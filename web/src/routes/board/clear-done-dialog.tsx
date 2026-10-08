@@ -1,4 +1,5 @@
 import { LoaderCircle } from '@/components/icons'
+import { RunRetention } from '@/components/run-retention'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -9,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
+import { runLabel } from '@/lib/status'
 
 export function ClearDoneConfirm({
   plan,
@@ -108,6 +110,16 @@ export function ReleaseFinishedConfirm({
             )}
           </DialogDescription>
         </DialogHeader>
+        {n > 0 && (
+          <ul className="max-h-60 space-y-3 overflow-y-auto">
+            {plan.eligible.map((run) => (
+              <li key={run.id}>
+                <p className="text-ui font-medium">{runLabel(run)}</p>
+                <RunRetention run={run} />
+              </li>
+            ))}
+          </ul>
+        )}
         <DialogFooter>
           <Button variant="secondary" disabled={running} onClick={onCancel}>
             {n === 0 ? 'Close' : 'Cancel'}

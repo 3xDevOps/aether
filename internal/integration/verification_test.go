@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -137,9 +138,10 @@ func TestVerificationFailureClassificationObservesTimeoutAndCancellation(t *test
 
 type verificationCleanupRuntime struct {
 	runtime.Runtime
-	findID  runtime.ID
-	findErr error
-	events  []string
+	findID     runtime.ID
+	findErr    error
+	destroyErr error
+	events     []string
 }
 
 func (r *verificationCleanupRuntime) Stop(context.Context, runtime.ID, time.Duration) error {
@@ -149,7 +151,7 @@ func (r *verificationCleanupRuntime) Stop(context.Context, runtime.ID, time.Dura
 
 func (r *verificationCleanupRuntime) Destroy(context.Context, runtime.ID) error {
 	r.events = append(r.events, "destroy")
-	return nil
+	return r.destroyErr
 }
 
 func (r *verificationCleanupRuntime) FindByCreationKey(context.Context, string) (runtime.ID, error) {
@@ -197,5 +199,280 @@ func TestCleanupVerificationRuntimeReleasesOnlyAfterAbsence(t *testing.T) {
 				t.Fatalf("cleanup events = %v, want %v", got, want)
 			}
 		}
+	}
+}
+
+type verificationProvisioningGit struct {
+	*deliveryTestGit
+	checkout string
+}
+
+func (g *verificationProvisioningGit) CandidateVerificationCheckout(context.Context, domain.WorkspaceID, string, string, string) (string, error) {
+	return g.checkout, nil
+}
+
+func (g *verificationProvisioningGit) CheckCandidateVerification(context.Context, domain.WorkspaceID, string, string, string) error {
+	return nil
+}
+
+func (g *verificationProvisioningGit) RemoveCandidateVerification(context.Context, domain.WorkspaceID, string, string) error {
+	return nil
+}
+
+type verificationProvisioningAttachment struct{ runtime.Attachment }
+
+func (*verificationProvisioningAttachment) Stdout() io.Reader { return strings.NewReader("output") }
+func (*verificationProvisioningAttachment) Stderr() io.Reader { return strings.NewReader("") }
+func (*verificationProvisioningAttachment) Close() error      { return nil }
+
+type verificationProvisioningRuntime struct {
+	verificationCleanupRuntime
+	t               *testing.T
+	reserved        *bool
+	durableReleases *int
+	fail            string
+	store           *deliveryTestStore
+	stages          []string
+}
+
+func (r *verificationProvisioningRuntime) Create(_ context.Context, spec runtime.Spec) (runtime.ID, error) {
+	r.stages = append(r.stages, "create")
+	if !*r.reserved || *r.durableReleases != 0 || spec.CreationKey != "provisioning-key" {
+		r.t.Error("Create lacks allowance or durable creation key")
+	}
+	if r.fail == "create" || r.fail == "create-unknown" {
+		return "", errors.New("create failed")
+	}
+	if r.fail == "save" {
+		r.store.failUpdates = 1
+	}
+	return "provisioning-container", nil
+}
+
+func (r *verificationProvisioningRuntime) Inspect(context.Context, runtime.ID) (runtime.ContainerInfo, error) {
+	r.stages = append(r.stages, "inspect")
+	if r.fail == "inspect" {
+		return runtime.ContainerInfo{}, errors.New("inspect failed")
+	}
+	if r.fail == "metadata" {
+		r.store.failUpdates = 1
+	}
+	return runtime.ContainerInfo{Image: "busybox"}, nil
+}
+
+func (r *verificationProvisioningRuntime) Attach(context.Context, runtime.ID) (runtime.Attachment, error) {
+	r.stages = append(r.stages, "attach")
+	if r.fail == "attach" {
+		return nil, errors.New("attach failed")
+	}
+	return &verificationProvisioningAttachment{}, nil
+}
+
+func (r *verificationProvisioningRuntime) Start(context.Context, runtime.ID) error {
+	r.stages = append(r.stages, "start")
+	if !*r.reserved {
+		r.t.Error("allowance released before Start")
+	}
+	if r.fail == "start" {
+		return errors.New("start failed")
+	}
+	return nil
+}
+
+func (r *verificationProvisioningRuntime) Wait(context.Context, runtime.ID) (runtime.ExitStatus, error) {
+	r.stages = append(r.stages, "wait")
+	if *r.reserved {
+		r.t.Error("verification command holds provisioning allowance")
+	}
+	if *r.durableReleases != 0 {
+		r.t.Error("verification command lost durable ownership before cleanup")
+	}
+	if r.fail == "wait" {
+		return runtime.ExitStatus{}, errors.New("wait failed")
+	}
+	// Nonzero command exit skips evidence validation, which is unrelated to
+	// the startup allowance; it must still release durable resources.
+	return runtime.ExitStatus{Code: 1}, nil
+}
+
+func (r *verificationProvisioningRuntime) FindByCreationKey(ctx context.Context, key string) (runtime.ID, error) {
+	if *r.reserved {
+		r.t.Error("runtime lookup still holds startup allowance")
+	}
+	if key != "provisioning-key" {
+		r.t.Errorf("runtime lookup key changed: %q", key)
+	}
+	return r.verificationCleanupRuntime.FindByCreationKey(ctx, key)
+}
+
+func (r *verificationProvisioningRuntime) Stop(ctx context.Context, id runtime.ID, timeout time.Duration) error {
+	if *r.reserved {
+		r.t.Error("runtime cleanup still holds startup allowance")
+	}
+	return r.verificationCleanupRuntime.Stop(ctx, id, timeout)
+}
+
+func TestVerificationProvisioningAllowanceSpansCreateStartOnly(t *testing.T) {
+	for _, tc := range []struct {
+		failure   string
+		stages    string
+		errorText string
+		pending   bool
+	}{
+		{failure: "", stages: "prepare,authorize,create,inspect,attach,authorize-start,start,wait"},
+		{failure: "prepare", stages: "prepare", errorText: "capacity refused"},
+		{failure: "key", stages: "prepare", errorText: "runtime preparation changed creation key"},
+		{failure: "validate", stages: "prepare", errorText: "image is required"},
+		{failure: "authorize", stages: "prepare,authorize", errorText: ErrUnauthorized.Error()},
+		{failure: "create", stages: "prepare,authorize,create", errorText: "create failed"},
+		{failure: "save", stages: "prepare,authorize,create", errorText: errDeliveryTestLostSave.Error()},
+		{failure: "inspect", stages: "prepare,authorize,create,inspect", errorText: "inspect failed"},
+		{failure: "metadata", stages: "prepare,authorize,create,inspect", errorText: errDeliveryTestLostSave.Error()},
+		{failure: "attach", stages: "prepare,authorize,create,inspect,attach", errorText: "attach failed"},
+		{failure: "authorize-start", stages: "prepare,authorize,create,inspect,attach,authorize-start", errorText: ErrUnauthorized.Error()},
+		{failure: "start", stages: "prepare,authorize,create,inspect,attach,authorize-start,start", errorText: "start failed"},
+		{failure: "wait", stages: "prepare,authorize,create,inspect,attach,authorize-start,start,wait", errorText: "wait failed"},
+		{failure: "create-unknown", stages: "prepare,authorize,create", errorText: "lookup unavailable", pending: true},
+		{failure: "destroy", stages: "prepare,authorize,create,inspect,attach,authorize-start,start,wait", errorText: "destroy unavailable", pending: true},
+	} {
+		t.Run(tc.failure, func(t *testing.T) {
+			svc, st, git := newDeliveryTestService(t, protocol.DeliveryPending)
+			svc.root = t.TempDir()
+			svc.git = &verificationProvisioningGit{deliveryTestGit: git, checkout: t.TempDir()}
+			candidate := serviceCandidate(t, svc)
+			candidate.Verifications[0].Status = protocol.VerificationRunning
+			candidate.Verifications[0].CreationKey = "provisioning-key"
+			storeCandidate(t, svc, candidate)
+			reserved, releases, durableReleases := false, 0, 0
+			rt := &verificationProvisioningRuntime{
+				verificationCleanupRuntime: verificationCleanupRuntime{findErr: runtime.ErrNotFound},
+				t:                          t, reserved: &reserved, durableReleases: &durableReleases, fail: tc.failure, store: st,
+			}
+			if tc.failure == "create-unknown" {
+				rt.findErr = errors.New("lookup unavailable")
+			}
+			if tc.failure == "destroy" {
+				rt.findID = "provisioning-container"
+				rt.findErr = nil
+				rt.destroyErr = errors.New("destroy unavailable")
+			}
+			svc.runtime = rt
+			svc.environment = func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error) {
+				// runVerification supplies the host checkout; the environment
+				// must supply its container mount just as the server does.
+				return runtime.Spec{Image: "busybox", WorktreeMountPath: "/workspace", WorkingDir: "/workspace"}, nil
+			}
+			svc.prepareRuntime = func(_ context.Context, spec *runtime.Spec) (func(), error) {
+				rt.stages = append(rt.stages, "prepare")
+				reserved = true
+				release := func() { reserved = false; releases++ }
+				switch tc.failure {
+				case "prepare":
+					return release, errors.New("capacity refused")
+				case "key":
+					spec.CreationKey = "changed"
+				case "validate":
+					spec.Image = ""
+				}
+				return release, nil
+			}
+			svc.releaseRuntime = func(_ context.Context, key string) error {
+				if reserved {
+					t.Error("cleanup still holds startup allowance")
+				}
+				if key != "provisioning-key" {
+					t.Errorf("cleanup key changed: %q", key)
+				}
+				durableReleases++
+				return nil
+			}
+			authorizations := 0
+			svc.admission = func(context.Context, Admission) (func(), error) {
+				stage := "authorize"
+				if authorizations > 0 {
+					stage = "authorize-start"
+				}
+				authorizations++
+				rt.stages = append(rt.stages, stage)
+				if tc.failure == stage {
+					return nil, ErrUnauthorized
+				}
+				return func() {}, nil
+			}
+			svc.runVerification(t.Context(), Actor{MemberID: "owner-1"}, "workspace-1", "candidate-1", "verification-1", []string{"true"}, time.Second)
+			result := serviceCandidate(t, svc).Verifications[0]
+			if got := strings.Join(rt.stages, ","); got != tc.stages {
+				t.Fatalf("stages = %q, want %q; verification error: %s", got, tc.stages, result.Error)
+			}
+			wantDurableReleases := 1
+			if tc.pending {
+				wantDurableReleases = 0
+			}
+			if reserved || releases != 1 || durableReleases != wantDurableReleases {
+				t.Fatalf("resources stranded: reserved=%v, allowance releases=%d, durable releases=%d; verification error: %s", reserved, releases, durableReleases, result.Error)
+			}
+			wantStatus := protocol.VerificationError
+			if tc.failure == "" {
+				wantStatus = protocol.VerificationFailed
+				if result.ExitCode == nil || *result.ExitCode != 1 {
+					t.Fatalf("command exit was not recorded: %+v", result)
+				}
+			}
+			if tc.pending {
+				wantStatus = protocol.VerificationRunning
+			}
+			if result.Status != wantStatus || !strings.Contains(result.Error, tc.errorText) || result.CreationKey != "provisioning-key" {
+				t.Fatalf("verification = %+v, want status %s and error containing %q with original key", result, wantStatus, tc.errorText)
+			}
+			if tc.pending {
+				// Retry from persisted state, with no worker allowance surviving
+				// the restart. Only confirmed runtime cleanup releases the owner.
+				rt.findErr = runtime.ErrNotFound
+				rt.destroyErr = nil
+				if tc.failure == "destroy" {
+					rt.findErr = nil
+				}
+				reboot := &Service{store: svc.store, git: svc.git, runtime: rt, root: svc.root, now: svc.now, releaseRuntime: svc.releaseRuntime}
+				persisted := serviceCandidate(t, reboot)
+				if recoveryErr := reboot.recoverVerifications(t.Context(), &persisted); recoveryErr != nil {
+					t.Fatalf("recover cleanup: %v", recoveryErr)
+				}
+				if durableReleases != 1 || releases != 1 || serviceCandidate(t, reboot).Verifications[0].Status != protocol.VerificationError {
+					t.Fatal("restart did not release exactly the durable owner and finish verification")
+				}
+			}
+		})
+	}
+}
+
+func TestVerificationFailedDestroyRecoveryKeepsDurableCleanupKey(t *testing.T) {
+	svc, _, git := newDeliveryTestService(t, protocol.DeliveryPending)
+	svc.root = t.TempDir()
+	svc.git = &verificationProvisioningGit{deliveryTestGit: git, checkout: t.TempDir()}
+	rt := &verificationCleanupRuntime{findID: "still-live", destroyErr: errors.New("destroy unavailable")}
+	svc.runtime = rt
+	released := false
+	svc.releaseRuntime = func(_ context.Context, key string) error {
+		if key != "restart-key" {
+			t.Fatalf("lost cleanup key: %q", key)
+		}
+		released = true
+		return nil
+	}
+	candidate := serviceCandidate(t, svc)
+	candidate.Verifications[0].Status = protocol.VerificationRunning
+	candidate.Verifications[0].CreationKey = "restart-key"
+	storeCandidate(t, svc, candidate)
+	if err := svc.recoverVerifications(t.Context(), &candidate); err == nil || released {
+		t.Fatalf("failed destroy released ownership: %v, released=%v", err, released)
+	}
+	if got := serviceCandidate(t, svc).Verifications[0]; got.Status != protocol.VerificationRunning || got.CreationKey != "restart-key" {
+		t.Fatalf("cleanup failure lost durable retry: %+v", got)
+	}
+	rt.destroyErr = nil
+	reboot := &Service{store: svc.store, git: svc.git, runtime: rt, root: svc.root, now: svc.now, releaseRuntime: svc.releaseRuntime}
+	candidate = serviceCandidate(t, reboot)
+	if err := reboot.recoverVerifications(t.Context(), &candidate); err != nil || !released {
+		t.Fatalf("restart did not release confirmed cleanup: %v, released=%v", err, released)
 	}
 }

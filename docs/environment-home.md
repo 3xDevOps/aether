@@ -27,6 +27,75 @@ Files outside the home live in the container layer. **Save environment** on the
 **Environment** page turns that layer into your member image so later runs get it; see
 [environments.md](environments.md).
 
+## Automatic tool caches
+
+Aether keeps reconstructible tool caches outside this durable home, at
+`<data>/home-caches/<member>/{runs,terminal}/data`, mounted at `/aether-cache`.
+The run pool belongs to the immutable launching member, including launches
+on someone else's shared account. The environment shell and automatic agent
+updater use the separate terminal pool, so an open environment does not pin
+all completed-run caches.
+Candidate verification also uses that launcher's run pool (the originating
+run's immutable home owner for an agent request). Its durable creation key
+protects both cache data and legacy home caches through startup and failed
+runtime lookup/destruction; only confirmed cleanup releases that ownership.
+Verification resolves the container UID:GID before creating its runtime and
+grants that user access only to the managed cache, not the persistent home.
+Its journal preserves the same home-user reservation across server restart;
+conflicting users cannot change cache ownership beneath a live verification.
+Malformed published ownership journals stop startup rather than guessing that
+the cache is unused; unpublished temporary files cannot own a runtime.
+
+Only tool variables unset by the image, workspace and profile receive defaults:
+
+| Variable | Default |
+| --- | --- |
+| `npm_config_cache` | `/aether-cache/npm` |
+| `PIP_CACHE_DIR` | `/aether-cache/pip` |
+| `UV_CACHE_DIR` | `/aether-cache/uv` |
+| `GOCACHE` | `/aether-cache/go-build` |
+| `GOMODCACHE` | `/aether-cache/go-mod` |
+
+`AETHER_CACHE_DIR` identifies the mount. Explicit tool cache paths remain
+unchanged and outside automatic cleanup; Aether does not replace `HOME`,
+`PATH` or `XDG_CACHE_HOME` wholesale. Installed CLIs, vendor logins, GitHub
+credentials and signing keys remain in the persistent home.
+
+No housekeeping is required. After recovery, hourly, and once before
+refusing new work for disk pressure, Aether tries eligible inactive caches,
+oldest first. Soft reclaim targets are 4 GiB per pool, 16 GiB total and 7 days
+since last use/release. Live, retained, finalizing or uncertain owners always
+win over these targets. They are not hard quotas, and no waiting shell or
+silent agent is killed for cache space. Failed cleanup and deleted-member
+resources retain small server-owned retry metadata outside the writable
+mount; normal maintenance retries them even if a partial removal brought the
+remaining data below its age or size target. Successful retries clear only
+their own diagnostic; image or legacy-cache cleanup cannot clear a pending
+cache-data failure. An open environment protects its cache data, not an exited
+updater container whose cleanup needs retrying.
+
+Before legacy cleanup, Aether re-reads the current image, workspace and harness
+cache settings, including configurations that have never launched or were edited
+while idle. Explicit paths inside the resolved container home protect overlapping
+allowlisted directories (including configured ancestors or descendants); a
+similarly named sibling does not. Protection observed by planning or cleanup is
+remembered in server-owned metadata across restart and subsequent configuration
+edits. Unavailable configuration or image inspection defers legacy cleanup.
+Ambiguous paths or symlink aliases are preserved conservatively, without following
+links. These protections do not prevent reclaiming inactive managed cache pools.
+Before the first managed cache is created, an absent cache root is an empty
+inventory. Existing broken or unreadable roots remain measurement errors.
+
+For homes created before managed caches, cleanup waits until all users of
+the old home are gone, then removes only `.npm/_cacache`, `.npm/_logs`,
+`.cache/pip`, `.cache/uv`, `.cache/go-build` and `go/pkg/mod`. It never clears
+all of `.npm`, `_npx`, `.cache`, `.local`, `.config`, `.ssh`, vendor stores or
+arbitrary home files. Symlink targets and external hardlink contents are
+not mutated. Saved-image maintenance removes only obsolete exact member
+tags, preserving current member, terminal and configured base/browser
+references; it does not run broad Docker image or volume prune.
+
+
 ## Setting up an agent
 
 Both dashboards and the CLI list the agents Aether ships and the ones members

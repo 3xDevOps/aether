@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -294,6 +295,121 @@ func TestIntegrationCoordinationCLIWhenDisabled(t *testing.T) {
 	if decodeErr := json.Unmarshal([]byte(stdout), &refused); err != nil || code != 4 || decodeErr != nil ||
 		refused.OK || refused.Error == nil || refused.Error.Code != protocol.CodeUnavailable {
 		t.Fatalf("disabled CLI inbox: exit=%d err=%v stdout=%s stderr=%s decode=%v", code, err, stdout, stderr, decodeErr)
+	}
+}
+
+// Verification must be able to use its managed cache as the image's real
+// non-root user, including across cleanup/reuse. A competing mapping may not
+// take ownership while the first verification container is still alive.
+func TestIntegrationVerificationNonRootCache(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	requireBinary(t, "docker")
+	if !dockerReachable(t) {
+		t.Skip("verification cache ownership needs a reachable Docker daemon")
+	}
+	image, user := buildCoordAgentImage(t)
+	docker, _, ok := dockerRuntime(t)
+	if !ok {
+		t.Fatal("the Docker daemon went away after the image was built")
+	}
+	e := &coordEnv{
+		rt: docker, image: image, serverBinary: buildServerBinary(t),
+		dataDir: filepath.Join(shortTempDir(t), "data"),
+	}
+	srv := e.seed(ctx, t, false)
+	sched := srv.srv.sched
+	environment := integrationEnvironment(Deps{Store: srv.srv.Store(), Runs: sched})
+	checkout := t.TempDir()
+	if err := os.Chmod(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 2 {
+		spec, err := environment(ctx, integration.Actor{MemberID: e.ada.id}, e.ws, checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if spec.User != user || spec.User == "" || strings.HasPrefix(spec.User, "0:") {
+			t.Fatalf("verification resolved user = %q, want non-root image user %q", spec.User, user)
+		}
+		spec.CreationKey = fmt.Sprintf("verification-cache-docker-%d", attempt)
+		spec.Command = []string{"sleep", "300"}
+		spec.Env["EXPECTED_VERIFICATION_USER"] = user
+		release, err := sched.PrepareVerificationRuntime(ctx, &spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		id, err := docker.Create(ctx, spec)
+		if err != nil {
+			_ = sched.ReleaseVerificationRuntime(ctx, spec.CreationKey)
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cleanupCancel()
+			if destroyErr := docker.Destroy(cleanupCtx, id); destroyErr == nil {
+				_ = sched.ReleaseVerificationRuntime(cleanupCtx, spec.CreationKey)
+			}
+		})
+		if startErr := docker.Start(ctx, id); startErr != nil {
+			t.Fatal(startErr)
+		}
+		release()
+		script := `set -eu
+test "$(id -u):$(id -g)" = "$EXPECTED_VERIFICATION_USER"
+test "$(stat -c '%u:%g' /aether-cache)" = "$EXPECTED_VERIFICATION_USER"
+test "$(stat -c '%a' /aether-cache)" = 700
+mkdir -p "$GOCACHE"
+printf '%s\n' verification-cache-bytes > "$GOCACHE/verification"
+test "$(cat "$GOCACHE/verification")" = verification-cache-bytes`
+		if attempt == 1 {
+			script = `test "$(cat "$GOCACHE/verification")" = verification-cache-bytes || exit 1
+` + script
+		}
+		if code, stdout, stderr, execErr := docker.Exec(ctx, id, []string{"sh", "-c", script}, "/workspace"); execErr != nil || code != 0 {
+			t.Fatalf("verification cache access attempt %d: code=%d err=%v stdout=%s stderr=%s", attempt, code, execErr, stdout, stderr)
+		}
+		conflict, err := environment(ctx, integration.Actor{MemberID: e.ada.id}, e.ws, checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conflict.CreationKey = fmt.Sprintf("conflicting-cache-user-%d", attempt)
+		conflict.User = "2000:2001"
+		if conflict.User == user {
+			conflict.User = "3000:3001"
+		}
+		if allowance, prepareErr := sched.PrepareVerificationRuntime(ctx, &conflict); prepareErr == nil || !strings.Contains(prepareErr.Error(), "resolved user") || allowance != nil {
+			if allowance != nil {
+				allowance()
+			}
+			t.Fatalf("live conflicting verification was not refused: %v", prepareErr)
+		}
+		if releaseErr := sched.ReleaseVerificationRuntime(ctx, conflict.CreationKey); releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		if code, stdout, stderr, execErr := docker.Exec(ctx, id, []string{"sh", "-c", script}, "/workspace"); execErr != nil || code != 0 {
+			t.Fatalf("live cache ownership changed after conflict: code=%d err=%v stdout=%s stderr=%s", code, execErr, stdout, stderr)
+		}
+		if destroyErr := docker.Destroy(ctx, id); destroyErr != nil {
+			t.Fatal(destroyErr)
+		}
+		if releaseErr := sched.ReleaseVerificationRuntime(ctx, spec.CreationKey); releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		var cacheHost string
+		for _, mount := range spec.Mounts {
+			if mount.ContainerPath == "/aether-cache" {
+				cacheHost = mount.HostPath
+			}
+		}
+		if cacheHost == "" {
+			t.Fatal("verification omitted managed cache mount")
+		}
+		data, err := os.ReadFile(filepath.Join(cacheHost, "go-build", "verification"))
+		if err != nil || string(data) != "verification-cache-bytes\n" {
+			t.Fatalf("verification cache did not persist after cleanup: %q, %v", data, err)
+		}
 	}
 }
 

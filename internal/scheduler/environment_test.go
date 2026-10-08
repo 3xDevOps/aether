@@ -15,7 +15,7 @@ import (
 
 func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 	t.Parallel()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
@@ -34,8 +34,8 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		if planErr != nil {
 			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, planErr)
 		}
-		if len(plan.Mounts) != 1 {
-			t.Fatalf("purpose %q mounts = %v, want exactly one home mount", purpose, plan.Mounts)
+		if len(plan.Mounts) != 2 {
+			t.Fatalf("purpose %q mounts = %v, want home plus isolated cache mount", purpose, plan.Mounts)
 		}
 		home, homeErr := homes.Path(member.ID)
 		if homeErr != nil {
@@ -44,6 +44,17 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		want := runtime.Mount{HostPath: home, ContainerPath: "/root"}
 		if plan.Mounts[0] != want {
 			t.Fatalf("purpose %q home mount = %+v, want %+v", purpose, plan.Mounts[0], want)
+		}
+		pool := "runs"
+		if purpose == EnvironmentPurposeTerminal {
+			pool = "terminal"
+		}
+		cache := runtime.Mount{HostPath: filepath.Join(homes.CacheRoot(), string(member.ID), pool, "data"), ContainerPath: "/aether-cache"}
+		if plan.Mounts[1] != cache {
+			t.Fatalf("purpose %q cache mount = %+v, want %+v", purpose, plan.Mounts[1], cache)
+		}
+		if plan.Env["GOCACHE"] != "/aether-cache/go-build" || plan.Env["HOME"] != "/root" || plan.Env["PATH"] != "/root/.local/bin:/workspace/bin" {
+			t.Fatalf("cache defaults changed persistent environment: %#v", plan.Env)
 		}
 
 	}

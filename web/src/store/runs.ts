@@ -118,6 +118,11 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         next.finished_at = time
         next.pending_inputs = []
       }
+      if (!isTerminal(to)) {
+        delete next.container_retained_until
+        delete next.cleanup_pending
+        delete next.cleanup_error
+      }
       return { runs: { ...s.runs, [runID]: next } }
     }),
   applyOutcomeSeen: (runID) =>

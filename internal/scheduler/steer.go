@@ -236,7 +236,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler: inspect destroy-pending sidecar: %w", serr)
 	}
-	if err = s.persistEvidencePendingErr(id, identity); err != nil {
+	if err = s.persistEvidencePendingErr(id, identity, ""); err != nil {
 		s.mu.Unlock()
 		return err
 	}
@@ -252,9 +252,11 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 	}
 	if cid := s.developmentContainer(id); cid != "" {
 		if err := s.destroyDevelopmentContainer(ctx, id, cid); err != nil {
+			s.recordRunCleanupError(id, cleanupRuntimeError)
 			return err
 		}
 	}
+	s.touchRunCache(r.HomeMember())
 	s.removeSidecar(id)
 	s.publishTimeline(ctx, r.WorkspaceID, id, actor, events.TimelineKill, "")
 	return nil
@@ -830,6 +832,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 		}
 		s.mu.Unlock()
 		if err := s.persistRetainedSidecar(retainedSidecar); err != nil {
+			s.recordCleanupError(entry, cleanupStateError)
 			return err
 		}
 		s.mu.Lock()
@@ -986,6 +989,8 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 		return captureErr
 	}
 	if err := s.StopDevelopmentRun(ctx, run); err != nil {
+		s.retainAfterEvidenceFailure(entry)
+		s.recordCleanupError(entry, cleanupRuntimeError)
 		return err
 	}
 	s.stopCloseContainer(ctx, cid)
@@ -994,7 +999,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 
 // settleRetainedCompletion leaves the pending bit set until evidence and
 // development-resource cleanup are both durable. Callers own lifecycleMu.
-func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervised) error {
+func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervised) (resultErr error) {
 	s.mu.Lock()
 	if s.runs[entry.runID] != entry || !entry.retained || !entry.status.Terminal() {
 		s.mu.Unlock()
@@ -1007,16 +1012,24 @@ func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervi
 	if !pending {
 		return nil
 	}
+	cause := cleanupRuntimeError
+	defer func() {
+		if resultErr != nil {
+			s.recordCleanupError(entry, cause)
+		}
+	}()
 	if !paused && !exited {
 		if err := s.cfg.Runtime.Pause(ctx, entry.containerID); err != nil {
 			return fmt.Errorf("scheduler: quiesce retained worker: %w", err)
 		}
 		s.setPaused(entry, true)
 	}
+	cause = cleanupEvidenceError
 	if err := s.captureFinishEvidence(ctx, entry.runID, outcome, identity); err != nil {
 		logEvidenceFailure(entry.runID, err)
 		return err
 	}
+	cause = cleanupRuntimeError
 	if exited {
 		if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
 			return err
@@ -1025,6 +1038,7 @@ func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervi
 	if err := s.StopDevelopmentRun(ctx, entry.runID); err != nil {
 		return err
 	}
+	cause = cleanupStateError
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runs[entry.runID] != entry {
@@ -1032,11 +1046,14 @@ func (s *Scheduler) settleRetainedCompletion(ctx context.Context, entry *supervi
 	}
 	sc := entry.sidecar()
 	sc.EvidencePending = false
+	sc.CleanupError = ""
 	if err := s.persistRetainedSidecar(sc); err != nil {
 		return err
 	}
 	entry.evidencePending = false
+	entry.cleanupError = ""
 	entry.finalizing = false
+	s.publishRetentionLocked(entry.runID)
 	return nil
 }
 
@@ -1128,11 +1145,13 @@ func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised
 	}
 	if err := s.destroyDevelopmentContainer(ctx, entry.runID, entry.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		s.mu.Lock()
+		entry.cleanupError = cleanupRuntimeError
 		s.markRetainedDestroyDueLocked(entry)
 		s.mu.Unlock()
 		slog.Warn("scheduler: destroy container behind closed run", "run", entry.runID, "error", err)
 		return
 	}
+	s.touchRunCache(entry.memberID)
 	s.removeSidecar(entry.runID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1142,6 +1161,8 @@ func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised
 	entry.retained = false
 	entry.retainedUntil = nil
 	entry.destroyPending = false
+	entry.evidencePending = false
+	entry.cleanupError = ""
 	if entry.userReservation != nil {
 		delete(s.credentialUsers, entry.userReservation)
 		entry.userReservation = nil
@@ -1149,4 +1170,5 @@ func (s *Scheduler) destroyClosedRetained(ctx context.Context, entry *supervised
 	s.closeDone(entry)
 	delete(s.runs, entry.runID)
 	s.syncRunUserReservationsLocked()
+	s.publishRetentionLocked(entry.runID)
 }

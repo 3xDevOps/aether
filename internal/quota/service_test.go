@@ -309,7 +309,8 @@ func TestReadCoalescesRequestsAndCanceledLeaderDoesNotCancelFlight(t *testing.T)
 
 func fixtureHomes(t *testing.T, claudeJSON, codexJSON string) (*memberhome.Manager, domain.MemberID) {
 	t.Helper()
-	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), nil)
+	root := t.TempDir()
+	homes, err := memberhome.New(filepath.Join(root, "homes"), filepath.Join(root, "home-caches"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

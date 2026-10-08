@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -128,6 +129,63 @@ func TestControlListsAndGets(t *testing.T) {
 	}
 	if len(rl.Runs) != 0 {
 		t.Errorf("run.list for unknown member = %+v, want empty", rl.Runs)
+	}
+}
+
+func TestRunRetentionSurvivesReadsAndMutationWithoutLeakingLookupErrors(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+	until := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+	e.runs.mu.Lock()
+	e.runs.retentions = map[domain.RunID]scheduler.RetentionInfo{
+		e.run.ID: {RetainedUntil: &until, CleanupPending: true, CleanupError: "Container cleanup failed"},
+	}
+	e.runs.mu.Unlock()
+	check := func(run protocol.Run) {
+		t.Helper()
+		if run.ContainerRetainedUntil == nil || *run.ContainerRetainedUntil != until.Format(time.RFC3339Nano) || !run.CleanupPending || run.CleanupError != "Container cleanup failed" {
+			t.Fatalf("retention enrichment lost: %+v", run)
+		}
+	}
+	var get protocol.RunResult
+	if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(e.run.ID)}, &get); err != nil {
+		t.Fatal(err)
+	}
+	check(get.Run)
+	var list protocol.RunListResult
+	if err := c.Call(protocol.MethodRunList, protocol.RunListParams{}, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Runs) != 1 {
+		t.Fatalf("runs = %v", list.Runs)
+	}
+	check(list.Runs[0])
+	var mutation protocol.RunResult
+	if err := c.Call(protocol.MethodRunProtect, protocol.RunProtectParams{RunID: string(e.run.ID), Protected: true}, &mutation); err != nil {
+		t.Fatal(err)
+	}
+	check(mutation.Run)
+	e.runs.mu.Lock()
+	e.runs.retentionErr = errors.New("open /private/server/token: credential=secret")
+	e.runs.mu.Unlock()
+	get = protocol.RunResult{}
+	if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(e.run.ID)}, &get); err != nil {
+		t.Fatal(err)
+	}
+	if get.Run.CleanupError == "" || strings.Contains(get.Run.CleanupError, "private") || strings.Contains(get.Run.CleanupError, "secret") || !get.Run.CleanupPending {
+		t.Fatalf("lookup failure was hidden or leaked: %+v", get.Run)
+	}
+	e.runs.mu.Lock()
+	e.runs.retentionErr = nil
+	delete(e.runs.retentions, e.run.ID)
+	e.runs.mu.Unlock()
+	get = protocol.RunResult{}
+	if err := c.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(e.run.ID)}, &get); err != nil {
+		t.Fatal(err)
+	}
+	if get.Run.ContainerRetainedUntil != nil || get.Run.CleanupPending || get.Run.CleanupError != "" {
+		t.Fatalf("released ownership remained visible: %+v", get.Run)
 	}
 }
 

@@ -373,6 +373,16 @@ them rather than choosing an arbitrary parent; repeated attempts within one
 swarm retain that swarm. These fields come from durable relationships,
 not task text, and confer no authorization.
 
+Run snapshots, including mutation results, also expose
+`container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
+when applicable. These describe the retained runtime, not the lifetime of
+files, history, or published Git results. Changes arrive as `run.retention`
+events with a complete replacement of `container_retained_until`,
+`cleanup_pending`, and `cleanup_error`; omitted fields clear prior values.
+Unchanged cleanup retries publish nothing. These events do not change status,
+completion timestamps, or the outcome-unseen flag and must not be treated as
+another `run.status` completion.
+
 #### Independent execution and input state
 
 `run.get` and `run.list` always include `pending_inputs`, an array of
@@ -892,7 +902,7 @@ attribution, shown in **Settings > Server**:
 {"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
  "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800,
  "repo_bytes":8589934592,"home_bytes":1073741824,"evidence_bytes":20971520,
- "other_bytes":1048576,"snapshot_bytes":104857600}
+ "cache_bytes":1073741824,"other_bytes":1048576,"snapshot_bytes":104857600}
 ```
 
 `used_bytes` and `total_bytes` describe the whole filesystem - the gauge
@@ -903,7 +913,7 @@ smaller than `total - used` wherever the filesystem reserves blocks.
 
 The categories describe Aether's footprint: worktrees, transcripts, the
 SQLite database (including persisted events), bare workspace repositories,
-member homes, evidence, and other data-directory contents.
+member homes, managed package/build caches, evidence, and other data-directory contents.
 `snapshot_bytes` is a subset of `worktree_bytes`, never an additional total.
 The categories are not a promise that their bytes can be reclaimed.
 
@@ -923,10 +933,11 @@ counted again as Docker volumes. Docker's unused classification does not mean
 Aether can safely delete a saved environment image.
 
 Optional `used_bytes`, `total_bytes`, `free_bytes` and `shared_filesystem`
-require a verified local daemon and classic storage layout. Containerd image
-stores can use another filesystem; their capacity remains unknown rather
-than borrowing the Docker data-root's figures. Filesystem used totals must
-not be added together. An omitted measurement is unknown, not zero.
+require a verified local daemon whose measured storage roots share a
+filesystem. Classic layer directories and containerd content/snapshotter
+roots are checked separately; different filesystems have no single aggregate.
+Filesystem used totals must not be added together. An omitted measurement is
+unknown, not zero.
 `docker.error` retains diagnostic causes with private paths and credentials
 redacted, without discarding available data-directory measurements. This
 endpoint never prunes Docker resources.
@@ -935,7 +946,10 @@ Admins additionally receive an optional `entries` array, bounded to the
 largest 50 measured owners; `truncated` indicates clipping. Each entry has
 `kind`, `owner_kind` (`run`, `member`, `workspace` or `server`), optional
 `owner_id`, `bytes` and `reason`, with optional `reclaimable_bytes`,
-`retained_until` (ISO 8601) and `error`. Entries attribute the category
+`retained_until` (ISO 8601), `pool` and `error`. Cache pools are `runs` or
+`terminal`, owned by the immutable launcher rather than a shared login account.
+Their deadline is an age target: byte pressure may reclaim eligible inactive
+caches earlier. Entries attribute the category
 totals; they must not be added to them. Retention reasons use live lifecycle
 ownership when present and durable state otherwise. Transcripts follow
 evidence-protected checkout cleanup; expiration alone never proves safe

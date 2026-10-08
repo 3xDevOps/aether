@@ -165,9 +165,9 @@ func init() {
 			Root:        d.DataDir,
 			Environment: integrationEnvironment(d),
 			Admission:   admission,
-			PrepareRuntime: func(ctx context.Context, spec *runtime.Spec) error {
+			PrepareRuntime: func(ctx context.Context, spec *runtime.Spec) (func(), error) {
 				if d.Runs == nil {
-					return fmt.Errorf("integration: scheduler is unavailable")
+					return nil, fmt.Errorf("integration: scheduler is unavailable")
 				}
 				return d.Runs.PrepareVerificationRuntime(ctx, spec)
 			},

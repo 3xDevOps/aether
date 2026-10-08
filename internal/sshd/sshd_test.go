@@ -356,6 +356,8 @@ type fakeRuns struct {
 	calls           []string
 	launchOptions   []domain.LaunchOptions
 	paused          map[domain.RunID]bool
+	retentions      map[domain.RunID]scheduler.RetentionInfo
+	retentionErr    error
 	// sharedLaunches is what CheckSharedLaunch reports, keyed by
 	// "member:account:harness"; absent means launchable. sharedRefusals is
 	// the refusal it reports with the same key.
@@ -364,6 +366,12 @@ type fakeRuns struct {
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
+}
+
+func (f *fakeRuns) Retention(run *domain.Run) (scheduler.RetentionInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.retentions[run.ID], f.retentionErr
 }
 
 func (f *fakeRuns) blockEnsureTerminal() (<-chan struct{}, chan struct{}) {
@@ -729,6 +737,13 @@ func (f *fakeRuns) StopTerminal(_ context.Context, member domain.MemberID) error
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.terminalStopErr
+}
+
+func (f *fakeRuns) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
+	if err := f.StopTerminal(ctx, member); err != nil {
+		return err
+	}
+	return afterStop()
 }
 
 func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (domain.TerminalStatus, error) {

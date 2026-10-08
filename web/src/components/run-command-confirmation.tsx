@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { RunRetention } from '@/components/run-retention'
 import type { Command } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import type { RunRecord } from '@/store/runs'
@@ -37,6 +38,7 @@ export function RunCommandConfirmation({
             &quot;{runLabel(run)}&quot; - {confirmation.body}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        <RunRetention run={run} />
         <AlertDialogFooter>
           {/* Radix AlertDialog focuses Cancel when the confirmation opens. */}
           <AlertDialogCancel>Cancel</AlertDialogCancel>

@@ -16,6 +16,7 @@ import type {
   RunDiffPayload,
   RunInputPayload,
   RunProtectedPayload,
+  RunRetentionPayload,
   RunStatusPayload,
   RunTitlePayload,
   ServerUpdatePayload,
@@ -390,8 +391,6 @@ export async function applyEvent(
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {
-        // Fetched before the cursor moves, so two transitions of a brand new
-        // run stay in order.
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
@@ -404,6 +403,27 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time, p.outcome_unseen)
+      break
+    }
+    case 'run.retention': {
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          if (!(err instanceof ApiError && err.status === 404)) {
+            store.getState().setUnreachable(classifyUnreachable(err, store))
+            return false
+          }
+        }
+      }
+      const current = store.getState().runs[ev.run_id]
+      const p = ev.payload as RunRetentionPayload
+      if (current) store.getState().upsertRun({
+        ...current,
+        container_retained_until: p.container_retained_until,
+        cleanup_pending: p.cleanup_pending,
+        cleanup_error: p.cleanup_error,
+      })
       break
     }
     case 'run.outcome_seen':

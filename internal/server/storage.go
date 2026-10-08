@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -44,6 +46,14 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			inUse[filepath.Clean(run.Worktree)] = true
 		}
 	}
+	var caches map[string]scheduler.CacheRetentionInfo
+	var cacheErr error
+	if d.Runs != nil {
+		caches, cacheErr = d.Runs.CacheRetentions(ctx)
+	}
+	if cacheErr != nil {
+		u.Warnings = append(u.Warnings, "Cache retention lookup is incomplete; unknown pools remain protected")
+	}
 	for i := range u.Entries {
 		e := &u.Entries[i]
 		switch e.Kind {
@@ -51,6 +61,16 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			e.Reason = "Persistent database and event history; no automatic expiry"
 		case "other":
 			e.Reason = "Other server state, profiles and caches; no general deletion policy"
+		case "cache":
+			e.OwnerKind = "member"
+			e.OwnerID, e.Pool, _ = strings.Cut(e.Key, "/")
+			e.Reason = "Cache ownership is unknown; pool protected"
+			if retention, ok := caches[e.Key]; ok {
+				e.RetainedUntil, e.Reason = retention.RetainedUntil, retention.Reason
+				e.Error = strings.Join(nonemptyStorageErrors(e.Error, retention.Error), "; ")
+			} else if cacheErr != nil || d.Runs == nil {
+				e.Error = strings.Join(nonemptyStorageErrors(e.Error, "Cache retention lookup failed"), "; ")
+			}
 		case "home":
 			member, err := d.Store.GetMember(ctx, domain.MemberID(e.Key))
 			if err != nil {
@@ -134,6 +154,16 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		}
 	}
 	attributeEvidence(ctx, d.Store, u, now)
+}
+
+func nonemptyStorageErrors(values ...string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func unknownStorageOwner(e *disk.Entry, err error) {

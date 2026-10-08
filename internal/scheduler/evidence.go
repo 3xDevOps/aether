@@ -345,18 +345,28 @@ func (s *Scheduler) retainAfterEvidenceFailure(entry *supervised) {
 	}
 	now := time.Now().UTC()
 	entry.retained = true
-	entry.retainedUntil = &now
+	if entry.retainedUntil == nil || now.Before(*entry.retainedUntil) {
+		entry.retainedUntil = &now
+	}
 	entry.evidencePending = true
+	entry.cleanupError = cleanupEvidenceError
 	entry.finalizing = false
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist evidence-retained sidecar", "run", entry.runID, "error", err)
 	}
+	s.publishRetentionLocked(entry.runID)
 }
 
 // persistEvidenceIdentity records the exact commit/exit identity before a
 // capture attempt. A crash after Git publication but before packet metadata
 // commits therefore retries the same packet key.
 func (s *Scheduler) persistEvidenceIdentity(run domain.RunID, identity string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil {
+		entry.evidenceIdentity = identity
+		return s.writeSidecar(entry.sidecar())
+	}
 	sc, err := s.readSidecar(run)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("scheduler: read evidence identity sidecar: %w", err)
@@ -371,18 +381,29 @@ func (s *Scheduler) persistEvidenceIdentity(run domain.RunID, identity string) e
 	return nil
 }
 
-// persistEvidencePending leaves a durable retry marker even when no in-memory
-// owner remains (for example, a missing container discovered during recovery).
-func (s *Scheduler) persistEvidencePendingErr(run domain.RunID, identity string) error {
-	sc, err := s.readSidecar(run)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("scheduler: read evidence-pending sidecar: %w", err)
+// persistEvidencePendingErr leaves a durable retry marker even when no live
+// owner remains. Caller holds s.mu; cause is empty when merely arming capture.
+func (s *Scheduler) persistEvidencePendingErr(run domain.RunID, identity, cause string) error {
+	var sc sidecar
+	if entry := s.runs[run]; entry != nil {
+		entry.evidenceIdentity = identity
+		entry.evidencePending = true
+		entry.cleanupError = publicCleanupError(cause)
+		sc = entry.sidecar()
 	}
 	if sc.RunID == "" {
-		sc.RunID = string(run)
+		var err error
+		sc, err = s.readSidecar(run)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("scheduler: read evidence-pending sidecar: %w", err)
+		}
+		if sc.RunID == "" {
+			sc.RunID = string(run)
+		}
 	}
 	sc.EvidenceIdentity = identity
 	sc.EvidencePending = true
+	sc.CleanupError = publicCleanupError(cause)
 	if err := s.writeSidecar(sc); err != nil {
 		return fmt.Errorf("scheduler: persist evidence-pending sidecar: %w", err)
 	}
@@ -390,9 +411,12 @@ func (s *Scheduler) persistEvidencePendingErr(run domain.RunID, identity string)
 }
 
 func (s *Scheduler) persistEvidencePending(run domain.RunID, identity string) {
-	if err := s.persistEvidencePendingErr(run, identity); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.persistEvidencePendingErr(run, identity, cleanupEvidenceError); err != nil {
 		slog.Warn("scheduler: persist evidence-pending sidecar", "run", run, "error", err)
 	}
+	s.publishRetentionLocked(run)
 }
 
 func (s *Scheduler) resolveEvidencePending(ctx context.Context, run domain.RunID, outcome domain.RunStatus, identity string) error {
@@ -400,16 +424,25 @@ func (s *Scheduler) resolveEvidencePending(ctx context.Context, run domain.RunID
 		identity = "none"
 	}
 	if err := s.captureFinishEvidence(ctx, run, outcome, identity); err != nil {
+		s.recordRunCleanupError(run, cleanupEvidenceError)
 		return err
 	}
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry != nil {
-		entry.evidencePending = false
-		if err := s.writeSidecar(entry.sidecar()); err != nil {
+		sc := entry.sidecar()
+		sc.EvidencePending = false
+		if !sc.DestroyPending || sc.CleanupError == cleanupEvidenceError {
+			sc.CleanupError = ""
+		}
+		if err := s.persistRetainedSidecar(sc); err != nil {
+			s.recordCleanupErrorLocked(entry, cleanupStateError)
 			s.mu.Unlock()
 			return err
 		}
+		entry.evidencePending = false
+		entry.cleanupError = sc.CleanupError
+		s.publishRetentionLocked(run)
 		s.mu.Unlock()
 		return nil
 	}
@@ -422,9 +455,17 @@ func (s *Scheduler) resolveEvidencePending(ctx context.Context, run domain.RunID
 		return err
 	}
 	sc.EvidencePending = false
+	if !sc.DestroyPending || sc.CleanupError == cleanupEvidenceError {
+		sc.CleanupError = ""
+	}
 	if sc.ContainerID == "" && !sc.Retained && !sc.DestroyPending {
 		s.removeSidecar(run)
+		s.publishRetention(run)
 		return nil
 	}
-	return s.writeSidecar(sc)
+	if err := s.writeSidecar(sc); err != nil {
+		return err
+	}
+	s.publishRetention(run)
+	return nil
 }

@@ -70,6 +70,8 @@ type RunController interface {
 	// Paused reports whether the run's container is currently frozen;
 	// unknown or finished runs report false.
 	Paused(run domain.RunID) bool
+	// Retention reads current runtime ownership without probing or mutating it.
+	Retention(run *domain.Run) (scheduler.RetentionInfo, error)
 	// PendingInputs returns an independent snapshot of unresolved requests;
 	// unknown or terminated run lifetimes return an empty list.
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
@@ -106,6 +108,9 @@ type RunController interface {
 	EnsureTerminal(ctx context.Context, member domain.MemberID) (*domain.Terminal, error)
 	EnsureTerminalTab(ctx context.Context, member domain.MemberID, tab string, cols, rows uint) error
 	StopTerminal(ctx context.Context, member domain.MemberID) error
+	// WithStoppedTerminal excludes terminal recreation through afterStop.
+	// The callback may lock member caches but must not reenter terminal lifecycle.
+	WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error

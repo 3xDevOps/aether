@@ -67,3 +67,28 @@ func (d *Docker) RemoveImage(ctx context.Context, tag string) error {
 	}
 	return nil
 }
+
+// ImageCacheEnvironment returns only the five tool-cache settings whose image
+// defaults must survive managed-cache defaults. It never exports unrelated
+// image environment (which may contain credentials). ImageUser has already
+// ensured the image is local before the scheduler assembles its plan.
+func (d *Docker) ImageCacheEnvironment(ctx context.Context, ref string) (map[string]string, error) {
+	info, err := d.cli.ImageInspect(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: inspect image cache environment: %w", err)
+	}
+	env := make(map[string]string, 5)
+	if info.Config != nil {
+		for _, pair := range info.Config.Env {
+			key, value, ok := strings.Cut(pair, "=")
+			if !ok {
+				continue
+			}
+			switch key {
+			case "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE":
+				env[key] = value
+			}
+		}
+	}
+	return env, nil
+}

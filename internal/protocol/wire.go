@@ -28,6 +28,10 @@ type Run struct {
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
+	// Runtime retention is enriched from scheduler ownership, not run-row age.
+	ContainerRetainedUntil *string `json:"container_retained_until,omitempty"`
+	CleanupPending         bool    `json:"cleanup_pending,omitempty"`
+	CleanupError           string  `json:"cleanup_error,omitempty"`
 	// ControllerMemberID holds the run's control lease; empty means nobody
 	// does. No omitempty, so absence still means a gateway too old to say.
 	ControllerMemberID string `json:"controller_member_id"`

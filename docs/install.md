@@ -1141,17 +1141,18 @@ uses the default; negative values have the semantics in the table.
 | `--stall-threshold` | `10m` | Silence after which a run parks needs-attention; see [failure-handling.md](failure-handling.md). |
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
-| `--run-container-ttl` | `168h` (7 days) | How long a closed Standard or Enhanced run, one its agent's report finished, or a completed swarm run retains its exact container, checkout, row, member account, and coordination surfaces. `0` uses the `168h` default; negative means no retention and immediate cleanup. |
+| `--run-container-ttl` | `1h` | Grace for the exact compute environment after a Standard or Enhanced run closes, its agent report finishes it, or a swarm run completes. `0` uses `1h`; a positive duration overrides it; negative means immediate release. Working/waiting agents and services never expire under this policy. Paused containers still consume RAM during grace. |
 | `--min-free-disk` | `0` (automatic) | Free-byte reserve on the Aether data and runtime storage filesystems: 5% of each filesystem, at least 5 GiB and at most 20 GiB. A positive integer overrides the reserve in bytes; negative disables disk admission, not memory checks. Provisioning also needs a 1 GiB startup allowance. |
-| `--run-cpus` | `0` (automatic) | CPU ceiling per run and member environment: up to 8 CPUs, clamped to the host CPU count. A positive number overrides it. |
-| `--run-memory` | `0` (automatic) | Memory ceiling per run and member environment: 8 GiB. A positive integer overrides it in bytes, for example `17179869184` for 16 GiB. |
-| `--run-pids` | `0` (automatic) | Process/thread ceiling per run and member environment: 4096. A positive integer overrides it. |
+| `--run-cpus` | `0` (automatic) | CPU ceiling per run, member environment and candidate verification: up to 8 CPUs, clamped to the host CPU count. A positive number overrides it. |
+| `--run-memory` | `0` (automatic) | Memory ceiling per run, member environment and candidate verification: 8 GiB. A positive integer overrides it in bytes, for example `17179869184` for 16 GiB. |
+| `--run-pids` | `0` (automatic) | Process/thread ceiling per run, member environment and candidate verification: 4096. A positive integer overrides it. |
 | `--agent-definitions` | none | Inline JSON custom agent definitions via this flag or `AETHER_AGENT_DEFINITIONS`; see [harnesses.md](harnesses.md). |
 
 These generous resource limits are automatic: a 32 GiB-or-larger host does not
 need routine budget settings to run a moderate swarm. They apply to new run,
-member-terminal and agent-updater containers; the browser retains its separate
-1 CPU / 1 GiB limits. Negative or nonfinite run budgets are rejected by flags,
+member-terminal, agent-updater and candidate-verification containers; explicitly
+supplied trusted verification budgets remain in force. The browser retains its
+separate 1 CPU / 1 GiB limits. Negative or nonfinite run budgets are rejected by flags,
 config edits and server startup. Config-file keys use the flag names without
 `--`; `aether-server config set run-memory 17179869184` changes the ceiling for
 new containers after the service restarts. Existing containers are not resized.
@@ -1165,6 +1166,9 @@ concurrent provisioning. These temporary allowances are released on success,
 failure or cancellation. The 8 GiB ceiling is not an 8 GiB reservation: idle or
 thinking swarm workers are not refused just because their maxima add up to more
 than host RAM.
+Candidate verification uses these same admission checks. Its temporary
+provisioning allowance spans container creation/start, not the full command
+lifetime; its runtime cache ownership lasts until confirmed destruction.
 
 Low capacity refuses new work with a resource-specific reason; it does not evict
 an active run. Reopening a retained run reuses existing compute and skips
@@ -1330,6 +1334,7 @@ automatic.
 | `checkouts/` | Per-run worktrees. A retained Standard or Enhanced run (closed, or finished by its agent's report) and a completed swarm run keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Each run's diff-snapshot objects sit beside its worktree in `<run-id>.diffsnap/` and are reclaimed with it. That store holds one object per distinct version of every file the run writes, so a run that rewrites a large binary repeatedly grows it by that binary's size each time; it is counted in the `worktree_bytes` the disk usage reports. |
 | `transcripts/` | Per-run PTY transcripts (asciicast v2). |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
+| `home-caches/<member>/{runs,terminal}/data/` | Reconstructible npm, pip, uv and Go caches, separate from HOME. Runs use `runs`; the member environment and updater use `terminal`. Small server-owned metadata beside `data/` preserves last use, ownership and cleanup retries; it is not mounted into containers. |
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
@@ -1348,20 +1353,27 @@ shared agent's login path from it, the whole `~/.omp/agent` for `omp`, into
 the recipient's runs, through a Docker volume named `aether-home-<hash>`
 ([security.md](security.md#account-sharing)).
 
-Three consequences worth knowing:
+Four consequences worth knowing:
 
 - **Back up `aether.db`, `repos/`, `homes/`, `profiles/`, and `mirrors/` to
   recover core state, installed agents, login state, profile snapshots, and
   configured source mirrors.**
-- **Four of these grow without bound**: `checkouts/` (reclaimed by the TTL
-  GC), `transcripts/`, `aether.db` (the event log), and `repos/` (every push,
-  run branch and reflog entry stays). The disk usage in Settings > **Server** reports those
-  four, and new provisioning is refused when the automatic or configured
-  `--min-free-disk` reserve plus startup allowances would not fit. A checkout is a
-  `git clone --local` of its workspace repo, so its object files are hard
-  links to the same bytes in `repos/`; the gauge counts them once, under
-  `repos/`, and the checkout line is what reclaiming that checkout would give
-  back. See [failure-handling.md](failure-handling.md).
+- **Durable code and retained runtime have separate lifetimes.** Closed compute
+  expires automatically after the `1h` default grace; old retained terminal
+  deadlines are shortened on recovery from their durable completion time,
+  never extended. Exact-process Reopen ends when compute is released. Finished
+  checkouts retain the separate `72h` default, and required evidence, valuable
+  Git results and failed cleanup remain protected. Source repositories and
+  event history are not cache eviction targets.
+- **Managed caches are reclaimed automatically.** Startup after recovery,
+  hourly maintenance and a single retry on disk pressure reclaim only inactive,
+  proven-owned pools. Soft targets are 4 GiB per pool, 16 GiB total and 7 days
+  since last genuine use/release. Active, retained, finalizing and uncertain
+  owners can exceed those targets; these are not live-write quotas. No idle
+  process is killed to meet them. `home-caches/` need not be backed up; keep the
+  credentials and installed tools in `homes/`. Settings > **Server** reports
+  cache ownership, deadlines and cleanup failures. Byte accounting de-duplicates
+  hardlinks and is not a guarantee that deletion returns those bytes to disk.
 - **Keep the path short.** Per-run coordination sockets live under
   `coord/<run-id>/coord3.sock`, and unix socket paths have a hard length limit
   (about 100 characters). A very deep data directory makes the server log

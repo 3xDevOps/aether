@@ -57,6 +57,12 @@ func TestStorageRetentionUsesLiveOwnerAfterSidecarWriteFailure(t *testing.T) {
 				t.Fatal("expected sidecar persistence failure")
 			}
 			until, reason, err := e.sched.StorageRetention(t.Context(), run.ID)
+			info, retentionErr := e.sched.Retention(run)
+			wantPending := entry.evidencePending || entry.destroyPending || entry.finalizing
+			if retentionErr != nil || info.RetainedUntil == nil || !info.RetainedUntil.Equal(deadline) ||
+				info.CleanupPending != wantPending {
+				t.Fatalf("public live retention = %+v, %v", info, retentionErr)
+			}
 			if err != nil || !strings.Contains(reason, tc.want) || until == nil || !until.Equal(deadline) {
 				t.Fatalf("live ownership lost to stale marker: %v, %q, %v", until, reason, err)
 			}
@@ -74,6 +80,54 @@ func TestStorageRetentionUsesLiveOwnerAfterSidecarWriteFailure(t *testing.T) {
 			got, err := e.db.GetRun(t.Context(), run.ID)
 			if err != nil || got.Status != run.Status || got.Worktree != run.Worktree {
 				t.Fatalf("report mutated durable run: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestRetentionSidecarOwnershipIsReadOnlyAndExplicit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		status  domain.RunStatus
+		pending bool
+		cause   string
+		wantErr bool
+	}{
+		{name: "missing", status: domain.RunCompleted},
+		{name: "corrupt", raw: "{", status: domain.RunCompleted, wantErr: true},
+		{name: "wrong owner", raw: `{"run_id":"another","destroy_pending":true}`, status: domain.RunCompleted, wantErr: true},
+		{name: "unknown owner", raw: `{}`, status: domain.RunCompleted, wantErr: true},
+		{name: "expired", raw: `{"run_id":"retention","container_id":"owned","retained_until":"2000-01-01T00:00:00Z"}`, status: domain.RunCompleted, pending: true},
+		{name: "evidence without container", raw: `{"run_id":"retention","evidence_pending":true}`, status: domain.RunCompleted, pending: true},
+		{name: "active retry", raw: `{"run_id":"retention","destroy_pending":true}`, status: domain.RunProvisioning, pending: true},
+		{name: "reopened", raw: `{"run_id":"retention","container_id":"owned","retained_until":"2000-01-01T00:00:00Z"}`, status: domain.RunRunning},
+		{name: "private diagnostic", raw: `{"run_id":"retention","destroy_pending":true,"cleanup_error":"/srv/private secret=token"}`, status: domain.RunCompleted, pending: true, cause: cleanupUnknownError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Deliberately no Store or Runtime: this API must only read ownership.
+			s := &Scheduler{cfg: Config{StateDir: t.TempDir()}}
+			run := &domain.Run{ID: "retention", Status: tc.status}
+			path := s.sidecarPath(run.ID)
+			if tc.raw != "" {
+				if err := os.WriteFile(path, []byte(tc.raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			info, err := s.Retention(run)
+			if (err != nil) != tc.wantErr || info.CleanupPending != tc.pending || info.CleanupError != tc.cause {
+				t.Fatalf("Retention = %+v, %v", info, err)
+			}
+			if !run.Status.Terminal() && info.RetainedUntil != nil {
+				t.Fatal("active run exposed a stale retention deadline")
+			}
+			if tc.raw != "" {
+				after, err := os.ReadFile(path)
+				if err != nil || string(after) != tc.raw {
+					t.Fatalf("retention read mutated sidecar: %q, %v", after, err)
+				}
+			} else if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("missing ownership read created metadata: %v", err)
 			}
 		})
 	}

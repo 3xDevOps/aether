@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // ErrTerminalNotRunning reports that an environment save needs an open terminal.
@@ -21,6 +24,13 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	if s.cfg.Homes != nil {
+		unlock := s.cfg.Homes.LockCaches(member)
+		defer unlock()
+		if err := s.cfg.Homes.EnsureCacheMetadata(member, "terminal"); err != nil {
+			return "", fmt.Errorf("scheduler: preserve saved image cleanup owner: %w", err)
+		}
+	}
 
 	sup := s.lookupLiveTerminal(member)
 	if sup == nil {
@@ -29,7 +39,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)
 	}
-	tag := fmt.Sprintf("%s:%d", memberImageRepo(member), s.cfg.Now().Unix())
+	tag := memberImageRepo(member) + ":" + strings.ToLower(rand.Text())
 	if err := s.cfg.Runtime.Commit(ctx, sup.containerID, tag); err != nil {
 		return "", fmt.Errorf("scheduler: save environment: %w", err)
 	}
@@ -45,12 +55,24 @@ func (s *Scheduler) ResetEnvironment(ctx context.Context, member domain.MemberID
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
+	if s.cfg.Homes != nil {
+		unlock := s.cfg.Homes.LockCaches(member)
+		defer unlock()
+		if err := s.cfg.Homes.EnsureCacheMetadata(member, "terminal"); err != nil {
+			return fmt.Errorf("scheduler: preserve saved image cleanup owner: %w", err)
+		}
+	}
 
 	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
 		return fmt.Errorf("scheduler: get member to reset environment: %w", err)
 	}
 	if err := s.stopTerminalLocked(ctx, member); err != nil {
 		return fmt.Errorf("scheduler: reset environment: %w", err)
+	}
+	if s.cfg.Homes != nil {
+		if err := s.cfg.Homes.TouchCache(member, "terminal"); err != nil {
+			return fmt.Errorf("scheduler: record environment cache release: %w", err)
+		}
 	}
 	if err := s.cfg.Store.UpdateMemberImage(ctx, member, ""); err != nil {
 		return fmt.Errorf("scheduler: reset environment: clear image: %w", err)
@@ -59,22 +81,66 @@ func (s *Scheduler) ResetEnvironment(ctx context.Context, member domain.MemberID
 	return nil
 }
 
-// sweepMemberImages untags every saved image of the member except keep.
-// A tag a live container still uses cannot be removed yet; the daemon
-// refuses, and the next save or reset retries it. Removal never fails the
-// save or reset that triggered it: the member's record is already current.
+// sweepMemberImages runs under terminalLock then the member cache lock, like
+// periodic maintenance. Every current reference is protected, not just keep.
 func (s *Scheduler) sweepMemberImages(ctx context.Context, member domain.MemberID, keep string) {
-	tags, err := s.cfg.Runtime.ListImageTags(ctx, memberImageRepo(member))
-	if err != nil {
-		slog.Warn("scheduler: list member environment images", "member", member, "error", err)
-		return
+	refs, err := s.currentImageReferences(ctx)
+	if err == nil {
+		refs[keep] = true
+		err = s.removeObsoleteMemberImages(ctx, member, refs)
 	}
+	if err != nil {
+		slog.Warn("scheduler: clean member environment images", "member", member, "error", err)
+	}
+	if s.cfg.Homes != nil {
+		message := ""
+		if err != nil {
+			message = "Saved image cleanup failed; automatic retry pending"
+		}
+		if metaErr := s.cfg.Homes.SetCacheImageCleanupError(member, message); metaErr != nil {
+			slog.Warn("scheduler: preserve image cleanup status", "member", member, "error", metaErr)
+		}
+	}
+}
+
+func (s *Scheduler) currentImageReferences(ctx context.Context) (map[string]bool, error) {
+	refs := map[string]bool{s.cfg.StandardImage: true, s.cfg.DefaultStandardImage: true, s.cfg.BrowserImage: true}
+	members, err := s.cfg.Store.ListMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, member := range members {
+		refs[member.Image] = true
+		terminal, err := s.cfg.Store.GetTerminal(ctx, member.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		if terminal != nil {
+			refs[terminal.Image] = true
+		}
+	}
+	s.mu.Lock()
+	for _, terminal := range s.terminals {
+		refs[terminal.image] = true
+	}
+	s.mu.Unlock()
+	return refs, nil
+}
+
+func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domain.MemberID, refs map[string]bool) error {
+	repo := memberImageRepo(member)
+	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
+	if err != nil {
+		return err
+	}
+	var failures []error
 	for _, tag := range tags {
-		if tag == keep {
+		if refs[tag] || !strings.HasPrefix(tag, repo+":") {
 			continue
 		}
 		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil {
-			slog.Warn("scheduler: remove stale member environment image", "member", member, "image", tag, "error", err)
+			failures = append(failures, err)
 		}
 	}
+	return errors.Join(failures...)
 }

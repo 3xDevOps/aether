@@ -11,7 +11,7 @@ import (
 
 func TestSaveImageRefusesSymlinkedImageDirectory(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "homes")
-	manager, err := New(root, nil)
+	manager, err := New(root, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestSaveImageRefusesSymlinkedImageDirectory(t *testing.T) {
 }
 
 func TestSaveImageCreatesPrivateGeneratedPath(t *testing.T) {
-	manager, err := New(filepath.Join(t.TempDir(), "homes"), nil)
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

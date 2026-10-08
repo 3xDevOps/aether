@@ -15,6 +15,7 @@ function diskParts(disk: DiskUsage): string[] {
     `Database ${formatBytes(disk.database_bytes)}`,
     ...(disk.repo_bytes === undefined ? [] : [`Repositories ${formatBytes(disk.repo_bytes)}`]),
     `Homes ${knownBytes(disk.home_bytes)}`,
+    `Caches ${knownBytes(disk.cache_bytes)}`,
     `Evidence ${knownBytes(disk.evidence_bytes)}`,
     `Other ${knownBytes(disk.other_bytes)}`,
   ]
@@ -75,6 +76,11 @@ export function ServerSection() {
             <p className="text-ui-sm text-muted">Aether holds {diskParts(disk).join(' · ')}</p>
             <p className="text-ui-sm text-muted">
               Snapshots {knownBytes(disk.snapshot_bytes)} (included in worktrees). These categories attribute Aether data, not the whole filesystem or guaranteed reclaimable space.
+            </p>
+            <p className="text-ui-sm text-muted">
+              Managed build and package caches are separate from homes, credentials and installed tools.
+              Run and terminal pools belong to the launching member, even when a shared agent account is used.
+              Automatic cleanup protects active, retained and uncertain owners; cache targets are not live-writer quotas.
             </p>
             {disk.warnings && disk.warnings.length > 0 && (
               <div className="text-ui-sm text-muted">
@@ -138,9 +144,12 @@ function StorageOwners({ disk }: { disk: DiskUsage }) {
                   : undefined)
             return (
               <li key={index} className="min-w-0 break-words">
-                <p className="font-medium text-text">{entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind} · {formatBytes(entry.bytes)}</p>
+                <p className="font-medium text-text">{entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind}{entry.pool ? ` (${entry.pool})` : ''} · {formatBytes(entry.bytes)}</p>
                 <p>{entry.reason}</p>
-                <p>Reclaimable: {knownBytes(entry.reclaimable_bytes)}{entry.retained_until ? ` · Retained until ${new Date(entry.retained_until).toLocaleString()}` : ''}</p>
+                <p>
+                  Reclaimable: {knownBytes(entry.reclaimable_bytes)}
+                  {entry.retained_until && <> · {entry.kind === 'cache' ? 'Age target' : 'Retained until'} <time dateTime={entry.retained_until}>{new Date(entry.retained_until).toLocaleString()}</time></>}
+                </p>
                 {entry.error && <p className="whitespace-pre-wrap">{entry.error}</p>}
               </li>
             )

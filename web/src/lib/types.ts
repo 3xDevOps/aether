@@ -62,6 +62,10 @@ export interface Run {
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */
   paused?: boolean
+  /** Exact runtime grace deadline; files and results have separate lifetimes. */
+  container_retained_until?: string
+  cleanup_pending?: boolean
+  cleanup_error?: string
   /** Holder of the run's control lease; '' means nobody, absent on older gateways. */
   controller_member_id?: string
   /** An agent report finished the run and its owner has not opened it yet. */
@@ -410,6 +414,7 @@ export interface DiskUsage {
   /** The bare workspace repos; absent on servers predating the component. */
   repo_bytes?: number
   home_bytes?: number
+  cache_bytes?: number
   evidence_bytes?: number
   other_bytes?: number
   /** Included in worktree_bytes, not an additional category. */
@@ -439,6 +444,7 @@ export interface DiskEntry {
   kind: string
   owner_kind: 'run' | 'member' | 'workspace' | 'server'
   owner_id?: string
+  pool?: string
   bytes: number
   reclaimable_bytes?: number
   retained_until?: string
@@ -662,6 +668,13 @@ export interface RunStatusPayload {
   reason?: string
   /** The run's flag after this transition; absent means false. */
   outcome_unseen?: boolean
+}
+
+/** Complete runtime ownership metadata; omitted fields clear previous values. */
+export interface RunRetentionPayload {
+  container_retained_until?: string
+  cleanup_pending?: boolean
+  cleanup_error?: string
 }
 
 export interface GitBranchPayload {

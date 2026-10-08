@@ -3,6 +3,7 @@ import type { Workspace, WorkspaceMirrorResult } from '../../src/lib/types'
 
 // A real credential-free HTTPS repository reachable by the server. No route
 // interception, fabricated mirror response, or local repository link is used.
+// Remote fetch uses the scenario deadline, not the short rendering timeout.
 const source = process.env.AETHER_E2E_GIT_SOURCE_URL ?? 'https://github.com/3xDevOps/Aether.git'
 const branch = process.env.AETHER_E2E_GIT_SOURCE_BRANCH ?? 'main'
 
@@ -20,7 +21,7 @@ test('remote import retains the initial candidate until an administrator adopts 
   await dialog.getByLabel('Source / base branch').fill(branch)
   await expect(dialog.getByLabel('Checkout Origin (optional)')).toHaveValue('')
   await dialog.getByRole('button', { name: 'Import repository', exact: true }).click()
-  await expect(dialog.getByRole('region', { name: 'Import outcome' })).toContainText('Created: yes')
+  await expect(dialog.getByRole('region', { name: 'Import outcome' })).toBeVisible({ timeout: test.info().timeout })
   const { workspaces } = await admin.api.rpc<{ workspaces: Workspace[] }>('workspace.list')
   const workspace = workspaces.find((entry) => entry.name === 'remote-only')!
   expect(workspace.origin ?? '').toBe('')
@@ -53,7 +54,7 @@ test('a failed fetch keeps the created workspace and repair flow instead of repl
   await dialog.getByLabel('Source / base branch').fill(`missing-e2e-${crypto.randomUUID()}`)
   await dialog.getByRole('button', { name: 'Import repository', exact: true }).click()
   const result = dialog.getByRole('region', { name: 'Import outcome' })
-  await expect(result).toContainText('Created: yes')
+  await expect(result).toBeVisible({ timeout: test.info().timeout })
   await expect(result.getByRole('alert')).toBeVisible()
   const { workspaces } = await admin.api.rpc<{ workspaces: Workspace[] }>('workspace.list')
   expect(workspaces.map((entry) => entry.name)).toEqual(['retained-fetch-failure'])

@@ -78,6 +78,25 @@ describe('release confirmation dialog', () => {
     expect(archiveMocks.runRelease).toHaveBeenCalledWith('run_a')
   })
 
+  it('shows authoritative pool-independent runtime deadlines and pending failures before release', async () => {
+    const deadline = '2030-02-03T04:05:06Z'
+    useStore.setState({
+      paletteDialog: 'release-finished',
+      runs: {
+        retained: toRecord(run({ id: 'retained', status: 'completed', container_retained_until: deadline, cleanup_pending: true, cleanup_error: 'Container cleanup failed' })),
+        active: toRecord(run({ id: 'active', status: 'running', created_at: '2020-01-01T00:00:00Z' })),
+      },
+    })
+    const view = render(<ReleaseFinishedDialog />)
+    expect(view.container.ownerDocument.querySelector('time')?.getAttribute('datetime')).toBe(deadline)
+    expect(screen.getByRole('status').textContent).toBe('Container cleanup failed')
+    expect(archiveMocks.runRelease).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Free 1' }))
+    await waitFor(() => expect(archiveMocks.runRelease).toHaveBeenCalledWith('retained'))
+    expect(archiveMocks.runRelease).not.toHaveBeenCalledWith('active')
+    expect(archiveMocks.runArchive).not.toHaveBeenCalled()
+  })
+
   it('says so when no finished run keeps its container', () => {
     useStore.setState({ paletteDialog: 'release-finished' })
     render(<ReleaseFinishedDialog />)

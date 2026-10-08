@@ -40,6 +40,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 				s.mu.Unlock()
 				return fmt.Errorf("scheduler: retained sidecar run ID mismatch")
 			}
+			s.rememberRetentionLocked(current)
 			if sc.DestroyPending && sc.RunUser == "" {
 				// A legacy sidecar may lack its ownership metadata. Inspect
 				// outside s.mu, then recheck the row and sidecar before admitting

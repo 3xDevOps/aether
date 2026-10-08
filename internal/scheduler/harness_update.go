@@ -77,37 +77,54 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 	}
 	update := state.running
 	installing := slices.Contains(slices.Collect(maps.Values(s.agentInstalls)), home.HostPath)
-	if update == nil && !installing && !s.cfg.Now().Before(state.next) {
+	start := update == nil && !installing && !s.cfg.Now().Before(state.next)
+	if start {
 		update = &harnessUpdateRun{done: make(chan struct{})}
 		state.running = update
-		// One name per home and harness: only one update per key runs at a
-		// time, so a match is left over from a crashed server.
-		name := "harness-update-" + filepath.Base(home.HostPath) + "-" + profile.Name
-		mounts := make([]runtime.Mount, 1, 2)
-		mounts[0] = home
+	}
+	s.mu.Unlock()
+	if start {
+		member := domain.MemberID(filepath.Base(home.HostPath))
+		name := "harness-update-" + string(member) + "-" + profile.Name
+		mounts := []runtime.Mount{home}
+		env := maps.Clone(plan.Env)
+		if s.cfg.Homes != nil {
+			// Provisioning holds this member's cache lock. Publish the key
+			// before starting the detached worker; running state protects
+			// the pre-create gap and metadata survives crashes.
+			cache, cacheErr := s.cfg.Homes.CachePath(member, "terminal")
+			if cacheErr == nil {
+				cacheErr = s.cfg.Homes.AddCacheOwner(member, "terminal", name)
+			}
+			if cacheErr == nil {
+				cacheErr = s.applyRunOwnership(nil, &domain.Run{}, member,
+					[]runtime.Mount{{HostPath: cache, ContainerPath: "/aether-cache"}}, plan.User)
+			}
+			if cacheErr != nil {
+				s.mu.Lock()
+				state.running = nil
+				close(update.done)
+				s.mu.Unlock()
+				slog.Warn("scheduler: preserve updater cache ownership", "member", member, "error", cacheErr)
+				return
+			}
+			mounts = append(mounts, runtime.Mount{HostPath: cache, ContainerPath: "/aether-cache"})
+		}
 		if s.cfg.ServerBinary != "" {
 			mounts = append(mounts, runtime.Mount{
 				HostPath: s.cfg.ServerBinary, ContainerPath: agentstatus.ReporterCommand, ReadOnly: true,
 			})
 		}
 		spec := runtime.Spec{
-			Name:  name,
-			Image: plan.Image,
-			// The launch goes on to add coordination variables to plan.Env.
-			Env:        maps.Clone(plan.Env),
-			Mounts:     mounts,
-			User:       plan.User,
-			WorkingDir: plan.Home,
+			Name: name, Image: plan.Image, Env: env, Mounts: mounts,
+			User: plan.User, WorkingDir: plan.Home,
 			// Outlives the execs, and ends on its own if the server dies first.
-			Command:          []string{"/bin/sh", "-c", "sleep 900"},
-			CreationKey:      name,
-			CPULimit:         s.cfg.RunCPULimit,
-			MemoryLimitBytes: s.cfg.RunMemoryBytes,
-			PidsLimit:        s.cfg.RunPidsLimit,
+			Command: []string{"/bin/sh", "-c", "sleep 900"}, CreationKey: name,
+			CPULimit: s.cfg.RunCPULimit, MemoryLimitBytes: s.cfg.RunMemoryBytes,
+			PidsLimit: s.cfg.RunPidsLimit,
 		}
 		go s.runHarnessUpdate(state, update, run.WorkspaceID, run.ID, spec, exe, profile)
 	}
-	s.mu.Unlock()
 	if update == nil {
 		return
 	}
@@ -171,6 +188,20 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 	state.running = nil
 	close(update.done)
 	s.mu.Unlock()
+	if s.cfg.Homes != nil {
+		member := domain.MemberID(filepath.Base(spec.Mounts[0].HostPath))
+		unlock := s.cfg.Homes.LockCaches(member)
+		defer unlock()
+		probeCtx, cancel := context.WithTimeout(context.Background(), harnessUpdateDestroyTimeout)
+		defer cancel()
+		if _, findErr := s.cfg.Runtime.FindByCreationKey(probeCtx, spec.CreationKey); errors.Is(findErr, runtime.ErrNotFound) {
+			if err := s.cfg.Homes.RemoveCacheOwner(member, "terminal", spec.CreationKey); err != nil {
+				slog.Warn("scheduler: release updater cache owner", "member", member, "error", err)
+			}
+		} else {
+			_ = s.cfg.Homes.SetCacheRuntimeCleanupError(member, "terminal", "Updater cleanup pending; cache protected")
+		}
+	}
 }
 
 // updateInContainer runs script in a throwaway container with the run's
@@ -185,8 +216,12 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 		return "", "", findErr
 	}
 	// Resolve /proc/self/exe before another process interprets the mount source.
-	if err = checkCoordinationMounts(spec.Mounts[1:]); err != nil {
-		return "", "", fmt.Errorf("resolve updater helper: %w", err)
+	for i := range spec.Mounts {
+		if spec.Mounts[i].ReadOnly {
+			if err = checkCoordinationMounts(spec.Mounts[i : i+1]); err != nil {
+				return "", "", fmt.Errorf("resolve updater helper: %w", err)
+			}
+		}
 	}
 	release, err := s.reserveCapacity(ctx)
 	if err != nil {

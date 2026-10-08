@@ -295,8 +295,19 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 		s.finishVerification(context.Background(), workspaceID, candidateID, verificationID, protocol.VerificationError, nil, nil, false, e)
 		return
 	}
+	var releaseAllowance func()
+	releaseProvisioning := func() {
+		if releaseAllowance != nil {
+			releaseAllowance()
+			releaseAllowance = nil
+		}
+	}
+	defer releaseProvisioning()
 	if s.prepareRuntime != nil {
-		if e := s.prepareRuntime(ctx, &spec); e != nil {
+		var e error
+		releaseAllowance, e = s.prepareRuntime(ctx, &spec)
+		if e != nil {
+			releaseProvisioning()
 			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), creationKey, ""); cleanupErr != nil {
 				releaseClaim()
 				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
@@ -312,6 +323,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 			return
 		}
 		if spec.CreationKey != creationKey {
+			releaseProvisioning()
 			e := fmt.Errorf("%w: runtime preparation changed creation key", ErrUnavailable)
 			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), creationKey, ""); cleanupErr != nil {
 				releaseClaim()
@@ -328,6 +340,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 			return
 		}
 		if e := spec.Validate(); e != nil {
+			releaseProvisioning()
 			if cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, ""); cleanupErr != nil {
 				releaseClaim()
 				s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
@@ -350,6 +363,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	// Candidate lock is already held, preserving lock order with Show.
 	createRelease, err := s.authorize(ctx, actor, candidate, protocol.MethodIntegrationVerify)
 	if err != nil {
+		releaseProvisioning()
 		if cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, ""); cleanupErr != nil {
 			releaseClaim()
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, cleanupErr))
@@ -367,6 +381,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	containerID, err := s.runtime.Create(ctx, spec)
 	if err != nil {
 		createRelease()
+		releaseProvisioning()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			releaseClaim()
@@ -390,6 +405,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	}
 	if e := s.save(ctx, record, candidate); e != nil {
 		createRelease()
+		releaseProvisioning()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		releaseClaim()
 		if cleanupErr == nil {
@@ -408,6 +424,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	candidateLock.Unlock()
 	info, inspectErr := s.runtime.Inspect(ctx, containerID)
 	if inspectErr != nil {
+		releaseProvisioning()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(inspectErr, cleanupErr))
@@ -422,6 +439,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 	}
 	observedImage := info.Image
 	if e := s.updateVerificationMetadata(context.Background(), workspaceID, candidateID, verificationID, spec.Image, observedImage, info.User, spec.WorkingDir, int(timeout/time.Second), spec.CPULimit, spec.MemoryLimitBytes, environmentSHA256, setupScriptSHA256); e != nil {
+		releaseProvisioning()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(e, cleanupErr))
@@ -437,6 +455,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 
 	attachment, err := s.runtime.Attach(ctx, containerID)
 	if err != nil {
+		releaseProvisioning()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)
 		if cleanupErr != nil {
 			s.markVerificationCleanupFailure(context.Background(), workspaceID, candidateID, verificationID, errors.Join(err, cleanupErr))
@@ -487,6 +506,9 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 		startRelease()
 	}
 	startLock.Unlock()
+	// The allowance protects the actual Create/Start window, not command
+	// execution. Later verification and cleanup retain only durable ownership.
+	releaseProvisioning()
 	if claimErr != nil {
 		_ = attachment.Close()
 		cleanupErr := s.cleanupVerificationRuntime(context.Background(), spec.CreationKey, containerID)

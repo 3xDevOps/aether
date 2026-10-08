@@ -110,6 +110,7 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 			entry.paused = false
 			if persistErr := s.persistRetainedSidecar(entry.sidecar()); persistErr != nil {
 				entry.evidencePending = true
+				s.recordCleanupErrorLocked(entry, cleanupStateError)
 				slog.Warn("scheduler: persist retained worker exit", "run", entry.runID, "error", persistErr)
 			}
 		}
@@ -234,6 +235,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		sc.EvidencePending = true
 		if persistErr := s.persistRetainedSidecar(sc); persistErr != nil {
 			entry.finalizing = false
+			s.recordCleanupErrorLocked(entry, cleanupStateError)
 			s.mu.Unlock()
 			slog.Warn("scheduler: persist completed worker retention", "run", entry.runID, "error", persistErr)
 			entry.lifecycleMu.Unlock()
@@ -251,6 +253,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		// Without a durable terminal row, destruction would orphan the
 		// recoverable checkout and transcript.
 		s.retainAfterEvidenceFailure(entry)
+		s.recordCleanupError(entry, cleanupStateError)
 		entry.lifecycleMu.Unlock()
 		return
 	}
@@ -290,11 +293,13 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if err := s.MarkDevelopmentContainerEnded(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: record development container exit", "run", entry.runID, "error", err)
 		s.retainAfterEvidenceFailure(entry)
+		s.recordCleanupError(entry, cleanupStateError)
 		return
 	}
 	if err := s.StopDevelopmentRun(ctx, entry.runID); err != nil {
 		slog.Warn("scheduler: stop development resources", "run", entry.runID, "error", err)
 		s.retainAfterEvidenceFailure(entry)
+		s.recordCleanupError(entry, cleanupRuntimeError)
 		return
 	}
 
@@ -319,21 +324,28 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 			entry.retained = true
 			entry.retainedUntil = &now
 			entry.finalizing = false
+			entry.destroyPending = true
+			entry.cleanupError = cleanupRuntimeError
 			if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {
 				slog.Warn("scheduler: persist retained sidecar after destroy failure",
 					"run", entry.runID, "error", sidecarErr)
 			}
+			s.publishRetentionLocked(entry.runID)
 		}
 		s.mu.Unlock()
 		slog.Warn("scheduler: destroy container", "run", entry.runID, "error", destroyErr)
 		return
 	}
+	// Publish release activity while the lifecycle owner still protects cache
+	// cleanup, never after removing its last ownership reference.
+	s.touchRunCache(entry.memberID)
 	s.removeSidecar(entry.runID)
 	s.closeDone(entry)
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry {
 		entry.finalizing = false
 		delete(s.runs, entry.runID)
+		s.publishRetentionLocked(entry.runID)
 	}
 	s.mu.Unlock()
 }
@@ -400,7 +412,7 @@ func (s *Scheduler) retryDestroyPending(ctx context.Context, entry *supervised) 
 
 // retryDestroyPendingLocked is the same retry for a caller that already owns
 // entry.lifecycleMu, such as Kill.
-func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *supervised) error {
+func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *supervised) (resultErr error) {
 	if entry == nil {
 		return nil
 	}
@@ -411,13 +423,21 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 	}
 	cid := entry.containerID
 	s.mu.Unlock()
+	cause := cleanupLookupError
+	defer func() {
+		if resultErr != nil {
+			s.recordCleanupError(entry, cause)
+		}
+	}()
 	if cid == "" {
 		found, err := s.cfg.Runtime.FindByCreationKey(ctx, string(entry.runID))
 		if err != nil {
 			if errors.Is(err, runtime.ErrNotFound) {
+				cause = cleanupEvidenceError
 				if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
 					return preserveErr
 				}
+				cause = cleanupStateError
 				return s.finishDestroyPending(ctx, entry)
 			}
 			return fmt.Errorf("find destroy-pending container: %w", err)
@@ -432,12 +452,17 @@ func (s *Scheduler) retryDestroyPendingLocked(ctx context.Context, entry *superv
 		}
 		s.mu.Unlock()
 	}
-	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-		return fmt.Errorf("destroy-pending container: %w", err)
-	}
+	// Required evidence must succeed before runtime deletion on retries too.
+	// The failed attempt may never have captured it.
+	cause = cleanupEvidenceError
 	if preserveErr := s.preserveRecoveryWork(ctx, entry.runID, entry.task); preserveErr != nil {
 		return preserveErr
 	}
+	cause = cleanupRuntimeError
+	if err := s.destroyDevelopmentContainer(ctx, entry.runID, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		return fmt.Errorf("destroy-pending container: %w", err)
+	}
+	cause = cleanupStateError
 	return s.finishDestroyPending(ctx, entry)
 }
 
@@ -480,7 +505,13 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
+		s.recordCleanupError(entry, cleanupLookupError)
 		return fmt.Errorf("scheduler: load retained run: %w", err)
+	}
+	if !run.Status.Terminal() {
+		// A reopened row, including one ahead of a stale retained sidecar,
+		// is not eligible for terminal cleanup.
+		return retainedTransitionError()
 	}
 	if identity == "" {
 		identity = evidenceCommitIdentity(run.LastCommit, "", -1)
@@ -496,10 +527,12 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 		// bounded sweep will retry without allowing cleanup to race a live
 		// container.
 		s.mu.Lock()
+		entry.cleanupError = cleanupRuntimeError
 		s.markRetainedDestroyDueLocked(entry)
 		s.mu.Unlock()
 		return fmt.Errorf("scheduler: destroy retained container: %w", err)
 	}
+	s.touchRunCache(entry.memberID)
 
 	var transitionErr error
 	s.mu.Lock()
@@ -510,6 +543,8 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 		entry.retained = false
 		entry.retainedUntil = nil
 		entry.destroyPending = false
+		entry.evidencePending = false
+		entry.cleanupError = ""
 		if entry.userReservation != nil {
 			delete(s.credentialUsers, entry.userReservation)
 			entry.userReservation = nil
@@ -524,6 +559,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	if s.runs[entry.runID] == entry {
 		s.closeDone(entry)
 		delete(s.runs, entry.runID)
+		s.publishRetentionLocked(entry.runID)
 	}
 	s.mu.Unlock()
 	return transitionErr

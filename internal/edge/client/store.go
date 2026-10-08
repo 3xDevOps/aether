@@ -27,9 +27,8 @@ const (
 	// TokensFile holds the device token of every edge this machine is
 	// signed in to, mode 0600.
 	TokensFile = "edge-tokens.json"
-	// lockFileName is the lock that serializes changes to the device key
-	// and TokensFile between aether processes, such as two sign-ins at
-	// once.
+	// lockFileName serializes reads and changes to the device key and
+	// TokensFile between aether processes, such as status during sign-in.
 	lockFileName = "edge.lock"
 )
 
@@ -61,6 +60,16 @@ func deviceKeyPath(dir string) string { return filepath.Join(dir, deviceKeyFile)
 
 // DeviceSigner loads this machine's device key.
 func DeviceSigner(dir string) (ssh.Signer, error) {
+	unlock, err := lock(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return deviceSignerLocked(dir)
+}
+
+// deviceSignerLocked requires the caller to hold dir's lock.
+func deviceSignerLocked(dir string) (ssh.Signer, error) {
 	path := deviceKeyPath(dir)
 	raw, err := readPrivate(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -92,7 +101,7 @@ func EnsureDeviceKey(dir string) (ssh.Signer, error) {
 	defer unlock()
 	file, err := os.OpenFile(deviceKeyPath(dir), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
-		return DeviceSigner(dir)
+		return deviceSignerLocked(dir)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create device key: %w", err)
@@ -120,6 +129,17 @@ func EnsureDeviceKey(dir string) (ssh.Signer, error) {
 func tokensPath(dir string) string { return filepath.Join(dir, TokensFile) }
 
 func readTokens(dir string) (tokensFile, error) {
+	unlock, err := lock(dir)
+	if err != nil {
+		return tokensFile{}, err
+	}
+	defer unlock()
+	return readTokensLocked(dir)
+}
+
+// readTokensLocked requires the caller to hold dir's lock. Readers must
+// not hold TokensFile open while a writer replaces it on Windows.
+func readTokensLocked(dir string) (tokensFile, error) {
 	var f tokensFile
 	raw, err := readPrivate(tokensPath(dir))
 	if errors.Is(err, os.ErrNotExist) {
@@ -145,7 +165,7 @@ func updateTokens(dir string, change func(tokensFile)) error {
 		return err
 	}
 	defer unlock()
-	f, err := readTokens(dir)
+	f, err := readTokensLocked(dir)
 	if err != nil {
 		return err
 	}
@@ -154,7 +174,7 @@ func updateTokens(dir string, change func(tokensFile)) error {
 }
 
 // writeTokens replaces TokensFile atomically: a crash leaves the old file
-// or the new one, never a torn token.
+// or the new one, never a torn token. The caller must hold dir's lock.
 func writeTokens(dir string, f tokensFile) error {
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -249,8 +269,8 @@ func readPrivate(path string) ([]byte, error) {
 	return raw, nil
 }
 
-// lock takes the lock that serializes changes to the files in dir, and
-// returns its release. The operating system drops it if the process dies.
+// lock serializes reads and changes to the files in dir and returns its
+// release. The operating system drops it if the process dies.
 func lock(dir string) (func(), error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create config dir: %w", err)

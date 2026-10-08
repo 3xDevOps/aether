@@ -49,7 +49,7 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	if err = db.CreateRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	homes, err := memberhome.New(filepath.Join(dir, "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(dir, "homes"), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	environment := integrationEnvironment(Deps{Store: db, Runs: sched})
 	checkout := filepath.Join(dir, "checkout")
 
-	wantOnlyHome := func(stage string, member domain.MemberID) {
+	wantHomeAndCache := func(stage string, member domain.MemberID) {
 		t.Helper()
 		spec, envErr := environment(ctx, integration.Actor{RunID: run.ID}, ws, checkout)
 		if envErr != nil {
@@ -75,17 +75,32 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 		if pathErr != nil {
 			t.Fatal(pathErr)
 		}
-		if len(spec.Mounts) != 1 || spec.Mounts[0] != (runtime.Mount{HostPath: home, ContainerPath: "/root"}) {
-			t.Fatalf("%s: mounts = %+v, want only %s's home %q", stage, spec.Mounts, member, home)
+		cache := filepath.Join(homes.CacheRoot(), string(member), memberhome.CachePoolRuns, "data")
+		foundHome, foundCache := false, false
+		for _, mount := range spec.Mounts {
+			switch mount.ContainerPath {
+			case "/root":
+				foundHome = mount == (runtime.Mount{HostPath: home, ContainerPath: "/root"})
+			case "/aether-cache":
+				foundCache = mount == (runtime.Mount{HostPath: cache, ContainerPath: "/aether-cache"})
+			default:
+				t.Fatalf("%s: unexpected account or coordination mount: %+v", stage, mount)
+			}
+		}
+		if !foundHome || !foundCache {
+			t.Fatalf("%s: mounts = %+v, want immutable home %q and runs cache %q", stage, spec.Mounts, home, cache)
+		}
+		if spec.Env["AETHER_CACHE_DIR"] != "/aether-cache" || spec.Env["GOCACHE"] != "/aether-cache/go-build" {
+			t.Fatalf("%s: managed cache defaults = %+v", stage, spec.Env)
 		}
 	}
 
-	wantOnlyHome("before handoff", launcher.ID)
+	wantHomeAndCache("before handoff", launcher.ID)
 
 	if err = db.TransferRun(ctx, run.ID, recipient.ID); err != nil {
 		t.Fatal(err)
 	}
-	wantOnlyHome("after handoff", launcher.ID)
+	wantHomeAndCache("after handoff", launcher.ID)
 
 	// A row from before account shares were narrowed has no home member;
 	// its container mounted the account's whole home.
@@ -97,5 +112,5 @@ func TestIntegrationEnvironmentUsesTheRunContainersHome(t *testing.T) {
 	if _, err = raw.ExecContext(ctx, `UPDATE runs SET home_member_id = NULL WHERE id = ?`, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	wantOnlyHome("legacy row", owner.ID)
+	wantHomeAndCache("legacy row", owner.ID)
 }

@@ -89,6 +89,7 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		DatabaseBytes:   usage.DatabaseBytes,
 		RepoBytes:       usage.RepoBytes,
 		HomeBytes:       usage.HomeBytes,
+		CacheBytes:      usage.CacheBytes,
 		EvidenceBytes:   usage.EvidenceBytes,
 		OtherBytes:      usage.OtherBytes,
 		SnapshotBytes:   usage.SnapshotBytes,
@@ -99,7 +100,7 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		result.Truncated = usage.Truncated || len(usage.Entries) > 50
 		for _, entry := range usage.Entries[:min(len(usage.Entries), 50)] {
 			wire := protocol.ServerDiskEntry{
-				Kind: entry.Kind, OwnerKind: entry.OwnerKind, OwnerID: entry.OwnerID,
+				Kind: entry.Kind, OwnerKind: entry.OwnerKind, OwnerID: entry.OwnerID, Pool: entry.Pool,
 				Bytes: entry.Bytes, ReclaimableBytes: entry.ReclaimableBytes,
 				Reason: entry.Reason, Error: entry.Error,
 			}

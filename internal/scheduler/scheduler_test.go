@@ -164,7 +164,7 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 		t.Fatalf("create member: %v", cerr)
 	}
 
-	homes, err := memberhome.New(filepath.Join(dir, "homes"), nil)
+	homes, err := memberhome.New(filepath.Join(dir, "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
 	if err != nil {
 		t.Fatalf("memberhome.New: %v", err)
 	}
@@ -1050,8 +1050,8 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	if c.spec.CreationKey != string(run.ID) {
 		t.Errorf("creation key = %q, want %q", c.spec.CreationKey, run.ID)
 	}
-	if len(c.spec.Mounts) != 1 {
-		t.Fatalf("mounts = %v, want one persistent home mount", c.spec.Mounts)
+	if len(c.spec.Mounts) != 2 {
+		t.Fatalf("mounts = %v, want persistent home plus isolated cache", c.spec.Mounts)
 	}
 	wantHome, err := e.cfg.Homes.Path(e.member.ID)
 	if err != nil {
@@ -1087,8 +1087,8 @@ func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) 
 		t.Fatalf("run actor/account = %s/%s, want %s/%s", run.MemberID, run.AccountMember(), e.member.ID, account.ID)
 	}
 	c := e.rt.byName(string(run.ID))
-	if c == nil || len(c.spec.Mounts) != 1 {
-		t.Fatalf("container mounts = %+v, want only the launcher's home", c)
+	if c == nil || len(c.spec.Mounts) != 2 {
+		t.Fatalf("container mounts = %+v, want only launcher's home/cache", c)
 	}
 	wantHome, err := e.cfg.Homes.Path(e.member.ID)
 	if err != nil {
@@ -1124,8 +1124,8 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member home: %v", err)
 	}
-	if len(c.spec.Mounts) != 1 {
-		t.Fatalf("mounts = %v, want exactly one home mount", c.spec.Mounts)
+	if len(c.spec.Mounts) != 2 {
+		t.Fatalf("mounts = %v, want home plus isolated cache", c.spec.Mounts)
 	}
 	if got := c.spec.Mounts[0]; got.HostPath != wantHome || got.ContainerPath != "/root" || got.ReadOnly {
 		t.Fatalf("home mount = %+v, want %q at /root", got, wantHome)
@@ -1135,7 +1135,7 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 		t.Fatalf("second Launch: %v", err)
 	}
 	c2 := e.rt.byName(string(run2.ID))
-	if c2 == nil || len(c2.spec.Mounts) != 1 || c2.spec.Mounts[0].HostPath != wantHome {
+	if c2 == nil || len(c2.spec.Mounts) != 2 || c2.spec.Mounts[0].HostPath != wantHome {
 		t.Fatalf("second home mount = %+v, want %q", c2.spec.Mounts, wantHome)
 	}
 }
@@ -1406,8 +1406,8 @@ func TestRetentionTTLDefaults(t *testing.T) {
 	if got := e.sched.cfg.CheckoutTTL; got != 72*time.Hour {
 		t.Fatalf("default CheckoutTTL = %v, want 72h", got)
 	}
-	if got := e.sched.cfg.RunContainerTTL; got != 7*24*time.Hour {
-		t.Fatalf("default RunContainerTTL = %v, want 168h", got)
+	if got := e.sched.cfg.RunContainerTTL; got != time.Hour {
+		t.Fatalf("default RunContainerTTL = %v, want 1h", got)
 	}
 	disabled := newTestEnv(t, func(cfg *Config) { cfg.CheckoutTTL = -1 })
 	if got := disabled.sched.cfg.CheckoutTTL; got >= 0 {
@@ -1446,12 +1446,12 @@ func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container")
 	}
-	if len(c.spec.Mounts) != 1 || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
-		t.Fatalf("mounts = %v, want only writable home mount", c.spec.Mounts)
+	if len(c.spec.Mounts) != 2 || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
+		t.Fatalf("mounts = %v, want writable home/cache without profile mount", c.spec.Mounts)
 	}
 }
 
-func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
+func TestLaunchWithoutSnapshotUsesHomeAndCache(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"fake-claude", "{task}"}}}
@@ -1468,8 +1468,8 @@ func TestLaunchWithoutSnapshotHasOnlyHomeMount(t *testing.T) {
 		t.Fatalf("unexpected pin %q", got.ProfileSnapshotID)
 	}
 	c := e.rt.byName(string(run.ID))
-	if c == nil || len(c.spec.Mounts) != 1 || c.spec.Mounts[0].ContainerPath != "/root" {
-		t.Fatalf("mounts = %v, want only home mount", c.spec.Mounts)
+	if c == nil || len(c.spec.Mounts) != 2 || c.spec.Mounts[0].ContainerPath != "/root" {
+		t.Fatalf("mounts = %v, want only home/cache mounts", c.spec.Mounts)
 	}
 }
 

@@ -90,9 +90,10 @@ type Config struct {
 	Runtime     runtime.Runtime
 	Root        string
 	Environment func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-	// PrepareRuntime stages any auxiliary runtime resources before Create.
-	// The hook receives the persisted verification creation key in Spec.
-	PrepareRuntime func(context.Context, *runtime.Spec) error
+	// PrepareRuntime stages durable auxiliary ownership and admits provisioning.
+	// It receives the persisted creation key and returns a temporary allowance
+	// release, called after Start or any earlier failure (even alongside error).
+	PrepareRuntime func(context.Context, *runtime.Spec) (func(), error)
 	// ReleaseRuntime removes resources staged by PrepareRuntime. It is called
 	// only after the runtime container is proven absent.
 	ReleaseRuntime func(context.Context, string) error
@@ -106,7 +107,7 @@ type Service struct {
 	runtime           runtime.Runtime
 	root              string
 	environment       func(context.Context, Actor, *domain.Workspace, string) (runtime.Spec, error)
-	prepareRuntime    func(context.Context, *runtime.Spec) error
+	prepareRuntime    func(context.Context, *runtime.Spec) (func(), error)
 	releaseRuntime    func(context.Context, string) error
 	admission         AdmissionFunc
 	now               func() time.Time

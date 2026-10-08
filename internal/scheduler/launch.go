@@ -297,6 +297,23 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // concurrent Kill takes the supervised path instead of transitioning the row
 // underneath the in-flight launch.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
+	// Cache ownership spans the create/sidecar gap. GC tries this lock rather
+	// than waiting behind provisioning; never acquire it under Scheduler.mu.
+	if s.cfg.Homes != nil {
+		home, account := run.HomeMember(), run.AccountMember()
+		first, second := home, account
+		if second < first {
+			first, second = second, first
+		}
+		if first != "" {
+			unlock := s.cfg.Homes.LockCaches(first)
+			defer unlock()
+		}
+		if second != "" && second != first {
+			unlock := s.cfg.Homes.LockCaches(second)
+			defer unlock()
+		}
+	}
 	entry := &supervised{
 		runID:           run.ID,
 		workspaceID:     run.WorkspaceID,
@@ -407,6 +424,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 			!errors.Is(derr, runtime.ErrNotFound) {
 			s.mu.Lock()
 			entry.destroyPending = true
+			entry.cleanupError = cleanupRuntimeError
 			_ = s.writeSidecar(entry.sidecar())
 			s.mu.Unlock()
 			slog.Warn("scheduler: retain container after failed provisioning destroy", "run", run.ID, "error", derr)

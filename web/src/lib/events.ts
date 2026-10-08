@@ -3,6 +3,7 @@
 
 export const eventLabel = {
   'run.status': 'Run state',
+  'run.retention': 'Runtime retention',
   'run.input': 'Agent questions',
   'run.title': 'Run title',
   'run.deleted': 'Run deleted',

@@ -165,8 +165,8 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		if spec.Image != launcherImage {
 			t.Fatalf("%s: image = %q, want the launcher's %q", tc.harness, spec.Image, launcherImage)
 		}
-		if len(spec.Mounts) != 2 {
-			t.Fatalf("%s: mounts = %+v, want the launcher's home and one login", tc.harness, spec.Mounts)
+		if len(spec.Mounts) != 3 {
+			t.Fatalf("%s: mounts = %+v, want launcher's home/cache and one borrowed login", tc.harness, spec.Mounts)
 		}
 		if home := spec.Mounts[0]; home != (runtime.Mount{HostPath: e.adaHome, ContainerPath: "/root"}) {
 			t.Fatalf("%s: home mount = %+v, want the launcher's home %q at /root", tc.harness, home, e.adaHome)
@@ -174,6 +174,11 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		want := runtime.Mount{HostPath: e.ownerHome, Subpath: tc.login, ContainerPath: "/root/" + tc.login}
 		if login := spec.Mounts[1]; login != want {
 			t.Fatalf("%s: login mount = %+v, want %+v", tc.harness, login, want)
+		}
+		cache, ok := mountFor(spec, "/aether-cache")
+		wantCache := filepath.Join(e.cfg.Homes.CacheRoot(), string(run.HomeMember()), "runs", "data")
+		if !ok || cache.ReadOnly || cache.HostPath != wantCache || run.HomeMember() != e.member.ID {
+			t.Fatalf("shared-account cache = %+v, want immutable launcher's %s", cache, wantCache)
 		}
 		e.assertOwnerExposedOnlyAt(t, spec, tc.login)
 		identity := e.member.GitIdentity()
@@ -206,9 +211,9 @@ func TestSharedLaunchMountsOnlyTheOwnersLogin(t *testing.T) {
 		t.Fatalf("owner Launch: %v", err)
 	}
 	spec := e.rt.byName(string(own.ID)).spec
-	if spec.Image != ownerImage || len(spec.Mounts) != 1 ||
+	if spec.Image != ownerImage || len(spec.Mounts) != 2 ||
 		spec.Mounts[0] != (runtime.Mount{HostPath: e.ownerHome, ContainerPath: "/root"}) {
-		t.Fatalf("own launch = image %q mounts %+v, want %q and only the owner's home", spec.Image, spec.Mounts, ownerImage)
+		t.Fatalf("own launch = image %q mounts %+v, want %q and owner's home/cache", spec.Image, spec.Mounts, ownerImage)
 	}
 }
 
@@ -224,8 +229,8 @@ func TestSharedLaunchWithoutOwnerLogin(t *testing.T) {
 		t.Fatalf("fake Launch: %v", err)
 	}
 	spec := e.rt.byName(string(run.ID)).spec
-	if len(spec.Mounts) != 1 || spec.Mounts[0].HostPath != e.adaHome {
-		t.Fatalf("fake mounts = %+v, want only the launcher's home", spec.Mounts)
+	if len(spec.Mounts) != 2 || spec.Mounts[0].HostPath != e.adaHome {
+		t.Fatalf("fake mounts = %+v, want only launcher's home/cache", spec.Mounts)
 	}
 	e.assertOwnerExposedOnlyAt(t, spec)
 
@@ -455,7 +460,7 @@ func TestSharedLaunchNonRootOwnershipAndReservation(t *testing.T) {
 	}
 	spec := e.rt.byName(string(run.ID)).spec
 	want := runtime.Mount{HostPath: e.ownerHome, Subpath: ".claude/.credentials.json", ContainerPath: "/home/aether/.claude/.credentials.json"}
-	if spec.User != "1000:1000" || len(spec.Mounts) != 2 || spec.Mounts[1] != want {
+	if spec.User != "1000:1000" || len(spec.Mounts) != 3 || spec.Mounts[1] != want {
 		t.Fatalf("spec user %q mounts %+v, want 1000:1000 and login %+v", spec.User, spec.Mounts, want)
 	}
 	if got := ownerOf(t, filepath.Join(e.ownerHome, ".claude", ".credentials.json")); got != 1000 {
