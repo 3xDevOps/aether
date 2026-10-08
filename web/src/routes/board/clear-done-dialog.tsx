@@ -37,9 +37,9 @@ export function ClearDoneConfirm({
               'Archive acts on merged, abandoned, failed and interrupted runs you may act on.'
             ) : (
               <>
-                Archive hides these runs and schedules their deletion after the retention
-                period. It does not free their containers; free them separately before
-                archiving if you want the memory back now.
+                Archive hides these runs from Finished and keeps their history until you
+                explicitly delete them. You can restore them at any time. It does not free
+                their containers; free them separately if you want the memory back now.
               </>
             )}
           </DialogDescription>
@@ -104,8 +104,8 @@ export function ReleaseFinishedConfirm({
             ) : (
               <>
                 Their retained containers will be removed and the runs cannot be reopened.
-                Checkouts, homes, repositories and history follow their existing retention rules;
-                this does not delete all run data or archive the runs.
+                Checkouts, homes and repositories follow their existing retention rules;
+                history is kept until explicit deletion. This does not archive the runs.
               </>
             )}
           </DialogDescription>

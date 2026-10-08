@@ -9,7 +9,7 @@ import (
 func init() {
 	register(command{
 		name:  "archive",
-		short: "hide a finished run from the board; the server deletes it on the printed date",
+		short: "hide a finished run from the board without deleting its history",
 		run:   func(args []string) error { return setArchived(args, true) },
 	})
 	register(command{
@@ -37,11 +37,8 @@ func setArchived(args []string, archive bool) error {
 			return fmt.Errorf("%s run %q: %w", verb, runID, err)
 		}
 		if archive {
-			if res.Run.DeletesAt == nil {
-				return fmt.Errorf("archive run %q: server reply carries no deletes_at", runID)
-			}
-			fmt.Printf("archived %s: off the board until the server deletes it on %s; restore with: aether unarchive %s\n",
-				res.Run.ID, *res.Run.DeletesAt, res.Run.ID)
+			fmt.Printf("archived %s: off the board; restore with: aether unarchive %s\n",
+				res.Run.ID, res.Run.ID)
 		} else {
 			fmt.Printf("%s is not archived: it shows on the board and in aether runs\n", res.Run.ID)
 		}

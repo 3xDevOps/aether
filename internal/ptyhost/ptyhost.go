@@ -309,12 +309,11 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 	var seed []byte
 	var modes modeScanner
 	var screen *terminalScreen
-	var recoveredHistory []castSegment
 	position := TerminalPosition{Epoch: epoch}
 	recoveredTranscript := false
 	if info, statErr := os.Stat(path); statErr == nil && info.Size() > 0 && key.seedsReplay() {
 		if isRun {
-			recovered, segments, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false)
+			recovered, _, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false)
 			if checkpointErr != nil {
 				h.unreserve(key)
 				repair := h.startSnapshotRepair(key, path)
@@ -328,7 +327,7 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 					if err = h.reserve(key); err != nil {
 						return err
 					}
-					recovered, segments, recoveredPosition, _, checkpointErr = loadCurrentCheckpoint(path, false)
+					recovered, _, recoveredPosition, _, checkpointErr = loadCurrentCheckpoint(path, false)
 					if checkpointErr != nil {
 						h.unreserve(key)
 						return errors.Join(ErrSnapshotUnavailable, fmt.Errorf("ptyhost: repaired checkpoint remains invalid: %w", checkpointErr))
@@ -337,15 +336,15 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 					return ErrSnapshotPending
 				}
 			}
-			screen, modes, recoveredHistory = recovered.screen, recovered.modes, segments
+			screen, modes = recovered.screen, recovered.modes
 			position = recoveredPosition
 			resumeID = string(position.Epoch)
 			recoveredTranscript = true
 		} else {
 			// New member transcripts have the same compact checkpoint as runs.
 			// Legacy recordings without one still recover a bounded recent tail.
-			if recovered, segments, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false); checkpointErr == nil {
-				screen, modes, recoveredHistory = recovered.screen, recovered.modes, segments
+			if recovered, _, recoveredPosition, _, checkpointErr := loadCurrentCheckpoint(path, false); checkpointErr == nil {
+				screen, modes = recovered.screen, recovered.modes
 				position = recoveredPosition
 				resumeID = string(position.Epoch)
 				recoveredTranscript = true
@@ -386,21 +385,14 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		h.unreserve(key)
 		return err
 	}
-	if len(recoveredHistory) > 0 {
-		tr.history = recoveredHistory
-		for i := range tr.history {
-			if tr.history[i].path == path {
-				tr.history[i].path = filepath.Join(filepath.Dir(path), stableCastSegmentName(path, tr.history[i].incarnation))
-			}
-		}
-	} else {
-		tr.history, err = priorCastSegments(path)
-		if err != nil {
-			_ = tr.close()
-			screen.dispose()
-			h.unreserve(key)
-			return err
-		}
+	tr.mu.Lock()
+	err = tr.loadPrefixLocked()
+	tr.mu.Unlock()
+	if err != nil {
+		_ = tr.close()
+		screen.dispose()
+		h.unreserve(key)
+		return err
 	}
 	if recoveredTranscript {
 		tr.seed(makeScreenSnapshot(screen, modes, position).Data)
@@ -630,10 +622,16 @@ func (h *Host) replayWindow(run domain.RunID, maxBytes int) (ReplayWindow, error
 		}
 	}
 	// Bounded recent reads must not repair or scan unrelated older archives.
-	// Full replay repairs and prunes before pinning its retained descriptors.
+	// Full replay repairs the checkpoint before pinning its descriptors.
 	if maxBytes <= 0 && (s == nil || s.tr == nil) {
-		if err := pruneColdCast(path, time.Now()); err != nil {
-			return ReplayWindow{}, err
+		checkpoint, err := decodeCheckpoint(checkpointPath(path))
+		if err == nil && checkpoint.Version == screenCheckpointVersion {
+			_, err = validateCheckpointSegments(path, checkpoint, true)
+		}
+		if err != nil || checkpoint.Version != screenCheckpointVersion {
+			if _, err = repairColdSnapshotLocked(path); err != nil {
+				return ReplayWindow{}, err
+			}
 		}
 	}
 	retention, err := readCastRetention(path)
@@ -653,7 +651,7 @@ func (h *Host) replayWindow(run domain.RunID, maxBytes int) (ReplayWindow, error
 			return ReplayWindow{}, err
 		}
 	}
-	if checkpoint, checkpointErr := decodeCheckpoint(checkpointPath(path)); checkpointErr == nil && checkpoint.Version == screenCheckpointVersion {
+	if checkpoint, checkpointErr := decodeCheckpoint(checkpointPath(path)); checkpointErr == nil && checkpoint.Version >= 2 {
 		if _, boundaryErr := validateCheckpointSegments(path, checkpoint, true); boundaryErr == nil {
 			window.Cols, window.Rows = checkpoint.Cols, checkpoint.Rows
 			window.Position = TerminalPosition{Epoch: checkpoint.Epoch, Sequence: checkpoint.Sequence}

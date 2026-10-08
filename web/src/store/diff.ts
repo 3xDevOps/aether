@@ -39,23 +39,12 @@ export function intervalKey(from: string, to: string): string {
   return `${from}..${to}`
 }
 
-/** The cached intervals the given snapshots can still ask for. */
-function keptIntervals(
-  intervals: Record<string, IntervalPatch>,
-  snapshots: DiffSnapshot[],
-): Record<string, IntervalPatch> {
-  const live = new Set<string>()
-  for (const snap of snapshots) {
-    if (snap.tree && snap.parentTree) live.add(intervalKey(snap.parentTree, snap.tree))
-  }
-  return Object.fromEntries(Object.entries(intervals).filter(([key]) => live.has(key)))
-}
-
 /** What the Changes view knows about one run. */
 export interface RunDiffState {
   base: string
   patch: string
   truncated: boolean
+  recorded: boolean
   /** Loaded, loading, or the message from the attempt that failed. */
   status: 'loading' | 'ready' | 'error'
   error?: string
@@ -81,6 +70,7 @@ export const initialDiff: RunDiffState = {
   base: '',
   patch: '',
   truncated: false,
+  recorded: false,
   status: 'loading',
   intervals: {},
   revision: 0,
@@ -88,12 +78,8 @@ export const initialDiff: RunDiffState = {
   snapshots: [],
 }
 
-/**
- * How many snapshots a run keeps. The timeline answers "what changed in the
- * last few minutes", not "everything since the run began", and the list is
- * the only thing holding them - a reload starts over, because the server has
- * no history to replay.
- */
+// Bound menu metadata and fetched patches independently. A menu update must
+// not invalidate an immutable interval the user is still reading.
 const maxSnapshots = 40
 
 export interface DiffSlice {
@@ -124,6 +110,7 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
           base: patch.base,
           patch: patch.patch,
           truncated: patch.truncated,
+          recorded: patch.recorded ?? false,
           status: 'ready',
           error: undefined,
           fetched: revision,
@@ -136,10 +123,14 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
   setIntervalPatch: (runID, key, entry) =>
     set((s) => {
       const current = s.diffs[runID] ?? initialDiff
+      const intervals = { ...current.intervals }
+      delete intervals[key]
+      intervals[key] = entry
+      for (const oldest of Object.keys(intervals).slice(0, -maxSnapshots)) delete intervals[oldest]
       return {
         diffs: {
           ...s.diffs,
-          [runID]: { ...current, intervals: { ...current.intervals, [key]: entry } },
+          [runID]: { ...current, intervals },
         },
       }
     }),
@@ -155,10 +146,6 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
             ...current,
             revision: current.revision + 1,
             snapshots,
-            // A snapshot that fell off the end can never be selected again,
-            // so its patch is dead weight: a long run would otherwise
-            // accumulate every interval it ever rendered.
-            intervals: keptIntervals(current.intervals, snapshots),
           },
         },
       }

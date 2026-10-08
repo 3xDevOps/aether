@@ -3,8 +3,10 @@
 package gitengine
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,14 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-func TestSnapshotRetentionExpiresRangesButKeepsCurrentAndEvidence(t *testing.T) {
+func TestSnapshotHistorySurvivesCheckoutCleanupAndExplicitDeletion(t *testing.T) {
 	e := newTestEngine(t, nil)
 	seedWorkspace(t, e, serveTransport(t, e), "ws1")
 	ctx := t.Context()
-	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "bounded snapshots", "")
+	checkout, branch, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "durable snapshots", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +33,10 @@ func TestSnapshotRetentionExpiresRangesButKeepsCurrentAndEvidence(t *testing.T) 
 	var trees []string
 	for i := range 5 {
 		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(fmt.Sprintf("version %d\n", i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		// Snapshot trees may borrow committed blobs from checkout alternates.
+		if _, err := e.CommitAll(ctx, "run1", fmt.Sprintf("version %d", i), domain.GitIdentity{}, nil); err != nil {
 			t.Fatal(err)
 		}
 		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
@@ -45,52 +52,111 @@ func TestSnapshotRetentionExpiresRangesButKeepsCurrentAndEvidence(t *testing.T) 
 	if _, _, err := e.gitBareBounded(ctx, store, 0, "update-ref", "refs/valuable/keep", trees[0]); err != nil {
 		t.Fatal(err)
 	}
-	lock := e.snapshotLock("run1")
-	lock.Lock()
-	err = e.retainSnapshot(ctx, store, trees[4], snapshotPolicy{1, 2, time.Hour, time.Now})
-	lock.Unlock()
+	sourceTip := bareRevParse(t, e, "ws1", "refs/heads/main")
+	if _, err := e.PublishRunBranch(ctx, "run1"); err != nil {
+		t.Fatal(err)
+	}
+	branchTip := bareRevParse(t, e, "ws1", "refs/heads/"+branch)
+	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
+		t.Fatalf("idempotent checkout removal: %v", err)
+	}
+	if _, err := os.Stat(checkout); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout survived cleanup: %v", err)
+	}
+	restarted, err := New(e.cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[1], To: trees[4]}); !errors.Is(err, ErrSnapshotTreeMissing) {
-		t.Fatalf("expired interval = %v", err)
-	}
-	if _, _, err := e.gitBareBounded(ctx, store, 64, "cat-file", "-t", trees[1]); err == nil {
-		t.Fatal("unreferenced historical tree survived scoped GC")
-	}
-	if _, _, err := e.gitBareBounded(ctx, store, 64, "cat-file", "-t", trees[0]); err != nil {
-		t.Fatalf("protected ref lost: %v", err)
+	e = restarted
+	for i := range len(trees) - 1 {
+		patch, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[i], To: trees[i+1]})
+		if err != nil || !strings.Contains(patch.Text, fmt.Sprintf("+version %d", i+1)) {
+			t.Fatalf("recorded interval %d after restart/cleanup = %+v, %v", i, patch, err)
+		}
 	}
 	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
-	if err != nil || !strings.Contains(patch.Text, "+version 4") {
+	if err != nil || !patch.Recorded || !strings.Contains(patch.Text, "+version 4") {
 		t.Fatalf("current diff = %+v, %v", patch, err)
 	}
 	patch, err = e.RenderEvidence(ctx, "ws1", evidence.Commit, 0)
 	if err != nil || !strings.Contains(patch.Text, "+version 4") {
 		t.Fatalf("retained evidence = %+v, %v", patch, err)
 	}
-	meta, err := e.readRunMeta("run1")
-	if err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := e.RemoveRunHistory(ctx, "run1"); err != nil {
+			t.Fatalf("explicit history deletion: %v", err)
+		}
 	}
-	base, err := e.gitCheckout(ctx, "run1", checkout, "rev-parse", meta.Base+"^{tree}")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(store); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("snapshot store survived explicit deletion: %v", err)
 	}
-	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: trees[4]}); err != nil {
-		t.Fatal(err)
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[4]}); !errors.Is(err, ErrSnapshotTreeMissing) {
+		t.Fatalf("deleted history = %v", err)
+	}
+	patch, err = e.RenderEvidence(ctx, "ws1", evidence.Commit, 0)
+	if err != nil || !strings.Contains(patch.Text, "+version 4") {
+		t.Fatalf("explicit history deletion removed evidence: %+v, %v", patch, err)
+	}
+	if got := bareRevParse(t, e, "ws1", "refs/heads/main"); got != sourceTip {
+		t.Fatalf("source branch changed: %s != %s", got, sourceTip)
+	}
+	if got := bareRevParse(t, e, "ws1", "refs/heads/"+branch); got != branchTip {
+		t.Fatalf("run branch changed: %s != %s", got, branchTip)
 	}
 }
 
-func TestSnapshotRetentionMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T) {
+func TestSnapshotHistoryMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing.T) {
 	e := newTestEngine(t, nil)
 	seedWorkspace(t, e, serveTransport(t, e), "ws1")
 	ctx := t.Context()
+	log, err := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "events.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	bus, err := events.NewInProc(ctx, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e.cfg.EventLog = log
 	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "legacy snapshots", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("legacy\n"), 0o600); err != nil {
+	// Source ancestry is available through checkout alternates, but is not
+	// owned snapshot history and must not all be copied during migration.
+	if err := os.WriteFile(filepath.Join(checkout, "unrelated.txt"), []byte("unrelated source history\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := e.CommitAll(ctx, "run1", "unrelated source", domain.GitIdentity{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelatedTree, err := e.git(ctx, checkout, "rev-parse", unrelated+"^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(checkout, "unrelated.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("older\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CommitAll(ctx, "run1", "borrowed snapshot blob", domain.GitIdentity{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	borrowed, err := e.git(ctx, checkout, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.PublishRunBranch(ctx, "run1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "local.txt"), []byte("local snapshot root\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	store, err := e.snapshotStorePath("run1")
@@ -109,11 +175,62 @@ func TestSnapshotRetentionMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing
 	if _, _, err := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); err != nil {
 		t.Fatal(err)
 	}
+	older, _, err := e.gitStaged(ctx, checkout, index, 256, "write-tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	older = strings.TrimSpace(older)
+	// Exercise a legacy local packed tree as well as the loose latest tree.
+	if _, _, err := e.gitBareBounded(ctx, store, 0, "update-ref", "refs/legacy-temporary", older); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.gitBareBounded(ctx, store, 0, "repack", "-a", "-d", "-l"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.gitBareBounded(ctx, store, 0, "update-ref", "-d", "refs/legacy-temporary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(checkout, "local.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("legacy\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
 	tree, _, err := e.gitStaged(ctx, checkout, index, 256, "write-tree")
 	if err != nil {
 		t.Fatal(err)
 	}
 	tree = strings.TrimSpace(tree)
+	unrecordedLocal, localErr := e.gitInput(ctx, store, gitEnv(), []byte("040000 tree "+tree+"\tunrecorded\n"), "mktree")
+	if localErr != nil {
+		t.Fatal(localErr)
+	}
+	unrecordedLocal = strings.TrimSpace(unrecordedLocal)
+	// Durable events, not arbitrary alternate objects, identify old history.
+	// Cross a page boundary and include an already-pruned endpoint.
+	for range 256 {
+		if _, err := bus.Publish(ctx, events.Event{WorkspaceID: "ws1", RunID: "run1", Payload: events.RunDiffPayload{Tree: borrowed}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, payload := range []events.RunDiffPayload{
+		{ParentTree: borrowed, Tree: older},
+		{ParentTree: older, Tree: tree},
+		{ParentTree: strings.Repeat("0", len(borrowed)), Tree: tree},
+	} {
+		if _, err := bus.Publish(ctx, events.Event{WorkspaceID: "ws1", RunID: "run1", Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := bus.Publish(ctx, events.Event{WorkspaceID: "ws1", RunID: "other-run", Payload: events.RunDiffPayload{Tree: unrelatedTree}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, publishErr := bus.Publish(ctx, events.Event{WorkspaceID: "other-workspace", RunID: "run1", Payload: events.RunDiffPayload{Tree: unrecordedLocal}}); publishErr != nil {
+		t.Fatal(publishErr)
+	}
 	if err := os.WriteFile(filepath.Join(store, lastTreeFile), []byte(tree+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +256,44 @@ func TestSnapshotRetentionMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing
 	if _, err := os.Stat(filepath.Join(store, lastTreeFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("read did not migrate last: %v", err)
 	}
+	// Object existence alone is never proof that this run recorded a tree.
+	// Known refs remain usable without a log; uncatalogued endpoints fail
+	// closed, even when they are present in local objects or alternates.
+	e.cfg.EventLog = nil
+	for _, unknown := range []string{borrowed, unrelatedTree, unrecordedLocal} {
+		for _, interval := range [][2]string{{base, unknown}, {unknown, tree}} {
+			if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: interval[0], To: interval[1]}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+				t.Fatalf("uncatalogued interval with no event log = %v", rangeErr)
+			}
+		}
+	}
+	if _, knownErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: tree}); knownErr != nil {
+		t.Fatalf("known recorded refs require an event log: %v", knownErr)
+	}
+	unavailableLog, logErr := events.OpenSQLiteLog(filepath.Join(t.TempDir(), "unavailable-events.db"))
+	if logErr != nil {
+		t.Fatal(logErr)
+	}
+	if closeErr := unavailableLog.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	e.cfg.EventLog = unavailableLog
+	if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: tree}); rangeErr == nil || errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+		t.Fatalf("unavailable event log did not report its recovery error: %v", rangeErr)
+	}
+	if _, knownErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: tree}); knownErr != nil {
+		t.Fatalf("known recorded refs failed with an unavailable log: %v", knownErr)
+	}
+	e.cfg.EventLog = log
+	patch, err = e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: older})
+	if err != nil || !strings.Contains(patch.Text, "+local snapshot root") {
+		t.Fatalf("legacy event endpoints were not recovered for a live checkout: %+v, %v", patch, err)
+	}
+	for _, unknown := range []string{unrelatedTree, unrecordedLocal} {
+		if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unknown}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+			t.Fatalf("another run/workspace's source tree became recorded history: %v", rangeErr)
+		}
+	}
 	for range 3 {
 		if _, err := e.writeSnapshotTree(ctx, "run1", checkout); err != nil {
 			t.Fatal(err)
@@ -151,8 +306,34 @@ func TestSnapshotRetentionMigratesLegacyAndDeduplicatesUnchangedTrees(t *testing
 		t.Fatalf("legacy marker still present: %v", err)
 	}
 	refs, _, err = e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", snapshotHistoryRoot)
-	if err != nil || len(strings.Fields(refs)) != 1 {
-		t.Fatalf("duplicate refs: %q, %v", refs, err)
+	if err != nil || strings.Count(refs, tree+"\n") != 1 {
+		t.Fatalf("duplicate refs for captured tree: %q, %v", refs, err)
+	}
+	if strings.Contains(refs, unrelatedTree) {
+		t.Fatal("migration cataloged unrelated alternate source history")
+	}
+	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store, "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout alternate survived detachment: %v", err)
+	}
+	patch, err = e.RunPatch(ctx, "run1", PatchRequest{From: borrowed, To: tree})
+	if err != nil || !strings.Contains(patch.Text, "-older") || !strings.Contains(patch.Text, "+legacy") {
+		t.Fatalf("recorded alternate-only root after cleanup: %+v, %v", patch, err)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: strings.Repeat("0", len(borrowed)), To: tree}); !errors.Is(err, ErrSnapshotTreeMissing) {
+		t.Fatalf("already-pruned recorded endpoint was not reported unavailable: %v", err)
+	}
+	patch, err = e.RunPatch(ctx, "run1", PatchRequest{From: older, To: tree})
+	if err != nil || !strings.Contains(patch.Text, "-older") || !strings.Contains(patch.Text, "+legacy") {
+		t.Fatalf("uncatalogued packed legacy interval after checkout cleanup: %+v, %v", patch, err)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unrelatedTree}); !errors.Is(err, ErrSnapshotTreeMissing) {
+		t.Fatalf("unrelated alternate history was copied or unavailability hidden: %v", err)
+	}
+	if _, rangeErr := e.RunPatch(ctx, "run1", PatchRequest{From: base, To: unrecordedLocal}); !errors.Is(rangeErr, ErrSnapshotTreeMissing) {
+		t.Fatalf("unrecorded local tree became readable after checkout cleanup: %v", rangeErr)
 	}
 }
 
@@ -204,7 +385,7 @@ func TestSnapshotOversizedInputLeavesCurrentFilesAndRecovery(t *testing.T) {
 	}
 }
 
-func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshotGC(t *testing.T) {
+func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshots(t *testing.T) {
 	e := newTestEngine(t, nil)
 	seedWorkspace(t, e, serveTransport(t, e), "ws1")
 	ctx := t.Context()
@@ -216,10 +397,6 @@ func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshotGC(t *testing.T) {
 		t.Fatal(err)
 	}
 	tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := e.snapshotStorePath("run1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,10 +421,7 @@ func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshotGC(t *testing.T) {
 						return
 					}
 				case 1:
-					lock := e.snapshotLock("run1")
-					lock.Lock()
-					err := e.retainSnapshot(ctx, store, tree, snapshotPolicy{1, 1, time.Nanosecond, time.Now})
-					lock.Unlock()
+					_, err := e.writeSnapshotTree(ctx, "run1", checkout)
 					if err != nil {
 						t.Error(err)
 						return
@@ -350,54 +524,145 @@ func TestDiffSnapshotFailurePublishesCurrentStatsAndNextIntervalGap(t *testing.T
 	}
 }
 
-func TestSnapshotCountAndAgeBoundariesProtectPublishedInterval(t *testing.T) {
-	for _, byAge := range []bool{false, true} {
-		t.Run(fmt.Sprintf("age=%t", byAge), func(t *testing.T) {
+func TestSnapshotHistorySurvivesFormerCountAndAgeLimits(t *testing.T) {
+	for _, age := range []time.Duration{0, 30 * 24 * time.Hour} {
+		t.Run(age.String(), func(t *testing.T) {
 			e := newTestEngine(t, nil)
 			seedWorkspace(t, e, serveTransport(t, e), "ws1")
 			ctx := t.Context()
-			checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "history boundary", "")
+			checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "long history", "")
 			if err != nil {
 				t.Fatal(err)
-			}
-			var trees []string
-			for i := range 4 {
-				if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(fmt.Sprintf("revision %d\n", i)), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				trees = append(trees, tree)
 			}
 			store, err := e.snapshotStorePath("run1")
 			if err != nil {
 				t.Fatal(err)
 			}
-			now := time.Now()
-			policy := snapshotPolicy{512 << 20, 2, 7 * 24 * time.Hour, func() time.Time { return now }}
-			if byAge {
-				policy.trees = 1024
-				now = now.Add(8 * 24 * time.Hour)
+			if err := e.initSnapshotStore(ctx, "run1", checkout, store); err != nil {
+				t.Fatal(err)
 			}
-			lock := e.snapshotLock("run1")
-			lock.Lock()
-			err = e.retainSnapshot(ctx, store, trees[3], policy)
-			lock.Unlock()
+			blob, err := e.gitInput(ctx, store, gitEnv(), []byte("recorded\n"), "hash-object", "-w", "--stdin")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[3]}); !errors.Is(err, ErrSnapshotTreeMissing) {
-				t.Fatalf("expired range: %v", err)
+			// Batch real Git tree creation to cover the former 1,024-tree
+			// boundary without thousands of staging subprocesses.
+			var input strings.Builder
+			for i := range 1025 {
+				fmt.Fprintf(&input, "100644 blob %s\tversion-%d.txt\n\n", strings.TrimSpace(blob), i)
 			}
-			if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[2], To: trees[3]}); err != nil {
-				t.Fatalf("latest published interval lost: %v", err)
+			out, err := e.gitInput(ctx, store, gitEnv(), []byte(input.String()), "mktree", "--batch")
+			if err != nil {
+				t.Fatal(err)
 			}
-			refs, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", snapshotHistoryRoot)
-			if err != nil || len(strings.Fields(refs)) > 2 {
-				t.Fatalf("unbounded catalog: %q, %v", refs, err)
+			trees := strings.Fields(out)
+			if len(trees) != 1025 {
+				t.Fatalf("created %d trees", len(trees))
+			}
+			var refs strings.Builder
+			refs.WriteString("start\n")
+			stamp := time.Now().Add(-age).UnixNano()
+			for i, tree := range trees {
+				fmt.Fprintf(&refs, "update %s%019d-%s %s\n", snapshotHistoryRoot, stamp+int64(i), tree, tree)
+			}
+			refs.WriteString("prepare\ncommit\n")
+			if _, err := e.gitInput(ctx, store, gitEnv(), []byte(refs.String()), "update-ref", "--stdin"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
+				t.Fatal(err)
+			}
+			e, err = New(e.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			patch, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[len(trees)-1]})
+			if err != nil || !strings.Contains(patch.Text, "version-0.txt") || !strings.Contains(patch.Text, "version-1024.txt") {
+				t.Fatalf("oldest recorded range after new capture/restart/cleanup: %+v, %v", patch, err)
 			}
 		})
+	}
+}
+
+func TestSnapshotHistorySurvivesFormerByteLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes more than the former 512 MiB history limit")
+	}
+	e := newTestEngine(t, nil)
+	seedWorkspace(t, e, serveTransport(t, e), "ws1")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "large history", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trees []string
+	for range 9 {
+		f, err := os.Create(filepath.Join(checkout, "recorded.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Incompressible, unrelated captures exceed 512 MiB even after
+		// repacking; each capture remains below the 128 MiB input limit.
+		_, copyErr := io.CopyN(f, rand.Reader, 64<<20)
+		closeErr := f.Close()
+		if err := errors.Join(copyErr, closeErr); err != nil {
+			t.Fatal(err)
+		}
+		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trees = append(trees, tree)
+	}
+	patch, err := e.RunPatch(ctx, "run1", PatchRequest{From: trees[0], To: trees[len(trees)-1]})
+	if err != nil || !strings.Contains(patch.Text, "Binary files") {
+		t.Fatalf("oldest range after byte pressure: %+v, %v", patch, err)
+	}
+}
+
+func TestSnapshotCheckoutCleanupWaitsForReadableHistoryLog(t *testing.T) {
+	e := newTestEngine(t, nil)
+	seedWorkspace(t, e, serveTransport(t, e), "ws1")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "history recovery", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("keep until history is durable\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(t.TempDir(), "events.db")
+	log, err := events.OpenSQLiteLog(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.cfg.EventLog = log
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RemoveRunCheckout(ctx, "run1"); err == nil {
+		t.Fatal("cleanup ignored an unavailable durable history log")
+	}
+	if _, err := os.Stat(checkout); err != nil {
+		t.Fatalf("failed history detachment removed the checkout: %v", err)
+	}
+	log, err = events.OpenSQLiteLog(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	e.cfg.EventLog = log
+	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
+		t.Fatalf("cleanup retry: %v", err)
+	}
+	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: tree, To: tree}); err != nil {
+		t.Fatalf("retry lost captured history: %v", err)
 	}
 }

@@ -38,15 +38,10 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss are", n, noun)
 }
 
-// renderRuns writes the table. The caller rejects --needs-you together with
-// archived, so archived alone decides the fifth column.
+// renderRuns writes the table, filtering archived runs independently of status.
 func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, needsYou, archived bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fifthColumn := "OVERLAP"
-	if archived {
-		fifthColumn = "DELETES"
-	}
-	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\t"+fifthColumn+"\tTITLE\tTASK"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\tOVERLAP\tTITLE\tTASK"); err != nil {
 		return err
 	}
 	for _, r := range runs {
@@ -62,15 +57,8 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		}
 		title = strings.ReplaceAll(title, "\n", " ")
 		task := strings.ReplaceAll(r.Task, "\n", " ")
-		fifth := overlapOf[r.ID]
-		if archived {
-			fifth = ""
-			if r.DeletesAt != nil {
-				fifth = *r.DeletesAt
-			}
-		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), fifth, title, task); err != nil {
+			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), overlapOf[r.ID], title, task); err != nil {
 			return err
 		}
 	}
@@ -87,7 +75,7 @@ func displayStatus(r protocol.Run) string {
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
 	needsYou := fs.Bool("needs-you", false, "list only runs that need you (wire status needs-attention)")
-	archived := fs.Bool("archived", false, "list only archived runs, with their deletion date")
+	archived := fs.Bool("archived", false, "list only archived runs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

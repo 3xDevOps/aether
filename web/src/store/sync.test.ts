@@ -75,7 +75,7 @@ function archivedEvent(over: Partial<Event> = {}): Event {
     run_id: 'run_1',
     actor_id: '',
     type: 'run.archived',
-    payload: { archived_at: '2026-08-14T11:03:00Z', deletes_at: '2026-08-28T11:03:00Z' },
+    payload: { archived_at: '2026-08-14T11:03:00Z' },
     ...over,
   }
 }
@@ -1004,21 +1004,19 @@ describe('applyEvent', () => {
 
     expect(client.runGet).toHaveBeenCalledWith('run_1')
     expect(store.getState().runs.run_1.archived_at).toBe('2026-08-14T11:03:00Z')
-    expect(store.getState().runs.run_1.deletes_at).toBe('2026-08-28T11:03:00Z')
 
-    // Both null means restored.
+    // A null archive timestamp means restored.
     await applyEvent(
       store,
       archivedEvent({
         id: 'evt_restored',
         seq: 10,
-        payload: { archived_at: null, deletes_at: null },
+        payload: { archived_at: null },
       }),
       client,
     )
 
     expect(store.getState().runs.run_1.archived_at).toBeUndefined()
-    expect(store.getState().runs.run_1.deletes_at).toBeUndefined()
     expect(store.getState().lastSeq).toBe(10)
   })
 

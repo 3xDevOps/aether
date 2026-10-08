@@ -65,7 +65,6 @@ export interface RunsSlice {
   applyRunArchived: (
     runID: string,
     archivedAt: string | null,
-    deletesAt: string | null,
   ) => void
 }
 
@@ -184,16 +183,15 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (!current || current.controller_member_id === memberID) return {}
       return { runs: { ...s.runs, [runID]: { ...current, controller_member_id: memberID } } }
     }),
-  applyRunArchived: (runID, archivedAt, deletesAt) =>
+  applyRunArchived: (runID, archivedAt) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
       const next = {
         ...current,
         archived_at: archivedAt ?? undefined,
-        deletes_at: deletesAt ?? undefined,
       }
-      if (current.archived_at === next.archived_at && current.deletes_at === next.deletes_at) {
+      if (current.archived_at === next.archived_at) {
         return {}
       }
       return { runs: { ...s.runs, [runID]: next } }

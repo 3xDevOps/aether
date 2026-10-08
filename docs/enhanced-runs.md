@@ -511,13 +511,10 @@ Each run driven over ACP keeps its log at
 the run's terminal transcripts and deleted with them. It holds prompts,
 the agent's messages and thoughts, tool call inputs, output and diffs,
 permission requests and answers, and notices. One item is capped at 256 KiB.
-The run keeps a rolling latest 64 MiB window: new messages and tool output
-continue to be recorded while the oldest items expire. Compaction atomically
-replaces the JSONL file and carries private preceding sequence, epoch and
-turn state, so sequence IDs do not restart and active approvals remain live.
-The temporary replacement file and readers pinning a pre-compaction file need
-additional disk space; 64 MiB is a retained-history ceiling, not an
-instantaneous disk quota. Compaction leaves roughly 8 MiB of writing headroom.
+The log is append-only, with no per-run byte or age retention limit. New
+output does not remove older items. Closing compute, checkout cleanup and
+archiving leave it intact; explicit run deletion removes it. Bounded replay
+and history pages limit each read, not the stored conversation.
 Anything an agent or a tool prints, a secret included, can be in it;
 [privacy.md](privacy.md#remote-development-data) covers who can read it.
 
@@ -526,12 +523,16 @@ older ones with `run.acp.history`; one that reconnects at most 200 items
 behind receives only the items it missed
 ([local-gateway.md](local-gateway.md#get-wsacprun_id)).
 
-History pages report `oldest_seq` and `truncated_before` alongside `frames`;
-the stream acknowledgement also reports an expired prefix. The Session view
-marks that boundary rather than implying this is the entire conversation.
-Looking up a full item that has expired returns an explicit unavailable
-error. Reconnecting from an expired cursor resets to a retained replay with
-its boundary advertised; it never invents missing messages or permission
-answers. Existing logs migrate during normal open/compaction. This display
-history policy does not delete the agent's native session, workspace files,
-result branches or separately retained evidence.
+The first read of a stopped run indexes its log. A small in-memory cache reuses
+immutable indexes for unchanged files, so subsequent pages do not scan the
+whole conversation. Each request owns a fresh descriptor; file growth or
+replacement rebuilds the index. Eviction discards only cached metadata, not
+history. No extra storage format or retention setting is required.
+
+History pages report `oldest_seq` and `truncated_before` alongside `frames`.
+Logs already trimmed by an older server keep their preceding sequence,
+epoch, turn and mode checkpoint; subsequent appends neither reset those
+identities nor delete more history. Session marks any existing missing prefix,
+and a lookup for an already-expired item returns unavailable. Reconnecting
+from such a cursor resets to the available replay with its boundary advertised;
+it never invents missing messages or permission answers.

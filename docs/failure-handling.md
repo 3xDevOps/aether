@@ -546,7 +546,6 @@ the container and shell are still healthy, not that an OOM spared them.
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted**. |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
-| The agent sends more than 64 MiB to the item log | The log rolls its latest retained window while recording continues. Earlier items expire; Session shows that boundary, and a full-item lookup for an expired ID returns an explicit unavailable error. Active turn and permission state remain live. |
 
 A background run over ACP ([enhanced-runs.md](enhanced-runs.md#background-runs))
 differs: an ACP server that fails to start or exits, a cancelled turn, or any
@@ -591,15 +590,14 @@ states the evidence required before claiming stronger isolation.
 
 ### Disk pressure
 
-Four things grow without bound, and the dashboard's disk usage covers all
-four (`GET /api/v1/disk`, shown in Settings > **Server** with the breakdown
-under it):
+History and durable workspace data can grow without bound. Settings >
+**Server** reports storage ownership and the separate lifetime of each kind.
 
 | Growing | Reclaimed by |
 | --- | --- |
-| `checkouts/` | The TTL GC, deleting the run, or the archive sweep once `deletes_at` passes. |
-| `transcripts/` | Deleting the run, or the archive sweep. |
-| `aether.db` (and its WAL) | Deleting the run's dependent records, or the archive sweep; the event log remains. |
+| `checkouts/` worktrees | Checkout TTL GC or explicit deletion. The `.diffsnap/` sidecars remain until explicit run deletion. |
+| `transcripts/` | Explicit run or terminal-session deletion, including run removal through workspace/swarm deletion. |
+| `aether.db` (and its WAL) | Explicit deletion of dependent records; the event log remains. |
 | `repos/` | Nothing - every push, run branch and reflog entry stays. |
 
 The GC sweeps on boot and hourly. It only reclaims worktrees of runs that
@@ -612,37 +610,16 @@ final branch, then removes the checkout and durable run records; its timeline
 stays as audit history.
 
 `run.archive` hides a run in a final disposition (`merged`, `abandoned`,
-`failed`, or `interrupted`) from the board. Archiving itself removes
-nothing - the run's checkout, transcripts, cost history, and timeline are
-untouched - but the checkout TTL GC above still reclaims an archived run's
-worktree once `--checkout-ttl` passes. The run can be restored at any time
-with `run.archive` `{"archived":false}`. Archiving stamps `archived_at`;
-the wire also carries `deletes_at`, the date the archive sweep deletes the
-run. Re-archiving an already-archived run does not move either date.
+`failed`, or `interrupted`) from the board. It stamps `archived_at` without
+scheduling deletion. Re-archiving is a no-op, and `{"archived":false}`
+restores it. Archived swarms and their runs likewise persist until explicit
+Delete. Checkout TTL cleanup still reclaims eligible worktrees, but it leaves
+terminal recordings, Enhanced item logs and recorded diff history intact.
 
-Once `deletes_at` passes, the archive sweep deletes the run on the first
-boot or hourly sweep at or after that time - it does not act the instant
-the deadline arrives. Deletion removes the same checkout, transcripts,
-evidence, and run-owned database records a manual Delete removes,
-publishing the run's branch first if the checkout still held commits the
-branch did not have. The published branch and the run's timeline survive,
-the timeline carrying a system note that records the purge. The run's
-cost stays in the workspace's and the member's spend totals, the same as
-after a manual delete. A run whose retained
-container is still held within `--run-container-ttl`, or whose branch
-cannot be published, is skipped and retried on the next hourly sweep,
-logging a warning on the server naming the run and the reason. Restore
-works at any point before `deletes_at`; once the sweep has run, the row
-is gone and restoring it returns `-32000` not found. The retention period
-is fixed at 14 days - there is no flag to change it. The sweep compares
-`archived_at` against the server's wall clock at boot and hourly: a
-forward clock jump, or a boot after the server was down past several
-runs' `deletes_at`, deletes every one of them in that pass. A worker run
-whose submission an existing swarm still references is not swept, even
-past its `deletes_at`: a swarm worker archived alone (for example by the
-board's **Archive closed runs…**) stays until its swarm is deleted. An
-archived swarm is itself deleted 14 days after `archived_at`, within five
-seconds of the deadline, and its runs follow on the next run sweep.
+The former automatic history limits and 14-day archive deletion policy no
+longer apply, including to already-archived records. Data already deleted by
+an older server cannot be recovered by this change; existing history gaps
+remain visible rather than being presented as complete recordings.
 
 Below `--min-free-disk`, `run.launch` is refused with `-32004` (unavailable)
 and a message naming the numbers. Reopening an eligible retained TUI run

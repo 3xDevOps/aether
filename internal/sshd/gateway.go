@@ -68,6 +68,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 		Base:      p.Base,
 		Patch:     p.Text,
 		Truncated: p.Truncated,
+		Recorded:  p.Recorded,
 	}, nil
 }
 

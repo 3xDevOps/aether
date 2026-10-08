@@ -185,7 +185,7 @@ func TestSetRunArchived(t *testing.T) {
 	r.ArchivedAt = &first
 	assertRunEqual(t, r, got)
 
-	// Re-archiving is idempotent: it must not reset or extend the timer.
+	// Re-archiving is idempotent: it must preserve the original timestamp.
 	second := time.Now().UTC()
 	if changed, archErr := db.SetRunArchived(ctx, r.ID, &second); archErr != nil {
 		t.Fatalf("SetRunArchived (re-archive): %v", archErr)
@@ -226,7 +226,7 @@ func TestSetRunArchived(t *testing.T) {
 // TestUpdateRunIgnoresStaleArchivedAt pins the invariant that UpdateRun's
 // SET list excludes archived_at: a caller holding a stale in-memory Run
 // with a bogus ArchivedAt (or one that has since changed underneath it)
-// can never clobber or resurrect the archive timer through UpdateRun.
+// can never clobber or resurrect the archive state through UpdateRun.
 func TestUpdateRunIgnoresStaleArchivedAt(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)

@@ -94,11 +94,11 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			e.OwnerKind, e.OwnerID = "run", string(run.ID)
-			if e.Kind == "transcript" && run.Worktree == "" {
-				e.Reason = "No owned checkout; transcript automatic cleanup eligibility unknown"
+			if e.Kind == "snapshot" || e.Kind == "transcript" {
+				e.Reason = "Run history retained until explicit deletion"
 				continue
 			}
-			if e.Kind == "checkout" || e.Kind == "snapshot" || e.Kind == "transcript" {
+			if e.Kind == "checkout" {
 				expected := filepath.Join(d.DataDir, "checkouts", string(run.ID))
 				if run.Worktree == "" || filepath.Clean(run.Worktree) != filepath.Clean(expected) {
 					e.Reason = "Run does not own this checkout in durable state; cleanup eligibility unknown"
@@ -137,16 +137,16 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				ttl = 72 * time.Hour
 			}
 			if ttl < 0 {
-				e.Reason = "Automatic checkout and transcript expiry is disabled"
+				e.Reason = "Automatic checkout expiry is disabled"
 			} else if run.FinishedAt == nil || !run.Status.Terminal() {
-				e.Reason = "No durable terminal completion time; checkout and transcript protected"
+				e.Reason = "No durable terminal completion time; checkout protected"
 			} else {
 				until := run.FinishedAt.Add(ttl)
 				e.RetainedUntil = &until
 				if now.Before(until) {
-					e.Reason = "Retained until checkout TTL expires; transcript cleanup also requires evidence preservation"
+					e.Reason = "Retained until checkout TTL expires; cleanup also requires evidence preservation"
 				} else {
-					e.Reason = "Checkout TTL expired; checkout and transcript await lifecycle and evidence cleanup checks"
+					e.Reason = "Checkout TTL expired; awaiting lifecycle and evidence cleanup checks"
 				}
 			}
 		case "evidence":

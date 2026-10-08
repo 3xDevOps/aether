@@ -234,25 +234,6 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	return collect(rows, scanRun)
 }
 
-// ListRunsArchivedBefore returns runs whose archived_at is set and at or
-// before cutoff, for the retention sweep. It does not filter by status: a
-// run restored or otherwise no longer eligible is caught by the sweep's
-// own re-read. A run a swarm submission references waits for the swarm's
-// sweep. One query, no index: the sweep runs hourly and the table is small.
-func (d *DB) ListRunsArchivedBefore(ctx context.Context, cutoff time.Time) ([]*domain.Run, error) {
-	ts, err := encodeTime(cutoff)
-	if err != nil {
-		return nil, fmt.Errorf("store: list runs archived before: %w", err)
-	}
-	rows, err := d.db.QueryContext(ctx,
-		runSnapshotQuery(`runs.archived_at IS NOT NULL AND runs.archived_at <= ?
-			AND NOT EXISTS (SELECT 1 FROM mission_submissions WHERE mission_submissions.run_id = runs.id)`)+` ORDER BY runs.created_at, runs.rowid`, ts)
-	if err != nil {
-		return nil, fmt.Errorf("store: list runs archived before: %w", err)
-	}
-	return collect(rows, scanRun)
-}
-
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the
 // home a run's container mounts is fixed when the row is created, and a
 // stale or hand-built snapshot must not be able to change or clear it. It

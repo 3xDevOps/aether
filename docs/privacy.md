@@ -129,9 +129,10 @@ agent's messages and thoughts, tool call inputs, command output and diffs,
 permission requests and their answers. Whatever the agent or a tool prints,
 a secret included, can land there. Anyone with **View** on the run can read
 it through the dashboard; answering or messaging the agent needs the `steer`
-permission and the run's control lease. It is capped at 64 MiB per run and deleted with the run's
-terminal transcripts, when the run's checkout is reclaimed or the run is
-deleted. Standard runs keep only their terminal transcript.
+permission and the run's control lease. The log and terminal recordings persist
+until the run is explicitly deleted, including through workspace or swarm
+deletion. Checkout cleanup and archiving do not remove them. Standard runs
+keep their terminal recording; older servers may already have trimmed history.
 
 Images selected or pasted into chat are uploaded to the run's persistent member
 home before sending. Sending an Enhanced prompt passes their bytes to the agent

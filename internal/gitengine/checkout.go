@@ -410,13 +410,9 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit
 	return after, nil
 }
 
-// RemoveRunCheckout deletes the run's checkout directory, its identity
-// sidecar, and its diff-snapshot store. It never touches the branch in the
-// bare repo - the branch is the artifact. Idempotent on missing paths.
-//
-// The snapshot store lives exactly as long as the checkout, so per-interval
-// diffs are reclaimed by the same scheduler GC that reclaims checkouts and
-// nothing accrues once a run is cleaned up.
+// RemoveRunCheckout deletes the checkout and identity, not recorded diff
+// history or source branches. Snapshot objects are detached from the checkout's
+// alternate object database before removal. Idempotent on missing paths.
 func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error {
 	checkout, err := e.checkoutPath(run)
 	if err != nil {
@@ -427,11 +423,21 @@ func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error 
 		return err
 	}
 	e.StopDiffWatch(run)
-	if err := e.cfg.RemoveCheckout(ctx, checkout); err != nil {
-		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, err)
+	// Detach while source/evidence maintenance is excluded. Acquire this
+	// before the per-run snapshot lock, as CaptureEvidence does.
+	e.repoMaintenanceMu.Lock()
+	defer e.repoMaintenanceMu.Unlock()
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	if detachErr := e.detachSnapshotStore(ctx, run, checkout); detachErr != nil {
+		return detachErr
 	}
-	if err := os.Remove(meta); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, err)
+	if checkoutErr := e.cfg.RemoveCheckout(ctx, checkout); checkoutErr != nil {
+		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, checkoutErr)
 	}
-	return e.removeSnapshotStore(run)
+	if metaErr := os.Remove(meta); metaErr != nil && !errors.Is(metaErr, os.ErrNotExist) {
+		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, metaErr)
+	}
+	return nil
 }

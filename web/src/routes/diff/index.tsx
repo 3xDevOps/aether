@@ -41,15 +41,14 @@ export function ChangesView({ runID }: { runID: string }) {
   const list = useRef<VirtualizerHandle>(null)
   usePatch(run ? runID : '')
 
-  const outsideWindow = snapshot !== null && !state.snapshots.some((entry) => entry.time === snapshot.time)
-  const interval = useInterval(run ? runID : '', outsideWindow ? null : snapshot)
+  const interval = useInterval(run ? runID : '', snapshot)
   const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
   const files = snapshot ? changed : cumulative
   const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
-  const error = outsideWindow ? 'This interval is no longer in the dashboard history window.' : snapshot ? interval?.error : state.error
-  const failed = snapshot ? outsideWindow || interval?.status === 'error' : state.status === 'error'
-  const loading = snapshot ? !outsideWindow && (!interval || interval.status === 'loading') : state.status === 'loading'
+  const error = snapshot ? interval?.error : state.error
+  const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
+  const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
   const historyNotice = snapshot ?? state.snapshots.find((entry) => entry.historyGap || entry.snapshotError)
 
@@ -100,8 +99,13 @@ export function ChangesView({ runID }: { runID: string }) {
         onRefresh={() => useStore.getState().refreshDiff(runID)}
         onJump={jump}
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
-        publishable={cumulative.length > 0}
+        publishable={!state.recorded && cumulative.length > 0}
       />
+      {!snapshot && state.recorded && (
+        <Callout tone="neutral" role="status" className="m-2 shrink-0">
+          Checkout removed. Showing the last recorded changes.
+        </Callout>
+      )}
       {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
         <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2 shrink-0">
           {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
@@ -136,18 +140,19 @@ export function ChangesView({ runID }: { runID: string }) {
           ) : (
             files.map(patchAt)
           )}
-          {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} />}
+          {files.length === 0 && !failed && <Empty snapshot={snapshot} loading={loading} recorded={state.recorded} />}
         </div>
       </div>
     </div>
   )
 }
 
-function Empty({ snapshot, loading }: { snapshot: DiffSnapshot | null; loading: boolean }) {
+function Empty({ snapshot, loading, recorded }: { snapshot: DiffSnapshot | null; loading: boolean; recorded: boolean }) {
   if (loading) {
     return <p className="p-4 text-ui text-muted">{snapshot ? 'Loading what changed then…' : 'Loading the diff…'}</p>
   }
   if (snapshot) return <EmptyState title="No changes in this interval.">That interval recorded no textual change.</EmptyState>
+  if (recorded) return <EmptyState title="No recorded changes.">The last snapshot matched the fork point.</EmptyState>
   return <EmptyState title="No changes yet.">Nothing differs from the fork point. Files the agent changes show up here.</EmptyState>
 }
 

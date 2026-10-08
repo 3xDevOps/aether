@@ -32,6 +32,7 @@ type RunPatchResult struct {
 	// Truncated reports that an explicitly bounded render ended early, at the
 	// last whole line that fit. Dashboard renders are complete.
 	Truncated bool `json:"truncated"`
+	Recorded  bool `json:"recorded,omitempty"`
 }
 
 // ServerDiskResult keeps whole-filesystem headroom separate from Aether's

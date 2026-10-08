@@ -308,7 +308,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
             <>
               Hides the swarm and its runs from the board and the swarm list until you unarchive it. Completed runs are
               closed first: merged when their work reached the delivered result, without merging otherwise. Archiving
-              schedules the swarm and its runs for deletion after the retention period.
+              keeps their history until you explicitly delete them.
             </>
           }
           action="Archive swarm"

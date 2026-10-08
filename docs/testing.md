@@ -1248,35 +1248,35 @@ go test -race -tags integration ./internal/gitengine -run \
 go test -race ./internal/evidence -run \
   'TestExpiredPrefixCaptureSurvivesRestartAndHistoryRemoval|TestTranscriptCaptureDistinguishesPrefixAndCopyCap|TestLegacyTranscriptMarkersMigrateWithoutRelaxingCap|TestPrefixCaptureReadFailureNeverPublishesPartialArtifact'
 
-# Stopped transcript age maintenance and streaming legacy migration.
-go test -race ./internal/ptyhost -run \
-  'TestMaintenancePrunesStoppedRecordingKinds|TestMaintenanceProtectsActiveAndStartingRecordings|TestLegacyReplayUnderDescriptorBudget'
-go test -race ./internal/scheduler -run \
-  'TestStartupAndMaintenancePruneStoppedTranscripts'
+# Durable recording boundaries, legacy frontiers and explicit deletion.
+go test -race ./internal/ptyhost ./internal/acphost ./internal/scheduler
 ```
 
-Bounded-history acceptance also needs producer regressions with real cast
-segments, JSONL compaction and Git sidecars: cross each retention boundary,
-keep newest output/current diff usable, restart, and reject authenticated
-expired cursors or tree IDs explicitly. Capture evidence before cleanup and
-read its exact bytes and retained refs afterward. An expired transcript
-prefix shorter than 16 MiB must stay honestly truncated across a restart;
-shortening that retained artifact later must fail submission validation.
-Check View-denied callers before history access, malformed versus expired
-cursors, ACP full-item expiry, and active approvals after a same-epoch replay
-reset. In the browser, keep the reading location on expiry, show history gaps
-and source reasons, and never substitute an empty complete recording.
+Durable-history acceptance uses real cast segments, JSONL logs and Git
+sidecars. Cross the former size, count and age boundaries, restart, then
+read the earliest recording and recorded diff interval. Exercise checkout
+cleanup separately: it must remove the worktree without removing recordings
+or recorded trees. Explicit run deletion must still remove those histories.
+Archive old runs and swarms and verify they remain restorable without an
+automatic deletion deadline.
 
-PTY maintenance regressions backdate real sealed files for stopped agent runs,
-member terminal tabs and run shells, invoke ordinary maintenance without a
-history read, and preserve the latest segment and compact checkpoint position.
-The Linux legacy replay regression lowers the file-descriptor budget only in
-an isolated helper process and migrates 256 archives with missing, v1 and stale
-checkpoints before pinning eight retained segments. Check exact replay bytes,
-the latest screen and absolute output/sequence positions, not merely success.
-Archived SSH attach acknowledgments (including recent fallbacks) and raw
-download `X-Aether-Truncated-Before` headers must report expired prefixes while
-the stream/body remains exactly the retained recording, without marker bytes.
+Already-trimmed recordings retain their original absolute positions and
+missing-prefix metadata. Check authenticated expired cursors, full-item
+lookups, live approvals and evidence provenance against those existing gaps.
+Never substitute empty output or restart sequence numbering.
+
+The Linux replay regression lowers the descriptor budget only in an isolated
+helper process and streams 257 segments without discarding old ones. Check
+exact bytes, compact screen position and finite replay under concurrent
+append/rotation. Explicit deletion may interrupt an unopened sealed segment,
+but must not silently skip it. Archived SSH acknowledgments and download
+headers continue reporting pre-existing gaps without injecting marker bytes.
+
+`TestCheckpointLongLineageRemainsWritable` keeps 40,000 real recording files
+whose old checkpoint metadata would exceed 8 MiB, then verifies compact
+checkpoint publication, rotation, restart, old cursors and continued output.
+History-discovery regressions cross the former directory-entry limit and
+advance through bounded pages of empty segments without a stuck cursor.
 
 The Docker runtime regressions must run against a reachable, real Docker
 daemon; the in-process E2E runtime is not a substitute for these checks:

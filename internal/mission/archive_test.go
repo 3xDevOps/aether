@@ -266,44 +266,51 @@ func (f *archiveFixture) reload(t *testing.T) *domain.Mission {
 	return m
 }
 
-func TestArchivedSwarmIsSweptAfterTheRetentionPeriod(t *testing.T) {
+func TestArchivedSwarmSurvivesReconcileUntilExplicitDeletion(t *testing.T) {
 	ctx := context.Background()
 	f := newArchiveFixture(t)
 	f.complete(t)
+	archivedAt := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	f.svc.cfg.Now = func() time.Time { return archivedAt }
 	if _, err := f.svc.Archive(ctx, f.human, f.params()); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
-	if swept, err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil || swept {
-		t.Fatalf("sweep inside retention = %v, %v; want nothing swept", swept, err)
-	}
-	f.reload(t)
-	later := time.Now().Add(domain.ArchiveRetention + time.Hour)
-	sweepable := func() map[domain.RunID]bool {
-		runs, err := f.db.ListRunsArchivedBefore(ctx, later)
-		if err != nil {
-			t.Fatalf("ListRunsArchivedBefore: %v", err)
-		}
-		out := map[domain.RunID]bool{}
-		for _, run := range runs {
-			out[run.ID] = true
-		}
-		return out
-	}
-	if got := sweepable(); got[f.worker] || !got[f.mission.CurrentIntegratorRunID] {
-		t.Fatalf("runs the run sweep may delete = %v, want the integrator but not the worker its swarm references", got)
-	}
+	f.svc.cfg.Runs = &recordingLauncher{db: f.db}
+	later := archivedAt.AddDate(1, 0, 0)
 	f.svc.cfg.Now = func() time.Time { return later }
-	if swept, err := f.svc.sweepArchived(ctx, f.reload(t)); err != nil || !swept {
-		t.Fatalf("sweep after retention = %v, %v; want swept", swept, err)
+	for range 2 {
+		if err := f.svc.reconcile(ctx); err != nil {
+			t.Fatalf("reconcile archived swarm: %v", err)
+		}
+	}
+	if m := f.reload(t); m.ArchivedAt == nil || !m.ArchivedAt.Equal(archivedAt) {
+		t.Fatalf("mission after reconcile = %+v, want its original archive timestamp", m)
+	}
+	for _, id := range f.runs() {
+		run, err := f.db.GetRun(ctx, id)
+		if err != nil || run.ArchivedAt == nil || !run.ArchivedAt.Equal(archivedAt) {
+			t.Fatalf("run %s after reconcile = %+v, %v; want its original archive timestamp", id, run, err)
+		}
+	}
+	submissions, err := f.db.ListSubmissions(ctx, f.mission.ID, "")
+	if err != nil || len(submissions) != 1 || submissions[0].State != domain.SubmissionAccepted {
+		t.Fatalf("submissions after reconcile = %+v, %v; want accepted work preserved", submissions, err)
+	}
+	for _, event := range f.missionEvents() {
+		if event.Deleted {
+			t.Fatal("reconcile published a mission deletion")
+		}
+	}
+	if err := f.svc.Delete(ctx, f.human, f.params()); err != nil {
+		t.Fatalf("explicit delete: %v", err)
 	}
 	if _, err := f.db.GetMission(ctx, f.mission.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("mission after sweep = %v, want ErrNotFound", err)
+		t.Fatalf("mission after explicit delete = %v, want ErrNotFound", err)
 	}
-	if got := sweepable(); !got[f.worker] {
-		t.Fatalf("runs the run sweep may delete after the swarm sweep = %v, want the worker too", got)
-	}
-	if got := f.missionEvents(); !got[len(got)-1].Deleted {
-		t.Fatalf("mission.changed events = %+v, want a final deleted one", got)
+	for _, id := range f.runs() {
+		if _, err := f.db.GetRun(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("run %s after explicit delete = %v, want ErrNotFound", id, err)
+		}
 	}
 }
 

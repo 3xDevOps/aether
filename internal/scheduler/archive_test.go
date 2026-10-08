@@ -3,8 +3,6 @@ package scheduler
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +10,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
 // createRun creates a run owned by e.member directly in status, bypassing
@@ -95,19 +92,15 @@ func TestSetArchivedIdempotent(t *testing.T) {
 		t.Fatal("archived run has no ArchivedAt")
 	}
 	payload := waitArchivedEvent(t, sub, r.ID)
-	if payload.ArchivedAt == nil || payload.DeletesAt == nil {
-		t.Fatalf("archived event payload = %+v, want archived_at and deletes_at set", payload)
+	if payload.ArchivedAt == nil {
+		t.Fatalf("archived event payload = %+v, want archived_at set", payload)
 	}
 	archivedAt, aerr := time.Parse(time.RFC3339, *payload.ArchivedAt)
 	if aerr != nil {
 		t.Fatalf("parse archived_at: %v", aerr)
 	}
-	deletesAt, derr := time.Parse(time.RFC3339, *payload.DeletesAt)
-	if derr != nil {
-		t.Fatalf("parse deletes_at: %v", derr)
-	}
-	if !deletesAt.Equal(archivedAt.Add(domain.ArchiveRetention)) {
-		t.Fatalf("deletes_at = %v, want archived_at + ArchiveRetention = %v", deletesAt, archivedAt.Add(domain.ArchiveRetention))
+	if !archivedAt.Equal(first.ArchivedAt.Truncate(time.Second)) {
+		t.Fatalf("event archived_at = %v, want persisted timestamp %v", archivedAt, first.ArchivedAt)
 	}
 	waitTimelineEvent(t, sub, r.ID, events.TimelineNote)
 
@@ -139,8 +132,8 @@ func TestSetArchivedRestore(t *testing.T) {
 		t.Fatalf("SetArchived: %v", err)
 	}
 	archivedPayload := waitArchivedEvent(t, sub, r.ID)
-	if archivedPayload.ArchivedAt == nil || archivedPayload.DeletesAt == nil {
-		t.Fatalf("archived event payload = %+v, want archived_at and deletes_at set", archivedPayload)
+	if archivedPayload.ArchivedAt == nil {
+		t.Fatalf("archived event payload = %+v, want archived_at set", archivedPayload)
 	}
 	waitTimelineEvent(t, sub, r.ID, events.TimelineNote)
 
@@ -152,13 +145,10 @@ func TestSetArchivedRestore(t *testing.T) {
 		t.Fatalf("restored run ArchivedAt = %v, want nil", restored.ArchivedAt)
 	}
 	restoredPayload := waitArchivedEvent(t, sub, r.ID)
-	if restoredPayload.ArchivedAt != nil || restoredPayload.DeletesAt != nil {
-		t.Fatalf("restore event payload = %+v, want both nil", restoredPayload)
+	if restoredPayload.ArchivedAt != nil {
+		t.Fatalf("restore event payload = %+v, want archived_at nil", restoredPayload)
 	}
-	ev := waitTimelineEvent(t, sub, r.ID, events.TimelineNote)
-	if p := ev.Payload.(events.TimelinePayload); !strings.Contains(p.Message, "restored") {
-		t.Fatalf("restore timeline message = %q, want it to say restored", p.Message)
-	}
+	waitTimelineEvent(t, sub, r.ID, events.TimelineNote)
 
 	unarchived, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, false)
 	if err != nil {
@@ -237,13 +227,10 @@ func TestRelaunchRestoresArchivedRun(t *testing.T) {
 		t.Fatalf("relaunched run returned ArchivedAt = %v, want nil", reopened.ArchivedAt)
 	}
 	restoredPayload := waitArchivedEvent(t, sub, run.ID)
-	if restoredPayload.ArchivedAt != nil || restoredPayload.DeletesAt != nil {
-		t.Fatalf("relaunch restore event payload = %+v, want both nil", restoredPayload)
+	if restoredPayload.ArchivedAt != nil {
+		t.Fatalf("relaunch restore event payload = %+v, want archived_at nil", restoredPayload)
 	}
-	ev := waitTimelineEvent(t, sub, run.ID, events.TimelineNote)
-	if p := ev.Payload.(events.TimelinePayload); !strings.Contains(p.Message, "restored") {
-		t.Fatalf("relaunch restore timeline message = %q, want it to say restored", p.Message)
-	}
+	waitTimelineEvent(t, sub, run.ID, events.TimelineNote)
 	fresh, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
@@ -261,7 +248,7 @@ func (s *failingUpdateRunStore) UpdateRun(context.Context, *domain.Run) error {
 	return errors.New("test: promotion failed")
 }
 
-func TestRelaunchKeepsArchiveTimerWhenPromotionFails(t *testing.T) {
+func TestRelaunchKeepsArchiveTimestampWhenPromotionFails(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
@@ -292,7 +279,7 @@ func TestRelaunchKeepsArchiveTimerWhenPromotionFails(t *testing.T) {
 }
 
 // waitDeletedEvent reads sub until a run.deleted event for run arrives and
-// returns it, so callers can inspect the actor the sweep published under.
+// returns it, so callers can inspect the actor who deleted the run.
 func waitDeletedEvent(t *testing.T, sub events.Subscription, run domain.RunID) events.Event {
 	t.Helper()
 	deadline := time.After(waitTimeout)
@@ -322,56 +309,36 @@ func backdateArchived(t *testing.T, e *testEnv, r *domain.Run, age time.Duration
 	}
 }
 
-// A run archived more than the retention period ago is deleted, and the
-// resulting run.deleted event carries the empty system actor.
-func TestSweepArchivedDeletesPastRetention(t *testing.T) {
+func TestDeleteRemovesAnOldArchivedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
 	r := createRun(t, e, domain.RunMerged)
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
+	backdateArchived(t, e, r, 365*24*time.Hour)
 
-	e.sched.sweepArchived(ctx)
+	if err := e.sched.DeleteRun(ctx, r.ID, e.member.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
 
 	ev := waitDeletedEvent(t, sub, r.ID)
-	if ev.ActorID != "" {
-		t.Fatalf("run.deleted actor = %q, want empty (system)", ev.ActorID)
+	if ev.ActorID != e.member.ID {
+		t.Fatalf("run.deleted actor = %q, want %q", ev.ActorID, e.member.ID)
 	}
 	if _, err := e.db.GetRun(ctx, r.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetRun after sweep: err = %v, want ErrNotFound", err)
+		t.Fatalf("GetRun after explicit delete: err = %v, want ErrNotFound", err)
 	}
 }
 
-// A run archived less than the retention period ago survives the sweep.
-func TestSweepArchivedKeepsRunUnderRetention(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-	r := createRun(t, e, domain.RunMerged)
-	backdateArchived(t, e, r, domain.ArchiveRetention-24*time.Hour)
-
-	e.sched.sweepArchived(ctx)
-
-	if _, err := e.db.GetRun(ctx, r.ID); err != nil {
-		t.Fatalf("GetRun after sweep: %v", err)
-	}
-}
-
-// A run whose retained container is still held (Reason ==
-// retainedCloseReason) is kept past its retention period instead of being
-// routed through DeleteRun, which would deadlock: Relaunch locks
-// lifecycleMu before archiveMu to restore a retained run, and DeleteRun
-// would need that same lifecycleMu while archiveMu is already held by the
-// sweep. Once the container TTL sweep expires it, the reason changes and
-// a later archive sweep deletes it.
-func TestSweepArchivedSkipsRetainedRun(t *testing.T) {
+// Expiring a retained container releases compute but preserves archived runs,
+// even when they were archived long ago.
+func TestArchivedRunSurvivesRetainedContainerExpiry(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.RunContainerTTL = time.Hour
 	})
 	ctx := t.Context()
-	run, _ := e.launchFake(t, "retain past retention")
+	run, _ := e.launchFake(t, "retain archived history")
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
@@ -383,16 +350,14 @@ func TestSweepArchivedSkipsRetainedRun(t *testing.T) {
 	// SetArchived's own archived_at write only takes effect when the
 	// column is still NULL, so archiving first would make the backdate a
 	// silent no-op.
-	backdateArchived(t, e, closed, domain.ArchiveRetention+24*time.Hour)
-
-	e.sched.sweepArchived(ctx)
+	backdateArchived(t, e, closed, 365*24*time.Hour)
 
 	kept, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
-		t.Fatalf("GetRun after sweep: %v", err)
+		t.Fatalf("GetRun after archive: %v", err)
 	}
 	if kept.Reason != retainedCloseReason {
-		t.Fatalf("run reason after sweep = %q, want %q (kept, not swept)", kept.Reason, retainedCloseReason)
+		t.Fatalf("run reason after archive = %q, want %q", kept.Reason, retainedCloseReason)
 	}
 
 	// Expire the retained container the way the container TTL sweep would,
@@ -401,9 +366,9 @@ func TestSweepArchivedSkipsRetainedRun(t *testing.T) {
 	entry := e.sched.runs[run.ID]
 	past := time.Now().UTC().Add(-time.Second)
 	entry.retainedUntil = &past
-	if err := e.sched.writeSidecar(entry.sidecar()); err != nil {
+	if sidecarErr := e.sched.writeSidecar(entry.sidecar()); sidecarErr != nil {
 		e.sched.mu.Unlock()
-		t.Fatalf("write expired sidecar: %v", err)
+		t.Fatalf("write expired sidecar: %v", sidecarErr)
 	}
 	e.sched.mu.Unlock()
 	e.sched.sweepRetained(ctx)
@@ -415,64 +380,12 @@ func TestSweepArchivedSkipsRetainedRun(t *testing.T) {
 		t.Fatalf("expiry reason = %q, want %q", expired.Reason, retainedExpiredReason)
 	}
 
-	e.sched.sweepArchived(ctx)
-
-	if _, err := e.db.GetRun(ctx, run.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("GetRun after later sweep: err = %v, want ErrNotFound", err)
-	}
-}
-
-// A restore that lands before the sweep picks up the run always wins.
-// sweepArchived's list query already excludes a restored run (its
-// archived_at is cleared), so sweepArchivedRun is called directly to
-// exercise the re-read guard itself.
-//
-// A non-Final status alongside a set archived_at is not reachable through
-// the store to test the same way: SetRunArchived only ever writes
-// archived_at on a Final row, and UpdateRun does not write that column at
-// all.
-func TestSweepArchivedKeepsRestoredRun(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-	r := createRun(t, e, domain.RunMerged)
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
-	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
-
-	if _, err := e.sched.SetArchived(ctx, r.ID, e.member.ID, false); err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-
-	if err := e.sched.sweepArchivedRun(ctx, r.ID, cutoff); err != nil {
-		t.Fatalf("sweepArchivedRun: %v", err)
-	}
-
-	fresh, err := e.db.GetRun(ctx, r.ID)
+	fresh, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
-		t.Fatalf("GetRun after sweep: %v", err)
+		t.Fatalf("GetRun after container expiry: %v", err)
 	}
-	if fresh.ArchivedAt != nil {
-		t.Fatal("restored run has ArchivedAt set after sweep")
-	}
-}
-
-// A run archived after the cutoff is not yet due; sweepArchivedRun is
-// called directly (bypassing the list query) so its own re-read guard is
-// what keeps it, not the caller's filtering.
-func TestSweepArchivedRunKeepsRunArchivedAfterCutoff(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-	r := createRun(t, e, domain.RunMerged)
-	backdateArchived(t, e, r, domain.ArchiveRetention-24*time.Hour)
-	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
-
-	if err := e.sched.sweepArchivedRun(ctx, r.ID, cutoff); err != nil {
-		t.Fatalf("sweepArchivedRun: %v", err)
-	}
-
-	if _, err := e.db.GetRun(ctx, r.ID); err != nil {
-		t.Fatalf("GetRun after sweep: %v", err)
+	if fresh.ArchivedAt == nil || kept.ArchivedAt == nil || !fresh.ArchivedAt.Equal(*kept.ArchivedAt) {
+		t.Fatalf("container expiry changed archive timestamp: %v -> %v", kept.ArchivedAt, fresh.ArchivedAt)
 	}
 }
 
@@ -495,39 +408,6 @@ func countDeletedEvents(sub events.Subscription) int {
 	}
 }
 
-// A PublishRunBranch failure blocks deletion: the sweep never destroys the
-// only copy of unpublished work unattended, publishes neither the
-// deletion timeline note nor run.deleted, and retries on the next tick.
-func TestSweepArchivedBlockedByPublishFailure(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, nil)
-	ctx := t.Context()
-	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunMerged)
-	path, branch, err := e.git.CreateRunCheckout(ctx, e.ws.ID, r.ID, "main", r.Task, "")
-	if err != nil {
-		t.Fatalf("CreateRunCheckout: %v", err)
-	}
-	r.Worktree, r.Branch = path, branch
-	if updErr := e.db.UpdateRun(ctx, r); updErr != nil {
-		t.Fatalf("UpdateRun: %v", updErr)
-	}
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
-	e.git.publishErr = errors.New("publish unavailable")
-
-	e.sched.sweepArchived(ctx)
-
-	if _, statErr := os.Stat(path); statErr != nil {
-		t.Fatalf("checkout path after blocked publish: %v", statErr)
-	}
-	if n := countTimelineEvents(sub, events.TimelineNote); n != 0 {
-		t.Fatalf("published %d timeline notes despite blocked publish", n)
-	}
-	if n := countDeletedEvents(sub); n != 0 {
-		t.Fatalf("published %d run.deleted events despite blocked publish", n)
-	}
-}
-
 type failingDeleteRunStore struct {
 	store.Store
 }
@@ -536,109 +416,23 @@ func (s *failingDeleteRunStore) DeleteRun(context.Context, domain.RunID) error {
 	return errors.New("test: delete failed")
 }
 
-// A DeleteRun failure must not leave a false "run was deleted" timeline
-// note: the note is published only after DeleteRun returns nil, so a
-// failed delete leaves no note for the next hourly retry to duplicate,
-// and the run survives.
-func TestSweepArchivedNoTimelineNoteOnDeleteFailure(t *testing.T) {
+// A failed explicit deletion must not announce that the run was deleted.
+func TestDeleteArchivedRunKeepsRecordOnDeleteFailure(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	sub := e.subscribe(t)
 	r := createRun(t, e, domain.RunMerged)
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
+	backdateArchived(t, e, r, 365*24*time.Hour)
 	e.sched.cfg.Store = &failingDeleteRunStore{Store: e.db}
 
-	e.sched.sweepArchived(ctx)
-
-	if n := countTimelineEvents(sub, events.TimelineNote); n != 0 {
-		t.Fatalf("published %d timeline notes despite failed delete", n)
+	if err := e.sched.DeleteRun(ctx, r.ID, e.member.ID); err == nil {
+		t.Fatal("DeleteRun succeeded despite the injected store failure")
 	}
 	if n := countDeletedEvents(sub); n != 0 {
 		t.Fatalf("published %d run.deleted events despite failed delete", n)
 	}
 	if _, err := e.db.GetRun(ctx, r.ID); err != nil {
-		t.Fatalf("GetRun after failed sweep: %v", err)
+		t.Fatalf("GetRun after failed delete: %v", err)
 	}
-}
-
-// The sweep's deletion is followed by a system timeline note explaining
-// why the run disappeared - published only once DeleteRun has actually
-// succeeded, so it arrives on the wire after run.deleted - and that note
-// stays readable from the persisted event log after the run row itself is
-// gone: the timeline does not depend on the row, only run.deleted does.
-func TestSweepArchivedPublishesTimelineNote(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	log, err := events.OpenSQLiteLog(filepath.Join(dir, "events.db"))
-	if err != nil {
-		t.Fatalf("open event log: %v", err)
-	}
-	t.Cleanup(func() { _ = log.Close() })
-	bus, err := events.NewInProc(context.Background(), log)
-	if err != nil {
-		t.Fatalf("new bus: %v", err)
-	}
-	t.Cleanup(func() { _ = bus.Close() })
-	e := newTestEnv(t, func(cfg *Config) { cfg.Bus = bus })
-	e.bus = bus
-	ctx := t.Context()
-	sub := e.subscribe(t)
-	r := createRun(t, e, domain.RunAbandoned)
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
-
-	e.sched.sweepArchived(ctx)
-
-	waitDeletedEvent(t, sub, r.ID)
-	ev := waitTimelineEvent(t, sub, r.ID, events.TimelineNote)
-	if ev.ActorID != "" {
-		t.Fatalf("timeline note actor = %q, want empty (system)", ev.ActorID)
-	}
-	p := ev.Payload.(events.TimelinePayload)
-	if !strings.Contains(p.Message, "deleted") {
-		t.Fatalf("timeline note message = %q, want it to say the run was deleted", p.Message)
-	}
-
-	reader := timeline.NewReader(log, e.db)
-	page, err := reader.Page(ctx, timeline.Filter{
-		Workspace: e.ws.ID, Run: r.ID, Types: []events.Type{events.TypeTimeline},
-	}, 0, 0)
-	if err != nil {
-		t.Fatalf("timeline page: %v", err)
-	}
-	found := false
-	for _, pe := range page.Events {
-		if tp, ok := pe.Payload.(events.TimelinePayload); ok && strings.Contains(tp.Message, "deleted") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("deleted-run timeline note not found in persisted event log")
-	}
-}
-
-// Start's hourly GC tick runs sweepArchived at boot even when CheckoutTTL
-// is disabled; only sweepCheckouts is gated on it.
-func TestSweepArchivedRunsAtBootWithCheckoutTTLDisabled(t *testing.T) {
-	t.Parallel()
-	e := newTestEnv(t, func(cfg *Config) {
-		cfg.CheckoutTTL = -1
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	r := createRun(t, e, domain.RunFailed)
-	backdateArchived(t, e, r, domain.ArchiveRetention+24*time.Hour)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if err := e.sched.Start(ctx); err != nil {
-			t.Errorf("Start: %v", err)
-		}
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-
-	waitFor(t, "boot sweepArchived to delete the run", func() bool {
-		_, err := e.db.GetRun(ctx, r.ID)
-		return errors.Is(err, store.ErrNotFound)
-	})
 }

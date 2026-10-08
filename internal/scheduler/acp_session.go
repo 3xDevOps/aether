@@ -152,7 +152,7 @@ func lastItem(log *acphost.Log, kind acphost.Kind) acphost.Item {
 }
 
 func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
-	log, err := acphost.OpenLogReadOnly(s.cfg.PTY.ItemLogPath(run))
+	log, err := s.itemLogs.Open(s.cfg.PTY.ItemLogPath(run))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

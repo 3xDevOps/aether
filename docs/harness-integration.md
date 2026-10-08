@@ -1,8 +1,9 @@
 # Integrating an unsupported agent
 
-An Aether **run** is a container and checkout with a server-owned identity.
-An **agent** is the CLI running there. A launch definition gets that CLI
-started; it does not automatically give the CLI an inbox hook or a native
+An Aether **run** is an agent session with a server-owned identity, including
+follow-up tasks; its compute and checkout can end before its history does.
+An **agent** is the CLI handling those tasks. Launching it does not
+automatically give it an inbox hook or native
 wake API. This guide connects an existing agent to Aether's durable inbox
 without inventing a second transport, daemon, or terminal-input fallback.
 
@@ -14,73 +15,13 @@ An inbox integration is separate from the optional
 ## Execution boundary: keep native tools with the agent
 
 Aether keeps each vendor agent and its native tools in the same run container.
-Enhanced mode changes the session transport and presentation, not where tools
-execute. This preserves the native agent, member login, home, worktree and
-session conventions; it does **not** isolate the agent's reasoning process
-from a build, shell command, subagent or plugin that exhausts that container.
+Enhanced mode changes transport and presentation, not execution placement.
+A build OOM can therefore still terminate the native agent session.
 
-The current [ACP host](../internal/acphost/conn.go) advertises terminal
-**authentication** and terminal-output display, not ACP filesystem or terminal
-**execution** capabilities. Tool-call updates are observations, not commands
-for Aether to execute. [ACP v1 filesystem](https://agentclientprotocol.com/protocol/v1/file-system)
-and [terminal methods](https://agentclientprotocol.com/protocol/v1/terminals)
-allow explicit delegation, but only when the agent actually uses them:
-
-| Inspected integration | Why it is not a complete execution boundary |
-| --- | --- |
-| [Claude ACP 0.86.0](https://github.com/agentclientprotocol/claude-agent-acp/blob/v0.86.0/README.md) | Runs Claude Agent SDK tools; reporting their activity does not delegate them to Aether. The adapter's [filesystem delegation change](https://github.com/agentclientprotocol/claude-agent-acp/issues/339) leaves native file tools on disk. |
-| [Codex ACP 2.1.1](https://github.com/agentclientprotocol/codex-acp/blob/v2.1.1/README.md) | Translates Codex App Server operations/events into ACP, not an equivalent full client-side shell/file/search executor. |
-| [pi-acp 0.0.34](https://github.com/svkozak/pi-acp/blob/v0.0.34/README.md#limitations) | Explicitly does not delegate `fs/*` or `terminal/*`; pi executes locally. |
-| [OMP 18.8.4](https://github.com/can1357/oh-my-pi/tree/v18.8.4) | Has a real conditional read/write/edit/Bash bridge, but local fallbacks and unbridged operations prevent a complete boundary. |
-
-The adapter versions above match [Aether's pins](../internal/harness/acp.go).
-OMP 18.8.4 was checked against that exact upstream tag and the installed
-`omp --version`; it is an inspected version, not an Aether installation pin.
-OpenCode and custom agents get no delegation guarantee from ACP support alone.
-
-In OMP 18.8.4, [read](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/tools/read.ts)
-can fall back to local disk after a bridge error;
-[Bash](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/tools/bash.ts)
-delegates only without PTY or virtual-CWD use.
-[Grep](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/tools/grep.ts)
-and [glob](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/tools/glob.ts)
-remain local, and [extensions run in-process without isolation](https://github.com/can1357/oh-my-pi/blob/v18.8.4/docs/extensions.md).
-**[INFERENCE]** The [root ACP session setup](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/modes/acp/acp-agent.ts)
-attaches a bridge, while the [subagent session creation path](https://github.com/can1357/oh-my-pi/blob/v18.8.4/packages/coding-agent/src/task/executor.ts)
-does not show bridge propagation. This is source evidence, not a live
-subagent-isolation proof.
-
-For these reasons Aether does not ship a partial OMP-only bridge as a universal
-boundary, or replace native agents with a custom tool-running agent. Moving a
-whole native harness to another container would still move its tools with it.
-Container resource limits protect between runs; they do not promise that the
-agent process survives its own tools' OOM. See [resource limits](environments.md#resource-limits-and-launch-admission)
-and [failure handling](failure-handling.md#resource-exhaustion-and-agent-survival).
-
-A per-harness split is supportable only when the exact harness/version passes
-all of these observable conditions:
-
-- Every enabled file, search, edit, shell/PTY, subprocess, subagent and plugin
-  path executes within the intended boundary or is denied **before** local
-  side effects. Bridge errors, path escapes and unsupported operations fail
-  closed; capability flags or tool-call displays alone are not evidence.
-- Native login and session restore work with the same member/account authority,
-  image, user, home and checkout. Restart, pause/resume and supported mode
-  switches restore the intended session or explicitly report that they cannot.
-- An execution-side OOM is observed in a separate cgroup while the agent stays
-  responsive; completed file writes remain in the mounted checkout/home and
-  the interrupted tool's outcome is reported, not invented.
-- Run/session ownership, permissions and cancellation fence child processes
-  and late replies, including during replacement and restart. No agent needs
-  a Docker socket or writable host cgroups.
-- Lost transport, unknown completion and restart never silently replay a
-  side-effecting tool. The user can distinguish a surviving process, a lost
-  attachment, a restored conversation and a new session.
-
-These are acceptance conditions, not an enabled feature or a new service.
-The [ACP v2 filesystem/terminal removal RFD](https://agentclientprotocol.com/rfds/v2/client-filesystem-terminal-capabilities)
-is a proposal that explicitly keeps v1 unchanged; it is not evidence that
-today's v1 methods have been removed.
+See [Separating the agent session from execution](agent-execution-separation.md)
+for the inspected provider/adapter contracts, pros and cons, and the next
+steps and acceptance checks for a real split. Aether does not advertise an
+incomplete tool bridge as isolation or replace native agents to simulate it.
 
 ## Start with the durable inbox
 

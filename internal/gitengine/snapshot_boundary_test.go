@@ -5,7 +5,6 @@ package gitengine
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,88 +14,43 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-func TestSnapshotRevertRefreshesChangedOccurrence(t *testing.T) {
-	for _, byAge := range []bool{false, true} {
-		t.Run(fmt.Sprintf("age=%t", byAge), func(t *testing.T) {
-			e := newTestEngine(t, nil)
-			seedWorkspace(t, e, serveTransport(t, e), "ws1")
-			ctx := t.Context()
-			checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "revert recency", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			store, err := e.snapshotStorePath("run1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := e.initSnapshotStore(ctx, "run1", checkout, store); err != nil {
-				t.Fatal(err)
-			}
-			index, err := scratchIndex(store, checkout, "run1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-			now := start
-			policy := snapshotPolicy{512 << 20, 3, 7 * 24 * time.Hour, func() time.Time { return now }}
-			if byAge {
-				policy.trees = 1024
-				// Isolate age expiry from count pressure.
-			} else {
-				policy.age = 30 * 24 * time.Hour
-			}
-			capture := func(content string, after time.Duration) string {
-				t.Helper()
-				now = start.Add(after)
-				if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(content+"\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				if _, _, err := e.gitStaged(ctx, checkout, index, 0, "add", "-A"); err != nil {
-					t.Fatal(err)
-				}
-				tree, _, err := e.gitStaged(ctx, checkout, index, 256, "write-tree")
-				if err != nil {
-					t.Fatal(err)
-				}
-				tree = strings.TrimSpace(tree)
-				lock := e.snapshotLock("run1")
-				lock.Lock()
-				err = e.retainSnapshot(ctx, store, tree, policy)
-				lock.Unlock()
-				if err != nil {
-					t.Fatal(err)
-				}
-				return tree
-			}
-			a := capture("A", 0)
-			capture("B", 24*time.Hour)
-			if got := capture("A", 6*24*time.Hour); got != a {
-				t.Fatalf("revert tree = %s, want %s", got, a)
-			}
-			catalog := func() string {
-				t.Helper()
-				refs, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(refname) %(objectname)", snapshotHistoryRoot)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return refs
-			}
-			before := catalog()
-			capture("A", 7*24*time.Hour)
-			if after := catalog(); after != before {
-				t.Fatalf("unchanged capture refreshed recency:\nbefore %s\nafter %s", before, after)
-			}
-			capture("C", 8*24*time.Hour)
-			d := capture("D", 8*24*time.Hour+time.Hour)
-			patch, err := e.RunPatch(ctx, "run1", PatchRequest{From: a, To: d})
-			if err != nil || !strings.Contains(patch.Text, "-A") || !strings.Contains(patch.Text, "+D") {
-				t.Fatalf("recent reverted tree expired: %+v, %v", patch, err)
-			}
-			want := fmt.Sprintf("%s%019d-%s %s", snapshotHistoryRoot, start.Add(6*24*time.Hour).UnixNano(), a, a)
-			if refs := catalog(); !strings.Contains(refs, want) || strings.Count(refs, " "+a) != 1 {
-				t.Fatalf("revert catalog = %q, want one refreshed ref %q", refs, want)
-			}
-		})
+func TestSnapshotRevertRetainsEveryChangedTree(t *testing.T) {
+	e := newTestEngine(t, nil)
+	seedWorkspace(t, e, serveTransport(t, e), "ws1")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "revert history", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := func(content string) string {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(content+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tree, err := e.writeSnapshotTree(ctx, "run1", checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tree
+	}
+	a, b := capture("A"), capture("B")
+	if got := capture("A"); got != a {
+		t.Fatalf("revert tree = %s, want %s", got, a)
+	}
+	capture("A")
+	c, d := capture("C"), capture("D")
+	for _, interval := range [][2]string{{a, b}, {b, a}, {a, c}, {c, d}} {
+		if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: interval[0], To: interval[1]}); err != nil {
+			t.Fatalf("recorded interval unavailable: %v", err)
+		}
+	}
+	store, err := e.snapshotStorePath("run1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", snapshotHistoryRoot)
+	if err != nil || len(strings.Fields(refs)) != 4 {
+		t.Fatalf("unchanged/reverted trees created duplicate refs: %q, %v", refs, err)
 	}
 }
 
@@ -140,14 +94,6 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	}
 	a, b := capture("A"), capture("B")
 	store, err := e.snapshotStorePath("run1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A is now reachable only through previous, not its historical ref.
-	lock := e.snapshotLock("run1")
-	lock.Lock()
-	err = e.retainSnapshot(ctx, store, b, snapshotPolicy{1, 1, time.Hour, time.Now})
-	lock.Unlock()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,15 +141,9 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	if err != nil || strings.TrimSpace(latest) == delivered.Tree {
 		t.Fatalf("evidence did not advance latest: %q, %v", latest, err)
 	}
-	lock.Lock()
-	err = e.retainSnapshot(ctx, store, strings.TrimSpace(latest), snapshotPolicy{1, 1, time.Hour, time.Now})
-	lock.Unlock()
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, interval := range [][2]string{{a, b}, {delivered.ParentTree, delivered.Tree}} {
 		if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: interval[0], To: interval[1]}); err != nil {
-			t.Fatalf("advertised interval lost after independent staging/GC: %v", err)
+			t.Fatalf("advertised interval lost after independent staging: %v", err)
 		}
 	}
 	patch, err = e.RunPatch(ctx, "run1", PatchRequest{})
@@ -212,7 +152,7 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	}
 	patch, err = e.RenderEvidence(ctx, "ws1", evidence.Commit, 0)
 	if err != nil || !strings.Contains(patch.Text, "+D") {
-		t.Fatalf("evidence lost during snapshot GC: %+v, %v", patch, err)
+		t.Fatalf("evidence lost during snapshot publication: %+v, %v", patch, err)
 	}
 	inflight, _, err := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", "refs/aether/inflight/")
 	if err != nil || len(strings.Fields(inflight)) != 2 {
@@ -240,8 +180,7 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: c, To: d}); err != nil {
 		t.Fatalf("post-recovery current interval: %v", err)
 	}
-	// The next publication releases B's interval pin. Recovery must have
-	// restored its catalog entry rather than depending on that temporary pin.
+	// The next publication releases B's interval pin; its history remains.
 	if _, err := e.RunPatch(ctx, "run1", PatchRequest{From: b, To: c}); err != nil {
 		t.Fatalf("new publication expired the just-recovered interval: %v", err)
 	}
@@ -349,13 +288,6 @@ func TestSnapshotGapSurvivesEventLogAppendFailure(t *testing.T) {
 				t.Fatalf("failed append removed durable gap: %v", err)
 			}
 			latest, _, err := e.gitBareBounded(ctx, store, 256, "rev-parse", "refs/aether/latest")
-			if err != nil {
-				t.Fatal(err)
-			}
-			lock := e.snapshotLock("run1")
-			lock.Lock()
-			err = e.retainSnapshot(ctx, store, strings.TrimSpace(latest), snapshotPolicy{1, 1, time.Hour, time.Now})
-			lock.Unlock()
 			if err != nil {
 				t.Fatal(err)
 			}

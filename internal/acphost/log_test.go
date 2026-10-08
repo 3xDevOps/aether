@@ -153,28 +153,67 @@ func TestItemCap(t *testing.T) {
 			t.Fatal("a split segment was truncated")
 		}
 	}
+}
 
-	segment := strings.Repeat("z", maxTextSegment)
-	for range MaxRunBytes/maxTextSegment + 32 {
-		s.emitLocked(Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m2", Text: segment}})
-	}
-	last := s.log.LastSeq()
-	s.emitLocked(Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m3", Text: "latest"}})
-	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "end_turn"})
-	s.emitLocked(Item{Kind: KindUsage, Usage: &Usage{Used: 1}})
-	tail, err := s.log.ReadAfter(last, 0)
+func TestLogKeepsMessageHistoryPast64MiB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.items.jsonl")
+	log, err := OpenLog(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tail) != 3 || tail[0].Message.Text != "latest" || tail[1].Kind != KindTurnEnd || tail[2].Kind != KindUsage {
-		t.Fatalf("after the cap: %+v", tail)
+	defer func() { _ = log.Close() }()
+	first := Item{Kind: KindMessage, Message: &Message{Role: "user", MessageID: "m1", Text: "first prompt"}}
+	if appendErr := log.Append(&first); appendErr != nil {
+		t.Fatal(appendErr)
 	}
-	page, err := s.log.History(last+4, 3)
-	if err != nil || !page.TruncatedBefore || page.OldestSeq <= 1 || len(page.Items) != 3 {
-		t.Fatalf("retained page: %+v, %v", page, err)
+	segment := strings.Repeat("z", maxTextSegment)
+	for range (64<<20)/maxTextSegment + 32 {
+		if appendErr := log.Append(&Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m2", Text: segment}}); appendErr != nil {
+			t.Fatal(appendErr)
+		}
 	}
-	if _, size, _ := s.log.state(); size > MaxRunBytes {
-		t.Fatalf("retained %d bytes", size)
+	last := log.LastSeq()
+	for _, it := range []Item{
+		{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m3", Text: "latest"}},
+		{Kind: KindTurnEnd, StopReason: "end_turn"},
+		{Kind: KindUsage, Usage: &Usage{Used: 1}},
+	} {
+		if appendErr := log.Append(&it); appendErr != nil {
+			t.Fatal(appendErr)
+		}
+	}
+	if _, size, _ := log.state(); size <= 64<<20 {
+		t.Fatalf("history did not pass the former limit: %d bytes", size)
+	}
+	if closeErr := log.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	log, err = OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earliest, found, err := log.Item(first.Seq)
+	if err != nil || !found || earliest.Message == nil || earliest.Message.Text != "first prompt" {
+		t.Fatalf("earliest item after reopen: %+v found=%v err=%v", earliest, found, err)
+	}
+	tail, err := log.ReadAfter(last, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tail) != 3 || tail[0].Message == nil || tail[0].Message.Text != "latest" || tail[1].Kind != KindTurnEnd || tail[2].Kind != KindUsage {
+		t.Fatalf("after the former limit: %+v", tail)
+	}
+	page, err := log.History(last+4, 3)
+	if err != nil || page.TruncatedBefore || page.OldestSeq != 1 || len(page.Items) != 3 {
+		t.Fatalf("bounded page: %+v, %v", page, err)
+	}
+	continued := Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: "m4", Text: "after reopen"}}
+	if appendErr := log.Append(&continued); appendErr != nil || continued.Seq != last+4 {
+		t.Fatalf("continued item: %+v, %v", continued, appendErr)
+	}
+	latest, found, err := log.Item(continued.Seq)
+	if err != nil || !found || latest.Message == nil || latest.Message.Text != "after reopen" {
+		t.Fatalf("latest item: %+v found=%v err=%v", latest, found, err)
 	}
 }
 

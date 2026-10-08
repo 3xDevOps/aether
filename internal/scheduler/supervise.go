@@ -11,7 +11,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -757,9 +756,8 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 				continue
 			}
 
-			// Evidence owns a per-run capture/cleanup lock. Capture both
-			// sources before either is removed; a failed required capture
-			// leaves the checkout and transcript recoverable for retry.
+			// Evidence capture must finish before the checkout is reclaimed.
+			// Recorded history remains owned by the run until explicit deletion.
 			identity := fresh.LastCommit
 			if lifecycle != nil {
 				s.mu.Lock()
@@ -774,9 +772,6 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 			cleanup := func(cleanupCtx context.Context) error {
 				if err := s.deleteDevelopment(cleanupCtx, r.ID); err != nil {
 					return err
-				}
-				if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, r.ID); err != nil {
-					return fmt.Errorf("scheduler: checkout gc: remove run transcripts: %w", err)
 				}
 				if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, r.ID); err != nil {
 					return fmt.Errorf("scheduler: checkout gc: remove run checkout: %w", err)
@@ -810,58 +805,6 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 			}
 		}
 	}
-}
-
-// sweepArchived keeps no state between ticks: every candidate is re-validated,
-// so a restore or publish failure only costs a retry.
-func (s *Scheduler) sweepArchived(ctx context.Context) {
-	cutoff := time.Now().UTC().Add(-domain.ArchiveRetention)
-	candidates, err := s.cfg.Store.ListRunsArchivedBefore(ctx, cutoff)
-	if err != nil {
-		slog.Warn("scheduler: archive sweep: list archived runs", "error", err)
-		return
-	}
-	for _, candidate := range candidates {
-		if err := s.sweepArchivedRun(ctx, candidate.ID, cutoff); err != nil {
-			slog.Warn("scheduler: archive sweep", "run", candidate.ID, "error", err)
-		}
-	}
-}
-
-// sweepArchivedRun holds archiveMu across the re-read and the delete so a
-// restore cannot race it. Runs with durable container ownership are skipped:
-// DeleteRun would take lifecycleMu, which Relaunch takes before archiveMu.
-func (s *Scheduler) sweepArchivedRun(ctx context.Context, id domain.RunID, cutoff time.Time) error {
-	s.archiveMu.Lock()
-	defer s.archiveMu.Unlock()
-
-	fresh, err := s.cfg.Store.GetRun(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("reread run: %w", err)
-	}
-	if fresh.ArchivedAt == nil || fresh.ArchivedAt.After(cutoff) || !fresh.Status.Final() ||
-		s.RetainsContainer(ctx, id) {
-		return nil
-	}
-
-	// Never destroy the only copy of unpublished work unattended: a
-	// checkout that never got a container back after a crash can still
-	// carry commits the branch does not have.
-	if fresh.Worktree != "" {
-		if _, err := s.cfg.Git.PublishRunBranch(ctx, id); err != nil {
-			return fmt.Errorf("publish run branch: %w", err)
-		}
-	}
-
-	if err := s.DeleteRun(ctx, id, ""); err != nil {
-		return fmt.Errorf("delete run: %w", err)
-	}
-	s.publishTimeline(ctx, fresh.WorkspaceID, id, "", events.TimelineNote,
-		"archived run deleted after the retention period")
-	return nil
 }
 
 const (

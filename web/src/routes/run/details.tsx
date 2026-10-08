@@ -10,7 +10,6 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
 import { isRetainedRun } from '@/lib/commands'
-import { deletesInLabel } from '@/lib/format'
 import { plainReason } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -175,7 +174,7 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
             : 'Nobody else'}
         </Row>
         <Row label="Container">{container(run)}</Row>
-        {run.archived_at && run.deletes_at && <Row label="Archived">{deletesInLabel(run.deletes_at)}</Row>}
+        {run.archived_at && <Row label="Archived"><RelativeTime at={run.archived_at} /></Row>}
         {run.reason && <Row label="Last reason">{plainReason(run.reason)}</Row>}
       </dl>
     </Section>

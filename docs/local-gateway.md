@@ -283,10 +283,11 @@ from the same retained-history snapshot as the page, including empty pages;
 `has_more:false` means the retained boundary, not necessarily the run's start.
 
 Line count is not the only bound. Each request also limits raw disk reads,
-decoded bytes and events, elapsed time, cast segments, directory discovery,
-and concurrent readers; searches have their own lower concurrency cap. A page
-or search may therefore return fewer than the requested number of lines,
-including none, with `has_more:true`. Continuing uses an older-page request
+decoded bytes and events, decoding time, cast segments per page and concurrent
+readers; searches have their own lower concurrency cap. Directory discovery
+streams with bounded memory and caller cancellation, not a total-history
+entry cutoff. A page or search may therefore return fewer than the requested
+number of lines, including none, with `has_more:true`. Continuing uses an older-page request
 with `next_cursor`; the live attach does not do this work. The dashboard's
 integrated upward scroller starts at the newest page and prefetches older
 windows near the loaded edge, automatically continuing empty scan windows.
@@ -495,13 +496,10 @@ and keeps its data, restorable any time: only a run in a final disposition
 archiving any other status returns `-32002` naming the run's real status.
 Archiving an already-archived run is a no-op that leaves its timestamp
 unchanged; calling it with `"archived":false` restores the run. The response
-is a `RunResult` whose `run.archived_at` and `run.deletes_at` are set while
-archived and absent otherwise; `deletes_at` is the date the server's
-archive sweep deletes the run, on its first boot or hourly sweep at or
-after that date (see
-[failure-handling.md](failure-handling.md#disk-pressure)).
-Both calls publish a `run.archived` event carrying the same two fields -
-null on both means the run was restored - and a matching timeline note.
+is a `RunResult` with `run.archived_at` set while archived and absent otherwise.
+Archiving does not schedule deletion; the obsolete `deletes_at` field is no
+longer emitted. Both calls publish `run.archived` with `archived_at` (null on
+restore) and a matching timeline note. Explicit Delete remains separate.
 
 `mission.archive`, `mission.unarchive` and `mission.delete` accept
 `{"mission_id":"..."}`. Archive and unarchive return `{"mission":Mission}`
@@ -879,18 +877,15 @@ full object id, has to resolve against that run's own object database and no
 other, and has to name a tree: a commit id would otherwise peel to its tree
 and render a diff the timeline never offered.
 
-Snapshot sidecars retain a target of 512 MiB per run, the newest 1,024 changed
-trees and seven days of history, protecting the latest/base needed for a valid
-current interval. Consecutive unchanged trees do not add duplicate refs;
-a changed snapshot reverting to an earlier tree refreshes that tree's recency.
-Cleanup touches only the sidecar's snapshot refs and objects, never source
-branches or durable evidence refs. Legacy sidecars migrate their last tip
-even on a range read without a new capture; uncatalogued older objects may
-expire. A range read and evidence import hold the snapshot lock against
-pruning. Published interval refs change atomically, and two bounded in-flight
-pins protect delivered endpoints across ref or event publication failures
-and evidence-triggered GC. Watch snapshots and cumulative-diff staging bound
-visible input at 128 MiB (evidence keeps its stricter 64 MiB input bound).
+Snapshot sidecars preserve captured trees until explicit run deletion, even
+after checkout cleanup. Consecutive unchanged trees do not add duplicate refs.
+Range reads and evidence imports share the snapshot lock with explicit
+deletion. Published interval refs change atomically, and in-flight pins protect
+delivered endpoints across ref or event-publication failures.
+Watch snapshots and cumulative-diff staging bound visible input at 128 MiB
+(evidence keeps its 64 MiB input bound); these limits do not evict history.
+A cumulative response after checkout cleanup is the last recorded snapshot,
+not a live filesystem read, and carries `recorded:true`.
 
 `run.diff` may include `history_gap:true` and a bounded, path-free
 `snapshot_error` when an interval could not be recorded. The next successful

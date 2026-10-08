@@ -4,8 +4,8 @@
 // turns file-change quiescence into run.diff and git.branch events.
 //
 // It is policy-free glue around the system git binary: checkout GC policy
-// lives in the scheduler (gitengine only provides RemoveRunCheckout), and
-// branches are never deleted - the branch is the artifact.
+// lives in the scheduler. RemoveRunCheckout preserves durable diff history;
+// RemoveRunHistory is explicit deletion. Source branches are never deleted.
 package gitengine
 
 import (
@@ -50,10 +50,11 @@ var (
 // Config configures an Engine. ReposDir and CheckoutsDir are required; the
 // rest defaults sensibly.
 type Config struct {
-	ReposDir          string     // <data>/repos
-	CheckoutsDir      string     // <data>/checkouts
-	GitPath           string     // "git"
-	Bus               events.Bus // run.diff + git.branch; may be nil in tests
+	ReposDir          string          // <data>/repos
+	CheckoutsDir      string          // <data>/checkouts
+	GitPath           string          // "git"
+	Bus               events.Bus      // run.diff + git.branch; may be nil in tests
+	EventLog          events.EventLog // durable run.diff roots for legacy checkout detachment
 	OnBranchPublished func(run domain.RunID, commit string, at time.Time)
 	QuietPeriod       time.Duration // default 2s
 	MinInterval       time.Duration // default 10s

@@ -66,6 +66,17 @@ func TestLegacyReplayUnderDescriptorBudget(t *testing.T) {
 					}
 					checkpoint.Version, checkpoint.Epoch, checkpoint.Sequence = 1, "", 0
 					checkpoint.CastOutputBytes = 0
+					segments, err := collectFullCastSegments(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					checkpoint.Segments = nil
+					for _, segment := range segments {
+						checkpoint.Segments = append(checkpoint.Segments, checkpointSegment{
+							Path: filepath.Base(segment.path), Incarnation: segment.incarnation,
+							FileBytes: segment.fileBytes, OutputBytes: segment.outputBytes,
+						})
+					}
 					if err = writeCheckpointFile(checkpointPath(path), checkpoint); err != nil {
 						t.Fatal(err)
 					}
@@ -87,29 +98,29 @@ func TestLegacyReplayUnderDescriptorBudget(t *testing.T) {
 			}
 			data, readErr := io.ReadAll(window.Reader)
 			closeErr := window.Reader.Close()
-			want := append(bytes.Repeat([]byte("old\r\n"), castRetainedSegments-1), []byte("LATEST")...)
+			want := append(bytes.Repeat([]byte("old\r\n"), archiveCount), []byte("LATEST")...)
 			if mode == "stale" {
 				want = append(want, "-suffix"...)
 				if window.Position.Epoch != original.Epoch || window.Position.Sequence != original.Sequence+TerminalSequence(len("-suffix")) {
 					t.Fatalf("stale repair lost absolute position: %+v, original %+v", window.Position, original)
 				}
 			}
-			if readErr != nil || closeErr != nil || !bytes.Equal(data, want) || window.Bytes != len(want) || !window.TruncatedBefore || !window.Complete {
-				t.Fatalf("retained replay = %q, %+v, %v, %v", data, window, readErr, closeErr)
+			if readErr != nil || closeErr != nil || !bytes.Equal(data, want) || window.Bytes != len(want) || window.TruncatedBefore || !window.Complete {
+				t.Fatalf("complete replay = %q, %+v, %v, %v", data, window, readErr, closeErr)
 			}
 			checkpoint, err := decodeCheckpoint(checkpointPath(path))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if checkpoint.CastOutputBytes != uint64(archiveCount*len("old\r\n")+len(want)-(castRetainedSegments-1)*len("old\r\n")) {
+			if checkpoint.CastOutputBytes != uint64(len(want)) {
 				t.Fatalf("absolute output boundary = %d", checkpoint.CastOutputBytes)
 			}
 			if !bytes.Contains(checkpoint.Data, []byte("LATEST")) || mode == "stale" && !bytes.Contains(checkpoint.Data, []byte("LATEST-suffix")) {
 				t.Fatalf("latest compact screen lost: %q", checkpoint.Data)
 			}
 			segments, err := priorCastPaths(path)
-			if err != nil || len(segments) != castRetainedSegments-1 {
-				t.Fatalf("retained archives = %d, %v", len(segments), err)
+			if err != nil || len(segments) != archiveCount {
+				t.Fatalf("preserved archives = %d, %v", len(segments), err)
 			}
 		})
 	}

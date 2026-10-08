@@ -657,7 +657,7 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 		t.Fatalf("write first shell input: %v", err)
 	}
 	p.waitForOutput(t, "shell-interactive")
-	if _, err := p.master.Write([]byte("printf 'shell-%s\\n' replacement\n")); err != nil {
+	if _, err := p.master.Write([]byte("trap 'printf \"shell-%s\\n\" hup; exit 129' HUP; printf 'shell-%s\\n' replacement; while :; do IFS= read -r line; done\n")); err != nil {
 		t.Fatalf("write replacement shell input: %v", err)
 	}
 	p.waitForOutput(t, "shell-replacement")
@@ -665,16 +665,21 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal ready login shell: %v", err)
 	}
+	p.waitForOutput(t, "shell-hup")
 	select {
 	case err := <-p.done:
-		if err == nil {
-			t.Fatal("supervisor exited successfully after TERM")
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128+int(syscall.SIGTERM) {
+			t.Fatalf("supervisor TERM exit = %v, want 143", err)
 		}
 	case <-time.After(waitTimeout):
 		t.Fatal("supervisor did not exit after TERM reached login shell")
 	}
 	time.Sleep(100 * time.Millisecond)
 	p.drainOutput()
+	if got := strings.Count(p.output.String(), "shell-hup"); got != 1 {
+		t.Fatalf("login shell HUP observations = %d, output = %q", got, p.output.String())
+	}
 	if got := strings.Count(p.output.String(), "[aether] harness exited with code"); got != 1 {
 		t.Fatalf("harness status count = %d, output = %q", got, p.output.String())
 	}

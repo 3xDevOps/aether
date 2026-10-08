@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -267,23 +266,14 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 		if resultErr == nil {
 			return
 		}
-		// A cancelled add or a file grown after preflight must not accumulate
-		// unreferenced blobs forever. The latest accepted trees have refs.
-		cleanup, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
-		defer cancel()
+		// Discard the failed staging index, but never prune objects: legacy
+		// recorded intervals may predate the durable per-tree catalog.
 		if removeErr := os.Remove(index); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			resultErr = errors.Join(resultErr, removeErr)
-			return
 		}
-		_, _, pruneErr := e.gitBareBounded(cleanup, store, 0, "prune", "--expire=now")
-		resultErr = errors.Join(resultErr, pruneErr)
 	}()
-	// The store is single-writer: one watch goroutine stages into it, and
-	// RemoveRunCheckout stops that watch before deleting the store. A lock
-	// file here is therefore stale by construction - left by a git killed at
-	// the snapshot timeout, or by a server crash - and leaving it would fail
-	// every later staging with "Unable to create index.lock: File exists",
-	// killing this run's per-interval diffs until checkout GC.
+	// Every writer holds snapshotLock, so an index lock here is stale:
+	// left by a git killed at the snapshot timeout or by a server crash.
 	if rmErr := os.Remove(index + ".lock"); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return "", fmt.Errorf("gitengine: clear stale index lock for run %s: %w", run, rmErr)
 	}
@@ -303,7 +293,7 @@ func (e *Engine) writeSnapshotTreeLocked(ctx context.Context, run domain.RunID, 
 	if err = e.checkSnapshotBounds(ctx, checkout, index, tree, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
 		return "", err
 	}
-	if err = e.retainSnapshot(ctx, store, tree, defaultSnapshotPolicy); err != nil {
+	if err = e.retainSnapshot(ctx, store, tree); err != nil {
 		return "", err
 	}
 	return tree, nil
@@ -390,17 +380,17 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 			}
 			previous = strings.TrimSpace(previous)
 		}
-		// Install both pins before Publish: even a delivered event followed
-		// by a ref-lock failure survives later staging and scoped GC.
+		// Install both pins before Publish so a delivered event followed by
+		// a ref-lock failure retries exactly the same interval after restart.
 		transaction := "start\nupdate " + snapshotInflightParentRef + " " + previous +
 			"\nupdate " + snapshotInflightTreeRef + " " + tree + "\nprepare\ncommit\n"
-		if _, err := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); err != nil {
-			return "", err
+		if _, pinErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); pinErr != nil {
+			return "", pinErr
 		}
 	}
 	if publish != nil {
-		if err := publish(tree); err != nil {
-			return "", err
+		if publishErr := publish(tree); publishErr != nil {
+			return "", publishErr
 		}
 	}
 	// A crash or ref-lock failure must leave the complete old interval, not
@@ -409,48 +399,39 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 	transaction := "start\n"
 	if previous != "" && previous != tree {
 		transaction += "update refs/aether/previous " + previous + "\n"
-		// Pressure may have removed either endpoint's history entry while
-		// the published/inflight pins kept its objects alive. Re-advertising
-		// that interval must hand both endpoints back to the retained catalog
-		// before releasing those pins, or the very next publication can make
-		// this newly delivered interval unreadable. Existing recency is not
-		// refreshed, and unchanged captures never enter this branch.
-		listing, _, listErr := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(objectname)", snapshotHistoryRoot, "refs/aether/base")
-		if listErr != nil {
-			return "", listErr
-		}
-		retained := strings.Fields(listing)
-		stamp := defaultSnapshotPolicy.now().UnixNano()
+		// Older stores may have retained these endpoints only through the
+		// interval pins. Give both durable refs before releasing the pins.
 		for _, endpoint := range []string{previous, tree} {
-			if !slices.Contains(retained, endpoint) {
-				ref := fmt.Sprintf("%s%019d-%s", snapshotHistoryRoot, stamp, endpoint)
-				transaction += "update " + ref + " " + endpoint + "\n"
-			}
+			transaction += "update " + snapshotHistoryRoot + endpoint + " " + endpoint + "\n"
 		}
 	}
 	transaction += "update " + snapshotPublishedRef + " " + tree +
 		"\ndelete " + snapshotInflightParentRef + "\ndelete " + snapshotInflightTreeRef + "\nprepare\ncommit\n"
-	if _, err := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); err != nil {
-		return "", err
+	if _, acknowledgeErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); acknowledgeErr != nil {
+		return "", acknowledgeErr
 	}
-	if err := os.Remove(filepath.Join(store, "history-gap")); err != nil {
-		return tree, err
+	if removeErr := os.Remove(filepath.Join(store, "history-gap")); removeErr != nil {
+		return tree, removeErr
 	}
 	return tree, nil
 }
 
-// removeSnapshotStore deletes a run's snapshot store. Idempotent on a
-// missing path.
-func (e *Engine) removeSnapshotStore(run domain.RunID) error {
-	lock := e.snapshotLock(run)
-	lock.Lock()
-	defer lock.Unlock()
+// RemoveRunHistory explicitly deletes only the run's diff history. It stops
+// the watcher and serializes with captures and readers; missing paths are safe.
+func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(store); err != nil {
-		return fmt.Errorf("gitengine: remove snapshot store for run %s: %w", run, err)
+	e.StopDiffWatch(run)
+	lock := e.snapshotLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
+	if removeErr := os.RemoveAll(store); removeErr != nil {
+		return fmt.Errorf("gitengine: remove snapshot store for run %s: %w", run, removeErr)
 	}
 	return nil
 }
@@ -465,18 +446,18 @@ func (e *Engine) removeSnapshotStore(run domain.RunID) error {
 // here would render diffs the timeline never offered. cat-file cannot carry
 // the existence check on its own; it exits 128 on a missing object, which
 // is indistinguishable from a real git failure.
-func (e *Engine) requireSnapshotTree(ctx context.Context, checkout, index, id string) error {
+func (e *Engine) requireSnapshotTree(ctx context.Context, store, id string) error {
 	// The ^{object} peel is what forces the lookup: rev-parse --verify on a
 	// bare full-length id echoes it back without asking the database
 	// anything, so the all-zero id would sail through.
-	if _, _, err := e.gitStaged(ctx, checkout, index, 0, "rev-parse", "--verify", "--quiet", id+"^{object}"); err != nil {
+	if _, _, err := e.gitBareBounded(ctx, store, 0, "rev-parse", "--verify", "--quiet", id+"^{object}"); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return fmt.Errorf("%w: %s", ErrSnapshotTreeMissing, id)
 		}
 		return err
 	}
-	out, _, err := e.gitStaged(ctx, checkout, index, 64, "cat-file", "-t", id)
+	out, _, err := e.gitBareBounded(ctx, store, 64, "cat-file", "-t", id)
 	if err != nil {
 		return err
 	}

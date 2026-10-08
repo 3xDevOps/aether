@@ -389,6 +389,9 @@ func (s *Scheduler) teardownRun(ctx context.Context, run domain.RunID, actor dom
 		if err := s.cfg.Git.RemoveRunCheckout(cleanupCtx, run); err != nil {
 			return fmt.Errorf("scheduler: delete run checkout: %w", err)
 		}
+		if err := s.cfg.Git.RemoveRunHistory(cleanupCtx, run); err != nil {
+			return fmt.Errorf("scheduler: delete run history: %w", err)
+		}
 		if err := s.cfg.PTY.RemoveRunTranscripts(cleanupCtx, run); err != nil {
 			return fmt.Errorf("scheduler: delete run transcripts: %w", err)
 		}

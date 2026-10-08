@@ -32,24 +32,6 @@ func startScheduler(t *testing.T, sched *Scheduler) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
-func TestStartupAndMaintenancePruneStoppedTranscripts(t *testing.T) {
-	e := newTestEnv(t, func(cfg *Config) { cfg.CheckoutTTL = -time.Second })
-	startScheduler(t, e.sched)
-	waitFor(t, "startup transcript maintenance", func() bool {
-		e.pty.mu.Lock()
-		defer e.pty.mu.Unlock()
-		return e.pty.pruneCalls == 1
-	})
-	// Exercise the same maintenance hook used by the hourly tick without
-	// introducing a second timer or waiting an hour in the regression.
-	e.sched.pruneTranscripts(t.Context())
-	e.pty.mu.Lock()
-	defer e.pty.mu.Unlock()
-	if e.pty.pruneCalls != 2 {
-		t.Fatalf("transcript maintenance calls = %d", e.pty.pruneCalls)
-	}
-}
-
 // failingActiveRunsStore fails the first recovery listing, standing in for a
 // backend failure that is not a cancellation.
 type failingActiveRunsStore struct {
@@ -652,6 +634,23 @@ func TestCheckoutGC(t *testing.T) {
 	}
 	expired := mk("old", time.Now().UTC().Add(-2*time.Hour))
 	fresh := mk("new", time.Now().UTC())
+	archivedAt := time.Now().UTC().Add(-30 * 24 * time.Hour)
+	if _, archiveErr := e.db.SetRunArchived(ctx, expired.ID, &archivedAt); archiveErr != nil {
+		t.Fatal(archiveErr)
+	}
+	historyDir := e.git.checkoutPath(expired.ID) + ".diffsnap"
+	if mkdirErr := os.MkdirAll(historyDir, 0o700); mkdirErr != nil {
+		t.Fatal(mkdirErr)
+	}
+	historyPaths := []string{
+		e.pty.ItemLogPath(expired.ID),
+		filepath.Join(historyDir, "recorded-range"),
+	}
+	for _, path := range historyPaths {
+		if writeErr := os.WriteFile(path, []byte("original user history"), 0o600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
 
 	e.sched.sweepCheckouts(ctx)
 
@@ -674,6 +673,26 @@ func TestCheckoutGC(t *testing.T) {
 	}
 	if r2.Worktree == "" {
 		t.Fatal("fresh run worktree cleared prematurely")
+	}
+	if r.ArchivedAt == nil || !r.ArchivedAt.Equal(archivedAt) {
+		t.Fatalf("checkout cleanup changed the archived record: %+v", r)
+	}
+	for _, path := range historyPaths {
+		content, readErr := os.ReadFile(path)
+		if readErr != nil || string(content) != "original user history" {
+			t.Fatalf("checkout cleanup lost history %s: %q, %v", path, content, readErr)
+		}
+	}
+	if deleteErr := e.sched.DeleteRun(ctx, expired.ID, e.member.ID); deleteErr != nil {
+		t.Fatal(deleteErr)
+	}
+	for _, path := range historyPaths {
+		if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("explicit deletion left history %s: %v", path, statErr)
+		}
+	}
+	if _, lookupErr := e.db.GetRun(ctx, expired.ID); !errors.Is(lookupErr, store.ErrNotFound) {
+		t.Fatalf("explicit deletion left run record: %v", lookupErr)
 	}
 }
 

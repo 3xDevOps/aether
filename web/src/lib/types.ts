@@ -45,8 +45,6 @@ export interface Run {
   protected?: boolean
   /** Set while the run is hidden from the board; absent means not archived. */
   archived_at?: string
-  /** When the deletion sweep will remove this run; absent means not archived. */
-  deletes_at?: string
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -694,10 +692,9 @@ export interface RunProtectedPayload {
 export interface RunControllerPayload {
   member_id: string
 }
-/** Both null means the run was restored. */
+/** Null means the run was restored. */
 export interface RunArchivedPayload {
   archived_at: string | null
-  deletes_at: string | null
 }
 
 export type RunMessageKind = 'message' | 'question' | 'reply' | 'report'
@@ -854,6 +851,7 @@ export interface RunPatch {
   base: string
   patch: string
   truncated: boolean
+  recorded?: boolean
 }
 
 /** One immediate child returned by files.tree. */

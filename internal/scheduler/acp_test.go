@@ -669,7 +669,7 @@ func TestACPSubscribeReplaysAtMostTheWindow(t *testing.T) {
 	}
 }
 
-func TestACPHistoryExpiryAndLatestSubscribe(t *testing.T) {
+func TestACPHistoryKeepsOldItemsAndBoundsSubscribe(t *testing.T) {
 	e, _ := newACPEnv(t)
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
@@ -682,22 +682,25 @@ func TestACPHistoryExpiryAndLatestSubscribe(t *testing.T) {
 	}
 	defer func() { _ = log.Close() }()
 	payload := strings.Repeat("x", 64<<10)
-	for range acphost.MaxRunBytes/len(payload) + 16 {
+	for range (64<<20)/len(payload) + 16 {
 		if appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: payload}}); appendErr != nil {
 			t.Fatal(appendErr)
 		}
 	}
 	last := log.LastSeq()
+	if closeErr := log.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
 	page, err := e.sched.ACPHistory(run.ID, 0, 2)
-	if err != nil || !page.TruncatedBefore || page.OldestSeq <= 1 || len(page.Items) != 2 || page.Items[1].Seq != last {
+	if err != nil || page.TruncatedBefore || page.OldestSeq != 1 || len(page.Items) != 2 || page.Items[1].Seq != last {
 		t.Fatalf("latest history: %+v, %v", page, err)
 	}
-	expired, err := e.sched.ACPHistory(run.ID, page.OldestSeq, 2)
-	if err != nil || !expired.TruncatedBefore || expired.OldestSeq != page.OldestSeq || len(expired.Items) != 0 {
-		t.Fatalf("expired history: %+v, %v", expired, err)
+	earliest, err := e.sched.ACPHistory(run.ID, 3, 2)
+	if err != nil || earliest.TruncatedBefore || earliest.OldestSeq != 1 || len(earliest.Items) != 2 || earliest.Items[0].Seq != 1 || earliest.Items[1].Seq != 2 {
+		t.Fatalf("earliest history: %+v, %v", earliest, err)
 	}
-	if _, itemErr := e.sched.ACPItem(run.ID, 1); !errors.Is(itemErr, acphost.ErrHistoryExpired) {
-		t.Fatalf("expired full item: %v", itemErr)
+	if item, itemErr := e.sched.ACPItem(run.ID, 1); itemErr != nil || item.Seq != 1 {
+		t.Fatalf("earliest full item: seq=%d err=%v", item.Seq, itemErr)
 	}
 	if _, itemErr := e.sched.ACPItem(run.ID, last+1); !errors.Is(itemErr, ErrACPItemNotFound) {
 		t.Fatalf("missing full item: %v", itemErr)
@@ -711,7 +714,7 @@ func TestACPHistoryExpiryAndLatestSubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stale.Cancel()
-	if !stale.Reset || !stale.TruncatedBefore || stale.Seq != last || len(stale.Replay) != acphost.ReplayWindow || stale.OldestSeq != stale.Replay[0].Seq {
+	if stale.Reset || stale.TruncatedBefore || stale.Seq != last || len(stale.Replay) != acphost.ReplayWindow || stale.OldestSeq != stale.Replay[0].Seq {
 		t.Fatalf("stale subscribe: reset=%v truncated=%v seq=%d oldest=%d items=%d", stale.Reset, stale.TruncatedBefore, stale.Seq, stale.OldestSeq, len(stale.Replay))
 	}
 	fresh, err := e.sched.ACPSubscribe(run.ID, 0)
@@ -719,8 +722,63 @@ func TestACPHistoryExpiryAndLatestSubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fresh.Cancel()
-	if fresh.Reset || !fresh.TruncatedBefore || fresh.OldestSeq != stale.OldestSeq {
+	if fresh.Reset || fresh.TruncatedBefore || fresh.OldestSeq != stale.OldestSeq {
 		t.Fatalf("fresh subscribe: reset=%v truncated=%v oldest=%d", fresh.Reset, fresh.TruncatedBefore, fresh.OldestSeq)
+	}
+}
+
+func TestACPStoppedHistoryRefreshesAfterAppendAndDeletion(t *testing.T) {
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if stopErr := e.sched.acp.stopAdapter(t.Context(), run.ID); stopErr != nil {
+		t.Fatal(stopErr)
+	}
+	path := e.pty.ItemLogPath(run.ID)
+	writer, err := acphost.OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	first := acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "first"}}
+	if appendErr := writer.Append(&first); appendErr != nil {
+		t.Fatal(appendErr)
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	page, err := e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Seq != first.Seq {
+		t.Fatalf("initial stopped history: %+v, %v", page, err)
+	}
+	writer, err = acphost.OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "next"}}
+	if appendErr := writer.Append(&next); appendErr != nil {
+		t.Fatal(appendErr)
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	item, err := e.sched.ACPItem(run.ID, next.Seq)
+	if err != nil || item.Notice == nil || item.Notice.Title != "next" {
+		t.Fatalf("appended stopped item: %+v, %v", item, err)
+	}
+	page, err = e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Seq != next.Seq {
+		t.Fatalf("refreshed stopped history: %+v, %v", page, err)
+	}
+	if removeErr := os.Remove(path); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	page, err = e.sched.ACPHistory(run.ID, 0, 1)
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("deleted history served from cache: %+v, %v", page, err)
+	}
+	if _, itemErr := e.sched.ACPItem(run.ID, next.Seq); !errors.Is(itemErr, ErrACPItemNotFound) {
+		t.Fatalf("deleted full item served from cache: %v", itemErr)
 	}
 }
 

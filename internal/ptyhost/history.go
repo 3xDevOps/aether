@@ -1,6 +1,7 @@
 package ptyhost
 
 import (
+	"container/heap"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -33,19 +34,16 @@ const (
 	maxHistoryDecodeBytes   = 3 << 19
 	// Allow bounded headroom for slow disks and race instrumentation.
 	// Page and search share this budget.
-	maxHistoryPageTime         = 1 * time.Second
-	maxHistoryDiscoveryTime    = 250 * time.Millisecond
-	maxHistoryDirectoryEntries = 4096
-	historyReverseBlock        = 64 << 10
-	maxHistorySegmentsPerPage  = 128
+	maxHistoryPageTime        = 1 * time.Second
+	historyReverseBlock       = 64 << 10
+	maxHistorySegmentsPerPage = 128
 )
 
 var (
-	ErrInvalidHistoryCursor  = errors.New("ptyhost: invalid terminal history cursor")
-	ErrHistoryCursorExpired  = errors.New("ptyhost: terminal history cursor expired; retained history no longer includes this page")
-	ErrHistoryQueryTooLong   = errors.New("ptyhost: terminal history query is too long")
-	ErrHistoryDiscoveryLimit = errors.New("ptyhost: terminal history discovery limit exceeded")
-	errHistoryWorkDeadline   = errors.New("ptyhost: terminal history work deadline reached")
+	ErrInvalidHistoryCursor = errors.New("ptyhost: invalid terminal history cursor")
+	ErrHistoryCursorExpired = errors.New("ptyhost: terminal history cursor expired; retained history no longer includes this page")
+	ErrHistoryQueryTooLong  = errors.New("ptyhost: terminal history query is too long")
+	errHistoryWorkDeadline  = errors.New("ptyhost: terminal history work deadline reached")
 
 	// Search work is bounded per request and globally. Waiting callers stay
 	// cancelable through their request context.
@@ -312,6 +310,24 @@ type historyDiscoveredSegment struct {
 	order int64
 }
 
+// Keep only the nearest predecessors needed by one bounded page, regardless
+// of how many recordings or unrelated files share the transcript directory.
+type historyDiscoveryHeap []historyDiscoveredSegment
+
+func (h historyDiscoveryHeap) Len() int { return len(h) }
+func (h historyDiscoveryHeap) Less(i, j int) bool {
+	return historySegmentOlder(h[i].order, h[i].path, h[j].order, h[j].path)
+}
+func (h historyDiscoveryHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *historyDiscoveryHeap) Push(value any) {
+	*h = append(*h, value.(historyDiscoveredSegment))
+}
+func (h *historyDiscoveryHeap) Pop() any {
+	last := (*h)[len(*h)-1]
+	*h = (*h)[:len(*h)-1]
+	return last
+}
+
 type historySegmentDiscovery struct {
 	initialized bool
 	paths       []string
@@ -331,46 +347,31 @@ func (d *historySegmentDiscovery) initialize(ctx context.Context, work *historyW
 		return err
 	}
 	defer func() { _ = dir.Close() }()
-	deadline := time.Now().Add(maxHistoryDiscoveryTime)
+	// Directory traversal has bounded memory and is caller-cancellable, not
+	// capped by total history size. Its time is separate from output decoding:
+	// otherwise a large directory could return the same deadline cursor forever.
+	started := time.Now()
+	if work != nil {
+		defer func() { work.at = work.at.Add(time.Since(started)) }()
+		stopped, err := work.check(ctx)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			return errHistoryWorkDeadline
+		}
+	}
 	before, bounded := historySegmentOrder(rootPath, filepath.Base(currentPath))
 	if filepath.Base(currentPath) != filepath.Base(rootPath) && !bounded {
 		return ErrInvalidHistoryCursor
 	}
 	currentStart := currentCastStart(rootPath)
-	discovered := make([]historyDiscoveredSegment, 0, 16)
-	entriesSeen := 0
-	legacyHeaders := 0
+	discovered := make(historyDiscoveryHeap, 0, maxHistorySegmentsPerPage+1)
 	for {
-		if work != nil {
-			stopped, err := work.check(ctx)
-			if err != nil {
-				return err
-			}
-			if stopped {
-				return errHistoryWorkDeadline
-			}
-		} else if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if time.Now().After(deadline) {
-			return ErrHistoryDiscoveryLimit
-		}
-		batch := 64
-		if remaining := maxHistoryDirectoryEntries - entriesSeen; remaining < batch {
-			batch = remaining
-		}
-		if batch == 0 {
-			entries, readErr := dir.ReadDir(1)
-			if len(entries) != 0 || readErr == nil {
-				return ErrHistoryDiscoveryLimit
-			}
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return readErr
-		}
-		entries, readErr := dir.ReadDir(batch)
-		entriesSeen += len(entries)
+		entries, readErr := dir.ReadDir(64)
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
@@ -380,25 +381,29 @@ func (d *historySegmentDiscovery) initialize(ctx context.Context, work *historyW
 			}
 			order, stable := historySegmentIncarnation(rootPath, entry.Name())
 			if !stable {
-				rotation, legacy := legacyCastSegmentIncarnation(rootPath, entry.Name())
+				var legacy bool
+				order, legacy = legacyCastSegmentIncarnation(rootPath, entry.Name())
 				if !legacy {
 					continue
 				}
-				legacyHeaders++
-				if legacyHeaders > maxLegacyCastHeaderInspections {
-					return ErrHistoryDiscoveryLimit
-				}
-				full := filepath.Join(filepath.Dir(rootPath), entry.Name())
-				if !readableLegacyHistoryArchive(full, rotation, currentStart) {
-					continue
-				}
-				order = rotation
 			}
 			full := filepath.Join(filepath.Dir(rootPath), entry.Name())
 			if bounded && !historySegmentOlder(order, full, before, currentPath) {
 				continue
 			}
-			discovered = append(discovered, historyDiscoveredSegment{path: full, order: order})
+			candidate := historyDiscoveredSegment{path: full, order: order}
+			if len(discovered) == cap(discovered) && !historySegmentOlder(discovered[0].order, discovered[0].path, order, full) {
+				continue
+			}
+			if !stable && !readableLegacyHistoryArchive(full, order, currentStart) {
+				continue
+			}
+			if len(discovered) < cap(discovered) {
+				heap.Push(&discovered, candidate)
+			} else {
+				discovered[0] = candidate
+				heap.Fix(&discovered, 0)
+			}
 		}
 		if errors.Is(readErr, io.EOF) {
 			break
@@ -415,9 +420,6 @@ func (d *historySegmentDiscovery) initialize(ctx context.Context, work *historyW
 	})
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if time.Now().After(deadline) {
-		return ErrHistoryDiscoveryLimit
 	}
 	d.paths = make([]string, len(discovered))
 	for i := range discovered {
@@ -586,10 +588,15 @@ func resolveHistoryCursor(ctx context.Context, cursor historyCursor, path string
 			}
 			return invalid()
 		}
+		// A signed cursor issued for the former current file can outlive its
+		// archive. A newer current incarnation is not a forged/replaced archive.
+		if candidate == path && segment.incarnation != cursor.Incarnation {
+			continue
+		}
 		if segment.incarnation != cursor.Incarnation || segment.stableID != cursor.SegmentID || cursor.Event > segment.fileBytes {
 			return invalid()
 		}
 		return historyPosition{event: cursor.Event, byte: cursor.Byte, scan: cursor.Scan}, segment, nil
 	}
-	return invalid()
+	return historyPosition{}, historySegment{}, ErrHistoryCursorExpired
 }

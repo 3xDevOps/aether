@@ -14,7 +14,7 @@ import (
 // restores it (false). archiveMu serializes this against Relaunch's own
 // restore so the two can never race past each other. Archiving a
 // non-Final run is refused; a no-op archive or restore publishes
-// nothing and never moves the retention timer.
+// nothing and never changes the original archive timestamp.
 func (s *Scheduler) SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error) {
 	s.archiveMu.Lock()
 	defer s.archiveMu.Unlock()
@@ -73,10 +73,10 @@ func (s *Scheduler) SetMissionArchived(ctx context.Context, mission domain.Missi
 // carrying the new state, and one human-readable timeline entry.
 func (s *Scheduler) publishArchived(ctx context.Context, run *domain.Run, actor domain.MemberID) {
 	wire := protocol.RunFromDomain(run)
-	payload := events.RunArchivedPayload{ArchivedAt: wire.ArchivedAt, DeletesAt: wire.DeletesAt}
+	payload := events.RunArchivedPayload{ArchivedAt: wire.ArchivedAt}
 	msg := "run restored from archive"
-	if wire.DeletesAt != nil {
-		msg = "run archived; deleted after " + *wire.DeletesAt
+	if wire.ArchivedAt != nil {
+		msg = "run archived"
 	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: run.WorkspaceID,

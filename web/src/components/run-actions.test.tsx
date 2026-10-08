@@ -144,13 +144,15 @@ test.each(['merged', 'abandoned', 'failed', 'interrupted'] as const)('Archive fo
   await selectMore('Archive run')
   expect(screen.queryByRole('alertdialog')).toBeNull()
   await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, true))
+  expect(api.runDelete).not.toHaveBeenCalled()
+  expect(useStore.getState().runs[record.id]).toBeDefined()
 })
 
 test('an archived run offers Restore and Reopen, not Archive', async () => {
   const record = seed({
     run: {
       status: 'merged', mode: 'tui', reason: 'closed; retained container',
-      archived_at: '2026-08-14T10:00:00Z', deletes_at: '2026-08-28T10:00:00Z',
+      archived_at: '2020-08-14T10:00:00Z',
     },
   })
   render(<RunActions run={record} />)
@@ -159,6 +161,20 @@ test('an archived run offers Restore and Reopen, not Archive', async () => {
   expect(menu.queryByRole('menuitem', { name: 'Archive run' })).toBeNull()
   fireEvent.click(menu.getByRole('menuitem', { name: 'Restore run' }))
   await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, false))
+  expect(api.runDelete).not.toHaveBeenCalled()
+})
+
+test('an old archived run is deleted only after explicit confirmation', async () => {
+  const record = seed({ run: { status: 'merged', archived_at: '2020-08-14T10:00:00Z' } })
+  render(<RunActions run={record} />)
+  await selectMore('Delete run')
+  const dialog = within(await screen.findByRole('alertdialog'))
+  expect(api.runDelete).not.toHaveBeenCalled()
+  expect(useStore.getState().runs[record.id]).toBeDefined()
+  fireEvent.click(dialog.getByRole('button', { name: 'Delete run' }))
+  await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
+  await waitFor(() => expect(useStore.getState().runs[record.id]).toBeUndefined())
+  expect(api.runArchive).not.toHaveBeenCalled()
 })
 
 test('archive follows kill permission and the run.archive capability', async () => {

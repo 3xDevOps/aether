@@ -128,7 +128,7 @@ func TestRunPatchRendersSnapshotInterval(t *testing.T) {
 		t.Errorf("half a range error = %v, want ErrInvalidObjectID", err)
 	}
 
-	// The store lives exactly as long as the checkout.
+	// Checkout cleanup preserves recorded intervals and a last-recorded view.
 	store, err := e.snapshotStorePath("run1")
 	if err != nil {
 		t.Fatal(err)
@@ -139,8 +139,21 @@ func TestRunPatchRendersSnapshotInterval(t *testing.T) {
 	if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {
 		t.Fatalf("RemoveRunCheckout: %v", err)
 	}
+	if _, err := os.Stat(store); err != nil {
+		t.Errorf("snapshot store lost during RemoveRunCheckout: %v", err)
+	}
+	if p := rangePatch(tree1, tree2); !strings.Contains(p.Text, "+second") {
+		t.Fatalf("interval lost after checkout cleanup: %+v", p)
+	}
+	whole, err = e.RunPatch(ctx, "run1", PatchRequest{})
+	if err != nil || !whole.Recorded || !strings.Contains(whole.Text, "+second") {
+		t.Fatalf("last-recorded cumulative patch: %+v, %v", whole, err)
+	}
+	if err := e.RemoveRunHistory(ctx, "run1"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
-		t.Errorf("snapshot store survived RemoveRunCheckout: %v", err)
+		t.Errorf("snapshot store survived explicit deletion: %v", err)
 	}
 }
 
