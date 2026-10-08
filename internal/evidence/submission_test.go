@@ -74,7 +74,7 @@ func TestSubmissionSourcesValidateRepeatedPrimaryTranscript(t *testing.T) {
 	if lookupErr != nil {
 		t.Fatal(lookupErr)
 	}
-	path, pathErr := svc.artifactPath(packetCaptureKey(stored))
+	path, pathErr := svc.artifactPath(StorageKey(stored))
 	if pathErr != nil {
 		t.Fatal(pathErr)
 	}

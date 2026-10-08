@@ -10,3 +10,7 @@ import "errors"
 func filesystem(string) (Usage, error) {
 	return Usage{}, errors.New("disk: filesystem usage is not supported on this platform")
 }
+
+func SameFilesystem(string, string) (bool, error) {
+	return false, errors.New("disk: filesystem identity is not supported on this platform")
+}

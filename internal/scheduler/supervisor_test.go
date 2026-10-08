@@ -6,7 +6,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
@@ -47,24 +46,31 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	p.waitForOutput(t, "resumed-up")
 	waitState("n1 exited 7")
 	p.waitForOutput(t, "[aether] harness exited with code 7")
-	if _, err := p.master.Write([]byte("printf 'fallback-%s\\n' ready\n")); err != nil {
+	// Keep each login shell in a builtin read after installing its HUP
+	// handler. A printf followed by the host's prompt/readline is not a
+	// handshake for the signal path this test is about to exercise.
+	if _, err := p.master.Write([]byte("trap 'printf \"fallback-%s\\n\" hup; exit 0' HUP; printf 'fallback-%s\\n' ready; while :; do read -r line; done\n")); err != nil {
 		t.Fatal(err)
 	}
 	p.waitForOutput(t, "fallback-ready")
 
 	swap("# n2\n")
+	p.waitForOutput(t, "fallback-hup")
 	waitState("n2 started")
-	if _, err := p.master.Write([]byte("printf 'shell-%s\\n' ok\n")); err != nil {
+	if _, err := p.master.Write([]byte("trap 'printf \"shell-%s\\n\" hup; exit 0' HUP; printf 'shell-%s\\n' ok; while :; do read -r line; done\n")); err != nil {
 		t.Fatal(err)
 	}
 	p.waitForOutput(t, "shell-ok")
 
-	swap("# n3\ntrap '' TERM; printf 'stubborn-%s\\n' up; while :; do sleep 1; done\n")
+	// Refuse TERM, but acknowledge it so the force signal cannot race the
+	// first request. A builtin read also leaves no sleeping grandchild.
+	swap("# n3\ntrap 'printf \"stubborn-%s\\n\" term' TERM; printf 'stubborn-%s\\n' up; while :; do read -r line; done\n")
+	p.waitForOutput(t, "shell-hup")
 	p.waitForOutput(t, "stubborn-up")
 	swap("# n4\n")
-	time.Sleep(200 * time.Millisecond)
-	if got, _ := os.ReadFile(state); strings.HasPrefix(string(got), "n4") {
-		t.Fatal("a child that ignores SIGTERM was replaced without a second SIGALRM")
+	p.waitForOutput(t, "stubborn-term")
+	if got, err := os.ReadFile(state); err != nil || strings.TrimSpace(string(got)) != "n3 started" {
+		t.Fatalf("a child that ignores SIGTERM was replaced without a second SIGALRM: state = %q, err = %v", got, err)
 	}
 	if err := p.cmd.Process.Signal(syscall.SIGALRM); err != nil {
 		t.Fatal(err)
@@ -86,16 +92,29 @@ func TestSupervisorIgnoresServedSwap(t *testing.T) {
 		_ = p.master.Close()
 	}()
 	p.waitForOutput(t, "harness-ready")
-	if err := os.WriteFile(next, []byte("# n1\necho up >> "+shellquote.QuoteAlways(starts)+"; while :; do read -r line; done\n"), 0o644); err != nil {
+	body := "trap 'exit 8' TERM; echo up >> " + shellquote.QuoteAlways(starts) + "; printf 'served-%s\\n' ready; IFS= read -r line; printf 'served-input:%s\\n' \"$line\"; exit 7\n"
+	if err := os.WriteFile(next, []byte("# n1\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		if err := p.cmd.Process.Signal(syscall.SIGALRM); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(300 * time.Millisecond)
+	if err := p.cmd.Process.Signal(syscall.SIGALRM); err != nil {
+		t.Fatal(err)
 	}
+	p.waitForOutput(t, "served-ready")
+	if err := p.cmd.Process.Signal(syscall.SIGALRM); err != nil {
+		t.Fatal(err)
+	}
+	// Let the same child finish through its PTY input. Observing its exit
+	// from the supervisor ensures the stale signal was handled; elapsed
+	// time alone cannot establish that on a busy host.
+	if _, err := p.master.Write([]byte("finish\n")); err != nil {
+		t.Fatal(err)
+	}
+	p.waitForOutput(t, "served-input:finish")
+	p.waitForOutput(t, "[aether] harness exited with code 7")
 	if got, _ := os.ReadFile(starts); string(got) != "up\n" {
 		t.Fatalf("a SIGALRM for a served request restarted the child: starts = %q", got)
+	}
+	if got, _ := os.ReadFile(state); strings.TrimSpace(string(got)) != "n1 exited 7" {
+		t.Fatalf("state after the served child finished = %q", got)
 	}
 }

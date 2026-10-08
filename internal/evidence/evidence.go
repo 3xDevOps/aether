@@ -592,7 +592,7 @@ func (s *Service) lookupPacketByOrigin(ctx context.Context, origin store.Evidenc
 	return s.store.GetEvidencePacketByIdempotency(ctx, creator, run, key)
 }
 
-func packetCaptureKey(p *store.EvidencePacket) string {
+func StorageKey(p *store.EvidencePacket) string {
 	if p == nil {
 		return ""
 	}

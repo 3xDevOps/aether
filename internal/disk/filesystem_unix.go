@@ -4,6 +4,7 @@ package disk
 
 import (
 	"fmt"
+	"os"
 	"syscall"
 )
 
@@ -22,4 +23,16 @@ func filesystem(path string) (Usage, error) {
 		UsedBytes:  (fs.Blocks - fs.Bfree) * block,
 		TotalBytes: fs.Blocks * block,
 	}, nil
+}
+
+func SameFilesystem(a, b string) (bool, error) {
+	first, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	second, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return first.Sys().(*syscall.Stat_t).Dev == second.Sys().(*syscall.Stat_t).Dev, nil
 }

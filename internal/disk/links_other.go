@@ -1,15 +1,23 @@
-//go:build !linux
+//go:build !unix && !windows
 
 package disk
 
-import "io/fs"
+import (
+	"io/fs"
+	"os"
+)
 
-// seen has no way to recognise a hardlink off linux, so every pathname
-// counts and a checkout's object files are charged twice. The server ships
-// for linux; this exists so the package builds - and over-reports rather
-// than lying about which tree holds what - wherever the tooling runs.
-type seen struct{}
+// Platforms without a public indexed file identity use the portable comparison.
+type seen struct{ files []fs.FileInfo }
 
-func newSeen() seen { return seen{} }
+func newSeen(_ *os.Root) seen { return seen{} }
 
-func (seen) claim(fs.FileInfo) bool { return true }
+func (s *seen) claim(_ string, info fs.FileInfo) (bool, error) {
+	for _, previous := range s.files {
+		if os.SameFile(previous, info) {
+			return false, nil
+		}
+	}
+	s.files = append(s.files, info)
+	return true, nil
+}

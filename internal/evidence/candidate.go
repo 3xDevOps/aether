@@ -87,7 +87,7 @@ func (s *Service) WithCandidateSource(ctx context.Context, workspace domain.Work
 		}
 	}
 
-	callbackErr, closeErr := invokeCandidateSource(preserve, packet, packetCaptureKey(packet), transcript)
+	callbackErr, closeErr := invokeCandidateSource(preserve, packet, StorageKey(packet), transcript)
 	if callbackErr != nil {
 		return fmt.Errorf("evidence: preserve candidate source: %w", callbackErr)
 	}
@@ -121,7 +121,7 @@ func invokeCandidateSource(preserve func(*store.EvidencePacket, string, io.ReadC
 }
 
 func (s *Service) openCandidateTranscript(packet *store.EvidencePacket) (io.ReadCloser, error) {
-	path, err := s.artifactPath(packetCaptureKey(packet))
+	path, err := s.artifactPath(StorageKey(packet))
 	if err != nil {
 		return nil, err
 	}

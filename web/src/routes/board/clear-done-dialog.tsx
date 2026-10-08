@@ -102,7 +102,8 @@ export function ReleaseFinishedConfirm({
             ) : (
               <>
                 Their retained containers will be removed and the runs cannot be reopened.
-                Run records and history remain visible; this does not archive or delete them.
+                Checkouts, homes, repositories and history follow their existing retention rules;
+                this does not delete all run data or archive the runs.
               </>
             )}
           </DialogDescription>

@@ -1,6 +1,7 @@
 // Team read models are read whole on connect, reconnect or wake; between those,
 // `applyEvent` in `store/sync.ts` keeps them current.
 
+import { dequal } from 'dequal'
 import { useEffect, useRef } from 'react'
 import { api, type Api } from '@/lib/api'
 import { onWake } from '@/lib/stream'
@@ -38,7 +39,7 @@ export function focusedWorkspace(state: RootState): string {
 export async function refreshTeam(store: RootStore, client: Api = api): Promise<void> {
   await Promise.all([
     client.presenceRoster().then(store.getState().setPresence).catch(ignore),
-    client.disk().then(rememberDisk).catch(ignore),
+    client.disk().then(rememberDisk).catch(rememberDiskError),
     refreshInbox(store, client),
     ...Object.keys(store.getState().workspaces).map((id) =>
       client.budgetGet(id).then(store.getState().setBudget).catch(ignore),
@@ -75,25 +76,18 @@ export async function heartbeat(store: RootStore, client: Api = api): Promise<vo
   await client.presenceHeartbeat(workspaceID).catch(ignore)
 }
 
-/** Compares every field: comparing totals alone would pin a stale breakdown in the tooltip. */
-function sameDisk(a: DiskUsage | undefined, b: DiskUsage): boolean {
-  return (
-    a !== undefined &&
-    a.used_bytes === b.used_bytes &&
-    a.total_bytes === b.total_bytes &&
-    a.free_bytes === b.free_bytes &&
-    a.worktree_bytes === b.worktree_bytes &&
-    a.transcript_bytes === b.transcript_bytes &&
-    a.database_bytes === b.database_bytes &&
-    a.repo_bytes === b.repo_bytes
-  )
-}
-
 /** Writes only a real change, so a quiet server does not re-render the shell every refresh. */
 function rememberDisk(disk: DiskUsage): void {
   const s = useStore.getState()
-  if (!s.info || sameDisk(s.info.disk, disk)) return
-  s.setInfo({ ...s.info, disk })
+  if (!s.info || (!s.info.diskError && dequal(s.info.disk, disk))) return
+  s.setInfo({ ...s.info, disk, diskError: undefined })
+}
+
+function rememberDiskError(error: unknown): void {
+  const s = useStore.getState()
+  const diskError = error instanceof Error ? error.message : String(error)
+  if (!s.info || s.info.diskError === diskError) return
+  s.setInfo({ ...s.info, disk: undefined, diskError })
 }
 
 /** Reads in full on every reconnect: events missed while away are not all replayed. */
@@ -116,7 +110,7 @@ export function useTeamRefresh(client: Api = api): void {
     const timer = setInterval(() => {
       void heartbeat(useStore, client)
       // Disk usage has no event; the heartbeat's pace is plenty for a gauge.
-      void client.disk().then(rememberDisk).catch(ignore)
+      void client.disk().then(rememberDisk).catch(rememberDiskError)
     }, heartbeatMs)
     return () => clearInterval(timer)
   }, [route, client])

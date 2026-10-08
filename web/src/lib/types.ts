@@ -395,6 +395,8 @@ export interface ServerInfo {
   tailnet_hostname?: string
   tailnet_identity_auth?: boolean
   disk?: DiskUsage
+  /** Client-side failure from the separate disk request. */
+  diskError?: string
 }
 
 export interface DiskUsage {
@@ -402,12 +404,46 @@ export interface DiskUsage {
   total_bytes: number
   /** What an unprivileged writer can still claim; the scheduler's floor. */
   free_bytes: number
-  /** The four directories that grow without bound. */
   worktree_bytes: number
   transcript_bytes: number
   database_bytes: number
   /** The bare workspace repos; absent on servers predating the component. */
   repo_bytes?: number
+  home_bytes?: number
+  evidence_bytes?: number
+  other_bytes?: number
+  /** Included in worktree_bytes, not an additional category. */
+  snapshot_bytes?: number
+  warnings?: string[]
+  docker?: DockerDiskUsage
+  entries?: DiskEntry[]
+  truncated?: boolean
+}
+
+/** Daemon-wide Docker accounting, including workloads outside Aether. */
+export interface DockerDiskUsage {
+  used_bytes?: number
+  total_bytes?: number
+  free_bytes?: number
+  images_bytes?: number
+  containers_bytes?: number
+  volumes_bytes?: number
+  build_cache_bytes?: number
+  /** Docker's unused classification, not Aether authorization to delete saved images. */
+  reclaimable_bytes?: number
+  shared_filesystem?: boolean
+  error?: string
+}
+
+export interface DiskEntry {
+  kind: string
+  owner_kind: 'run' | 'member' | 'workspace' | 'server'
+  owner_id?: string
+  bytes: number
+  reclaimable_bytes?: number
+  retained_until?: string
+  reason: string
+  error?: string
 }
 
 /** GET /api/v1/capabilities. Legacy remote monitors do not serve it; null

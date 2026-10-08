@@ -270,7 +270,7 @@ describe('team refresh and summary', () => {
     )
   })
 
-  it('breaks the disk gauge down into what an operator can reclaim', async () => {
+  it('breaks the disk gauge down into attributed components', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
     render(<ServerSection />)
@@ -290,6 +290,12 @@ describe('team refresh and summary', () => {
   it('takes a new breakdown even when the totals have not moved', async () => {
     const client = fakeApi()
     const stale = await client.disk()
+    const current = {
+      ...stale,
+      docker: { images_bytes: 512, error: 'Docker volume accounting unavailable' },
+      warnings: ['Evidence measurement incomplete'],
+    }
+    client.disk = vi.fn(async () => current)
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
     render(<ServerSection />)
     expect(
@@ -303,6 +309,23 @@ describe('team refresh and summary', () => {
     expect(screen.getByLabelText('Disk usage').textContent).toContain(
       'Repositories 512 MB',
     )
+    expect(useStore.getState().info?.disk).toEqual(current)
+
+    const failure = new Error('disk RPC unavailable')
+    client.disk = vi.fn(async () => { throw failure })
+    await act(async () => {
+      await refreshTeam(useStore, client)
+    })
+    expect(useStore.getState().info?.disk).toBeUndefined()
+    expect(screen.queryByRole('meter', { name: 'Disk used' })).toBeNull()
+    expect(screen.getByText(failure.message)).toBeDefined()
+
+    client.disk = vi.fn(async () => current)
+    await act(async () => {
+      await refreshTeam(useStore, client)
+    })
+    expect(useStore.getState().info?.disk).toEqual(current)
+    expect(screen.queryByText(failure.message)).toBeNull()
   })
 })
 

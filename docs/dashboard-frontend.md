@@ -2945,10 +2945,20 @@ every gateway:
   mirroring** are secondary buttons. The server-hosted dashboard omits the
   section.
 - **Server**: the server version and protocol, with **Update…** when an
-  update is waiting; the disk gauge with what Aether holds on that
-  filesystem (worktrees, transcripts, database, repositories) and the free
-  space; and, for admins, **Free retained containers…**, which opens the same
-  confirmation as the board's Finished menu for the active workspace.
+  update is waiting; data-filesystem used and available space, separate from
+  Aether's attributed worktrees, transcripts, database, repositories, homes,
+  evidence and other data. Snapshots are included in worktrees, not added
+  again. Daemon-wide Docker accounting includes non-Aether workloads and has
+  its own block; filesystem used totals are never added together. Docker's
+  unused classification is not permission to delete saved environments.
+  Missing values stay unknown, and partial-measurement warnings and Docker
+  errors remain visible. Admins can expand **Largest storage owners** for up
+  to 50 entries with ownership, bytes, retention deadlines and errors; these
+  overlap category totals and are not extra usage. **Free retained containers…**
+  opens the same admin confirmation as the board's Finished menu for the
+  active workspace. It prevents reopening those runs but does not delete
+  all run data: checkouts, homes, repositories and history retain their
+  existing lifecycle. Storage accounting adds no manual pruning controls.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you.
 
