@@ -109,6 +109,14 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     const takeControl = bobControls.getByRole('button', { name: 'Take control', exact: true })
     await expect(bobControls).toContainText(`${aliceMember.display_name} controls`)
     await expect(takeControl).toHaveAttribute('aria-disabled', 'false')
+    await expect(aliceControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
+    await expect(aliceControls.getByRole('group', { name: 'Run controller' })).toContainText(aliceMember.display_name)
+    await expect(bobControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: aliceMember.display_name })).toBeVisible()
+    const watchers = bobControls.getByRole('group', { name: 'Run watchers' })
+    for (const name of [aliceMember.display_name, bobMember.display_name]) {
+      await expect(watchers.getByText(name, { exact: true })).toBeVisible()
+      await expect(watchers.getByRole('img', { name, exact: true })).toBeVisible()
+    }
 
     for (const controls of [aliceControls, bobControls]) {
       await controls.getByRole('button', { name: 'Multiplayer', exact: true }).click()
@@ -191,6 +199,8 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await expect(takeover.getByRole('status')).toContainText('Control transfers automatically')
     await page.screenshot({ path: testInfo.outputPath('enhanced-takeover-review.png') })
     await expect(bobControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(bobControls.getByRole('group', { name: 'Run controller' }).getByRole('img', { name: bobMember.display_name })).toBeVisible()
+    await expect(bobControls.getByRole('group', { name: 'Run controller' })).toContainText(bobMember.display_name)
     await expect(aliceControls).toContainText(`${bobMember.display_name} controls`)
     await expect(aliceControls.getByRole('button', { name: 'Take control', exact: true })).toBeVisible()
     await bobControls.getByRole('button', { name: 'Release', exact: true }).click()
@@ -209,6 +219,8 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await bobPage.setViewportSize({ width: 390, height: 844 })
     await expect(bobControls.getByRole('button', { name: 'Multiplayer', exact: true })).toBeVisible()
     await expect(takeControl).toBeVisible()
+    await expect(watchers.getByText(bobMember.display_name, { exact: true })).toBeVisible()
+    await expect(watchers.getByRole('img', { name: bobMember.display_name, exact: true })).toBeVisible()
     const bounds = await bobControls.boundingBox()
     expect(bounds).not.toBeNull()
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)

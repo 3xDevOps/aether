@@ -279,10 +279,13 @@ Changes, Browser) is a segmented tab list. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
 never overlays the terminal on wide screens. Standard runs keep control in
 the terminal toolbar; Enhanced runs keep a compact **Multiplayer** strip
-below the view switch on every view. Takeover progress uses `state-failed`
-with `on-failed` text in both themes. One run-owned holder decision dialog
-sits above every sheet and dialog. Request cards use the needs-you soft fill;
-the Session column is 736px wide with no row borders.
+below the view switch on every view. Names and member avatars identify the
+controller and watchers directly in that strip. On narrow strips the watcher
+roster gets its own horizontally scrollable row; control actions stay separate.
+Takeover progress uses `state-failed` with `on-failed` text in both themes.
+One run-owned holder decision dialog sits above every sheet and dialog.
+Request cards use the needs-you soft fill; the Session column is 736px wide
+with no row borders.
 
 ## Run state and motion
 
