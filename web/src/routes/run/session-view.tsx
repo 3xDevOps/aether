@@ -148,8 +148,18 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
   const prepended = before.flat.length > 0 && flat.length > before.flat.length &&
     flat[flat.length - before.flat.length]?.key === before.flat[0]!.key
   const shift = prepended || (before.older && !older && flat.length === before.flat.length)
+  let anchor: { index: number; offset: number } | undefined
+  const handle = list.current
+  // shift anchors from the end, which also moves when live rows arrive with history.
+  if (!shift && !pinned.current && handle && before.flat.length > 0 && flat[0]?.key !== before.flat[0]?.key) {
+    const index = Math.max(Number(before.older), handle.findItemIndex(handle.scrollOffset))
+    const key = before.flat[index - Number(before.older)]?.key
+    const next = flat.findIndex((row) => row.key === key)
+    if (next >= 0) anchor = { index: next + Number(older), offset: handle.scrollOffset - handle.getItemOffset(index) }
+  }
   useLayoutEffect(() => {
     previous.current = { flat, older }
+    if (anchor) list.current?.scrollToIndex(anchor.index, { align: 'start', offset: anchor.offset })
   })
   const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)

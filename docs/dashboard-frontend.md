@@ -1435,9 +1435,10 @@ timeline over. Scrolling within 240px of the top automatically pages
 older room messages. If the loaded rows do not fill the viewport, paging
 continues until they do or history ends. Inactive views and failed reads do
 not auto-page; failures keep the server's error with **Retry**. The list
-anchors prepended rows to preserve the reader's position without shifting
-for new live rows. A closed turn's rows are derived once and kept; only the
-open turn re-derives. At most three sessions stay whole; the least recently
+anchors pure prepends from the end; when history and live rows arrive
+together, it restores the visible row's key and offset instead. A closed
+turn's rows are derived once and kept; only the open turn re-derives. At most
+three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (the run's
 appended instructions hidden under its task), `assistant` (markdown through
 `react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
