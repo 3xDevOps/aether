@@ -115,9 +115,10 @@ approval: <command>" or "Waiting for your answer" with an amber dot. When a
 turn ends without a request, the run waits for your reply: the board, the
 sidebar and the header say **Waiting for your reply** and the header's
 **Reply** focuses the composer. "Agent idle" and "No activity" are kept for
-Standard runs and for real stalls. **Show earlier** reads older items 200 at
-a time. `Esc` in an empty composer moves focus to the timeline; `Esc` again
-leaves the run.
+Standard runs and for real stalls. Scrolling near the top automatically loads
+older items 200 at a time without moving the text you are reading. A failed
+load shows the server's error with **Retry**. `Esc` in an empty composer moves
+focus to the timeline; `Esc` again leaves the run.
 
 A success or failure outcome report does not close an interactive Enhanced
 session. It shows the reported result for review, then **Done** or **Failed**

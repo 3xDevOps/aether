@@ -25,6 +25,7 @@ import { loadOlderItems } from '@/store/session-stream'
 const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
 const bottomSlack = 24
+const historySlack = 240
 const userScrollWindow = 600
 const sameMessageWindow = 120_000
 
@@ -140,9 +141,26 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
   const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
   const pinned = useRef(true)
-  const lastInput = useRef(0)
+  const lastInput = useRef(-Infinity)
   const viewport = useRef<HTMLDivElement>(null)
-  const [shift, setShift] = useState(false)
+  const previous = useRef({ flat, older })
+  const before = previous.current
+  const prepended = before.flat.length > 0 && flat.length > before.flat.length &&
+    flat[flat.length - before.flat.length]?.key === before.flat[0]!.key
+  const shift = prepended || (before.older && !older && flat.length === before.flat.length)
+  let anchor: { index: number; offset: number } | undefined
+  const handle = list.current
+  // shift anchors from the end, which also moves when live rows arrive with history.
+  if (!shift && !pinned.current && handle && before.flat.length > 0 && flat[0]?.key !== before.flat[0]?.key) {
+    const index = Math.max(Number(before.older), handle.findItemIndex(handle.scrollOffset))
+    const key = before.flat[index - Number(before.older)]?.key
+    const next = flat.findIndex((row) => row.key === key)
+    if (next >= 0) anchor = { index: next + Number(older), offset: handle.scrollOffset - handle.getItemOffset(index) }
+  }
+  useLayoutEffect(() => {
+    previous.current = { flat, older }
+    if (anchor) list.current?.scrollToIndex(anchor.index, { align: 'start', offset: anchor.offset })
+  })
   const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)
 
@@ -185,9 +203,6 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
       cancelAnimationFrame(frame)
     }
   }, [])
-  useEffect(() => {
-    if (shift) setShift(false)
-  }, [flat, shift])
 
   const live = useStore((s) => s.connection === 'live')
   useEffect(() => {
@@ -204,12 +219,20 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
 
   const loadOlder = () => {
     pinned.current = false
-    setShift(true)
     if (enhanced && session?.more) void loadOlderItems(useStore, api, run.id)
     if (olderRoom) void room.loadOlder()
   }
   const loadingOlder = roomLoading || (enhanced && Boolean(session?.olderLoading))
   const olderError = enhanced ? session?.olderError : undefined
+  const loadEarlier = () => {
+    const handle = list.current
+    if (!active || !enhanced || !older || loadingOlder || olderError || roomError || !handle || handle.viewportSize === 0) return
+    if (handle.scrollOffset <= historySlack && (!pinned.current || handle.scrollSize <= handle.viewportSize + bottomSlack)) loadOlder()
+  }
+  useEffect(() => {
+    const frame = requestAnimationFrame(loadEarlier)
+    return () => cancelAnimationFrame(frame)
+  }, [active, enhanced, older, loadingOlder, olderError, roomError, flat])
 
   const dock = enhanced && session && session.pending.length > 0 && (
     <RequestDock
@@ -277,13 +300,21 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
             // Only the person's own scrolling unpins; resizes and row measurements move the offset too.
             if (offset + handle.viewportSize >= handle.scrollSize - bottomSlack) pinned.current = true
             else if (performance.now() - lastInput.current < userScrollWindow) pinned.current = false
+            loadEarlier()
           }}
+          onResize={loadEarlier}
         >
           {(item: FlatRow | null, index: number) => item === null ? (
             <div key="older" className="mx-auto flex w-full max-w-[736px] justify-center px-4 pt-4">
-              <Button size="sm" variant="ghost" disabled={loadingOlder} onClick={loadOlder}>
-                {loadingOlder ? 'Loading…' : enhanced ? 'Show earlier' : 'Show older messages'}
-              </Button>
+              {enhanced ? (
+                <span role="status" className="flex h-7 items-center text-ui-sm text-muted">
+                  {loadingOlder ? 'Loading earlier…' : ''}
+                </span>
+              ) : (
+                <Button size="sm" variant="ghost" disabled={loadingOlder} onClick={loadOlder}>
+                  {loadingOlder ? 'Loading…' : 'Show older messages'}
+                </Button>
+              )}
             </div>
           ) : (
             <div
