@@ -63,7 +63,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       <Collapsible defaultOpen={advancedOpen}>
         <CollapsibleTrigger>
           <span className="font-medium">Advanced</span>
-          <span className="min-w-0 truncate text-muted">Server-fetched source, checkout origin, deploy keys</span>
+          <span className="min-w-0 truncate text-muted">Repository source and publishing destination</span>
         </CollapsibleTrigger>
         <CollapsibleContent forceMount className="flex flex-col gap-4 pt-2 pl-5 data-[state=closed]:hidden">
           {canReadSource ? <OnboardingSourceOption key={generation} client={client} workspaceID={workspace.id} canManageSource={isAdmin} onStatusChange={onStatusChange} /> : <p className="text-ui-sm text-muted">This gateway does not offer source status, so source ownership cannot be checked. Linking works, but base pushes stay off until local-only ownership is confirmed; ask an administrator to verify the source with Review source mirror on the Repository page before launching.</p>}

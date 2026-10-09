@@ -69,7 +69,7 @@ export function OnboardingSourceOption({
       <h4 id={headingID} className="text-ui font-medium text-text">Server-fetched source</h4>
       <p className="max-w-3xl text-ui-sm text-muted">
         {canManageSource
-          ? 'The server can fetch the repository itself over public HTTPS or with a read-only deploy key, so no local clone is needed.'
+          ? 'The server can fetch code through your GitHub connection, public HTTPS, or a read-only deploy key. No local clone is needed.'
           : 'The server can fetch the repository itself. An administrator sets it up on this workspace\'s Repository page.'}
       </p>
       <div role="status" aria-label="Source mirror status" aria-live="polite" className="flex min-w-0 flex-col gap-2 self-stretch text-ui-sm">
