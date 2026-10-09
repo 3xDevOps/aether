@@ -122,7 +122,7 @@ case "$1 $2" in
 "auth status")
 	if [ ! -f "$HOME/.config/gh/hosts.yml" ]; then
 		echo '{"hosts":{}}'
-		exit 1
+		exit 0
 	fi
 	echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"admin:ssh_signing_key, gist, read:org, repo"}]}}'
 	;;
