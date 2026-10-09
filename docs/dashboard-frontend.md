@@ -393,7 +393,7 @@ that omit the fields get a flat list.
 ### App header
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
-Its first row restores the Aether mark and title on the left, then **Board**,
+Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
 **Swarms**, **Activity**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
@@ -444,14 +444,20 @@ is no connection to report, so neither header shows one.
 
 ### Window bar
 
-The desktop window is frameless, so `src/components/shell/window-bar.tsx`
-draws a 35px drag strip at its top edge whenever `window.aetherDesktop`
-exists. On Windows and Linux it holds minimize, maximize/restore and close,
-wired to `window.aetherDesktop.controls`; on macOS it is the strip the native
-traffic lights sit in. The strip is `-webkit-app-region: drag` and its
-buttons are `no-drag`. `App.tsx` mounts it above the `ConnectionError` page
-too, so a total failure still lets the window move and close. A browser tab
-has no bridge and no strip.
+In the desktop app, the navigation row is also the window's drag area; there
+is no separate title-bar strip. On Windows and Linux,
+`src/components/shell/window-bar.tsx` adds minimize, maximize/restore and close
+at the right edge, wired to `window.aetherDesktop.controls`. Their callbacks
+take no arguments: forwarding React's pointer event through Electron's
+context bridge fails with `An object could not be cloned.`
+
+On macOS, the shell keeps the native traffic lights, centers them in the
+44px navigation row and reserves 80px before the logo. The row uses
+`-webkit-app-region: drag`; navigation buttons and window controls use
+`no-drag`. The logo and unused row space remain draggable at narrow widths.
+On an initial connection failure, `App.tsx` renders the same header without
+navigation, so the window can still move and close. A browser tab has no
+desktop bridge, so its header has neither drag regions nor window controls.
 
 The bridge carries one more thing the SPA cannot do for itself:
 `window.aetherDesktop.chooseFolder()` opens the shell's native directory

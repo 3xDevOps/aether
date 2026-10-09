@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Ellipsis, PanelLeft, Plus, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
 import { ConnectionLine } from '@/components/shell/connection'
+import { desktopBridge, WindowControls } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import { ListRow } from '@/components/ui/list-row'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
@@ -18,7 +19,8 @@ const titles: Record<string, string> = {
   missions: 'Swarms',
 }
 
-export function TopBar() {
+export function TopBar({ navigation = true }: { navigation?: boolean }) {
+  const desktop = desktopBridge()
   const mobile = useIsMobile()
   const header = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
@@ -37,14 +39,19 @@ export function TopBar() {
 
   return (
     <header ref={header} className="shrink-0 border-b border-seam bg-chrome pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-      <div className="flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12">
-        <div className="flex shrink-0 items-center gap-1.5">
+      <div className={cn(
+        'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
+        desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
+        desktop?.platform === 'darwin' && 'pl-20',
+      )}>
+        <div className="flex shrink-0 -translate-y-px items-center gap-1.5">
           <img src="/aether-mark.png" alt="" width={24} height={24} />
-          <span className="text-wordmark">Aether</span>
+          <span className="text-wordmark">aether</span>
         </div>
-        <HeaderNavigation />
+        {navigation && <HeaderNavigation />}
+        <WindowControls />
       </div>
-      {mobile && <PhoneToolbar />}
+      {navigation && mobile && <PhoneToolbar />}
     </header>
   )
 }

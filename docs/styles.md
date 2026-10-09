@@ -32,9 +32,11 @@ Other scripts and symbols outside those ranges still use platform fallbacks.
 The aliases use `font-display: swap` and load only when a matching character
 appears; xterm keeps its own full-font family and cell metrics.
 
-The header wordmark uses `text-wordmark`: VT323 at 24px, 400 weight and line
-height 1. The splash keeps its original `clamp(32px, 4vw, 48px)` size and
-`0.12em` letter spacing. Both use `--font-pixel`; other headings stay Saira.
+The header wordmark is lowercase `aether` and uses `text-wordmark`: VT323 at
+24px, 400 weight and line height 1. The header logo and wordmark sit 1px above
+the row's center to align visually with navigation buttons. The splash keeps
+its original `clamp(32px, 4vw, 48px)` size and `0.12em` letter spacing. Both use
+`--font-pixel`; other headings stay Saira.
 
 The type scale, in `web/src/index.css`:
 
@@ -66,7 +68,7 @@ follows `prefers-color-scheme` live.
 | Token | Utility | Light | Dark | Use |
 | --- | --- | --- | --- | --- |
 | `--canvas` | `bg-canvas` | `#ffffff` | `#141516` | Main view, fields |
-| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, phone top bar, window bar, toolbars, code, browser chrome |
+| `--chrome` | `bg-chrome` | `#f7f7f7` | `#1b1c1d` | Sidebar, app header, toolbars, code, browser chrome |
 | `--hover` | `bg-hover` | `#f3f3f3` | `#1d1e1f` | Hovered rows and cards on canvas |
 | `--hover-chrome` | `bg-hover-chrome` | `#ececec` | `#262728` | Hover on chrome and raised surfaces: sidebar and list rows, menu items, ghost and secondary buttons |
 | `--raised` | `bg-raised` | `#ffffff` | `#222324` | Floating surfaces, secondary buttons |
