@@ -4,7 +4,7 @@ import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import { Search } from '@/components/icons'
 
-import { cn, focusRing } from "@/lib/utils"
+import { cn, fieldFocus } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -93,7 +93,7 @@ function CommandInput({
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          focusRing,
+          fieldFocus,
           'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-ui leading-6 placeholder:text-muted coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
