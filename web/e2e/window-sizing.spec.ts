@@ -82,7 +82,7 @@ const test = base.extend<{ gateway: Gateway }>({
 /**
  * Opens the dashboard as the desktop app does, then the updates dialog from
  * the sidebar's notice row. The bridge in `desktop/preload.js` makes the SPA
- * draw its window bar and, because the shell version cannot match the CLI
+ * add window controls to its header and, because the shell version cannot match the CLI
  * serving it, list the stale-shell prompt above the CLI one.
  */
 async function openDesktop(page: Page, gateway: Gateway): Promise<void> {

@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Copy, Minus, Square, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 
@@ -25,13 +25,8 @@ export function desktopBridge(): AetherDesktop | undefined {
   return (window as Window & { aetherDesktop?: AetherDesktop }).aetherDesktop
 }
 
-// `-webkit-app-region` is non-standard, so csstype does not declare it.
-const DRAG = { WebkitAppRegion: 'drag' } as CSSProperties
-const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties
-
-export function WindowBar() {
-  const desktop = desktopBridge()
-  const controls = desktop?.controls
+export function WindowControls() {
+  const controls = desktopBridge()?.controls
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -47,31 +42,26 @@ export function WindowBar() {
     }
   }, [controls])
 
-  if (!desktop) return null
+  if (!controls) return null
   return (
     <div
-      data-slot="window-bar"
-      style={DRAG}
-      className="flex h-[var(--window-bar-height)] shrink-0 select-none items-center justify-end border-b border-seam bg-chrome"
+      data-slot="window-controls"
+      className="ml-auto flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
     >
-      {controls && (
-        <div style={NO_DRAG} className="flex h-full items-center gap-1 px-1">
-          <Button variant="ghost" size="icon" label="Minimize" onClick={controls.minimize}>
-            <Minus />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            label={maximized ? 'Restore' : 'Maximize'}
-            onClick={controls.toggleMaximize}
-          >
-            {maximized ? <Copy /> : <Square />}
-          </Button>
-          <Button variant="ghost" size="icon" label="Close" onClick={controls.close}>
-            <X />
-          </Button>
-        </div>
-      )}
+      <Button variant="ghost" size="icon" label="Minimize" onClick={() => controls.minimize()}>
+        <Minus />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        label={maximized ? 'Restore' : 'Maximize'}
+        onClick={() => controls.toggleMaximize()}
+      >
+        {maximized ? <Copy /> : <Square />}
+      </Button>
+      <Button variant="ghost" size="icon" label="Close" onClick={() => controls.close()}>
+        <X />
+      </Button>
     </div>
   )
 }

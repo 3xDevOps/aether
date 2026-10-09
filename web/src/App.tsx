@@ -3,7 +3,8 @@ import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
-import { WindowBar } from '@/components/shell/window-bar'
+import { TopBar } from '@/components/shell/top-bar'
+import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
@@ -66,10 +67,8 @@ export function App() {
     <>
       <ThemeEffect />
       <LaunchSplash />
-      {/* Frameless desktop window: its bar stays outside the error branch so
-          an offline user can still move or close the window. */}
       <div className="flex min-w-0 h-full flex-col">
-        <WindowBar />
+        {blocked && desktopBridge() && <TopBar navigation={false} />}
         <div className="min-h-0 min-w-0 flex-1">
           {blocked ? (
             <ConnectionError

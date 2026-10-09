@@ -125,8 +125,6 @@
 :root {
   color-scheme: light;
 
-  /* The desktop window's drag strip and the phone top bar. */
-  --window-bar-height: 35px;
   --top-bar-height: 48px;
 
   /* The top safe-area inset, named because more than the top edge itself
