@@ -208,7 +208,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     // Hold through the server's five-second threshold; only the holder decides.
     await takeControl.focus()
     await bobPage.keyboard.down('Space')
-    const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
+    const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
     await expect(takeover).toBeVisible()
     await bobPage.keyboard.up('Space')
     await expect(takeover).toContainText(bobDisplayName)

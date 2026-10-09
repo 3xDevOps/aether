@@ -217,7 +217,7 @@ test('incoming control decisions stay usable over Run details and Captures', asy
     const requestPresence = requester.getByRole('group', { name: 'Run presence' })
     await expect(requestPresence.getByText(/^You control in another tab/)).toBeVisible()
     const takeControl = requestPresence.getByRole('button', { name: 'Take control', exact: true })
-    const takeover = page.getByRole('alertdialog', { name: 'Terminal control requested' })
+    const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })
     const deny = takeover.getByRole('button', { name: 'Deny', exact: true })
 
     for (const { surface, width } of [

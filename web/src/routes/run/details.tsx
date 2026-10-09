@@ -29,7 +29,7 @@ const emptyMessages: RoomMessage[] = []
 
 function Section({ id, title, count, inset, children }: { id?: string; title: string; count?: number; inset: boolean; children: React.ReactNode }) {
   return (
-    <section id={id} aria-label={title} className={cn('flex flex-col gap-2 border-b border-seam py-3 last:border-b-0', inset && 'px-4')}>
+    <section id={id} tabIndex={id ? -1 : undefined} aria-label={title} className={cn('flex flex-col gap-2 border-b border-seam py-3 last:border-b-0', inset && 'px-4')}>
       <SectionLabel as="h2" className="flex items-center gap-1.5">
         {title}
         {count !== undefined && count > 0 && <span className="text-text tabular-nums">{count}</span>}
@@ -155,7 +155,7 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
   const selfID = useStore((s) => s.info?.member.id)
   const controllerID = agent.localControl ? selfID : status?.controller?.member_id
   return (
-    <Section title="Details" inset={inset}>
+    <Section id="details-people" title="Details" inset={inset}>
       {run.task.trim() && <p className="max-h-48 overflow-y-auto break-words whitespace-pre-wrap text-ui text-text">{run.task}</p>}
       <dl className="text-ui-sm">
         <Row label="Owner"><Person id={run.member_id} /></Row>

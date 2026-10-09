@@ -712,7 +712,11 @@ the same agent: the e2e fixture `installACPMock` builds it (`go build`, so
 the e2e host needs Go) into the member's `~/.local/bin` and registers it as
 the member agent `mock`. The spec launches an Enhanced run, watches the
 stream, answers a permission with the digit key, expands a work entry's
-diff and interrupts a turn:
+diff and interrupts a turn. Its two-member scenario checks shared notes,
+moderated instructions, occupied-click refusal, early hold cancellation,
+holder denial, automatic transfer after the five-second hold and seven-second
+review, explicit release without reacquisition, controls across view switches
+and a narrow-screen layout:
 
 ```sh
 make build && (cd web && bunx playwright test run-session.spec.ts)

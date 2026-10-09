@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Terminal } from '@xterm/xterm'
 import { toast } from 'sonner'
 import type { TerminalReadSurface } from '@/components/terminal-pane'
@@ -9,6 +9,7 @@ import { errorSentence } from '@/lib/format'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
+import type { TakeoverAction } from '@/routes/terminal/attach'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { useRunTerminalSession } from '@/routes/terminal/session'
 import { useTakeover } from '@/routes/terminal/use-takeover'
@@ -129,13 +130,17 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
   const controlMetadata = acp ? acpControl : session.controlMetadata
   const roomControl = live && steerable && !state.steerDenied ? controlMetadata : undefined
   const localControl = live && (acp || state.write) && controlMetadata?.has_control === true && steerable && !state.steerDenied
+  const requestAcpTakeover = useCallback(
+    (action: TakeoverAction, id: string, generation?: number) => requestSessionTakeover(runID, action, id, generation),
+    [runID],
+  )
   const takeover = useTakeover({
     state: acp ? acpTakeover : session.takeover,
     error: acp ? acpTakeoverError : session.takeoverError,
     control: controlMetadata,
     enabled: live && steerable && !state.steerDenied,
     occupied: Boolean(roomStatus?.controller),
-    request: acp ? (action, id, generation) => requestSessionTakeover(runID, action, id, generation) : session.requestTakeover,
+    request: acp ? requestAcpTakeover : session.requestTakeover,
   })
   const control = useMemo(() => acp ? {
     ...session,

@@ -16,6 +16,7 @@ import { CapturesDialog } from '@/routes/run/captures'
 import { RawEventsDialog } from '@/routes/run/raw-events'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
+import { MultiplayerControls } from '@/routes/run/multiplayer-controls'
 import { useRunRoom } from '@/routes/run/room'
 import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
@@ -156,6 +157,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           agentName={agentName}
           agentEntry={agentEntry}
         />
+        {run.mode === 'acp' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div className="relative min-h-0 flex-1">
           {visited.has('session') && (
             <TabsContent value="session" forceMount inert={view !== 'session'} className={cn(panel, view !== 'session' && 'invisible')}>

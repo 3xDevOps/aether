@@ -37,7 +37,7 @@ export interface SessionStreamHandlers {
 }
 
 export interface SessionStream {
-  control: (write: boolean, opts?: { takeover?: boolean; generation?: number }) => boolean
+  control: (write: boolean, opts?: { generation?: number }) => boolean
   takeover: (action: TakeoverAction, id: string, generation?: number) => boolean
   close: () => void
 }
@@ -174,12 +174,14 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers): S
   open()
 
   return {
-    control: (write, opts = {}) => send({
-      type: 'control',
-      write,
-      ...(opts.takeover ? { takeover: true } : {}),
-      ...(opts.generation ? { control_generation: opts.generation } : {}),
-    }),
+    control: (write, opts = {}) => {
+      const generation = opts.generation ?? h.lease().control_generation
+      return send({
+        type: 'control',
+        write,
+        ...(generation ? { control_generation: generation } : {}),
+      })
+    },
     takeover: (action, id, generation) => send({
       type: 'takeover',
       action,

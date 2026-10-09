@@ -1352,6 +1352,23 @@ The view switch is a segmented `tablist` named "Run views" with manual
 activation, on its own 32px row under the header at every width. On a phone
 with the composer focused the header keeps only the title line.
 
+### Multiplayer controls
+
+Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
+below the view switch at frame level, so Session, Terminal, Changes and
+Browser share one control surface. It shows the controller, watcher count,
+protection and the existing `ControlButton`: take a free lease, release it,
+or hold for five seconds to request an occupied lease. **Multiplayer**
+opens Details at the people on the run; notes stay in the same panel.
+The strip wraps on narrow screens. Control and presence failures stay beside
+the action rather than inside a closed composer.
+
+ACP control uses the same server-timed hold, seven-second holder dialog,
+cancellation and server acknowledgement as Standard runs. Streaming updates
+do not cancel a held gesture. Explicit control choices and revocations stop
+automatic acquisition for the open stream; release carries the current lease
+generation. Takeover denials belong to the requester, not the holder.
+
 ### Session view
 
 The Session view (`session-view.tsx`) is the run's conversation: what was said
@@ -1460,12 +1477,14 @@ Mode and effort menus use content-sized described rows; model selectors use
 group with search by name, ID and description. Selections use
 `run.acp.set_option`; `/` completes the agent's commands and `@` paths from
 the Files tree cache. It closes with one line of reason while switching, for a
-Background run, while connecting, while a request is pending (keeping
-**Interrupt** for the lease holder), or while another session holds the lease
-(**Take control**). `useImplicitControl` (`agent-terminal.ts`) lets the owner
-of a run nobody controls act in one step on any screen: Send, the Standard
-composer's Send and a request's options request the lease and run the action
-once it is held (given up after 10 seconds). Pending requests dock above it
+Background run, while connecting, or while a request is pending (keeping
+**Interrupt** for the lease holder). An authorized non-controller can **Send**
+through the existing 45-second moderated path without a lease; model and mode
+menus are disabled and the hint explains controller approval. `useImplicitControl`
+(`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
+on any screen: Send, the Standard composer's Send and a request's options
+request the lease and run the action once it is held (given up after 10
+seconds). Pending requests dock above it
 one at a time (`routes/run/session-requests.tsx`), ordered allow-once first
 and allow-always last by ACP `kind`; `1`-`4` pick an option while a card has
 focus, `1` never an allow-always one, and the header's **Answer** focuses the
