@@ -203,9 +203,11 @@ lease, then acts. **Release**, a deliberate takeover, or losing control
 stops automatic acquisition while the run stays open, including view
 switches.
 
-A pending request docks above the composer, one at a time with `1/N`, and
-the composer stays shut until it is answered; **Interrupt** stays, to stop
-the turn and cancel the request instead. Options are ordered allow-once
+A pending request docks above the composer, one at a time with `1/N`. The
+controller's composer stays shut until it is answered; **Interrupt** stays,
+to stop the turn and cancel the request instead. Other collaborators can
+still send moderated instructions, but cannot answer the request or
+interrupt the agent without control. Options are ordered allow-once
 first and allow-always last, whatever order the agent sends; allow-once is
 the filled button. `1` to `4` pick an option while the card has focus (`1`
 never picks an allow-always option), and the header's **Answer** focuses

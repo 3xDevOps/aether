@@ -1477,10 +1477,11 @@ Mode and effort menus use content-sized described rows; model selectors use
 group with search by name, ID and description. Selections use
 `run.acp.set_option`; `/` completes the agent's commands and `@` paths from
 the Files tree cache. It closes with one line of reason while switching, for a
-Background run, while connecting, or while a request is pending (keeping
-**Interrupt** for the lease holder). An authorized non-controller can **Send**
-through the existing 45-second moderated path without a lease; model and mode
-menus are disabled and the hint explains controller approval. `useImplicitControl`
+Background run, while connecting, or while the controller has a pending
+request (keeping **Interrupt**). An authorized non-controller can **Send**
+through the existing 45-second moderated path even while an agent request
+waits for an answer; model and mode menus stay disabled and the hint explains
+controller approval. `useImplicitControl`
 (`agent-terminal.ts`) lets the owner of a run nobody controls act in one step
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10

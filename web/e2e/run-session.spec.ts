@@ -130,10 +130,37 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     await expect(request.getByRole('button', { name: 'Deny', exact: true })).toBeVisible()
     await request.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect.poll(async () => {
-      const { messages } = await alice.api.rpc<{ messages: { body: string; state: string; agent_delivery?: string }[] }>('run.room.list', {
+      const { messages } = await alice.api.rpc<{ messages: { body: string; state: string }[] }>('run.room.list', {
         workspace_id: workspaces[0].id, run_id: run.id,
       })
-      return messages.find((message) => message.body === instruction)?.agent_delivery
+      return messages.find((message) => message.body === instruction)?.state
+    }).toBe('sent')
+    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong', { exact: true })).toHaveCount(2)
+
+    const ownerComposer = page.getByRole('combobox', { name: 'Message the agent' })
+    await ownerComposer.fill('ask permission')
+    await ownerComposer.press('ControlOrMeta+Enter')
+    const permission = page.locator('#session-request-docked')
+    await expect(permission.getByRole('button', { name: 'Allow', exact: true })).toBeVisible()
+    await expect(bobPage.locator('#session-request-docked').getByRole('button', { name: 'Allow', exact: true })).toBeDisabled()
+    const pendingInstruction = 'Please check rollback after approval'
+    await composer.fill(pendingInstruction)
+    await bobPage.getByRole('button', { name: 'Send', exact: true }).click()
+    const pendingSteer = aliceDetails.getByRole('region', { name: 'Needs you' }).locator('[data-slot=request-card]').filter({ hasText: pendingInstruction })
+    await pendingSteer.getByRole('button', { name: 'Approve', exact: true }).click()
+    await expect.poll(async () => {
+      const { messages } = await alice.api.rpc<{ messages: { body: string; agent_delivery?: string }[] }>('run.room.list', {
+        workspace_id: workspaces[0].id, run_id: run.id,
+      })
+      return messages.find((message) => message.body === pendingInstruction)?.agent_delivery
+    }).toBe('queued')
+    await bobPage.screenshot({ path: testInfo.outputPath('enhanced-multiplayer-pending.png') })
+    await permission.getByRole('button', { name: 'Allow', exact: true }).click()
+    await expect.poll(async () => {
+      const { messages } = await alice.api.rpc<{ messages: { body: string; agent_delivery?: string }[] }>('run.room.list', {
+        workspace_id: workspaces[0].id, run_id: run.id,
+      })
+      return messages.find((message) => message.body === pendingInstruction)?.agent_delivery
     }).toBe('delivered')
 
     await takeControl.click()

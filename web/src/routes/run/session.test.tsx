@@ -351,12 +351,13 @@ describe('Enhanced multiplayer controls', () => {
     expect(session.socket.closed).toBe(false)
   })
 
-  it('lets a collaborator send a moderated message without taking the controller’s lease', async () => {
+  it.each([false, true])('lets a collaborator send without taking the lease (pending request: %s)', async (pending) => {
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
     const queued = roomMessage({ actor_id: alice.id, kind: 'steer_request', body: 'Please review the migration', state: 'queued', deliver_after: new Date(Date.now() + 45_000).toISOString() })
     vi.spyOn(api, 'runInject').mockResolvedValue({ message: queued })
+    vi.mocked(api.runInputAnswer).mockClear()
     open({ member_id: bob.id, controller_member_id: bob.id })
-    const session = acpSocket().open({ has_control: false, state: state({ turn_in_flight: true, steering: true }) })
+    const session = acpSocket().open({ has_control: false, state: state({ turn_in_flight: true, steering: true, pending: pending ? [permission] : [] }) })
     const box = await screen.findByRole('combobox', { name: 'Message the agent' })
     expect(screen.queryByRole('button', { name: 'Interrupt the agent' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull()
@@ -365,8 +366,21 @@ describe('Enhanced multiplayer controls', () => {
     await waitFor(() => expect(box).toHaveProperty('value', ''))
     expect(useStore.getState().roomMessages.run_1).toContainEqual(queued)
     expect(useStore.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+    if (pending) expect(screen.getByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true)
+    expect(api.runInputAnswer).not.toHaveBeenCalled()
     expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
     expect(api.runInject).toHaveBeenCalledWith('run_1', queued.body, expect.any(String), expect.objectContaining({ steer: false, lease: undefined }))
+  })
+
+  it('keeps protected-run collaborators from messaging or answering a pending request', async () => {
+    useStore.setState({ info: { ...serverInfo, member: bob } })
+    open({ protected: true })
+    acpSocket().open({ has_control: false, state: state({ turn_in_flight: true, pending: [permission] }) })
+    expect(await screen.findByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('combobox', { name: 'Message the agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Interrupt the agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull()
   })
 
   it('requires the full hold and server grant even while the Enhanced session rerenders', async () => {

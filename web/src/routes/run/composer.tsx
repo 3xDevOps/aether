@@ -239,7 +239,6 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const session = useStore((s) => s.acpSessions[run.id])
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
-  const controllerID = useStore((s) => s.roomStatus[run.id]?.controller?.member_id)
   const control = useImplicitControl(run, agent)
   const coarse = useMediaQuery(coarsePointer)
   const [body, setBody] = useState('')
@@ -265,12 +264,11 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     sessionLive: session?.live ?? false,
     pending: session?.pending.length ?? 0,
     hasLease: control.canAct,
-    controller: !controllerID ? null : controllerID === self.id ? 'self' : 'other',
   })
-  const moderated = gate?.takeControl === true
+  const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
   const supportsImages = state?.prompt_images === true
-  const images = useComposerImages(run.id, (!gate || moderated) && supportsImages && cap.hasMethod('terminal.image'), () => busyRef.current)
+  const images = useComposerImages(run.id, !gate && supportsImages && cap.hasMethod('terminal.image'), () => busyRef.current)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = moderated ? 'send' : pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
 
@@ -363,7 +361,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     if (lease) await attempt(() => api.runACPSetOption(run.id, option.id, value, lease))
   }
 
-  if (gate && !gate.takeControl) {
+  if (gate) {
     return (
       <Closed
         reason={gate.reason}
