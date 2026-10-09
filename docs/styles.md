@@ -17,12 +17,20 @@ Fonts ship in the bundle; nothing is fetched from Google.
 | DM Sans (variable, Latin subset) | All UI text | `@fontsource-variable/dm-sans`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
 | VT323 (Latin subset, 400) | Header and launch-splash wordmarks | `web/public/fonts/vt323-latin.woff2` |
-| JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
-| `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`) | system |
+| JetBrainsMono NFM | xterm primary font; UI private-use symbols through `Aether Nerd Symbols` | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
+| Noto Sans Symbols 2 | Braille and geometric symbols through `Aether Symbols` | `web/public/fonts/noto-sans-symbols-2-spinners.woff2` |
+| `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`), after symbol fallbacks | system |
 
 DM Sans loads with `font-display: swap` behind `DM Sans Fallback`, Arial
-scaled to DM Sans's metrics to reduce layout shift. Characters outside
-Latin render in the fallback.
+scaled to DM Sans's metrics to reduce layout shift. Sans, title and code
+stacks include two symbol-only fallbacks: `Aether Symbols` covers Geometric
+Shapes (`U+25A0–25FF`) and Braille Patterns (`U+2800–28FF`), including OMP's
+spinner frames; `Aether Nerd Symbols` covers the Unicode private-use areas
+used by agent title icons. The latter reuses the terminal's regular and bold
+font files. `unicode-range` keeps both aliases from replacing ordinary text.
+Other scripts and symbols outside those ranges still use platform fallbacks.
+The aliases use `font-display: swap` and load only when a matching character
+appears; xterm keeps its own full-font family and cell metrics.
 
 The header wordmark uses `text-wordmark`: VT323 at 24px, 400 weight and line
 height 1. The splash keeps its original `clamp(32px, 4vw, 48px)` size and

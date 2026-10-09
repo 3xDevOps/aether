@@ -29,7 +29,7 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard uses four fonts, each under the SIL Open Font License 1.1:
+The dashboard bundles these fonts under the SIL Open Font License 1.1:
 
 - DM Sans for UI text
   ([`web/public/fonts/LICENSE-dm-sans.txt`](../web/public/fonts/LICENSE-dm-sans.txt)).
@@ -44,9 +44,21 @@ The dashboard uses four fonts, each under the SIL Open Font License 1.1:
 - VT323 for the header and launch-splash wordmarks
   ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
   `web/public/fonts/vt323-latin.woff2` is the Latin subset at weight 400.
-- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for the
-  terminal (xterm) only
+- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for xterm
+  and the UI's private-use symbol fallback
   ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
+- Noto Sans Symbols 2 v2.008 for Braille and geometric spinner symbols
+  ([`web/public/fonts/LICENSE-noto-sans-symbols-2.txt`](../web/public/fonts/LICENSE-noto-sans-symbols-2.txt)).
+  `noto-sans-symbols-2-spinners.woff2` is a subset of the regular font from
+  [Google Fonts revision `2eb0b48d`](https://github.com/google/fonts/blob/2eb0b48d5f760f62e286216f0859a8c540dbc1bd/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf).
+  It contains Geometric Shapes (`U+25A0–25FF`) and Braille Patterns
+  (`U+2800–28FF`), generated with FontTools 4.66.1:
+
+  ```sh
+  pyftsubset NotoSansSymbols2-Regular.ttf \
+    --unicodes=U+25A0-25FF,U+2800-28FF --flavor=woff2 \
+    --output-file=web/public/fonts/noto-sans-symbols-2-spinners.woff2
+  ```
 
 `scripts/make-icons.py` also uses VT323 to draw the wordmark on the Play
 listing's feature graphic, `android/listing/feature-graphic.png`, whose
