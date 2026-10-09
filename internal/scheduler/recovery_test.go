@@ -146,11 +146,12 @@ func (p *pendingRecoveryPTY) stats() (attempts int, reusedAttachment bool) {
 func TestRecoveryRetriesPendingSnapshotWithSameAttachment(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	run, _ := e.launchFake(t, "pending recovery snapshot")
+	run, c := e.launchFake(t, "pending recovery snapshot")
 	beforeAttach := e.rt.attachCount()
 	if err := e.sched.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	sub := e.subscribe(t)
 
 	pty := &pendingRecoveryPTY{fakePTY: newFakePTY(), pending: 2}
 	s2 := e.newScheduler(t, e.rt, pty.fakePTY)
@@ -167,19 +168,24 @@ func TestRecoveryRetriesPendingSnapshotWithSameAttachment(t *testing.T) {
 	if !reusedAttachment || e.rt.attachCount() != beforeAttach+1 {
 		t.Fatalf("recovery attachment changed across retries; reused = %v, attach count = %d -> %d", reusedAttachment, beforeAttach, e.rt.attachCount())
 	}
-	s2.mu.Lock()
-	owner := s2.runs[run.ID]
-	supervised := owner != nil && owner.waitStarted && !owner.destroyPending
-	s2.mu.Unlock()
-	if !supervised {
-		t.Fatalf("recovered owner = %+v, want active supervision", owner)
-	}
 	row, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
 	if row.Status != domain.RunRunning {
 		t.Fatalf("recovered run status = %s, want running", row.Status)
+	}
+
+	// PTY publication may precede supervision startup. A real exit must still
+	// be observed and finalized after retrying the snapshot on one attachment.
+	c.exitNow(0)
+	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" {
+		t.Fatalf("reason = %q", p.Reason)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: pending recovery snapshot" {
+		t.Fatalf("commits = %v", got)
 	}
 }
 
