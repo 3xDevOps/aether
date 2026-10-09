@@ -55,6 +55,7 @@ afterEach(async () => {
 // restores this rather than taking it away.
 Element.prototype.scrollIntoView = vi.fn()
 Element.prototype.scrollTo = () => {}
+Element.prototype.setPointerCapture = () => {}
 Element.prototype.hasPointerCapture = () => false
 Element.prototype.releasePointerCapture = () => {}
 globalThis.ResizeObserver = class {

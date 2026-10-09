@@ -37,9 +37,9 @@ export function TakeoverDialog({ open, requesterName, seconds, pending, error, o
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Terminal control requested</AlertDialogTitle>
+          <AlertDialogTitle>Run control requested</AlertDialogTitle>
           <AlertDialogDescription>
-            {requesterName} held Take control for 5 seconds and is requesting this terminal.
+            {requesterName} held Take control for 5 seconds and is requesting this run.
             Accept to hand over control, or deny to keep it.
           </AlertDialogDescription>
         </AlertDialogHeader>

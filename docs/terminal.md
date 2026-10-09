@@ -92,7 +92,13 @@ agent runs beside it over the Agent Client Protocol. Its Terminal view says
 same one: holding it from the Session view (`/ws/acp/<run_id>`) is what lets
 you answer the agent's permission requests.
 
-The **agent terminal** has one controller session at a time. A member needs
+Enhanced runs keep a **Multiplayer** strip below the view switch on every
+view. It names the controller, shows how many people are watching, and
+offers **Take control** or **Release**. **Multiplayer** opens Details with
+the people on the run and its shared notes. Run shells keep their own
+separate controls; opening a shell does not take control of the agent.
+
+The **run** has one controller session at a time. A member needs
 permission to message the run (the `steer` permission) to acquire it.
 Viewing, presence, and run ownership by themselves do not grant input
 access. A writable agent terminal or `aether attach` must acquire that
@@ -114,15 +120,16 @@ The server grants an unoccupied lease only with the `steer` permission. A
 write request that cannot acquire the lease is refused rather than silently
 becoming a second writer. `aether attach` asks for control by default; use
 `aether attach --read-only <run>` to watch deliberately. Clicking **Take
-control** in the Terminal view's toolbar acquires an unoccupied terminal.
-An occupied click reports `run control is held by another session` and leaves
-the current controller in place.
+control** in the Terminal toolbar or the Enhanced run's Multiplayer strip
+acquires an unoccupied run. An occupied click reports
+`run control is held by another session` and leaves the controller in place.
 
-To request an occupied terminal, hold **Take control** for five seconds with
+To request an occupied run, hold **Take control** for five seconds with
 the pointer, touch, Space, or Enter. A red fill with a forward-slash leading
 edge advances across the button; covered and uncovered text retain separate
-contrast. The holder sees the same fill on **Release** and red tracing over
-the teal border from the side midpoints toward the top and bottom centers.
+contrast. The holder sees the same fill on **Release**. A Standard run also
+traces red over its terminal's teal border from the side midpoints toward
+the top and bottom centers.
 Releasing early, moving off the button, pressing Escape, or leaving the tab
 cancels the hold.
 

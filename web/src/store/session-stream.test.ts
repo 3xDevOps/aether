@@ -1,5 +1,5 @@
 import { createRootStore } from '@/store'
-import { allowSessionAutoWrite, requestSessionControl, subscribeSession } from '@/store/session-stream'
+import { allowSessionAutoWrite, requestSessionControl, requestSessionTakeover, subscribeSession } from '@/store/session-stream'
 import { ScriptedSession } from '@/test/acp-stream'
 import { alice, run, serverInfo } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -67,11 +67,62 @@ describe('the session stream owner', () => {
   it('shows a refused request the viewer made', async () => {
     const { store, stop, session } = setup()
     session.open({ has_control: true, control_generation: 2 })
-    requestSessionControl('run_1', true, true)
+    requestSessionControl('run_1', true)
     session.send({ type: 'control', request_id: 1, ok: false, error: 'stale lease' })
     await vi.runAllTimersAsync()
     expect(store.getState().acpSessions.run_1?.controlError).toBe('stale lease')
     stop()
+  })
+
+  it('keeps a deliberate release read-only when presence changes or Session is shown again', async () => {
+    const { store, stop, session } = setup()
+    try {
+      session.open({ has_control: false })
+      session.send({ type: 'control', request_id: 1, ok: true, has_control: true, control_generation: 3 })
+      await vi.advanceTimersByTimeAsync(0)
+      requestSessionControl('run_1', false)
+      expect(controlFrames(session).at(-1)).toMatchObject({ write: false, control_generation: 3 })
+      session.send({ type: 'control', request_id: 2, ok: true, has_control: false, control_generation: 3 })
+      await vi.advanceTimersByTimeAsync(0)
+      store.getState().applyRunController('run_1', '')
+      allowSessionAutoWrite('run_1')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(controlFrames(session).map((frame) => frame.write)).toEqual([true, false])
+      expect(store.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+    } finally {
+      stop()
+    }
+  })
+
+  it('does not race a deliberate takeover with an automatic acquisition retry', async () => {
+    const { stop, session } = setup()
+    try {
+      session.open({ has_control: false })
+      session.send({ type: 'control', request_id: 1, ok: false, error: 'run control is held by another session' })
+      requestSessionTakeover('run_1', 'start', 'deliberate-takeover')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(controlFrames(session)).toHaveLength(1)
+      expect(session.socket.frames().at(-1)).toMatchObject({ type: 'takeover', action: 'start', takeover_id: 'deliberate-takeover' })
+    } finally {
+      stop()
+    }
+  })
+
+  it('keeps a displaced controller read-only after the new controller releases', async () => {
+    const { store, stop, session } = setup()
+    try {
+      session.open({ has_control: false })
+      session.send({ type: 'control', request_id: 1, ok: true, has_control: true, control_generation: 3 })
+      session.send({ type: 'control', has_control: false, control_generation: 3, revocation_reason: 'takeover' })
+      await vi.advanceTimersByTimeAsync(0)
+      store.getState().applyRunController('run_1', 'mem_bob')
+      store.getState().applyRunController('run_1', '')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(controlFrames(session)).toHaveLength(1)
+      expect(store.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+    } finally {
+      stop()
+    }
   })
 
   it('resets the stream and lease when the last viewer leaves', async () => {

@@ -152,7 +152,24 @@ func (s *Server) serveACP(ctx context.Context, member domain.MemberID, ch subsys
 			defer a.mu.Unlock()
 			return a.lease != nil && a.lease.Generation == generation
 		},
-		grant: func(p *pendingTakeover) error { return a.acquire(true, 0, p) },
+		grant: func(p *pendingTakeover) error {
+			if err := a.acquire(true, 0, p); err != nil {
+				return err
+			}
+			// Keep the grant acknowledgement ahead of any later revocation.
+			a.writeMu.Lock()
+			defer a.writeMu.Unlock()
+			a.mu.Lock()
+			lease := a.lease
+			a.mu.Unlock()
+			if lease == nil {
+				return control.ErrStale
+			}
+			return writeJSONLine(a.ch, protocol.DashAttachControl{
+				Type: protocol.DashAttachControlFrame, OK: true, HasControl: true,
+				ControlSessionID: lease.SessionID, ControlGeneration: lease.Generation,
+			})
+		},
 	}
 	unregister := s.registerTakeoverAttach(a.endpoint)
 	defer unregister()

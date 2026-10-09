@@ -34,6 +34,12 @@ function controlSession(runID: string): string {
   return id
 }
 
+function stopAutomaticControl(entry: Owned): void {
+  entry.autoWrite = false
+  entry.askedWrite = true
+  clearTimeout(entry.retryTimer)
+}
+
 export function sessionStreamOpen(runID: string): boolean {
   return owned.has(runID)
 }
@@ -52,6 +58,7 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
     owned.set(runID, created)
     const askAutomatically = () => {
       clearTimeout(created.retryTimer)
+      if (!created.autoWrite) return
       created.autoRequest = created.stream.control(true)
     }
     created.askOnce = () => {
@@ -99,9 +106,13 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
         void batchNotifications(store, async () => store.getState().acpFrames(runID, frames))
       },
       onControl: (frame) => {
-        const held = store.getState().acpSessions[runID]?.control
+        const session = store.getState().acpSessions[runID]
+        const held = session?.control
         const automatic = frame.request_id !== undefined && created.autoRequest
-        if (frame.request_id !== undefined) created.autoRequest = false
+        if (frame.request_id !== undefined) {
+          created.autoRequest = false
+          if (session?.takeoverError) store.getState().acpTakeover(runID, session.takeover)
+        }
         if (frame.request_id !== undefined && !frame.ok) {
           if (!automatic) {
             store.getState().acpControl(runID, held, frame.error)
@@ -109,12 +120,13 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
           }
           const holder = store.getState().runs[runID]?.controller_member_id
           const self = store.getState().info?.member.id
-          if (created.autoRetries < autoRetryLimit && (!holder || holder === self)) {
+          if (created.autoWrite && created.autoRetries < autoRetryLimit && (!holder || holder === self)) {
             created.retryTimer = setTimeout(askAutomatically, 1000 * 2 ** created.autoRetries++)
           }
           return
         }
         const has = frame.has_control === true
+        if (!has && frame.revocation_reason) stopAutomaticControl(created)
         store.getState().acpControl(runID, {
           control_session_id: sessionID,
           control_generation: frame.control_generation ?? held?.control_generation ?? 0,
@@ -125,12 +137,14 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
       onTakeover: (frame) => {
         const takeover = frame.takeover
         const active = takeover && (takeover.phase === 'holding' || takeover.phase === 'review')
+        const requester = takeover?.requester_session_id === sessionID
+        const session = store.getState().acpSessions[runID]
+        if (requester && session?.controlError) store.getState().acpControl(runID, session.control)
         store.getState().acpTakeover(
           runID,
           active ? { ...takeover, receivedAt: performance.now() } : undefined,
-          frame.ok === false ? frame.error ?? 'Takeover request refused' : takeover?.phase === 'denied' ? 'The controller denied your takeover request.' : undefined,
+          frame.ok === false ? frame.error ?? 'Takeover request refused' : requester && takeover?.phase === 'denied' ? 'The controller denied your takeover request.' : undefined,
         )
-        if (takeover?.phase === 'granted' && takeover.requester_session_id === sessionID) created.stream.control(true)
       },
       onState: (state, error) => store.getState().acpStream(runID, state, error),
     })
@@ -152,17 +166,23 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
 
 export function allowSessionAutoWrite(runID: string): void {
   const entry = owned.get(runID)
-  if (!entry || entry.autoWrite) return
+  if (!entry || entry.autoWrite || entry.askedWrite) return
   entry.autoWrite = true
   entry.askOnce()
 }
 
-export function requestSessionControl(runID: string, write: boolean, takeover = false): boolean {
-  return owned.get(runID)?.stream.control(write, { takeover }) ?? false
+export function requestSessionControl(runID: string, write: boolean): boolean {
+  const entry = owned.get(runID)
+  if (!entry) return false
+  stopAutomaticControl(entry)
+  return entry.stream.control(write)
 }
 
 export function requestSessionTakeover(runID: string, action: TakeoverAction, id: string, generation?: number): boolean {
-  return owned.get(runID)?.stream.takeover(action, id, generation) ?? false
+  const entry = owned.get(runID)
+  if (!entry) return false
+  if (action === 'start') stopAutomaticControl(entry)
+  return entry.stream.takeover(action, id, generation)
 }
 
 export function sessionLease(store: RootStore, runID: string): SessionLease | undefined {

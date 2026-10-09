@@ -239,7 +239,6 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const session = useStore((s) => s.acpSessions[run.id])
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
-  const controllerID = useStore((s) => s.roomStatus[run.id]?.controller?.member_id)
   const control = useImplicitControl(run, agent)
   const coarse = useMediaQuery(coarsePointer)
   const [body, setBody] = useState('')
@@ -265,13 +264,13 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     sessionLive: session?.live ?? false,
     pending: session?.pending.length ?? 0,
     hasLease: control.canAct,
-    controller: !controllerID ? null : controllerID === self.id ? 'self' : 'other',
   })
+  const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
   const supportsImages = state?.prompt_images === true
   const images = useComposerImages(run.id, !gate && supportsImages && cap.hasMethod('terminal.image'), () => busyRef.current)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
-  const pill = pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
+  const pill = moderated ? 'send' : pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
 
   const [dismissed, setDismissed] = useState(false)
   const trigger = focused && !dismissed ? triggerAt(body, caret) : null
@@ -311,7 +310,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     const text = body.trim()
     const attachments = images.getPaths()
     const lease = sessionLease(useStore, run.id)
-    if ((!text && !attachments.length) || busyRef.current || !images.isReady() || !lease) return
+    if ((!text && !attachments.length) || busyRef.current || !images.isReady() || (!lease && !moderated)) return
     if (attachments.length && !supportsImages) {
       setError('This agent does not support image prompts.')
       return
@@ -339,7 +338,8 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
   const act = (chosen: Pill) => {
     if (busyRef.current || images.isUploading()) return
-    control.withControl(() => perform(chosen))
+    if (moderated) void deliver(false)
+    else control.withControl(() => perform(chosen))
   }
   const perform = (chosen: Pill) => {
     if (busyRef.current || images.isUploading()) return
@@ -361,7 +361,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     if (lease) await attempt(() => api.runACPSetOption(run.id, option.id, value, lease))
   }
 
-  if (gate && !gate.takeControl) {
+  if (gate) {
     return (
       <Closed
         reason={gate.reason}
@@ -372,18 +372,6 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
             <Square className="fill-current" />
             Interrupt
           </Button>
-        )}
-      />
-    )
-  }
-  if (gate) {
-    return (
-      <Closed
-        reason={gate.reason}
-        failure={session?.controlError && `Take control failed: ${session.controlError}`}
-        dock={dock}
-        action={agent.steerable && !agent.controlUnavailable && (
-          <Button size="sm" variant="secondary" onClick={agent.session.takeControl}>Take control</Button>
         )}
       />
     )
@@ -460,9 +448,9 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           }}
         />
         <div className="flex min-w-0 flex-wrap items-center gap-1">
-          <OptionPills options={state?.config_options ?? []} disabled={busy} onSet={setOption} />
+          <OptionPills options={state?.config_options ?? []} disabled={busy || moderated} onSet={setOption} />
           <p id={hintID} role={images.uploading ? 'status' : undefined} className="line-clamp-2 min-w-0 flex-1 basis-24 px-1 text-ui-sm text-muted">
-            {images.uploading ? 'Uploading…' : turnRunning || pill === 'resume' ? pillHint[pill] : ''}
+            {images.uploading ? 'Uploading…' : moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'resume' ? pillHint[pill] : ''}
           </p>
           <Button
             size="sm"

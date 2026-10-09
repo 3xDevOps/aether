@@ -131,9 +131,24 @@ Appearance > Text size**; event notices remain plain text.
 The [rendering capture](media/acp-reasoning-markdown.png) shows production
 timeline components with fixture ACP items, not a live agent.
 
+The **Multiplayer** strip stays below the view switch, including on Terminal
+and Changes. It shows who controls the agent, how many people are watching,
+and **Take control** or **Release**. Select **Multiplayer** to see the people
+and shared notes in Details. Hold **Take control** for five seconds to
+request an occupied run; the holder has seven seconds to accept or deny
+before control transfers. See [Run control](terminal.md#run-control) for
+cancellation, permissions and reconnect behavior.
+
+![Enhanced multiplayer controls and shared notes](media/enhanced-multiplayer-controls.webp)
+
+![The Enhanced holder's timed takeover decision](media/enhanced-multiplayer-takeover.webp)
+
+These captures use fixture members and simulated server messages with the
+dashboard components, not live agents.
+
 The composer under the timeline sends with `Mod+Enter`; on a touch screen the
-button is the only way, and Enter adds a line. Its button changes with the
-turn:
+button is the only way, and Enter adds a line. With control, its button
+changes with the turn:
 
 | Button | When | What the message does |
 | --- | --- | --- |
@@ -145,6 +160,12 @@ turn:
 
 `Mod+Enter` does what the button says, and nothing without text or attached
 images, so it never interrupts; `Mod+Shift+Enter` always queues.
+
+Without control, an authorized collaborator still gets **Send**. The
+instruction waits 45 seconds unless the controller approves or denies it
+sooner in **Details > Needs you**; the message row shows the countdown and
+delivery result. This does not take the controller's lease. Model and mode
+menus stay disabled, and **Steer** and **Interrupt** are not offered.
 
 **Attach an image** selects PNG, JPEG, GIF or WebP files; pasting actual image
 data embeds it in the composer too. Thumbnails appear above the text, with a
@@ -174,16 +195,19 @@ provider groups across every model the harness advertises; arrow keys and
 Enter select, and Escape closes it. Aether does not curate a shorter catalog.
 The harness's login, configuration and adapter policies determine which models
 it advertises. `/` lists the agent's commands and `@` completes a path in the
-run's checkout. Sending, answering and changing options need the
-run's control lease: the owner's desktop tab takes it when it first shows
-Session and nobody holds it. On any screen, the owner of a run nobody
-controls sends or answers in one step: the button takes the lease, then
-acts. The composer offers **Take control** only while another session
-holds it.
+run's checkout. Immediate steering, answering, interruption and changing
+options need the run's control lease: the owner's desktop tab takes it when
+it first shows Session and nobody holds it. On any screen, the owner of a
+run nobody controls sends or answers in one step: the button takes the
+lease, then acts. **Release**, a deliberate takeover, or losing control
+stops automatic acquisition while the run stays open, including view
+switches.
 
-A pending request docks above the composer, one at a time with `1/N`, and
-the composer stays shut until it is answered; **Interrupt** stays, to stop
-the turn and cancel the request instead. Options are ordered allow-once
+A pending request docks above the composer, one at a time with `1/N`. The
+controller's composer stays shut until it is answered; **Interrupt** stays,
+to stop the turn and cancel the request instead. Other collaborators can
+still send moderated instructions, but cannot answer the request or
+interrupt the agent without control. Options are ordered allow-once
 first and allow-always last, whatever order the agent sends; allow-once is
 the filled button. `1` to `4` pick an option while the card has focus (`1`
 never picks an allow-always option), and the header's **Answer** focuses

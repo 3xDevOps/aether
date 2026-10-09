@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
+import type { TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
 import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
@@ -43,6 +44,28 @@ function acpSocket(): ScriptedSession {
   const socket = StubSocket.opened.find((s) => s.url.includes('/ws/acp/'))
   if (!socket) throw new Error('no /ws/acp socket opened')
   return new ScriptedSession(socket)
+}
+
+function receiveTakeover(session: ScriptedSession, phase: TakeoverState['phase'], over: Partial<TakeoverState> = {}) {
+  const takeover: TakeoverState = {
+    id: 'takeover-request',
+    requester_member_id: bob.id,
+    requester_session_id: 'other-session',
+    holder_session_id: String(session.header().control_session_id),
+    holder_generation: 4,
+    phase,
+    hold_started_at: '2026-10-08T12:00:00Z',
+    hold_deadline: '2026-10-08T12:00:05Z',
+    decision_deadline: '2026-10-08T12:00:12Z',
+    server_now: phase === 'holding' ? '2026-10-08T12:00:00Z' : '2026-10-08T12:00:05Z',
+    ...over,
+  }
+  session.send({ type: 'takeover', ok: true, takeover })
+}
+
+const occupiedRoom = {
+  workspace_id: workspace.id, run_id: 'run_1', protected: false, watchers: [alice.id], queued_steers: 0,
+  controller: { member_id: bob.id, connected: true, acquired_at: '2026-10-08T11:00:00Z' },
 }
 
 const permission = {
@@ -287,13 +310,6 @@ describe('the Enhanced session view', () => {
     expect(eventRenders.get('Finished in 2s')).toBe(before)
   })
 
-  it('offers Take control instead of the box when someone else holds the run', async () => {
-    open({ controller_member_id: bob.id })
-    const session = acpSocket().open({ has_control: false }, [])
-    await userEvent.click(await screen.findByRole('button', { name: 'Take control' }))
-    expect(session.socket.frames().at(-1)).toMatchObject({ type: 'control', write: true })
-  })
-
   it('lets the owner of a run nobody controls send in one step, taking control first', async () => {
     vi.mocked(api.runInject).mockClear().mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'sent', actor_id: alice.id, body: 'go', created_at: new Date().toISOString() } } as never)
     open({ controller_member_id: '' })
@@ -315,5 +331,133 @@ describe('the Enhanced session view', () => {
     expect(await screen.findByText(/stderr: boom/, { selector: 'pre' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry Enhanced' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Open in Standard' })).toBeDefined()
+  })
+})
+
+describe('Enhanced multiplayer controls', () => {
+  it('releases the acknowledged lease without closing the session and remains reachable on Terminal', async () => {
+    const view = open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4 })
+    const controls = await screen.findByRole('group', { name: 'Multiplayer controls' })
+    await userEvent.click(within(controls).getByRole('button', { name: 'Release' }))
+    const request = session.socket.frames().at(-1) as { request_id: number }
+    expect(request).toMatchObject({ type: 'control', write: false, control_generation: 4 })
+    session.send({ type: 'control', request_id: request.request_id, ok: true, has_control: false, control_generation: 4 })
+    expect(await within(controls).findByRole('button', { name: 'Take control' })).toBeDefined()
+    const View = lookupRoute('run')!
+    view.rerender(<View params={{ runId: 'run_1', view: 'terminal' }} />)
+    expect(screen.getByText('No agent terminal')).toBeDefined()
+    expect(within(screen.getByRole('group', { name: 'Multiplayer controls' })).getByRole('button', { name: 'Take control' })).toBeDefined()
+    expect(session.socket.closed).toBe(false)
+  })
+
+  it.each([false, true])('lets a collaborator send without taking the lease (pending request: %s)', async (pending) => {
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    const queued = roomMessage({ actor_id: alice.id, kind: 'steer_request', body: 'Please review the migration', state: 'queued', deliver_after: new Date(Date.now() + 45_000).toISOString() })
+    vi.spyOn(api, 'runInject').mockResolvedValue({ message: queued })
+    vi.mocked(api.runInputAnswer).mockClear()
+    open({ member_id: bob.id, controller_member_id: bob.id })
+    const session = acpSocket().open({ has_control: false, state: state({ turn_in_flight: true, steering: true, pending: pending ? [permission] : [] }) })
+    const box = await screen.findByRole('combobox', { name: 'Message the agent' })
+    expect(screen.queryByRole('button', { name: 'Interrupt the agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull()
+    await userEvent.type(box, queued.body)
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(box).toHaveProperty('value', ''))
+    expect(useStore.getState().roomMessages.run_1).toContainEqual(queued)
+    expect(useStore.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+    if (pending) expect(screen.getByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true)
+    expect(api.runInputAnswer).not.toHaveBeenCalled()
+    expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
+    expect(api.runInject).toHaveBeenCalledWith('run_1', queued.body, expect.any(String), expect.objectContaining({ steer: false, lease: undefined }))
+  })
+
+  it('keeps protected-run collaborators from messaging or answering a pending request', async () => {
+    useStore.setState({ info: { ...serverInfo, member: bob } })
+    open({ protected: true })
+    acpSocket().open({ has_control: false, state: state({ turn_in_flight: true, pending: [permission] }) })
+    expect(await screen.findByRole('button', { name: 'Allow' })).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('combobox', { name: 'Message the agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Interrupt the agent' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Take control' })).toBeNull()
+  })
+
+  it('requires the full hold and server grant even while the Enhanced session rerenders', async () => {
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    const view = open({ member_id: bob.id, controller_member_id: bob.id })
+    const session = acpSocket().open({ has_control: false })
+    await waitFor(() => expect(screen.getByText('Bob controls')).toBeDefined())
+    const button = screen.getByRole('button', { name: 'Take control' })
+    vi.useFakeTimers()
+    try {
+      fireEvent.keyDown(button, { key: ' ' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(180) })
+      const start = session.socket.frames().at(-1) as { takeover_id: string }
+      expect(start).toMatchObject({ type: 'takeover', action: 'start' })
+      const request = { id: start.takeover_id, requester_member_id: alice.id, requester_session_id: String(session.header().control_session_id), holder_session_id: 'holder-session' }
+      receiveTakeover(session, 'holding', request)
+      session.items(say(1, 'assistant', 'Still working during the hold'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(4999) })
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'confirm' }))
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
+      expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(41) })
+      expect(session.socket.frames().at(-1)).toMatchObject({ type: 'takeover', action: 'confirm', takeover_id: start.takeover_id })
+      fireEvent.keyUp(button, { key: ' ' })
+      receiveTakeover(session, 'review', request)
+      expect(button.getAttribute('aria-disabled')).toBe('true')
+      expect(useStore.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+      session.send({ type: 'control', ok: true, has_control: true, control_generation: 5 })
+      receiveTakeover(session, 'granted', request)
+      expect(screen.getByRole('button', { name: 'Release' })).toBeDefined()
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels an early release instead of confirming a partial hold', async () => {
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    const view = open({ member_id: bob.id, controller_member_id: bob.id })
+    const session = acpSocket().open({ has_control: false })
+    await waitFor(() => expect(screen.getByText('Bob controls')).toBeDefined())
+    const button = screen.getByRole('button', { name: 'Take control' })
+    vi.useFakeTimers()
+    try {
+      fireEvent.keyDown(button, { key: ' ' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(180) })
+      const start = session.socket.frames().at(-1) as { takeover_id: string }
+      receiveTakeover(session, 'holding', { id: start.takeover_id, requester_member_id: alice.id, requester_session_id: String(session.header().control_session_id), holder_session_id: 'holder-session' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      fireEvent.keyUp(button, { key: ' ' })
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(session.socket.frames()).toContainEqual(expect.objectContaining({ type: 'takeover', action: 'cancel', takeover_id: start.takeover_id }))
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'confirm' }))
+      expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['accept', 'deny'] as const)('lets the holder %s a takeover above the Session composer', async (decision) => {
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4 })
+    const box = await screen.findByRole('combobox', { name: 'Message the agent' })
+    box.focus()
+    receiveTakeover(session, 'review')
+    const dialog = await screen.findByRole('alertdialog', { name: 'Run control requested' })
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Deny' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: decision === 'accept' ? 'Accept' : 'Deny' }))
+    expect(session.socket.frames().at(-1)).toMatchObject({ type: 'takeover', action: decision, takeover_id: 'takeover-request', control_generation: 4 })
+    receiveTakeover(session, decision === 'accept' ? 'granted' : 'denied')
+    if (decision === 'accept') session.send({ type: 'control', has_control: false, control_generation: 4, revocation_reason: 'takeover' })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(Boolean(screen.queryByRole('button', { name: 'Release' }))).toBe(decision === 'deny')
+    expect(within(screen.getByRole('group', { name: 'Multiplayer controls' })).queryByRole('alert')).toBeNull()
+    if (decision === 'deny') await waitFor(() => expect(document.activeElement).toBe(box))
   })
 })

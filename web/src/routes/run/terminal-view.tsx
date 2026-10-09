@@ -4,30 +4,14 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { isRetainedRun } from '@/lib/commands'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
+import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
 import { terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
-
-function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string {
-  const self = useSelf()
-  const members = useStore((s) => s.members)
-  const status = useStore((s) => s.roomStatus[run.id])
-  const statusControl = useStore((s) => s.roomStatusControl[run.id])
-  const statusError = useStore((s) => s.roomStatusError[run.id])
-  if (agent.localControl) return 'You control'
-  if (!status) return statusError ? 'Control unknown' : 'Checking control…'
-  const controllerID = status.controller?.member_id
-  const who = !controllerID ? 'Nobody controls'
-    : controllerID === self.id ? 'You control in another tab'
-      : `${members[controllerID]?.display_name ?? controllerID} controls`
-  const stale = agent.session.state.connection !== 'live' || statusControl !== agent.roomControl || Boolean(statusError)
-  return stale ? `${who} (last known)` : who
-}
 
 function Presence({ run, agent }: { run: RunRecord; agent: AgentTerminal }) {
   const summary = usePresenceSummary(run, agent)

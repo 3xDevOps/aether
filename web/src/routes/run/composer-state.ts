@@ -34,11 +34,10 @@ export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: bool
 
 export interface EnhancedGate {
   reason: string
-  takeControl?: boolean
   interrupt?: boolean
 }
 
-export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, sessionLive, pending, hasLease, controller }: {
+export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, sessionLive, pending, hasLease }: {
   run: RunRecord
   maySteer: boolean
   canReopen: boolean
@@ -47,7 +46,6 @@ export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, s
   sessionLive: boolean
   pending: number
   hasLease: boolean
-  controller: 'self' | 'other' | null
 }): EnhancedGate | null {
   if (run.switching) return { reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
   if (run.mode === 'headless') return { reason: 'Background runs take no input.' }
@@ -56,12 +54,6 @@ export function enhancedBlock({ run, maySteer, canReopen, stream, streamError, s
   if (stream === 'refused') return { reason: streamError ?? 'The session stream was refused.' }
   if (stream !== 'live') return { reason: 'Connecting to the agent…' }
   if (!sessionLive) return { reason: 'The agent’s session is not running.' }
-  if (pending > 0) return { reason: 'Answer the request above to continue.', interrupt: hasLease }
-  if (!hasLease) {
-    const reason = controller === 'self' ? 'Your other session still holds control.'
-      : controller === 'other' ? 'Someone else controls this run.'
-        : 'Take control to message the agent.'
-    return { reason, takeControl: true }
-  }
+  if (pending > 0 && hasLease) return { reason: 'Answer the request above to continue.', interrupt: true }
   return null
 }
