@@ -1438,9 +1438,15 @@ The `sessions` slice keeps each run's `AcpSession`: items grouped into
 turns (`store/session-rows.ts`), the ack's live state (turn in flight,
 pending requests, config options, commands, auth, steering), the lease and
 the stream state. A `reset` frame or an ack with `oldest_seq` starts the
-timeline over; **Show earlier** pages `run.acp.history` before the oldest
-item held. A closed turn's rows are derived once and kept; only the open
-turn re-derives. At most three sessions stay whole; the least recently
+timeline over. Scrolling within 240px of the top automatically pages
+`run.acp.history` before the oldest item held, 200 items at a time, along with
+older room messages. If the loaded rows do not fill the viewport, paging
+continues until they do or history ends. Inactive views and failed reads do
+not auto-page; failures keep the server's error with **Retry**. The list
+anchors pure prepends from the end; when history and live rows arrive
+together, it restores the visible row's key and offset instead. A closed
+turn's rows are derived once and kept; only the open turn re-derives. At most
+three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (the run's
 appended instructions hidden under its task), `assistant` (markdown through
 `react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
@@ -3638,7 +3644,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Dark, light, system.** Settings > Appearance and explicit palette commands
   set the stored preference; `system` follows `prefers-color-scheme` live.
   There is no additional theme mode or cycling status icon.
-- **Typography and density.** Inter at 13px with 12px supporting copy, on
+- **Typography and density.** DM Sans at 13px with 12px supporting copy, on
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
   terminal's alone; code uses the system monospace stack. Use the 28px
   control and row, 24px small control, 44px view header and 56px run header,

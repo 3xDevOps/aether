@@ -40,7 +40,7 @@ export function TopBar() {
       <div className="flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12">
         <div className="flex shrink-0 items-center gap-1.5">
           <img src="/aether-mark.png" alt="" width={24} height={24} />
-          <span className="text-title">Aether</span>
+          <span className="text-wordmark">Aether</span>
         </div>
         <HeaderNavigation />
       </div>
