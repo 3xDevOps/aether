@@ -143,6 +143,13 @@ request an occupied run; the holder has seven seconds to accept or deny
 before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
 
+In Session, the same animated teal control border as a Standard terminal
+surrounds the conversation and composer, not the toolbar or Details.
+**Release** retracts it; an incoming hold traces it red, and a takeover
+retracts the red border. Read-only tabs and disconnected sessions have no
+border. Reduced motion makes ownership changes instant and the takeover
+indicator static.
+
 ![Controller and watcher identities in the Enhanced run top bar](media/enhanced-multiplayer-controls.webp)
 
 ![The Enhanced holder's timed takeover decision](media/enhanced-multiplayer-takeover.webp)

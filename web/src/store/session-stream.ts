@@ -2,7 +2,7 @@ import { connectSessionStream, type SessionStream } from '@/lib/acp-stream'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { SessionLease } from '@/lib/session-types'
-import type { TakeoverAction } from '@/routes/terminal/attach'
+import type { ControlMetadata, TakeoverAction } from '@/routes/terminal/attach'
 import type { RootStore } from '@/store'
 import { batchNotifications } from '@/store/batch'
 
@@ -126,12 +126,20 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
           return
         }
         const has = frame.has_control === true
+        let loss: ControlMetadata['loss']
+        if (held?.has_control && !has) {
+          if (frame.request_id !== undefined && frame.ok && !frame.revocation_reason) loss = 'release'
+          else if (
+            frame.request_id === undefined && frame.revocation_reason === 'takeover' &&
+            frame.control_session_id === sessionID && frame.control_generation === held.control_generation
+          ) loss = 'takeover'
+        }
         if (!has && frame.revocation_reason) stopAutomaticControl(created)
         store.getState().acpControl(runID, {
           control_session_id: sessionID,
           control_generation: frame.control_generation ?? held?.control_generation ?? 0,
           has_control: has,
-          loss: !has && frame.revocation_reason === 'takeover' ? 'takeover' : undefined,
+          loss,
         })
       },
       onTakeover: (frame) => {
