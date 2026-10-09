@@ -36,7 +36,7 @@ interface ComposerProps {
 function Closed({ reason, action, dock, failure }: { reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
   return (
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
-      <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2 px-4 py-3">
         {dock}
         {failure && <p role="alert" className="text-ui-sm text-state-failed">{failure}</p>}
         <div className="flex min-w-0 items-center gap-2">
@@ -95,9 +95,10 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
   return (
     <div className="relative">
       {menu}
-      <div className="overflow-hidden rounded-control border border-control bg-canvas">
+      <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>
       {images}
       <Textarea
+        variant="embedded"
         ref={textarea}
         aria-label="Message the agent"
         aria-describedby={describedBy}
@@ -111,7 +112,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
         readOnly={readOnly}
         onPaste={onPaste}
         placeholder={placeholder}
-        className="resize-none border-0 [field-sizing:content] max-md:[--composer-lines:6.5rem]"
+        className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
         style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
         onFocus={() => {
           setFocused(true)
@@ -169,7 +170,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
 
   return (
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
-      <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2 px-4 py-3">
         {error && (
           <div role="alert" className="flex items-start gap-2 text-ui-sm text-state-failed">
             <span className="min-w-0 flex-1 break-words">{error}</span>
@@ -383,7 +384,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
   return (
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
-      <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 py-3">
+      <div className="flex flex-col gap-2 px-4 py-3">
         {dock}
         {images.uploadError && (
           <div role="alert" className="flex items-start gap-2 text-ui-sm text-state-failed">

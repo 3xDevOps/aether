@@ -305,6 +305,7 @@
   --color-scrim: var(--scrim);
 
   --shadow-overlay: var(--overlay-shadow);
+  --shadow-field-focus: 0 0 4px color-mix(in srgb, var(--accent-fill) 25%, transparent);
 }
 
 /* Saira at 600 for pane, dialog, step and empty-state headings only. */

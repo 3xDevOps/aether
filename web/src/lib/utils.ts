@@ -6,7 +6,7 @@ import { extendTailwindMerge } from 'tailwind-merge'
 // `rounded-control rounded-control`.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ['control', 'panel'], shadow: ['overlay'] },
+    theme: { radius: ['control', 'panel'], shadow: ['overlay', 'field-focus'] },
     classGroups: { 'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar'] }] },
   },
 })
@@ -25,9 +25,12 @@ export const focusRingInset =
 
 export const surface = 'rounded-panel border border-seam bg-raised text-text shadow-overlay'
 
+export const fieldFocus =
+  'focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-accent focus-visible:shadow-field-focus focus-visible:transition-none'
+
 /** Composed by `Input`, `Textarea` and `SelectTrigger`; nothing wears it by hand. */
 export const field = cn(
-  focusRing,
+  fieldFocus,
   'h-7 w-full rounded-control border border-control bg-canvas px-2 py-0 text-ui text-text coarse:h-11',
   'placeholder:text-muted aria-[invalid=true]:border-state-failed',
   'disabled:cursor-not-allowed disabled:opacity-50',
