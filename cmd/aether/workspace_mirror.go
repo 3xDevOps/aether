@@ -17,23 +17,25 @@ import (
 const (
 	workspaceMirrorUsage          = "usage: aether workspace mirror <status|configure|refresh|adopt|disable>"
 	workspaceMirrorStatusUsage    = "usage: aether workspace mirror status [--workspace <name-or-id>]"
-	workspaceMirrorConfigureUsage = "usage: aether workspace mirror configure --source <url> [--workspace <name-or-id>] [--branch <branch>] [--auth public|deploy-key] [--known-hosts-file <path>]"
+	workspaceMirrorConfigureUsage = "usage: aether workspace mirror configure --source <url> [--workspace <name-or-id>] [--branch <branch>] [--auth public|deploy-key|github] [--github-account-id <id>] [--known-hosts-file <path>]"
 	workspaceMirrorRefreshUsage   = "usage: aether workspace mirror refresh --workspace <name-or-id>"
-	workspaceMirrorAdoptUsage     = "usage: aether workspace mirror adopt --workspace <name-or-id> --generation <n> --yes"
+	workspaceMirrorAdoptUsage     = "usage: aether workspace mirror adopt --workspace <name-or-id> --generation <n> --commit <reviewed-sha> --yes"
 	workspaceMirrorDisableUsage   = "usage: aether workspace mirror disable --workspace <name-or-id> --yes"
 )
 
 type workspaceMirrorConfigureOptions struct {
-	workspace      string
-	source         string
-	branch         string
-	auth           string
-	knownHostsFile string
+	workspace       string
+	source          string
+	branch          string
+	auth            string
+	knownHostsFile  string
+	githubAccountID int64
 }
 
 type workspaceMirrorAdoptOptions struct {
 	workspace  string
 	generation int64
+	commit     string
 	yes        bool
 }
 
@@ -76,9 +78,10 @@ func parseWorkspaceMirrorConfigureArgs(args []string) (workspaceMirrorConfigureO
 	fs := flag.NewFlagSet("workspace mirror configure", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	source := fs.String("source", "", "upstream repository URL")
+	source := fs.String("source", "", "upstream repository URL (github auth requires https://github.com/owner/repo.git)")
 	branch := fs.String("branch", "", "upstream branch (default: the workspace base branch)")
-	auth := fs.String("auth", "public", "upstream authentication: public or deploy-key")
+	auth := fs.String("auth", "public", "upstream authentication: public, deploy-key, or github (your connected GitHub account)")
+	githubAccountID := fs.Int64("github-account-id", 0, "expected numeric GitHub account ID (github auth only)")
 	knownHostsFile := fs.String("known-hosts-file", "", "known_hosts text file for generic SSH deploy-key sources")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return workspaceMirrorConfigureOptions{}, errors.New(workspaceMirrorConfigureUsage)
@@ -86,15 +89,19 @@ func parseWorkspaceMirrorConfigureArgs(args []string) (workspaceMirrorConfigureO
 	if *source == "" {
 		return workspaceMirrorConfigureOptions{}, fmt.Errorf("%s: --source is required", workspaceMirrorConfigureUsage)
 	}
-	if *auth != string(domain.MirrorAuthPublic) && *auth != string(domain.MirrorAuthDeployKey) {
-		return workspaceMirrorConfigureOptions{}, fmt.Errorf("invalid --auth %q: want public or deploy-key", *auth)
+	if !domain.MirrorAuth(*auth).Valid() {
+		return workspaceMirrorConfigureOptions{}, fmt.Errorf("invalid --auth %q: want public, deploy-key, or github", *auth)
+	}
+	if *githubAccountID < 0 || (*githubAccountID != 0 && *auth != string(domain.MirrorAuthGitHub)) {
+		return workspaceMirrorConfigureOptions{}, errors.New("--github-account-id requires github auth and a positive account ID")
 	}
 	return workspaceMirrorConfigureOptions{
-		workspace:      *workspace,
-		source:         *source,
-		branch:         *branch,
-		auth:           *auth,
-		knownHostsFile: *knownHostsFile,
+		workspace:       *workspace,
+		source:          *source,
+		branch:          *branch,
+		auth:            *auth,
+		knownHostsFile:  *knownHostsFile,
+		githubAccountID: *githubAccountID,
 	}, nil
 }
 
@@ -116,6 +123,7 @@ func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, 
 	fs.SetOutput(io.Discard)
 	workspace := fs.String("workspace", "", "workspace ID or name")
 	generation := fs.Int64("generation", 0, "candidate mirror generation to adopt")
+	commit := fs.String("commit", "", "full observed candidate commit explicitly reviewed for adoption")
 	yes := fs.Bool("yes", false, "confirm replacing the accepted base with the candidate")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return workspaceMirrorAdoptOptions{}, errors.New(workspaceMirrorAdoptUsage)
@@ -126,10 +134,16 @@ func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, 
 	if *generation <= 0 {
 		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --generation must be greater than zero", workspaceMirrorAdoptUsage)
 	}
+	if *commit == "" {
+		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --commit is required; review the current candidate and supply its full observed commit", workspaceMirrorAdoptUsage)
+	}
+	if !domain.ValidMirrorSHA(*commit) || strings.ContainsAny(*commit, "ABCDEF") {
+		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --commit must be a full lowercase SHA-1 or SHA-256 object ID", workspaceMirrorAdoptUsage)
+	}
 	if !*yes {
 		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --yes is required because adopt replaces the accepted base", workspaceMirrorAdoptUsage)
 	}
-	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, yes: *yes}, nil
+	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, commit: *commit, yes: *yes}, nil
 }
 
 func parseWorkspaceMirrorDisableArgs(args []string) (workspaceMirrorWorkspaceOptions, error) {
@@ -194,11 +208,12 @@ func workspaceMirrorConfigure(args []string) error {
 		}
 		var result protocol.WorkspaceMirrorResult
 		if err := c.Call(protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{
-			WorkspaceID: ws.ID,
-			SourceURL:   opts.source,
-			Branch:      branch,
-			Auth:        opts.auth,
-			KnownHosts:  knownHosts,
+			WorkspaceID:     ws.ID,
+			SourceURL:       opts.source,
+			Branch:          branch,
+			Auth:            opts.auth,
+			KnownHosts:      knownHosts,
+			GitHubAccountID: opts.githubAccountID,
 		}, &result); err != nil {
 			return err
 		}
@@ -239,8 +254,9 @@ func workspaceMirrorAdopt(args []string) error {
 		}
 		var result protocol.WorkspaceMirrorResult
 		if err := c.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{
-			WorkspaceID: ws.ID,
-			Generation:  opts.generation,
+			WorkspaceID:    ws.ID,
+			Generation:     opts.generation,
+			ExpectedCommit: opts.commit,
 		}, &result); err != nil {
 			return err
 		}

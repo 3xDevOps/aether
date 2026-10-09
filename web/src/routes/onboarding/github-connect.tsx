@@ -1,8 +1,8 @@
-// `gh auth login` is a device flow that ends in a browser, so the screen types
-// it into the environment terminal and hands the rest to `github.connect`.
+// Non-admin members retain their own terminal-based publishing setup.
 
 import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
+import { GitHubConnection } from '@/components/github-connection'
 import { Button } from '@/components/ui/button'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -11,19 +11,23 @@ import type { GitHubConnectResult, GitHubProbeResult } from '@/lib/types'
 import { TerminalDock } from '@/routes/environment/terminal-dock'
 import { pane } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
-import type { Capability } from '@/store/hooks'
+import { type Capability, useIsAdmin } from '@/store/hooks'
 
 /** Other sub-screens are named by harness, and no registry name starts with `@`. */
 export const githubSubStep = '@github'
 
 /** `connection` is set once this session's connect succeeded. */
 export function GitHubSection({
+  client,
   connection,
   onOpen,
 }: {
+  client: Api
   connection: GitHubConnectResult | null
   onOpen: () => void
 }) {
+  const isAdmin = useIsAdmin()
+  if (isAdmin) return <GitHubConnection client={client} />
   return (
     <section aria-label="Connect GitHub" className="flex min-w-0 flex-col items-start gap-2">
       <p className="text-ui text-text">

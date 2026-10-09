@@ -618,6 +618,7 @@ func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *termin
 	}
 	sup.cleanupPending = true
 	s.mu.Unlock()
+	s.stopSupervisionGitHubOAuth(sup.member, sup)
 
 	cleanupCtx, cancel := context.WithTimeout(ctx, terminalCleanupTimeout)
 	defer cancel()
@@ -780,6 +781,9 @@ func (s *Scheduler) StopTerminal(ctx context.Context, member domain.MemberID) er
 // may acquire the member cache lock (terminal -> cache ordering), but must not
 // reenter terminal lifecycle methods. Nil performs only the stop.
 func (s *Scheduler) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
+	// Interrupt OAuth completion before waiting on its short terminal-locked
+	// native setup. stopTerminalLocked repeats this under the admission fence.
+	s.stopTerminalGitHubOAuth(member)
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()
@@ -795,6 +799,7 @@ func (s *Scheduler) WithStoppedTerminal(ctx context.Context, member domain.Membe
 
 // stopTerminalLocked stops a member's terminal while its member lock is held.
 func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.MemberID) error {
+	s.stopTerminalGitHubOAuth(member)
 	row, err := s.cfg.Store.GetTerminal(ctx, member)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("scheduler: get terminal to stop: %w", err)

@@ -261,7 +261,8 @@ sandbox.
 
 ### GitHub credentials and signing keys
 
-Connecting GitHub (`aether github connect`, see
+Connecting GitHub (the administrator's browser authorization flow or
+`aether github connect`, see
 [environment-home.md](environment-home.md#connect-github)) puts two secrets,
 and the settings that use them, in the member home on the server:
 
@@ -337,8 +338,11 @@ against the member's public key with `git verify-commit`, given a
 does not change who the commit is authored as; see
 [teams.md](teams.md#attribution).
 
-To revoke: run `gh auth logout --hostname github.com` in the environment
-terminal, remove the signing key from
+To revoke the token at GitHub, revoke the GitHub CLI authorization in
+[GitHub's application settings](https://github.com/settings/applications).
+`gh auth logout --hostname github.com` in the environment terminal only
+removes the native local login; it does not revoke a copied token. Remove
+the signing key from
 [github.com/settings/keys](https://github.com/settings/keys), and delete
 `.config/gh/hosts.yml`, `.ssh/aether_signing` and `.ssh/aether_signing.pub`
 from the member home. Then clear the signing settings in the environment
@@ -466,7 +470,46 @@ workspace's protected base. It is not the checkout `Origin`: Origin remains
 the independent push destination for run branches and pull requests. A mirror
 source URL must not contain credentials, query strings, or fragments.
 
-Public mode fetches credential-free HTTPS. Deploy-key mode generates a
+**GitHub mode** (`auth: github`) uses the initiating administrator's native
+GitHub CLI login on their own Aether server. The server reads
+`homes/<member>/.config/gh/hosts.yml` through a bounded, root-confined read,
+verifies the active account with `https://api.github.com/user`, and uses the
+credential only for fixed GitHub API reads and HTTPS fetch of the selected
+`https://github.com/<owner>/<repo>.git` source. API requests and fetches do
+not follow redirects. Repository listing includes accessible private
+collaborator and organization repositories; repository administration or
+push access is not required to import a readable source.
+
+The token remains a native member-home secret. Mirror configuration persists
+only the authorizing member ID and numeric GitHub account ID as its
+credential binding, alongside ordinary source metadata, never a token.
+It is not copied to other members, the browser, the edge, the workspace
+database, on-disk Git configuration, URLs, or command arguments. The server
+uses it in memory and passes URL-scoped HTTP authorization to the fetch
+child through its temporary process environment. Server administrators and
+processes able to inspect that server can therefore access it.
+
+**Fetch-only describes the mirror operation, not the token's permissions.**
+Native gh authorization retains its scopes, including the broad `repo`
+scope and the signing-key scope described above. The owner's own agents
+already can read or replace these native credentials. Importing private
+source deliberately shares its code with the workspace's authorized members
+and runs; it does not lend them the administrator's GitHub login or grant
+them upstream publishing permission. Publishing still requires an explicit,
+independent checkout Origin and the publishing member's own credentials.
+
+Every refresh re-reads the native credential and verifies the numeric account
+binding. Expiry, revocation, logout, removal of the authorizing member, or
+switching to another account fails refresh without moving the accepted
+base. Reconnect the same account as the authorizing member, or have an
+administrator explicitly reconfigure the source to bind their current
+account. Disabling or deleting a mirror does not log out or revoke native gh
+authorization. Browser authorization and repository-selection RPCs are
+admin-only; the server derives the credential owner from the authenticated
+caller. Existing member-scoped native GitHub setup remains separate, as do
+edge identity sign-in and agent-provider accounts.
+
+**Public mode** fetches credential-free HTTPS. **Deploy-key mode** generates a
 dedicated Ed25519 key for each mirror configuration generation. For GitHub,
 the operator installs only the printed public half as a repository deploy key
 and should leave **Allow write access** off. Generic SSH sources use the
@@ -491,7 +534,18 @@ client-writable base behavior; it also cannot revoke a remote key. Treat a
 deploy-key public key and its fingerprint as operational metadata, but never
 publish the private key or the `known_hosts` file.
 
-Configuration starts **pending**; it does not fetch until Verify/`refresh`.
+Configuration starts **pending**; it does not fetch until Verify/`refresh`
+(remote import performs that first fetch). The initial observed revision
+requires explicit administrator adoption; fetching it is not acceptance.
+Adoption requires both the configuration `generation` and the full reviewed
+commit SHA (`expected_commit` in the API, `--commit` in the CLI). Generation
+pins configuration, not code: a refresh can replace the candidate without
+changing generation. Under the Git ref-mutation lock, the server checks the
+reviewed SHA against the current candidate on every compare-and-swap attempt,
+before moving any base, accepted, or candidate ref. A stale review is rejected
+without changing those refs; the new candidate remains inspectable. The
+administrator must refresh the review and explicitly accept the new revision,
+not retry with an automatically selected latest SHA.
 Each launch refreshes exactly the configured branch before a run row is
 created. `ready` accepts an unchanged or forward-only source, while
 `auth-failed`, `offline`, `source-missing`, `rewritten`, `diverged`, and

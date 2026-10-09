@@ -203,8 +203,13 @@ type Scheduler struct {
 	// agentInstalls maps a member with an agent.install in flight to its home's
 	// host path.
 	agentInstalls map[domain.MemberID]string
-	acp           *acpDriver
-	itemLogs      acphost.ReadOnlyLogCache
+	// GitHub OAuth commands belong to the scheduler, not to an RPC channel.
+	githubOAuthMu     sync.Mutex
+	githubOAuth       map[domain.MemberID]*githubOAuthAttempt
+	githubOAuthClosed bool
+	githubOAuthWG     sync.WaitGroup
+	acp               *acpDriver
+	itemLogs          acphost.ReadOnlyLogCache
 }
 
 // credentialUserReservation stops ownership changes to the member home and
@@ -595,6 +600,7 @@ func recoveryError(err error) error {
 // Close stops supervision and the Start loops. Containers keep running.
 func (s *Scheduler) Close() error {
 	s.superCancel()
+	s.closeGitHubOAuth()
 	s.wg.Wait()
 	s.acp.shutdown()
 	s.flushPendingRunTitles()

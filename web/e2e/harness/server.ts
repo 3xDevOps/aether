@@ -1,12 +1,13 @@
-// A real `aether-server` as a child process: real SQLite, real git
-// transport, real Docker. Nothing here is stubbed except the agent, which
-// is the scheduler's deterministic `fake` harness.
+// A real server as a child process: real SQLite, git and Docker. Most scenarios
+// use the shipped binary and deterministic fake agent. GitHub journeys use a
+// package-server test binary that replaces only external GitHub providers.
 
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { binaries } from './paths'
+import { binaries, repoRoot, scratchDir } from './paths'
+import { seedRepo } from './git'
 import { type Child, portOpen, reservePort, start, waitFor } from './process'
 
 /**
@@ -65,8 +66,23 @@ export interface Server {
 
 export interface ServerOptions {
   standardImage?: string
+  /** Test-only GitHub HTTP/Git provider; the server remains real. */
+  githubProvider?: boolean
 }
 
+
+let githubServerBinary: string | undefined
+
+function githubProviderServer(): string {
+  if (!githubServerBinary) {
+    githubServerBinary = path.join(scratchDir(), 'github-provider-server.test')
+    execFileSync('go', ['test', '-c', '-tags=integration', '-o', githubServerBinary, './internal/server'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    })
+  }
+  return githubServerBinary
+}
 /**
  * Starts the server in `dir` and waits for its SSH listener. The first
  * identity to authenticate becomes the admin, so nothing is seeded here:
@@ -83,9 +99,14 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
 
   const port = await reservePort()
   const addr = `127.0.0.1:${port}`
+  if (options.githubProvider) {
+    await seedRepo(path.join(dir, 'repos'), 'first')
+    const second = await seedRepo(path.join(dir, 'repos'), 'second')
+    execFileSync('git', ['-C', second, 'branch', '-m', 'main', 'trunk'])
+  }
   const child: Child = start(
-    binaries().server,
-    [
+    options.githubProvider ? githubProviderServer() : binaries().server,
+    options.githubProvider ? ['-test.run=^TestGitHubBrowserProviderHarness$', '-test.timeout=0'] : [
       'serve',
       '--data-dir',
       dataDir,
@@ -96,7 +117,16 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
       '--standard-image',
       options.standardImage ?? standardImage,
     ],
-    { ...process.env, AETHER_FAKE_AGENT: fakeAgent },
+    {
+      ...process.env,
+      AETHER_FAKE_AGENT: fakeAgent,
+      ...(options.githubProvider ? {
+        AETHER_E2E_GITHUB_ROOT: dir,
+        AETHER_E2E_GITHUB_ADDR: addr,
+        AETHER_E2E_GITHUB_IMAGE: options.standardImage ?? standardImage,
+        AETHER_E2E_GITHUB_SERVER: binaries().server,
+      } : {}),
+    },
   )
 
   try {

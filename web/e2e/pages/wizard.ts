@@ -171,10 +171,6 @@ export class AgentStep extends Step {
     return this.section.getByRole('status').filter({ hasText: 'Starting your environment container' })
   }
 
-  async connectGitHub(): Promise<void> {
-    await this.expand('GitHub')
-    await this.button('Connect GitHub').click()
-  }
 
   continue(): Locator {
     return this.button('Continue')
@@ -189,37 +185,8 @@ export class AgentStep extends Step {
     return new ConfigurationImport(this.page)
   }
 
-  get github(): GitHubConnect {
-    return new GitHubConnect(this.page)
-  }
 }
 
-/**
- * The Agent step's GitHub part, closed and open: both states carry the
- * same `<section aria-label>` and never render together, so one object
- * covers them.
- */
-export class GitHubConnect {
-  constructor(private readonly page: Page) {}
-
-  get section(): Locator {
-    return this.page.getByRole('region', { name: 'Connect GitHub', exact: true })
-  }
-
-  /** Runs the non-interactive half, once the device login is done. */
-  confirmLoggedIn(): Locator {
-    return this.section.getByRole('button', { name: "I've logged in", exact: true })
-  }
-
-  /**
-   * The screen's own copy of a command, in its code block. The section
-   * also holds the terminal, which echoes whatever was typed into it, so
-   * asserting on the section cannot tell the two apart.
-   */
-  get commands(): Locator {
-    return this.section.locator('code')
-  }
-}
 
 /**
  * One explicit browser directory import. The input is scoped to its section

@@ -1173,6 +1173,38 @@ export interface GitHubConnectResult {
   fingerprint: string
 }
 
+export interface GitHubOAuthResult {
+  state: 'disconnected' | 'starting' | 'pending' | 'finishing' | 'connected' | 'expired' | 'failed' | 'cancelled'
+  session_id?: string
+  user_code?: string
+  verification_url?: string
+  expires_at?: string
+  login?: string
+  connection?: GitHubConnectResult
+  error?: string
+}
+
+export interface GitHubAccount {
+  id: number
+  login: string
+}
+
+export interface GitHubRepository {
+  id: number
+  full_name: string
+  name: string
+  private: boolean
+  default_branch: string
+  clone_url: string
+  can_push: boolean
+}
+
+export interface GitHubRepositoryListResult {
+  account: GitHubAccount
+  repositories: GitHubRepository[]
+  next_page?: number
+}
+
 /** github.probe status: gh is usable, absent, present but unrunnable, or
  * older than the login check can read. */
 export type GitHubCLIStatus = 'ok' | 'missing' | 'broken' | 'outdated'
@@ -1240,7 +1272,7 @@ export interface RepoFastForwardResult {
   output: string
 }
 
-export type WorkspaceMirrorAuth = 'public' | 'deploy-key'
+export type WorkspaceMirrorAuth = 'public' | 'deploy-key' | 'github'
 
 export type WorkspaceMirrorStatus =
   | 'pending'
@@ -1261,6 +1293,8 @@ export interface WorkspaceMirrorResult {
   source_identity?: string
   branch?: string
   auth?: WorkspaceMirrorAuth
+  github_member_id?: string
+  github_user_id?: number
   generation?: number
   status?: WorkspaceMirrorStatus
   observed_commit?: string

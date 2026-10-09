@@ -3,8 +3,10 @@ package gitengine
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -59,7 +61,7 @@ func TestMirrorImportInitializesAndRequiresInitialAdoption(t *testing.T) {
 	if _, branchErr := e.WorkspaceBranchCommit(t.Context(), ws, "main"); branchErr == nil {
 		t.Fatal("first observation silently accepted the base")
 	}
-	adopted, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation)
+	adopted, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, commit)
 	if err != nil || adopted.AcceptedCommit != commit || adopted.BaseCommit != commit || adopted.Status != domain.MirrorStatusReady {
 		t.Fatalf("adoption = %+v, %v", adopted, err)
 	}
@@ -107,7 +109,7 @@ func TestMirrorImportConcurrentInitializationPreservesRepository(t *testing.T) {
 	if _, err := e.RefreshWorkspaceMirror(t.Context(), ws, req); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation); err != nil {
+	if _, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, commit); err != nil {
 		t.Fatal(err)
 	}
 	repo, err := e.InitWorkspaceRepo(t.Context(), ws)
@@ -143,7 +145,7 @@ func TestMirrorImportPreservesSeededBaseAndRejectsRewrite(t *testing.T) {
 	if err != nil || observed.BaseCommit != base || observed.CandidateCommit != candidate || observed.AcceptedCommit != "" {
 		t.Fatalf("seeded base overwritten: %+v, %v", observed, err)
 	}
-	if _, adoptErr := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation); adoptErr != nil {
+	if _, adoptErr := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, candidate); adoptErr != nil {
 		t.Fatal(adoptErr)
 	}
 	mirrorImportGit(t, e, source, "fetch", seed, "refs/heads/main")
@@ -178,9 +180,134 @@ func TestMirrorImportMissingSourceBranch(t *testing.T) {
 			if !errors.As(err, &typed) || typed.Kind != MirrorErrorSourceMissing || typed.Branch != branch || result.Status != domain.MirrorStatusSourceMissing || result.BaseCommit != "" || result.CandidateCommit != "" {
 				t.Fatalf("source failure = %+v, %v", result, err)
 			}
-			if _, err := e.AdoptWorkspaceMirror(t.Context(), "missing-source", req.Generation); !errors.As(err, &typed) || typed.Kind != MirrorErrorNoCandidate {
+			if _, err := e.AdoptWorkspaceMirror(t.Context(), "missing-source", req.Generation, strings.Repeat("a", 40)); !errors.As(err, &typed) || typed.Kind != MirrorErrorNoCandidate {
 				t.Fatalf("missing source created adoptable candidate: %v", err)
 			}
 		})
+	}
+}
+
+func TestMirrorAdoptionRequiresReviewedCandidate(t *testing.T) {
+	e := newUnitEngine(t)
+	e.cfg.MirrorFetch = mirrorImportTransport
+	source, reviewed := mirrorImportSource(t, e, true)
+	const ws domain.WorkspaceID = "reviewed-import"
+	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
+		t.Fatal(err)
+	}
+	first, err := e.RefreshWorkspaceMirror(t.Context(), ws, req)
+	if err != nil || first.CandidateCommit != reviewed || first.Status != domain.MirrorStatusPending {
+		t.Fatalf("reviewed candidate = %+v, %v", first, err)
+	}
+	mirrorImportGit(t, e, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "new candidate")
+	current := mirrorImportGit(t, e, source, "rev-parse", "HEAD")
+	second, err := e.RefreshWorkspaceMirror(t.Context(), ws, req)
+	if err != nil || second.Generation != first.Generation || second.CandidateCommit != current || current == reviewed || second.AcceptedCommit != "" || second.BaseCommit != "" {
+		t.Fatalf("new candidate = %+v, %v", second, err)
+	}
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedRef, candidateRef := mirrorRefs(req.Generation)
+	assertUnchanged := func(t *testing.T) {
+		t.Helper()
+		for ref, want := range map[string]string{"refs/heads/main": "", acceptedRef: "", candidateRef: current} {
+			if got := readRefBestEffort(t.Context(), e, repo, ref); got != want {
+				t.Fatalf("ref %s = %q, want %q", ref, got, want)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		expected string
+		kind     MirrorErrorKind
+	}{
+		{name: "stale review", expected: reviewed, kind: MirrorErrorCASConflict},
+		{name: "missing", expected: "", kind: MirrorErrorInvalidRequest},
+		{name: "abbreviated", expected: current[:12], kind: MirrorErrorInvalidRequest},
+		{name: "revspec", expected: "HEAD", kind: MirrorErrorInvalidRequest},
+		{name: "uppercase", expected: strings.Repeat("A", 40), kind: MirrorErrorInvalidRequest},
+		{name: "nonhex", expected: strings.Repeat("g", 40), kind: MirrorErrorInvalidRequest},
+		{name: "whitespace", expected: current + "\n", kind: MirrorErrorInvalidRequest},
+		{name: "wrong length", expected: strings.Repeat("a", 41), kind: MirrorErrorInvalidRequest},
+		{name: "complete sha256", expected: strings.Repeat("a", 64), kind: MirrorErrorCASConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, adoptErr := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, tc.expected)
+			var failure *MirrorError
+			if !errors.As(adoptErr, &failure) || failure.Kind != tc.kind || result.Status == domain.MirrorStatusReady || result.Changed {
+				t.Fatalf("rejected adoption = %+v, %v", result, adoptErr)
+			}
+			if tc.kind == MirrorErrorCASConflict && (result.CandidateCommit != current || result.ObservedCommit != current || result.AcceptedCommit != "" || result.BaseCommit != "") {
+				t.Fatalf("conflict omitted current candidate: %+v", result)
+			}
+			assertUnchanged(t)
+		})
+	}
+	adopted, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, current)
+	if err != nil || adopted.Status != domain.MirrorStatusReady || adopted.AcceptedCommit != current || adopted.BaseCommit != current || !adopted.Changed {
+		t.Fatalf("current candidate adoption = %+v, %v", adopted, err)
+	}
+	for _, ref := range []string{"refs/heads/main", acceptedRef, candidateRef} {
+		if got := readRefBestEffort(t.Context(), e, repo, ref); got != current {
+			t.Fatalf("adopted ref %s = %q, want %q", ref, got, current)
+		}
+	}
+}
+
+func TestMirrorAdoptionRechecksReviewedCandidateAfterCASConflict(t *testing.T) {
+	e := newUnitEngine(t)
+	e.cfg.MirrorFetch = mirrorImportTransport
+	source, reviewed := mirrorImportSource(t, e, true)
+	const ws domain.WorkspaceID = "reviewed-retry"
+	req := MirrorRequest{SourceURL: source, Branch: "main", Generation: 1, Auth: domain.MirrorAuthPublic}
+	if _, err := e.ConfigureWorkspaceMirror(t.Context(), ws, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.RefreshWorkspaceMirror(t.Context(), ws, req); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirrorImportGit(t, e, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "candidate during CAS")
+	current := mirrorImportGit(t, e, source, "rev-parse", "HEAD")
+	mirrorImportGit(t, e, repo, "fetch", source, "refs/heads/main")
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedRef, candidateRef := mirrorRefs(req.Generation)
+	wrapperDir := t.TempDir()
+	wrapper, marker := filepath.Join(wrapperDir, "git-wrapper"), filepath.Join(wrapperDir, "moved")
+	// Interpose a native ref writer after adoption reads A but before its
+	// transaction verifies A. Git must reject that transaction atomically,
+	// and the next attempt must reject B rather than adopting it.
+	script := "#!/bin/sh\nset -e\n" +
+		"case \"$*\" in *'update-ref --stdin'*)\n" +
+		"if [ ! -e " + shellQuoteMirror(marker) + " ]; then\n" +
+		shellQuoteMirror(realGit) + " -C " + shellQuoteMirror(repo) + " update-ref " + shellQuoteMirror(candidateRef) + " " + current + " " + reviewed + "\n" +
+		": > " + shellQuoteMirror(marker) + "\nfi\n;; esac\n" +
+		"exec " + shellQuoteMirror(realGit) + " \"$@\"\n"
+	if writeErr := os.WriteFile(wrapper, []byte(script), 0o755); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	e.cfg.GitPath = wrapper
+	result, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, reviewed)
+	var failure *MirrorError
+	if !errors.As(err, &failure) || failure.Kind != MirrorErrorCASConflict || result.Status != domain.MirrorStatusError || result.Changed || result.CandidateCommit != current || result.AcceptedCommit != "" || result.BaseCommit != "" {
+		t.Fatalf("retried stale adoption = %+v, %v", result, err)
+	}
+	for ref, want := range map[string]string{"refs/heads/main": "", acceptedRef: "", candidateRef: current} {
+		if got := readRefBestEffort(t.Context(), e, repo, ref); got != want {
+			t.Fatalf("ref after CAS conflict %s = %q, want %q", ref, got, want)
+		}
+	}
+	adopted, err := e.AdoptWorkspaceMirror(t.Context(), ws, req.Generation, current)
+	if err != nil || adopted.Status != domain.MirrorStatusReady || adopted.AcceptedCommit != current || adopted.BaseCommit != current {
+		t.Fatalf("reviewed candidate after CAS conflict = %+v, %v", adopted, err)
 	}
 }

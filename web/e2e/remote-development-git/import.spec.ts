@@ -7,7 +7,7 @@ import type { Workspace, WorkspaceMirrorResult } from '../../src/lib/types'
 const source = process.env.AETHER_E2E_GIT_SOURCE_URL ?? 'https://github.com/3xDevOps/Aether.git'
 const branch = process.env.AETHER_E2E_GIT_SOURCE_BRANCH ?? 'main'
 
-test('remote import retains the initial candidate until an administrator adopts its generation', async ({ page, aether }) => {
+test('remote import retains the initial candidate until an administrator adopts its reviewed commit and generation', async ({ page, aether }) => {
   const admin = await aether.member('Import administrator')
   await admin.api.local('link.apply', { addr: aether.server.addr, name: admin.name })
   await page.goto(admin.url)

@@ -21,15 +21,17 @@ const (
 // WorkspaceImport starts the existing mirror configure/refresh/adopt flow.
 // Origin is explicit and independent of SourceURL. Import never implicitly
 // accepts a rewritten base: the observed initial candidate is accepted through
-// workspace.mirror.adopt with its returned generation.
+// workspace.mirror.adopt with its reviewed generation and observed_commit
+// supplied as the required expected_commit.
 type WorkspaceImportParams struct {
-	Name        string               `json:"name"`
-	Environment WorkspaceEnvironment `json:"environment"`
-	SourceURL   string               `json:"source_url"`
-	BaseBranch  string               `json:"base_branch"`
-	Origin      string               `json:"origin"`
-	Auth        string               `json:"auth"`
-	KnownHosts  string               `json:"known_hosts,omitempty"`
+	Name            string               `json:"name"`
+	Environment     WorkspaceEnvironment `json:"environment"`
+	SourceURL       string               `json:"source_url"`
+	BaseBranch      string               `json:"base_branch"`
+	Origin          string               `json:"origin"`
+	Auth            string               `json:"auth"`
+	KnownHosts      string               `json:"known_hosts,omitempty"`
+	GitHubAccountID int64                `json:"github_account_id,omitempty"`
 }
 
 // Created remains true if configuration/fetch subsequently fails. Callers

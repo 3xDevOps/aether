@@ -5,6 +5,7 @@ import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
 import { ModeOverview } from '@/components/agents/mode-comparison'
+import { GitHubConnection } from '@/components/github-connection'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,7 +17,7 @@ import { useAgentList } from '@/routes/agents/use-agents'
 import { actionRow, Step } from '@/routes/onboarding/layout'
 import { GitHubConnect, githubSubStep } from '@/routes/onboarding/github-connect'
 import { useStore } from '@/store'
-import type { Capability } from '@/store/hooks'
+import { type Capability, useIsAdmin } from '@/store/hooks'
 
 export const addAgentSubStep = '@custom'
 
@@ -37,6 +38,7 @@ export function AgentStep({
   onSetup: (subStep: string) => void
   onNext: (skipped: boolean) => void
 }) {
+  const isAdmin = useIsAdmin()
   const { agents, error, reload } = useAgentList(client, true)
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
   const rememberLaunch = useStore((s) => s.rememberLaunch)
@@ -53,7 +55,7 @@ export function AgentStep({
     return (
       <section aria-label="Agent" className="flex min-w-0 flex-col gap-5">
         {setup === githubSubStep ? (
-          <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={() => onSetup('')} />
+          isAdmin ? <GitHubConnection client={client} /> : <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={() => onSetup('')} />
         ) : setup === addAgentSubStep ? (
           <AddAgent client={client} onAdded={(agent) => { reload(); openSetup(agent.name) }} onCancel={() => onSetup('')} />
         ) : settingUp ? (

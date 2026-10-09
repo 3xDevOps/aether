@@ -166,10 +166,12 @@ const (
 	MirrorAuthPublic MirrorAuth = "public"
 	// MirrorAuthDeployKey fetches with an operator-provided deploy key.
 	MirrorAuthDeployKey MirrorAuth = "deploy-key"
+	// MirrorAuthGitHub reads the bound member's native GitHub credential on demand.
+	MirrorAuthGitHub MirrorAuth = "github"
 )
 
 func (a MirrorAuth) Valid() bool {
-	return a == MirrorAuthPublic || a == MirrorAuthDeployKey
+	return a == MirrorAuthPublic || a == MirrorAuthDeployKey || a == MirrorAuthGitHub
 }
 
 type MirrorStatus string
@@ -207,14 +209,16 @@ func (s MirrorStatus) Valid() bool {
 // WorkspaceMirror is the server-owned configuration and refresh state for a
 // workspace's upstream source. A missing row means the workspace is local-only.
 //
-// Private key bytes are deliberately not part of this model or its persisted
-// representation; Auth and KeyFingerprint identify the configured credential.
+// Credentials are never part of this model. GitHub bindings identify the
+// authorizing member and numeric account, not a token or shared member home.
 type WorkspaceMirror struct {
 	WorkspaceID    WorkspaceID
 	SourceURL      string
 	SourceIdentity string
 	Branch         string
 	Auth           MirrorAuth
+	GitHubMemberID MemberID
+	GitHubUserID   int64
 	Generation     int64
 	Status         MirrorStatus
 	ObservedCommit string
@@ -235,6 +239,8 @@ func (m WorkspaceMirror) Valid() bool {
 		ValidMirrorSourceIdentity(m.SourceIdentity) &&
 		ValidMirrorBranch(m.Branch) &&
 		m.Auth.Valid() &&
+		((m.Auth == MirrorAuthGitHub && m.GitHubMemberID != "" && m.GitHubUserID > 0 && ValidGitHubMirrorSourceURL(m.SourceURL)) ||
+			(m.Auth != MirrorAuthGitHub && m.GitHubMemberID == "" && m.GitHubUserID == 0)) &&
 		m.Generation > 0 &&
 		m.Status.Valid() &&
 		ValidMirrorSHA(m.ObservedCommit) &&
@@ -251,6 +257,18 @@ func ValidMirrorSourceURL(url string) bool {
 	return strings.HasPrefix(url, "https://") ||
 		strings.HasPrefix(url, "ssh://") ||
 		scpLikeOrigin.MatchString(url)
+}
+
+var githubMirrorSource = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+\.git$`)
+
+// ValidGitHubMirrorSourceURL accepts only canonical, credential-free GitHub
+// HTTPS repository URLs. It deliberately rejects normalization and escaping.
+func ValidGitHubMirrorSourceURL(raw string) bool {
+	if len(raw) > 2048 || !githubMirrorSource.MatchString(raw) {
+		return false
+	}
+	repo := strings.TrimSuffix(raw[strings.LastIndexByte(raw, '/')+1:], ".git")
+	return repo != "" && repo != "." && repo != ".."
 }
 
 func ValidMirrorSourceIdentity(identity string) bool {

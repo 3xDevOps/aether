@@ -280,6 +280,125 @@ func TestSupervisorPipeRunsWithoutTerminal(t *testing.T) {
 	}
 }
 
+func TestSupervisorPipePublishesDeviceCodeBeforeApproval(t *testing.T) {
+	for _, action := range []string{"approve", "cancel"} {
+		t.Run(action, func(t *testing.T) {
+			key := t.TempDir()
+			approval := filepath.Join(key, "approved")
+			claim := "device-authorization"
+			cmd := exec.Command(os.Args[0], "-test.run=^TestSupervisorSubprocess$", "--", "run-pipe", key, claim,
+				"/bin/sh", "-c", `exec </dev/null
+test ! -t 0 && test -z "$(cat)" || exit 124
+printf '%s\n' '! First copy your one-time code: ABCD-1234' >&2
+printf '%s\n' 'Open this URL to continue in your web browser: https://github.com/login/device'
+while [ ! -f "$1" ]; do sleep 0.05; done`, "device-provider", approval)
+			cmd.Env = append(os.Environ(), "AETHER_DEVEXEC_SUBPROCESS=1")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stdin.Close() })
+			stdout, stdoutWriter, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stdout.Close(); _ = stdoutWriter.Close() })
+			stderr, stderrWriter, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stderr.Close(); _ = stderrWriter.Close() })
+			cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+			if err = cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			_ = stdoutWriter.Close()
+			_ = stderrWriter.Close()
+			exit := make(chan error, 1)
+			go func() { exit <- cmd.Wait(); close(exit) }()
+			request := Request{ExecID: "device-exec", ClaimToken: claim, Action: "start"}
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+				stop := request
+				stop.Action = "stop"
+				_, _ = Control(ctx, key, stop)
+				select {
+				case <-exit:
+				case <-ctx.Done():
+					_ = cmd.Process.Kill()
+					<-exit
+				}
+				_ = os.RemoveAll(stateDir(key))
+			})
+			// Keep the attachment's stdin open, as Docker does; only the
+			// provider's explicit redirection should supply EOF.
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			state, err := Control(ctx, key, request)
+			if err != nil || !state.Running {
+				t.Fatalf("claim = %+v, %v", state, err)
+			}
+			for _, stream := range []struct {
+				reader io.Reader
+				want   string
+			}{
+				{stderr, "! First copy your one-time code: ABCD-1234"},
+				{stdout, "Open this URL to continue in your web browser: https://github.com/login/device"},
+			} {
+				line := make(chan string, 1)
+				go func() {
+					scanner := bufio.NewScanner(stream.reader)
+					if scanner.Scan() {
+						line <- scanner.Text()
+					}
+					close(line)
+				}()
+				select {
+				case got := <-line:
+					if got != stream.want {
+						t.Fatalf("live pipe output = %q, want %q", got, stream.want)
+					}
+				case <-ctx.Done():
+					t.Fatal("device output waited for provider approval or process exit")
+				}
+			}
+			request.Action = "status"
+			state, err = Control(ctx, key, request)
+			if err != nil || !state.Running || state.Exited {
+				t.Fatalf("provider stopped before approval: %+v, %v", state, err)
+			}
+			wantCode := 0
+			if action == "approve" {
+				if err = os.WriteFile(approval, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				request.Action, request.GraceMillis = "stop", 100
+				if _, err = Control(ctx, key, request); err != nil {
+					t.Fatal(err)
+				}
+				wantCode = 143
+			}
+			select {
+			case waitErr := <-exit:
+				var exited *exec.ExitError
+				if (wantCode == 0 && waitErr != nil) || (wantCode != 0 && (!errors.As(waitErr, &exited) || exited.ExitCode() != wantCode)) {
+					t.Fatalf("provider %s exit = %v, want %d", action, waitErr, wantCode)
+				}
+			case <-ctx.Done():
+				t.Fatalf("provider did not finish after %s", action)
+			}
+			request.Action = "status"
+			state, err = Control(ctx, key, request)
+			if err != nil || !state.Exited || state.ExitCode == nil || *state.ExitCode != wantCode {
+				t.Fatalf("final provider status = %+v, %v", state, err)
+			}
+		})
+	}
+}
+
 func TestSupervisorReapsEscapedDescendants(t *testing.T) {
 	for _, mode := range []string{"tree", "tree-exit", "zombie"} {
 		t.Run(mode, func(t *testing.T) {

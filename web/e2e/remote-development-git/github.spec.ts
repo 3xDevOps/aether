@@ -44,7 +44,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
   expect(imported.error).toBeFalsy()
   expect(imported.created).toBe(true)
   const workspaceID = imported.workspace.id
-  await admin.api.rpc<WorkspaceMirrorResult>('workspace.mirror.adopt', { workspace_id: workspaceID, generation: imported.mirror.generation })
+  await admin.api.rpc<WorkspaceMirrorResult>('workspace.mirror.adopt', { workspace_id: workspaceID, generation: imported.mirror.generation, expected_commit: imported.mirror.observed_commit })
   const account = await memberID(admin)
   aether.installAgent(account, 'claude', 'sleep 600')
   // Native gh stores this credential only in the disposable member home.

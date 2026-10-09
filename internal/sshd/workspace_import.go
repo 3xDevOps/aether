@@ -26,12 +26,15 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 	if decodeErr != nil {
 		return nil, decodeErr
 	}
-	if p.SourceURL == "" || p.BaseBranch == "" {
-		return nil, invalidParams("source_url and base_branch are required")
+	if p.SourceURL == "" || (p.BaseBranch == "" && p.Auth != string(domain.MirrorAuthGitHub)) {
+		return nil, invalidParams("source_url and base_branch are required (GitHub imports may use the default branch)")
 	}
 	auth := domain.MirrorAuth(p.Auth)
 	if !auth.Valid() {
-		return nil, invalidParams("auth must be public or deploy-key")
+		return nil, invalidParams("auth must be public, deploy-key, or github")
+	}
+	if auth != domain.MirrorAuthGitHub && p.GitHubAccountID != 0 {
+		return nil, invalidParams("github_account_id requires github authentication")
 	}
 	// Validate before normalizing, just as workspace.origin does. In particular,
 	// the read-only mirror source never supplies a missing checkout Origin.
@@ -47,6 +50,22 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 	if adminErr := s.requireAdmin(ctx, member, protocol.MethodWorkspaceImport); adminErr != nil {
 		return nil, adminErr
 	}
+	request := mirrorservice.ConfigureRequest{
+		SourceURL: p.SourceURL, Branch: p.BaseBranch, Auth: auth, KnownHosts: p.KnownHosts,
+	}
+	if auth == domain.MirrorAuthGitHub {
+		request, perr = s.resolveGitHubMirror(ctx, member, p.SourceURL, p.BaseBranch, p.GitHubAccountID)
+		if perr != nil {
+			return nil, perr
+		}
+		if _, err := s.cfg.Runs.EnsureTerminal(ctx, member); err != nil {
+			return nil, rpcError(err)
+		}
+		if _, err := s.cfg.Runs.ConnectGitHub(ctx, member); err != nil {
+			return nil, rpcError(err)
+		}
+		p.BaseBranch = request.Branch
+	}
 	workspace, perr := s.createWorkspace(ctx, protocol.WorkspaceAddParams{
 		Name: p.Name, Environment: p.Environment, BaseBranch: p.BaseBranch,
 	}, domain.NormalizeOrigin(p.Origin))
@@ -58,9 +77,7 @@ func (s *Server) workspaceImport(ctx context.Context, member domain.MemberID, pa
 		WorkspaceID: workspace.ID, ActorID: member,
 		Payload: events.TimelinePayload{Kind: events.TimelineNote, Message: "workspace created for remote import"},
 	})
-	configured, err := svc.Configure(ctx, workspace.ID, mirrorservice.ConfigureRequest{
-		SourceURL: p.SourceURL, Branch: workspace.BaseBranch, Auth: auth, KnownHosts: p.KnownHosts,
-	})
+	configured, err := svc.Configure(ctx, workspace.ID, request)
 	if err != nil {
 		return s.workspaceImportResult(ctx, svc, result, configured, err), nil
 	}

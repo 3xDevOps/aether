@@ -44,4 +44,8 @@ type Services struct {
 	Development DevelopmentService
 	// RunRepo executes native Git/GitHub commands in the selected run account.
 	RunRepo RunRepoService
+	// GitHub reads repositories accessible to the caller's native gh account.
+	GitHub GitHubService
+	// GitHubOAuth manages browser authorization for the caller's native gh account.
+	GitHubOAuth GitHubOAuthController
 }

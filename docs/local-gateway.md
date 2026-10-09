@@ -144,6 +144,7 @@ the tailnet.
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). `config.import`, `workspace.import`, `agent.install`,
+`github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
 `dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A server refusal passes through untouched as that `protocol.Error`;
@@ -713,12 +714,104 @@ unavailable owned source remains the server's protocol error.
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `workspace.origin` | `WorkspaceOriginParams` (`{"workspace_id":"...","origin":"https://github.com/acme/app.git"}`; `origin` empty clears it) | `WorkspaceOriginResult` - the workspace with its new `origin`, the upstream every new run checkout's `origin` remote points at |
 | `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
-| `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key","known_hosts":"..."}`) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning |
+| `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key"\|"github","known_hosts":"...","github_account_id":42}`; last two fields optional and mode-specific) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning; GitHub mode binds the authenticated admin and verified numeric account |
 | `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
-| `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7}`) | `WorkspaceMirrorResult` after explicitly accepting the retained candidate |
+| `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7,"expected_commit":"<full-reviewed-sha>"}`; all fields required) | `WorkspaceMirrorResult` after explicitly accepting exactly the reviewed retained candidate |
 | `workspace.mirror.disable` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` with `enabled:false`; the workspace becomes local-only |
 | `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
 | `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
+| `github.oauth.start` | `{}` | `GitHubOAuthResult`; admin-only, starts or returns the calling member's active authorization attempt |
+| `github.oauth.status` | `{"session_id":"..."}` (optional) | `GitHubOAuthResult`; admin-only, read-only connection/attempt inspection |
+| `github.oauth.cancel` | `{"session_id":"..."}` (required) | `GitHubOAuthResult`; admin-only, cancels only that member's exact current attempt |
+| `github.repositories.list` | `{"page":1}` (optional) | `GitHubRepositoryListResult`; admin-only, repositories readable by the calling member's native GitHub account |
+
+Mirror adoption pins both the configuration `generation` and the candidate's
+full `observed_commit` as `expected_commit` (SHA-1 or SHA-256, not a revision
+expression or abbreviated hash). Generation-only clients must migrate: missing
+or malformed `expected_commit` returns invalid params (`-32602`). If a refresh
+changes the candidate, even within the same generation, adoption returns conflict
+(`-32003`) without moving the accepted/base refs or discarding the current candidate.
+Keep the workspace, read fresh status, and explicitly review that candidate before
+submitting its generation and commit again. Never fetch a new SHA automatically
+while submitting or replay a failed adoption with a substituted SHA.
+
+### Administrator GitHub connection and import
+
+Both gateways expose the same administrator flow; it needs no local clone or
+loopback OAuth callback. The assembled server wires `Services.GitHubOAuth`
+directly to the scheduler, independently of run-control decorators.
+The authenticated transport supplies the member; none of these methods accepts
+a credential owner selected by the browser. Existing `github.connect` and
+`github.probe` remain member-scoped for native terminal setup.
+
+`GitHubOAuthResult` has required `state` and optional `session_id`, `user_code`,
+`verification_url`, `expires_at` (timestamp), `login`, `connection` and `error`.
+`connection`, when present, is the existing `GitHubConnectResult` with `login`,
+`signing_key` and `fingerprint`. No token or secret device code is returned.
+
+| State | Meaning |
+| --- | --- |
+| `disconnected` | No usable current native connection was found; status does not start an Environment to discover one |
+| `starting` | Preparing the Environment and native authorization |
+| `pending` | Waiting for approval; show the one-time `user_code` and `https://github.com/login/device` |
+| `finishing` | Completing native credential/signing setup after approval |
+| `connected` | Native connection available; a successful start has also completed signing setup |
+| `expired` | The bounded authorization attempt expired; explicitly start again |
+| `failed` | Authorization, inspection or setup failed; display `error` |
+| `cancelled` | The attempt was stopped; explicitly start again if desired |
+
+Start ensures the member's Environment exists and runs native `gh` without a
+visible terminal. Only one active attempt exists per member; repeated starts
+return it. Attempts last at most 15 minutes. Cancel, expiry, Environment stop
+and scheduler shutdown stop the authorization process. Cancel is not logout.
+An explicit stale or another member's `session_id` is rejected, not applied to
+the latest attempt. Omit `session_id` on a fresh visit to inspect the current
+connection/attempt. Status never initiates login, writes Git config, registers
+keys or starts an Environment; completed success is rechecked against native
+login rather than trusted forever. Poll only active states and do not replay
+start/cancel after a lost response: inspect status first.
+
+Missing signing permission or a known failed setup remains non-connected.
+Status does not retry setup; an explicit start retries completion or requests
+authorization again.
+
+Repository listing returns
+`{account:{id:number,login:string},repositories:[{id:number,full_name:string,name:string,private:boolean,default_branch:string,clone_url:string,can_push:boolean}],next_page?:number}`.
+Omitted or zero `page` means 1; negative pages are invalid. Pages contain at most
+100 repositories, including readable collaborator and organization repositories,
+not just owned repositories. Request `next_page` while present. `can_push:false`
+does not prevent importing a private source. An empty list is not an
+authentication failure; a repository without a default branch needs an initial
+commit before import.
+
+`workspace.import` remains the creation API:
+`{name,environment,source_url,base_branch,origin,auth,known_hosts?,github_account_id?}`.
+`auth` is `public`, `deploy-key` or `github`. For GitHub, use credential-free
+`https://github.com/owner/repo.git`; `base_branch` may be empty to use the
+verified default branch. Send the selected list's numeric `account.id` as
+`github_account_id` (optional on the wire; zero means unspecified). A supplied
+positive ID must match the verified account; it is not a login name or credential
+owner. The server re-reads repository access/identity, derives the member/account
+binding, ensures the Environment and completes native GitHub setup before
+creation. It requires read access, not repository-admin or push permission.
+`origin` is explicitly chosen or empty: the source never implicitly becomes a
+publish destination. `known_hosts` belongs to SSH deploy-key configuration, not
+GitHub mode; `github_account_id` is rejected for other authentication modes.
+
+The result is `{workspace,created,mirror,error?}`. Once created, downstream
+configuration/fetch failures return `created:true` and the workspace ID; keep it
+and repair/refresh its source, never repeat creation. Fetch observes a candidate;
+only `workspace.mirror.adopt` with the reviewed `generation` and full
+`observed_commit` supplied as `expected_commit` accepts it.
+A lost import response is uncertain: inspect Workspaces before retrying.
+GitHub mirror status exposes non-secret `github_member_id` and `github_user_id`
+alongside `auth`, source, branch, generation and observed/accepted revisions.
+Refresh resolves the bound member's credential and verifies the numeric account
+again; revoked/missing/changed credentials fail without discarding the accepted
+base. Explicit `workspace.mirror.configure` with `auth:"github"` deliberately
+rebinds to the current admin's verified account (and can check
+`github_account_id`); it cannot select another member's credential.
+
 
 ### Files and member configuration
 
@@ -1076,8 +1169,9 @@ or ask this method to read an arbitrary path.
   `HTTP 401: Bad credentials`, so the dashboard and the CLI can show what
   gh said rather than a summary. `signing_key` is the public key line and
   `fingerprint` its `SHA256:` fingerprint; the private key never leaves
-  the server. Onboarding's Agent step and the Agents page call this after the
-  member finishes `gh auth login` in the environment shell shown there; see
+  the server. The member-scoped terminal setup on Agents and the collaborator's
+  onboarding Agent step call this after native `gh auth login`; the new admin
+  browser flow completes it automatically, without **I've logged in**. See
   [environment-home.md](environment-home.md#connect-github).
 
 ## `/local/v1` verbs

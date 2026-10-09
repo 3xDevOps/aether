@@ -305,3 +305,75 @@ func TestWorkspaceMirrorMigrationFromV24(t *testing.T) {
 		t.Fatalf("workspace mirror survived workspace delete: %d rows", mirrors)
 	}
 }
+
+func TestGitHubMirrorBindingPersistenceAndRebind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := mustCreateWorkspace(t, db)
+	m := mirrorForWorkspace(ws.ID)
+	m.SourceURL, m.SourceIdentity = "https://github.com/acme/private.git", "github.com/acme/private"
+	m.Auth, m.KeyFingerprint = domain.MirrorAuthGitHub, ""
+	m.GitHubMemberID, m.GitHubUserID = "authorizing-admin", 42
+	if err = db.SetWorkspaceMirror(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	got, err := db.GetWorkspaceMirror(t.Context(), ws.ID)
+	if err != nil || got.GitHubMemberID != m.GitHubMemberID || got.GitHubUserID != 42 || got.AcceptedCommit != m.AcceptedCommit {
+		t.Fatalf("reopened GitHub mirror = %+v, %v", got, err)
+	}
+	m.GitHubMemberID, m.GitHubUserID = "other-admin", 99
+	m.Generation++
+	if err = db.SetWorkspaceMirror(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListWorkspaceMirrors(t.Context())
+	if err != nil || len(rows) != 1 || rows[0].GitHubMemberID != "other-admin" || rows[0].GitHubUserID != 99 {
+		t.Fatalf("rebound mirror list = %+v, %v", rows, err)
+	}
+	m.Auth, m.GitHubMemberID, m.GitHubUserID = domain.MirrorAuthPublic, "", 0
+	if err = db.SetWorkspaceMirror(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.GetWorkspaceMirror(t.Context(), ws.ID)
+	if err != nil || got.GitHubMemberID != "" || got.GitHubUserID != 0 {
+		t.Fatalf("public reconfigure retained GitHub binding = %+v, %v", got, err)
+	}
+}
+
+func TestGitHubMirrorMigrationPreservesExistingMirror(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 54)
+	if _, err := raw.Exec(`
+		INSERT INTO workspaces (id, name, environment, base_branch, steer_others, origin, created_at)
+			VALUES ('w1', 'legacy', '{}', 'main', '', '', 1);
+		INSERT INTO workspace_mirrors
+			(workspace_id, source_url, source_identity, branch, auth, generation, status, accepted_commit, created_at, updated_at)
+			VALUES ('w1', 'https://github.com/acme/public.git', 'github.com/acme/public', 'main', 'public', 2, 'ready', ?, 1, 1)
+	`, strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	m, err := db.GetWorkspaceMirror(t.Context(), "w1")
+	if err != nil || m.Auth != domain.MirrorAuthPublic || m.GitHubMemberID != "" || m.GitHubUserID != 0 ||
+		m.Generation != 2 || m.AcceptedCommit != strings.Repeat("a", 40) {
+		t.Fatalf("migrated existing mirror = %+v, %v", m, err)
+	}
+}

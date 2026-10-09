@@ -16,6 +16,8 @@ var (
 	_ sshd.PTYAttacher    = (*ptyhost.Host)(nil)
 	_ sshd.RunController  = (*scheduler.Scheduler)(nil)
 
+	_ sshd.GitHubOAuthController = (*scheduler.Scheduler)(nil)
+
 	// The wired server hands both consumers the lazy-init wrapper.
 	_ scheduler.GitEngine = lazyGit{}
 	_ sshd.GitTransport   = lazyGit{}

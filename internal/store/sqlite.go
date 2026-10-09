@@ -318,7 +318,8 @@ func (d *DB) SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, orig
 
 const workspaceMirrorCols = `workspace_id, source_url, source_identity, branch,
 	auth, generation, status, observed_commit, accepted_commit, key_fingerprint,
-	last_error, created_at, updated_at, last_attempt_at, last_success_at`
+	last_error, created_at, updated_at, last_attempt_at, last_success_at,
+	github_member_id, github_user_id`
 
 func validateWorkspaceMirror(m *domain.WorkspaceMirror, op string) error {
 	if m == nil {
@@ -342,7 +343,7 @@ func scanWorkspaceMirror(row interface{ Scan(...any) error }) (*domain.Workspace
 		&m.WorkspaceID, &m.SourceURL, &m.SourceIdentity, &m.Branch,
 		&m.Auth, &generation, &m.Status, &m.ObservedCommit, &m.AcceptedCommit,
 		&m.KeyFingerprint, &m.LastError, &createdAt, &updatedAt,
-		&lastAttemptAt, &lastSuccessAt,
+		&lastAttemptAt, &lastSuccessAt, &m.GitHubMemberID, &m.GitHubUserID,
 	); err != nil {
 		return nil, err
 	}
@@ -418,8 +419,8 @@ func (d *DB) SetWorkspaceMirror(ctx context.Context, m *domain.WorkspaceMirror) 
 	if err := d.db.QueryRowContext(ctx, `INSERT INTO workspace_mirrors
 		(workspace_id, source_url, source_identity, branch, auth, generation,
 		 status, observed_commit, accepted_commit, key_fingerprint, last_error,
-		 created_at, updated_at, last_attempt_at, last_success_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 created_at, updated_at, last_attempt_at, last_success_at, github_member_id, github_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			source_url = excluded.source_url,
 			source_identity = excluded.source_identity,
@@ -433,12 +434,14 @@ func (d *DB) SetWorkspaceMirror(ctx context.Context, m *domain.WorkspaceMirror) 
 			last_error = excluded.last_error,
 			updated_at = excluded.updated_at,
 			last_attempt_at = excluded.last_attempt_at,
-			last_success_at = excluded.last_success_at
+			last_success_at = excluded.last_success_at,
+			github_member_id = excluded.github_member_id,
+			github_user_id = excluded.github_user_id
 		RETURNING created_at`,
 		m.WorkspaceID, m.SourceURL, m.SourceIdentity, m.Branch, m.Auth,
 		m.Generation, m.Status, m.ObservedCommit, m.AcceptedCommit,
 		m.KeyFingerprint, m.LastError, createdAt, updatedAt, lastAttemptAt,
-		lastSuccessAt,
+		lastSuccessAt, m.GitHubMemberID, m.GitHubUserID,
 	).Scan(&storedCreated); err != nil {
 		return fmt.Errorf("store: set workspace mirror: %w", mapConstraint(err, ErrNotFound))
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -29,7 +30,7 @@ type MirrorService interface {
 	Configure(context.Context, domain.WorkspaceID, mirrorservice.ConfigureRequest) (mirrorservice.Result, error)
 	Status(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
 	Refresh(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
-	Adopt(context.Context, domain.WorkspaceID, int64) (mirrorservice.Result, error)
+	Adopt(context.Context, domain.WorkspaceID, int64, string) (mirrorservice.Result, error)
 	Disable(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
 	Capture(context.Context, domain.WorkspaceID, string) (mirrorservice.CaptureResult, error)
 }
@@ -75,23 +76,41 @@ func (s *Server) workspaceMirrorConfigure(ctx context.Context, member domain.Mem
 	if p.SourceURL == "" {
 		return nil, invalidParams("source_url is required")
 	}
-	if p.Branch == "" {
+	if p.Branch == "" && p.Auth != string(domain.MirrorAuthGitHub) {
 		return nil, invalidParams("branch is required")
 	}
 	auth := domain.MirrorAuth(p.Auth)
 	if !auth.Valid() {
-		return nil, invalidParams("auth must be public or deploy-key")
+		return nil, invalidParams("auth must be public, deploy-key, or github")
+	}
+	if auth != domain.MirrorAuthGitHub && p.GitHubAccountID != 0 {
+		return nil, invalidParams("github_account_id requires github authentication")
 	}
 	svc, perr := s.mirrors()
 	if perr != nil {
 		return nil, perr
 	}
-	result, err := svc.Configure(ctx, domain.WorkspaceID(p.WorkspaceID), mirrorservice.ConfigureRequest{
-		SourceURL:  p.SourceURL,
-		Branch:     p.Branch,
-		Auth:       auth,
-		KnownHosts: p.KnownHosts,
-	})
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorConfigure); err != nil {
+		return nil, err
+	}
+	request := mirrorservice.ConfigureRequest{
+		SourceURL: p.SourceURL, Branch: p.Branch, Auth: auth, KnownHosts: p.KnownHosts,
+	}
+	if auth == domain.MirrorAuthGitHub {
+		request, perr = s.resolveGitHubMirror(ctx, member, p.SourceURL, p.Branch, p.GitHubAccountID)
+		if perr != nil {
+			return nil, perr
+		}
+		if _, err := s.cfg.Runs.EnsureTerminal(ctx, member); err != nil {
+			return nil, rpcError(err)
+		}
+		if _, err := s.cfg.Runs.ConnectGitHub(ctx, member); err != nil {
+			return nil, rpcError(err)
+		}
+	}
+	result, err := svc.Configure(ctx, domain.WorkspaceID(p.WorkspaceID), request)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -110,6 +129,11 @@ func (s *Server) workspaceMirrorRefresh(ctx context.Context, member domain.Membe
 	svc, perr := s.mirrors()
 	if perr != nil {
 		return nil, perr
+	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorRefresh); err != nil {
+		return nil, err
 	}
 	result, err := svc.Refresh(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {
@@ -130,11 +154,22 @@ func (s *Server) workspaceMirrorAdopt(ctx context.Context, member domain.MemberI
 	if p.Generation <= 0 {
 		return nil, invalidParams("generation must be greater than zero")
 	}
+	if p.ExpectedCommit == "" {
+		return nil, invalidParams("expected_commit is required; review the current candidate and send its full observed_commit with generation")
+	}
+	if !domain.ValidMirrorSHA(p.ExpectedCommit) || strings.ContainsAny(p.ExpectedCommit, "ABCDEF") {
+		return nil, invalidParams("expected_commit must be a full lowercase SHA-1 or SHA-256 object ID")
+	}
 	svc, perr := s.mirrors()
 	if perr != nil {
 		return nil, perr
 	}
-	result, err := svc.Adopt(ctx, domain.WorkspaceID(p.WorkspaceID), p.Generation)
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorAdopt); err != nil {
+		return nil, err
+	}
+	result, err := svc.Adopt(ctx, domain.WorkspaceID(p.WorkspaceID), p.Generation, p.ExpectedCommit)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -153,6 +188,11 @@ func (s *Server) workspaceMirrorDisable(ctx context.Context, member domain.Membe
 	svc, perr := s.mirrors()
 	if perr != nil {
 		return nil, perr
+	}
+	s.authorizationMu.Lock()
+	defer s.authorizationMu.Unlock()
+	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorDisable); err != nil {
+		return nil, err
 	}
 	result, err := svc.Disable(ctx, domain.WorkspaceID(p.WorkspaceID))
 	if err != nil {

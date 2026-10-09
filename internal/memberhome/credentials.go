@@ -11,6 +11,7 @@ import (
 const (
 	claudeCredentialPath = ".claude/.credentials.json"
 	codexCredentialPath  = ".codex/auth.json"
+	githubCredentialPath = ".config/gh/hosts.yml"
 )
 
 // ReadCredential returns one of the vendor credential files from a member's
@@ -18,7 +19,7 @@ const (
 // cannot escape the member home or make the server follow a symlink. A missing
 // file returns nil, nil. The caller must provide a small explicit size limit.
 func (m *Manager) ReadCredential(member domain.MemberID, name string, limit int64) ([]byte, error) {
-	if name != claudeCredentialPath && name != codexCredentialPath {
+	if name != claudeCredentialPath && name != codexCredentialPath && name != githubCredentialPath {
 		return nil, fmt.Errorf("memberhome: unsupported credential file %q", name)
 	}
 	if limit <= 0 {

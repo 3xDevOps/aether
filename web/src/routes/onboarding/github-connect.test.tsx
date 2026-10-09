@@ -29,8 +29,8 @@ function seed(caps: GatewayCapabilities = localCaps) {
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
-    members: { [alice.id]: alice },
-    info: serverInfo,
+    members: { [alice.id]: { ...alice, role: 'collaborator' } },
+    info: { ...serverInfo, member: { ...serverInfo.member, role: 'collaborator' } },
     capabilities: caps,
     hydrated: true,
     hydrationError: null,
@@ -140,10 +140,28 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('administrator GitHub connection', () => {
+  it('recognizes persisted login on Agent without opening a terminal or starting another authorization', async () => {
+    seed()
+    useStore.setState({ info: serverInfo })
+    const client = fakeApi({
+      githubOAuthStatus: vi.fn(async () => ({ state: 'connected' as const, login: 'octocat' })),
+    })
+    render(<AgentStep client={client} caps={capability(localCaps)} setup="" onSetup={vi.fn()} onNext={vi.fn()} />)
+    await screen.findByText(/octocat/)
+    expect(client.githubOAuthStatus).toHaveBeenCalled()
+    expect(client.githubOAuthStart).not.toHaveBeenCalled()
+    expect(client.githubProbe).not.toHaveBeenCalled()
+    expect(client.githubConnect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('region', { name: 'Environment terminal' })).toBeNull()
+    expect(screen.queryByRole('button', { name: "I've logged in" })).toBeNull()
+  })
+})
+
 // Every case here mounts the whole Agents step and a terminal dock, which
 // is several seconds of real awaits in jsdom even idle. The 5s default is
 // a coin flip on a loaded CI runner, so the block carries its own budget.
-describe('connect GitHub', { timeout: 20_000 }, () => {
+describe('member publishing GitHub connection', { timeout: 20_000 }, () => {
   it('types the login command into the environment terminal', async () => {
     const socket = attachMainTab()
     renderStep(runningApi())

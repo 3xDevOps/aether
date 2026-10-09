@@ -62,7 +62,7 @@ type Config struct {
 	// MirrorFetch is an explicit test seam for local-file mirror remotes.
 	// Production leaves it nil; the built-in fetch accepts only HTTPS or SSH.
 	MirrorFetch MirrorFetchFunc
-	// MirrorResolve optionally replaces DNS resolution for public HTTPS
+	// MirrorResolve optionally replaces DNS resolution for HTTPS
 	// mirrors. Production leaves it nil to use the system resolver; tests
 	// provide this narrow seam to avoid external DNS.
 	MirrorResolve MirrorResolveFunc

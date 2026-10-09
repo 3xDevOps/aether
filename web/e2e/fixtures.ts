@@ -93,13 +93,10 @@ function buildACPMock(): string {
 }
 
 /**
- * A stub `gh` for the environment container: busybox `sh`, so no bashisms.
- * It answers exactly the login a member types and the three invocations
- * `github.connect` makes, records every call so the spec can assert the
- * argv, and fails loudly on anything else rather than passing silently when
- * an invocation changes. `auth setup-git` writes the credential block real
- * gh writes, which is the shape the server's own `.gitconfig` edits must
- * leave alone.
+ * A deterministic GitHub provider executable inside the real Docker runtime.
+ * Login waits for a test-controlled approval instead of authorizing at start;
+ * only approval writes native gh credentials. All scheduler commands, pipe
+ * lifecycle, credential reads, signing and Git configuration remain real.
  */
 const stubGh = `#!/bin/sh
 echo "$*" >> "$HOME/gh-calls.log"
@@ -109,9 +106,24 @@ if [ "$1" = "--version" ]; then
 fi
 case "$1 $2" in
 "auth login")
+	trap 'echo login-stopped >> "$HOME/gh-calls.log"; exit 1' TERM INT
 	echo "! First copy your one-time code: ABCD-1234"
+	echo "Open this URL to continue in your web browser: https://github.com/login/device"
+	while [ ! -f "$HOME/gh-approved" ]; do
+		if [ -f "$HOME/gh-denied" ]; then
+			echo "GitHub device authorization denied" >&2
+			exit 1
+		fi
+		sleep 0.1
+	done
+	mkdir -p "$HOME/.config/gh"
+	printf 'github.com:\\n    user: octocat\\n    oauth_token: github-browser-fixture\\n    git_protocol: https\\n' > "$HOME/.config/gh/hosts.yml"
 	;;
 "auth status")
+	if [ ! -f "$HOME/.config/gh/hosts.yml" ]; then
+		echo '{"hosts":{}}'
+		exit 0
+	fi
 	echo '{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"admin:ssh_signing_key, gist, read:org, repo"}]}}'
 	;;
 "auth setup-git")
@@ -121,12 +133,8 @@ case "$1 $2" in
 	cp "$3" "$HOME/gh-registered-key"
 	;;
 "ssh-key list")
-	# The SHA256 fingerprint of the registered key, the way ssh-keygen -l
-	# prints it: base64 of the digest of the decoded key blob, unpadded.
-	# busybox has no ssh-keygen, so the digest is spelled out.
-	hex=$(awk '{print $2}' "$HOME/gh-registered-key" | base64 -d | sha256sum | cut -d' ' -f1)
-	fp=$(printf "$(printf %s "$hex" | sed 's/../\\\\x&/g')" | base64 | tr -d '=\n')
-	printf 'aether\tSHA256:%s\t2026-01-01T00:00:00Z\t1\tsigning\n' "$fp"
+	set -- $(ssh-keygen -lf "$HOME/gh-registered-key")
+	printf 'aether\\t%s\\t2026-01-01T00:00:00Z\\t1\\tsigning\\n' "$2"
 	;;
 *)
 	echo "gh: unsupported invocation: $*" >&2

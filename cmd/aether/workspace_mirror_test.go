@@ -31,6 +31,7 @@ func TestParseWorkspaceMirrorConfigureArgs(t *testing.T) {
 	}{
 		{name: "public", args: []string{"--source", "https://example.test/repo"}, auth: "public"},
 		{name: "deploy key with known hosts", args: []string{"--workspace", "app", "--source", "ssh://git@example.test/acme/repo", "--branch", "trunk", "--auth", "deploy-key", "--known-hosts-file", knownHostsFile}, auth: "deploy-key"},
+		{name: "github account", args: []string{"--source", "https://github.com/org/private.git", "--auth", "github", "--github-account-id", "42"}, auth: "github"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opts, err := parseWorkspaceMirrorConfigureArgs(tc.args)
@@ -46,10 +47,21 @@ func TestParseWorkspaceMirrorConfigureArgs(t *testing.T) {
 			if tc.auth == "deploy-key" && opts.knownHostsFile != knownHostsFile {
 				t.Fatalf("known hosts file = %q, want %q", opts.knownHostsFile, knownHostsFile)
 			}
+			if tc.auth == "github" && opts.githubAccountID != 42 {
+				t.Fatalf("GitHub account ID = %d, want 42", opts.githubAccountID)
+			}
 		})
 	}
 	if _, err := parseWorkspaceMirrorConfigureArgs([]string{"--source", "x", "--auth", "private-key"}); err == nil {
 		t.Fatal("invalid auth accepted")
+	}
+	for _, args := range [][]string{
+		{"--source", "https://github.com/org/repo.git", "--github-account-id", "42"},
+		{"--source", "https://github.com/org/repo.git", "--auth", "github", "--github-account-id", "-1"},
+	} {
+		if _, err := parseWorkspaceMirrorConfigureArgs(args); err == nil {
+			t.Fatalf("invalid account expectation accepted: %v", args)
+		}
 	}
 	if _, err := parseWorkspaceMirrorConfigureArgs(nil); err == nil || !strings.Contains(err.Error(), "--source is required") {
 		t.Fatalf("missing source error = %v", err)
@@ -70,12 +82,25 @@ func TestParseWorkspaceMirrorGuards(t *testing.T) {
 	if _, err := parseWorkspaceMirrorRefreshArgs([]string{"--workspace", "app", "--yes"}); err == nil {
 		t.Fatal("refresh accepted destructive confirmation flag")
 	}
-	if _, err := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7"}); err == nil || !strings.Contains(err.Error(), "--yes is required") {
+	commit := strings.Repeat("a", 40)
+	if _, err := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--commit", commit}); err == nil || !strings.Contains(err.Error(), "--yes is required") {
 		t.Fatalf("adopt without confirmation = %v", err)
 	}
-	adopt, err := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--yes"})
-	if err != nil || adopt.generation != 7 || !adopt.yes {
+	adopt, err := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--commit", commit, "--yes"})
+	if err != nil || adopt.generation != 7 || adopt.commit != commit || !adopt.yes {
 		t.Fatalf("adopt options = %+v, %v", adopt, err)
+	}
+	if _, err = parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--yes"}); err == nil || !strings.Contains(err.Error(), "--commit is required") {
+		t.Fatalf("generation-only adoption error = %v", err)
+	}
+	for _, invalid := range []string{"HEAD", "abc123", strings.Repeat("g", 40), strings.Repeat("a", 41), strings.Repeat("A", 40), strings.Repeat("B", 64)} {
+		if _, err = parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--commit", invalid, "--yes"}); err == nil {
+			t.Fatalf("invalid reviewed commit accepted: %q", invalid)
+		}
+	}
+	sha256 := strings.Repeat("b", 64)
+	if opts, parseErr := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "7", "--commit", sha256, "--yes"}); parseErr != nil || opts.commit != sha256 {
+		t.Fatalf("SHA-256 adoption = %+v, %v", opts, parseErr)
 	}
 	privateHosts := filepath.Join(t.TempDir(), "private")
 	if writeErr := os.WriteFile(privateHosts, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n"), 0o600); writeErr != nil {
@@ -84,7 +109,7 @@ func TestParseWorkspaceMirrorGuards(t *testing.T) {
 	if _, knownHostsErr := readMirrorKnownHosts(privateHosts); knownHostsErr == nil || !strings.Contains(knownHostsErr.Error(), "private key") {
 		t.Fatalf("private-key known_hosts input error = %v", knownHostsErr)
 	}
-	if _, zeroGenerationErr := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "0", "--yes"}); zeroGenerationErr == nil {
+	if _, zeroGenerationErr := parseWorkspaceMirrorAdoptArgs([]string{"--workspace", "app", "--generation", "0", "--commit", commit, "--yes"}); zeroGenerationErr == nil {
 		t.Fatal("zero generation accepted")
 	}
 	if _, disableGuardErr := parseWorkspaceMirrorDisableArgs([]string{"--workspace", "app"}); disableGuardErr == nil || !strings.Contains(disableGuardErr.Error(), "--yes is required") {

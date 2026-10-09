@@ -30,6 +30,8 @@ import type {
   EvidenceTranscriptResult,
   GatewayCapabilities,
   GitHubConnectResult,
+  GitHubOAuthResult,
+  GitHubRepositoryListResult,
   GitHubProbeResult,
   GitIdentity,
   Invitation,
@@ -776,15 +778,17 @@ export const api = {
     branch: string
     auth: WorkspaceMirrorAuth
     known_hosts?: string
+    github_account_id?: number
   }) => call<WorkspaceMirrorResult>('workspace.mirror.configure', params),
   workspaceMirrorRefresh: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.refresh', {
       workspace_id: workspaceID,
     }),
-  workspaceMirrorAdopt: (workspaceID: string, generation: number) =>
+  workspaceMirrorAdopt: (workspaceID: string, generation: number, expectedCommit: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.adopt', {
       workspace_id: workspaceID,
       generation,
+      expected_commit: expectedCommit,
     }),
   workspaceMirrorDisable: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.disable', {
@@ -946,6 +950,13 @@ export const api = {
   githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
   /** Answers only for an environment terminal that is already running. */
   githubProbe: () => call<GitHubProbeResult>('github.probe', {}),
+  githubOAuthStart: () => call<GitHubOAuthResult>('github.oauth.start', {}),
+  githubOAuthStatus: (sessionID?: string) =>
+    call<GitHubOAuthResult>('github.oauth.status', sessionID ? { session_id: sessionID } : {}),
+  githubOAuthCancel: (sessionID: string) =>
+    call<GitHubOAuthResult>('github.oauth.cancel', { session_id: sessionID }),
+  githubRepositories: (page?: number) =>
+    call<GitHubRepositoryListResult>('github.repositories.list', page ? { page } : {}),
   terminalStop: () => call<unknown>('terminal.stop', {}),
   terminalSocket: (tab: string) =>
     socketURL(`/ws/terminal?tab=${encodeURIComponent(tab)}`),

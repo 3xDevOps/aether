@@ -3,6 +3,7 @@ package gitengine
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,14 +24,14 @@ import (
 // remote; production mirror validation never permits that protocol.
 type MirrorFetchFunc func(ctx context.Context, repo string, req MirrorRequest, incomingRef string) error
 
-// MirrorResolveFunc is a narrow test seam for public HTTPS DNS lookups.
+// MirrorResolveFunc is a narrow test seam for HTTPS DNS lookups.
 // Production callers leave it nil, selecting the system resolver. Deploy-key
 // SSH fetches never invoke this seam.
 type MirrorResolveFunc func(ctx context.Context, host string) ([]net.IP, error)
 
-// MirrorRequest describes one upstream observation. Private key bytes never
-// cross this API; deploy-key authentication refers to a file path owned by
-// the server's credential lifecycle.
+// MirrorRequest describes one upstream observation. Deploy-key authentication
+// refers to server-owned file paths. GitHubToken is ephemeral and used only in
+// the fetch child's environment, never in repository configuration.
 type MirrorRequest struct {
 	SourceURL      string
 	Branch         string
@@ -38,6 +39,7 @@ type MirrorRequest struct {
 	Auth           domain.MirrorAuth
 	PrivateKeyPath string
 	KnownHostsPath string
+	GitHubToken    string `json:"-"`
 }
 
 // MirrorResult reports the upstream observation and refs accepted into the
@@ -76,7 +78,7 @@ const (
 
 // MirrorError is safe to show to an operator: fetch failures expose only
 // allowlisted diagnostics, never raw transport output or credential details.
-// Cause retains the original error and output for trusted server diagnostics.
+// Cause retains transport diagnostics after credential redaction.
 type MirrorError struct {
 	Kind        MirrorErrorKind
 	WorkspaceID domain.WorkspaceID
@@ -323,12 +325,17 @@ func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.Workspace
 	return result, mirrorErr(MirrorErrorCASConflict, ws, req, result.BaseCommit, result.ObservedCommit, nil)
 }
 
-func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64) (MirrorResult, error) {
+// AdoptWorkspaceMirror accepts only the exact candidate reviewed by the caller.
+// The generation pins configuration; expectedCommit pins the source revision.
+func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64, expectedCommit string) (MirrorResult, error) {
 	e.fileWriteMu.Lock()
 	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, Generation: generation, CheckedAt: time.Now().UTC()}
 	if generation < 0 {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", errors.New("invalid mirror generation"))
+	}
+	if !validObjectID(expectedCommit) {
+		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", ErrInvalidObjectID)
 	}
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
@@ -362,6 +369,13 @@ func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID
 		if candidate == "" {
 			result.Status = domain.MirrorStatusPending
 			return result, mirrorErr(MirrorErrorNoCandidate, ws, MirrorRequest{Branch: branch, Generation: generation}, base, candidate, nil)
+		}
+		// Check on every CAS attempt while holding fileWriteMu. The ref
+		// transaction also verifies this candidate, so an external ref writer
+		// cannot substitute another revision between this check and adoption.
+		if candidate != expectedCommit {
+			result.Status = domain.MirrorStatusError
+			return result, mirrorErr(MirrorErrorCASConflict, ws, MirrorRequest{Branch: branch, Generation: generation}, base, candidate, errors.New("mirror candidate changed since review"))
 		}
 		if err := e.commitMirrorObservation(ctx, repo, baseRef, acceptedRef, candidateRef, "", base, accepted, candidate, candidate, candidate, candidate); err != nil {
 			if attempt+1 < mirrorMaxCASAttempts {
@@ -407,6 +421,10 @@ func validateMirrorRequest(req MirrorRequest, seam bool) error {
 		return errors.New("generation must not be negative")
 	}
 	switch req.Auth {
+	case domain.MirrorAuthGitHub:
+		if !domain.ValidGitHubMirrorSourceURL(req.SourceURL) {
+			return errors.New("GitHub mirror source must be canonical https://github.com/owner/repository.git")
+		}
 	case domain.MirrorAuthPublic:
 		u, err := url.Parse(req.SourceURL)
 		if !seam {
@@ -494,12 +512,15 @@ func (e *Engine) configuredMirror(ctx context.Context, repo string) (string, int
 }
 
 func (e *Engine) fetchMirror(ctx context.Context, repo string, req MirrorRequest, incomingRef string) error {
+	if req.Auth == domain.MirrorAuthGitHub && (req.GitHubToken == "" || strings.ContainsAny(req.GitHubToken, "\x00\r\n\t ")) {
+		return &mirrorFetchFailure{err: errors.New("GitHub credential unavailable"), output: "authentication failed"}
+	}
 	if e.cfg.MirrorFetch != nil {
 		return e.cfg.MirrorFetch(ctx, repo, req, incomingRef)
 	}
 	args := []string{"-C", repo, "-c", "safe.directory=*"}
 	env := gitEnv()
-	if req.Auth == domain.MirrorAuthPublic {
+	if req.Auth == domain.MirrorAuthPublic || req.Auth == domain.MirrorAuthGitHub {
 		u, err := url.Parse(req.SourceURL)
 		if err != nil || u.Hostname() == "" {
 			if err == nil {
@@ -516,6 +537,23 @@ func (e *Engine) fetchMirror(ctx context.Context, repo string, req MirrorRequest
 			args = append(args, "-c", "http.curloptResolve="+mirrorCurloptResolve(u.Hostname(), address))
 		}
 	}
+	if req.Auth == domain.MirrorAuthGitHub {
+		// URL-scoped authentication cannot follow a repository URL rewrite to
+		// another host or path. Clear inherited headers and credential helpers.
+		// The encoded secret is never an argv entry or an on-disk Git setting.
+		env = append(env,
+			"GIT_CONFIG_COUNT=3",
+			"GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=",
+			"GIT_CONFIG_KEY_1=http."+req.SourceURL+".extraHeader",
+			"GIT_CONFIG_VALUE_1=Authorization: Basic "+base64.StdEncoding.EncodeToString([]byte("x-access-token:"+req.GitHubToken)),
+			"GIT_CONFIG_KEY_2=credential.helper", "GIT_CONFIG_VALUE_2=",
+		)
+		args = append(args, "-c", "http."+req.SourceURL+".followRedirects=false",
+			"-c", "http."+req.SourceURL+".sslVerify=true",
+			"-c", "http."+req.SourceURL+".proxy=",
+			"-c", "core.hooksPath=/dev/null",
+			"-c", "protocol.allow=never", "-c", "protocol.https.allow=always")
+	}
 	if req.Auth == domain.MirrorAuthDeployKey {
 		ssh := strings.Join([]string{
 			"/usr/bin/ssh", "-F", "/dev/null", "-i", shellQuoteMirror(req.PrivateKeyPath),
@@ -529,9 +567,22 @@ func (e *Engine) fetchMirror(ctx context.Context, repo string, req MirrorRequest
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, args...)
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return &mirrorFetchFailure{err: err, output: string(out)}
+		output := string(out)
+		if req.Auth == domain.MirrorAuthGitHub {
+			output = redactMirrorGitHubCredential(output, req.GitHubToken)
+		}
+		return &mirrorFetchFailure{err: err, output: output, github: req.Auth == domain.MirrorAuthGitHub}
 	}
 	return nil
+}
+
+func redactMirrorGitHubCredential(output, token string) string {
+	if token == "" {
+		return output
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	output = strings.ReplaceAll(output, encoded, "[REDACTED]")
+	return strings.ReplaceAll(output, token, "[REDACTED]")
 }
 
 func (e *Engine) resolveMirrorHost(ctx context.Context, host string) ([]net.IP, error) {
@@ -590,6 +641,7 @@ func mirrorCurloptResolve(host string, address net.IP) string {
 type mirrorFetchFailure struct {
 	err    error
 	output string
+	github bool
 }
 
 func (e *mirrorFetchFailure) Error() string {
@@ -619,10 +671,12 @@ func mirrorFetchProblem(err error) (MirrorErrorKind, string) {
 	}
 	msg := strings.ToLower(failure.output)
 	switch {
+	case failure.github && (strings.Contains(msg, "repository not found") || strings.Contains(msg, "returned error: 404")):
+		return MirrorErrorAuthFailed, "GitHub repository is unavailable to the connected account; check access or reconfigure the source"
 	case strings.Contains(msg, "host key verification failed"):
 		return MirrorErrorAuthFailed, "host key verification failed; verify the mirror's pinned host key"
 	case strings.Contains(msg, "authentication failed"), strings.Contains(msg, "permission denied (publickey"), strings.Contains(msg, "could not read username"), strings.Contains(msg, "returned error: 401"), strings.Contains(msg, "returned error: 403"):
-		return MirrorErrorAuthFailed, "upstream authentication failed; check source access and the mirror deploy key"
+		return MirrorErrorAuthFailed, "upstream authentication failed; check source access and reconnect GitHub or verify the mirror deploy key"
 	case strings.Contains(msg, "couldn't find remote ref"), strings.Contains(msg, "could not find remote ref"), strings.Contains(msg, "no such ref"):
 		return MirrorErrorSourceMissing, "upstream branch was not found; verify the configured branch"
 	case strings.Contains(msg, "ssl certificate problem"), strings.Contains(msg, "server certificate verification failed"), strings.Contains(msg, "error setting certificate"):

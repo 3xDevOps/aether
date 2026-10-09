@@ -89,9 +89,14 @@ while you sleep.**
 machine, bound to loopback and carried over the same SSH connection as the
 CLI. On a tailnet, the server can optionally host the dashboard over HTTPS with
 `--web-port`; Tailscale WhoIs identifies each request, so a phone needs no
-install or token. The server-hosted surface has no machine-local verbs or
-onboarding wizard; use local `aether gui` for the one-time directory picker and
-other local filesystem or repository actions.
+install or token. Both dashboards include onboarding. Admins can choose
+**Onboarding → Repository → From GitHub → Add GitHub repository**, connect
+GitHub in the browser, choose a repository, then **Review repository → Use
+repository** to accept its fetched revision. No terminal or deploy key is
+needed for this path; see the [browser walkthrough](docs/quickstart.md#github-repository).
+Later, use **Settings → GitHub → Add repository** with the same connection.
+Machine-local directory and clone actions still need the desktop app or local
+`aether gui`; the hosted dashboard cannot read arbitrary paths on your computer.
 
 Inside either dashboard: a workspace switcher, a board bucketed by what needs
 attention (Needs you, Working, Finished; approve or reply from the card), a

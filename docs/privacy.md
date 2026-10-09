@@ -5,7 +5,7 @@ publish it unless you sign in to the edge they run, at `auth.onaether.dev`
 and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
 policy for the Aether Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
-shows, and for that edge. Effective 2026-09-29.
+shows, and for that edge. Effective 2026-10-09.
 
 ## Who publishes it
 
@@ -69,15 +69,57 @@ again.
   workspace you have open, and an open run terminal adds you to that run's
   **Watching** list; the other members of that server see both
   ([teams.md](teams.md)). It is not kept as history.
-- **To nobody else.** The app has no analytics, no crash reporting, no
-  advertising, and no third-party library that talks to a network. WebView
-  Safe Browsing is turned off in the app, so no visited URL, and no hash of
-  one, is sent to Google. A link that leaves the dashboard opens in the
-  phone's browser, under that browser's own policy.
+- **Optional GitHub authorization opens GitHub in your external browser.**
+  If an administrator chooses **Connect GitHub** during onboarding or in
+  Settings, that browser visits GitHub to approve the native GitHub CLI's
+  device authorization. GitHub receives the browser's requests under its own
+  policy; the resulting token is kept in the member home on your server,
+  not in the dashboard or Android shell.
+- **No app analytics or advertising.** The app has no analytics, no crash
+  reporting, no advertising, and no third-party library that talks to a
+  network. WebView Safe Browsing is turned off in the app, so no visited URL,
+  and no hash of one, is sent to Google. A link that leaves the dashboard
+  opens in the phone's browser, under that browser's own policy.
 
-Everything above goes to one server, the one you typed in, and stops there.
-Nothing is sold, and nothing is handed to anyone the server's administrator
-has not made a member of it.
+Dashboard requests above go to the server you chose, not to an
+Aether-operated analytics service. Optional GitHub authorization and the
+server-side connections described below are separate external requests.
+Nothing is sold.
+
+## Optional GitHub repository access
+
+Connecting GitHub uses the native `gh` CLI in your member Environment on
+your own server. Your server contacts GitHub to verify the account, list
+repositories the account can access (including private collaborator and
+organization repositories), look up a selected repository, and fetch its
+selected source branch over HTTPS. GitHub receives these authenticated
+requests under its own policy. There is no new Aether-operated authorization
+broker or analytics service, and this connection is separate from signing
+in to an edge and from an agent's model-provider account.
+
+The native token is stored in
+`homes/<member>/.config/gh/hosts.yml` on your server. The server reads it for
+GitHub API requests and source fetches. A source mirror stores only the
+authorizing member and numeric GitHub account binding with its source
+metadata, not a copy of the token. Aether does not send that token to the
+dashboard, the edge, or other members, or put it in workspace database
+records, on-disk Git configuration, URLs, or command arguments. It is used
+in server memory and the fetch child's temporary environment.
+
+This is fetch-only source access, **not a read-only token scope**: native gh
+permissions can include broad repository access. Your own agents already
+have access to your native login in your member home. Imported code is
+deliberately shared with the workspace's authorized members and runs; the
+token is not. Repository data remains on your server until the relevant
+workspace/run data is deleted; removing upstream access does not erase
+already imported code.
+
+Logout, token expiry or revocation, member removal, or an account switch
+prevents further refresh with that binding without moving the accepted
+source revision. Disabling or deleting a source mirror does not delete the
+native login or revoke authorization at GitHub. To remove the native login
+and revoke GitHub authorization, see
+[GitHub credentials and signing keys](security.md#github-credentials-and-signing-keys).
 
 ## What an edge stores
 

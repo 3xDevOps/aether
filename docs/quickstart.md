@@ -8,8 +8,9 @@ Choose where your code comes from:
 
 | Starting point | Onboarding path |
 | --- | --- |
-| Public remote repository | [Import public HTTPS](#public-remote-repository); no local clone needed. |
-| Private remote repository | [Import with a read-only deploy key](#private-remote-repository); a repository administrator must install the key. |
+| GitHub repository (public or private) | [From GitHub](#github-repository): connect in the browser, choose a repository, and accept its revision. |
+| Other public remote repository | [Import public HTTPS](#public-remote-repository); no local clone needed. |
+| Private remote with a deploy key | [Manual deploy-key import](#private-remote-repository); a repository administrator must install the key. |
 | Existing local clone | [Create or link a workspace](#local-clone) from the desktop app, `aether gui`, or CLI on the computer holding the clone. |
 
 A **workspace** holds one repository, its base branch, and its runs. A **run**
@@ -211,41 +212,88 @@ authentication.
 
 The dashboard opens **Onboarding** until you finish it; later, open it from
 **Settings → Onboarding → Open guide**, which resumes at the furthest step
-you reached. Its header lists four steps: **Connect**,
-**Repository**, **Agent** and **First run**. The local dashboard starts at
-**Connect**; the hosted dashboard has no machine-local link and starts at
-**Repository**, and opens onboarding for new members even when shared
+you reached. The local dashboard lists four steps: **Connect**,
+**Repository**, **Agent** and **First run**, starting at **Connect**. The hosted
+dashboard omits the machine-local **Connect** step and starts at
+**Repository**. It opens onboarding for new members even when shared
 workspaces already exist.
 
 A **workspace** is one repository and base branch, and the runs started from
-it. **Repository** lists your workspaces with **Use**, and offers two cards
-under **Add a workspace**: **Import a remote repository** and **From a local
-clone**. A member who is not an admin and finds no workspace sees **Ask an
-admin to add a workspace** and can still **Continue to Agent**. Once a
-workspace is chosen, **Change** returns to the list.
+it. **Repository** lists your workspaces with **Use**. Under **Add a workspace**,
+admins can choose **From GitHub**, or the alternatives **Import a remote
+repository** and **From a local clone**. A member who is not an admin and finds
+no workspace sees **Ask an admin to add a workspace** and can still **Continue
+to Agent**. Once a workspace is chosen, **Change** returns to the list.
 
-For another workspace, open **Manage workspaces** from the workspace selector
-or command palette (**Ctrl/Cmd+K**) and press **Add workspace**. The same
-public, private, and local choices remain available. An existing workspace's
-repository page (**Repository** in the workspace selector) links a clone and
-manages the source.
+For another repository, open **Settings → GitHub → Add repository**; it reuses
+your connection. Or open **Manage workspaces** from Settings, the workspace
+selector, or command palette (**Ctrl/Cmd+K**), then **Add workspace → Add
+GitHub repository**. Manual remote and local choices remain available.
+An existing workspace's repository page (**Repository** in the workspace
+selector) links a clone and manages the source.
 
-The **base branch** is the branch new runs start from. Use the repository's
-actual branch, not `main` merely because the form defaults to it. Creating an
-empty workspace does not upload code.
+The **base branch** is the branch new runs start from. The GitHub picker uses
+the repository's actual default branch; manual forms need you to supply the
+correct branch. Creating an empty workspace does not upload code.
 
-The settings below sit under the step's **Advanced** disclosure. Keep them
-separate:
+### GitHub repository
+
+On an already connected server, an Aether admin can do this entirely in either
+dashboard:
+
+1. Open **Onboarding → Repository** and choose **Add GitHub repository** under
+   **From GitHub**. To reopen onboarding, use **Settings → Onboarding → Open
+   guide**.
+2. If GitHub is not already connected, choose **Connect GitHub**, then **Copy
+   code and open GitHub**. Enter the displayed code and approve **GitHub CLI**,
+   which Aether uses to connect this server. If the clipboard or new tab is
+   blocked, copy the visible code and use **Open GitHub**. Completion is automatic.
+   Wait for **Connected as …**; there is no terminal or **I've logged in** step.
+3. Choose a repository. **Find a repository** filters the loaded list; use
+   **Load more** if needed. Private repositories you can read, including
+   collaborator and organization repositories, do not require repository-admin
+   permission or a deploy key. Organization approval and SSO policy still apply.
+4. The workspace name and base branch come from the repository. When you can
+   write to it, it is also shown as the publishing destination. Review that
+   destination before continuing. Under **Advanced**, change the name or branch,
+   choose another writable repository or fork, or select **None — do not
+   publish**. Read-only sources have no publishing destination by default.
+5. Choose **Review repository** to create the workspace and fetch the branch.
+   Review the displayed branch and actual **Revision**, then choose **Use
+   repository** to accept that exact revision as the initial base. The
+   repository is now ready, and onboarding continues to **Agent**.
+
+Your agent vendor login and edge/server sign-in remain separate from this
+GitHub connection. The server needs its normal Docker runtime and Git, and
+your member Environment needs `gh` 2.81.0 or newer; the current standard image
+includes it. See [Environment prerequisites and setup](environment-home.md#connect-github).
+Imported code is shared with workspace members, and future source fetches
+depend on the authorizing member's connected GitHub account; see
+[source sharing and account dependence](security.md#workspace-source-mirrors).
+
+**If something goes wrong:** use **Cancel connection** to stop a pending
+authorization; after cancellation or expiry, **Connect GitHub** gives a new
+attempt. Use **Check connection** and **Reload repositories** after access
+changes. For an empty repository, add an initial commit on GitHub and reload.
+If a workspace was created but fetching failed, keep it: use **Retry fetch**,
+then review and **Use repository**. An authentication failure offers **Source
+settings** to reconnect the authorizing account; deliberately save source
+settings to change the bound account or branch. If an operation's result is
+uncertain, use **Check source status**, or close the dialog and inspect
+**Manage workspaces** before creating anything again.
+
+### Manual source and publishing settings
+
+The manual import form's **Advanced** settings keep these separate:
 
 - **Source authentication** lets the server read an upstream branch into its
   **source mirror**. A deploy key is read-only and is not your Git/`gh` login.
 - **Checkout Origin** is the publishing destination placed in new run
-  checkouts. Remote import never infers it from the source URL; supply a
-  writable repository or fork, or leave it blank.
+  checkouts. Supply a writable repository or fork, or leave it blank.
 - **Native Git/`gh` credentials** and upstream write permission let a run push
-  and open a PR. Set them up in your **Environment**
-  ([Connect GitHub](#connect-github)). Git author identity and agent vendor
-  login are separate again.
+  and open a PR. The admin GitHub connection configures these automatically;
+  collaborators and CLI users can use [native setup](#connect-github).
+  Git author identity and agent vendor login are separate again.
 
 ### Public remote repository
 
@@ -273,15 +321,21 @@ aether workspace mirror status --workspace myproject
 ```
 
 Unlike dashboard import, CLI `configure` does not fetch until `refresh`.
-After reviewing the returned candidate, adopt its actual generation:
+After reviewing the returned candidate, adopt its generation and full observed commit:
 
 ```sh
-aether workspace mirror adopt --workspace myproject --generation <n> --yes
+aether workspace mirror adopt --workspace myproject --generation <n> --commit <reviewed-sha> --yes
 ```
+
+Use the generation and full observed commit from the state you reviewed. If
+adoption reports a conflict, keep the workspace, refresh its status, and explicitly
+review the current candidate before adopting again; never substitute a newer SHA
+without review.
 
 ### Private remote repository
 
-Use the same **Import repository** form, choosing **Read-only deploy key**.
+For GitHub, prefer [From GitHub](#github-repository) above. For manual key-based
+access, use the **Import repository** form, choosing **Read-only deploy key**.
 Use a GitHub HTTPS source or a generic `ssh://` source. For generic SSH,
 **Pinned known_hosts (required for generic SSH)** must contain the host key
 verified with the host administrator; do not blindly trust `ssh-keyscan`.
@@ -322,11 +376,13 @@ Install the public key printed by `configure`, then:
 ```sh
 aether workspace mirror refresh --workspace myproject
 aether workspace mirror status --workspace myproject
-aether workspace mirror adopt --workspace myproject --generation <n> --yes
+aether workspace mirror adopt --workspace myproject --generation <n> --commit <reviewed-sha> --yes
 ```
 
-Replace `<n>` with the reviewed generation from `status`. After installing a
-key, use **Verify** / **Refresh**, not **Save source** or `configure`:
+Replace `<n>` and `<reviewed-sha>` with the generation and full observed commit
+you reviewed from `status`. A conflict requires fresh status and explicit review
+before another adoption. After installing a key, use **Verify** / **Refresh**,
+not **Save source** or `configure`:
 reconfiguration rotates the key and generation. To recover a misplaced public
 key, reopen the source mirror on the workspace's repository page or run
 `mirror status` on the same workspace.
@@ -607,10 +663,15 @@ If runs should publish to GitHub, connect an account with write permission
 to the checkout Origin from step 4. Source deploy keys do not grant that
 permission, and enterprise policy may require additional authorization.
 
-In **Onboarding → Agent** or **Agents**, open **GitHub**, then **Connect
-GitHub**: it opens your Environment's terminal with the login command typed.
-**I've logged in** finishes setup and reports the account and registered
-signing key.
+Admins who connected under **From GitHub** are already set up: **Onboarding →
+Agent** recognizes that connection. To connect later, use **Settings → GitHub →
+Connect GitHub**, or the admin GitHub controls in the Agent step.
+**Check connection** only reads status; it does not configure Git or signing.
+
+Collaborators retain their own native setup: in **Onboarding → Agent** or
+**Agents**, open **GitHub**, then **Connect GitHub**. This member flow opens
+the Environment terminal with the login command typed; **I've logged in**
+finishes setup and reports the account and registered signing key.
 
 From the CLI it is two commands. In `aether terminal`:
 
