@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
@@ -8,6 +8,7 @@ import type {
   WorkspaceMirrorResult,
 } from '@/lib/types'
 import { useStore } from '@/store'
+import { useIsAdmin } from '@/store/hooks'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +21,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { GitHubConnection } from '@/components/github-connection'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,6 +65,7 @@ export function WorkspaceMirrorDialog({
   onClose: () => void
 }) {
   const workspace = useStore((s) => s.workspaces[workspaceID])
+  const admin = useIsAdmin()
   const [result, setResult] = useState<WorkspaceMirrorResult | null>(null)
   const [source, setSource] = useState(suggestedSource ?? workspace?.origin ?? '')
   const [branch, setBranch] = useState(workspace?.base_branch ?? 'main')
@@ -74,13 +77,38 @@ export function WorkspaceMirrorDialog({
   const [disableStateUnavailable, setDisableStateUnavailable] = useState(false)
   const [confirmation, setConfirmation] = useState<'adopt' | 'disable' | null>(null)
   const publicKeyRef = useRef<HTMLPreElement>(null)
+  const generation = useRef(0)
+  const [contextVersion, setContextVersion] = useState(0)
+  const previousContext = useRef({ client, workspaceID })
+
+  useLayoutEffect(() => {
+    const reset = () => {
+      generation.current += 1
+      setContextVersion((version) => version + 1)
+      setResult(null); setSource(''); setBranch(''); setAuth('public'); setKnownHosts('')
+      setBusy(false); setLoading(true); setError(null); setConfirmation(null)
+      setDisableStateUnavailable(false)
+    }
+    if (previousContext.current.client !== client || previousContext.current.workspaceID !== workspaceID) {
+      previousContext.current = { client, workspaceID }
+      reset()
+    }
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (state.identityKey !== previous.identityKey || state.connectionEpoch !== previous.connectionEpoch || state.info?.member.id !== previous.info?.member.id || state.info?.member.role !== previous.info?.member.role) reset()
+    })
+    return () => { generation.current += 1; unsubscribe() }
+  }, [client, workspaceID])
+
+  const version = generation.current
+  const isCurrent = () => version === generation.current
 
 
   useEffect(() => {
     let live = true
+    const requestVersion = generation.current
     void client.workspaceMirrorStatus(workspaceID).then(
       (current) => {
-        if (!live) return
+        if (!live || requestVersion !== generation.current) return
         setResult(current)
         setDisableStateUnavailable(false)
         onStatusChange?.(current)
@@ -92,7 +120,7 @@ export function WorkspaceMirrorDialog({
         setLoading(false)
       },
       (err) => {
-        if (!live) return
+        if (!live || requestVersion !== generation.current) return
         setError(message(err))
         setLoading(false)
       },
@@ -100,7 +128,7 @@ export function WorkspaceMirrorDialog({
     return () => {
       live = false
     }
-  }, [client, workspaceID, workspace?.base_branch, onStatusChange])
+  }, [client, workspaceID, workspace?.base_branch, onStatusChange, contextVersion])
 
   const configure = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -117,12 +145,14 @@ export function WorkspaceMirrorDialog({
           ? { known_hosts: knownHosts }
           : {}),
       })
+      if (!isCurrent()) return
       setResult(current)
       onStatusChange?.(current)
     } catch (err) {
+      if (!isCurrent()) return
       setError(message(err))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -132,20 +162,23 @@ export function WorkspaceMirrorDialog({
     setError(null)
     try {
       const current = await client.workspaceMirrorRefresh(workspaceID)
+      if (!isCurrent()) return
       setResult(current)
       onStatusChange?.(current)
     } catch (err) {
+      if (!isCurrent()) return
       const refreshError = message(err)
       setError(refreshError)
       try {
         const current = await client.workspaceMirrorStatus(workspaceID)
+        if (!isCurrent()) return
         setResult(current)
         onStatusChange?.(current)
       } catch {
         // Keep the original refresh error when the persisted status is unavailable.
       }
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -155,13 +188,15 @@ export function WorkspaceMirrorDialog({
     setError(null)
     try {
       const current = await client.workspaceMirrorAdopt(workspaceID, result.generation)
+      if (!isCurrent()) return
       setResult(current)
       onStatusChange?.(current)
       toast.success('Workspace source candidate adopted')
     } catch (err) {
+      if (!isCurrent()) return
       setError(message(err))
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -171,17 +206,20 @@ export function WorkspaceMirrorDialog({
     setError(null)
     try {
       const current = await client.workspaceMirrorDisable(workspaceID)
+      if (!isCurrent()) return
       setResult(current)
       setDisableStateUnavailable(false)
       onStatusChange?.(current)
       toast.success('Workspace source disabled')
     } catch (err) {
+      if (!isCurrent()) return
       setError(message(err))
       // Only a successful status read can establish the next action.
       setResult(null)
       setDisableStateUnavailable(true)
       try {
         const current = await client.workspaceMirrorStatus(workspaceID)
+        if (!isCurrent()) return
         setResult(current)
         setDisableStateUnavailable(false)
         onStatusChange?.(current)
@@ -189,7 +227,7 @@ export function WorkspaceMirrorDialog({
         // Keep the original disable error and withhold all stale actions.
       }
     } finally {
-      setBusy(false)
+      if (isCurrent()) setBusy(false)
     }
   }
 
@@ -255,6 +293,10 @@ export function WorkspaceMirrorDialog({
                       <dt className="text-muted">Branch</dt>
                       <dd className="mt-0.5 break-all font-code">{result.branch || '-'}</dd>
                     </div>
+                    {result.auth === 'github' && <div className="min-w-0 sm:col-span-2">
+                      <dt className="text-muted">GitHub source authorization</dt>
+                      <dd className="mt-0.5 break-all">Account ID {result.github_user_id ?? 'unavailable'} · authorizing member {result.github_member_id ?? 'unavailable'}</dd>
+                    </div>}
                     <div className="min-w-0">
                       <dt className="text-muted">Observed SHA</dt>
                       <dd className="mt-0.5 break-all font-code">{result.observed_commit || '-'}</dd>
@@ -334,8 +376,13 @@ export function WorkspaceMirrorDialog({
                   >
                     <option value="public">Public HTTPS</option>
                     <option value="deploy-key">Private repository - read-only deploy key</option>
+                    {admin && <option value="github">Connected GitHub account</option>}
                   </select>
                 </div>
+                {auth === 'github' && <div className="space-y-2 border-l-2 border-seam/70 pl-3">
+                  <GitHubConnection client={client} />
+                  <p className="text-ui-sm text-muted">The server fetches this GitHub source using the authorizing member's native account. Save source explicitly binds it to your current connected account. Existing accepted code remains available if authorization fails; reconnect the original account or save to rebind, then refresh and review the fetched revision. Credentials are not copied to workspace members.</p>
+                </div>}
                 {auth === 'deploy-key' && (
                   <div className="space-y-2 border-l-2 border-seam/70 pl-3">
                     <div className="space-y-1">

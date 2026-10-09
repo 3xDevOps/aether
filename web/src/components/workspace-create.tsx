@@ -10,17 +10,18 @@ import { shellQuote } from '@/lib/shell'
 import { cn } from '@/lib/utils'
 import type { Workspace } from '@/lib/types'
 import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository-dialog'
+import { GitHubRepositoryDialog } from '@/routes/admin-dialogs/github-repository-dialog'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
 export function WorkspaceCreate({ client, onCreated, onRefresh }: {
   client: Api
-  onCreated: (workspace: Workspace, source: 'local' | 'remote') => void
+  onCreated: (workspace: Workspace, source: 'local' | 'remote', accepted?: boolean) => void
   onRefresh: () => void
 }) {
   const caps = useCapability()
   const isAdmin = useIsAdmin()
-  const [choice, setChoice] = useState<'local' | 'remote' | null>(null)
+  const [choice, setChoice] = useState<'github' | 'local' | 'remote' | null>(null)
   const [imported, setImported] = useState<Workspace | null>(null)
   const [name, setName] = useState('')
   const [base, setBase] = useState('main')
@@ -65,26 +66,31 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
     }
   }
 
-  const recommended = choice === null && (caps.hasLocal('link.repo') ? 'local' : 'remote')
   const canImport = isAdmin && caps.hasMethod('workspace.import')
   const canAdd = isAdmin && caps.hasMethod('workspace.add')
+  const canGitHub = canImport && caps.hasMethod('github.oauth.start') && caps.hasMethod('github.repositories.list')
   if (!canImport && !canAdd) return null
 
   return <section aria-label="Add workspace" className="flex min-w-0 flex-col gap-3">
     <h3 className="text-ui font-medium text-text">Add a workspace</h3>
+    {canGitHub && <div className="flex flex-col items-start gap-2 border-b border-seam pb-3">
+      <h4 className="text-ui font-medium text-text">From GitHub</h4>
+      <p className="text-ui-sm text-muted">Connect your account and choose a repository. Private repositories need no deploy key or local clone.</p>
+      <Button size="sm" disabled={busy || uncertain} onClick={() => setChoice('github')}>Add GitHub repository</Button>
+    </div>}
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="flex flex-col items-start gap-2 rounded-panel border border-seam p-3">
-        <h4 className="text-ui font-medium text-text">Import a remote repository</h4>
+        <h4 className="text-ui font-medium text-text">From a Git URL</h4>
         <p className="flex-1 text-ui-sm text-muted">Public HTTPS, or private with a read-only deploy key. No local clone needed.</p>
         {canImport
-          ? <Button size="sm" variant={recommended === 'remote' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
+          ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot import repositories.</p>}
       </div>
       <div className={cn('flex flex-col items-start gap-2 rounded-panel border p-3', choice === 'local' ? 'border-accent' : 'border-seam')}>
         <h4 className="text-ui font-medium text-text">From a local clone</h4>
         <p className="flex-1 text-ui-sm text-muted">Create the workspace, then link your clone and push its base branch. History is never rewritten.</p>
         {canAdd
-          ? <Button size="sm" variant={recommended === 'local' ? 'primary' : 'secondary'} disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
+          ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot create workspaces.</p>}
       </div>
     </div>
@@ -102,5 +108,6 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
       <CodeBlock className="whitespace-pre-wrap break-words">{`aether link ${shellQuote('<server-address-or-id>')} &&\naether workspace add myproject --base main &&\naether link ${shellQuote('<server-address-or-id>')} --repo /absolute/path/to/clone --workspace myproject &&\ngit -C /absolute/path/to/clone push -u aether main`}</CodeBlock>
     </div>)}
     {choice === 'remote' && <ImportRepositoryDialog client={client} onImported={(workspace) => { if (workspace) setImported(workspace); onRefresh() }} onClose={() => { setChoice(null); if (imported) onCreated(imported, 'remote') }} />}
+    {choice === 'github' && <GitHubRepositoryDialog client={client} onCreated={(workspace) => { setChoice(null); onCreated(workspace, 'remote', true) }} onClose={() => { setChoice(null); onRefresh() }} />}
   </section>
 }

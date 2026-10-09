@@ -1,5 +1,5 @@
-// Package mirror owns server-side upstream mirror configuration and the
-// deploy-key files used to fetch it. Private key bytes never cross this API.
+// Package mirror owns server-side upstream mirror configuration and fetch
+// credentials. Secret bytes never cross its public lifecycle API.
 package mirror
 
 import (
@@ -17,7 +17,7 @@ import (
 )
 
 // Store is the intentionally narrow persistence contract needed by Service.
-// Workspace and member homes are not consulted by mirror operations.
+// Credential access is injected separately and never persisted by the store.
 type Store interface {
 	GetWorkspaceMirror(context.Context, domain.WorkspaceID) (*domain.WorkspaceMirror, error)
 	SetWorkspaceMirror(context.Context, *domain.WorkspaceMirror) error
@@ -50,15 +50,18 @@ type Config struct {
 	Store Store
 	Git   Git
 	Now   func() time.Time
+	// GitHubCredentials reads the authorizing member's current native credential.
+	GitHubCredentials func(context.Context, domain.MemberID) (string, int64, error)
 }
 
 // Service serializes all operations for one workspace while allowing
 // unrelated workspaces to proceed concurrently.
 type Service struct {
-	root  string
-	store Store
-	git   Git
-	now   func() time.Time
+	root              string
+	store             Store
+	git               Git
+	now               func() time.Time
+	githubCredentials func(context.Context, domain.MemberID) (string, int64, error)
 
 	locksMu sync.Mutex
 	locks   map[domain.WorkspaceID]*sync.Mutex
@@ -70,6 +73,9 @@ type ConfigureRequest struct {
 	Branch     string
 	Auth       domain.MirrorAuth
 	KnownHosts string
+	// GitHub binding is derived by the server, never accepted from a client.
+	GitHubMemberID domain.MemberID
+	GitHubUserID   int64
 }
 
 // Result is the public mirror state returned by lifecycle methods.
@@ -110,7 +116,7 @@ func New(cfg Config) (*Service, error) {
 	if err := sweepKeyQuarantines(root); err != nil {
 		return nil, err
 	}
-	svc := &Service{root: root, store: cfg.Store, git: cfg.Git, now: cfg.Now, locks: make(map[domain.WorkspaceID]*sync.Mutex)}
+	svc := &Service{root: root, store: cfg.Store, git: cfg.Git, now: cfg.Now, githubCredentials: cfg.GitHubCredentials, locks: make(map[domain.WorkspaceID]*sync.Mutex)}
 	if lister, ok := cfg.Store.(workspaceMirrorLister); ok {
 		if err := svc.reconcileDisablingRows(lister); err != nil {
 			return nil, err
@@ -198,6 +204,13 @@ func (s *Service) Configure(ctx context.Context, workspace domain.WorkspaceID, r
 	if !domain.ValidMirrorBranch(req.Branch) || strings.HasPrefix(req.Branch, "-") {
 		return Result{}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace, Cause: errors.New("invalid mirror branch")}
 	}
+	if req.Auth == domain.MirrorAuthGitHub {
+		if req.GitHubMemberID == "" || req.GitHubUserID <= 0 || s.githubCredentials == nil {
+			return Result{}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace, Cause: errors.New("GitHub mirror requires an authorizing member and account")}
+		}
+	} else if req.GitHubMemberID != "" || req.GitHubUserID != 0 {
+		return Result{}, &gitengine.MirrorError{Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace, Cause: errors.New("GitHub binding requires GitHub authentication")}
+	}
 	old, err := s.store.GetWorkspaceMirror(ctx, workspace)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Result{}, err
@@ -261,6 +274,7 @@ func (s *Service) Configure(ctx context.Context, workspace domain.WorkspaceID, r
 		WorkspaceID: workspace, SourceURL: source.URL, SourceIdentity: source.Identity,
 		Branch: req.Branch, Auth: req.Auth, Generation: generation,
 		Status: domain.MirrorStatusPending, KeyFingerprint: material.Fingerprint,
+		GitHubMemberID: req.GitHubMemberID, GitHubUserID: req.GitHubUserID,
 	}
 	if old != nil {
 		pending.CreatedAt = old.CreatedAt
@@ -316,40 +330,7 @@ func (s *Service) Refresh(ctx context.Context, workspace domain.WorkspaceID) (Re
 	if m.Status == domain.MirrorStatusDisabling {
 		return s.result(*m, s.publicKey(workspace, *m)), disablingMirrorError(workspace)
 	}
-	now := s.now().UTC()
-	m.Status, m.LastError, m.LastAttemptAt = domain.MirrorStatusRefreshing, "", now
-	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return Result{}, err
-	}
-	request := gitengine.MirrorRequest{SourceURL: m.SourceURL, Branch: m.Branch, Generation: m.Generation, Auth: m.Auth}
-	if m.Auth == domain.MirrorAuthDeployKey {
-		paths, pathErr := generationPaths(s.root, string(workspace), m.Generation)
-		if pathErr != nil {
-			return s.persistFailure(ctx, *m, now, gitengine.MirrorErrorAuthFailed, pathErr)
-		}
-		if _, statErr := os.Stat(paths.Private); statErr != nil {
-			return s.persistFailure(ctx, *m, now, gitengine.MirrorErrorAuthFailed, statErr)
-		}
-		if _, statErr := os.Stat(paths.KnownHosts); statErr != nil {
-			return s.persistFailure(ctx, *m, now, gitengine.MirrorErrorAuthFailed, statErr)
-		}
-		request.PrivateKeyPath, request.KnownHostsPath = paths.Private, paths.KnownHosts
-	}
-	gitResult, gitErr := s.git.RefreshWorkspaceMirror(ctx, workspace, request)
-	if gitErr != nil {
-		return s.persistFailureResult(ctx, *m, now, gitErrorKind(gitErr), gitResult, gitErr)
-	}
-	applyGitResult(m, gitResult)
-	m.Status = gitResult.Status
-	if !m.Status.Valid() || m.Status == domain.MirrorStatusRefreshing || m.Status == domain.MirrorStatusError {
-		m.Status = domain.MirrorStatusReady
-	}
-	m.LastError = ""
-	m.LastSuccessAt = now
-	if err := s.store.SetWorkspaceMirror(ctx, m); err != nil {
-		return s.result(*m, s.publicKey(workspace, *m)), fmt.Errorf("mirror: persist fetched Git state: %w", err)
-	}
-	return s.result(*m, s.publicKey(workspace, *m)), nil
+	return s.refreshLocked(ctx, workspace, *m)
 }
 
 func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, generation int64) (Result, error) {
@@ -553,6 +534,24 @@ func (s *Service) refreshLocked(ctx context.Context, workspace domain.WorkspaceI
 			return s.persistFailure(ctx, current, now, gitengine.MirrorErrorAuthFailed, statErr)
 		}
 		request.PrivateKeyPath, request.KnownHostsPath = paths.Private, paths.KnownHosts
+	}
+	if current.Auth == domain.MirrorAuthGitHub {
+		if s.githubCredentials == nil || current.GitHubMemberID == "" || current.GitHubUserID <= 0 {
+			return s.persistFailure(ctx, current, now, gitengine.MirrorErrorAuthFailed, errors.New("GitHub mirror credential binding is unavailable"))
+		}
+		token, accountID, credentialErr := s.githubCredentials(ctx, current.GitHubMemberID)
+		if credentialErr != nil {
+			// Provider errors must not retain native credential contents, including
+			// through Unwrap or trusted diagnostic formatting.
+			return s.persistFailure(ctx, current, now, gitengine.MirrorErrorAuthFailed, errors.New("GitHub credential unavailable; reconnect the authorizing member"))
+		}
+		if accountID != current.GitHubUserID {
+			return s.persistFailure(ctx, current, now, gitengine.MirrorErrorAuthFailed, errors.New("GitHub account changed; reconfigure the mirror to authorize this account"))
+		}
+		if token == "" || strings.ContainsAny(token, "\x00\r\n\t ") {
+			return s.persistFailure(ctx, current, now, gitengine.MirrorErrorAuthFailed, errors.New("GitHub credential is invalid; reconnect the authorizing member"))
+		}
+		request.GitHubToken = token
 	}
 	gitResult, gitErr := s.git.RefreshWorkspaceMirror(ctx, workspace, request)
 	if gitErr != nil {

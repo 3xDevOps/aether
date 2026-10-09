@@ -105,12 +105,13 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
               workspace={workspace}
               local={onboardingSource === 'local'}
               back={back}
-              onChoose={(w, source) => {
+              onChoose={(w, source, accepted) => {
                 const state = useStore.getState()
                 state.upsertWorkspace(w)
                 state.setOnboardingWorkspace(w.id)
                 state.setActiveWorkspace(w.id)
                 state.setOnboardingSource(source ?? (state.onboardingRepo?.workspace === w.id ? 'local' : 'remote'))
+                if (accepted) setStep(onboardingStepIndex('Agent'))
               }}
               onLocalChange={(local) => useStore.getState().setOnboardingSource(local ? 'local' : 'remote')}
               onNext={() => setStep(onboardingStepIndex('Agent'))}

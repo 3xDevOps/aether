@@ -23,13 +23,14 @@ const (
 // accepts a rewritten base: the observed initial candidate is accepted through
 // workspace.mirror.adopt with its returned generation.
 type WorkspaceImportParams struct {
-	Name        string               `json:"name"`
-	Environment WorkspaceEnvironment `json:"environment"`
-	SourceURL   string               `json:"source_url"`
-	BaseBranch  string               `json:"base_branch"`
-	Origin      string               `json:"origin"`
-	Auth        string               `json:"auth"`
-	KnownHosts  string               `json:"known_hosts,omitempty"`
+	Name            string               `json:"name"`
+	Environment     WorkspaceEnvironment `json:"environment"`
+	SourceURL       string               `json:"source_url"`
+	BaseBranch      string               `json:"base_branch"`
+	Origin          string               `json:"origin"`
+	Auth            string               `json:"auth"`
+	KnownHosts      string               `json:"known_hosts,omitempty"`
+	GitHubAccountID int64                `json:"github_account_id,omitempty"`
 }
 
 // Created remains true if configuration/fetch subsequently fails. Callers

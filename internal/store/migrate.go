@@ -1550,6 +1550,12 @@ ALTER TABLE room_messages ADD COLUMN agent_delivery TEXT NOT NULL DEFAULT '';
 ALTER TABLE missions ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE missions ADD COLUMN change_kinds TEXT NOT NULL DEFAULT '{}';
 `,
+	// v55: non-secret GitHub source authorization binding. Retain it when a
+	// member is removed so refresh fails closed without deleting the base.
+	`
+ALTER TABLE workspace_mirrors ADD COLUMN github_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE workspace_mirrors ADD COLUMN github_user_id INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

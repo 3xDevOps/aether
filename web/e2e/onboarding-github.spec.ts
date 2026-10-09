@@ -1,110 +1,242 @@
-// The Agent step's Connect GitHub screen. The login itself is a device
-// flow only a person can finish, so a stub `gh` in the member's environment
-// home stands in for it; everything the server does around that stub - the
-// signing key, the git identity written next to gh's own credential block,
-// and the key registered on the account - is real.
-
-import { existsSync, readFileSync } from 'node:fs'
+// Real dashboard, gateway, server, Docker exec, native credential setup and
+// Git mirrors. Only the external GitHub provider is deterministic: gh's device
+// interaction, GitHub's HTTP API and the remote repository transport.
+import { execFileSync } from 'node:child_process'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-
-import { githubLoginCommand } from '@/lib/github'
-
-import { expect, test } from './fixtures'
-import { dockerReachable, standardImage } from './harness/server'
+import type { BrowserContext, Locator, Page } from '@playwright/test'
+import type { GitHubOAuthResult, Workspace, WorkspaceMirrorResult } from '../src/lib/types'
+import { expect, test, type Member } from './fixtures'
+import { dockerReachable } from './harness/server'
 import { memberID } from './harness/setup'
 import { OnboardingWizard } from './pages/wizard'
 
-test.skip(!dockerReachable(), 'connecting GitHub needs a reachable Docker daemon')
+const nativeImage = process.env.AETHER_E2E_STANDARD_IMAGE ?? 'aether-standard:ci'
+test.use({ serverOptions: { githubProvider: true, standardImage: nativeImage } })
+test.beforeAll(() => {
+  // These are normal CI coverage, not an opt-in live-credential suite. A broken
+  // provider or unavailable Docker must fail, never silently skip the journeys.
+  expect(dockerReachable(), 'GitHub journeys require the CI Docker daemon').toBe(true)
+  try {
+    execFileSync('docker', ['image', 'inspect', nativeImage], { stdio: 'ignore' })
+  } catch {
+    throw new Error(`Required GitHub journey image ${nativeImage} is missing. Build it from the repository root: docker build -f images/standard/Dockerfile -t ${nativeImage} .`)
+  }
+})
 
-test('connecting GitHub registers a signing key and keeps gh credentials', async ({
-  page,
-  aether,
-}) => {
+async function deviceProvider(context: BrowserContext, home: string) {
+  await context.route('https://github.com/login/device', async (route) => {
+    if (route.request().method() === 'POST') {
+      const code = new URLSearchParams(route.request().postData() ?? '').get('user_code')
+      if (code !== 'ABCD-1234') {
+        await route.fulfill({ status: 400, body: 'Invalid device code' })
+        return
+      }
+      writeFileSync(path.join(home, 'gh-approved'), '')
+      await route.fulfill({ contentType: 'text/html', body: '<h1>Authorization complete</h1>' })
+      return
+    }
+    await route.fulfill({ contentType: 'text/html', body: '<h1>GitHub device authorization</h1><form method="post"><label>Device code<input name="user_code"></label><button>Authorize device</button></form>' })
+  })
+}
+
+async function approveDevice(page: Page, connection: Locator) {
+  await expect(connection).toContainText('ABCD-1234', { timeout: 60_000 })
+  await expect(connection.getByRole('link', { name: 'Open GitHub', exact: true })).toHaveAttribute('href', 'https://github.com/login/device')
+  const popupPromise = page.context().waitForEvent('page')
+  await connection.getByRole('button', { name: 'Copy code and open GitHub' }).click()
+  const popup = await popupPromise
+  await popup.getByLabel('Device code').fill('ABCD-1234')
+  await popup.getByRole('button', { name: 'Authorize device' }).click()
+  await expect(popup.getByRole('heading', { name: 'Authorization complete' })).toBeVisible()
+  await popup.close()
+  await expect(connection).toContainText('Connected as octocat', { timeout: 60_000 })
+}
+
+async function screenshot(page: Page, name: string) {
+  const file = test.info().outputPath(`${name}.png`)
+  await page.screenshot({ path: file, fullPage: true })
+  await test.info().attach(name, { path: file, contentType: 'image/png' })
+}
+
+async function workspaces(member: Member) {
+  return (await member.api.rpc<{ workspaces: Workspace[] }>('workspace.list')).workspaces
+}
+
+async function settings(page: Page, member: Member) {
+  const url = new URL(member.url)
+  url.searchParams.set('page', 'settings')
+  await page.goto(url.toString())
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
+}
+
+async function review(page: Page, member: Member, fullName: string, expectedCount: number, branch = 'main') {
+  const dialog = page.getByRole('dialog', { name: 'Add GitHub repository' })
+  await dialog.getByLabel('Find a repository').fill(fullName)
+  await dialog.getByRole('button', { name: `${fullName} · Private`, exact: true }).click()
+  // Selecting only edits local form state: no workspace exists until review.
+  expect(await workspaces(member)).toHaveLength(expectedCount - 1)
+  await dialog.getByRole('button', { name: 'Review repository', exact: true }).click()
+  const revision = dialog.getByRole('region', { name: 'Review repository revision' })
+  await expect(revision).toBeVisible({ timeout: 60_000 })
+  const all = await workspaces(member)
+  expect(all).toHaveLength(expectedCount)
+  const workspace = all.find((entry) => entry.name === fullName.split('/')[1])!
+  expect(workspace).toBeDefined()
+  expect(workspace.base_branch).toBe(branch)
+  return { dialog, revision, workspace }
+}
+
+async function pending(member: Member, workspace: Workspace) {
+  const mirror = await member.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: workspace.id })
+  expect(mirror.auth).toBe('github')
+  expect(mirror.status).toBe('pending')
+  expect(mirror.observed_commit).toMatch(/^[a-f0-9]{40}$/)
+  expect(mirror.accepted_commit ?? '').toBe('')
+  return mirror
+}
+
+test('administrator onboards a private read-only repository, then adds another in Settings without logging in again', async ({ page, context, aether }) => {
   const alice = await aether.member('alice')
-  const repo = await aether.seedRepo('project')
-
   const wizard = await OnboardingWizard.open(page, alice.url)
   await wizard.connect.link(aether.server.addr, { name: 'Alice' })
-  // The identity is what the connect writes into the home's .gitconfig, so
-  // this scenario sets one rather than leaving it to the server's fallback.
   await wizard.connect.identity.save('Ada Lovelace', 'ada@example.invalid')
   await wizard.connect.continue().click()
-  await wizard.repository.createFromClone('project')
-  await wizard.repository.addRemote(repo)
-  await wizard.repository.continue().click()
-  await wizard.expectStep('Agent')
-
   const id = await memberID(alice)
   const home = aether.server.memberHome(id)
-
-  // This environment has no gh, which is the state every environment from
-  // before the standard image shipped one is in. The screen probes the
-  // running container and names both halves of the remedy rather than
-  // showing a login that container cannot run. Opening the dock starts a
-  // real container, so the first answer is what to wait on: the button is
-  // clickable long before the container exists.
-  const github = wizard.agent.github
-  await wizard.agent.connectGitHub()
-  await expect(github.section).toContainText(
-    'There is no gh in your Environment',
-    { timeout: 3 * 60 * 1000 },
-  )
-
-  await expect(github.commands).toContainText([
-    `docker pull ${standardImage}`,
-    'aether terminal stop',
-  ])
-  await expect(github.section).not.toContainText(githubLoginCommand)
-  await wizard.back().click()
-  await wizard.expectStep('Agent')
-
-  // The container is the same one; the stub reaches it through the bind
-  // mounted home, so reopening the screen is enough to probe again. The
-  // server bounds the probe at twenty seconds, well inside this.
   aether.installStubGh(id)
-  await wizard.agent.connectGitHub()
-  // The state, not the command block: a probe that threw would put the
-  // same block back, so only this sentence proves the check passed.
-  await expect(github.section).toContainText(
-    'The login command is ready in your Environment:',
-    { timeout: 30_000 },
-  )
-  await expect(github.commands).toContainText([githubLoginCommand])
-
-  await github.confirmLoggedIn().click()
-  await expect(github.section).toContainText('Connected to GitHub as octocat', {
-    timeout: 60_000,
+  await deviceProvider(context, home)
+  const mutations: { method: string; params: Record<string, unknown> }[] = []
+  page.on('request', (request) => {
+    const method = request.url().split('/api/v1/')[1]
+    if (method === 'workspace.import' || method === 'workspace.mirror.adopt') mutations.push({ method, params: request.postDataJSON() })
   })
-  await expect(github.section).toContainText(/Signing key SHA256:/)
 
-  // The key stays on the server: the private half in the member home, the
-  // public half registered on the account through gh.
-  expect(existsSync(path.join(home, '.ssh', 'aether_signing'))).toBe(true)
-  const publicKey = readFileSync(path.join(home, '.ssh', 'aether_signing.pub'), 'utf8')
-  expect(readFileSync(path.join(home, 'gh-registered-key'), 'utf8')).toBe(publicKey)
+  await wizard.repository.button('Add GitHub repository').click()
+  const dialog = page.getByRole('dialog', { name: 'Add GitHub repository' })
+  const connection = dialog.getByRole('region', { name: 'GitHub connection' })
+  await connection.getByRole('button', { name: 'Connect GitHub', exact: true }).click()
+  await expect(connection).toContainText('ABCD-1234', { timeout: 60_000 })
+  expect(existsSync(path.join(home, '.config/gh/hosts.yml'))).toBe(false)
+  await expect(dialog.getByLabel('Find a repository')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Review repository', exact: true })).toBeDisabled()
+  await screenshot(page, 'github-onboarding-device-code')
+  await approveDevice(page, connection)
 
-  // git in that home now has both halves: gh's credential helper for the
-  // push, and the signing settings for the commit.
-  const gitconfig = readFileSync(path.join(home, '.gitconfig'), 'utf8')
-  expect(gitconfig).toContain('helper = !gh auth git-credential')
-  expect(gitconfig).toContain('format = ssh')
-  expect(gitconfig).toContain('signingkey = ~/.ssh/aether_signing')
-  expect(gitconfig).toContain('gpgsign = true')
-  const calls = readFileSync(path.join(home, 'gh-calls.log'), 'utf8')
-  // The dock typed the login into the container, which is the half of
-  // this flow no server call can stand in for.
-  expect(calls).toContain(
-    'auth login --hostname github.com --git-protocol https --web --scopes admin:ssh_signing_key',
-  )
-  expect(calls).toContain('auth setup-git --hostname github.com')
-  // The server reads the account's keys back after registering, so the
-  // fingerprint it shows is the one GitHub holds.
-  expect(calls).toContain('ssh-key list')
-
-  // Back closes the sub-screen without leaving the step, and the step now
-  // says who it connected as.
-  await wizard.back().click()
+  const first = await review(page, alice, 'octocat/first', 1)
+  expect(first.workspace.origin ?? '').toBe('')
+  const candidate = await pending(alice, first.workspace)
+  const upstream = path.join(path.dirname(aether.server.dataDir), 'repos/first')
+  expect(candidate.observed_commit).toBe(execFileSync('git', ['-C', upstream, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim())
+  await expect(first.revision).toContainText(candidate.observed_commit!)
+  await screenshot(page, 'github-onboarding-review-revision')
+  await first.dialog.getByRole('button', { name: 'Use repository', exact: true }).click()
   await wizard.expectStep('Agent')
-  await expect(github.section).toContainText('Connected in this session as octocat')
-  await expect(github.section.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'GitHub connection' })).toContainText('Connected as octocat', { timeout: 60_000 })
+  await expect(page.getByRole('button', { name: "I've logged in", exact: true })).toHaveCount(0)
+  const accepted = await alice.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: first.workspace.id })
+  expect(accepted.status).toBe('ready')
+  expect(accepted.accepted_commit).toBe(candidate.observed_commit)
+  expect(mutations.filter((entry) => entry.method === 'workspace.mirror.adopt')[0].params).toMatchObject({ workspace_id: first.workspace.id, generation: candidate.generation })
+  await screenshot(page, 'github-onboarding-ready')
+
+  // The native signing setup and credential helper are real; this is not a
+  // canned successful connect response from a mocked browser request.
+  expect(existsSync(path.join(home, '.ssh/aether_signing'))).toBe(true)
+  expect(readFileSync(path.join(home, 'gh-registered-key'), 'utf8')).toBe(readFileSync(path.join(home, '.ssh/aether_signing.pub'), 'utf8'))
+  const config = readFileSync(path.join(home, '.gitconfig'), 'utf8')
+  expect(config).toContain('helper = !gh auth git-credential')
+  expect(config).toContain('signingkey = ~/.ssh/aether_signing')
+  expect(config).toContain('gpgsign = true')
+
+  await settings(page, alice)
+  await expect(page.getByRole('region', { name: 'GitHub connection' })).toContainText('Connected as octocat', { timeout: 60_000 })
+  await page.getByRole('button', { name: 'Add repository', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Add GitHub repository' }).getByRole('button', { name: 'Load more', exact: true }).click()
+  const second = await review(page, alice, 'team/second', 2, 'trunk')
+  expect(second.workspace.origin).toBe('https://github.com/team/second.git')
+  const secondCandidate = await pending(alice, second.workspace)
+  expect(secondCandidate.branch).toBe('trunk')
+  const secondUpstream = path.join(path.dirname(aether.server.dataDir), 'repos/second')
+  expect(secondCandidate.observed_commit).toBe(execFileSync('git', ['-C', secondUpstream, 'rev-parse', 'trunk'], { encoding: 'utf8' }).trim())
+  await second.dialog.getByRole('button', { name: 'Use repository', exact: true }).click()
+  await expect(second.dialog).toHaveCount(0)
+  const secondAccepted = await alice.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: second.workspace.id })
+  expect(secondAccepted.status).toBe('ready')
+  expect(secondAccepted.branch).toBe('trunk')
+  expect(secondAccepted.accepted_commit).toBe(secondCandidate.observed_commit)
+  expect(new URL(page.url()).searchParams.get('page')).toBe('workspace')
+  expect(new URL(page.url()).searchParams.get('id')).toBe(second.workspace.id)
+  expect(mutations.filter((entry) => entry.method === 'workspace.import')).toHaveLength(2)
+  const calls = readFileSync(path.join(home, 'gh-calls.log'), 'utf8').split('\n')
+  expect(calls.filter((call) => call.startsWith('auth login '))).toHaveLength(1)
+  await screenshot(page, 'github-settings-additional-repository-ready')
+})
+
+test('cancelled and rejected device authorization recover, and a failed fetch retries the retained workspace', async ({ page, context, aether }) => {
+  const alice = await aether.member('alice')
+  await alice.api.local('link.apply', { addr: aether.server.addr, name: 'Alice' })
+  const id = await memberID(alice)
+  const home = aether.server.memberHome(id)
+  aether.installStubGh(id)
+  await deviceProvider(context, home)
+  await settings(page, alice)
+  const connection = page.getByRole('region', { name: 'GitHub connection' })
+  await connection.getByRole('button', { name: 'Connect GitHub', exact: true }).click()
+  await expect(connection).toContainText('ABCD-1234', { timeout: 60_000 })
+  const original = await alice.api.rpc<GitHubOAuthResult>('github.oauth.status')
+  await connection.getByRole('button', { name: 'Cancel connection', exact: true }).click()
+  await expect(connection).toContainText('GitHub connection cancelled.')
+  expect(existsSync(path.join(home, '.config/gh/hosts.yml'))).toBe(false)
+  await connection.getByRole('button', { name: 'Connect GitHub', exact: true }).click()
+  await expect(connection).toContainText('ABCD-1234', { timeout: 60_000 })
+  const restarted = await alice.api.rpc<GitHubOAuthResult>('github.oauth.status')
+  expect(restarted.session_id).not.toBe(original.session_id)
+  writeFileSync(path.join(home, 'gh-denied'), '')
+  await expect(connection).toContainText('GitHub connection failed.', { timeout: 60_000 })
+  await expect(connection.getByRole('alert')).toContainText('GitHub device authorization denied')
+  expect(existsSync(path.join(home, '.config/gh/hosts.yml'))).toBe(false)
+  rmSync(path.join(home, 'gh-denied'))
+  await connection.getByRole('button', { name: 'Connect GitHub', exact: true }).click()
+  await approveDevice(page, connection)
+  await page.getByRole('button', { name: 'Add repository', exact: true }).click()
+  const failFetch = path.join(path.dirname(aether.server.dataDir), 'fail-fetch')
+  writeFileSync(failFetch, '')
+  const retained = await review(page, alice, 'octocat/first', 1)
+  await expect(retained.revision).toContainText('No revision fetched yet')
+  await expect(retained.dialog.getByRole('button', { name: 'Use repository', exact: true })).toBeDisabled()
+  await expect(retained.dialog.getByRole('button', { name: 'Review repository', exact: true })).toHaveCount(0)
+  rmSync(failFetch)
+  await retained.dialog.getByRole('button', { name: 'Retry fetch', exact: true }).click()
+  await expect(retained.dialog.getByRole('button', { name: 'Use repository', exact: true })).toBeEnabled({ timeout: 60_000 })
+  expect((await workspaces(alice)).map((entry) => entry.id)).toEqual([retained.workspace.id])
+  const candidate = await pending(alice, retained.workspace)
+  await expect(retained.revision).toContainText(candidate.observed_commit!)
+  await retained.dialog.getByRole('button', { name: 'Use repository', exact: true }).click()
+  await expect(retained.dialog).toHaveCount(0)
+  const ready = await alice.api.rpc<WorkspaceMirrorResult>('workspace.mirror.status', { workspace_id: retained.workspace.id })
+  expect(ready.accepted_commit).toBe(candidate.observed_commit)
+  await screenshot(page, 'github-cancellation-and-fetch-recovered')
+})
+
+test('collaborators have no repository connection controls and forged administrator RPCs are denied', async ({ page, aether }) => {
+  const admin = await aether.member('admin')
+  await admin.api.local('link.apply', { addr: aether.server.addr, name: 'Admin' })
+  const bob = await aether.member('bob')
+  const wizard = await OnboardingWizard.open(page, bob.url)
+  await wizard.connect.link(aether.server.addr, { invite: await aether.invite(admin), name: 'Bob' })
+  await expect(wizard.connect.section).toContainText('(collaborator)')
+  await wizard.connect.continue().click()
+  await wizard.expectStep('Repository')
+  await expect(wizard.repository.button('Add GitHub repository')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'GitHub connection' })).toHaveCount(0)
+  await settings(page, bob)
+  await expect(page.getByRole('region', { name: 'GitHub connection' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Add repository', exact: true })).toHaveCount(0)
+  for (const method of ['github.oauth.start', 'github.oauth.status', 'github.oauth.cancel', 'github.repositories.list']) {
+    await expect(bob.api.rpc(method, { session_id: 'forged' })).rejects.toThrow(/admin|permission|forbidden/i)
+  }
+  await expect(bob.api.rpc('workspace.import', { name: 'forged', source_url: 'https://github.com/octocat/first.git', branch: 'main', auth: 'github', github_account_id: 42 })).rejects.toThrow(/admin|permission|forbidden/i)
+  expect(await workspaces(admin)).toHaveLength(0)
+  await screenshot(page, 'github-collaborator-settings')
 })

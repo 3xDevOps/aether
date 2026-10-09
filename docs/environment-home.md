@@ -154,22 +154,41 @@ launch it runs the agent's own update command against this home, at most every
 
 ## Connect GitHub
 
-Connect GitHub once and every run you launch, including on another member's
-shared agent account, can push branches to the workspace's upstream
-repository, open pull requests, and sign its commits as you. Sharing your own
-agent account never gives another member's runs your GitHub login.
-Because the home is shared read-write, active runs can see the files too after
-their agent reloads. Both halves happen in the member home, so no run needs
-its own credentials.
+Connect GitHub once so your runs can use your native GitHub credentials to
+push branches to a writable checkout Origin, open pull requests, and sign
+commits. This also applies when you use another member's shared agent
+account; sharing your agent account does not give their runs your GitHub login.
+GitHub connection is separate from agent vendor login and edge/server sign-in.
+See [credentials and signing](security.md#github-credentials-and-signing-keys)
+for the home-sharing boundary and GitHub's requirements for a **Verified**
+signature; registering a signing key alone does not guarantee that label.
+
+For admins, use **Settings → GitHub → Connect GitHub**, or **Onboarding →
+Repository → From GitHub → Add GitHub repository**. Choose **Copy code and
+open GitHub**, enter the code and approve on GitHub, then return to Aether.
+Use the visible **Open GitHub** link and copy the code manually if needed.
+Completion automatically configures native Git and signing; no terminal,
+deploy key, or **I've logged in** confirmation is needed. **Check connection**
+is read-only and does not perform that setup.
+
+To import a repository, follow the [browser walkthrough](quickstart.md#github-repository):
+choose it, **Review repository**, then **Use repository** to accept the fetched
+revision. Later **Settings → GitHub → Add repository** reuses the connection.
+Readable private repositories need no repository-admin permission, subject to
+organization/SSO policy. For shared source access and its dependence on the
+authorizing account, see [workspace source mirrors](security.md#workspace-source-mirrors).
 
 The login runs in your environment, so that container needs
 `gh` 2.81.0 or newer - the release that added `gh auth status --json`,
-which is how the server reads your login back. The standard image ships a
-current one. An environment saved, or a standard image pulled, before the
-image started shipping gh has none; see [No gh in the
-environment](#no-gh-in-the-environment) below.
+which is how the server reads your login back. The server also needs its
+normal Docker runtime, Git, and host `ssh-keygen` for signing setup. The
+standard image ships a current gh. Older saved environments may not; see
+[No gh in the environment](#no-gh-in-the-environment) below.
 
-Open your [environment](terminal.md) and log in there:
+Collaborators can use **Onboarding → Agent → GitHub → Connect GitHub**:
+the embedded terminal supplies the login command, and **I've logged in**
+finishes native setup. For the manual CLI alternative, open your
+[environment](terminal.md) and log in there:
 
 ```sh
 aether terminal
@@ -200,7 +219,8 @@ logged in to github.com as octocat
 signing key SHA256:2E3v9x... registered on GitHub
 ```
 
-That one command does five things, all on the server:
+Admin OAuth completion and the explicit `aether github connect` command both
+perform this setup on the server (reading connection status does not):
 
 1. Checks `gh auth status` for `github.com` inside your terminal container
    to confirm the login took.
@@ -252,9 +272,10 @@ server update - the container is the only thing left behind, and the
 refusal asks for nothing but `aether terminal stop` and a reopen. A gh that
 is on `PATH` but exits non-zero is refused the same way, as `gh in the
 environment terminal would not run`, ending with what it printed. The
-dashboard's GitHub step checks all of this before it prints the login
+collaborator dashboard flow checks all of this before it prints the login
 command, so it shows the remedy instead of a login that container cannot
-run.
+run. The admin browser connection also reports prerequisite failures before
+asking you to authorize.
 
 Without a terminal login:
 

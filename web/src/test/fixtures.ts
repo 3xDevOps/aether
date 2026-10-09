@@ -613,6 +613,10 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       signing_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI aether mbr_1',
       fingerprint: 'SHA256:9wPnHRtG0DPQNo8VYbC2mSczRRRUYY7NoLgTHTAlYFA',
     })),
+    githubOAuthStart: vi.fn(async () => ({ state: 'pending' as const, session_id: 'oauth_test', user_code: 'ABCD-EFGH', verification_url: 'https://github.com/login/device' })),
+    githubOAuthStatus: vi.fn(async () => ({ state: 'disconnected' as const })),
+    githubOAuthCancel: vi.fn(async () => ({ state: 'cancelled' as const })),
+    githubRepositories: vi.fn(async () => ({ account: { id: 1, login: 'octocat' }, repositories: [] })),
     githubProbe: vi.fn(async () => ({
       status: 'ok' as const,
       version: '2.100.0',

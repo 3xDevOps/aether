@@ -29,7 +29,7 @@ export function RepositoryStep({
   caps: Capability
   workspace: Workspace | null
   local: boolean
-  onChoose: (workspace: Workspace, source?: 'local' | 'remote') => void
+  onChoose: (workspace: Workspace, source?: 'local' | 'remote', accepted?: boolean) => void
   onLocalChange: (local: boolean) => void
   back?: ReactNode
   onNext: () => void
@@ -59,9 +59,9 @@ export function RepositoryStep({
   const loading = useDelayed(workspaces === null && error === null)
   const canAdd = isAdmin && (caps.hasMethod('workspace.add') || caps.hasMethod('workspace.import'))
   const askAdmin = workspaces?.length === 0 && !canAdd
-  const choose = (next: Workspace, source?: 'local' | 'remote') => {
+  const choose = (next: Workspace, source?: 'local' | 'remote', accepted?: boolean) => {
     setChoosing(false)
-    onChoose(next, source)
+    onChoose(next, source, accepted)
   }
 
   const identity = hosted && caps.hasMethod('member.git') && (

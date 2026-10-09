@@ -9,11 +9,12 @@ type WorkspaceMirrorParams struct {
 
 // WorkspaceMirrorConfigureParams configures a workspace's upstream mirror.
 type WorkspaceMirrorConfigureParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	SourceURL   string `json:"source_url"`
-	Branch      string `json:"branch"`
-	Auth        string `json:"auth"`
-	KnownHosts  string `json:"known_hosts,omitempty"`
+	WorkspaceID     string `json:"workspace_id"`
+	SourceURL       string `json:"source_url"`
+	Branch          string `json:"branch"`
+	Auth            string `json:"auth"`
+	KnownHosts      string `json:"known_hosts,omitempty"`
+	GitHubAccountID int64  `json:"github_account_id,omitempty"`
 }
 
 // WorkspaceMirrorAdoptParams promotes the candidate observed for a specific
@@ -33,6 +34,8 @@ type WorkspaceMirrorResult struct {
 	Branch         string  `json:"branch,omitempty"`
 	Auth           string  `json:"auth,omitempty"`
 	Generation     int64   `json:"generation,omitempty"`
+	GitHubMemberID string  `json:"github_member_id,omitempty"`
+	GitHubUserID   int64   `json:"github_user_id,omitempty"`
 	Status         string  `json:"status,omitempty"`
 	ObservedCommit string  `json:"observed_commit,omitempty"`
 	AcceptedCommit string  `json:"accepted_commit,omitempty"`
@@ -58,6 +61,8 @@ func WorkspaceMirrorResultFromDomain(m domain.WorkspaceMirror, enabled bool, pub
 		Branch:         m.Branch,
 		Auth:           string(m.Auth),
 		Generation:     m.Generation,
+		GitHubMemberID: string(m.GitHubMemberID),
+		GitHubUserID:   m.GitHubUserID,
 		Status:         string(m.Status),
 		ObservedCommit: m.ObservedCommit,
 		AcceptedCommit: m.AcceptedCommit,

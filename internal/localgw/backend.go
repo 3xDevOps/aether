@@ -183,6 +183,9 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 		return nil, perr
 	}
 	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
+		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
+		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
+		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||
 		strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
 		// A mutation may have committed before the response was lost;
 		// do not replay it.

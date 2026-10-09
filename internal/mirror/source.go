@@ -53,6 +53,11 @@ func CanonicalizeSource(raw string, auth domain.MirrorAuth, knownHosts string) (
 
 	host := strings.ToLower(u.Hostname())
 	switch auth {
+	case domain.MirrorAuthGitHub:
+		if !domain.ValidGitHubMirrorSourceURL(raw) {
+			return Source{}, errors.New("GitHub mirror source must be canonical https://github.com/owner/repository.git")
+		}
+		return Source{URL: raw, Identity: strings.TrimSuffix(strings.TrimPrefix(raw, "https://"), ".git"), GitHub: true}, nil
 	case domain.MirrorAuthPublic:
 		if u.Scheme != "https" {
 			return Source{}, errors.New("public mirror source must be credential-free HTTPS")

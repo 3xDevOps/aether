@@ -3,13 +3,19 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,6 +23,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -109,6 +116,39 @@ esac
 echo "stub gh: unsupported command: $*" >&2
 exit 1
 `
+
+// OAuth status must survive the normal cost service's run-controller decorator.
+// No Environment or provider call is needed to read a fresh member's state.
+func TestIntegrationGitHubOAuthDisconnectedWithBudgetService(t *testing.T) {
+	ctx := t.Context()
+	srv, err := New(ctx, Config{
+		DataDir: t.TempDir(), Addr: "127.0.0.1:0", Runtime: newE2ERuntime(),
+	})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	_, signer := writeClientKey(t)
+	member := &domain.Member{
+		DisplayName: "GitHub admin",
+		PublicKey:   string(ssh.MarshalAuthorizedKey(signer.PublicKey())),
+		Role:        domain.RoleAdmin,
+	}
+	if err := srv.Store().CreateMember(ctx, member); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	raw, perr := srv.ssh.Local(member.ID).Call(ctx, protocol.MethodGitHubOAuthStatus, json.RawMessage(`{}`))
+	if perr != nil {
+		t.Fatalf("github.oauth.status through assembled server: %v", perr)
+	}
+	var status protocol.GitHubOAuthResult
+	if err := json.Unmarshal(raw, &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.State != "disconnected" || status.SessionID != "" || status.Connection != nil {
+		t.Fatalf("fresh member OAuth status = %+v", status)
+	}
+}
 
 // TestIntegrationGitHubConnect drives the GitHub connection end to end
 // against real Docker: github.connect finishes the login the member began
@@ -206,6 +246,16 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 
 	client := dialSSH(t, addr, signer)
 	ctrl := openControl(t, client)
+
+	// Exercise the normally assembled OAuth service over authenticated SSH,
+	// before opening an Environment or installing any provider fixture.
+	var oauthStatus protocol.GitHubOAuthResult
+	if err = ctrl.Call(protocol.MethodGitHubOAuthStatus, protocol.GitHubOAuthStatusParams{}, &oauthStatus); err != nil {
+		t.Fatalf("github.oauth.status: %v", err)
+	}
+	if oauthStatus.State != "disconnected" {
+		t.Fatalf("fresh member OAuth status = %+v", oauthStatus)
+	}
 
 	// The identity the connection writes into the home, and the origin
 	// every new run checkout is pointed at - both set the way a member
@@ -486,4 +536,132 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestGitHubBrowserProviderHarness is the subprocess entrypoint used by the
+// dashboard journeys. It replaces only the external GitHub HTTP/Git providers;
+// server assembly, native Docker exec, credentials, mirrors and adoption are
+// the production implementations. No shipped binary reads these variables.
+func TestGitHubBrowserProviderHarness(t *testing.T) {
+	root := os.Getenv("AETHER_E2E_GITHUB_ROOT")
+	if root == "" {
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = githubBrowserTransport{fallback: originalTransport}
+	defer func() { http.DefaultTransport = originalTransport }()
+
+	originalBuilders := append([]serviceBuilder(nil), serviceBuilders...)
+	defer func() { serviceBuilders = originalBuilders }()
+	found := false
+	for i := range serviceBuilders {
+		if serviceBuilders[i].name != "mirror" {
+			continue
+		}
+		found = true
+		build := serviceBuilders[i].build
+		serviceBuilders[i].build = func(d Deps) (Service, error) {
+			engine, err := gitengine.New(gitengine.Config{
+				ReposDir:     filepath.Join(d.DataDir, "repos"),
+				CheckoutsDir: filepath.Join(d.DataDir, "checkouts"),
+				MirrorFetch: func(ctx context.Context, repo string, req gitengine.MirrorRequest, incoming string) error {
+					var name string
+					switch req.SourceURL {
+					case "https://github.com/octocat/first.git":
+						name = "first"
+					case "https://github.com/team/second.git":
+						name = "second"
+					default:
+						return fmt.Errorf("unexpected GitHub fixture source %q", req.SourceURL)
+					}
+					if _, err := os.Stat(filepath.Join(root, "fail-fetch")); err == nil {
+						return errors.New("GitHub fixture fetch temporarily unavailable")
+					}
+					cmd := exec.CommandContext(ctx, "git", "-C", repo, "fetch", "--no-tags",
+						filepath.Join(root, "repos", name), "+refs/heads/"+req.Branch+":"+incoming)
+					cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
+					if out, err := cmd.CombinedOutput(); err != nil {
+						return fmt.Errorf("fixture git fetch: %w: %s", err, out)
+					}
+					return nil
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			t.Cleanup(func() { _ = engine.Close() })
+			d.Git = engine
+			return build(d)
+		}
+	}
+	if !found {
+		t.Fatal("production mirror builder missing")
+	}
+	srv, err := New(ctx, Config{
+		DataDir:       filepath.Join(root, "data"),
+		Addr:          os.Getenv("AETHER_E2E_GITHUB_ADDR"),
+		StandardImage: os.Getenv("AETHER_E2E_GITHUB_IMAGE"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	if err := srv.Run(ctx); err != nil && ctx.Err() == nil {
+		t.Fatal(err)
+	}
+}
+
+type githubBrowserTransport struct {
+	fallback http.RoundTripper
+}
+
+func (p githubBrowserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host != "api.github.com" {
+		return p.fallback.RoundTrip(req)
+	}
+	status := http.StatusOK
+	header := http.Header{"Content-Type": {"application/json"}}
+	var body any
+	if req.Method != http.MethodGet || req.Header.Get("Authorization") != "Bearer github-browser-fixture" {
+		status, body = http.StatusUnauthorized, map[string]any{"message": "Bad credentials"}
+	} else {
+		repositories := []map[string]any{
+			{"id": 101, "name": "first", "full_name": "octocat/first", "private": true,
+				"default_branch": "main", "clone_url": "https://github.com/octocat/first.git",
+				"permissions": map[string]bool{"pull": true, "push": false, "admin": false}},
+			{"id": 102, "name": "second", "full_name": "team/second", "private": true,
+				"default_branch": "trunk", "clone_url": "https://github.com/team/second.git",
+				"permissions": map[string]bool{"pull": true, "push": true, "admin": false}},
+		}
+		switch req.URL.Path {
+		case "/user":
+			body = map[string]any{"id": 42, "login": "octocat"}
+		case "/user/repos":
+			switch req.URL.Query().Get("page") {
+			case "1":
+				body = repositories[:1]
+				header.Set("Link", `<https://api.github.com/user/repos?per_page=100&page=2>; rel="next"`)
+			case "2":
+				body = repositories[1:]
+			default:
+				status, body = http.StatusBadRequest, map[string]any{"message": "Unexpected fixture page"}
+			}
+		case "/repos/octocat/first":
+			body = repositories[0]
+		case "/repos/team/second":
+			body = repositories[1]
+		default:
+			status, body = http.StatusNotFound, map[string]any{"message": "Unknown fixture endpoint"}
+		}
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: status, Header: header,
+		Body: io.NopCloser(bytes.NewReader(data)), Request: req,
+	}, nil
 }

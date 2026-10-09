@@ -349,11 +349,19 @@ aether workspace add myproject [--base <branch>]
 ```
 
 In the dashboard, open **Manage workspaces** from the workspace selector or
-the command palette and press **Add workspace**: choose **Import repository** for public HTTPS or a private read-only deploy
-key, or **Create from local clone** in the desktop app or `aether gui`.
-Onboarding offers the same choices. A hosted gateway can import remotely but
-cannot browse a clone on your computer; its local-clone choice shows the
-desktop and CLI handoff.
+the command palette and press **Add workspace**. Choose **GitHub** to connect
+your account, select a repository you can read, and review and explicitly
+accept its initial revision. Private collaborator repositories do not need
+repository-admin access or a deploy key. The picker uses the repository's
+default branch; advanced choices let you change the branch, workspace name,
+and independent publishing destination.
+
+Onboarding and the administrator's **Settings** GitHub section use the same
+connection and repository flow, so an additional repository can reuse your
+login. Manual Git URL import (public HTTPS or a private deploy key) and
+**Create from local clone** remain alternatives. Local-clone selection needs
+the desktop app or `aether gui`; a hosted gateway shows the desktop and CLI
+handoff instead of browsing your computer.
 
 For a local clone, select its existing base branch when creating the workspace,
 then link its absolute path and use **Push now**. For a remote import, creation
@@ -414,7 +422,10 @@ Four settings belong to the workspace rather than to any run in it:
   HTTPS only and nothing in the member home authenticates SSH, so the HTTPS
   form is the one a run can push to. Every other host is recorded verbatim.
   Its native Git credentials and upstream write permission remain the member's
-  responsibility; a read-only source deploy key never grants publishing access.
+  responsibility. A source mirror never grants publishing access: neither a
+  read-only deploy key nor another member's GitHub source binding supplies
+  your run's credentials. The GitHub picker shows a proposed writable
+  destination before import; review it, change it, or leave it unset.
 
   The remote is set when a run's checkout is created, so a change reaches new
   runs only; runs already going keep the URL they were given. With no checkout
@@ -431,10 +442,36 @@ Four settings belong to the workspace rather than to any run in it:
   ```
 
   `--branch` defaults to the workspace base branch. Public mode fetches
-  credential-free HTTPS. For a private GitHub repository use
-  `--auth deploy-key` with its HTTPS URL; Aether prints a public key and the
-  exact `https://github.com/<owner>/<repo>/settings/keys/new` URL. Add the key
-  as a read-only repository deploy key, then verify it. For generic SSH, use
+  credential-free HTTPS. For a private GitHub source, connect your own
+  GitHub account on this server, then use:
+
+  ```sh
+  aether workspace mirror configure --workspace myproject \
+    --source https://github.com/acme/myproject.git --branch main --auth github
+  ```
+
+  GitHub mode requires the canonical HTTPS URL ending in `.git`. The optional
+  `--github-account-id <numeric-id>` asserts the expected account; a mismatch
+  is refused rather than binding a different account. Without it, configuration
+  binds the current caller's verified native GitHub account. It cannot name
+  another member's credential owner. Read access is enough; upstream push or
+  repository-admin permission is not required.
+
+  The server reads your native member-home gh login for each refresh and
+  stores only your member/numeric-account binding, not the token. Native gh
+  scopes can be broad: fetch-only operation is not a read-only token scope.
+  Importing deliberately shares the source code with the workspace, not your
+  GitHub token. If the token expires, is revoked or logged out, your member
+  is removed, or the active GitHub account changes, refresh fails without
+  moving the accepted base. Reconnect the same account as the authorizing
+  member, or explicitly configure the mirror again as the admin/account that
+  should own the binding. See
+  [security.md](security.md#workspace-source-mirrors).
+
+  Alternatively, use `--auth deploy-key` with the GitHub HTTPS URL. Aether
+  prints a public key and the exact
+  `https://github.com/<owner>/<repo>/settings/keys/new` URL. Add the key as a
+  read-only repository deploy key, then verify it. For generic SSH, use
   `--auth deploy-key` with an `ssh://` source and
   `--known-hosts-file <file>` containing a host key verified with the host
   administrator, not a blindly trusted scan. The private key is never printed
@@ -456,8 +493,9 @@ the source mirror and use **Verify** or **Refresh**; from the CLI:
   candidate without moving the accepted base; an administrator must review
   and explicitly **Adopt candidate** (`aether workspace mirror adopt
   --workspace myproject --generation <n> --yes`). **Disable** requires
-  confirmation and returns the workspace to local-only; remove any GitHub
-  deploy key separately because disabling cannot revoke it remotely.
+  confirmation and returns the workspace to local-only. It does not log out
+  or revoke a native GitHub login. Remove any remote deploy key separately,
+  because disabling cannot revoke it at the provider either.
 - **The message-others policy** decides whether collaborators may
   message, control and kill each other's runs. It is permissive by default;
   an admin restricts it to owners and admins:

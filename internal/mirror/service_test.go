@@ -954,3 +954,31 @@ func mustMode(t *testing.T, path string) os.FileMode {
 	}
 	return info.Mode().Perm()
 }
+
+func TestGitHubBindingValidationDoesNotMutate(t *testing.T) {
+	st := newMirrorTestStore()
+	git := &mirrorTestGit{}
+	svc := newMirrorTestService(t, st, git)
+	old, err := svc.Configure(t.Context(), "w", ConfigureRequest{SourceURL: "https://example.test/repo", Branch: "main", Auth: domain.MirrorAuthPublic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.githubCredentials = func(context.Context, domain.MemberID) (string, int64, error) {
+		t.Fatal("configure must not read a credential")
+		return "", 0, nil
+	}
+	for _, binding := range []ConfigureRequest{
+		{GitHubUserID: 42},
+		{GitHubMemberID: "admin"},
+		{GitHubMemberID: "admin", GitHubUserID: -1},
+	} {
+		binding.SourceURL, binding.Branch, binding.Auth = "https://github.com/acme/private.git", "main", domain.MirrorAuthGitHub
+		if _, err := svc.Configure(t.Context(), "w", binding); err == nil {
+			t.Fatal("accepted missing GitHub binding")
+		}
+		got, err := st.GetWorkspaceMirror(t.Context(), "w")
+		if err != nil || *got != old.Mirror || len(git.configureRequests) != 1 {
+			t.Fatal("invalid binding mutated existing mirror")
+		}
+	}
+}

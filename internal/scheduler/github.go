@@ -112,6 +112,12 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 	lock.Lock()
 	defer lock.Unlock()
 
+	return s.connectGitHubLocked(ctx, member)
+}
+
+// connectGitHubLocked requires terminalLock; OAuth uses it after proving that
+// the environment which authorized the account is still the current one.
+func (s *Scheduler) connectGitHubLocked(ctx context.Context, member domain.MemberID) (domain.GitHubConnection, error) {
 	ctx, cancel := context.WithTimeout(ctx, githubConnectTimeout)
 	defer cancel()
 
@@ -145,18 +151,7 @@ func (s *Scheduler) ConnectGitHub(ctx context.Context, member domain.MemberID) (
 		return domain.GitHubConnection{}, err
 	}
 	if cli.Status != domain.GitHubCLIOK {
-		_, _, phrase := s.githubCLIRemedy(m, sup.image, s.memberOwnedGitHubCLI(ctx, sup.containerID))
-		switch cli.Status {
-		case domain.GitHubCLIMissing:
-			return domain.GitHubConnection{}, fmt.Errorf("%w; %s: %s", ErrGitHubCLIMissing, phrase, cli.Detail)
-		case domain.GitHubCLIBroken:
-			return domain.GitHubConnection{}, fmt.Errorf("%w; %s: %s", ErrGitHubCLIBroken, phrase, cli.Detail)
-		default:
-			// gh's own version line names what is there, so the message
-			// carries it rather than paraphrasing it.
-			return domain.GitHubConnection{}, fmt.Errorf("%w: %s is the oldest gh that answers auth status --json; %s: %s",
-				ErrGitHubCLIOutdated, cli.Minimum, phrase, cli.Detail)
-		}
+		return domain.GitHubConnection{}, s.githubCLIError(ctx, m, sup, cli)
 	}
 
 	// No --active: the flag landed in gh 2.57.0 and the active entry is
@@ -301,6 +296,10 @@ func activeGitHubLogin(stdout string) (ghAuthEntry, bool) {
 	if err := json.Unmarshal([]byte(stdout), &status); err != nil {
 		return ghAuthEntry{}, false
 	}
+	return activeGitHubAccount(status)
+}
+
+func activeGitHubAccount(status ghAuthStatus) (ghAuthEntry, bool) {
 	hosts := status.Hosts["github.com"]
 	for _, host := range hosts {
 		if host.Active {
@@ -353,6 +352,19 @@ func (s *Scheduler) probeGitHubCLI(ctx context.Context, container runtime.ID, ho
 		cli.Status = domain.GitHubCLIOutdated
 	}
 	return cli, nil
+}
+
+func (s *Scheduler) githubCLIError(ctx context.Context, m *domain.Member, sup *terminalSupervision, cli domain.GitHubCLI) error {
+	_, _, phrase := s.githubCLIRemedy(m, sup.image, s.memberOwnedGitHubCLI(ctx, sup.containerID))
+	switch cli.Status {
+	case domain.GitHubCLIMissing:
+		return fmt.Errorf("%w; %s: %s", ErrGitHubCLIMissing, phrase, cli.Detail)
+	case domain.GitHubCLIBroken:
+		return fmt.Errorf("%w; %s: %s", ErrGitHubCLIBroken, phrase, cli.Detail)
+	default:
+		return fmt.Errorf("%w: %s is the oldest gh that answers auth status --json; %s: %s",
+			ErrGitHubCLIOutdated, cli.Minimum, phrase, cli.Detail)
+	}
 }
 
 // memberOwnedGitHubCLI reports the gh the container resolves when it is a

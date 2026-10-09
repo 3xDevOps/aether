@@ -40,7 +40,7 @@ func workspaceImportCommit(t *testing.T, source string) string {
 // The sole transport seam substitutes a local repository for the public URL.
 // All fetches, protected refs, adoption, key generation, persistence, authority,
 // and control-channel serialization use their production implementations.
-func workspaceImportEnv(t *testing.T, seeded bool) (*testEnv, *gitengine.Engine, string, string) {
+func workspaceImportEnv(t *testing.T, seeded bool, configure ...func(*Config, *mirrorservice.Config)) (*testEnv, *gitengine.Engine, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
@@ -65,7 +65,11 @@ func workspaceImportEnv(t *testing.T, seeded bool) (*testEnv, *gitengine.Engine,
 	}
 	t.Cleanup(func() { _ = engine.Close() })
 	e := newTestEnv(t, func(c *Config) {
-		svc, err := mirrorservice.New(mirrorservice.Config{Root: filepath.Join(root, "mirrors"), Store: c.Store, Git: engine})
+		mirrorConfig := mirrorservice.Config{Root: filepath.Join(root, "mirrors"), Store: c.Store, Git: engine}
+		for _, setup := range configure {
+			setup(c, &mirrorConfig)
+		}
+		svc, err := mirrorservice.New(mirrorConfig)
 		if err != nil {
 			t.Fatal(err)
 		}

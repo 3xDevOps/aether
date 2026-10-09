@@ -18,6 +18,7 @@ export interface WorkspaceImportParams {
   origin: string
   auth: WorkspaceMirrorAuth
   known_hosts?: string
+  github_account_id?: number
 }
 
 /** Keep the created workspace even when configuring or fetching its mirror fails. */

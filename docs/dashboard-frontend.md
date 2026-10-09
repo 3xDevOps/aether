@@ -2685,8 +2685,12 @@ calls `rememberLaunch` with the chosen mode, which seeds **New run** and
 First run. Setup does not save the Environment image: the install lands in
 the member's home directory, which every container mounts.
 
-**GitHub.** `github-connect.tsx` connects the member's GitHub account.
-The closed `<section aria-label="Connect GitHub">` says what a connection
+**GitHub (member-scoped terminal setup).** `github-connect.tsx` remains the
+Agents page's native setup and the collaborator onboarding path. Administrator
+onboarding instead uses the shared browser connection described under
+[Manage workspaces](#manage-workspaces), including a persisted status check on
+the Agent step so Repository-step authorization need not be repeated.
+The terminal setup's closed `<section aria-label="Connect GitHub">` says what a connection
 buys - runs push branches and open pull requests as the member, and commits
 are signed with a key kept in their home directory - and **Connect GitHub**
 opens the sub-screen. The sub-screen mounts the same `TerminalDock` the
@@ -2943,9 +2947,35 @@ switcher or the command palette.
 The creation choices are the shared `src/components/workspace-create.tsx`,
 the same ones onboarding's Repository step shows:
 
+- **Add GitHub repository** is the primary administrator path, using shared
+  `GitHubConnection` (`components/github-connection.tsx`) and
+  `GitHubRepositoryDialog` (`routes/admin-dialogs/github-repository-dialog.tsx`).
+  Connect displays a one-time code, **Copy code and open GitHub**, a visible
+  **Open GitHub** fallback and **Cancel connection**. It completes automatically:
+  no terminal or **I've logged in** confirmation is required. Status is read
+  from the server on mount, not inferred from a previous React session.
+  Connection controls explicitly use `type="button"` so authorization inside
+  source settings cannot accidentally save or rebind a mirror.
+  The picker labels the account, searches loaded pages and offers **Load more**.
+  Private collaborator repositories with read-only access are selectable.
+  Selection changes only local form state. Name and branch use the repository's
+  actual defaults. A writable selected repository is proposed as the publishing
+  destination and shown before import; read-only sources leave it unconfigured.
+  **Advanced** lets the admin change the name, branch or destination, including
+  choosing **None — do not publish**.
+  **Review repository** imports with `auth:"github"` and the list's numeric
+  `github_account_id`, then shows the actual observed branch/SHA inline.
+  **Use repository** explicitly adopts that generation before reporting success.
+  A failed fetch retains the workspace ID: **Retry fetch** refreshes it, never
+  creates another workspace. **Source settings** opens the existing source
+  dialog locally; closing it returns to this same workspace and reads status
+  before another action. Saving a different account/branch requires a fresh
+  review. Lost mutation responses are shown as uncertain, not automatically
+  retried; use **Check source status**, or inspect Workspaces if creation itself
+  was uncertain.
 - **Import a remote repository** opens **Import repository**.
-  Public sources use credential-free HTTPS. Private sources use a server-held,
-  read-only deploy key, installed by an administrator of the upstream
+  Public sources use credential-free HTTPS. This manual alternative's private
+  sources use a server-held, read-only deploy key, installed by an administrator of the upstream
   repository. Generic SSH sources also require independently verified
   `known_hosts` entries. Import retains the new workspace even if fetching
   fails and then opens its repository page; repair the source there rather
@@ -2961,6 +2991,14 @@ the same ones onboarding's Repository step shows:
 Creation and remote source administration require an administrator. A
 collaborator can link a clone to an existing workspace; a viewer cannot push
 its base.
+
+The GitHub entry is available only to admins with `workspace.import`,
+`github.oauth.start` and `github.repositories.list`; local-clone controls retain
+their gateway capability gates. Async connection/list/import results are fenced
+by client, server identity/connection epoch and member/role. Context changes
+discard stale selections/results; unmount or terminal OAuth states stop polling.
+An account change between repository pages clears the selection rather than
+mixing identities. Server permission checks independently reject forged calls.
 
 **Delete…** asks first and lists what is permanently removed; **Cancel**
 leaves the workspace untouched. The server refuses active work, pending
@@ -2992,9 +3030,15 @@ does.
 
 The source mirror dialog reports local-only, pending, ready or failure,
 including the configured source, branch, accepted SHA and last check time.
-**Configure source** starts from `Workspace.Origin` and offers public or
-deploy-key access; the latter exposes only a public key to copy and the
-GitHub deploy-key link, and **Save source** later rotates the key.
+**Configure source** starts from `Workspace.Origin` and offers `public`,
+`deploy-key` and `github` authentication, with source URL and branch fields.
+Deploy-key mode alone shows `known_hosts`, the public key and GitHub deploy-key
+installation link; **Save source** rotates that key, not **Verify**.
+GitHub mode uses the shared connection control and shows the source's numeric
+account ID and authorizing member (`github_user_id`, `github_member_id`).
+An explicit **Save source** binds it to the current admin's verified account;
+reconnecting alone does not silently change an existing binding. These are
+non-secret source fields, never a token or member-home path.
 **Verify** (**Refresh** once the source is ready) reports the server's
 result; fetching is not approval, so **Adopt candidate** and **Disable
 source** require explicit confirmations. A local-only workspace uses its
@@ -3002,8 +3046,8 @@ pushed base.
 
 ## Settings
 
-`src/routes/settings/` is one column of four sections, available through
-every gateway:
+`src/routes/settings/` is one column of capability-gated sections, available
+through either gateway:
 
 - **Appearance**: **Theme** (System, Light, Dark; the palette and the
   footer menu offer the same), **Text size** (Default, Large, Larger; it
@@ -3019,6 +3063,12 @@ every gateway:
   already mirroring). **Change** edits the target; **Install** and **Start
   mirroring** are secondary buttons. The server-hosted dashboard omits the
   section.
+- **GitHub**, for admins when the OAuth methods are available: the same
+  `GitHubConnection` and **Add repository** picker used in onboarding and
+  Manage workspaces, not another importer. Existing native authorization is
+  reused. Successful explicit revision acceptance upserts/selects the workspace
+  and opens its repository page. Nonadmins see neither this section nor its
+  repository-add controls.
 - **Server**: the server version and protocol, with **Update…** when an
   update is waiting; data-filesystem used and available space, separate from
   Aether's attributed worktrees, transcripts, database, repositories, homes,
@@ -3099,14 +3149,16 @@ wizard. See [teams.md](teams.md) for what the identity does once it is set.
 Repository's first line defines the word: a workspace is one repository and
 base branch, and the runs started from it. With no workspace chosen it lists
 the member's workspaces with **Use** and, for an admin whose gateway serves
-`workspace.import` or `workspace.add`, the two **Add a workspace** cards,
-whose primary button is **Create from local clone** on a local gateway and
-**Import repository** on a hosted one. A member who cannot add one and finds
+`workspace.import` or `workspace.add`, the shared **Add a workspace** choices.
+**Add GitHub repository** leads when its methods are available on either
+gateway; manual remote import and local-clone creation remain alternatives.
+After explicit GitHub revision acceptance, onboarding continues to Agent.
+A member who cannot add one and finds
 none gets **Ask an admin to add a workspace** and **Continue to Agent**,
 because Agent setup does not depend on a workspace. Once a workspace is chosen
 the step shows it as one row with **Change**, then the **Local clone** section
 and one **Advanced** disclosure holding the server-fetched source status, the
-checkout origin and the deploy-key note. The source status stays mounted while
+checkout origin and the mode-specific source authorization details. The source status stays mounted while
 collapsed, so a source that is not ready says so above the disclosure.
 
 **Link local repository** opens the local path form; its path must be

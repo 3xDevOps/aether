@@ -5,6 +5,7 @@ import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { OnboardingSection } from '@/routes/onboarding/settings-section'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { GitHubSection } from '@/routes/settings/github'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { ServerSection } from '@/routes/settings/server'
 import { ThisComputerSection } from '@/routes/settings/this-computer'
@@ -79,6 +80,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
           <AppearanceSection />
+          <GitHubSection client={client} />
           <ThisComputerSection client={client} />
           <ServerSection />
           <UsageSection client={client} />

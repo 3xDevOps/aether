@@ -64,3 +64,61 @@ func TestReadCredentialMissingAndUnsupported(t *testing.T) {
 		t.Fatal("unsupported credential path accepted")
 	}
 }
+
+func TestReadGitHubCredentialIsRootConfinedAndBounded(t *testing.T) {
+	for _, attack := range []string{"regular", "oversized", "file symlink", "parent symlink", "hardlink"} {
+		t.Run(attack, func(t *testing.T) {
+			manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			home, err := manager.Path("member-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := manager.ReadCredential("member-1", githubCredentialPath, 1024)
+			if err != nil || got != nil {
+				t.Fatalf("missing GitHub credential: %q, %v", got, err)
+			}
+			dir := filepath.Join(home, ".config", "gh")
+			if err = os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			outsideDir := t.TempDir()
+			outside := filepath.Join(outsideDir, "hosts.yml")
+			want := []byte("github.com:\n  user: octocat\n  oauth_token: test-only\n")
+			if err = os.WriteFile(outside, want, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			credential := filepath.Join(home, githubCredentialPath)
+			limit := int64(1024)
+			switch attack {
+			case "file symlink":
+				err = os.Symlink(outside, credential)
+			case "parent symlink":
+				if err = os.Remove(dir); err != nil {
+					t.Fatal(err)
+				}
+				err = os.Symlink(outsideDir, dir)
+			case "hardlink":
+				err = os.Link(outside, credential)
+			default:
+				err = os.WriteFile(credential, want, 0o600)
+				if attack == "oversized" {
+					limit = 8
+				}
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err = manager.ReadCredential("member-1", githubCredentialPath, limit)
+			if attack == "regular" {
+				if err != nil || string(got) != string(want) {
+					t.Fatalf("GitHub credential: %q, %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatalf("%s credential accepted", attack)
+			}
+		})
+	}
+}

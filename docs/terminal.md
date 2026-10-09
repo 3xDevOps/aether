@@ -402,11 +402,20 @@ when the dashboard cannot install the agent itself); press Enter to run it.
 Step 3, **Check**, re-reads the agent and shows **Installed** and **Login
 found**. Login state lives in your home, so it needs no **Save environment**.
 
-**Connect GitHub** embeds the same terminal and types the `gh auth login`
-command instead. Finish the device login in your browser, then **I've logged
-in** runs the rest of the connection and reports the account and the
-signing key it registered. See
-[environment-home.md](environment-home.md#connect-github).
+Admins do not need this terminal for GitHub setup. Use **Settings → GitHub →
+Connect GitHub**, or **Onboarding → Repository → From GitHub → Add GitHub
+repository**. **Copy code and open GitHub** opens the authorization page;
+enter the code, approve, and return to Aether. Completion automatically sets
+up native Git and signing. Choose a repository, **Review repository**, then
+**Use repository** to accept its actual revision. Later **Settings → GitHub →
+Add repository** reuses the connection. See the
+[browser walkthrough and recovery](quickstart.md#github-repository).
+
+Collaborators retain **Onboarding → Agent → GitHub → Connect GitHub**, which
+embeds the terminal and types `gh auth login`. Finish the device login in
+your browser, then **I've logged in** completes native setup. GitHub access,
+agent vendor login, and edge/server sign-in are separate. See
+[Environment prerequisites and signing details](environment-home.md#connect-github).
 
 ## Sign in to agents
 

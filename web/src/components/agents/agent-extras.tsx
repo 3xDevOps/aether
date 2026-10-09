@@ -6,7 +6,7 @@ import type { Api } from '@/lib/api'
 import type { GitHubConnectResult } from '@/lib/types'
 import { ProfileDialog } from '@/routes/members/personal'
 import { GitHubSection } from '@/routes/onboarding/github-connect'
-import type { Capability } from '@/store/hooks'
+import { type Capability, useIsAdmin } from '@/store/hooks'
 
 function Extra({ title, summary, open, children }: { title: string; summary: string; open?: boolean; children: ReactNode }) {
   return (
@@ -36,6 +36,7 @@ export function AgentExtras({
   onConnectGitHub: () => void
 }) {
   const [profile, setProfile] = useState(false)
+  const isAdmin = useIsAdmin()
   return (
     <div className="flex min-w-0 flex-col">
       {identity && caps.hasMethod('member.git') && (
@@ -47,9 +48,9 @@ export function AgentExtras({
           <ProfileDialog open={profile} onOpenChange={setProfile} client={client} />
         </Extra>
       )}
-      <Extra title="GitHub" summary="Push branches and open pull requests as you" open={github !== null}>
-        {caps.hasMethod('github.connect') && caps.hasMethod('github.probe') ? (
-          <GitHubSection connection={github} onOpen={onConnectGitHub} />
+      <Extra title="GitHub" summary="Push branches and open pull requests as you" open={isAdmin || github !== null}>
+        {isAdmin || (caps.hasMethod('github.connect') && caps.hasMethod('github.probe')) ? (
+          <GitHubSection client={client} connection={github} onOpen={onConnectGitHub} />
         ) : (
           <p className="text-ui text-text">
             Log in with <code className="font-code">gh auth login</code> in <code className="font-code">aether terminal</code>, then run{' '}

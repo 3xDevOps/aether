@@ -166,3 +166,91 @@ func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
 		t.Fatalf("source became implicit push target: %+v, %v", stored, err)
 	}
 }
+
+func TestGitHubImportRefreshRetainsProtectedBaseAcrossCredentialChanges(t *testing.T) {
+	st := newMirrorTestStore()
+	svc, engine, initial := newImportService(t, st)
+	accountID, credentialCalls := int64(42), 0
+	token := "test-native-credential"
+	var credentialErr error
+	svc.githubCredentials = func(_ context.Context, member domain.MemberID) (string, int64, error) {
+		if member != "admin" {
+			t.Fatal("refresh selected another member's credential")
+		}
+		credentialCalls++
+		return token, accountID, credentialErr
+	}
+	configured, err := svc.Configure(t.Context(), "github-import", ConfigureRequest{
+		SourceURL: "https://github.com/acme/private.git", Branch: "main", Auth: domain.MirrorAuthGitHub,
+		GitHubMemberID: "admin", GitHubUserID: 42,
+	})
+	if err != nil || configured.PublicKey != "" || configured.Mirror.KeyFingerprint != "" || credentialCalls != 0 {
+		t.Fatalf("GitHub configure = %+v, %v", configured, err)
+	}
+	observed, err := svc.Refresh(t.Context(), "github-import")
+	if err != nil || observed.Mirror.ObservedCommit != initial || observed.Mirror.AcceptedCommit != "" {
+		t.Fatalf("GitHub initial observation = %+v, %v", observed, err)
+	}
+	if _, err = svc.Adopt(t.Context(), "github-import", configured.Mirror.Generation); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(filepath.Dir(svc.root), "source")
+	importGit(t, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "next source")
+	next := importGit(t, source, "rev-parse", "HEAD")
+	token = "rotated-native-credential"
+	captured, err := svc.Capture(t.Context(), "github-import", "")
+	if err != nil || captured.Commit != next || captured.Cached || credentialCalls != 2 {
+		t.Fatalf("launch refresh = %+v, %v; credential reads = %d", captured, err, credentialCalls)
+	}
+	repo, err := engine.InitWorkspaceRepo(t.Context(), "github-import")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := importGit(t, repo, "config", "--local", "--list")
+	if strings.Contains(config, token) || strings.Contains(config, "extraheader") {
+		t.Fatal("credential was persisted in Git config")
+	}
+	importGit(t, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "unaccepted source")
+	push := exec.CommandContext(t.Context(), "git", "-C", source, "push", repo, "HEAD:refs/heads/main")
+	if out, err := push.CombinedOutput(); err == nil {
+		t.Fatalf("direct push bypassed protected GitHub base: %s", out)
+	}
+	for _, state := range []string{"switched account", "revoked", "missing token", "invalid token", "missing provider"} {
+		accountID, token, credentialErr = 42, "test-native-credential", nil
+		switch state {
+		case "switched account":
+			accountID = 99
+		case "revoked":
+			credentialErr = errors.New("native output contains test-native-credential")
+		case "missing token":
+			token = ""
+		case "invalid token":
+			token = "invalid\nheader"
+		case "missing provider":
+			svc.githubCredentials = nil
+		}
+		captured, err := svc.Capture(t.Context(), "github-import", "")
+		var failure *gitengine.MirrorError
+		if !errors.As(err, &failure) || failure.Kind != gitengine.MirrorErrorAuthFailed || captured.Commit != next {
+			t.Fatalf("%s capture = %+v, %v", state, captured, err)
+		}
+		for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+			if strings.Contains(cause.Error(), "test-native-credential") {
+				t.Fatal("credential leaked through error chain")
+			}
+		}
+		status, statusErr := svc.Status(t.Context(), "github-import")
+		if statusErr != nil || status.Mirror.Status != domain.MirrorStatusAuthFailed || status.Mirror.AcceptedCommit != next {
+			t.Fatalf("%s status = %+v, %v", state, status, statusErr)
+		}
+		base, baseErr := engine.WorkspaceBranchCommit(t.Context(), "github-import", "main")
+		if baseErr != nil || base != next {
+			t.Fatalf("%s changed base: %q, %v", state, base, baseErr)
+		}
+		calls := credentialCalls
+		cached, err := svc.Capture(t.Context(), "github-import", next)
+		if err != nil || !cached.Cached || cached.Commit != next || credentialCalls != calls {
+			t.Fatalf("%s explicit cached capture = %+v, %v", state, cached, err)
+		}
+	}
+}

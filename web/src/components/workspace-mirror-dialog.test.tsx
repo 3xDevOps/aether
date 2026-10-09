@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { WorkspaceMirrorDialog } from '@/components/workspace-mirror-dialog'
-import { fakeApi, workspace } from '@/test/fixtures'
+import { fakeApi, serverInfo, workspace } from '@/test/fixtures'
 import { useStore } from '@/store'
 import type { WorkspaceMirrorResult } from '@/lib/types'
 
@@ -33,6 +33,35 @@ describe('workspace mirror dialog', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
+  it('shows the authorizing GitHub account and reconnect flow without deploy-key instructions', async () => {
+    seed()
+    useStore.setState({ info: serverInfo })
+    const client = fakeApi({
+      workspaceMirrorStatus: vi.fn(async () => mirror({ auth: 'github', github_member_id: serverInfo.member.id, github_user_id: 42, status: 'auth-failed', last_error: 'GitHub account changed; reconfigure source' })),
+      githubOAuthStatus: vi.fn(async () => ({ state: 'connected' as const, login: 'alice-gh' })),
+    })
+    render(<WorkspaceMirrorDialog workspaceID={workspace.id} client={client} onClose={vi.fn()} />)
+    expect(await screen.findByText('Connected as alice-gh')).toBeTruthy()
+    expect(screen.getByText(/Account ID 42/)).toBeTruthy()
+    expect(screen.getByText('GitHub account changed; reconfigure source')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Copy public key' })).toBeNull()
+    expect(screen.queryByText(/Install the generated key/)).toBeNull()
+    expect(screen.getByLabelText<HTMLSelectElement>('Authentication').value).toBe('github')
+  })
+
+  it('does not publish an old source mutation after the server identity changes', async () => {
+    seed()
+    const pending = Promise.withResolvers<WorkspaceMirrorResult>()
+    const client = fakeApi({ workspaceMirrorStatus: vi.fn(async () => mirror()), workspaceMirrorRefresh: vi.fn(() => pending.promise) })
+    const onStatusChange = vi.fn()
+    render(<WorkspaceMirrorDialog workspaceID={workspace.id} client={client} onStatusChange={onStatusChange} onClose={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }))
+    act(() => { useStore.setState({ identityKey: 'new-server:alice' }) })
+    await act(async () => { pending.resolve(mirror({ observed_commit: 'old-server-private-revision' })) })
+    expect(screen.queryByText('old-server-private-revision')).toBeNull()
+    expect(onStatusChange.mock.calls.some(([result]) => result.observed_commit === 'old-server-private-revision')).toBe(false)
+  })
+
   it('shows a local-only workspace and prefills the configure source', async () => {
     seed({ origin: 'https://github.com/acme/project.git' })
     const client = fakeApi({

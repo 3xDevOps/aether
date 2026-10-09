@@ -67,3 +67,23 @@ func TestCanonicalizeSourceRejectsHTTPSCredentialsAndUnsafeSSHUsers(t *testing.T
 		})
 	}
 }
+
+func TestGitHubSourceRequiresCanonicalHTTPS(t *testing.T) {
+	source, err := CanonicalizeSource("https://github.com/acme/private.repo.git", domain.MirrorAuthGitHub, "")
+	if err != nil || !source.GitHub || source.Identity != "github.com/acme/private.repo" || source.KnownHosts != "" {
+		t.Fatalf("canonical GitHub source = %+v, %v", source, err)
+	}
+	for _, raw := range []string{
+		"https://github.com/acme/repo", "https://github.com/acme/repo.git/",
+		"https://GITHUB.com/acme/repo.git", "https://github.com:443/acme/repo.git",
+		"https://github.com/acme/../repo.git", "https://github.com/acme/%72epo.git",
+		"https://github.com/acme/repo.git?", "https://github.com/acme/repo.git#",
+		"https://github.com/acme/.git", "https://github.com/acme/...git",
+		"https://user@github.com/acme/repo.git", "https://github.example/acme/repo.git",
+		"ssh://git@github.com/acme/repo.git", "https://github.com/acme/repo.git?token=secret",
+	} {
+		if _, err := CanonicalizeSource(raw, domain.MirrorAuthGitHub, ""); err == nil {
+			t.Errorf("accepted noncanonical GitHub source %q", raw)
+		}
+	}
+}

@@ -31,6 +31,7 @@ func TestParseWorkspaceMirrorConfigureArgs(t *testing.T) {
 	}{
 		{name: "public", args: []string{"--source", "https://example.test/repo"}, auth: "public"},
 		{name: "deploy key with known hosts", args: []string{"--workspace", "app", "--source", "ssh://git@example.test/acme/repo", "--branch", "trunk", "--auth", "deploy-key", "--known-hosts-file", knownHostsFile}, auth: "deploy-key"},
+		{name: "github account", args: []string{"--source", "https://github.com/org/private.git", "--auth", "github", "--github-account-id", "42"}, auth: "github"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opts, err := parseWorkspaceMirrorConfigureArgs(tc.args)
@@ -46,10 +47,21 @@ func TestParseWorkspaceMirrorConfigureArgs(t *testing.T) {
 			if tc.auth == "deploy-key" && opts.knownHostsFile != knownHostsFile {
 				t.Fatalf("known hosts file = %q, want %q", opts.knownHostsFile, knownHostsFile)
 			}
+			if tc.auth == "github" && opts.githubAccountID != 42 {
+				t.Fatalf("GitHub account ID = %d, want 42", opts.githubAccountID)
+			}
 		})
 	}
 	if _, err := parseWorkspaceMirrorConfigureArgs([]string{"--source", "x", "--auth", "private-key"}); err == nil {
 		t.Fatal("invalid auth accepted")
+	}
+	for _, args := range [][]string{
+		{"--source", "https://github.com/org/repo.git", "--github-account-id", "42"},
+		{"--source", "https://github.com/org/repo.git", "--auth", "github", "--github-account-id", "-1"},
+	} {
+		if _, err := parseWorkspaceMirrorConfigureArgs(args); err == nil {
+			t.Fatalf("invalid account expectation accepted: %v", args)
+		}
 	}
 	if _, err := parseWorkspaceMirrorConfigureArgs(nil); err == nil || !strings.Contains(err.Error(), "--source is required") {
 		t.Fatalf("missing source error = %v", err)

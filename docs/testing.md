@@ -992,6 +992,63 @@ make test-e2e
 CLI serves the SPA out of its own embedded `web/dist`, so a stale binary would
 test a stale dashboard. The dashboard itself has no production Next server.
 
+**Administrator GitHub journeys**
+
+`web/e2e/onboarding-github.spec.ts` runs the real built dashboard and local SSH
+gateway against a test-only server process, real SQLite, Docker Environment
+exec, native signing setup, mirror storage and explicit revision adoption.
+It requires the repository's **standard image**, not the BusyBox image used by
+most dashboard scenarios: native Git, SSH signing, `flock` and `timeout` must
+actually work. Docker or a missing image is a failure, never a silent skip.
+From the repository root, with Go, Bun, Git, Docker and the project's build
+prerequisites installed:
+
+```sh
+docker info
+docker build -f images/standard/Dockerfile -t aether-standard:ci .
+(cd web && bun install --frozen-lockfile && bunx playwright install chromium)
+make test-e2e E2E_ARGS='--project=chromium onboarding-github.spec.ts'
+```
+
+`AETHER_E2E_STANDARD_IMAGE` can name another locally available build of that
+image. `make test-e2e` rebuilds the embedded dashboard and gateway binaries.
+The harness additionally compiles the test-only server automatically using
+`go test -c -tags=integration -o <scratch>/github-provider-server.test ./internal/server`
+and runs it with
+`-test.run=^TestGitHubBrowserProviderHarness$ -test.timeout=0`.
+`web/e2e/harness/server.ts` supplies isolated `AETHER_E2E_GITHUB_ROOT`,
+`AETHER_E2E_GITHUB_ADDR` and `AETHER_E2E_GITHUB_IMAGE`; production binaries do
+not read those provider-fixture variables.
+
+The **external provider is substituted**: a member-home `gh` fixture implements
+device approval/denial, Playwright intercepts the GitHub device page, the
+test-only server supplies GitHub HTTP metadata, and its fetch boundary uses
+real local Git repositories instead of GitHub HTTPS. No real GitHub secret is
+required, and no live GitHub approval, GitHub availability or production
+token-authenticated HTTPS transport is tested by this fixture. This is not an
+API-mocked dashboard: browser control requests still cross the gateway and
+assembled server. Separate live acceptance is needed for the provider boundary.
+
+Scenarios cover private read-only selection, inline SHA/generation acceptance,
+persisted connection reuse on the admin Agent step and in Settings, pagination
+to a second repository whose default branch is `trunk`, cancellation and denied
+authorization recovery, failed-fetch retry on the same workspace, and absent
+nonadmin controls plus forged-RPC denial. Successful checkpoints attach
+`github-onboarding-device-code`, `github-onboarding-review-revision`,
+`github-onboarding-ready`, `github-settings-additional-repository-ready`,
+`github-cancellation-and-fetch-recovered` and `github-collaborator-settings`
+PNG screenshots to the Playwright results/report. These are verification
+commands and expected coverage, not a claim that Docker or CI has passed.
+
+The retained collaborator/native-terminal component coverage is in
+`web/src/routes/onboarding/github-connect.test.tsx`: typed login, missing/old/
+broken gh remedies, probe retry, terminal incarnation changes, verbatim errors,
+account/signing fingerprint, CLI fallback and Back navigation. Its administrator
+case separately checks persisted connection reuse without opening a terminal.
+`TestIntegrationGitHubConnect` in `internal/server/github_integration_test.go`
+retains the native connection, signed commit and push path with a gh provider
+fixture; do not confuse that legitimate member setup with the new admin picker.
+
 The browser suite owns behavior that jsdom cannot observe: actual hit testing,
 computed layout, responsive overflow, painted focus outlines and event ordering
 across document listeners. Component tests remain responsible for rendered
@@ -1078,7 +1135,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `onboarding-configuration` | An explicit browser directory import from the Agent step's collapsed **Agent config files** disclosure: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
 | `onboarding-first-member` | A fresh server through the steps Connect, Repository, Agent and First run: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the agent exits, and closing the run as **Merged** from **More > Close run…**; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
-| `onboarding-github` | The Agent step's **Connect GitHub** screen, opened from its GitHub disclosure, against the member's own environment container, in two acts. First with no gh in it: the screen says "There is no gh in your Environment", names both halves of the remedy - the admin's `docker pull` of the standard image and the member's `aether terminal stop` - and shows no `gh auth login` command at all. Then Back, a stub `gh` installed into the member's environment home, and the screen reopened: "The login command is ready in your Environment" - the state, because the command block alone is also what a failed check shows - the stub's own log proving the terminal typed that login into the container, the account and signing-key fingerprint the connect reports, the key on disk and registered through gh, the home's `.gitconfig` carrying both gh's credential helper and the signing settings, and Back closing the sub-screen without leaving the step |
+| `onboarding-github` | Administrator device connection and private read-only import, actual observed revision acceptance, Agent/Settings connection reuse, paginated second repository on `trunk`, cancellation/denial recovery, failed-fetch retry without duplicate import, and nonadmin UI/RPC denial. Uses the real standard image and test-only provider harness described above; attaches six checkpoint screenshots. No live GitHub approval |
 | `onboarding-navigation` | Back from every step and the header's jump to a reached step, with the workspace and the connected clone still settled on the way through, and picking the same workspace again keeping its clone |
 | `onboarding-second-member` | A collaborator joining on an invite code, onto a workspace someone else created: Repository offers no way to add a workspace and the workspace is picked rather than created. A local-only workspace is seeded by the collaborator's push, with the push command under Advanced; a mirrored workspace says its server copy is pending outside Advanced, shows its source under Advanced, and offers no push |
 | `palette-navigation` | The command palette at a short touch viewport with 25 workspaces: the active option is announced and kept scrolled into view through Home, End and arrows, filtering and clearing restore browse order, a workspace deleted mid-search drops out live, Enter opens the chosen workspace (named in the top bar), Tab stays inside the dialog and Escape returns focus to Search |
@@ -1104,14 +1161,15 @@ evidence that they have been executed or passed on a particular checkout.
 `account-sharing`, `activity`, `agent-outcome`, `board-card`,
 `candidate-delivery`, `development-browser/browser.spec.ts`,
 `development-terminal/shared-terminal.spec.ts`, `keyboard-focus`,
-`onboarding-agents`, `onboarding-github`, `onboarding-first-run`'s launch
+`onboarding-agents`, `onboarding-first-run`'s launch
 scenario, `remote-development-git/github.spec.ts`, `run-attach-retry`,
 `run-deep-link`, `run-evidence.spec.ts`, `run-provisioning`,
 `run-room.spec.ts`, `run-session`, `run-switch`, `templates`,
 `terminal-geometry`, `terminal-images`, `terminal-streaming` and
 `terminal-tools` need a reachable Docker daemon and skip without one.
-`mission-candidate-review` and `remote-development-git/native.spec.ts` also
-need Docker but fail without it instead of skipping. That skip is specific to
+`onboarding-github`, `mission-candidate-review` and
+`remote-development-git/native.spec.ts` also need Docker but fail without it
+instead of skipping. That skip is specific to
 the dashboard suite: `make test-integration` requires its real Docker setup
 and fails when Docker is unavailable. The rest need only git, except
 `window-sizing`, which needs neither: it starts a gateway of its own rather
