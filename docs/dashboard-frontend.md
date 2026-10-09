@@ -3829,6 +3829,10 @@ remain covered as state transitions. Component tests should assert labels,
 accessible names, focus handoff, keyboard actions, navigation, loading and
 empty states, server errors, capability gates and mutation results.
 
+Session component fixtures unmount before restoring timers or browser globals.
+Await the stream-disposal batch, then reset the root store to cancel its held
+notification frame and fallback timer.
+
 Run actions cover the retained-run contract: Close chooses merged or abandoned,
 while Reopen run appears only for eligible retained Standard runs. Free
 container is also offered for finished retained swarm workers; its
