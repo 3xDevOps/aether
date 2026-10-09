@@ -29,7 +29,7 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard uses three fonts, each under the SIL Open Font License 1.1:
+The dashboard bundles these fonts under the SIL Open Font License 1.1:
 
 - Inter for UI text
   ([`web/public/fonts/LICENSE-inter.txt`](../web/public/fonts/LICENSE-inter.txt)).
@@ -41,17 +41,27 @@ The dashboard uses three fonts, each under the SIL Open Font License 1.1:
   `web/public/fonts/saira-latin.woff2` is the normal-width variable font,
   weights 100-900, Latin subset, downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
-- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for the
-  terminal (xterm) only
+- `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for xterm
+  and the UI's private-use symbol fallback
   ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
+- Noto Sans Symbols 2 v2.008 for Braille and geometric spinner symbols
+  ([`web/public/fonts/LICENSE-noto-sans-symbols-2.txt`](../web/public/fonts/LICENSE-noto-sans-symbols-2.txt)).
+  `noto-sans-symbols-2-spinners.woff2` is a subset of the regular font from
+  [Google Fonts revision `2eb0b48d`](https://github.com/google/fonts/blob/2eb0b48d5f760f62e286216f0859a8c540dbc1bd/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf).
+  It contains Geometric Shapes (`U+25A0–25FF`) and Braille Patterns
+  (`U+2800–28FF`), generated with FontTools 4.66.1:
+
+  ```sh
+  pyftsubset NotoSansSymbols2-Regular.ttf \
+    --unicodes=U+25A0-25FF,U+2800-28FF --flavor=woff2 \
+    --output-file=web/public/fonts/noto-sans-symbols-2-spinners.woff2
+  ```
 
 `web/public/fonts/` also holds VT323 (`vt323-latin.woff2`, SIL OFL 1.1,
 [`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
-The dashboard never uses it: `scripts/make-icons.py` reads it to draw the
-wordmark on the Play listing's feature graphic,
+It supplies the launch-splash wordmark. `scripts/make-icons.py` also reads
+it to draw the wordmark on the Play listing's feature graphic,
 `android/listing/feature-graphic.png`, whose tagline is JetBrainsMono NFM.
-Because it sits in `web/public/`, the static export copies it into the
-dashboard bundle.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the

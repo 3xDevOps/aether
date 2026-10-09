@@ -68,6 +68,29 @@
   font-display: block;
 }
 
+/* Symbol-only aliases leave prose metrics and non-symbol fallback unchanged. */
+@font-face {
+  font-family: 'Aether Symbols';
+  src: url('/fonts/noto-sans-symbols-2-spinners.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+25A0-25FF, U+2800-28FF;
+}
+@font-face {
+  font-family: 'Aether Nerd Symbols';
+  src: url('/fonts/jetbrains-mono-nfm-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+}
+@font-face {
+  font-family: 'Aether Nerd Symbols';
+  src: url('/fonts/jetbrains-mono-nfm-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD;
+}
+
 /* The DOM renderer measures wide glyphs in one context and renders them in
    another; Chromium's default CJK punctuation compression (text-spacing-trim)
    makes the two disagree, drifting CJK-heavy rows off the cell grid
@@ -209,10 +232,9 @@
   --radius-3xl: var(--radius-panel);
   --radius-4xl: var(--radius-panel);
 
-  --font-sans: 'Inter Variable', 'Inter Fallback', system-ui, sans-serif;
-  --font-title: 'Saira', 'Inter Variable', 'Inter Fallback', sans-serif;
-  /* Code text; only xterm uses JetBrainsMono NFM. */
-  --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-sans: 'Inter Variable', 'Aether Symbols', 'Aether Nerd Symbols', 'Inter Fallback', system-ui, sans-serif;
+  --font-title: 'Saira', 'Inter Variable', 'Aether Symbols', 'Aether Nerd Symbols', 'Inter Fallback', sans-serif;
+  --font-code: 'Aether Symbols', 'Aether Nerd Symbols', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --font-mono: var(--font-code);
 
   --text-ui-xs: 11px;
