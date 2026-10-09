@@ -1430,9 +1430,14 @@ The `sessions` slice keeps each run's `AcpSession`: items grouped into
 turns (`store/session-rows.ts`), the ack's live state (turn in flight,
 pending requests, config options, commands, auth, steering), the lease and
 the stream state. A `reset` frame or an ack with `oldest_seq` starts the
-timeline over; **Show earlier** pages `run.acp.history` before the oldest
-item held. A closed turn's rows are derived once and kept; only the open
-turn re-derives. At most three sessions stay whole; the least recently
+timeline over. Scrolling within 240px of the top automatically pages
+`run.acp.history` before the oldest item held, 200 items at a time, along with
+older room messages. If the loaded rows do not fill the viewport, paging
+continues until they do or history ends. Inactive views and failed reads do
+not auto-page; failures keep the server's error with **Retry**. The list
+anchors prepended rows to preserve the reader's position without shifting
+for new live rows. A closed turn's rows are derived once and kept; only the
+open turn re-derives. At most three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (the run's
 appended instructions hidden under its task), `assistant` (markdown through
 `react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
