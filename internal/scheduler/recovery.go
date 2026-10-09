@@ -1527,10 +1527,10 @@ func (s *Scheduler) resumeRecoveredAgent(ctx context.Context, entry *supervised,
 }
 
 func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc sidecar, cid runtime.ID) {
-	// Older sidecars lack HOME and RunUser. A failed inspection is not
-	// evidence of exit: keep the survivor supervised.
+	// Older sidecars lack HOME and RunUser; unknown users need another
+	// inspection. A failed inspection is not evidence of exit.
 	metadataRecovered := false
-	if sc.Home == "" || sc.RunUser == "" {
+	if sc.Home == "" || sc.RunUser == "" || sc.RunUser == unknownRecoveryRunUser {
 		info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
 		if inspectErr != nil {
 			slog.Warn("scheduler: inspect container metadata during recovery", "run", r.ID, "container", cid, "error", inspectErr)
@@ -1547,9 +1547,10 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 					metadataRecovered = true
 				}
 			}
-			if sc.RunUser == "" {
-				sc.RunUser = normalizeRecoveryRunUser(info.User)
-				metadataRecovered = metadataRecovered || sc.RunUser != ""
+			if sc.RunUser == "" || sc.RunUser == unknownRecoveryRunUser {
+				user := normalizeRecoveryRunUser(info.User)
+				metadataRecovered = metadataRecovered || sc.RunUser != user
+				sc.RunUser = user
 			}
 		}
 	}

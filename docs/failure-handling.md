@@ -410,6 +410,16 @@ containers:
   failure keeps ownership and a bounded cleanup cause for automatic retries;
   the deadline can pass while safe cleanup is still pending.
 
+An active run whose container user could not be inspected is recorded as
+`<unknown>`. This conservatively blocks environment terminal adoption for the
+same member. On the next server restart, recovery inspects that container
+again and replaces the unknown reservation with its actual UID:GID, including
+root. A blank resolved terminal user in the ownership error means root, not
+missing configuration. This error does not require a deployment reset or
+deleting the member home. If inspection still fails, the server log reports
+`scheduler: inspect container metadata during recovery`; restore runtime
+access before restarting. Different non-root UID:GID mappings still conflict.
+
 Ordinary headless runs are not recovered into a shell. When their agent exits, Aether
 commits and publishes the branch, records `completed` for a clean exit or
 `failed` for an error - or the outcome the agent reported, whatever the exit
