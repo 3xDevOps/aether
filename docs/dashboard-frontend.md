@@ -3630,7 +3630,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Dark, light, system.** Settings > Appearance and explicit palette commands
   set the stored preference; `system` follows `prefers-color-scheme` live.
   There is no additional theme mode or cycling status icon.
-- **Typography and density.** Inter at 13px with 12px supporting copy, on
+- **Typography and density.** DM Sans at 13px with 12px supporting copy, on
   the type scale in [styles.md](styles.md#type). JetBrainsMono NFM is the
   terminal's alone; code uses the system monospace stack. Use the 28px
   control and row, 24px small control, 44px view header and 56px run header,
