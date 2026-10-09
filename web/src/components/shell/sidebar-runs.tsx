@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronRight } from '@/components/icons'
+import { ChevronDown, ChevronRight, Waypoints } from '@/components/icons'
 import { ListRow } from '@/components/ui/list-row'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useDelayed } from '@/lib/hooks'
@@ -160,10 +160,10 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
-              <ul aria-label={`Waiting in ${runLabel(tree.run)}`}>
+              <ul aria-label={`Runs in ${runLabel(tree.run)}`} className="ml-3 border-l border-seam pl-1">
                 {tree.children.map((child) => (
                   <li key={child.run.id}>
-                    <RunRowItem tree={{ ...child, children: [] }} nested />
+                    <RunRowItem tree={{ ...child, children: [] }} />
                   </li>
                 ))}
               </ul>
@@ -198,7 +198,7 @@ function MineToggle() {
   )
 }
 
-function RunRowItem({ tree, nested = false }: { tree: RunTree; nested?: boolean }) {
+function RunRowItem({ tree }: { tree: RunTree }) {
   return (
     <RunRow
       runID={tree.run.id}
@@ -207,7 +207,6 @@ function RunRowItem({ tree, nested = false }: { tree: RunTree; nested?: boolean 
       workspaceName={tree.workspaceName}
       swarm={tree.swarm}
       unread={tree.unread}
-      nested={nested}
     />
   )
 }
@@ -219,34 +218,31 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   workspaceName?: string
   swarm?: SwarmSummary
   unread?: number
-  nested: boolean
 }) {
   const run = useRun(runID)
   return run ? <RunRowButton run={run} {...shown} /> : null
 })
 
-function RunRowButton({ run, state, reason, workspaceName, swarm, unread, nested }: {
+function RunRowButton({ run, state, reason, workspaceName, swarm, unread }: {
   run: RunRecord
   state: PresentationState
   reason: string
   workspaceName?: string
   swarm?: SwarmSummary
   unread?: number
-  nested: boolean
 }) {
   const navigate = useStore((s) => s.navigate)
   const self = useStore((s) => s.info?.member.id)
-  const mission = useStore((s) => (swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
-  const selected = useStore((s) =>
-    swarm ? s.route.name === 'missions' && s.route.params.missionId === run.mission_id : isRunRoute(s.route, run.id))
-  const title = swarm ? mission?.objective.split('\n')[0] || runLabel(run) : runLabel(run)
+  const selected = useStore((s) => isRunRoute(s.route, run.id))
+  const swarmSelected = useStore((s) => !!swarm && s.route.name === 'missions' && s.route.params.missionId === run.mission_id)
+  const title = runLabel(run)
   const counts = swarm ? swarmCounts(swarm) : ''
   const open = () => {
-    if (state === 'needs-you') {
+    if (swarm) navigate('run', { runId: run.id })
+    else if (state === 'needs-you') {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
       navigate(route.name, route.params)
-    } else if (swarm && run.mission_id) navigate('missions', { missionId: run.mission_id })
-    else navigate('run', { runId: run.id })
+    } else navigate('run', { runId: run.id })
   }
   const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
   const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason].filter(Boolean).join(' · ')
@@ -258,13 +254,23 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, unread, nested
       aria-current={selected ? 'page' : undefined}
       selected={selected}
       onClick={open}
-      leading={
+      leading={<StatusDot tone={state} />}
+      trailing={!swarm ? <AgentGlyph agent={run.harness} /> : undefined}
+      action={swarm && run.mission_id && (
         <>
-          {nested && <span aria-hidden className="w-3 shrink-0" />}
-          <StatusDot tone={state} />
+          <Button
+            variant={swarmSelected ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            label={`Open swarm controls for ${title}`}
+            hint={counts ? `Open swarm controls · ${counts}` : 'Open swarm controls'}
+            aria-current={swarmSelected ? 'page' : undefined}
+            onClick={() => navigate('missions', { missionId: run.mission_id! })}
+          >
+            <Waypoints />
+          </Button>
+          <AgentGlyph agent={run.harness} />
         </>
-      }
-      trailing={swarm ? counts : <AgentGlyph agent={run.harness} />}
+      )}
       hoverAction={state === 'needs-you' && <AnswerButton run={run} />}
     >
       {workspaceName && <span className="text-muted">{workspaceName} · </span>}

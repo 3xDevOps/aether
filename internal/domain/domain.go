@@ -547,7 +547,7 @@ type Run struct {
 	HomeMemberID MemberID
 	// Task is the prompt the agent was launched with.
 	Task string
-	// Title is the latest terminal title reported by the agent.
+	// Title is the latest terminal or ACP session title reported by the agent.
 	Title   string
 	Harness string
 	Mode    LaunchMode

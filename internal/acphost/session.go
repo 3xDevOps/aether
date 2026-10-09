@@ -56,6 +56,7 @@ type Config struct {
 	// OnActivity reports the ACP tool kind the agent is using, "think" while
 	// it thinks, at most once a second.
 	OnActivity func(kind, target string)
+	OnTitle    func(title string)
 }
 
 // Receipt says what happened to a prompt.
@@ -668,6 +669,10 @@ func (s *Session) emitLocked(it Item) {
 		s.state.Commands = it.Commands
 	case KindAuthStatus:
 		s.state.Auth = it.Auth
+	case KindSessionInfo:
+		if s.cfg.OnTitle != nil {
+			s.callback(func() { s.cfg.OnTitle(it.Title) })
+		}
 	}
 	it.Turn = s.turn
 	s.appendLocked(it)

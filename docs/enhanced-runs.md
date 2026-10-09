@@ -292,6 +292,12 @@ What the agent is doing reaches the dashboard's state line as a `run.agent`
 (`Reading`, `Running`, `Thinking`, or `Using` for a kind without one), and
 `detail` the call's first file path or title.
 
+The agent's `session_info_update` title becomes the run's title in the
+sidebar, run header and command palette. It uses the same five-second
+coalescing and persisted `run.title` event as Standard terminal titles.
+Title changes received during session restoration apply too. Until the
+agent supplies a title, the dashboard uses the prompt's bounded first line.
+
 ## Mail
 
 Agent mail ([coordination.md](coordination.md)) reaches an enhanced run

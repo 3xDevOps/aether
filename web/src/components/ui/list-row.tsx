@@ -4,6 +4,7 @@ import { cn, focusRingInset } from '@/lib/utils'
 export function ListRow({
   leading,
   trailing,
+  action,
   hoverAction,
   selected = false,
   className,
@@ -12,6 +13,7 @@ export function ListRow({
 }: React.ComponentProps<'button'> & {
   leading?: React.ReactNode
   trailing?: React.ReactNode
+  action?: React.ReactNode
   hoverAction?: React.ReactNode
   selected?: boolean
 }) {
@@ -40,6 +42,7 @@ export function ListRow({
           <span className={cn('shrink-0 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>{trailing}</span>
         )}
       </button>
+      {action && <div className="flex shrink-0 items-center gap-2 pr-2 text-muted">{action}</div>}
       {hoverAction && (
         <div className="w-0 shrink-0 overflow-hidden group-focus-within/row:w-auto group-focus-within/row:overflow-visible group-hover/row:w-auto has-[[data-state=open]]:w-auto coarse:w-auto coarse:overflow-visible">
           <div className="flex items-center pr-1">{hoverAction}</div>

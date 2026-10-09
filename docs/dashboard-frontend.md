@@ -364,19 +364,27 @@ recede: their title is in the muted colour. A Needs you row offers the
 condition's primary action on hover, focus and a coarse pointer, the same one
 its board card shows (see [Board](#board)): **Approve** resolves in place,
 **Reply** opens the run's Session view with the composer focused, and every
-other action and the row itself go to the view the condition names. The list
-is one tab stop (roving `tabindex`); Arrow keys, Home and End move within it,
-`j` and `k` move from anywhere (starting at the open run), and `u` opens the
-next run that needs you, oldest first.
+other action and non-swarm rows go to the view the condition names. Run rows
+share one tab stop (roving `tabindex`); Arrow keys, Home and End move within
+them. Swarm-control buttons are separate tab stops. `j` and `k` move from
+anywhere (starting at the open run), and `u` opens the next run that needs
+you, oldest first.
 
-A swarm is one row showing the objective and the workers' counts ("3 working ·
-1 needs you"); while the integrator has unread agent mail the row's name and
-tooltip end with "Integrator has not read 3 messages (12 min)". Selecting it
-opens the swarm page. Only workers that need the viewer are
-listed under it, and the row then sits in Needs you. Workers never list on
-their own: a swarm whose integrator is missing or archived is rooted at its
-oldest worker (`swarmRoot` in `src/store/selectors.ts`). Relationships come
-from the run snapshot's `mission_id`, `mission_role` and `integrator_run_id`,
+A swarm's integrator row uses the agent's title, not the swarm objective.
+Every unarchived worker and previous integrator is indented beneath the current
+integrator, with a tree guide connecting the children. **Mine** also filters
+these children under Working and Finished; Needs you keeps the whole tree
+visible. Selecting a run row opens that run. The graph-node button to the
+right of the title, before the
+agent glyph, opens the swarm control page; its tooltip includes the workers'
+counts. The same `Waypoints` icon marks Swarms in navigation and New swarm in
+the command palette. Unread integrator mail still appears in the row's name
+and tooltip. The whole tree sits in Needs you while any member needs the
+viewer, but only those waiting runs contribute to that group's count.
+A swarm whose integrator is missing or archived is rooted at its oldest
+worker (`swarmRoot` in `src/store/selectors.ts`). The Board still aggregates a
+swarm into one card. Relationships come from the run snapshot's `mission_id`,
+`mission_role` and `integrator_run_id`,
 not task text. `mission.changed` coalesces background refreshes of those
 fields without blocking run-status events or overwriting newer run state;
 reconnect hydration supersedes pending relationship requests. Older servers
@@ -1304,8 +1312,8 @@ deadline.
 ### Header
 
 The header (`header.tsx`) is a 56px `PaneHeader size="run"`: the title (the
-agent's last terminal title, else the task's first line cut at 120
-characters, with a lock for a protected run), then a state line with the
+agent's last terminal or Enhanced session title, else the task's first line
+cut at 120 characters, with a lock for a protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
 the branch (click copies it) and the owner. Container queries on the state

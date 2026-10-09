@@ -15,7 +15,7 @@ import {
   MessageSquarePlus,
   Monitor,
   Moon,
-  Network,
+  Waypoints,
   PackageX,
   Pause,
   Play,
@@ -498,7 +498,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
     list.push({
       id: 'swarm',
       label: 'New swarm…',
-      Icon: Network,
+      Icon: Waypoints,
       perform: (d) => d.openDialog('swarm'),
     })
   }
