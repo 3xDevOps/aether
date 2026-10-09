@@ -169,6 +169,21 @@ describe('sidebarGroups', () => {
     expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'done', 'old', 'working'])
   })
 
+  it('applies Mine to swarm children without hiding Needs you context', () => {
+    const root = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
+    const mine = record({ id: 'mine', mission_id: 'mission_1', mission_role: 'worker' })
+    const theirs = record({ id: 'theirs', member_id: bob.id, mission_id: 'mission_1', mission_role: 'worker' })
+    const scope = input([root, mine, theirs], {}, { missions: { mission_1: mission() } })
+    expect(ids(sidebarGroups(scope)[0].runs[0].children)).toEqual(['mine', 'theirs'])
+    expect(ids(sidebarGroups({ ...scope, mineOnly: true })[0].runs[0].children)).toEqual(['mine'])
+
+    scope.ctx.runs.theirs = { ...theirs, status: 'needs-attention', reason: 'blocked: no database access' }
+    const [waiting] = sidebarGroups({ ...scope, mineOnly: true })
+    expect(waiting.key).toBe('needs-you')
+    expect(waiting.count).toBe(1)
+    expect(ids(waiting.runs[0].children)).toEqual(['mine', 'theirs'])
+  })
+
   it('keeps active workers visible under a missing-integrator fallback outside the selected workspace', () => {
     const worker = (id: string, over: Parameters<typeof run>[0] = {}) => record({
       id, mission_id: 'mission_1', mission_role: 'worker', workspace_id: otherWorkspace.id, ...over,

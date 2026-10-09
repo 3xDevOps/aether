@@ -372,8 +372,10 @@ you, oldest first.
 
 A swarm's integrator row uses the agent's title, not the swarm objective.
 Every unarchived worker and previous integrator is indented beneath the current
-integrator, with a tree guide connecting the children. Selecting a run row
-opens that run. The graph-node button to the right of the title, before the
+integrator, with a tree guide connecting the children. **Mine** also filters
+these children under Working and Finished; Needs you keeps the whole tree
+visible. Selecting a run row opens that run. The graph-node button to the
+right of the title, before the
 agent glyph, opens the swarm control page; its tooltip includes the workers'
 counts. The same `Waypoints` icon marks Swarms in navigation and New swarm in
 the command palette. Unread integrator mail still appears in the row's name

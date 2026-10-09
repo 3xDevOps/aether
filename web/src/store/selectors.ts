@@ -191,7 +191,8 @@ export function sidebarGroups(s: RunsInput): SidebarGroup[] {
       label: groupLabel[key],
       runs: groups[key].map((tree) => tree.swarm ? {
         ...tree,
-        children: [...tree.swarm.members]
+        children: tree.swarm.members
+          .filter((row) => key === 'needs-you' || !s.mineOnly || row.run.member_id === s.ctx.viewerID)
           .sort((a, b) => a.run.created_at.localeCompare(b.run.created_at) || a.run.id.localeCompare(b.run.id))
           .map((row) => located(row, s)),
       } : tree),
