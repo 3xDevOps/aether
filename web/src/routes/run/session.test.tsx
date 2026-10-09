@@ -408,11 +408,11 @@ describe('Enhanced multiplayer controls', () => {
       receiveTakeover(session, 'review', request)
       expect(button.getAttribute('aria-disabled')).toBe('true')
       expect(useStore.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+      session.send({ type: 'control', ok: true, has_control: true, control_generation: 5 })
       receiveTakeover(session, 'granted', request)
-      const acquisition = session.socket.frames().at(-1) as { request_id: number }
-      session.send({ type: 'control', request_id: acquisition.request_id, ok: true, has_control: true, control_generation: 5 })
       expect(screen.getByRole('button', { name: 'Release' })).toBeDefined()
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
+      expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
     } finally {
       view.unmount()
       vi.useRealTimers()

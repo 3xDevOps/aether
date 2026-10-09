@@ -145,7 +145,6 @@ export function subscribeSession(store: RootStore, runID: string, autoWrite: boo
           active ? { ...takeover, receivedAt: performance.now() } : undefined,
           frame.ok === false ? frame.error ?? 'Takeover request refused' : requester && takeover?.phase === 'denied' ? 'The controller denied your takeover request.' : undefined,
         )
-        if (takeover?.phase === 'granted' && takeover.requester_session_id === sessionID) created.stream.control(true)
       },
       onState: (state, error) => store.getState().acpStream(runID, state, error),
     })

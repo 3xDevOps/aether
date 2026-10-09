@@ -1925,6 +1925,13 @@ does not run its agent over ACP`. Every frame is JSON text.
    with `revocation_reason` when another session takes the lease. The socket
    stays open as a viewer.
 
+   A successful timed takeover sends the requester an unsolicited `control`
+   frame with `ok:true`, `has_control:true`, its session id and the new
+   generation before the `takeover` frame with phase `granted`. Use that
+   acknowledgement to enable input; do not acquire the already-held lease
+   again. The same acknowledgement is sent whether the holder accepts or
+   the seven-second review expires.
+
 The socket closes **1012** `session stream ended; resubscribe with
 after_seq` when the session ends or restarts, when the run has no session
 and one starts, or when the client falls 1024 items behind: reconnect with

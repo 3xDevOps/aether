@@ -127,3 +127,83 @@ func TestACPStreamLease(t *testing.T) {
 		t.Fatal("the lease is still held after release")
 	}
 }
+
+func TestACPStreamTimedTakeoverAcknowledgesNewLease(t *testing.T) {
+	e, run := newACPEnv(t)
+	clock := takeoverClock(e)
+	e.runs.acpStream = scheduler.ACPStream{Items: make(chan acphost.Item)}
+	holder, initial, err := e.srv.Local(e.member.ID).ACP(t.Context(), protocol.ACPStreamRequest{
+		RunID: string(run.ID), Write: true, ControlSessionID: "holder",
+	})
+	if err != nil || !initial.HasControl {
+		t.Fatalf("holder: %+v, %v", initial, err)
+	}
+	defer func() { _ = holder.Close() }()
+	go func() { _, _ = io.Copy(io.Discard, holder) }()
+
+	_, member := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	requester, mirror, err := e.srv.Local(member.ID).ACP(t.Context(), protocol.ACPStreamRequest{
+		RunID: string(run.ID), ControlSessionID: "requester",
+	})
+	if err != nil || mirror.HasControl {
+		t.Fatalf("requester: %+v, %v", mirror, err)
+	}
+	defer func() { _ = requester.Close() }()
+	reader := bufio.NewReader(requester)
+	next := func() protocol.DashAttachControl {
+		t.Helper()
+		line, readErr := protocol.ReadLine(reader)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var frame protocol.DashAttachControl
+		if err := json.Unmarshal(line, &frame); err != nil {
+			t.Fatalf("control frame %s: %v", line, err)
+		}
+		return frame
+	}
+	encoder := json.NewEncoder(requester)
+	if err := encoder.Encode(takeoverCommand("start", 1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if frame := next(); frame.TakeoverState == nil || frame.TakeoverState.Phase != "holding" {
+		t.Fatalf("start: %+v", frame)
+	}
+	clock.Advance(takeoverHold)
+	if err := encoder.Encode(takeoverCommand("confirm", 2, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if frame := next(); frame.TakeoverState == nil || frame.TakeoverState.Phase != "review" {
+		t.Fatalf("confirm: %+v", frame)
+	}
+	e.srv.takeovers.mu.Lock()
+	pending := e.srv.takeovers.pending[run.ID]
+	e.srv.takeovers.mu.Unlock()
+	if pending == nil {
+		t.Fatal("no pending takeover")
+	}
+	clock.Advance(takeoverReview)
+	go e.srv.advanceTakeover(pending)
+	granted := next()
+	if granted.Type != protocol.DashAttachControlFrame || !granted.OK || !granted.HasControl ||
+		granted.ControlSessionID != "requester" || granted.ControlGeneration <= initial.ControlGeneration {
+		t.Fatalf("takeover did not acknowledge the new lease: %+v", granted)
+	}
+	if frame := next(); frame.TakeoverState == nil || frame.TakeoverState.Phase != "granted" {
+		t.Fatalf("grant notification: %+v", frame)
+	}
+	if err := e.srv.cfg.Control.Validate(string(run.ID), "holder", initial.ControlGeneration); err == nil {
+		t.Fatal("the displaced holder can still write")
+	}
+	if err := encoder.Encode(protocol.DashAttachControl{
+		Type: protocol.DashAttachControlFrame, RequestID: 3, ControlGeneration: granted.ControlGeneration,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if released := next(); !released.OK || released.HasControl {
+		t.Fatalf("release with the acknowledged generation: %+v", released)
+	}
+	if _, held := e.srv.cfg.Control.Status(string(run.ID)); held {
+		t.Fatal("the new controller could not release the lease")
+	}
+}
