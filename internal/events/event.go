@@ -31,7 +31,7 @@ const (
 	// TypeRunDeleted tells clients that a run's durable record was removed.
 	TypeRunDeleted       Type = "run.deleted"
 	TypeWorkspaceDeleted Type = "workspace.deleted"
-	// TypeRunTitle carries the latest terminal title for a run.
+	// TypeRunTitle carries the latest agent-provided title for a run.
 	TypeRunTitle Type = "run.title"
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected  Type = "run.protected"
@@ -152,7 +152,7 @@ func (WorkspaceDeletedPayload) EventType() Type { return TypeWorkspaceDeleted }
 
 func init() { registerPayload[WorkspaceDeletedPayload](TypeWorkspaceDeleted) }
 
-// RunTitlePayload reports the latest terminal title for a run.
+// RunTitlePayload reports the latest agent-provided title for a run.
 type RunTitlePayload struct {
 	Title string `json:"title"`
 }

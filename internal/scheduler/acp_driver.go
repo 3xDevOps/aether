@@ -347,6 +347,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})
 		},
 		OnActivity: func(kind, target string) { d.activity(entry, kind, target) },
+		OnTitle:    func(title string) { d.s.setRunTitle(runID, title) },
 	})
 	if err != nil {
 		if stopErr := d.stopExec(exec); stopErr != nil {

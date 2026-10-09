@@ -1,12 +1,63 @@
 package scheduler
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 )
+
+func TestEnhancedRunTitleFollowsAgentAcrossReopen(t *testing.T) {
+	oldInterval := runTitleDebounceInterval
+	runTitleDebounceInterval = 25 * time.Millisecond
+	t.Cleanup(func() { runTitleDebounceInterval = oldInterval })
+
+	e, rt := newACPEnv(t)
+	fixture, err := acpmock.Load("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.Initialize = bytes.Replace(fixture.Initialize, []byte(`"resume": {},`), nil, 1)
+	rt.fixture = fixture
+	sub := e.subscribe(t)
+	run := e.launchACP(t, "say pong")
+	awaitTitle := func(want string) {
+		t.Helper()
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case ev := <-sub.Events():
+				title, ok := ev.Payload.(events.RunTitlePayload)
+				if !ok || ev.RunID != run.ID || title.Title != want {
+					continue
+				}
+				fresh, readErr := e.db.GetRun(t.Context(), run.ID)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if fresh.Title != want || fresh.Task != "say pong" {
+					t.Fatalf("title = %q, task = %q", fresh.Title, fresh.Task)
+				}
+				return
+			case <-timer.C:
+				t.Fatalf("no run.title event for %q", want)
+			}
+		}
+	}
+	awaitTitle("Reply with exactly the word pong and nothing else; do not use tools.")
+	waitItems(t, e.sched, run.ID, "first turn", turnEnded("end_turn", 1))
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sched.Relaunch(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	awaitTitle("Pong response request")
+}
 
 func TestSetRunTitleDebouncesAndKeepsLatest(t *testing.T) {
 	oldInterval := runTitleDebounceInterval
