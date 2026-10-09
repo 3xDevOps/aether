@@ -151,6 +151,41 @@ describe('sidebarGroups', () => {
     ])
   })
 
+  it('keeps every visible swarm run beneath its current integrator without inflating Needs you', () => {
+    const swarmRun = (id: string, over: Parameters<typeof run>[0] = {}) => record({
+      id, mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'old', ...over,
+    })
+    const groups = sidebarGroups(input([
+      swarmRun('old', { mission_role: 'integrator', status: 'failed' }),
+      swarmRun('run_integrator', { mission_role: 'integrator' }),
+      swarmRun('working'),
+      swarmRun('blocked', { status: 'needs-attention', reason: 'blocked: no database access' }),
+      swarmRun('done', { status: 'merged' }),
+      swarmRun('archived', { status: 'merged', archived_at: '2026-08-15T00:00:00Z' }),
+    ], {}, { missions: { mission_1: mission() } }))
+
+    expect(groups.map((group) => [group.key, group.count])).toEqual([['needs-you', 1]])
+    expect(ids(groups[0].runs)).toEqual(['run_integrator'])
+    expect(ids(groups[0].runs[0].children)).toEqual(['blocked', 'done', 'old', 'working'])
+  })
+
+  it('keeps active workers visible under a missing-integrator fallback outside the selected workspace', () => {
+    const worker = (id: string, over: Parameters<typeof run>[0] = {}) => record({
+      id, mission_id: 'mission_1', mission_role: 'worker', workspace_id: otherWorkspace.id, ...over,
+    })
+    const groups = sidebarGroups(input([
+      worker('root', { created_at: '2026-08-14T09:00:00Z' }),
+      worker('working'),
+      worker('blocked', { status: 'needs-attention', reason: 'blocked: no database access' }),
+    ], { mineOnly: true }))
+
+    expect(ids(groups[0].runs)).toEqual(['root'])
+    expect(groups[0].count).toBe(1)
+    expect(groups[0].runs[0].children.map((row) => [row.run.id, row.workspaceName])).toEqual([
+      ['blocked', otherWorkspace.name], ['working', otherWorkspace.name],
+    ])
+  })
+
   it('is empty without runs', () => {
     expect(sidebarGroups(input([]))).toEqual([])
   })

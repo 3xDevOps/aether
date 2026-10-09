@@ -6,7 +6,7 @@ import {
   FolderTree,
   History,
   LayoutGrid,
-  ListTodo,
+  Waypoints,
   MonitorSmartphone,
   Settings,
   ShieldQuestion,
@@ -32,7 +32,7 @@ export interface Surface {
 export function surfaces(cap: Capability, admin = false): Surface[] {
   const list: Surface[] = [{ name: 'board', label: 'Board', Icon: LayoutGrid, place: 'nav' }]
   if (cap.hasMethod('mission.list'))
-    list.push({ name: 'missions', label: 'Swarms', Icon: ListTodo, place: 'nav' })
+    list.push({ name: 'missions', label: 'Swarms', Icon: Waypoints, place: 'nav' })
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
   if (
