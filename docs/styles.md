@@ -314,10 +314,12 @@ visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.
 
 Live local control draws a 1px `--accent-fill` outline around the terminal
-viewport, alongside the toolbar's **You control** and **Release**. The
-outline is pointer-transparent and does not change layout. It appears only
-with live, acknowledged writable control, outside replay and history
-reading. Acquisition and voluntary release propagate along it over 720ms,
+viewport or the Enhanced Session conversation and composer, excluding
+toolbars and Details. The outline is pointer-transparent and does not change
+layout. It appears only with live, acknowledged writable control. Terminal
+replay and history reading hide it; reading earlier Enhanced items does not
+disable the composer or hide its control border. Acquisition and voluntary
+release propagate along it over 720ms,
 decelerating toward the endpoint. A control-lost takeover turns it red over
 540ms and retracts it over 1440ms. An occupied five-second hold fills **Take
 control** and the holder's **Release** diagonally in red and traces the

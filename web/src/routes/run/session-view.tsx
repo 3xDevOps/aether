@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { VList, type VListHandle } from 'virtua'
+import { TerminalControlBorder } from '@/components/terminal-control-border'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
@@ -244,7 +245,14 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      {run.mode === 'acp' && (
+        <TerminalControlBorder
+          appearance={agent.localControl ? 'active'
+            : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
+          takeoverProgress={agent.takeover.holderProgress}
+        />
+      )}
       {hasMessages && (
         <div className="mx-auto flex w-full max-w-[736px] shrink-0 justify-end px-4 pt-1">
           <Button size="sm" variant="ghost" aria-pressed={!showMessages} onClick={() => setShowMessages(!showMessages)}>

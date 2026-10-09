@@ -88,7 +88,7 @@ describe('the session stream owner', () => {
       allowSessionAutoWrite('run_1')
       await vi.advanceTimersByTimeAsync(60_000)
       expect(controlFrames(session).map((frame) => frame.write)).toEqual([true, false])
-      expect(store.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+      expect(store.getState().acpSessions.run_1?.control).toMatchObject({ has_control: false, loss: 'release' })
     } finally {
       stop()
     }
@@ -113,13 +113,37 @@ describe('the session stream owner', () => {
     try {
       session.open({ has_control: false })
       session.send({ type: 'control', request_id: 1, ok: true, has_control: true, control_generation: 3 })
-      session.send({ type: 'control', has_control: false, control_generation: 3, revocation_reason: 'takeover' })
+      session.send({
+        type: 'control', has_control: false, control_generation: 3,
+        control_session_id: session.header().control_session_id, revocation_reason: 'takeover',
+      })
       await vi.advanceTimersByTimeAsync(0)
       store.getState().applyRunController('run_1', 'mem_bob')
       store.getState().applyRunController('run_1', '')
       await vi.advanceTimersByTimeAsync(60_000)
       expect(controlFrames(session)).toHaveLength(1)
-      expect(store.getState().acpSessions.run_1?.control?.has_control).toBe(false)
+      expect(store.getState().acpSessions.run_1?.control).toMatchObject({ has_control: false, loss: 'takeover' })
+    } finally {
+      stop()
+    }
+  })
+
+  it.each([
+    { reason: 'permission', generation: 3, currentSession: true },
+    { reason: 'revoked', generation: 3, currentSession: true },
+    { reason: 'takeover', generation: 2, currentSession: true },
+    { reason: 'takeover', generation: 3, currentSession: false },
+  ])('does not animate $reason for generation $generation, current session $currentSession', ({ reason, generation, currentSession }) => {
+    const { store, stop, session } = setup(false)
+    try {
+      session.open({ has_control: true, control_generation: 3 })
+      session.send({
+        type: 'control', has_control: false, control_generation: generation,
+        control_session_id: currentSession ? session.header().control_session_id : 'another-tab',
+        revocation_reason: reason,
+      })
+      expect(store.getState().acpSessions.run_1?.control).toMatchObject({ has_control: false })
+      expect(store.getState().acpSessions.run_1?.control?.loss).toBeUndefined()
     } finally {
       stop()
     }

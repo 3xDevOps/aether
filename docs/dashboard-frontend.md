@@ -1382,6 +1382,15 @@ do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
+`SessionView` reuses `TerminalControlBorder` around the Enhanced timeline and
+composer, excluding the frame toolbar and Details. Its appearance follows
+the acknowledged ACP lease, not the unused agent terminal's history or
+connection state. Voluntary release retracts it; takeover feedback requires
+an explicit revocation matching the held session and generation.
+Disconnects, permission loss and other fencing hide it immediately. The
+shared component supplies acquisition, holder progress, takeover loss and
+reduced-motion behavior.
+
 ### Session view
 
 The Session view (`session-view.tsx`) is the run's conversation: what was said
