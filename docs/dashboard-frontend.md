@@ -577,10 +577,11 @@ grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
 Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
 
-**The bars are tokens, not repeated numbers.** `--window-bar-height` (35px,
-the desktop drag strip) and `--top-bar-height` (48px, the phone top bar,
-border included) are declared in `src/index.css`, and every offset measured
-from the top bar reads the token - the palette's drop and the phone sheets.
+**Header offsets follow the rendered layout.** `--top-bar-height` (48px,
+border included) in `src/index.css` sets the phone toolbar's height.
+The app header reports its measured bottom edge through `--app-header-bottom`
+for the command palette. Desktop dragging uses the navigation row, not a
+separate height token.
 `--safe-top` is the top safe-area inset under a name, so that
 a surface measuring from the top bar can add the same amount the bar itself
 grew by. It carries a `0px` fallback because a bare `env()` in a browser
