@@ -1034,6 +1034,21 @@ with `{"hosts":{}}`, matching native gh's JSON-status behavior when no login
 exists. This lets the browser begin device authorization; a nonzero status
 remains a CLI failure, not evidence of a logged-out account.
 
+The provider harness passes the built `aether-server` through its test-only
+`AETHER_E2E_GITHUB_SERVER` setting into `Config.ServerBinary`. The staged
+`aether-internal` helper must use the production `dev-exec` dispatcher, not
+the Go test executable running the provider harness.
+
+Native pipe regressions exercise the real supervisor and Docker-multiplexed
+attachment: the device code and URL must arrive while the provider is still
+waiting for approval, with attachment stdin open. Approval and cancellation
+then produce their respective exit states:
+
+```sh
+go test ./internal/devexec ./internal/runtime \
+  -run '^Test(SupervisorPipePublishesDeviceCodeBeforeApproval|ExecAttachmentPublishesDeviceCodeBeforeEOF)$'
+```
+
 Scenarios cover private read-only selection, inline acceptance pinned to both
 the configuration generation and the reviewed SHA,
 persisted connection reuse on the admin Agent step and in Settings, pagination

@@ -547,6 +547,10 @@ func TestGitHubBrowserProviderHarness(t *testing.T) {
 	if root == "" {
 		return
 	}
+	serverBinary := os.Getenv("AETHER_E2E_GITHUB_SERVER")
+	if serverBinary == "" {
+		t.Fatal("GitHub browser harness requires the built aether-server binary")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	originalTransport := http.DefaultTransport
@@ -603,6 +607,7 @@ func TestGitHubBrowserProviderHarness(t *testing.T) {
 		DataDir:       filepath.Join(root, "data"),
 		Addr:          os.Getenv("AETHER_E2E_GITHUB_ADDR"),
 		StandardImage: os.Getenv("AETHER_E2E_GITHUB_IMAGE"),
+		ServerBinary:  serverBinary,
 	})
 	if err != nil {
 		t.Fatal(err)

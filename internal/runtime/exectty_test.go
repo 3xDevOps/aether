@@ -70,6 +70,71 @@ func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 	}
 }
 
+func TestExecAttachmentPublishesDeviceCodeBeforeEOF(t *testing.T) {
+	reader, writer := net.Pipe()
+	attachment := newExecAttachment(nil, "oauth-exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	t.Cleanup(func() { _ = attachment.Close(); _ = writer.Close() })
+	const code = "! First copy your one-time code: ABCD-1234"
+	const url = "Open this URL to continue in your web browser: https://github.com/login/device"
+	published := make(chan error, 1)
+	go func() {
+		// Split a native line across Docker frames and keep the connection
+		// open until the caller has seen both streams, as device login does.
+		for _, frame := range []struct {
+			stream stdcopy.StdType
+			text   string
+		}{
+			{stdcopy.Stderr, code[:20]},
+			{stdcopy.Stdout, url + "\n"},
+			{stdcopy.Stderr, code[20:] + "\n"},
+		} {
+			if err := writeExecFrame(writer, frame.stream, []byte(frame.text)); err != nil {
+				published <- err
+				return
+			}
+		}
+		published <- nil
+	}()
+	for _, stream := range []struct {
+		reader io.Reader
+		want   string
+	}{
+		{attachment.Stderr(), code},
+		{attachment.Stdout(), url},
+	} {
+		line := make(chan string, 1)
+		go func() {
+			scanner := bufio.NewScanner(stream.reader)
+			if scanner.Scan() {
+				line <- scanner.Text()
+			}
+			close(line)
+		}()
+		select {
+		case got := <-line:
+			if got != stream.want {
+				t.Fatalf("live framed output = %q, want %q", got, stream.want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("device output was held until attachment EOF")
+		}
+	}
+	if err := <-published; err != nil {
+		t.Fatal(err)
+	}
+	if !attachment.connected() {
+		t.Fatal("device output was published only after the attachment closed")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-attachment.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("attachment did not finish after the provider closed its output")
+	}
+}
+
 func TestPipeExecStdoutIsLossless(t *testing.T) {
 	reader, writer := net.Pipe()
 	attachment := newExecAttachment(nil, "exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})

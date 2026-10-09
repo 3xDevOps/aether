@@ -124,6 +124,7 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
         AETHER_E2E_GITHUB_ROOT: dir,
         AETHER_E2E_GITHUB_ADDR: addr,
         AETHER_E2E_GITHUB_IMAGE: options.standardImage ?? standardImage,
+        AETHER_E2E_GITHUB_SERVER: binaries().server,
       } : {}),
     },
   )
