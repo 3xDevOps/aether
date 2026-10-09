@@ -266,11 +266,15 @@ compact rows. Theme is in **Settings > Appearance** and the footer menu, with
 explicit **System**, **Light** and **Dark** choices and matching palette
 commands.
 
-`focusRing` and `field` in `web/src/lib/utils.ts` are the shared focus and
-field styles. Preserve their keyboard outline, inset behavior for full-bleed
-rows, readable placeholders, disabled and read-only states, menu roving
-focus, typeahead, portalling and viewport flipping. Shared primitives retain
-their props, events, refs and accessibility contracts.
+`focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared
+focus and field styles. Buttons and navigation keep their keyboard outlines;
+text fields use a 1px inset accent outline over the existing border with a
+faint 4px glow and no offset gap. The outline remains visible in forced-colors
+mode, where box shadows disappear. The Session composer draws this treatment
+on its enclosing box, not its embedded textarea, so attachments do not clip
+the highlight. Preserve readable placeholders, disabled and read-only states,
+menu roving focus, typeahead, portalling and viewport flipping. Shared
+primitives retain their props, events, refs and accessibility contracts.
 
 The run header shows one primary action for the run's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
@@ -284,8 +288,12 @@ controller and watchers directly in that strip. On narrow strips the watcher
 roster gets its own horizontally scrollable row; control actions stay separate.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.
-Request cards use the needs-you soft fill; the Session column is 736px wide
-with no row borders.
+Request cards use the needs-you soft fill; the Session transcript column is
+736px wide with no row borders. Its composer fills the available pane with
+balanced 16px side gutters, including when Details is open. An empty ACP
+conversation shows a subdued Aether mark above the centered run title and
+metadata rows: workspace, agent, branch, owner and creation time. Symmetric
+scrollbar gutters keep the overview centered when its content needs scrolling.
 
 ## Run state and motion
 

@@ -1426,8 +1426,25 @@ shows only the failures of its own actions. **Hide agent messages** sits on
 its own row above the list. `Esc` in an empty composer focuses the list's
 viewport; the next `Esc` is the run's `leave-run`.
 
+The composer fills the Session pane with 16px gutters on both sides; on wide
+screens, opening Details narrows the pane rather than overlaying the composer.
+Its focus highlight follows the outer border around the textarea and attachments.
+Transcript rows retain their 736px reading width.
+
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#the-session-item-log) instead.
+With no conversation rows or older-history control, the pane shows a
+decorative, low-contrast Aether mark above the run's title, workspace, agent
+and mode, branch, owner and creation time. The title and each metadata row
+are centered in the conversation pane, including when long metadata needs
+scrolling. The overview gives way to the conversation as rows arrive. History
+errors and their **Retry** action remain visible above it; the overview does
+not imply that the agent is connected.
+
+Screenshots with fixture data: [desktop](media/acp-session-desktop.png),
+[phone](media/acp-session-phone.png),
+[history error](media/acp-session-history-error.png).
+
 `useAgentTerminal` subscribes the run to `/ws/acp/<run>` while the run is open
 and not `switching`; `store/session-stream.ts` owns the socket
 (`lib/acp-stream.ts`: the events feed's backoff and `onWake`, `after_seq`

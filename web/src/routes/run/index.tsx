@@ -164,6 +164,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
               <SessionView
                 run={run}
                 agent={agent}
+                agentName={agentName}
                 room={room}
                 nav={nav}
                 active={view === 'session'}

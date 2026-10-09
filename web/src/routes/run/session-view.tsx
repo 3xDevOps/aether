@@ -5,8 +5,11 @@ import { VList, type VListHandle } from 'virtua'
 import { TerminalControlBorder } from '@/components/terminal-control-border'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
+import { runLabel } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
+import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
@@ -111,9 +114,34 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
   return text
 }
 
-export function SessionView({ run, agent, room, nav, active, textarea, focusComposer, onComposing, shells, switchable }: {
+function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string }) {
+  const workspace = useStore((s) => s.workspaces[run.workspace_id]?.name ?? run.workspace_id)
+  const owner = useStore((s) => s.members[run.member_id]?.display_name ?? run.member_id)
+  return (
+    <section aria-label="Run overview" className="flex min-h-0 flex-1 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable_both-edges]">
+      <div className="m-auto flex w-full min-w-0 max-w-sm flex-col items-center gap-6">
+        <div
+          aria-hidden="true"
+          className="h-36 max-h-[24vh] w-52 shrink-0 bg-icon-faint/15"
+          style={{ mask: 'url(/aether-mark.png) center / contain no-repeat' }}
+        />
+        <h2 className="line-clamp-3 max-w-full text-center text-title break-words text-muted">{runLabel(run)}</h2>
+        <dl className="flex w-full min-w-0 flex-col gap-2 text-center text-ui-sm text-muted">
+          <div className="flex flex-wrap justify-center gap-x-2"><dt>Workspace</dt><dd className="min-w-0 break-words">{workspace}</dd></div>
+          <div className="flex flex-wrap justify-center gap-x-2"><dt>Agent</dt><dd className="min-w-0 break-words">{agentName} · {modeLabel[run.mode] ?? run.mode}</dd></div>
+          <div className="flex flex-wrap justify-center gap-x-2"><dt>Branch</dt><dd className="min-w-0 font-code break-all">{run.branch}</dd></div>
+          <div className="flex flex-wrap justify-center gap-x-2"><dt>Owner</dt><dd className="min-w-0 break-words">{owner}</dd></div>
+          <div className="flex flex-wrap justify-center gap-x-2"><dt>Created</dt><dd><RelativeTime at={run.created_at} /></dd></div>
+        </dl>
+      </div>
+    </section>
+  )
+}
+
+export function SessionView({ run, agent, agentName, room, nav, active, textarea, focusComposer, onComposing, shells, switchable }: {
   run: RunRecord
   agent: AgentTerminal
+  agentName: string
   room: RunRoom
   nav: RunNavigation
   active: boolean
@@ -268,7 +296,7 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
       <div
         ref={viewport}
         tabIndex={-1}
-        className="relative min-h-0 flex-1 outline-none"
+        className="relative flex min-h-0 flex-1 flex-col outline-none"
         onWheelCapture={markInput}
         onTouchMoveCapture={markInput}
         onKeyDownCapture={markInput}
@@ -293,12 +321,14 @@ export function SessionView({ run, agent, room, nav, active, textarea, focusComp
             )}
           </div>
         )}
+        {enhanced && count === 0 && <SessionWelcome run={run} agentName={agentName} />}
         <VList
           ref={list}
           role="log"
           aria-live="off"
           aria-label="Session"
-          className="h-full"
+          className="min-h-0 flex-1"
+          style={enhanced && count === 0 ? { display: 'none' } : undefined}
           data={older ? [null, ...flat] : flat}
           shift={shift}
           keepMounted={focused !== null && focused < count ? [focused] : undefined}
