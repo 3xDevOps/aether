@@ -129,7 +129,7 @@ export function GitHubRepositoryDialog({ client = api, onCreated, onClose }: {
     if (action === 'adopt') reviewed.current = mirror!.observed_commit!
     try {
       const result = action === 'refresh' ? await client.workspaceMirrorRefresh(workspace.id)
-        : action === 'adopt' ? await client.workspaceMirrorAdopt(workspace.id, mirror!.generation!)
+        : action === 'adopt' ? await client.workspaceMirrorAdopt(workspace.id, mirror!.generation!, mirror!.observed_commit!)
           : await client.workspaceMirrorStatus(workspace.id)
       if (!current()) return
       setMirror(result)
@@ -208,7 +208,7 @@ export function GitHubRepositoryDialog({ client = api, onCreated, onClose }: {
           <p className="break-all text-ui-sm text-muted">Revision: <code>{mirror?.observed_commit || 'No revision fetched yet'}</code></p>
           {mirror?.accepted_commit && <p className="break-all text-ui-sm">Accepted revision: <code>{mirror.accepted_commit}</code></p>}
           <p className="text-ui-sm text-muted">Source status: {mirror?.status ?? 'Not configured'}</p>
-          <p className="text-ui-sm">{canAdopt ? 'Review this exact revision before accepting it as the initial base.' : 'The workspace is retained. A successful fetch and explicit acceptance are required before it is ready.'}</p>
+          <p className="text-ui-sm">{canAdopt ? 'Review this exact revision before accepting it as the initial base. If the candidate changes, use Check source status to review the new revision before choosing Use repository again.' : 'The workspace is retained. A successful fetch and explicit acceptance are required before it is ready.'}</p>
           {mirror?.warning && <p role="status" className="text-ui-sm">{mirror.warning}</p>}
           {mirror?.status === 'auth-failed' && <p className="text-ui-sm">Open Source settings to reconnect GitHub using the authorizing account, then return here and retry the fetch. To change the bound account or source branch, explicitly save the new source settings for this workspace.</p>}
           <div className="flex flex-wrap gap-2">

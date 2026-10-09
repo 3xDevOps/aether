@@ -321,11 +321,16 @@ aether workspace mirror status --workspace myproject
 ```
 
 Unlike dashboard import, CLI `configure` does not fetch until `refresh`.
-After reviewing the returned candidate, adopt its actual generation:
+After reviewing the returned candidate, adopt its generation and full observed commit:
 
 ```sh
-aether workspace mirror adopt --workspace myproject --generation <n> --yes
+aether workspace mirror adopt --workspace myproject --generation <n> --commit <reviewed-sha> --yes
 ```
+
+Use the generation and full observed commit from the state you reviewed. If
+adoption reports a conflict, keep the workspace, refresh its status, and explicitly
+review the current candidate before adopting again; never substitute a newer SHA
+without review.
 
 ### Private remote repository
 
@@ -371,11 +376,13 @@ Install the public key printed by `configure`, then:
 ```sh
 aether workspace mirror refresh --workspace myproject
 aether workspace mirror status --workspace myproject
-aether workspace mirror adopt --workspace myproject --generation <n> --yes
+aether workspace mirror adopt --workspace myproject --generation <n> --commit <reviewed-sha> --yes
 ```
 
-Replace `<n>` with the reviewed generation from `status`. After installing a
-key, use **Verify** / **Refresh**, not **Save source** or `configure`:
+Replace `<n>` and `<reviewed-sha>` with the generation and full observed commit
+you reviewed from `status`. A conflict requires fresh status and explicit review
+before another adoption. After installing a key, use **Verify** / **Refresh**,
+not **Save source** or `configure`:
 reconfiguration rotates the key and generation. To recover a misplaced public
 key, reopen the source mirror on the workspace's repository page or run
 `mirror status` on the same workspace.

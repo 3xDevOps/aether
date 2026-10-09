@@ -396,7 +396,7 @@ func TestServiceContainerMirroredProposalPreservesBase(t *testing.T) {
 	if err != nil || refreshed.Status != domain.MirrorStatusReady || !refreshed.Changed || refreshed.CandidateCommit == "" {
 		t.Fatalf("mirror refresh = %+v, %v", refreshed, err)
 	}
-	adopted, err := mirrorGit.AdoptWorkspaceMirror(ctx, f.workspace.ID, 1)
+	adopted, err := mirrorGit.AdoptWorkspaceMirror(ctx, f.workspace.ID, 1, refreshed.CandidateCommit)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -183,11 +183,11 @@ export function WorkspaceMirrorDialog({
   }
 
   const adopt = async () => {
-    if (busy || !result?.generation) return
+    if (busy || !result?.generation || !result.observed_commit) return
     setBusy(true)
     setError(null)
     try {
-      const current = await client.workspaceMirrorAdopt(workspaceID, result.generation)
+      const current = await client.workspaceMirrorAdopt(workspaceID, result.generation, result.observed_commit)
       if (!isCurrent()) return
       setResult(current)
       onStatusChange?.(current)
@@ -327,6 +327,9 @@ export function WorkspaceMirrorDialog({
                   <div className="space-y-2 border-t border-seam/70 pt-2">
                     <p className="text-ui-sm text-state-needs-you">
                       Candidate SHA <span className="font-code">{candidate}</span> is not accepted.
+                    </p>
+                    <p className="text-ui-sm text-muted">
+                      Adoption accepts only this reviewed SHA. If the candidate changes, refresh the source and review it before confirming again.
                     </p>
                     <Button
                       type="button"

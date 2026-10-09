@@ -1808,7 +1808,7 @@ func TestMirrorLifecycleWithExplicitLocalTransportSeam(t *testing.T) {
 	if first.Status != domain.MirrorStatusPending || first.CandidateCommit == "" {
 		t.Fatalf("initial mirror result = %+v", first)
 	}
-	adopted, err := e.AdoptWorkspaceMirror(ctx, "mirror", int64(1))
+	adopted, err := e.AdoptWorkspaceMirror(ctx, "mirror", int64(1), first.CandidateCommit)
 	if err != nil {
 		t.Fatalf("AdoptWorkspaceMirror: %v", err)
 	}
@@ -1867,7 +1867,7 @@ func TestMirrorLifecycleWithExplicitLocalTransportSeam(t *testing.T) {
 		t.Fatalf("old candidate ref survived reconfigure: %s", got)
 	}
 	var staleErr *MirrorError
-	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 1); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
+	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 1, first.CandidateCommit); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
 		t.Fatalf("stale generation adoption error = %v, want not-configured", err)
 	}
 	if err := e.DisableWorkspaceMirror(ctx, "mirror"); err != nil {
@@ -1883,7 +1883,7 @@ func TestMirrorLifecycleWithExplicitLocalTransportSeam(t *testing.T) {
 	if generation, err := e.MirrorGeneration(ctx, "mirror"); err != nil || generation != 3 {
 		t.Fatalf("durable generation after reconfigure = %d, %v; want 3", generation, err)
 	}
-	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 2); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
+	if _, err := e.AdoptWorkspaceMirror(ctx, "mirror", 2, first.CandidateCommit); !errors.As(err, &staleErr) || staleErr.Kind != MirrorErrorNotConfigured {
 		t.Fatalf("disabled generation adoption error = %v, want not-configured", err)
 	}
 }

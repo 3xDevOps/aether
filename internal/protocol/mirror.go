@@ -17,11 +17,12 @@ type WorkspaceMirrorConfigureParams struct {
 	GitHubAccountID int64  `json:"github_account_id,omitempty"`
 }
 
-// WorkspaceMirrorAdoptParams promotes the candidate observed for a specific
-// mirror generation to the accepted base.
+// WorkspaceMirrorAdoptParams promotes the explicitly reviewed candidate commit
+// for a specific mirror configuration generation to the accepted base.
 type WorkspaceMirrorAdoptParams struct {
-	WorkspaceID string `json:"workspace_id"`
-	Generation  int64  `json:"generation"`
+	WorkspaceID    string `json:"workspace_id"`
+	Generation     int64  `json:"generation"`
+	ExpectedCommit string `json:"expected_commit"`
 }
 
 // WorkspaceMirrorResult is the public state of a workspace mirror. It never

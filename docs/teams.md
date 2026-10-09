@@ -367,8 +367,9 @@ For a local clone, select its existing base branch when creating the workspace,
 then link its absolute path and use **Push now**. For a remote import, creation
 retains a workspace even if configuring or fetching fails. On that
 workspace's repository page (**Repository** in the workspace selector),
-repair the source, verify it, and explicitly adopt the observed generation;
-do not import again. Link or relink a clone later from the same page.
+repair the source, verify it, and explicitly adopt the reviewed commit at its
+configuration generation; do not import again. Link or relink a clone later
+from the same page.
 
 An admin can permanently delete an inactive workspace by name or ID:
 
@@ -492,7 +493,13 @@ the source mirror and use **Verify** or **Refresh**; from the CLI:
   becomes **ready** and moves the mirrored base. A rewrite or local/server divergence retains the
   candidate without moving the accepted base; an administrator must review
   and explicitly **Adopt candidate** (`aether workspace mirror adopt
-  --workspace myproject --generation <n> --yes`). **Disable** requires
+  --workspace myproject --generation <n> --commit <reviewed-sha> --yes`).
+  Generation pins the source configuration; the full SHA pins the code reviewed
+  (the API requires `expected_commit`). A refresh can change the candidate at
+  the same generation. The server rejects a stale reviewed SHA before changing
+  any base, accepted, or candidate ref; refresh the review and explicitly
+  accept the new revision in the existing workspace rather than importing again.
+  **Disable** requires
   confirmation and returns the workspace to local-only. It does not log out
   or revoke a native GitHub login. Remove any remote deploy key separately,
   because disabling cannot revoke it at the provider either.

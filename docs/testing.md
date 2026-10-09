@@ -1029,7 +1029,13 @@ token-authenticated HTTPS transport is tested by this fixture. This is not an
 API-mocked dashboard: browser control requests still cross the gateway and
 assembled server. Separate live acceptance is needed for the provider boundary.
 
-Scenarios cover private read-only selection, inline SHA/generation acceptance,
+The unauthenticated `gh auth status --json` fixture returns exit status 0
+with `{"hosts":{}}`, matching native gh's JSON-status behavior when no login
+exists. This lets the browser begin device authorization; a nonzero status
+remains a CLI failure, not evidence of a logged-out account.
+
+Scenarios cover private read-only selection, inline acceptance pinned to both
+the configuration generation and the reviewed SHA,
 persisted connection reuse on the admin Agent step and in Settings, pagination
 to a second repository whose default branch is `trunk`, cancellation and denied
 authorization recovery, failed-fetch retry on the same workspace, and absent
@@ -1039,6 +1045,15 @@ nonadmin controls plus forged-RPC denial. Successful checkpoints attach
 `github-cancellation-and-fetch-recovered` and `github-collaborator-settings`
 PNG screenshots to the Playwright results/report. These are verification
 commands and expected coverage, not a claim that Docker or CI has passed.
+
+Reviewed-revision regression coverage uses real Git: import candidate A,
+advance upstream to B and refresh without changing configuration generation,
+then submit adoption through the API with A as `expected_commit`. The stale
+request must fail before mutation, leaving accepted/base unchanged (or unset
+for an initial import) and B available as the candidate. Explicitly reviewing
+and submitting B must succeed. The UI retains the existing workspace on
+conflict and requires a fresh review rather than silently accepting B or
+repeating import. Generation alone is not a code-acceptance precondition.
 
 The retained collaborator/native-terminal component coverage is in
 `web/src/routes/onboarding/github-connect.test.tsx`: typed login, missing/old/

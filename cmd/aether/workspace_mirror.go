@@ -19,7 +19,7 @@ const (
 	workspaceMirrorStatusUsage    = "usage: aether workspace mirror status [--workspace <name-or-id>]"
 	workspaceMirrorConfigureUsage = "usage: aether workspace mirror configure --source <url> [--workspace <name-or-id>] [--branch <branch>] [--auth public|deploy-key|github] [--github-account-id <id>] [--known-hosts-file <path>]"
 	workspaceMirrorRefreshUsage   = "usage: aether workspace mirror refresh --workspace <name-or-id>"
-	workspaceMirrorAdoptUsage     = "usage: aether workspace mirror adopt --workspace <name-or-id> --generation <n> --yes"
+	workspaceMirrorAdoptUsage     = "usage: aether workspace mirror adopt --workspace <name-or-id> --generation <n> --commit <reviewed-sha> --yes"
 	workspaceMirrorDisableUsage   = "usage: aether workspace mirror disable --workspace <name-or-id> --yes"
 )
 
@@ -35,6 +35,7 @@ type workspaceMirrorConfigureOptions struct {
 type workspaceMirrorAdoptOptions struct {
 	workspace  string
 	generation int64
+	commit     string
 	yes        bool
 }
 
@@ -122,6 +123,7 @@ func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, 
 	fs.SetOutput(io.Discard)
 	workspace := fs.String("workspace", "", "workspace ID or name")
 	generation := fs.Int64("generation", 0, "candidate mirror generation to adopt")
+	commit := fs.String("commit", "", "full observed candidate commit explicitly reviewed for adoption")
 	yes := fs.Bool("yes", false, "confirm replacing the accepted base with the candidate")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return workspaceMirrorAdoptOptions{}, errors.New(workspaceMirrorAdoptUsage)
@@ -132,10 +134,16 @@ func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, 
 	if *generation <= 0 {
 		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --generation must be greater than zero", workspaceMirrorAdoptUsage)
 	}
+	if *commit == "" {
+		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --commit is required; review the current candidate and supply its full observed commit", workspaceMirrorAdoptUsage)
+	}
+	if !domain.ValidMirrorSHA(*commit) || strings.ContainsAny(*commit, "ABCDEF") {
+		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --commit must be a full lowercase SHA-1 or SHA-256 object ID", workspaceMirrorAdoptUsage)
+	}
 	if !*yes {
 		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%s: --yes is required because adopt replaces the accepted base", workspaceMirrorAdoptUsage)
 	}
-	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, yes: *yes}, nil
+	return workspaceMirrorAdoptOptions{workspace: *workspace, generation: *generation, commit: *commit, yes: *yes}, nil
 }
 
 func parseWorkspaceMirrorDisableArgs(args []string) (workspaceMirrorWorkspaceOptions, error) {
@@ -246,8 +254,9 @@ func workspaceMirrorAdopt(args []string) error {
 		}
 		var result protocol.WorkspaceMirrorResult
 		if err := c.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{
-			WorkspaceID: ws.ID,
-			Generation:  opts.generation,
+			WorkspaceID:    ws.ID,
+			Generation:     opts.generation,
+			ExpectedCommit: opts.commit,
 		}, &result); err != nil {
 			return err
 		}

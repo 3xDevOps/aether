@@ -210,10 +210,10 @@ func TestGitHubImportBindsPrivateCollaboratorAndRecoversSameWorkspace(t *testing
 	if _, err := engine.WorkspaceBranchCommit(t.Context(), domain.WorkspaceID(imported.Workspace.ID), "missing"); err == nil {
 		t.Fatal("refresh silently adopted")
 	}
-	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation + 1}, nil); err == nil {
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation + 1, ExpectedCommit: refreshed.ObservedCommit}, nil); err == nil {
 		t.Fatal("stale adoption accepted")
 	}
-	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation}, nil); err != nil {
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation, ExpectedCommit: refreshed.ObservedCommit}, nil); err != nil {
 		t.Fatal(err)
 	}
 	workspaces, err := e.store.ListWorkspaces(t.Context())

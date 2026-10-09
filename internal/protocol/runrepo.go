@@ -21,7 +21,8 @@ const (
 // WorkspaceImport starts the existing mirror configure/refresh/adopt flow.
 // Origin is explicit and independent of SourceURL. Import never implicitly
 // accepts a rewritten base: the observed initial candidate is accepted through
-// workspace.mirror.adopt with its returned generation.
+// workspace.mirror.adopt with its reviewed generation and observed_commit
+// supplied as the required expected_commit.
 type WorkspaceImportParams struct {
 	Name            string               `json:"name"`
 	Environment     WorkspaceEnvironment `json:"environment"`

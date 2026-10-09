@@ -537,6 +537,15 @@ publish the private key or the `known_hosts` file.
 Configuration starts **pending**; it does not fetch until Verify/`refresh`
 (remote import performs that first fetch). The initial observed revision
 requires explicit administrator adoption; fetching it is not acceptance.
+Adoption requires both the configuration `generation` and the full reviewed
+commit SHA (`expected_commit` in the API, `--commit` in the CLI). Generation
+pins configuration, not code: a refresh can replace the candidate without
+changing generation. Under the Git ref-mutation lock, the server checks the
+reviewed SHA against the current candidate on every compare-and-swap attempt,
+before moving any base, accepted, or candidate ref. A stale review is rejected
+without changing those refs; the new candidate remains inspectable. The
+administrator must refresh the review and explicitly accept the new revision,
+not retry with an automatically selected latest SHA.
 Each launch refreshes exactly the configured branch before a run row is
 created. `ready` accepts an unchanged or forward-only source, while
 `auth-failed`, `offline`, `source-missing`, `rewritten`, `diverged`, and

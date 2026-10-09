@@ -784,10 +784,11 @@ export const api = {
     call<WorkspaceMirrorResult>('workspace.mirror.refresh', {
       workspace_id: workspaceID,
     }),
-  workspaceMirrorAdopt: (workspaceID: string, generation: number) =>
+  workspaceMirrorAdopt: (workspaceID: string, generation: number, expectedCommit: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.adopt', {
       workspace_id: workspaceID,
       generation,
+      expected_commit: expectedCommit,
     }),
   workspaceMirrorDisable: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.disable', {

@@ -103,7 +103,7 @@ func TestWorkspaceImportFreshBaseAndExplicitOrigin(t *testing.T) {
 				t.Fatal("initial fetch silently adopted a base")
 			}
 			var adopted protocol.WorkspaceMirrorResult
-			if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(id), Generation: imported.Mirror.Generation}, &adopted); err != nil {
+			if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(id), Generation: imported.Mirror.Generation, ExpectedCommit: imported.Mirror.ObservedCommit}, &adopted); err != nil {
 				t.Fatal(err)
 			}
 			stored, err := e.store.GetWorkspace(t.Context(), id)
@@ -125,6 +125,53 @@ func TestWorkspaceImportFreshBaseAndExplicitOrigin(t *testing.T) {
 				t.Fatalf("empty explicit Origin acquired external push destination: %q", got)
 			}
 		})
+	}
+}
+
+func TestWorkspaceImportAdoptRejectsSameGenerationCandidateChange(t *testing.T) {
+	e, engine, source, reviewed := workspaceImportEnv(t, true)
+	client := controlClient(t, e)
+	var imported protocol.WorkspaceImportResult
+	if err := client.Call(protocol.MethodWorkspaceImport, workspaceImportParams("stale-review"), &imported); err != nil {
+		t.Fatal(err)
+	}
+	if imported.Mirror.ObservedCommit != reviewed {
+		t.Fatalf("import candidate = %+v", imported.Mirror)
+	}
+	current := workspaceImportCommit(t, source)
+	params := protocol.WorkspaceMirrorParams{WorkspaceID: imported.Workspace.ID}
+	var refreshed protocol.WorkspaceMirrorResult
+	if err := client.Call(protocol.MethodWorkspaceMirrorRefresh, params, &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if current == reviewed || refreshed.Generation != imported.Mirror.Generation || refreshed.ObservedCommit != current {
+		t.Fatalf("refresh did not change candidate within generation: %+v", refreshed)
+	}
+	request := protocol.WorkspaceMirrorAdoptParams{
+		WorkspaceID: imported.Workspace.ID, Generation: imported.Mirror.Generation, ExpectedCommit: reviewed,
+	}
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, request, nil); err == nil || wireErrOf(t, err).Code != protocol.CodeConflict {
+		t.Fatalf("stale adoption = %v, want conflict", err)
+	}
+	var state protocol.WorkspaceMirrorResult
+	if err := client.Call(protocol.MethodWorkspaceMirrorStatus, params, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.AcceptedCommit != "" || state.ObservedCommit != current || state.Generation != imported.Mirror.Generation {
+		t.Fatalf("stale adoption changed accepted state or lost candidate: %+v", state)
+	}
+	id := domain.WorkspaceID(imported.Workspace.ID)
+	if base, err := engine.WorkspaceBranchCommit(t.Context(), id, "main"); err == nil {
+		t.Fatalf("stale adoption created base %s", base)
+	}
+	request.ExpectedCommit = state.ObservedCommit
+	var adopted protocol.WorkspaceMirrorResult
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, request, &adopted); err != nil {
+		t.Fatal(err)
+	}
+	base, err := engine.WorkspaceBranchCommit(t.Context(), id, "main")
+	if err != nil || base != current || adopted.AcceptedCommit != current {
+		t.Fatalf("freshly reviewed adoption: base=%s state=%+v error=%v", base, adopted, err)
 	}
 }
 
@@ -223,7 +270,7 @@ func TestWorkspaceImportDeployKeyPendingThenAdopt(t *testing.T) {
 	if refreshed.PublicKey != imported.Mirror.PublicKey || refreshed.Generation != imported.Mirror.Generation || refreshed.ObservedCommit != commit || refreshed.AcceptedCommit != "" {
 		t.Fatalf("verification changed key or accepted candidate: %+v", refreshed)
 	}
-	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation}, &adopted); err != nil {
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: refreshed.Generation, ExpectedCommit: refreshed.ObservedCommit}, &adopted); err != nil {
 		t.Fatal(err)
 	}
 	if adopted.AcceptedCommit != commit || adopted.PublicKey != imported.Mirror.PublicKey {
@@ -238,7 +285,7 @@ func TestWorkspaceImportAcceptedBaseRewriteNeedsAdoption(t *testing.T) {
 	if err := client.Call(protocol.MethodWorkspaceImport, workspaceImportParams("rewritten"), &imported); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: imported.Mirror.Generation}, nil); err != nil {
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: imported.Workspace.ID, Generation: imported.Mirror.Generation, ExpectedCommit: imported.Mirror.ObservedCommit}, nil); err != nil {
 		t.Fatal(err)
 	}
 	workspaceImportGit(t, source, "checkout", "--orphan", "rewrite")

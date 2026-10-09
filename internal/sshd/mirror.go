@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -29,7 +30,7 @@ type MirrorService interface {
 	Configure(context.Context, domain.WorkspaceID, mirrorservice.ConfigureRequest) (mirrorservice.Result, error)
 	Status(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
 	Refresh(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
-	Adopt(context.Context, domain.WorkspaceID, int64) (mirrorservice.Result, error)
+	Adopt(context.Context, domain.WorkspaceID, int64, string) (mirrorservice.Result, error)
 	Disable(context.Context, domain.WorkspaceID) (mirrorservice.Result, error)
 	Capture(context.Context, domain.WorkspaceID, string) (mirrorservice.CaptureResult, error)
 }
@@ -153,6 +154,12 @@ func (s *Server) workspaceMirrorAdopt(ctx context.Context, member domain.MemberI
 	if p.Generation <= 0 {
 		return nil, invalidParams("generation must be greater than zero")
 	}
+	if p.ExpectedCommit == "" {
+		return nil, invalidParams("expected_commit is required; review the current candidate and send its full observed_commit with generation")
+	}
+	if !domain.ValidMirrorSHA(p.ExpectedCommit) || strings.ContainsAny(p.ExpectedCommit, "ABCDEF") {
+		return nil, invalidParams("expected_commit must be a full lowercase SHA-1 or SHA-256 object ID")
+	}
 	svc, perr := s.mirrors()
 	if perr != nil {
 		return nil, perr
@@ -162,7 +169,7 @@ func (s *Server) workspaceMirrorAdopt(ctx context.Context, member domain.MemberI
 	if err := s.requireAdmin(ctx, member, protocol.MethodWorkspaceMirrorAdopt); err != nil {
 		return nil, err
 	}
-	result, err := svc.Adopt(ctx, domain.WorkspaceID(p.WorkspaceID), p.Generation)
+	result, err := svc.Adopt(ctx, domain.WorkspaceID(p.WorkspaceID), p.Generation, p.ExpectedCommit)
 	if err != nil {
 		return nil, rpcError(err)
 	}

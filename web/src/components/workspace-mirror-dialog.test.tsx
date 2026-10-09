@@ -183,7 +183,49 @@ describe('workspace mirror dialog', () => {
     expect(confirmation.getByText(candidate)).toBeDefined()
     fireEvent.click(confirmation.getByRole('button', { name: 'Adopt candidate' }))
 
-    await waitFor(() => expect(client.workspaceMirrorAdopt).toHaveBeenCalledWith(workspace.id, 4))
+    await waitFor(() => expect(client.workspaceMirrorAdopt).toHaveBeenCalledWith(workspace.id, 4, candidate))
+  })
+
+  it('retains the reviewed candidate after a stale adoption until an explicit refresh and confirmation', async () => {
+    seed()
+    const nextCommit = 'cccccccccccccccccccccccccccccccccccccccc'
+    let current = mirror({ status: 'rewritten', observed_commit: candidate })
+    const onClose = vi.fn()
+    const client = fakeApi({
+      workspaceMirrorStatus: vi.fn(async () => current),
+      workspaceMirrorRefresh: vi.fn(async () => current),
+      workspaceMirrorAdopt: vi.fn(async (_workspaceID: string, _generation: number, expectedCommit: string) => {
+        if (expectedCommit !== current.observed_commit) throw new Error('source candidate changed; review the latest revision')
+        current = { ...current, status: 'ready', accepted_commit: expectedCommit }
+        return current
+      }),
+    })
+    render(<WorkspaceMirrorDialog workspaceID={workspace.id} client={client} onClose={onClose} />)
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.click(await dialog.findByRole('button', { name: 'Adopt candidate' }))
+    const confirmation = within(await screen.findByRole('alertdialog'))
+    expect(confirmation.getByText(candidate)).toBeTruthy()
+    current = { ...current, observed_commit: nextCommit }
+    fireEvent.click(confirmation.getByRole('button', { name: 'Adopt candidate' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('source candidate changed; review the latest revision')
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, 4, candidate)
+    expect(client.workspaceMirrorStatus).toHaveBeenCalledTimes(1)
+    expect(client.workspaceMirrorRefresh).not.toHaveBeenCalled()
+    expect(dialog.queryByText(nextCommit)).toBeNull()
+    expect(current.accepted_commit).toBe(accepted)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(useStore.getState().workspaces[workspace.id]).toBeTruthy()
+
+    fireEvent.click(await dialog.findByRole('button', { name: /^(Verify|Refresh)$/ }))
+    await waitFor(() => expect(dialog.getAllByText(nextCommit).length).toBeGreaterThan(0))
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledTimes(1)
+    fireEvent.click(dialog.getByRole('button', { name: 'Adopt candidate' }))
+    const freshConfirmation = within(await screen.findByRole('alertdialog'))
+    expect(freshConfirmation.getByText(nextCommit)).toBeTruthy()
+    fireEvent.click(freshConfirmation.getByRole('button', { name: 'Adopt candidate' }))
+    await waitFor(() => expect(dialog.getByTestId('mirror-state').textContent).toBe('ready'))
+    expect(client.workspaceMirrorAdopt).toHaveBeenLastCalledWith(workspace.id, 4, nextCommit)
+    expect(current.accepted_commit).toBe(nextCommit)
   })
   it('keeps refresh errors while loading a persisted candidate for adoption', async () => {
     seed()
@@ -226,7 +268,7 @@ describe('workspace mirror dialog', () => {
     const confirmation = within(await screen.findByRole('alertdialog'))
     fireEvent.click(confirmation.getByRole('button', { name: 'Adopt candidate' }))
 
-    await waitFor(() => expect(client.workspaceMirrorAdopt).toHaveBeenCalledWith(workspace.id, 4))
+    await waitFor(() => expect(client.workspaceMirrorAdopt).toHaveBeenCalledWith(workspace.id, 4, candidate))
   })
 
 

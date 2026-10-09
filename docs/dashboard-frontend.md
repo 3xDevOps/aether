@@ -2965,7 +2965,13 @@ the same ones onboarding's Repository step shows:
   choosing **None — do not publish**.
   **Review repository** imports with `auth:"github"` and the list's numeric
   `github_account_id`, then shows the actual observed branch/SHA inline.
-  **Use repository** explicitly adopts that generation before reporting success.
+  **Use repository** explicitly adopts that generation and the exact displayed
+  SHA (`expected_commit`) before reporting success. Generation pins source
+  configuration; the SHA pins the reviewed code even if another actor refreshes
+  the candidate without changing configuration. A stale review keeps the
+  workspace and displays the server error without fetching or accepting the new
+  candidate automatically. **Check source status** deliberately loads the latest
+  candidate for review; **Use repository** then accepts that reviewed SHA.
   A failed fetch retains the workspace ID: **Retry fetch** refreshes it, never
   creates another workspace. **Source settings** opens the existing source
   dialog locally; closing it returns to this same workspace and reads status
@@ -2980,8 +2986,10 @@ the same ones onboarding's Repository step shows:
   `known_hosts` entries. Import retains the new workspace even if fetching
   fails and then opens its repository page; repair the source there rather
   than importing again. Verify the key, review the observed commit, and
-  explicitly adopt its generation. Reconfiguring rotates the key; verifying
-  does not.
+  explicitly adopt its generation and exact displayed SHA. A stale adoption keeps
+  the existing accepted base and candidate review visible; **Refresh** loads the
+  new candidate for another explicit **Adopt candidate** confirmation.
+  Reconfiguring rotates the key; verifying does not.
 - **From a local clone** opens **Create from local clone** on a local
   gateway. Name the workspace and the base branch that exists in the clone;
   the repository page then opens with the clone link started. A hosted

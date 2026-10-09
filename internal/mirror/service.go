@@ -27,7 +27,7 @@ type Store interface {
 type Git interface {
 	ConfigureWorkspaceMirror(context.Context, domain.WorkspaceID, gitengine.MirrorRequest) (gitengine.MirrorResult, error)
 	RefreshWorkspaceMirror(context.Context, domain.WorkspaceID, gitengine.MirrorRequest) (gitengine.MirrorResult, error)
-	AdoptWorkspaceMirror(context.Context, domain.WorkspaceID, int64) (gitengine.MirrorResult, error)
+	AdoptWorkspaceMirror(context.Context, domain.WorkspaceID, int64, string) (gitengine.MirrorResult, error)
 	DisableWorkspaceMirror(context.Context, domain.WorkspaceID) error
 	WorkspaceBranchCommit(context.Context, domain.WorkspaceID, string) (string, error)
 }
@@ -333,9 +333,15 @@ func (s *Service) Refresh(ctx context.Context, workspace domain.WorkspaceID) (Re
 	return s.refreshLocked(ctx, workspace, *m)
 }
 
-func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, generation int64) (Result, error) {
+func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, generation int64, expectedCommit string) (Result, error) {
 	unlock := s.workspaceLock(workspace)
 	defer unlock()
+	if expectedCommit == "" || !domain.ValidMirrorSHA(expectedCommit) || strings.ContainsAny(expectedCommit, "ABCDEF") {
+		return Result{}, &gitengine.MirrorError{
+			Kind: gitengine.MirrorErrorInvalidRequest, WorkspaceID: workspace,
+			Cause: gitengine.ErrInvalidObjectID,
+		}
+	}
 	m, err := s.store.GetWorkspaceMirror(ctx, workspace)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -352,7 +358,7 @@ func (s *Service) Adopt(ctx context.Context, workspace domain.WorkspaceID, gener
 			Cause: errors.New("generation does not match configured mirror"),
 		}
 	}
-	gitResult, gitErr := s.git.AdoptWorkspaceMirror(ctx, workspace, generation)
+	gitResult, gitErr := s.git.AdoptWorkspaceMirror(ctx, workspace, generation, expectedCommit)
 	now := s.now().UTC()
 	if gitErr != nil {
 		return s.persistFailureResult(ctx, *m, now, gitErrorKind(gitErr), gitResult, gitErr)

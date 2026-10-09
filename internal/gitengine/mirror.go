@@ -325,12 +325,17 @@ func (e *Engine) RefreshWorkspaceMirror(ctx context.Context, ws domain.Workspace
 	return result, mirrorErr(MirrorErrorCASConflict, ws, req, result.BaseCommit, result.ObservedCommit, nil)
 }
 
-func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64) (MirrorResult, error) {
+// AdoptWorkspaceMirror accepts only the exact candidate reviewed by the caller.
+// The generation pins configuration; expectedCommit pins the source revision.
+func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID, generation int64, expectedCommit string) (MirrorResult, error) {
 	e.fileWriteMu.Lock()
 	defer e.fileWriteMu.Unlock()
 	result := MirrorResult{WorkspaceID: ws, Generation: generation, CheckedAt: time.Now().UTC()}
 	if generation < 0 {
 		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", errors.New("invalid mirror generation"))
+	}
+	if !validObjectID(expectedCommit) {
+		return result, mirrorErr(MirrorErrorInvalidRequest, ws, MirrorRequest{Generation: generation}, "", "", ErrInvalidObjectID)
 	}
 	repo, err := e.existingRepoPath(ws)
 	if err != nil {
@@ -364,6 +369,13 @@ func (e *Engine) AdoptWorkspaceMirror(ctx context.Context, ws domain.WorkspaceID
 		if candidate == "" {
 			result.Status = domain.MirrorStatusPending
 			return result, mirrorErr(MirrorErrorNoCandidate, ws, MirrorRequest{Branch: branch, Generation: generation}, base, candidate, nil)
+		}
+		// Check on every CAS attempt while holding fileWriteMu. The ref
+		// transaction also verifies this candidate, so an external ref writer
+		// cannot substitute another revision between this check and adoption.
+		if candidate != expectedCommit {
+			result.Status = domain.MirrorStatusError
+			return result, mirrorErr(MirrorErrorCASConflict, ws, MirrorRequest{Branch: branch, Generation: generation}, base, candidate, errors.New("mirror candidate changed since review"))
 		}
 		if err := e.commitMirrorObservation(ctx, repo, baseRef, acceptedRef, candidateRef, "", base, accepted, candidate, candidate, candidate, candidate); err != nil {
 			if attempt+1 < mirrorMaxCASAttempts {

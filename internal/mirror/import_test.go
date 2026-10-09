@@ -81,7 +81,7 @@ func TestImportNewWorkspacePreservesExplicitCheckoutOrigin(t *testing.T) {
 	if err != nil || observed.Mirror.Status != domain.MirrorStatusPending || observed.Mirror.ObservedCommit != commit || observed.Mirror.AcceptedCommit != "" {
 		t.Fatalf("initial candidate = %+v, %v", observed, err)
 	}
-	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); adoptErr != nil {
+	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation, commit); adoptErr != nil {
 		t.Fatal(adoptErr)
 	}
 	stored, err := db.GetWorkspace(t.Context(), workspace.ID)
@@ -121,7 +121,7 @@ func TestImportReportsGitStateWhenPersistenceFails(t *testing.T) {
 					t.Fatal(refreshErr)
 				}
 				st.setErrors = []error{persistence}
-				result, err = svc.Adopt(t.Context(), "import", configured.Mirror.Generation)
+				result, err = svc.Adopt(t.Context(), "import", configured.Mirror.Generation, commit)
 			}
 			if !errors.Is(err, persistence) || result.Mirror.ObservedCommit != commit {
 				t.Fatalf("lost actual Git state on %s persistence failure: %+v, %v", phase, result, err)
@@ -148,7 +148,7 @@ func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
 	if err := db.CreateWorkspace(t.Context(), workspace); err != nil {
 		t.Fatal(err)
 	}
-	svc, _, _ := newImportService(t, db)
+	svc, _, commit := newImportService(t, db)
 	configured, err := svc.Configure(t.Context(), workspace.ID, ConfigureRequest{
 		SourceURL: "https://github.com/upstream/source.git", Branch: "main", Auth: domain.MirrorAuthPublic,
 	})
@@ -158,7 +158,7 @@ func TestImportDoesNotInferCheckoutOriginFromSource(t *testing.T) {
 	if _, refreshErr := svc.Refresh(t.Context(), workspace.ID); refreshErr != nil {
 		t.Fatal(refreshErr)
 	}
-	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation); adoptErr != nil {
+	if _, adoptErr := svc.Adopt(t.Context(), workspace.ID, configured.Mirror.Generation, commit); adoptErr != nil {
 		t.Fatal(adoptErr)
 	}
 	stored, err := db.GetWorkspace(t.Context(), workspace.ID)
@@ -191,7 +191,7 @@ func TestGitHubImportRefreshRetainsProtectedBaseAcrossCredentialChanges(t *testi
 	if err != nil || observed.Mirror.ObservedCommit != initial || observed.Mirror.AcceptedCommit != "" {
 		t.Fatalf("GitHub initial observation = %+v, %v", observed, err)
 	}
-	if _, err = svc.Adopt(t.Context(), "github-import", configured.Mirror.Generation); err != nil {
+	if _, err = svc.Adopt(t.Context(), "github-import", configured.Mirror.Generation, initial); err != nil {
 		t.Fatal(err)
 	}
 	source := filepath.Join(filepath.Dir(svc.root), "source")
@@ -251,6 +251,106 @@ func TestGitHubImportRefreshRetainsProtectedBaseAcrossCredentialChanges(t *testi
 		cached, err := svc.Capture(t.Context(), "github-import", next)
 		if err != nil || !cached.Cached || cached.Commit != next || credentialCalls != calls {
 			t.Fatalf("%s explicit cached capture = %+v, %v", state, cached, err)
+		}
+	}
+}
+
+func TestImportAdoptionRejectsStaleReviewAtSameGeneration(t *testing.T) {
+	for _, alreadyAccepted := range []bool{false, true} {
+		for _, failPersistence := range []bool{false, true} {
+			t.Run(fmt.Sprintf("accepted=%t/persistence-failure=%t", alreadyAccepted, failPersistence), func(t *testing.T) {
+				st := newMirrorTestStore()
+				svc, engine, initial := newImportService(t, st)
+				const ws domain.WorkspaceID = "reviewed-import"
+				configured, err := svc.Configure(t.Context(), ws, ConfigureRequest{
+					SourceURL: "https://github.com/upstream/source.git", Branch: "main", Auth: domain.MirrorAuthPublic,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed, err := svc.Refresh(t.Context(), ws)
+				if err != nil || observed.Mirror.ObservedCommit != initial || observed.Mirror.AcceptedCommit != "" {
+					t.Fatalf("initial observation = %+v, %v", observed, err)
+				}
+				source := filepath.Join(filepath.Dir(svc.root), "source")
+				reviewed, accepted := initial, ""
+				if alreadyAccepted {
+					if _, adoptErr := svc.Adopt(t.Context(), ws, configured.Mirror.Generation, initial); adoptErr != nil {
+						t.Fatal(adoptErr)
+					}
+					accepted = initial
+					importGit(t, source, "checkout", "--orphan", "rewritten")
+					importGit(t, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "rewritten candidate A")
+					reviewed = importGit(t, source, "rev-parse", "HEAD")
+					importGit(t, source, "update-ref", "refs/heads/main", reviewed)
+					observed, err = svc.Refresh(t.Context(), ws)
+					var failure *gitengine.MirrorError
+					if !errors.As(err, &failure) || failure.Kind != gitengine.MirrorErrorRewritten || observed.Mirror.ObservedCommit != reviewed || observed.Mirror.AcceptedCommit != accepted {
+						t.Fatalf("rewrite observation = %+v, %v", observed, err)
+					}
+				}
+				before, err := svc.Status(t.Context(), ws)
+				if err != nil {
+					t.Fatal(err)
+				}
+				importGit(t, source, "-c", "user.name=Source", "-c", "user.email=source@example.test", "commit", "--allow-empty", "-m", "candidate B")
+				current := importGit(t, source, "rev-parse", "HEAD")
+				importGit(t, source, "update-ref", "refs/heads/main", current)
+				// Refresh outside this service to leave its metadata at reviewed A.
+				// Adoption must compare against Git, not the persisted observation.
+				refreshed, refreshErr := engine.RefreshWorkspaceMirror(t.Context(), ws, gitengine.MirrorRequest{
+					SourceURL: configured.Mirror.SourceURL, Branch: "main", Generation: configured.Mirror.Generation, Auth: domain.MirrorAuthPublic,
+				})
+				if alreadyAccepted {
+					var failure *gitengine.MirrorError
+					if !errors.As(refreshErr, &failure) || failure.Kind != gitengine.MirrorErrorRewritten {
+						t.Fatalf("rewrite refresh = %+v, %v", refreshed, refreshErr)
+					}
+				} else if refreshErr != nil {
+					t.Fatal(refreshErr)
+				}
+				if refreshed.Generation != configured.Mirror.Generation || refreshed.CandidateCommit != current || refreshed.AcceptedCommit != accepted || refreshed.BaseCommit != accepted || current == reviewed {
+					t.Fatalf("same-generation candidate B = %+v", refreshed)
+				}
+				repo, err := engine.InitWorkspaceRepo(t.Context(), ws)
+				if err != nil {
+					t.Fatal(err)
+				}
+				refsBefore := importGit(t, repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/main", "refs/aether/mirror")
+				persistence := errors.New("database write unavailable")
+				if failPersistence {
+					st.setErrors = []error{persistence}
+				}
+				rejected, err := svc.Adopt(t.Context(), ws, configured.Mirror.Generation, reviewed)
+				var failure *gitengine.MirrorError
+				if !errors.As(err, &failure) || failure.Kind != gitengine.MirrorErrorCASConflict || errors.Is(err, persistence) != failPersistence {
+					t.Fatalf("stale review error = %v", err)
+				}
+				if rejected.Mirror.Status != domain.MirrorStatusError || rejected.Mirror.ObservedCommit != current || rejected.Mirror.AcceptedCommit != accepted || rejected.Mirror.Generation != configured.Mirror.Generation || rejected.Mirror.LastSuccessAt != before.Mirror.LastSuccessAt {
+					t.Fatalf("stale adoption misreported Git state: %+v", rejected)
+				}
+				if got := importGit(t, repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/main", "refs/aether/mirror"); got != refsBefore {
+					t.Fatalf("stale adoption changed refs:\nbefore %s\nafter %s", refsBefore, got)
+				}
+				status, err := svc.Status(t.Context(), ws)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if failPersistence {
+					if status.Mirror != before.Mirror {
+						t.Fatalf("failed persistence changed stored state: %+v", status)
+					}
+				} else if status.Mirror != rejected.Mirror {
+					t.Fatalf("conflict state was not persisted: %+v", status)
+				}
+				adopted, err := svc.Adopt(t.Context(), ws, configured.Mirror.Generation, current)
+				if err != nil || adopted.Mirror.Status != domain.MirrorStatusReady || adopted.Mirror.ObservedCommit != current || adopted.Mirror.AcceptedCommit != current || adopted.Mirror.LastError != "" {
+					t.Fatalf("reviewed B adoption = %+v, %v", adopted, err)
+				}
+				if base, err := engine.WorkspaceBranchCommit(t.Context(), ws, "main"); err != nil || base != current {
+					t.Fatalf("adopted base = %q, %v", base, err)
+				}
+			})
 		}
 	}
 }

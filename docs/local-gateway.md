@@ -716,7 +716,7 @@ unavailable owned source remains the server's protocol error.
 | `workspace.mirror.status` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | Read-only for admitted members. `WorkspaceMirrorResult` reports whether mirroring is enabled, source, branch, status, observed and accepted commits, check times, public key, and safe warning/error fields; no private key or server path |
 | `workspace.mirror.configure` | `WorkspaceMirrorConfigureParams` (`{"workspace_id":"...","source_url":"https://github.com/acme/app.git","branch":"main","auth":"public"\|"deploy-key"\|"github","known_hosts":"...","github_account_id":42}`; last two fields optional and mode-specific) | `WorkspaceMirrorResult`; deploy-key configuration includes only the public key and safe installation warning; GitHub mode binds the authenticated admin and verified numeric account |
 | `workspace.mirror.refresh` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` after fetching the configured source branch |
-| `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7}`) | `WorkspaceMirrorResult` after explicitly accepting the retained candidate |
+| `workspace.mirror.adopt` | `WorkspaceMirrorAdoptParams` (`{"workspace_id":"...","generation":7,"expected_commit":"<full-reviewed-sha>"}`; all fields required) | `WorkspaceMirrorResult` after explicitly accepting exactly the reviewed retained candidate |
 | `workspace.mirror.disable` | `WorkspaceMirrorParams` (`{"workspace_id":"..."}`) | `WorkspaceMirrorResult` with `enabled:false`; the workspace becomes local-only |
 | `github.connect` | none | `GitHubConnectResult` (`{"login":"...","signing_key":"ssh-ed25519 ...","fingerprint":"SHA256:..."}`) - finishes the GitHub connection for the calling member |
 | `github.probe` | none | `GitHubProbeResult` (`{"status":"ok","version":"2.100.0","minimum":"2.81.0","detail":"gh version 2.100.0 (2026-09-03)\nhttps://github.com/cli/cli/releases/tag/v2.100.0","image":"ghcr.io/3xdevops/aether-standard:v0.2.0-alpha.7"}`) - the gh in the calling member's environment terminal |
@@ -724,6 +724,16 @@ unavailable owned source remains the server's protocol error.
 | `github.oauth.status` | `{"session_id":"..."}` (optional) | `GitHubOAuthResult`; admin-only, read-only connection/attempt inspection |
 | `github.oauth.cancel` | `{"session_id":"..."}` (required) | `GitHubOAuthResult`; admin-only, cancels only that member's exact current attempt |
 | `github.repositories.list` | `{"page":1}` (optional) | `GitHubRepositoryListResult`; admin-only, repositories readable by the calling member's native GitHub account |
+
+Mirror adoption pins both the configuration `generation` and the candidate's
+full `observed_commit` as `expected_commit` (SHA-1 or SHA-256, not a revision
+expression or abbreviated hash). Generation-only clients must migrate: missing
+or malformed `expected_commit` returns invalid params (`-32602`). If a refresh
+changes the candidate, even within the same generation, adoption returns conflict
+(`-32003`) without moving the accepted/base refs or discarding the current candidate.
+Keep the workspace, read fresh status, and explicitly review that candidate before
+submitting its generation and commit again. Never fetch a new SHA automatically
+while submitting or replay a failed adoption with a substituted SHA.
 
 ### Administrator GitHub connection and import
 
@@ -791,7 +801,8 @@ GitHub mode; `github_account_id` is rejected for other authentication modes.
 The result is `{workspace,created,mirror,error?}`. Once created, downstream
 configuration/fetch failures return `created:true` and the workspace ID; keep it
 and repair/refresh its source, never repeat creation. Fetch observes a candidate;
-only `workspace.mirror.adopt` with the reviewed `generation` accepts it.
+only `workspace.mirror.adopt` with the reviewed `generation` and full
+`observed_commit` supplied as `expected_commit` accepts it.
 A lost import response is uncertain: inspect Workspaces before retrying.
 GitHub mirror status exposes non-secret `github_member_id` and `github_user_id`
 alongside `auth`, source, branch, generation and observed/accepted revisions.

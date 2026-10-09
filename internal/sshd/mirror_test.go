@@ -25,6 +25,7 @@ type mirrorRPCFake struct {
 	disableErr      error
 	calls           []string
 	adoptGeneration int64
+	adoptCommit     string
 }
 
 func (f *mirrorRPCFake) Configure(_ context.Context, _ domain.WorkspaceID, req mirrorservice.ConfigureRequest) (mirrorservice.Result, error) {
@@ -54,11 +55,12 @@ func (f *mirrorRPCFake) Refresh(_ context.Context, _ domain.WorkspaceID) (mirror
 	}
 	return f.result, nil
 }
-func (f *mirrorRPCFake) Adopt(_ context.Context, _ domain.WorkspaceID, generation int64) (mirrorservice.Result, error) {
+func (f *mirrorRPCFake) Adopt(_ context.Context, _ domain.WorkspaceID, generation int64, expectedCommit string) (mirrorservice.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "adopt")
 	f.adoptGeneration = generation
+	f.adoptCommit = expectedCommit
 	if f.adoptErr != nil {
 		return mirrorservice.Result{}, f.adoptErr
 	}
@@ -133,7 +135,7 @@ func TestWorkspaceMirrorStatusReadAccess(t *testing.T) {
 				WorkspaceID: string(e.ws.ID), SourceURL: "https://example.test/repo", Branch: "main", Auth: "public",
 			}, nil), "mirror configure")
 			wantDenied(t, client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{
-				WorkspaceID: string(e.ws.ID), Generation: 7,
+				WorkspaceID: string(e.ws.ID), Generation: 7, ExpectedCommit: configured.ObservedCommit,
 			}, nil), "mirror adopt")
 
 			if err := e.store.DeleteMember(context.Background(), member.ID); err != nil {
@@ -212,7 +214,7 @@ func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
 	if err := client.Call(protocol.MethodWorkspaceMirrorRefresh, protocol.WorkspaceMirrorParams{WorkspaceID: string(e.ws.ID)}, &refreshed); err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
-	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: 7}, &adopted); err != nil {
+	if err := client.Call(protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: refreshed.Generation, ExpectedCommit: refreshed.ObservedCommit}, &adopted); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 	if err := client.Call(protocol.MethodWorkspaceMirrorDisable, protocol.WorkspaceMirrorParams{WorkspaceID: string(e.ws.ID)}, &disabled); err != nil {
@@ -223,8 +225,8 @@ func TestWorkspaceMirrorLifecycleAndSanitizedTimeline(t *testing.T) {
 	}
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
-	if strings.Join(fake.calls, ",") != "configure:deploy-key,refresh,adopt,disable" || fake.adoptGeneration != 7 {
-		t.Fatalf("service calls = %v generation=%d", fake.calls, fake.adoptGeneration)
+	if strings.Join(fake.calls, ",") != "configure:deploy-key,refresh,adopt,disable" || fake.adoptGeneration != 7 || fake.adoptCommit != refreshed.ObservedCommit {
+		t.Fatalf("service calls = %v generation=%d commit=%s", fake.calls, fake.adoptGeneration, fake.adoptCommit)
 	}
 }
 
@@ -242,6 +244,10 @@ func TestWorkspaceMirrorInputValidation(t *testing.T) {
 		{"configure source", protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{WorkspaceID: string(e.ws.ID), Branch: "main", Auth: "public"}},
 		{"configure auth", protocol.MethodWorkspaceMirrorConfigure, protocol.WorkspaceMirrorConfigureParams{WorkspaceID: string(e.ws.ID), SourceURL: "https://example.test/repo", Branch: "main", Auth: "other"}},
 		{"adopt generation", protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID)}},
+		{"adopt missing commit", protocol.MethodWorkspaceMirrorAdopt, map[string]any{"workspace_id": string(e.ws.ID), "generation": 7}},
+		{"adopt abbreviated commit", protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: 7, ExpectedCommit: "abc123"}},
+		{"adopt revspec", protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: 7, ExpectedCommit: "HEAD"}},
+		{"adopt uppercase commit", protocol.MethodWorkspaceMirrorAdopt, protocol.WorkspaceMirrorAdoptParams{WorkspaceID: string(e.ws.ID), Generation: 7, ExpectedCommit: strings.Repeat("A", 40)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,6 +255,9 @@ func TestWorkspaceMirrorInputValidation(t *testing.T) {
 			err := client.Call(tc.method, tc.params, nil)
 			if err == nil || wireErrOf(t, err).Code != protocol.CodeInvalidParams {
 				t.Fatalf("error = %v, want invalid params", err)
+			}
+			if tc.name == "adopt missing commit" && !strings.Contains(wireErrOf(t, err).Message, "expected_commit is required") {
+				t.Fatalf("generation-only migration error = %v", err)
 			}
 		})
 	}

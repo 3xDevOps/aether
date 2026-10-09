@@ -433,9 +433,27 @@ func TestRefreshSuccessAdoptAndRotation(t *testing.T) {
 	if err != nil || fresh.Mirror.Status != domain.MirrorStatusReady || fresh.Mirror.AcceptedCommit != testSHA || fresh.Mirror.LastSuccessAt.IsZero() {
 		t.Fatalf("successful refresh = %+v, %v", fresh, err)
 	}
-	adopted, err := svc.Adopt(ctx, "w", first.Mirror.Generation)
+	adopted, err := svc.Adopt(ctx, "w", first.Mirror.Generation, fresh.Mirror.ObservedCommit)
 	if err != nil || adopted.Mirror.Status != domain.MirrorStatusReady || adopted.Mirror.AcceptedCommit != testSHA {
 		t.Fatalf("adopt = %+v, %v", adopted, err)
+	}
+	for _, invalid := range []string{"", "HEAD", testSHA[:12], strings.Repeat("A", 40), strings.Repeat("g", 40), testSHA + "\n", strings.Repeat("a", 41)} {
+		t.Run("reject "+invalid, func(t *testing.T) {
+			before, readErr := st.GetWorkspaceMirror(ctx, "w")
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			calls := git.adoptCalls
+			_, adoptErr := svc.Adopt(ctx, "w", first.Mirror.Generation, invalid)
+			var failure *gitengine.MirrorError
+			if !errors.As(adoptErr, &failure) || failure.Kind != gitengine.MirrorErrorInvalidRequest || git.adoptCalls != calls {
+				t.Fatalf("invalid reviewed commit reached Git: %v, calls=%d", adoptErr, git.adoptCalls)
+			}
+			after, readErr := st.GetWorkspaceMirror(ctx, "w")
+			if readErr != nil || *after != *before {
+				t.Fatalf("invalid reviewed commit changed metadata: %+v, %v", after, readErr)
+			}
+		})
 	}
 	second, err := svc.Configure(ctx, "w", ConfigureRequest{SourceURL: "https://github.com/acme/repo", Branch: "main", Auth: domain.MirrorAuthDeployKey})
 	if err != nil || second.Mirror.Generation != first.Mirror.Generation+1 || second.PublicKey == first.PublicKey {
@@ -623,7 +641,7 @@ func TestGenerationSurvivesDisableAndRejectsStaleAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := *beforePtr
-	got, err := svc.Adopt(ctx, "w", second.Mirror.Generation)
+	got, err := svc.Adopt(ctx, "w", second.Mirror.Generation, testSHA)
 	var typed *gitengine.MirrorError
 	if err == nil || !errors.As(err, &typed) || typed.Kind != gitengine.MirrorErrorInvalidRequest {
 		t.Fatalf("stale generation adoption error = %v, want invalid-request MirrorError", err)
@@ -912,7 +930,7 @@ func (g *mirrorTestGit) RefreshWorkspaceMirror(ctx context.Context, ws domain.Wo
 	}
 	return gitengine.MirrorResult{WorkspaceID: ws, Status: domain.MirrorStatusReady, ObservedCommit: testSHA, AcceptedCommit: testSHA, CheckedAt: time.Now().UTC()}, nil
 }
-func (g *mirrorTestGit) AdoptWorkspaceMirror(_ context.Context, ws domain.WorkspaceID, generation int64) (gitengine.MirrorResult, error) {
+func (g *mirrorTestGit) AdoptWorkspaceMirror(_ context.Context, ws domain.WorkspaceID, generation int64, _ string) (gitengine.MirrorResult, error) {
 	g.mu.Lock()
 	g.adoptCalls++
 	g.mu.Unlock()

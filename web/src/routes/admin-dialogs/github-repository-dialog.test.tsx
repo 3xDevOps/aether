@@ -51,7 +51,7 @@ describe('GitHub repository onboarding', () => {
     expect(client.workspaceImport).toHaveBeenCalledWith(expect.objectContaining({ base_branch: 'trunk', auth: 'github', github_account_id: 7, origin: '' }))
     fireEvent.click(screen.getByRole('button', { name: 'Use repository' }))
     await screen.findByText(/Accepted revision:/)
-    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, 8)
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, 8, revision)
     expect(onCreated).toHaveBeenCalledExactlyOnceWith(imported.workspace)
   })
 
@@ -114,7 +114,7 @@ describe('GitHub repository onboarding', () => {
     expect(onCreated).toHaveBeenCalledExactlyOnceWith(imported.workspace)
     expect(client.workspaceImport).toHaveBeenCalledTimes(1)
     expect(client.workspaceMirrorRefresh).toHaveBeenCalledExactlyOnceWith(workspace.id)
-    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, recovered.generation)
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, recovered.generation, revision)
   })
 
   it('does not replay creation after a lost import response', async () => {
@@ -184,17 +184,47 @@ describe('GitHub repository onboarding', () => {
     expect(client.workspaceMirrorAdopt).toHaveBeenCalledTimes(1)
   })
 
-  it('shows a stale revision error rather than claiming the repository is ready', async () => {
-    const client = clientWith({ workspaceMirrorAdopt: vi.fn(async () => { throw new ApiError(409, 'source generation changed; review the latest revision', -32000) }), workspaceMirrorStatus: vi.fn(async () => ({ ...observed, generation: 9, observed_commit: 'new-revision' })) })
+  it('requires explicit re-review when another actor refreshes the candidate at the same generation', async () => {
+    const nextRevision = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    let current = observed
+    const client = clientWith({
+      workspaceMirrorAdopt: vi.fn(async (_workspaceID: string, _generation: number, expectedCommit: string) => {
+        if (expectedCommit !== current.observed_commit) throw new ApiError(409, 'source candidate changed; review the latest revision', -32000)
+        current = { ...current, status: 'ready', accepted_commit: expectedCommit }
+        return current
+      }),
+      workspaceMirrorStatus: vi.fn(async () => current),
+    })
     const onCreated = vi.fn()
-    render(<GitHubRepositoryDialog client={client} onCreated={onCreated} onClose={vi.fn()} />)
-    await review()
+    const onClose = vi.fn()
+    render(<GitHubRepositoryDialog client={client} onCreated={onCreated} onClose={onClose} />)
+    const outcome = await review()
+    expect(outcome.textContent).toContain(revision)
+    current = { ...observed, observed_commit: nextRevision }
     fireEvent.click(screen.getByRole('button', { name: 'Use repository' }))
-    await screen.findByText('source generation changed; review the latest revision')
-    fireEvent.click(screen.getByRole('button', { name: 'Check source status' }))
-    expect(await screen.findByText('new-revision')).toBeTruthy()
+    await screen.findByText('source candidate changed; review the latest revision')
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledExactlyOnceWith(workspace.id, 8, revision)
+    expect(client.workspaceMirrorStatus).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorRefresh).not.toHaveBeenCalled()
+    expect(outcome.textContent).toContain(revision)
+    expect(outcome.textContent).not.toContain(nextRevision)
+    expect(current.accepted_commit).toBeUndefined()
+    expect(screen.getByRole('button', { name: 'Use repository' })).toHaveProperty('disabled', true)
     expect(onCreated).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(useStore.getState().workspaces[workspace.id]).toEqual(imported.workspace)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check source status' }))
+    expect(await screen.findByText(nextRevision)).toBeTruthy()
+    expect(onCreated).not.toHaveBeenCalled()
+    expect(client.workspaceMirrorAdopt).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Use repository' })).toHaveProperty('disabled', false)
+    fireEvent.click(screen.getByRole('button', { name: 'Use repository' }))
+    await screen.findByText(/Accepted revision:/)
+    expect(client.workspaceMirrorAdopt).toHaveBeenLastCalledWith(workspace.id, 8, nextRevision)
+    expect(current.accepted_commit).toBe(nextRevision)
+    expect(onCreated).toHaveBeenCalledExactlyOnceWith(imported.workspace)
+    expect(client.workspaceImport).toHaveBeenCalledTimes(1)
   })
 
   it.each(['identity', 'connection', 'client', 'unmount'] as const)('discards a late import after a %s change', async (change) => {
