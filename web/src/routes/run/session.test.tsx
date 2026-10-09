@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
@@ -38,6 +38,14 @@ function open(over: Partial<Run> = {}) {
   const params = { runId: 'run_1', view: 'session' }
   useStore.setState({ route: { name: 'run', params } })
   return render(<View params={params} />)
+}
+
+async function cleanupSessionView() {
+  cleanup()
+  // Unmount closes the stream in a batch. Let its async scope end before
+  // resetting the store, so the reset flushes and cancels its held frame/timer.
+  await Promise.resolve()
+  useStore.setState(useStore.getInitialState(), true)
 }
 
 function acpSocket(): ScriptedSession {
@@ -120,7 +128,8 @@ beforeEach(() => {
   vi.mocked(api.runACPCancel).mockResolvedValue({})
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await cleanupSessionView()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -399,7 +408,7 @@ describe('Enhanced multiplayer controls', () => {
 
   it('requires the full hold and server grant even while the Enhanced session rerenders', async () => {
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
-    const view = open({ member_id: bob.id, controller_member_id: bob.id })
+    open({ member_id: bob.id, controller_member_id: bob.id })
     const session = acpSocket().open({ has_control: false })
     await waitFor(() => expect(screen.getByText('Bob controls')).toBeDefined())
     const button = screen.getByRole('button', { name: 'Take control' })
@@ -428,14 +437,14 @@ describe('Enhanced multiplayer controls', () => {
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ type: 'control', write: true }))
     } finally {
-      view.unmount()
+      await cleanupSessionView()
       vi.useRealTimers()
     }
   })
 
   it('cancels an early release instead of confirming a partial hold', async () => {
     vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
-    const view = open({ member_id: bob.id, controller_member_id: bob.id })
+    open({ member_id: bob.id, controller_member_id: bob.id })
     const session = acpSocket().open({ has_control: false })
     await waitFor(() => expect(screen.getByText('Bob controls')).toBeDefined())
     const button = screen.getByRole('button', { name: 'Take control' })
@@ -452,7 +461,7 @@ describe('Enhanced multiplayer controls', () => {
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'confirm' }))
       expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()
     } finally {
-      view.unmount()
+      await cleanupSessionView()
       vi.useRealTimers()
     }
   })

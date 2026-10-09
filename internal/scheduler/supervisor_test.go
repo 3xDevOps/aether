@@ -1,8 +1,11 @@
 package scheduler
 
 import (
+	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -17,8 +20,12 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	next, state := filepath.Join(dir, "next-command"), filepath.Join(dir, "state")
-	p := startTestPTYProcess(t, supervisorCommand(next, state, []string{"/bin/sh", "-c",
-		"trap 'printf \"harness-%s\\n\" term; exit 0' TERM; printf 'harness-%s\\n' ready; while :; do read -r line; done"}))
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := startTestPTYProcess(t, supervisorCommand(next, state, []string{testBinary,
+		"-test.run=^TestSupervisorSignalChild$", "--", "harness"}))
 	defer func() {
 		_ = p.cmd.Process.Kill()
 		_ = p.master.Close()
@@ -62,9 +69,8 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	}
 	p.waitForOutput(t, "shell-ok")
 
-	// Refuse TERM, but acknowledge it so the force signal cannot race the
-	// first request. A builtin read also leaves no sleeping grandchild.
-	swap("# n3\ntrap 'printf \"stubborn-%s\\n\" term' TERM; printf 'stubborn-%s\\n' up; while :; do read -r line; done\n")
+	// Acknowledge TERM without exiting so the force signal cannot race it.
+	swap("# n3\nexec " + shellquote.QuoteAlways(testBinary) + " '-test.run=^TestSupervisorSignalChild$' -- stubborn\n")
 	p.waitForOutput(t, "shell-hup")
 	p.waitForOutput(t, "stubborn-up")
 	swap("# n4\n")
@@ -76,9 +82,40 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitState("n4 started")
+	if _, err := p.master.Write([]byte("printf 'after-kill-%s\\n' ok\n")); err != nil {
+		t.Fatal(err)
+	}
+	p.waitForOutput(t, "after-kill-ok")
 
 	if got := strings.Count(p.output.String(), "[aether] harness exited with code"); got != 1 {
 		t.Fatalf("harness exit lines = %d, output = %q", got, p.output.String())
+	}
+}
+
+// A shell trap can remain pending if TERM arrives just before its read
+// syscall blocks. Register a buffered signal channel before readiness instead.
+func TestSupervisorSignalChild(t *testing.T) {
+	i := slices.Index(os.Args, "--")
+	if i < 0 {
+		return
+	}
+	args := os.Args[i+1:]
+	if len(args) != 1 || args[0] != "harness" && args[0] != "stubborn" {
+		t.Fatalf("unexpected helper arguments: %q", args)
+	}
+	name, ready := args[0], "ready"
+	if name == "stubborn" {
+		ready = "up"
+	}
+	terms := make(chan os.Signal, 1)
+	signal.Notify(terms, syscall.SIGTERM)
+	defer signal.Stop(terms)
+	fmt.Printf("%s-%s\n", name, ready)
+	for range terms {
+		fmt.Printf("%s-term\n", name)
+		if name == "harness" {
+			return
+		}
 	}
 }
 
