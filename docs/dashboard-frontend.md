@@ -1356,12 +1356,17 @@ with the composer focused the header keeps only the title line.
 
 Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
 below the view switch at frame level, so Session, Terminal, Changes and
-Browser share one control surface. It shows the controller, watcher count,
-protection and the existing `ControlButton`: take a free lease, release it,
-or hold for five seconds to request an occupied lease. **Multiplayer**
-opens Details at the people on the run; notes stay in the same panel.
-The strip wraps on narrow screens. Control and presence failures stay beside
-the action rather than inside a closed composer.
+Browser share one control surface. It shows the controller and every watcher
+with their member name and `Avatar`, protection and the existing
+`ControlButton`: take a free lease, release it, or hold for five seconds to
+request an occupied lease. A local lease acknowledgement takes precedence
+over polled controller metadata; the controller's name remains visible
+beside **You control** or **You control in another tab**.
+**Multiplayer** still opens Details for shared notes and run facts.
+The watcher roster moves below the controls when the strip is narrow and
+scrolls horizontally rather than replacing names with a count. Offline or
+failed presence reads mark the retained roster **(last known)**. Control and
+presence failures stay beside the action rather than inside a closed composer.
 
 ACP control uses the same server-timed hold, seven-second holder dialog,
 cancellation and server acknowledgement as Standard runs. Streaming updates

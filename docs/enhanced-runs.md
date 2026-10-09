@@ -132,14 +132,17 @@ The [rendering capture](media/acp-reasoning-markdown.png) shows production
 timeline components with fixture ACP items, not a live agent.
 
 The **Multiplayer** strip stays below the view switch, including on Terminal
-and Changes. It shows who controls the agent, how many people are watching,
-and **Take control** or **Release**. Select **Multiplayer** to see the people
-and shared notes in Details. Hold **Take control** for five seconds to
+and Changes. It shows the controller's name and avatar, each watcher's name
+and avatar, and **Take control** or **Release**. Your name stays visible when
+you control the run. On narrow screens the watcher roster moves to its own
+row; longer rosters scroll horizontally without opening Details.
+Select **Multiplayer** for shared notes and run details.
+Hold **Take control** for five seconds to
 request an occupied run; the holder has seven seconds to accept or deny
 before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
 
-![Enhanced multiplayer controls and shared notes](media/enhanced-multiplayer-controls.webp)
+![Controller and watcher identities in the Enhanced run top bar](media/enhanced-multiplayer-controls.webp)
 
 ![The Enhanced holder's timed takeover decision](media/enhanced-multiplayer-takeover.webp)
 

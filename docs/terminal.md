@@ -93,10 +93,11 @@ same one: holding it from the Session view (`/ws/acp/<run_id>`) is what lets
 you answer the agent's permission requests.
 
 Enhanced runs keep a **Multiplayer** strip below the view switch on every
-view. It names the controller, shows how many people are watching, and
-offers **Take control** or **Release**. **Multiplayer** opens Details with
-the people on the run and its shared notes. Run shells keep their own
-separate controls; opening a shell does not take control of the agent.
+view. The controller and watchers appear by name with their member avatars,
+alongside **Take control** or **Release**. Watchers move to a separate,
+horizontally scrollable row on narrow screens. **Multiplayer** opens Details
+with shared notes and run facts. Run shells keep their own separate
+controls; opening a shell does not take control of the agent.
 
 The **run** has one controller session at a time. A member needs
 permission to message the run (the `steer` permission) to acquire it.

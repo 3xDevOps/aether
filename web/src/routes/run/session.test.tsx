@@ -335,6 +335,20 @@ describe('the Enhanced session view', () => {
 })
 
 describe('Enhanced multiplayer controls', () => {
+  it('keeps the controller identity tied to the acknowledged lease while presence catches up', async () => {
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue(occupiedRoom)
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4 })
+    const controller = within(await screen.findByRole('group', { name: 'Run controller' }))
+    expect(controller.getByRole('img', { name: alice.display_name })).toBeDefined()
+    expect(controller.queryByRole('img', { name: bob.display_name })).toBeNull()
+    expect(controller.getByText(/Alice.*You control/)).toBeDefined()
+    session.send({ type: 'control', has_control: false, control_generation: 4, revocation_reason: 'takeover' })
+    expect(await controller.findByRole('img', { name: bob.display_name })).toBeDefined()
+    expect(controller.queryByRole('img', { name: alice.display_name })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
+  })
+
   it('releases the acknowledged lease without closing the session and remains reachable on Terminal', async () => {
     const view = open()
     const session = acpSocket().open({ has_control: true, control_generation: 4 })
