@@ -85,6 +85,7 @@ func (s *Scheduler) syncRunUserReservationsLocked() {
 	for reservation := range s.credentialUsers {
 		if reservation.run != nil {
 			if s.runs[reservation.run.runID] == reservation.run && reservation.run.runUser != "" {
+				reservation.user = reservation.run.runUser
 				continue
 			}
 			if reservation.run.userReservation == reservation {
