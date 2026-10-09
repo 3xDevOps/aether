@@ -11,7 +11,7 @@ function stubFonts(fonts: unknown) {
 function fontSet(regular: FontFaceLoadStatus, bold: FontFaceLoadStatus, load: (face: string) => Promise<unknown>) {
   return Object.assign(
     [
-      { family: 'Inter Variable', status: 'unloaded' },
+      { family: 'DM Sans Variable', status: 'unloaded' },
       { family: 'JetBrainsMono NFM', status: regular },
       { family: 'JetBrainsMono NFM', status: bold },
     ],

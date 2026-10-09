@@ -29,29 +29,28 @@ A copy of the Apache-2.0 text ships inside the APK at
 
 ## In the dashboard bundle
 
-The dashboard uses three fonts, each under the SIL Open Font License 1.1:
+The dashboard uses four fonts, each under the SIL Open Font License 1.1:
 
-- Inter for UI text
-  ([`web/public/fonts/LICENSE-inter.txt`](../web/public/fonts/LICENSE-inter.txt)).
+- DM Sans for UI text
+  ([`web/public/fonts/LICENSE-dm-sans.txt`](../web/public/fonts/LICENSE-dm-sans.txt)).
   Only the Latin variable WOFF2 from the
-  [`@fontsource-variable/inter`](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter)
+  [`@fontsource-variable/dm-sans`](https://github.com/fontsource/font-files/tree/main/fonts/variable/dm-sans)
   package is bundled.
 - Saira for titles
   ([`web/public/fonts/LICENSE-saira.txt`](../web/public/fonts/LICENSE-saira.txt)).
   `web/public/fonts/saira-latin.woff2` is the normal-width variable font,
   weights 100-900, Latin subset, downloaded from
   [Google Fonts](https://fonts.googleapis.com/css2?family=Saira:wght@100..900&display=swap).
+- VT323 for the header and launch-splash wordmarks
+  ([`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
+  `web/public/fonts/vt323-latin.woff2` is the Latin subset at weight 400.
 - `JetBrainsMono NFM`, a Nerd Fonts Mono patch of JetBrains Mono, for the
   terminal (xterm) only
   ([`web/public/fonts/LICENSE-jetbrains-mono-nfm.txt`](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt)).
 
-`web/public/fonts/` also holds VT323 (`vt323-latin.woff2`, SIL OFL 1.1,
-[`web/public/fonts/LICENSE-vt323.txt`](../web/public/fonts/LICENSE-vt323.txt)).
-The dashboard never uses it: `scripts/make-icons.py` reads it to draw the
-wordmark on the Play listing's feature graphic,
-`android/listing/feature-graphic.png`, whose tagline is JetBrainsMono NFM.
-Because it sits in `web/public/`, the static export copies it into the
-dashboard bundle.
+`scripts/make-icons.py` also uses VT323 to draw the wordmark on the Play
+listing's feature graphic, `android/listing/feature-graphic.png`, whose
+tagline is JetBrainsMono NFM.
 
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the

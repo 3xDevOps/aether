@@ -14,19 +14,19 @@ Fonts ship in the bundle; nothing is fetched from Google.
 
 | Face | Use | Source |
 | --- | --- | --- |
-| Inter (variable, Latin subset) | All UI text | `@fontsource-variable/inter`, one WOFF2 |
+| DM Sans (variable, Latin subset) | All UI text | `@fontsource-variable/dm-sans`, one WOFF2 |
 | Saira (variable, Latin subset) | `text-title` only | `web/public/fonts/saira-latin.woff2` |
-| VT323 (Latin subset, 400) | Original launch-splash wordmark only | `web/public/fonts/vt323-latin.woff2` |
+| VT323 (Latin subset, 400) | Header and launch-splash wordmarks | `web/public/fonts/vt323-latin.woff2` |
 | JetBrainsMono NFM | xterm only | `web/public/fonts/jetbrains-mono-nfm-*.woff2` |
 | `ui-monospace, 'SF Mono', Menlo, Consolas, monospace` | Code, paths and SHAs (`font-code`) | system |
 
-Inter loads with `font-display: swap` behind `Inter Fallback`, Arial scaled
-to Inter's metrics, so the swap does not reflow text. Characters outside
+DM Sans loads with `font-display: swap` behind `DM Sans Fallback`, Arial
+scaled to DM Sans's metrics to reduce layout shift. Characters outside
 Latin render in the fallback.
 
-The splash keeps VT323's original metrics: 400 weight, a
-`clamp(32px, 4vw, 48px)` size, line height 1 and `0.12em` letter spacing.
-Its scoped `--font-pixel` does not change workbench typography.
+The header wordmark uses `text-wordmark`: VT323 at 24px, 400 weight and line
+height 1. The splash keeps its original `clamp(32px, 4vw, 48px)` size and
+`0.12em` letter spacing. Both use `--font-pixel`; other headings stay Saira.
 
 The type scale, in `web/src/index.css`:
 
