@@ -133,7 +133,7 @@ func TestCancelRefusesAnEndedMission(t *testing.T) {
 
 	completed := newMissionFixture(t)
 	completed.activate(t, taskSpec{key: "propose-a", title: "task a"})
-	if _, err := completed.db.CompleteMission(context.Background(), completed.mission.ID, completed.mission.CurrentIntegratorRunID); err != nil {
+	if _, err := completed.db.CompleteMission(context.Background(), completed.mission.ID, completed.mission.CurrentIntegratorRunID, "report-1"); err != nil {
 		t.Fatalf("complete mission: %v", err)
 	}
 	if _, err := completed.cancel(completed.member.ID, "cancel-completed"); !errors.Is(err, store.ErrMissionPhase) {

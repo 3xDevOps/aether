@@ -354,7 +354,7 @@ func TestMissionCancelEndsAnActiveMission(t *testing.T) {
 			return e
 		}(),
 		"mission complete": func() error {
-			_, e := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID)
+			_, e := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "report-1")
 			return e
 		}(),
 	} {
@@ -382,22 +382,22 @@ func TestMissionCancelEndsAPlanningMission(t *testing.T) {
 func TestMissionCompleteIsTheCurrentIntegratorsAndTerminal(t *testing.T) {
 	db, mission, member := planningFixture(t)
 	ctx := context.Background()
-	if _, err := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID); !errors.Is(err, ErrMissionPhase) {
+	if _, err := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "report-1"); !errors.Is(err, ErrMissionPhase) {
 		t.Fatalf("complete a planning mission = %v, want ErrMissionPhase", err)
 	}
 	task := mustStartedMission(t, db, mission, domain.TaskScope{})
 
-	if _, err := db.CompleteMission(ctx, mission.ID, "some-other-run"); !errors.Is(err, ErrMissionStale) {
+	if _, err := db.CompleteMission(ctx, mission.ID, "some-other-run", "report-1"); !errors.Is(err, ErrMissionStale) {
 		t.Fatalf("complete by a run that is not the integrator = %v, want ErrMissionStale", err)
 	}
-	completed, err := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID)
+	completed, err := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "report-1")
 	if err != nil {
 		t.Fatalf("CompleteMission: %v", err)
 	}
 	if completed.Phase != domain.MissionPhaseCompleted || missionPhase(t, db, mission.ID) != domain.MissionPhaseCompleted {
 		t.Fatalf("completed mission phase = %s, want completed", completed.Phase)
 	}
-	if replay, replayErr := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID); replayErr != nil || replay.Phase != domain.MissionPhaseCompleted {
+	if replay, replayErr := db.CompleteMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "report-1"); replayErr != nil || replay.Phase != domain.MissionPhaseCompleted {
 		t.Fatalf("completing again = %v, %v, want a no-op", replay, replayErr)
 	}
 	if _, cancelErr := db.CancelMission(ctx, mission.ID, member, "cancel-1"); !errors.Is(cancelErr, ErrMissionPhase) {

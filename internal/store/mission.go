@@ -68,7 +68,7 @@ type MissionStore interface {
 	GetMissionQuestion(context.Context, domain.MissionQuestionID) (*domain.MissionQuestion, error)
 	ListMissionQuestions(context.Context, domain.MissionID) ([]*domain.MissionQuestion, error)
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
-	CompleteMission(context.Context, domain.MissionID, domain.RunID) (*domain.Mission, error)
+	CompleteMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)
 	CancelMission(context.Context, domain.MissionID, domain.MemberID, string) (*domain.Mission, error)
 	DeleteMission(context.Context, domain.MissionID, []domain.RunID) error
 	ListMissionRunIDs(context.Context, domain.MissionID) ([]domain.RunID, error)

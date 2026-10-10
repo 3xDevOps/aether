@@ -787,7 +787,15 @@ follow-up prompt can give it more work. Its first `task propose`, `worker
 start`, or `worker retry` in `completed` moves the swarm back to `active` in
 the same transaction as the task or the worker attempt; a refused call
 leaves the swarm `completed`. Nothing else reopens a swarm, and only its
-current integrator can. Report success again when the follow-up is done.
+current integrator can. Until the workers left over from the completion are
+stopped, the call is refused with code `-32003` and a message ending in
+`mission <id> is still stopping worker <run-id> from its completion; retry
+once aether-internal worker list shows it finished`.
+
+A replay never changes the phase. A retried `task propose` returns its first
+result without reopening the swarm, and a success report completes a swarm
+once, so retrying an earlier report cannot complete the reopened swarm.
+Report success under a new idempotency key when the follow-up is done.
 
 `mission.cancel` is the human's stop button. It is not reachable from the run
 socket; the accountable human or an admin cancels with **Cancel swarm…** in the

@@ -134,12 +134,6 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 	if err != nil {
 		return nil, false, err
 	}
-	if reopenErr := reopenCompletedMission(ctx, tx, mission, t.Revision.ProposedByRunID); reopenErr != nil {
-		return nil, false, reopenErr
-	}
-	if phaseErr := requireMissionPhase(mission, "task.propose", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
-		return nil, false, phaseErr
-	}
 	var existingID string
 	var existingRevision int
 	var found bool
@@ -165,6 +159,12 @@ func (d *DB) CreateTaskWithIdempotency(ctx context.Context, t *domain.Task, key 
 			return nil, false, commitErr
 		}
 		return loaded, true, nil
+	}
+	if reopenErr := reopenCompletedMission(ctx, tx, mission, t.Revision.ProposedByRunID); reopenErr != nil {
+		return nil, false, reopenErr
+	}
+	if phaseErr := requireMissionPhase(mission, "task.propose", domain.MissionPhasePlanning, domain.MissionPhaseActive); phaseErr != nil {
+		return nil, false, phaseErr
 	}
 	var count int
 	if countErr := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mission_tasks WHERE mission_id=?`, t.MissionID).Scan(&count); countErr != nil {

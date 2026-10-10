@@ -333,11 +333,12 @@ func (d *DB) StartMission(ctx context.Context, missionID domain.MissionID, run d
 }
 
 // CompleteMission records that run, the mission's current integrator,
-// reported success: the mission moves to completed. Completing a completed
-// mission again is a no-op, so a replayed report changes nothing.
-func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, run domain.RunID) (*domain.Mission, error) {
-	if missionID == "" || run == "" {
-		return nil, errors.New("store: mission complete requires mission_id and the integrator run")
+// reported success: the mission moves to completed. A report completes its
+// mission once, so its replay changes nothing, even after the integrator
+// reopened the mission.
+func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, run domain.RunID, reportID string) (*domain.Mission, error) {
+	if missionID == "" || run == "" || !validMutationKey(reportID) {
+		return nil, errors.New("store: mission complete requires mission_id, the integrator run, and its report")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -351,16 +352,26 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 	if m.CurrentIntegratorRunID != run {
 		return nil, fmt.Errorf("%w: run %s is not the current integrator of mission %s", ErrMissionStale, run, missionID)
 	}
-	if m.Phase == domain.MissionPhaseCompleted {
-		return m, tx.Commit()
+	_, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.complete", reportID, "")
+	if err != nil {
+		return nil, err
 	}
-	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhaseActive); phaseErr != nil {
-		return nil, phaseErr
+	if replayed {
+		return m, tx.Commit()
 	}
 	now := missionNow(time.Time{})
 	n, err := encodeTime(now)
 	if err != nil {
 		return nil, err
+	}
+	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.complete", reportID, "", string(missionID), 0, n); receiptErr != nil {
+		return nil, receiptErr
+	}
+	if m.Phase == domain.MissionPhaseCompleted {
+		return m, tx.Commit()
+	}
+	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhaseActive); phaseErr != nil {
+		return nil, phaseErr
 	}
 	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseCompleted, n, missionID); updateErr != nil {
 		return nil, fmt.Errorf("store: move mission %s to completed: %w", missionID, updateErr)
@@ -380,10 +391,19 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 
 // reopenCompletedMission moves a completed mission back to active inside the
 // caller's transaction when run, its current integrator, takes up new work,
-// so a refused call leaves it completed.
+// so a refused call leaves it completed. It waits for the completion's
+// teardown: every attempt alive after reopening is then new work.
 func reopenCompletedMission(ctx context.Context, tx *sql.Tx, m *domain.Mission, run domain.RunID) error {
 	if m.Phase != domain.MissionPhaseCompleted || run != m.CurrentIntegratorRunID {
 		return nil
+	}
+	var leftover domain.RunID
+	leftoverErr := tx.QueryRowContext(ctx, `SELECT run_id FROM mission_attempts WHERE mission_id=? AND state IN ('reserved','launching','running','unknown','submitted') LIMIT 1`, m.ID).Scan(&leftover)
+	if leftoverErr == nil {
+		return fmt.Errorf("%w: mission %s is still stopping worker %s from its completion; retry once aether-internal worker list shows it finished", ErrMissionNotReady, m.ID, leftover)
+	}
+	if !errors.Is(leftoverErr, sql.ErrNoRows) {
+		return leftoverErr
 	}
 	n, err := encodeTime(missionNow(time.Time{}))
 	if err != nil {
