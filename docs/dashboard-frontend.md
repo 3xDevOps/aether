@@ -382,7 +382,9 @@ you, oldest first.
 
 A swarm's integrator row uses the agent's title, not the swarm objective.
 Every unarchived worker and previous integrator is indented beneath the current
-integrator, with a tree guide connecting the children. **Mine** also filters
+integrator and joined to it by tree connectors: a vertical trunk under the
+integrator's status dot and a horizontal wire into each child row
+([Styles](styles.md#shell-palette-and-focus)). **Mine** also filters
 these children under Working and Finished; Needs you keeps the whole tree
 visible. Selecting a run row opens that run, from anywhere on the row
 outside its buttons. The graph-node button to the right of the title, before

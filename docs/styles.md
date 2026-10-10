@@ -76,7 +76,7 @@ follows `prefers-color-scheme` live.
 | `--control-border` | `border-control` | `#8a8a8a` | `#767676` | Fields, checkboxes, radios |
 | `--text` | `text-text` | `#1f1f1f` | `#e8e8e8` | Text |
 | `--text-muted` | `text-muted` | `#6b6b6b` | `#9a9a9a` | Placeholders, timestamps, meta |
-| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs |
+| `--icon-faint` | `text-icon-faint` | `#8a8a8a` | `#7a7a7a` | Disabled text, decorative icons, scrollbar thumbs, tree connectors |
 | `--accent-fill` | `bg-accent`, `border-accent` | `#367f77` | `#367f77` | The one primary button, focus ring, control outline |
 | `--accent-text` | `text-accent` | `#306f69` | `#5fb3a8` | Links, accent text |
 | `--on-accent` | `text-on-accent` | `#ffffff` | `#ffffff` | Text on `bg-accent` |
@@ -249,7 +249,11 @@ Run rows carry a shaped `StatusDot`, the agent's title, a compact age
 A swarm's root also has a `Waypoints` graph-node button before the age; it
 opens swarm controls while the row opens the run. Use
 the same icon for swarm navigation and commands. Swarm children are
-indented under the root with a vertical tree guide. A row that does not need
+indented 26px under the root and joined to it by 1px `icon-faint` tree
+connectors: a trunk under the centre of the root's status dot, and for each
+child a wire from the trunk to the row's left edge, level with the child's
+dot. The trunk ends at the last child's wire. Connectors stay in the indent,
+outside every row's hover, selection and focus box. A row that does not need
 the viewer shows its title in `text-muted`, never with opacity. Group headers
 are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
