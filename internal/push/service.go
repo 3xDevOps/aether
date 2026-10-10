@@ -32,10 +32,6 @@ import (
 // before a notification is sent to their devices.
 const DefaultQuiet = time.Minute
 
-// maxDevices bounds one member's subscriptions: every one is an outbound
-// request per notification.
-const maxDevices = 16
-
 var (
 	// ErrInvalid marks a subscription a browser could not have produced.
 	ErrInvalid = errors.New("push: invalid subscription")
@@ -319,20 +315,13 @@ func (s *Service) Subscribe(ctx context.Context, member domain.MemberID, endpoin
 	if _, err := parseTarget(endpoint, p256dh, auth); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	subs, err := s.store.ListPushSubscriptions(ctx, member)
-	if err != nil {
-		return err
-	}
-	known := false
-	for _, sub := range subs {
-		known = known || sub.Endpoint == endpoint
-	}
-	if !known && len(subs) >= maxDevices {
-		return fmt.Errorf("%w: %d devices already receive your notifications; turn one off first", store.ErrLimit, maxDevices)
-	}
-	return s.store.PutPushSubscription(ctx, &store.PushSubscription{
+	err := s.store.PutPushSubscription(ctx, &store.PushSubscription{
 		Endpoint: endpoint, MemberID: member, P256DH: p256dh, Auth: auth,
 	})
+	if errors.Is(err, store.ErrLimit) {
+		return fmt.Errorf("push: %d devices already receive your notifications; turn one off first: %w", store.MaxPushSubscriptions, err)
+	}
+	return err
 }
 
 // Unsubscribe removes member's subscription with endpoint.
