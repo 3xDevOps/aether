@@ -14,8 +14,14 @@ export type RunRecord = Omit<Run, 'status_changed_at'> & {
 }
 
 export function toRecord(run: Run, previous?: RunRecord): RunRecord {
-  const { status_changed_at: changedAt, ...wire } = run
+  const { status_changed_at: snapshotAt, ...wire } = run
   const carry = previous && previous.status === run.status
+  // A snapshot can be older than the events already applied, so it never moves
+  // a same-status run's change time backwards. The wire has whole seconds and
+  // an event a finer time: they compare as instants, not as strings.
+  const behind =
+    carry && snapshotAt !== undefined && Date.parse(snapshotAt) < Date.parse(previous.stateChangedAt)
+  const changedAt = behind ? undefined : snapshotAt
   const record: RunRecord = {
     ...wire,
     reason: run.reason ?? (carry ? previous.reason : undefined),

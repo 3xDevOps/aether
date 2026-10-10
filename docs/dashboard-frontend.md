@@ -1078,7 +1078,9 @@ min" keeps moving.
 
 **The change time** is `stateChangedAt` on the run record. A snapshot's
 `status_changed_at` sets it: when the run entered its status, or its reason
-while it needs attention. A `run.status` event moves it to the event's time
+while it needs attention. A snapshot can be older than the events already
+applied, so for a run still in that status it never moves the time
+backwards. A `run.status` event moves it to the event's time
 on those same changes and leaves it alone on a same-status rewrite, as the
 server does, so a retention relabel of a run that finished last week does not
 make it the newest Finished row. An older gateway, and a run whose status

@@ -883,6 +883,27 @@ describe('applyEvent', () => {
     expect(changed('run_parked')).toEqual(['2026-08-14T10:31:00Z', false])
   })
 
+  it('keeps the newer change time when an older snapshot of the same status arrives late', async () => {
+    const store = createRootStore()
+    const parked = run({ status: 'needs-attention', reason: 'agent idle', status_changed_at: '2026-08-14T10:05:00Z' })
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [parked]) }))
+    const changedAt = () => store.getState().runs.run_1.stateChangedAt
+
+    // The reason changes while a run.get sent before it is still in flight.
+    const blocked = { from: 'needs-attention', to: 'needs-attention', reason: 'blocked: need a decision' }
+    await applyEvent(store, statusEvent({ time: '2026-08-14T10:18:00.523Z', payload: blocked }), fakeApi())
+    store.getState().upsertRun(parked)
+    expect(changedAt()).toBe('2026-08-14T10:18:00.523Z')
+    expect(store.getState().runs.run_1.stateChangedAtEstimated).toBe(false)
+
+    // The same change read back in whole seconds does not move it either.
+    store.getState().upsertRun({ ...parked, reason: blocked.reason, status_changed_at: '2026-08-14T10:18:00Z' })
+    expect(changedAt()).toBe('2026-08-14T10:18:00.523Z')
+    // A later change the stream has not delivered yet does.
+    store.getState().upsertRun({ ...parked, status_changed_at: '2026-08-14T10:20:00Z' })
+    expect(changedAt()).toBe('2026-08-14T10:20:00Z')
+  })
+
   it('applies input for an unseen run and protects the cleared set from a late snapshot', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ runList: vi.fn(async () => []) }))
