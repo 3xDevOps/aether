@@ -2,8 +2,10 @@ package browser
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"math"
@@ -11,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCaptureRejectsWrongTargetAndImageGeometry(t *testing.T) {
@@ -97,5 +100,26 @@ func TestTypedOperationLimits(t *testing.T) {
 	request.Operation, request.Condition, request.Text, request.TimeoutMS = "wait", "text", "ready", 30000
 	if err := request.Validate(); err != nil {
 		t.Fatalf("rejected declared public wait ceiling: %v", err)
+	}
+}
+
+func TestStalledCompanionIsATimeout(t *testing.T) {
+	client := NewClient("unused")
+	defer client.Close()
+	client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	_, err := client.Health(ctx)
+	var browserErr *Error
+	if !errors.As(err, &browserErr) || browserErr.Code != "timeout" {
+		t.Fatalf("stalled companion = %v", err)
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := client.Health(cancelled); errors.As(err, &browserErr) {
+		t.Fatalf("caller cancellation reported as %v", err)
 	}
 }

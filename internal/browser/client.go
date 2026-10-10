@@ -61,6 +61,10 @@ func (c *Client) request(ctx context.Context, method, endpoint string, value any
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, &Error{Code: "timeout", Message: err.Error()}
+		}
 		return nil, fmt.Errorf("browser companion: %w", err)
 	}
 	if response.StatusCode == http.StatusOK {
