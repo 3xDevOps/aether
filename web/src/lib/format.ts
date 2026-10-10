@@ -49,7 +49,6 @@ const compactUnits: Partial<Record<Intl.RelativeTimeFormatUnit, string>> = {
   year: 'y',
 }
 
-/** `timeAgo` in a few characters: "now" under a minute, then "15m", "3h", "2d". */
 export function compactAge(iso: string, now = Date.now()): string {
   const step = relativeStep(iso, now)
   if (!step) return ''
