@@ -170,12 +170,17 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		block.Image.Uri = &uri
 		blocks = append(blocks, block)
 	}
-	receipt, err := sess.Prompt(ctx, blocks, steer, delivered)
+	untitled := run.Task == "" && run.Title == ""
+	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
+		if untitled && taken == nil {
+			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
+		}
+		if queued && delivered != nil {
+			delivered(taken)
+		}
+	})
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
-	}
-	if err == nil && run.Task == "" && run.Title == "" {
-		d.s.setProvisionalRunTitle(run.ID, prompt.Text)
 	}
 	return receipt.Outcome, err
 }

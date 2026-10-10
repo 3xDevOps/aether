@@ -316,9 +316,10 @@ under its latest prompt, which the server ignores.
 
 Until the agent supplies a title, a run launched with a task shows the
 task's bounded first line. A run launched without one takes the first
-non-empty line of the first message its agent accepts, cut at 120 characters,
-stored and published as `run.title` at once. That line never replaces a
-title, and the agent's title replaces it.
+non-empty line of the first message its agent accepts, cut at 120 characters.
+A message still waiting for a turn to end titles nothing. The line is stored
+and published as `run.title` without the five-second wait, never replaces a
+title, and is replaced by the agent's title.
 
 ## Mail
 

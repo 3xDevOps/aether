@@ -9,6 +9,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -94,9 +95,6 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	withTask := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, withTask.ID, "the task's turn", turnEnded("end_turn", 1))
 	inject(e.sched, withTask.ID, "then say ping")
-	if title := storedTitle(withTask.ID); title != "" {
-		t.Fatalf("a follow-up titled a run launched with a task %q", title)
-	}
 
 	sub := e.subscribe(t)
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
@@ -122,11 +120,11 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	// The recorded adapter lists an untitled session under this prompt.
 	const prompt = "\nReply with exactly the word pong\nand nothing else; do not use tools."
 	inject(e.sched, run.ID, prompt)
-	if title := storedTitle(run.ID); title != "Reply with exactly the word pong" {
-		t.Fatalf("title after the first prompt = %q, want its first line", title)
-	}
 	if title := nextTitle(); title != "Reply with exactly the word pong" {
 		t.Fatalf("first run.title = %q, want the prompt's first line", title)
+	}
+	if title := storedTitle(run.ID); title != "Reply with exactly the word pong" {
+		t.Fatalf("title after the first prompt = %q, want its first line", title)
 	}
 	waitFor(t, "the title lookup", listedSince(0))
 	waitItems(t, e.sched, run.ID, "first turn", turnEnded("end_turn", 1))
@@ -140,6 +138,9 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	execs := len(rt.all())
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if title := storedTitle(withTask.ID); title != "" {
+		t.Fatalf("a follow-up titled a run launched with a task %q", title)
 	}
 	cfg := e.cfg
 	cfg.PTY = newFakePTY()
@@ -156,6 +157,51 @@ func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
 	time.Sleep(4 * runTitleDebounceInterval)
 	if title := storedTitle(run.ID); title != "Pong response" {
 		t.Fatalf("title after a restart and another prompt = %q, want the agent's", title)
+	}
+}
+
+func TestRunIsTitledByTheFirstMessageItsAgentAccepts(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	run := e.launchACP(t, "")
+	storedTitle := func() string {
+		t.Helper()
+		fresh, err := e.db.GetRun(t.Context(), run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fresh.Title
+	}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptWait}, false, nil)
+		first <- err
+	}()
+	waitFor(t, "the first message on the wire", func() bool {
+		execs := rt.all()
+		return len(execs) == 1 && slices.Contains(execs[0].agent.Methods(), acp.AgentMethodSessionPrompt)
+	})
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "queued behind it"}, false, nil)
+	if err != nil || outcome != acphost.OutcomeQueued {
+		t.Fatalf("second Inject = %q, %v", outcome, err)
+	}
+	if title := storedTitle(); title != "" {
+		t.Fatalf("a queued message titled the run before the agent took it: %q", title)
+	}
+
+	if err = e.sched.ACPCancel(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-first; err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the queued message's turn", turnEnded("end_turn", 1))
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if title := storedTitle(); title != acpmock.PromptWait {
+		t.Fatalf("title = %q, want the message the agent accepted first", title)
 	}
 }
 

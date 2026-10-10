@@ -296,9 +296,10 @@ func (s *Session) Close() error {
 // returns once the agent accepted it; a refusal is an error. While a turn
 // runs, steer asks the agent to add the input to that turn if it advertises
 // steering; otherwise the input waits for the turn to end. delivered, if set,
-// is called once for a queued prompt: with nil when the agent accepts it, or
-// with why it was never delivered.
-func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool, delivered func(error)) (Receipt, error) {
+// is called once for a prompt that started, awaited or joined a turn, in the
+// order the agent took its prompts: with nil when the agent accepted it, or
+// with why it never did. queued says the prompt waited for a turn to end.
+func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool, delivered func(queued bool, err error)) (Receipt, error) {
 	if len(blocks) == 0 {
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
@@ -311,12 +312,12 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks, nil)
+		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
 	if !steer || !s.conn.Info().Steering {
-		s.queue = append(s.queue, queuedPrompt{blocks, delivered})
+		s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeQueued}, nil
 	}
@@ -338,6 +339,9 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	switch outcome {
 	case OutcomeInjected:
 		s.userMessageLocked(blocks)
+		if delivered != nil {
+			s.callback(func() { delivered(false, nil) })
+		}
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeInjected}, nil
 	case "startedNewTurn":
@@ -361,13 +365,20 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks, nil)
+		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
-	s.queue = append(s.queue, queuedPrompt{blocks, delivered})
+	s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
 	s.mu.Unlock()
 	return Receipt{Outcome: OutcomeQueued}, nil
+}
+
+func report(delivered func(queued bool, err error), queued bool) func(error) {
+	if delivered == nil {
+		return nil
+	}
+	return func(err error) { delivered(queued, err) }
 }
 
 // awaitAccept reports a turn's prompt sent once the agent accepted it, or

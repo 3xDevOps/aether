@@ -13,7 +13,7 @@ import (
 
 type deliveries chan error
 
-func (d deliveries) report(err error) { d <- err }
+func (d deliveries) report(_ bool, err error) { d <- err }
 
 func (d deliveries) next(t *testing.T) error {
 	t.Helper()

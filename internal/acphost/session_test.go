@@ -175,7 +175,7 @@ func TestUnsupportedImagesNeverStartQueueOrSteer(t *testing.T) {
 				t.Helper()
 				before := len(items(t, s))
 				for _, steer := range []bool{false, true} {
-					receipt, err := s.Prompt(context.Background(), blocks, steer, func(err error) { callback <- err })
+					receipt, err := s.Prompt(context.Background(), blocks, steer, func(_ bool, err error) { callback <- err })
 					if !errors.Is(err, ErrUnsupportedImage) || receipt.Outcome != "" {
 						t.Fatalf("Prompt steer=%v = %+v, %v", steer, receipt, err)
 					}
@@ -939,7 +939,7 @@ func TestQueuedPromptIsNotSentAfterClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	delivered := make(chan error, 1)
-	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, func(err error) { delivered <- err }); err != nil || r.Outcome != OutcomeQueued {
+	if r, err := s.Prompt(context.Background(), textPrompt("second"), false, func(_ bool, err error) { delivered <- err }); err != nil || r.Outcome != OutcomeQueued {
 		t.Fatalf("second: %+v %v", r, err)
 	}
 	_ = s.Close()
