@@ -3845,7 +3845,7 @@ while Reopen run appears only for eligible retained Standard runs. Free
 container is also offered for finished retained swarm workers; its
 confirmation and error path do not hide or delete history. Expired or
 unavailable runs offer no Free container. Sidebar tests cover group
-disclosure, with Finished collapsed by default.
+disclosure: every group starts expanded and closes when its header is pressed.
 `src/lib/needs-you.test.ts` has one case per Needs you condition.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
