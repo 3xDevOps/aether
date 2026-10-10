@@ -156,6 +156,35 @@ describe('board columns', () => {
     expect(cardOf('still going').getByText('−3')).toBeDefined()
   })
 
+  it('counts the newest snapshot, not the first one it saw', () => {
+    seed([working])
+    useStore.getState().noteDiffSnapshot(working.id, {
+      time: '2026-08-14T10:10:00Z',
+      files: [{ path: 'a.ts', additions: 900, deletions: 0 }],
+    })
+    useStore.getState().noteDiffSnapshot(working.id, {
+      time: '2026-08-14T10:11:00Z',
+      files: [{ path: 'a.ts', additions: 4, deletions: 1 }],
+    })
+    renderBoard()
+
+    expect(cardOf('still going').getByText('+4')).toBeDefined()
+    expect(cardOf('still going').queryByText('+900')).toBeNull()
+  })
+
+  it('shows a file floor for a snapshot too large to count', () => {
+    seed([working])
+    useStore.getState().noteDiffSnapshot(working.id, {
+      time: '2026-08-14T10:10:00Z',
+      files: [{ path: 'a.ts', additions: 12, deletions: 3 }, { path: 'b.ts', additions: 1, deletions: 0 }],
+      truncated: true,
+    })
+    renderBoard()
+
+    expect(cardOf('still going').getByText('2+ files')).toBeDefined()
+    expect(cardOf('still going').queryByText('+13')).toBeNull()
+  })
+
   it('opens the run from anywhere on the card', () => {
     seed([working])
     renderBoard()

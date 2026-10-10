@@ -838,6 +838,9 @@ export interface FileDiffStat {
 
 export interface RunDiffPayload {
   files: FileDiffStat[]
+  /** The run changed more than a stat set holds: `files` is a prefix of its
+   * changes and the counts sum to a floor. */
+  truncated?: boolean
   /** The git tree of the whole worktree at this snapshot. */
   tree?: string
   /** The previous snapshot's tree, or the fork-point tree for the first one.

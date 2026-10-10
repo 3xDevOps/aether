@@ -748,7 +748,7 @@ func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
-	files, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
+	files, truncated, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
 	if err != nil {
 		w.warnSnapshot(err)
 		return
@@ -780,7 +780,7 @@ func (w *diffWatch) snapshot() {
 		}
 		attempted = true
 		return publish(events.RunDiffPayload{
-			Files: files, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
+			Files: files, Truncated: truncated, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
 		})
 	})
 	// Acknowledgement cleanup can fail after both the event and ref pair
@@ -797,7 +797,7 @@ func (w *diffWatch) snapshot() {
 		w.lastEvent = time.Now()
 		if !attempted {
 			payload := events.RunDiffPayload{
-				Files: files, HistoryGap: true,
+				Files: files, Truncated: truncated, HistoryGap: true,
 				SnapshotError: "Snapshot history unavailable; current change statistics remain live.",
 			}
 			if errors.Is(treeErr, ErrSnapshotStorageLimit) {
@@ -869,19 +869,29 @@ func (w *diffWatch) warnTree(err error) {
 		"run", string(w.run), "error", err)
 }
 
+// maxDiffStatFiles bounds the entries one stat set carries and
+// diffStatListingBytes each path listing read to build it. Untracked content
+// is read up to MaxSnapshotInputBytes, the most a snapshot would stage.
+const (
+	maxDiffStatFiles     = 1000
+	diffStatListingBytes = 4 << 20
+)
+
 // diffStats builds the snapshot stat set: numstat against base for tracked
 // work (committed and uncommitted) plus untracked files at their line
 // counts. Both listings use -z (NUL-separated, unquoted) so non-ASCII
 // paths survive verbatim, and --no-renames so a rename reports its real
 // old and new paths rather than a munged "old => new". Never mutates the
-// index. Sorted by path.
-func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) ([]events.FileDiffStat, error) {
-	numstat, err := e.gitCheckout(ctx, run, checkout, "diff", "--numstat", "--no-renames", "-z", base)
+// index. Sorted by path. truncated reports a checkout past one of the
+// bounds above, whose set is a prefix and whose totals are a floor.
+func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) (files []events.FileDiffStat, truncated bool, err error) {
+	numstat, truncated, err := e.gitCheckoutBounded(ctx, run, checkout, diffStatListingBytes,
+		"diff", "--numstat", "--no-renames", "-z", base)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	files := make([]events.FileDiffStat, 0, 8)
-	for record := range strings.SplitSeq(numstat, "\x00") {
+	files = make([]events.FileDiffStat, 0, 8)
+	for record := range strings.SplitSeq(wholeRecords(numstat, truncated), "\x00") {
 		parts := strings.SplitN(record, "\t", 3)
 		if len(parts) != 3 {
 			continue
@@ -890,29 +900,48 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 		del, _ := strconv.Atoi(parts[1])
 		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del})
 	}
-	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, over, err := e.gitCheckoutBounded(ctx, run, checkout, diffStatListingBytes,
+		"ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	truncated = truncated || over
 	checkoutRoot, err := os.OpenRoot(checkout)
 	if err != nil {
-		return nil, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
+		return nil, false, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
 	}
 	defer func() { _ = checkoutRoot.Close() }()
-	for path := range strings.SplitSeq(untracked, "\x00") {
+	budget := int64(MaxSnapshotInputBytes)
+	for path := range strings.SplitSeq(wholeRecords(untracked, over), "\x00") {
 		if path == "" {
 			continue
 		}
-		lines, err := countLines(ctx, checkoutRoot, path)
+		if len(files) >= maxDiffStatFiles || budget <= 0 {
+			truncated = true
+			break
+		}
+		lines, read, err := countLines(ctx, checkoutRoot, path)
 		if err != nil {
 			continue
 		}
+		budget -= read
 		files = append(files, events.FileDiffStat{Path: path, Additions: lines})
 	}
 	slices.SortFunc(files, func(a, b events.FileDiffStat) int {
 		return strings.Compare(a.Path, b.Path)
 	})
-	return files, nil
+	if len(files) > maxDiffStatFiles {
+		files, truncated = files[:maxDiffStatFiles], true
+	}
+	return files, truncated, nil
+}
+
+// wholeRecords drops the record a bounded -z listing was cut inside.
+func wholeRecords(listing string, over bool) string {
+	if !over {
+		return listing
+	}
+	return listing[:strings.LastIndexByte(listing, 0)+1]
 }
 
 // countBytesCap bounds how much of a single untracked file a snapshot will
@@ -921,23 +950,24 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 const countBytesCap = 8 << 20
 
 // countLines counts the lines in an untracked path (a trailing partial line
-// counts). A symlink counts as one line (git's view of its content) and is
-// never followed - the target may be a FIFO or device that would block the
-// watch loop forever. Only regular files are read, capped at countBytesCap.
-func countLines(ctx context.Context, root *os.Root, path string) (int, error) {
+// counts) and reports how many bytes it read to do so. A symlink counts as
+// one line (git's view of its content) and is never followed - the target
+// may be a FIFO or device that would block the watch loop forever. Only
+// regular files are read, capped at countBytesCap.
+func countLines(ctx context.Context, root *os.Root, path string) (lines int, read int64, err error) {
 	fi, err := root.Lstat(path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if fi.Mode()&fs.ModeSymlink != 0 {
-		return 1, nil
+		return 1, 0, nil
 	}
 	if !fi.Mode().IsRegular() {
-		return 0, fmt.Errorf("gitengine: not a regular file: %s", path)
+		return 0, 0, fmt.Errorf("gitengine: not a regular file: %s", path)
 	}
 	f, err := rootfs.Open(root, path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = f.Close() }()
 	var (
@@ -949,7 +979,7 @@ func countLines(ctx context.Context, root *os.Root, path string) (int, error) {
 	)
 	for total < countBytesCap {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		n, err := f.Read(buf[:])
 		if n > 0 {
@@ -966,11 +996,11 @@ func countLines(ctx context.Context, root *os.Root, path string) (int, error) {
 			break
 		}
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
 	if !empty && !endsNL {
 		count++
 	}
-	return count, nil
+	return count, int64(total), nil
 }

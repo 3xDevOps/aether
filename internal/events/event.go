@@ -241,6 +241,9 @@ type FileDiffStat struct {
 // against its base, taken on file-change quiescence.
 type RunDiffPayload struct {
 	Files []FileDiffStat `json:"files"`
+	// Truncated marks a worktree whose changes outgrew the stat set's
+	// bounds: Files is a prefix of them, and its counts sum to a floor.
+	Truncated bool `json:"truncated,omitempty"`
 	// Tree is the git tree recorded for this snapshot: the whole worktree's
 	// content at that instant. Empty when the tree could not be written, or
 	// on events from a server that predates snapshot trees.

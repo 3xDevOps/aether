@@ -10,6 +10,7 @@ import type { SliceCreator } from '@/store/slice'
 export interface DiffSnapshot {
   time: string
   files: FileDiffStat[]
+  truncated?: boolean
   /** The worktree's git tree at this snapshot. */
   tree?: string
   /**

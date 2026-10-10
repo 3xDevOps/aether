@@ -194,8 +194,14 @@ function IntervalMenu({
                 description={
                   hasTree(snapshot) ? (
                     <>
-                      {snapshot.files.length} file{snapshot.files.length === 1 ? '' : 's'} ·{' '}
-                      <Counts additions={additions} deletions={deletions} />
+                      {snapshot.truncated ? (
+                        `${snapshot.files.length}+ files`
+                      ) : (
+                        <>
+                          {snapshot.files.length} file{snapshot.files.length === 1 ? '' : 's'} ·{' '}
+                          <Counts additions={additions} deletions={deletions} />
+                        </>
+                      )}
                       {snapshot.historyGap && ' · History gap'}
                     </>
                   ) : (
