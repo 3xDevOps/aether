@@ -402,7 +402,7 @@ export async function applyEvent(
           }
         }
       }
-      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time, p.outcome_unseen)
+      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time, p.outcome_unseen, p.finish_unopened)
       break
     }
     case 'run.retention': {
@@ -428,6 +428,10 @@ export async function applyEvent(
     }
     case 'run.outcome_seen':
       store.getState().applyOutcomeSeen(ev.run_id)
+      store.getState().applyFinishOpened(ev.run_id)
+      break
+    case 'run.finish_opened':
+      store.getState().applyFinishOpened(ev.run_id)
       break
     case 'run.input': {
       if (!store.getState().runs[ev.run_id]) {

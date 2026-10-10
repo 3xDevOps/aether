@@ -247,8 +247,9 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 	return s.transitionOutcomeLocked(ctx, run, workspace, from, to, reason, actor, false)
 }
 
-// transitionOutcomeLocked also marks a newly reported outcome unseen, including
-// a nonterminal interactive park. Ordinary transitions clear the visible flag.
+// transitionOutcomeLocked also marks a newly reported outcome unseen and
+// unopened, including a nonterminal interactive park. Ordinary transitions
+// clear outcome_unseen and leave finish_unopened set only on a terminal status.
 func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, reported bool) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
@@ -294,7 +295,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public, OutcomeUnseen: reported},
+		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public, OutcomeUnseen: reported, FinishUnopened: reported || to.Terminal()},
 	})
 	if to.Terminal() || s.retentionPublished[run] != (events.RunRetentionPayload{}) {
 		s.publishRetentionLocked(run)

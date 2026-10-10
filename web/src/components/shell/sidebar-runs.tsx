@@ -245,9 +245,10 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
       navigate(route.name, route.params)
     } else navigate('run', { runId: run.id })
   }
-  const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
+  const unopened = run.finish_unopened === true && (state === 'done' || state === 'failed')
+  const recedes = state !== 'needs-you' && !unopened && (state !== 'working' || (!swarm && run.member_id !== self))
   useClock()
-  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason, timeAgo(since)].filter(Boolean).join(' · ')
+  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason, unopened && 'Not opened yet', timeAgo(since)].filter(Boolean).join(' · ')
   const indicators = (
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
       <RelativeTime at={since} compact title={undefined} />

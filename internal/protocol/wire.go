@@ -43,8 +43,10 @@ type Run struct {
 	LastCommitAt  *string                  `json:"last_commit_at,omitempty"`
 	Protected     bool                     `json:"protected,omitempty"`
 	ArchivedAt    *string                  `json:"archived_at,omitempty"`
-	// run.seen clears OutcomeUnseen.
+	// run.seen clears OutcomeUnseen for the owner and FinishUnopened for
+	// any member.
 	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`
+	FinishUnopened    bool    `json:"finish_unopened,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
@@ -150,6 +152,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Protected:           r.Protected,
 		ArchivedAt:          rfc3339Ptr(r.ArchivedAt),
 		OutcomeUnseen:       r.OutcomeUnseen,
+		FinishUnopened:      r.FinishUnopened,
 		CreatedAt:           rfc3339(r.CreatedAt),
 		StartedAt:           rfc3339Ptr(r.StartedAt),
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
@@ -373,7 +376,7 @@ type RunArchiveParams struct {
 	Archived bool   `json:"archived"`
 }
 
-// RunSeenParams: run.seen is owner only.
+// RunSeenParams: run.seen is open to any member who may view the run.
 type RunSeenParams struct {
 	RunID string `json:"run_id"`
 }

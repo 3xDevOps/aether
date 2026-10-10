@@ -140,6 +140,39 @@ describe('run rows', () => {
     }
   })
 
+  it('keeps a finish nobody has opened at full strength, nested workers too, and says so in its name', () => {
+    useStore.setState((s) => ({
+      runs: {
+        ...s.runs,
+        run_5: toRecord(run({ id: 'run_5', task: 'bump the linter', status: 'failed', finish_unopened: true })),
+        run_integrator: toRecord(run({
+          id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+        })),
+        run_worker: toRecord(run({
+          id: 'run_worker', task: 'port the parser', status: 'completed', mission_id: 'mission_1',
+          mission_role: 'worker', finish_unopened: true,
+        })),
+      },
+      missions: { mission_1: mission() },
+    }))
+    render(<AppShell />)
+    const shown = (state: string, task: string) => {
+      const row = runList().getByRole('button', { name: new RegExp(`^${state} · ${task} · `) })
+      return {
+        unopened: row.getAttribute('aria-label')!.includes(' · Not opened yet · '),
+        muted: within(row).getByText(task).className.includes('text-muted'),
+      }
+    }
+
+    expect(shown('Failed', 'bump the linter')).toEqual({ unopened: true, muted: false })
+    expect(shown('Done', 'port the parser')).toEqual({ unopened: true, muted: false })
+    expect(shown('Done', 'tidy the readme')).toEqual({ unopened: false, muted: true })
+
+    act(() => useStore.getState().applyFinishOpened('run_5'))
+
+    expect(shown('Failed', 'bump the linter')).toEqual({ unopened: false, muted: true })
+  })
+
   it('prefixes a Needs you row from another workspace and answers it where it waits', () => {
     render(<AppShell />)
 

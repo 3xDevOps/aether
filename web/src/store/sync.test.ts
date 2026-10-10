@@ -977,6 +977,38 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.outcome_unseen).toBe(false)
   })
 
+  it('marks a finish unopened until run.finish_opened, run.outcome_seen or the next transition', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const flags = () => {
+      const { outcome_unseen, finish_unopened } = store.getState().runs.run_1
+      return { outcome_unseen, finish_unopened }
+    }
+    const reported = {
+      from: 'running', to: 'completed', reason: 'agent reported success', outcome_unseen: true, finish_unopened: true,
+    }
+
+    await applyEvent(store, statusEvent({ payload: reported }), fakeApi())
+    expect(flags()).toEqual({ outcome_unseen: true, finish_unopened: true })
+    await applyEvent(store, statusEvent({ id: 'evt_opened', seq: 6, type: 'run.finish_opened', payload: {} }), fakeApi())
+    expect(flags()).toEqual({ outcome_unseen: true, finish_unopened: false })
+
+    await applyEvent(store, statusEvent({ id: 'evt_again', seq: 7, payload: reported }), fakeApi())
+    await applyEvent(store, statusEvent({ id: 'evt_seen', seq: 8, type: 'run.outcome_seen', payload: {} }), fakeApi())
+    expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: false })
+
+    const closed = { from: 'completed', to: 'merged', reason: 'closed', finish_unopened: true }
+    await applyEvent(store, statusEvent({ id: 'evt_closed', seq: 9, payload: closed }), fakeApi())
+    expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: true })
+    // A status event without the field - a relaunch, an older gateway - clears it.
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_relaunched', seq: 10, payload: { from: 'merged', to: 'running' } }),
+      fakeApi(),
+    )
+    expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: false })
+  })
+
   it('updates a run protection flag from run.protected events', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

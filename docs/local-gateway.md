@@ -517,17 +517,29 @@ trimmed and must be 1 to 64 characters with no control characters; a bad
 name is `-32602` with the reason. Each rename publishes `member.changed`
 (`{"member_id":"...","display_name":"..."}`) in every workspace.
 
-`run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. An agent's
-success or failure outcome (see [coordination.md](coordination.md)) sets
-`run.outcome_unseen`, including when an interactive run stays open at
-`needs-attention`. `run.seen` clears the flag. Only the run's current owner may
-call it; anyone else, admins included, gets `-32001`. Clearing publishes a
-`run.outcome_seen` event with an empty payload and a timeline note; calling
-it on a run whose flag is already clear returns the run and publishes
-nothing. Every `run.status` payload carries `outcome_unseen` as the run's
-flag after that event, including a same-status re-label such as retention
-expiry: `true` when a reported outcome becomes reviewable until the owner
-opens it, `false` after work resumes, Close or another status change.
+`run.seen` accepts `{"run_id":"..."}` and returns a `RunResult`. It records
+that the caller opened the run, which clears up to two flags on it:
+
+- `run.outcome_unseen` is set by an agent's success or failure outcome (see
+  [coordination.md](coordination.md)), including when an interactive run
+  stays open at `needs-attention`. Only a call from the run's current owner
+  clears it; a call from anyone else, admins included, leaves it set.
+- `run.finish_unopened` is set by that same outcome, and by any change into a
+  terminal status (`completed`, `failed`, `interrupted`, `merged` or
+  `abandoned`), reported or not. A call from any member who may view the run
+  clears it. Runs that finished before the server had this flag never carry
+  it.
+
+One call publishes at most one event, with an empty payload:
+`run.outcome_seen` and a timeline note when it cleared `outcome_unseen`, which
+also tells clients that `finish_unopened` is clear; otherwise
+`run.finish_opened` when it cleared `finish_unopened`. A call that clears
+neither returns the run and publishes nothing. Every `run.status` payload
+carries both flags as the run's flags after that event. A same-status
+re-label such as retention expiry keeps them. `outcome_unseen` is `true` when
+a reported outcome becomes reviewable until the owner opens it, `false` after
+work resumes, Close or another status change. `finish_unopened` is `true`
+from the finish until a member opens the run, `false` after work resumes.
 
 `run.relaunch` is another proxied control-channel method:
 

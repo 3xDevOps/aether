@@ -299,12 +299,18 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			}
 			return joinRollback(fmt.Errorf("scheduler: relaunch rollback row: %w", rowErr), restoreErr)
 		}
-		// UpdateRun cleared outcome_unseen with the status change; an
-		// outcome the owner had not seen is still unseen.
-		var unseenErr error
+		// UpdateRun cleared outcome_unseen and set finish_unopened with the
+		// status change; an outcome the owner had not seen is still unseen,
+		// and a finish a member had opened is still opened.
+		var unseenErr, unopenedErr error
 		if terminalRow.OutcomeUnseen {
 			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, nil, nil); flagErr != nil {
 				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
+			}
+		}
+		if !terminalRow.FinishUnopened {
+			if _, flagErr := s.cfg.Store.ClearRunFinishUnopened(ctx, run); flagErr != nil {
+				unopenedErr = fmt.Errorf("scheduler: relaunch rollback finish unopened: %w", flagErr)
 			}
 		}
 
@@ -317,7 +323,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			entry.destroyPending = false
 		}
 		s.mu.Unlock()
-		return joinRollback(unseenErr)
+		return joinRollback(unseenErr, unopenedErr)
 	}
 
 	if paused {

@@ -380,6 +380,12 @@ them. Swarm-control buttons are separate tab stops. `j` and `k` move from
 anywhere (starting at the open run), and `u` opens the next run that needs
 you, oldest first.
 
+A Done or Failed row does not recede while no member has opened its run
+since it finished (`finish_unopened`, see [Run state](#run-state)): its title
+keeps the text colour and its accessible name says "Not opened yet" before
+the age. A finished worker nested under a swarm follows the same rule. Once
+any member opens the run, the row recedes in every member's dashboard.
+
 A swarm's integrator row uses the agent's title, not the swarm objective.
 Every unarchived worker and previous integrator is indented beneath the current
 integrator and joined to it by tree connectors: a vertical trunk under the
@@ -761,7 +767,8 @@ Removal also repairs the selection and open route before any refresh awaits.
   run, whose snapshot carries the holder.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
-  `finished_at`, `stateChangedAt`, the business status, or `outcome_unseen`.
+  `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
+  `finish_unopened`.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
 - **`run.agent` events set a run's `activity`** (`{verb, target, at}` on
@@ -1066,6 +1073,16 @@ Overdue worker mail on an open integrator takes precedence over a reviewed
 outcome. Its warning and unread count stay in Working until the mail is
 acknowledged; then the reported Done or Failed state is shown again.
 
+**Unopened finish** marks a Done or Failed run that no member has opened
+since it finished, with or without a report: an exit, a failure, an
+interruption and a close count as much as a reported outcome. The server owns
+`finish_unopened`, so one member opening the run settles it for every member
+and device. `watchOutcomeSeen` makes the same `run.seen` call for any member
+who reveals such a run, or is already on it in a visible tab when it
+finishes, under the same one-call-per-reveal rule; the owner's call clears
+both flags. The flag only keeps the run's sidebar row from receding (see
+[Sidebar](#sidebar)); it moves no run between groups and changes no order.
+
 ### Execution, input and paused on the wire
 
 **The parked reason survives a fetch.** `protocol.Run` carries `reason` -
@@ -1114,8 +1131,15 @@ owner; absent (an older gateway) means false. Every `run.status` event sets
 the flag to its payload's `outcome_unseen`, the row's flag after that event -
 a same-status re-label such as retention expiry included - so a later close or
 reopen clears it. A `run.outcome_seen` event, or the Run `run.seen` returns,
-clears it. `run.seen` is gated on `cap.hasMethod('run.seen')`, owner-only, and
-idempotent.
+clears it. `run.seen` is gated on `cap.hasMethod('run.seen')` and idempotent;
+only the owner's call clears this flag.
+
+**So is an unopened finish.** `Run.finish_unopened` on `run.get` and
+`run.list` is true while no member has opened a finished run; absent (an
+older gateway) means false, so every finished row recedes. Every `run.status`
+event sets the flag to its payload's `finish_unopened` the same way. A
+`run.finish_opened` event, a `run.outcome_seen` event (the owner's open
+clears both flags), or the Run `run.seen` returns, clears it.
 
 **Paused hydrates from the same snapshot.** With `paused` on the wire
 (above), a reload shows Paused for a run paused earlier, and the
@@ -3866,6 +3890,8 @@ container is also offered for finished retained swarm workers; its
 confirmation and error path do not hide or delete history. Expired or
 unavailable runs offer no Free container. Sidebar tests cover group
 disclosure: every group starts expanded and closes when its header is pressed.
+They also cover an unopened finish: the row and a nested worker keep the text
+colour and say so in their names until `finish_unopened` clears.
 `src/lib/needs-you.test.ts` has one case per Needs you condition.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar

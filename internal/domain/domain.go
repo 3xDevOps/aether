@@ -595,7 +595,11 @@ type Run struct {
 	// (completed or failed) has not been opened by its owner. Any later
 	// status change clears it.
 	OutcomeUnseen bool
-	CreatedAt     time.Time
+	// FinishUnopened is true while no member has opened the run since it
+	// finished: reached a terminal status, or was parked by an agent's
+	// reported outcome. A same-status relabel keeps it.
+	FinishUnopened bool
+	CreatedAt      time.Time
 	// StartedAt is when the run entered running; nil while queued or
 	// provisioning.
 	StartedAt *time.Time

@@ -41,8 +41,11 @@ const (
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
 	// TypeRunOutcomeSeen signals that a run's owner opened it after an
-	// agent's report finished it, clearing outcome_unseen.
+	// agent's report finished it, clearing outcome_unseen and finish_unopened.
 	TypeRunOutcomeSeen Type = "run.outcome_seen"
+	// TypeRunFinishOpened signals that a member opened a finished run,
+	// clearing finish_unopened and leaving outcome_unseen as it was.
+	TypeRunFinishOpened Type = "run.finish_opened"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -118,6 +121,8 @@ type RunStatusPayload struct {
 	Reason string `json:"reason,omitempty"`
 	// OutcomeUnseen is the run's outcome_unseen flag after this transition.
 	OutcomeUnseen bool `json:"outcome_unseen,omitempty"`
+	// FinishUnopened is the run's finish_unopened flag after this transition.
+	FinishUnopened bool `json:"finish_unopened,omitempty"`
 }
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields
@@ -205,12 +210,21 @@ func (RunArchivedPayload) EventType() Type { return TypeRunArchived }
 func init() { registerPayload[RunArchivedPayload](TypeRunArchived) }
 
 // RunOutcomeSeenPayload signals that run.seen cleared the run's
-// outcome_unseen flag; the run is on the envelope.
+// outcome_unseen flag, and with it finish_unopened; the run is on the
+// envelope.
 type RunOutcomeSeenPayload struct{}
 
 func (RunOutcomeSeenPayload) EventType() Type { return TypeRunOutcomeSeen }
 
 func init() { registerPayload[RunOutcomeSeenPayload](TypeRunOutcomeSeen) }
+
+// RunFinishOpenedPayload signals that run.seen cleared only the run's
+// finish_unopened flag; the run is on the envelope.
+type RunFinishOpenedPayload struct{}
+
+func (RunFinishOpenedPayload) EventType() Type { return TypeRunFinishOpened }
+
+func init() { registerPayload[RunFinishOpenedPayload](TypeRunFinishOpened) }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 

@@ -93,8 +93,9 @@ type RunController interface {
 	CloseRun(ctx context.Context, run domain.RunID, actor domain.MemberID, outcome domain.RunStatus) error
 	Relaunch(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	SetArchived(ctx context.Context, run domain.RunID, actor domain.MemberID, archived bool) (*domain.Run, error)
-	// Seen clears the run's outcome_unseen flag for its owner; anyone
-	// else is denied. Clearing a clear flag returns the run unchanged.
+	// Seen clears the run's finish_unopened flag, and its outcome_unseen
+	// flag when actor owns the run. Clearing a clear flag returns the run
+	// unchanged.
 	Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the

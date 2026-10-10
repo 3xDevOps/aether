@@ -253,8 +253,10 @@ indented 26px under the root and joined to it by 1px `icon-faint` tree
 connectors: a trunk under the centre of the root's status dot, and for each
 child a wire from the trunk to the row's left edge, level with the child's
 dot. The trunk ends at the last child's wire. Connectors stay in the indent,
-outside every row's hover, selection and focus box. A row that does not need
-the viewer shows its title in `text-muted`, never with opacity. Group headers
+outside every row's hover, selection and focus box. A row that recedes shows
+its title in `text-muted`, never with opacity; a finished row no member has
+opened yet keeps `text-text` (see
+[dashboard-frontend.md](dashboard-frontend.md#sidebar)). Group headers
 are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.

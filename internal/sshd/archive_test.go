@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -109,9 +108,9 @@ func TestRunArchiveWireShape(t *testing.T) {
 	}
 }
 
-// run.seen forwards the caller as the actor and answers with the run; the
-// scheduler's owner-only refusal surfaces as CodeDenied, and a missing run
-// is refused by the guard before the scheduler is called.
+// run.seen forwards the caller as the actor and answers with the run, for the
+// owner and for a member who may only view it; a missing run is refused by
+// the guard before the scheduler is called.
 func TestRunSeenAuthorization(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -125,14 +124,14 @@ func TestRunSeenAuthorization(t *testing.T) {
 	if res.Run.ID != string(r.ID) || res.Run.OutcomeUnseen {
 		t.Fatalf("run.seen result = %+v, want run %s with outcome_unseen clear", res.Run, r.ID)
 	}
-	if got, want := e.runs.Calls(), []string{fmt.Sprintf("seen:%s:%s", r.ID, e.member.ID)}; !slices.Equal(got, want) {
+	viewer, vera := addMember(t, e, "Vera", domain.RoleViewer, false)
+	if err := controlAs(t, e, viewer).Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: string(r.ID)}, nil); err != nil {
+		t.Fatalf("viewer run.seen: %v", err)
+	}
+	want := []string{fmt.Sprintf("seen:%s:%s", r.ID, e.member.ID), fmt.Sprintf("seen:%s:%s", r.ID, vera.ID)}
+	if got := e.runs.Calls(); !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}
-
-	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
-	e.runs.setErr(fmt.Errorf("%w: only the run's owner can mark its outcome seen", permissions.ErrDenied))
-	wantDenied(t, controlAs(t, e, collab).Call(protocol.MethodRunSeen,
-		protocol.RunSeenParams{RunID: string(r.ID)}, nil), "collaborator run.seen")
 
 	var pe *protocol.Error
 	err := owner.Call(protocol.MethodRunSeen, protocol.RunSeenParams{RunID: "run_missing"}, nil)

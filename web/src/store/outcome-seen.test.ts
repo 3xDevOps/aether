@@ -104,6 +104,30 @@ describe('watchOutcomeSeen', () => {
     stop()
   })
 
+  it('marks a finish opened for a teammate, once the tab is visible, and leaves the owner the review', async () => {
+    const store = setup(bob)
+    store.setState({ runs: { [reported.id]: toRecord({ ...reported, status: 'running', outcome_unseen: false }) } })
+    const doc = fakeDocument(true)
+    const answer = deferred<ReturnType<typeof run>>()
+    const client = fakeApi({ runSeen: vi.fn(() => answer.promise) })
+    const stop = watchOutcomeSeen(store, client, doc)
+    store.getState().navigate('run', { runId: reported.id })
+
+    store.getState().applyRunStatus(reported.id, 'completed', 'agent reported success', '2026-08-14T11:00:00Z', true, true)
+    expect(client.runSeen).not.toHaveBeenCalled()
+
+    doc.hidden = false
+    doc.dispatchEvent(new Event('visibilitychange'))
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+    expect(store.getState().runs[reported.id].finish_unopened).toBe(true)
+
+    answer.resolve({ ...reported, finish_unopened: false })
+    await settle()
+    expect(store.getState().runs[reported.id]).toMatchObject({ finish_unopened: false, outcome_unseen: true })
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
   it('asks when the outcome lands on a run the owner is viewing, once the tab is visible', async () => {
     const store = setup()
     store.setState({ runs: { [reported.id]: toRecord({ ...reported, status: 'running', outcome_unseen: false }) } })
