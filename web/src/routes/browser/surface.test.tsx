@@ -1,8 +1,9 @@
+import { createRef } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { api } from '@/lib/api'
 import type { DevBrowserActionResult, DevBrowserFrameMetadata, DevBrowserPage, DevControlFence } from '@/lib/types'
 import { StubSocket } from '@/test/stub-socket'
-import { BrowserSurface } from './surface'
+import { BrowserSurface, type BrowserSurfaceHandle } from './surface'
 
 const page: DevBrowserPage = {
   session_id: 'browser-1', page_id: 'page-1', page_revision: 3, viewport_id: 'viewport-1',
@@ -67,7 +68,7 @@ it('drops the old input backlog and ignores its late refusal after a new control
   fireEvent.compositionStart(input)
   view.rerender(<BrowserSurface {...props} control={{ control_session_id: 'tab', control_generation: 8 }} />)
   fireEvent.compositionEnd(input, { data: '旧' })
-  fireEvent.input(input, { inputType: 'insertFromComposition', data: '旧', target: { value: '​旧' } })
+  fireEvent.input(input, { inputType: 'insertFromComposition', data: '旧', target: { value: '\u200b旧' } })
   fireEvent.keyDown(input, { key: 'c' })
   await act(async () => { reject(new Error('Old controller was fenced')); await pending.catch(() => {}) })
   await waitFor(() => expect(api.devBrowserAction).toHaveBeenCalledTimes(2))
@@ -75,7 +76,7 @@ it('drops the old input backlog and ignores its late refusal after a new control
   expect(props.onError).not.toHaveBeenCalled()
   fireEvent.compositionStart(input)
   fireEvent.compositionEnd(input, { data: '新' })
-  fireEvent.input(input, { inputType: 'insertFromComposition', data: '新', target: { value: '​新' } })
+  fireEvent.input(input, { inputType: 'insertFromComposition', data: '新', target: { value: '\u200b新' } })
   await waitFor(() => expect(api.devBrowserAction).toHaveBeenCalledTimes(3))
   expect(api.devBrowserAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'text', text: '新', control_generation: 8 }))
   view.unmount()
@@ -125,6 +126,23 @@ it('sends nothing while someone else drives, and says so on a press', async () =
   view.unmount()
 })
 
+it('lets a wheel take the lease only for the focused window', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 844 } as DOMRect)
+  const windowFocused = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+  const props = surfaceProps(null)
+  props.acquire.mockResolvedValue({ control_session_id: 'tab', control_generation: 4 })
+  const view = render(<BrowserSurface {...props} />)
+  await stream(frame())
+  await painted()
+  fireEvent.wheel(canvas(), { clientX: 10, clientY: 10, deltaY: 120 })
+  await act(async () => {})
+  expect(props.acquire).not.toHaveBeenCalled()
+  windowFocused.mockReturnValue(true)
+  fireEvent.wheel(canvas(), { clientX: 10, clientY: 10, deltaY: 120 })
+  await waitFor(() => expect(api.devBrowserAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'scroll', x: 10, y: 10, delta_y: 120, control_generation: 4 })))
+  view.unmount()
+})
+
 it('holds input while the toolbar changes the page', async () => {
   const props = { ...surfaceProps(), paused: true }
   const view = render(<BrowserSurface {...props} />)
@@ -134,6 +152,21 @@ it('holds input while the toolbar changes the page', async () => {
   await act(async () => {})
   expect(api.devBrowserAction).not.toHaveBeenCalled()
   expect(props.onError).not.toHaveBeenCalled()
+  view.unmount()
+})
+
+it('is not idle, so the viewport is left alone, while text is being composed', async () => {
+  const handle = createRef<BrowserSurfaceHandle>()
+  const view = render(<BrowserSurface {...surfaceProps()} ref={handle} />)
+  await stream(frame())
+  await painted()
+  const input = screen.getByRole('textbox', { name: 'Remote browser keyboard' })
+  expect(handle.current!.idle()).toBe(true)
+  fireEvent.compositionStart(input)
+  expect(handle.current!.idle()).toBe(false)
+  fireEvent.compositionEnd(input, { data: '語' })
+  await waitFor(() => expect(handle.current!.idle()).toBe(true))
+  expect(api.devBrowserAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'text', text: '語' }))
   view.unmount()
 })
 

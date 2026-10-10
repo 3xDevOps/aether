@@ -34,8 +34,10 @@ export function BrowserDock({ available, children }: { available: number; childr
     setWidth(clamp(next))
   }
 
+  // `data-browser` puts the divider inside the Browser for its key bindings
+  // and its lease: resizing the pane is not leaving it.
   return (
-    <section id="run-browser" aria-label="Browser" style={{ width }} className="relative h-full shrink-0 border-l border-seam">
+    <section id="run-browser" data-browser aria-label="Browser" style={{ width }} className="relative h-full shrink-0 border-l border-seam">
       <div
         role="separator"
         aria-orientation="vertical"

@@ -12,7 +12,8 @@ import { decodeBrowserFrame, framePoint, sameFrameTarget, type BrowserFrame } fr
 export interface BrowserSurfaceHandle {
   /** Gives the page the keyboard; on a phone this opens its keyboard. */
   focus: () => void
-  /** False while input is queued or a pointer is down on the page. */
+  /** False while input is queued or was sent in the last half second, a
+   * pointer is down, or text is being composed. */
   idle: () => boolean
 }
 
@@ -34,7 +35,7 @@ interface BrowserSurfaceProps {
 }
 type BrowserInput = Omit<DevBrowserActionParams, 'run_id' | 'session_id' | 'page_id' | 'page_revision' | 'control_session_id' | 'control_generation'>
 interface PendingInput { input: BrowserInput; frame: DevBrowserFrameMetadata; time: number; epoch: number }
-const inputSentinel = '​'
+const inputSentinel = '\u200b'
 const retryDelays = [500, 1000, 2000, 4000, 8000]
 interface PointerGesture {
   kind: string
@@ -63,6 +64,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const pointers = useRef(new Map<number, PointerGesture>())
   const lastClick = useRef({ time: 0, x: 0, y: 0, button: -1, count: 0 })
   const controlled = useRef(false)
+  const lastInput = useRef(-Infinity)
   const failures = useRef(0)
   const [live, setLive] = useState(false)
   const [failure, setFailure] = useState('')
@@ -83,7 +85,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   }, [])
   useImperativeHandle(props.ref, () => ({
     focus: () => keyboard.current?.focus({ preventScroll: true }),
-    idle: () => !sending.current && queue.current.length === 0 && pointers.current.size === 0,
+    idle: () => !sending.current && queue.current.length === 0 && pointers.current.size === 0 && !composing.current && performance.now() - lastInput.current > 500,
   }), [])
   useEffect(() => {
     // Input queued while a free lease is being taken belongs to that lease.
@@ -217,6 +219,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       return
     }
     const entry: PendingInput = { input, frame, time: performance.now(), epoch: inputEpoch.current }
+    lastInput.current = entry.time
     const previous = queue.current.at(-1)
     if (input.phase === 'move' && previous?.input.action === input.action && previous.input.phase === 'move' && previous.input.touch_id === input.touch_id) queue.current[queue.current.length - 1] = entry
     else if (queue.current.length < 32) queue.current.push(entry)
@@ -275,7 +278,9 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       const now = current.current
       if (!frame) return
       event.preventDefault()
-      if (now.paused) return
+      // A wheel also reaches a window that is not the focused one, which must
+      // not take the lease on its behalf.
+      if (now.paused || !document.hasFocus()) return
       if (!now.control && !now.free) {
         now.onBlocked()
         return
@@ -315,7 +320,13 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     send({ action: 'key', key: event.key === ' ' ? 'Space' : event.key, modifiers: [event.altKey && 'Alt', event.ctrlKey && 'Control', event.metaKey && 'Meta', event.shiftKey && 'Shift'].filter((value): value is string => Boolean(value)) })
   }
   const onPointer = (event: ReactPointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up' | 'cancel') => {
-    if (!displayed.current || props.paused) return
+    if (!displayed.current) return
+    if (props.paused) {
+      // A press that was down when the pause began is forgotten here, so its
+      // late release is not sent on its own; the next press starts clean.
+      if (phase === 'up' || phase === 'cancel') pointers.current.delete(event.pointerId)
+      return
+    }
     if (watching) {
       if (phase === 'down') props.onBlocked()
       return
