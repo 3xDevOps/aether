@@ -273,7 +273,10 @@ takes the lease first, then sends. A message from anyone else waits 45
 seconds (**Delivers in 45 s unless the controller decides sooner.**), with
 the countdown on its row (**Delivers in
 32s**). A send the server refuses keeps the draft and shows the server's
-error above the composer. During the countdown the controller sees the
+error above the composer. An unsent message and its images stay with the run
+while you open another run or page, until the page reloads; a send still
+running when you return keeps the composer locked until it settles. During the
+countdown the controller sees the
 message in **Details > Needs you** with **Approve** and **Deny**; anyone else
 who could take control sees **Take control to decide**. When the timer
 expires Aether attempts delivery. The row then reads **Sent** (`sent`),

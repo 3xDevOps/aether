@@ -49,9 +49,9 @@ async function cleanupSessionView() {
   useStore.setState(useStore.getInitialState(), true)
 }
 
-function acpSocket(): ScriptedSession {
-  const socket = StubSocket.opened.find((s) => s.url.includes('/ws/acp/'))
-  if (!socket) throw new Error('no /ws/acp socket opened')
+function acpSocket(runID = 'run_1'): ScriptedSession {
+  const socket = StubSocket.opened.filter((s) => s.url.includes(`/ws/acp/${runID}`)).at(-1)
+  if (!socket) throw new Error(`no /ws/acp socket opened for ${runID}`)
   return new ScriptedSession(socket)
 }
 
@@ -394,6 +394,164 @@ describe('the Enhanced session view', () => {
     expect(await screen.findByText(/stderr: boom/, { selector: 'pre' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry Enhanced' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Open in Standard' })).toBeDefined()
+  })
+})
+
+describe('the Enhanced composer draft', () => {
+  const View = lookupRoute('run')!
+  const lease = { has_control: true, control_generation: 4, state: state({ prompt_images: true }) }
+  const box = () => screen.findByRole('combobox', { name: 'Message the agent' })
+  const prompt = 'Round the totals\n  then update the docs'
+  const sent = { message: roomMessage({ id: 'm', kind: 'steer_request' }) }
+  let show: (runID: string) => void
+
+  /** Opens run_1 beside run_2, the run the member looks at in between. */
+  function openBesideAnotherRun() {
+    useStore.getState().upsertRun(run({ id: 'run_2', mode: 'acp', acp: true }))
+    const view = open()
+    show = (runID) => {
+      view.rerender(<View params={{ runId: runID, view: 'session' }} />)
+      acpSocket(runID).open(lease)
+    }
+    acpSocket().open(lease)
+    return view
+  }
+
+  it('keeps each run\'s unsent prompt and images while another run or page is shown, until the prompt is sent', async () => {
+    let uploaded = (_: { path: string }) => {}
+    vi.mocked(api.uploadTerminalImage).mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
+    const view = openBesideAnotherRun()
+    await userEvent.type(await box(), 'Round the totals{Enter}  then update the docs')
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
+
+    show('run_2')
+    expect(await box()).toHaveProperty('value', '')
+    await userEvent.type(await box(), 'Other run')
+    uploaded({ path: '/home/alice/totals.png' })
+    view.rerender(<p>Board</p>)
+    show('run_1')
+    const restored = await box()
+    expect(restored).toHaveProperty('value', prompt)
+    act(() => restored.focus())
+    expect(restored).toHaveProperty('selectionStart', prompt.length)
+    expect(screen.getByRole('button', { name: 'Remove attached image 1: totals.png' })).toBeDefined()
+
+    vi.mocked(api.runInject).mockClear().mockRejectedValueOnce(new Error('acphost: agent connection closed'))
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('acphost: agent connection closed')
+    show('run_2')
+    expect(await box()).toHaveProperty('value', 'Other run')
+    show('run_1')
+    expect(await box()).toHaveProperty('value', prompt)
+
+    const tooMany = Array.from({ length: 8 }, (_, index) => new File(['png'], `extra-${index}.png`, { type: 'image/png' }))
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), tooMany)
+    expect(screen.getByText('Attach at most 8 images.')).toBeDefined()
+    vi.mocked(api.runInject).mockResolvedValueOnce(sent)
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
+    expect(screen.queryByRole('alert')).toBeNull()
+    const [failed, retried] = vi.mocked(api.runInject).mock.calls
+    expect(retried).toEqual(['run_1', prompt, failed![2], expect.objectContaining({ attachments: ['/home/alice/totals.png'] })])
+    show('run_2')
+    expect(await box()).toHaveProperty('value', 'Other run')
+    show('run_1')
+    expect(await box()).toHaveProperty('value', '')
+    expect(screen.queryByRole('button', { name: /Remove attached image/ })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('waits for a send that outlives its composer, so nothing is added to it or sent twice', async () => {
+    let settle = { resolve: (_: typeof sent) => {}, reject: (_: Error) => {} }
+    const pending = () => new Promise<typeof sent>((resolve, reject) => { settle = { resolve, reject } })
+    vi.mocked(api.runInject).mockReset().mockImplementationOnce(pending).mockImplementationOnce(pending)
+    openBesideAnotherRun()
+    await userEvent.type(await box(), 'Round the totals')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    show('run_2')
+    show('run_1')
+    const waiting = await box()
+    expect(waiting).toMatchObject({ value: 'Round the totals', readOnly: true })
+    expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
+    fireEvent.keyDown(waiting, { key: 'Enter', ctrlKey: true })
+    act(() => settle.resolve(sent))
+    await waitFor(() => expect(waiting).toMatchObject({ value: '', readOnly: false }))
+    expect(api.runInject).toHaveBeenCalledTimes(1)
+
+    await userEvent.type(waiting, 'Update the docs')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    show('run_2')
+    show('run_1')
+    expect(await box()).toMatchObject({ value: 'Update the docs', readOnly: true })
+    act(() => settle.reject(new Error('acphost: agent connection closed')))
+    expect((await screen.findByRole('alert')).textContent).toContain('acphost: agent connection closed')
+    expect(await box()).toMatchObject({ value: 'Update the docs', readOnly: false })
+  })
+
+  it('waits for an upload that outlives its composer, so a resent prompt keeps its attachment and key', async () => {
+    let uploaded = (_: { path: string }) => {}
+    vi.mocked(api.uploadTerminalImage).mockReset().mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
+    openBesideAnotherRun()
+    await userEvent.type(await box(), 'Round the totals')
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
+    show('run_2')
+    show('run_1')
+    await box()
+    expect(screen.getByText('Uploading…')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Retry image upload' })).toBeNull()
+    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
+    act(() => uploaded({ path: '/home/alice/totals.png' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
+    expect(api.uploadTerminalImage).toHaveBeenCalledTimes(1)
+
+    const uncertain = { message: roomMessage({ id: 'm', kind: 'steer_request', state: 'uncertain' as const }), receipt: 'uncertain' as const }
+    vi.mocked(api.runInject).mockReset().mockResolvedValueOnce(uncertain).mockResolvedValueOnce(sent)
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Delivery is uncertain')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
+    const [first, resent] = vi.mocked(api.runInject).mock.calls
+    expect(first![3]).toMatchObject({ attachments: ['/home/alice/totals.png'] })
+    expect(resent).toEqual(first)
+  })
+
+  it('offers a restored partial command its suggestions again, and follows the selection', async () => {
+    useStore.getState().upsertRun(run({ id: 'run_2', mode: 'acp', acp: true }))
+    const view = open()
+    const withCommands = { ...lease, state: state({ commands: [{ name: 'help', description: 'List commands' }] }) }
+    acpSocket().open(withCommands)
+    await userEvent.type(await box(), '/hel')
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+    view.rerender(<View params={{ runId: 'run_2', view: 'session' }} />)
+    view.rerender(<View params={{ runId: 'run_1', view: 'session' }} />)
+    acpSocket().open(withCommands)
+    const restored = await box()
+    expect(screen.queryByRole('option')).toBeNull()
+    act(() => restored.focus())
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+    await userEvent.keyboard('{Home}')
+    expect(screen.queryByRole('option')).toBeNull()
+    await userEvent.keyboard('{End}')
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+  })
+
+  it('keeps the draft through the run\'s views, a reconnect, an event-log restart and a switch to Standard', async () => {
+    const view = open()
+    acpSocket().open(lease)
+    await userEvent.type(await box(), prompt)
+    view.rerender(<View params={{ runId: 'run_1', view: 'terminal' }} />)
+    view.rerender(<View params={{ runId: 'run_1', view: 'session', focus: 'composer' }} />)
+    expect(await box()).toHaveProperty('value', prompt)
+    act(() => useStore.getState().acpStream('run_1', 'reconnecting'))
+    expect(screen.getByText('Connecting to the agent…')).toBeDefined()
+    act(() => useStore.getState().acpStream('run_1', 'live'))
+    expect(await box()).toHaveProperty('value', prompt)
+    act(() => useStore.getState().resetSeq())
+    acpSocket().open(lease)
+    expect(await box()).toHaveProperty('value', prompt)
+    act(() => useStore.getState().upsertRun(run({ mode: 'tui', acp: false })))
+    expect(await screen.findByRole('textbox', { name: 'Message the agent' })).toHaveProperty('value', prompt)
   })
 })
 

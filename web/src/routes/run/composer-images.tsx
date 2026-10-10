@@ -5,15 +5,12 @@ import { Button } from '@/components/ui/button'
 import { api, TERMINAL_IMAGE_TYPES } from '@/lib/api'
 import { message } from '@/lib/format'
 import { imageFiles } from '@/lib/term-clipboard'
+import { beginDraftRequest, composerDraft, saveComposerDraft, useComposerDraft, type ComposerImage } from '@/routes/run/composer-state'
 
 export const maxAttachments = 8
 export const imageTypes = TERMINAL_IMAGE_TYPES.join(',')
 
-interface ComposerImage {
-  id: number
-  file: File
-  path?: string
-}
+let nextID = 0
 
 export interface ComposerImageState {
   attachments: string[]
@@ -23,7 +20,6 @@ export interface ComposerImageState {
   uploadError: string | undefined
   upload: (files: File[]) => Promise<void>
   retry: () => Promise<void>
-  clear: () => void
   remove: (index: number) => void
   onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void
   clearError: () => void
@@ -32,81 +28,49 @@ export interface ComposerImageState {
   getPaths: () => string[]
 }
 
-export function useComposerImages(runID: string, enabled: boolean, isBusy: () => boolean): ComposerImageState {
-  const [previews, setPreviews] = useState<ComposerImage[]>([])
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string>()
-  const selected = useRef<ComposerImage[]>([])
-  const paths = useRef<string[]>([])
-  const nextID = useRef(0)
-  const pending = useRef(false)
-  const generation = useRef(0)
-  const target = useRef({ runID, enabled, isBusy })
-  target.current = { runID, enabled, isBusy }
+function pathsOf(images: ComposerImage[]): string[] {
+  return images.flatMap((image) => image.path ? [image.path] : [])
+}
 
-  useEffect(() => {
-    selected.current = []
-    paths.current = []
-    pending.current = false
-    setPreviews([])
-    setUploading(false)
-    setUploadError(undefined)
-    return () => { generation.current += 1 }
-  }, [runID])
+export function useComposerImages(runID: string, enabled: boolean): ComposerImageState {
+  const { images: previews, uploading, uploadError } = useComposerDraft(runID)
 
-  const update = (next: ComposerImage[]) => {
-    selected.current = next
-    paths.current = next.flatMap((image) => image.path ? [image.path] : [])
-    setPreviews(next)
-  }
-  const clear = () => {
-    generation.current += 1
-    pending.current = false
-    setUploading(false)
-    setUploadError(undefined)
-    update([])
-  }
   const remove = (index: number) => {
-    if (target.current.isBusy() || pending.current) return
-    update(selected.current.filter((_, at) => at !== index))
-    setUploadError(undefined)
+    const draft = composerDraft(runID)
+    if (draft.busy || draft.uploading) return
+    saveComposerDraft(runID, { images: draft.images.filter((_, at) => at !== index), uploadError: undefined })
   }
   const retry = async () => {
-    if (!target.current.enabled || target.current.isBusy() || pending.current) return
-    const token = generation.current
-    const current = () => token === generation.current && target.current.runID === runID
-    pending.current = true
-    setUploading(true)
-    setUploadError(undefined)
+    const draft = composerDraft(runID)
+    if (!enabled || draft.busy || draft.uploading) return
+    const request = beginDraftRequest(runID, 'uploading', { uploadError: undefined })
     try {
-      for (const image of selected.current) {
-        if (image.path) continue
-        if (!current() || !target.current.enabled) return
-        const result = await api.uploadTerminalImage(image.file, runID)
-        if (!current() || !target.current.enabled) return
-        update(selected.current.map((item) => item.id === image.id ? { ...item, path: result.path } : item))
+      for (;;) {
+        const image = request.current() ? composerDraft(runID).images.find((item) => !item.path) : undefined
+        if (!image) break
+        const { path } = await api.uploadTerminalImage(image.file, runID)
+        if (request.current()) {
+          saveComposerDraft(runID, { images: composerDraft(runID).images.map((item) => item.id === image.id ? { ...item, path } : item) })
+        }
       }
+      request.settle()
     } catch (cause) {
-      if (current()) setUploadError(`Image upload failed: ${message(cause)}`)
-    } finally {
-      if (current()) {
-        pending.current = false
-        setUploading(false)
-      }
+      request.settle({ uploadError: `Image upload failed: ${message(cause)}` })
     }
   }
   const upload = async (files: File[]) => {
-    if (!files.length || !target.current.enabled || target.current.isBusy() || pending.current) return
-    if (selected.current.length + files.length > maxAttachments) {
-      setUploadError(`Attach at most ${maxAttachments} images.`)
+    const draft = composerDraft(runID)
+    if (!files.length || !enabled || draft.busy || draft.uploading) return
+    if (draft.images.length + files.length > maxAttachments) {
+      saveComposerDraft(runID, { uploadError: `Attach at most ${maxAttachments} images.` })
       return
     }
-    update([...selected.current, ...files.map((file) => ({ id: nextID.current++, file }))])
+    saveComposerDraft(runID, { images: [...draft.images, ...files.map((file) => ({ id: nextID++, file }))] })
     await retry()
   }
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!target.current.enabled) return
+    if (!enabled) return
     const files = imageFiles(event.clipboardData)
     if (!files.length) return
     if (!event.clipboardData.getData('text/plain')) event.preventDefault()
@@ -114,13 +78,13 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
   }
 
   return {
-    attachments: previews.flatMap((image) => image.path ? [image.path] : []),
-    previews, uploading, ready: !uploading && previews.every((image) => Boolean(image.path)),
-    uploadError, upload, retry, clear, remove, onPaste,
-    clearError: () => setUploadError(undefined),
-    isUploading: () => pending.current,
-    isReady: () => !pending.current && selected.current.every((image) => Boolean(image.path)),
-    getPaths: () => paths.current,
+    attachments: pathsOf(previews),
+    previews, uploading: Boolean(uploading), ready: !uploading && previews.every((image) => Boolean(image.path)),
+    uploadError, upload, retry, remove, onPaste,
+    clearError: () => saveComposerDraft(runID, { uploadError: undefined }),
+    isUploading: () => Boolean(composerDraft(runID).uploading),
+    isReady: () => !composerDraft(runID).uploading && composerDraft(runID).images.every((image) => Boolean(image.path)),
+    getPaths: () => pathsOf(composerDraft(runID).images),
   }
 }
 

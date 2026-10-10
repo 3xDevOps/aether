@@ -1,6 +1,79 @@
+import { create } from 'zustand'
 import type { StreamState } from '@/lib/acp-stream'
 import { modeLabel } from '@/routes/run/agent-name'
-import { isTerminal, type RunRecord } from '@/store/runs'
+import { useStore } from '@/store'
+import { isTerminal, pruneRuns, type RunRecord } from '@/store/runs'
+
+export interface ComposerImage {
+  id: number
+  file: File
+  path?: string
+}
+
+export interface ComposerDraft {
+  body: string
+  images: ComposerImage[]
+  /** Sending the same prompt again reuses the key, so the server delivers it once. */
+  idempotency?: { identity: string; key: string }
+  /** The send or other request in flight, which the next composer to mount waits for too. */
+  busy?: number
+  uploading?: number
+  error?: string
+  uploadError?: string
+}
+
+const noDraft: ComposerDraft = { body: '', images: [] }
+
+// Not a root-store slice: every write there rewrites `aether.ui`, and one made
+// during an event drain would reach the textarea a frame late.
+const useDrafts = create<Record<string, ComposerDraft>>(() => ({}))
+
+export function composerDraft(runID: string): ComposerDraft {
+  return useDrafts.getState()[runID] ?? noDraft
+}
+
+export function useComposerDraft(runID: string): ComposerDraft {
+  return useDrafts((drafts) => drafts[runID] ?? noDraft)
+}
+
+export function saveComposerDraft(runID: string, patch: Partial<ComposerDraft>): void {
+  const draft = { ...composerDraft(runID), ...patch }
+  const drafts = { ...useDrafts.getState(), [runID]: draft }
+  if (!draft.body && draft.images.length === 0 && !draft.busy && !draft.uploading && !draft.error && !draft.uploadError) delete drafts[runID]
+  useDrafts.setState(drafts, true)
+}
+
+let requests = 0
+
+/**
+ * A request outlives the composer that started it, so it marks the draft. It
+ * writes only while its mark is there: a draft dropped meanwhile has a successor.
+ */
+export function beginDraftRequest(runID: string, kind: 'busy' | 'uploading', patch: Partial<ComposerDraft> = {}) {
+  const request = ++requests
+  saveComposerDraft(runID, { ...patch, [kind]: request })
+  const current = () => composerDraft(runID)[kind] === request
+  return {
+    current,
+    settle: (settled: Partial<ComposerDraft> = {}) => {
+      if (current()) saveComposerDraft(runID, { ...settled, [kind]: undefined })
+    },
+  }
+}
+
+/** The key to send these contents under: the last attempt's while they are unchanged. */
+export function draftSendKey(draft: ComposerDraft, text: string, attachments: string[]): NonNullable<ComposerDraft['idempotency']> {
+  const identity = JSON.stringify([text, attachments])
+  return { identity, key: draft.idempotency?.identity === identity ? draft.idempotency.key : crypto.randomUUID() }
+}
+
+/** What a delivered prompt leaves of its draft. */
+export const sentDraft: Partial<ComposerDraft> = { body: '', images: [], idempotency: undefined, uploadError: undefined }
+
+useStore.subscribe((state, previous) => {
+  if (state.identityKey !== previous.identityKey) useDrafts.setState({}, true)
+  else if (state.runs !== previous.runs) useDrafts.setState(pruneRuns(useDrafts.getState(), (runID) => runID in state.runs), true)
+})
 
 export type Pill = 'send' | 'steer' | 'queue' | 'interrupt' | 'resume'
 

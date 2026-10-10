@@ -1,6 +1,55 @@
-import { composerBlock, enhancedBlock, pillFor } from '@/routes/run/composer-state'
+import { beginDraftRequest, composerBlock, composerDraft, enhancedBlock, pillFor, saveComposerDraft } from '@/routes/run/composer-state'
+import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
+
+describe('composer drafts', () => {
+  beforeEach(() => {
+    useStore.getState().setIdentityKey('alice')
+    useStore.getState().setRuns([run(), run({ id: 'run_2' })])
+    saveComposerDraft('run_1', { body: 'first' })
+    saveComposerDraft('run_2', { body: 'second', idempotency: { identity: '["second",[]]', key: 'key' } })
+  })
+
+  it('holds one draft per run until it is emptied', () => {
+    saveComposerDraft('run_2', { body: '' })
+    expect(composerDraft('run_1').body).toBe('first')
+    expect(composerDraft('run_2')).toEqual({ body: '', images: [] })
+  })
+
+  it('lets a request settle only the draft it marked', () => {
+    const stale = beginDraftRequest('run_1', 'busy')
+    useStore.getState().setIdentityKey('bob')
+    saveComposerDraft('run_1', { body: 'typed by the next member' })
+    const current = beginDraftRequest('run_1', 'busy')
+    stale.settle({ body: '', error: 'acphost: agent connection closed' })
+    expect(composerDraft('run_1')).toMatchObject({ body: 'typed by the next member', busy: expect.any(Number) })
+    expect(composerDraft('run_1').error).toBeUndefined()
+    current.settle({ body: '' })
+    expect(composerDraft('run_1')).toEqual({ body: '', images: [] })
+  })
+
+  it('saves without a root-store write, which would rewrite aether.ui', () => {
+    const stored = vi.spyOn(Storage.prototype, 'setItem')
+    saveComposerDraft('run_1', { body: 'first line' })
+    expect(stored).not.toHaveBeenCalled()
+    stored.mockRestore()
+  })
+
+  it('drops the draft of a run that no longer exists', () => {
+    useStore.getState().removeRun('run_1')
+    expect(composerDraft('run_1').body).toBe('')
+    expect(composerDraft('run_2').body).toBe('second')
+    useStore.getState().setRuns([])
+    expect(composerDraft('run_2').body).toBe('')
+  })
+
+  it('drops every draft when another member or server is authenticated', () => {
+    useStore.getState().setIdentityKey('bob')
+    expect(composerDraft('run_1').body).toBe('')
+    expect(composerDraft('run_2').body).toBe('')
+  })
+})
 
 describe('the composer pill', () => {
   const base = { paused: false, turnRunning: false, steering: true, queueHeld: false, empty: false }

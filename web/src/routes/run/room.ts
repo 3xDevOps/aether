@@ -13,6 +13,8 @@ export interface RoomPost {
   body: string
   correlationID?: string
   attachments?: string[]
+  /** A caller that outlives this hook keeps its own retry key. */
+  key?: string
 }
 
 export interface RunRoom {
@@ -140,9 +142,9 @@ export function useRunRoom(run: Run, control: ControlMetadata | undefined, clien
     const live = run.status === 'running' || run.status === 'needs-attention'
     const held = controlRef.current
     const previous = retry.current
-    const key = previous && previous.post.kind === next.kind && previous.post.body === next.body &&
+    const key = next.key ?? (previous && previous.post.kind === next.kind && previous.post.body === next.body &&
       previous.post.correlationID === next.correlationID &&
-      (previous.post.attachments ?? []).join('\n') === (next.attachments ?? []).join('\n') ? previous.key : crypto.randomUUID()
+      (previous.post.attachments ?? []).join('\n') === (next.attachments ?? []).join('\n') ? previous.key : crypto.randomUUID())
     retry.current = { post: next, key }
     setBusy(true)
     setErrorFromComposer(next.kind === 'steer_request')

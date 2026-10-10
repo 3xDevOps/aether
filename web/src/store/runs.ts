@@ -28,7 +28,7 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
 }
 
 /** `records` without the runs `keep` rejects; the same object when none is. */
-function pruneRuns<T>(
+export function pruneRuns<T>(
   records: Record<string, T>,
   keep: (runID: string) => boolean,
 ): Record<string, T> {

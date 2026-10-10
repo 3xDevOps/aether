@@ -13,7 +13,7 @@ import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ComposerImagePicker, ComposerImages, useComposerImages } from '@/routes/run/composer-images'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
-import { composerBlock, enhancedBlock, pillFor, pillHint, type Pill } from '@/routes/run/composer-state'
+import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -56,11 +56,12 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, imageAction }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, imageAction }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
   onChange: (value: string, caret: number) => void
+  onCaret?: (caret: number) => void
   onFocusChange: (focused: boolean) => void
   onSend: () => void
   onQueue?: () => void
@@ -77,6 +78,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
 }) {
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
+  const caretPlaced = useRef(false)
   useEffect(() => {
     if (autoFocus) textarea.current?.focus()
   }, [autoFocus, textarea])
@@ -114,10 +116,17 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
         placeholder={placeholder}
         className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
         style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
-        onFocus={() => {
+        onFocus={(event) => {
+          // A textarea that mounts with a draft starts its caret before the text.
+          if (!caretPlaced.current) {
+            caretPlaced.current = true
+            event.target.setSelectionRange(value.length, value.length)
+            onCaret?.(value.length)
+          }
           setFocused(true)
           onFocusChange(true)
         }}
+        onSelect={(event) => onCaret?.(event.currentTarget.selectionStart)}
         onBlur={() => {
           setFocused(false)
           onFocusChange(false)
@@ -141,11 +150,13 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const coarse = useMediaQuery(coarsePointer)
-  const [body, setBody] = useState('')
+  const draft = useComposerDraft(run.id)
+  const { body } = draft
+  const busy = room.busy || Boolean(draft.busy)
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
-  const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.image'), () => room.busy)
+  const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.image'))
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
   const hint = control.canAct
@@ -154,13 +165,16 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const error = uploadError ?? (room.errorFromComposer ? room.error : undefined)
 
   const send = () => {
-    const text = body.trim()
-    if (!text || room.busy || !images.isReady()) return
+    if (!body.trim() || busy || !images.isReady()) return
     const post = async () => {
-      if (await room.post({ kind: 'steer_request', body: text, attachments: images.getPaths() })) {
-        setBody('')
-        images.clear()
-      }
+      const latest = composerDraft(run.id)
+      const text = latest.body.trim()
+      const attachments = images.getPaths()
+      if (!text || latest.busy || room.busy || !images.isReady()) return
+      const idempotency = draftSendKey(latest, text, attachments)
+      const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined })
+      const posted = await room.post({ kind: 'steer_request', body: text, attachments, key: idempotency.key })
+      request.settle(posted ? sentDraft : {})
     }
     if (control.canAct) control.withControl(() => void post())
     else void post()
@@ -184,15 +198,16 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           textarea={textarea}
           autoFocus={autoFocus}
           value={body}
-          onChange={setBody}
+          readOnly={Boolean(draft.busy)}
+          onChange={(next) => saveComposerDraft(run.id, { body: next })}
           onFocusChange={onFocusChange}
           onSend={send}
           onEscape={onEscape}
           placeholder="Message the agent"
           describedBy={hintID}
           onPaste={images.onPaste}
-          images={<ComposerImages images={images} disabled={room.busy} />}
-          imageAction={<ComposerImagePicker images={images} disabled={room.busy || !cap.hasMethod('terminal.image')} />}
+          images={<ComposerImages images={images} disabled={busy} />}
+          imageAction={<ComposerImagePicker images={images} disabled={busy || !cap.hasMethod('terminal.image')} />}
         />
         <div className="flex min-w-0 items-center gap-2">
           <p id={hintID} className="line-clamp-2 min-w-0 flex-1 text-ui-sm text-muted">
@@ -201,11 +216,11 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           <Button
             size="sm"
             hint={coarse ? undefined : `Send (${formatKeys('$mod+Enter')})`}
-            disabled={!body.trim() || room.busy || !images.ready}
+            disabled={!body.trim() || busy || !images.ready}
             onClick={send}
           >
             <ArrowUp />
-            {room.busy ? 'Sending…' : 'Send'}
+            {busy ? 'Sending…' : 'Send'}
           </Button>
         </div>
       </div>
@@ -242,14 +257,13 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const control = useImplicitControl(run, agent)
   const coarse = useMediaQuery(coarsePointer)
-  const [body, setBody] = useState('')
+  const draft = useComposerDraft(run.id)
+  const { body, error } = draft
+  const busy = Boolean(draft.busy)
+  const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
   const [caret, setCaret] = useState(0)
-  const [busy, setBusy] = useState(false)
-  const busyRef = useRef(false)
-  const [error, setError] = useState<string>()
   const [focused, setFocused] = useState(false)
   const [active, setActive] = useState(0)
-  const idempotency = useRef<{ identity: string; key: string } | null>(null)
   const hintID = useId()
   const listID = useId()
   const queueHeld = useQueueHeld(focused)
@@ -269,7 +283,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
   const supportsImages = state?.prompt_images === true
-  const images = useComposerImages(run.id, !gate && supportsImages && cap.hasMethod('terminal.image'), () => busyRef.current)
+  const images = useComposerImages(run.id, !gate && supportsImages && cap.hasMethod('terminal.image'))
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = moderated ? 'send' : pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
 
@@ -280,7 +294,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const current = Math.min(active, Math.max(0, suggestions.length - 1))
 
   const pick = (item: Suggestion) => {
-    if (busyRef.current) return
+    if (composerDraft(run.id).busy) return
     if (!trigger) return
     const next = body.slice(0, trigger.start) + item.insert + body.slice(caret)
     const at = trigger.start + item.insert.length
@@ -291,59 +305,47 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   }
 
   const attempt = async (action: () => Promise<unknown>) => {
-    if (busyRef.current) return false
-    busyRef.current = true
-    setBusy(true)
-    setError(undefined)
+    if (composerDraft(run.id).busy) return
+    const request = beginDraftRequest(run.id, 'busy', { error: undefined })
     try {
       await action()
-      return true
+      request.settle()
     } catch (err) {
-      setError(message(err))
-      return false
-    } finally {
-      busyRef.current = false
-      setBusy(false)
+      request.settle({ error: message(err) })
     }
   }
 
   const deliver = async (steer: boolean) => {
-    const text = body.trim()
+    const latest = composerDraft(run.id)
+    const text = latest.body.trim()
     const attachments = images.getPaths()
     const lease = sessionLease(useStore, run.id)
-    if ((!text && !attachments.length) || busyRef.current || !images.isReady() || (!lease && !moderated)) return
+    if ((!text && !attachments.length) || latest.busy || !images.isReady() || (!lease && !moderated)) return
     if (attachments.length && !supportsImages) {
-      setError('This agent does not support image prompts.')
+      saveComposerDraft(run.id, { error: 'This agent does not support image prompts.' })
       return
     }
-    const identity = JSON.stringify([text, attachments])
-    const key = idempotency.current?.identity === identity ? idempotency.current.key : crypto.randomUUID()
-    idempotency.current = { identity, key }
-    const sent = await attempt(async () => {
-      const result = await api.runInject(run.id, text, key, { steer, lease, attachments })
+    const idempotency = draftSendKey(latest, text, attachments)
+    const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined })
+    try {
+      const result = await api.runInject(run.id, text, idempotency.key, { steer, lease, attachments })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
-      if (delivery !== 'sent' && delivery !== 'queued') {
-        if (delivery !== 'uncertain') idempotency.current = null
-        throw new Error(result.message.failure?.message ?? (delivery === 'uncertain'
-          ? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.'
-          : 'The message was not sent. Your draft was kept.'))
-      }
-    })
-    if (sent) {
-      idempotency.current = null
-      setBody('')
-      images.clear()
+      if (delivery === 'sent' || delivery === 'queued') request.settle(sentDraft)
+      else if (delivery === 'uncertain') request.settle({ error: result.message.failure?.message ?? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.' })
+      else request.settle({ error: result.message.failure?.message ?? 'The message was not sent. Your draft was kept.', idempotency: undefined })
+    } catch (err) {
+      request.settle({ error: message(err) })
     }
   }
 
   const act = (chosen: Pill) => {
-    if (busyRef.current || images.isUploading()) return
+    if (composerDraft(run.id).busy || images.isUploading()) return
     if (moderated) void deliver(false)
     else control.withControl(() => perform(chosen))
   }
   const perform = (chosen: Pill) => {
-    if (busyRef.current || images.isUploading()) return
+    if (composerDraft(run.id).busy || images.isUploading()) return
     const lease = sessionLease(useStore, run.id)
     switch (chosen) {
       case 'resume':
@@ -395,7 +397,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         {error && (
           <div role="alert" className="flex items-start gap-2 text-ui-sm text-state-failed">
             <span className="min-w-0 flex-1 break-words">{error}</span>
-            <Button size="sm" variant="ghost" onClick={() => setError(undefined)}>Dismiss</Button>
+            <Button size="sm" variant="ghost" onClick={() => saveComposerDraft(run.id, { error: undefined })}>Dismiss</Button>
           </div>
         )}
         <ComposerBox
@@ -418,6 +420,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
             setActive(0)
             setDismissed(false)
           }}
+          onCaret={setCaret}
           onFocusChange={(next) => {
             setFocused(next)
             onFocusChange(next)
@@ -434,7 +437,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           combobox={{ expanded: suggestions.length > 0, controls: listID, active: suggestions.length ? `${listID}-${current}` : undefined }}
           menu={<SuggestionList id={listID} items={suggestions} active={current} onPick={pick} />}
           onKeyDown={(event) => {
-            if (busyRef.current) return
+            if (busy) return
             if (suggestions.length === 0 || event.nativeEvent.isComposing) return
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault()
