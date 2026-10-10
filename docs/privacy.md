@@ -126,7 +126,8 @@ and revoke GitHub authorization, see
 Off until you turn on **Notify this device when a run needs me** in the
 dashboard's Settings, in a browser or in the dashboard added to a home screen
 ([networking.md](networking.md#notifications)). The Android app cannot
-receive them and sends nothing described here.
+receive them, so it never registers with a push service; the one thing in
+this section it does send is the last paragraph's report to your server.
 
 Turning it on makes that browser register with its vendor's push service -
 Google's for Chrome, Mozilla's for Firefox, Apple's for Safari, Microsoft's
@@ -159,10 +160,10 @@ The push service relays the message to your browser under its own policy.
 **Send test notification** sends the same request with the text
 `Notifications work on this device.` and no run.
 
-While you use a dashboard, in any browser or in the desktop app, it tells
-your server so at most every 20 seconds. Your server keeps the time of the
-latest such report in memory, to hold your notifications while you are there.
-It is not stored, and no other member sees it.
+While you use a dashboard, in any browser, the desktop app or the Android
+app, it tells your server so at most every 20 seconds. Your server keeps the
+time of the latest such report in memory, to hold your notifications while
+you are there. It is not stored, and no other member sees it.
 
 ## What an edge stores
 
