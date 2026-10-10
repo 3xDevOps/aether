@@ -244,7 +244,9 @@ to avoid attaching to an explicit replacement. `server_owned_responder: true`
 means the server answers terminal queries; viewers must not send competing
 device replies. Writer ownership is fenced by surface, incarnation,
 `control_session_id` and `control_generation`. Viewer attach does not resize
-the app; resize and stop require explicit control. Development control changes
+the app; resize and stop require explicit control. `dev.terminal.list` names
+who started each terminal in `started_by` (`run_agent` or `member`).
+Development control changes
 use `dev.control.*` and reconnect, not interactive primary-agent attach.
 
 Cancellation and authority revocation stop source work and close download
@@ -1985,11 +1987,12 @@ keystrokes.
 run container instead of attaching to the agent process. A shell tab always
 requires **steer** permission and ignores the `write` value in the header;
 there is no read-only shell mode. Tab names must match
-`^[a-z0-9-]{1,32}$`, and each run can have at most four active shell tabs.
+`^[a-z0-9-]{1,32}$`, and at most four shells started by people can run in a
+run at once; the agent's shells are counted apart.
 The shell starts in `/workspace`. When it exits, the socket closes normally
 with **1000** and the tab name is free to reopen with a fresh shell.
 Closing the socket only detaches: the shell keeps running, still counts
-toward the four-tab cap, and reconnecting the same tab name reattaches to
+toward that limit, and reconnecting the same tab name reattaches to
 it. Every shell ends with the run's container. An unsuccessful initial TUI
 agent exit returns the session to a login shell, so another installed agent
 can use the same run checkout. A run shell can only be opened while the

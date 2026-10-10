@@ -107,7 +107,7 @@ func TestEnsureRunShellTabEnforcesFourTabLimitAndIsIdempotent(t *testing.T) {
 			t.Fatalf("EnsureRunShellTab(%q): %v", tab, err)
 		}
 	}
-	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "five", 80, 24); err == nil || !strings.Contains(err.Error(), "at most 4 shell tabs") {
+	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "five", 80, 24); !errors.Is(err, ErrRunShellTabLimit) {
 		t.Fatalf("fifth tab error = %v", err)
 	}
 	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "one", 80, 24); err != nil {
