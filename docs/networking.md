@@ -2,7 +2,8 @@
 
 Aether needs exactly one thing from your network: **the CLI must be able to
 reach the server's SSH port.** Git transport, the control channel, event
-streams, PTY attach and the dashboard forward all multiplex over that one
+streams, PTY attach, the dashboard forward and `ssh` into a run
+([terminal.md](terminal.md#ssh-and-editors)) all multiplex over that one
 connection. The server opens no HTTP port unless you set `web-port`, and that
 one listens on the host's tailnet addresses only - see
 [The dashboard](#the-dashboard). Through an edge the server opens no port at

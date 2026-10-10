@@ -22,6 +22,7 @@ func init() {
 			return nil
 		})
 		d.SSH.Services.Development = developmentService{runs: d.Runs}
+		d.SSH.Services.RunSSH = d.Runs
 		return nil, nil
 	})
 }

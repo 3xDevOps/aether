@@ -32,6 +32,13 @@ should keep both, and keep gh at 2.81.0 or newer: that release added
 `gh auth status --json`, which is how the server reads a member's login
 back.
 
+An editor that attaches to a run over SSH installs its remote server in the
+container ([terminal.md](terminal.md#editors)). The standard image has what
+that takes: glibc, bash, curl and tar. A team image should keep them. `ssh`,
+`scp` and `sftp` into a run need nothing from the image but `/bin/sh`;
+`rsync` needs `rsync` installed in it, which the standard image does not
+have.
+
 ### Git in run environments
 
 Managed commits use native `git update-ref --stdin` prepared transactions
