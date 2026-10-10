@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,7 +14,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -94,11 +95,11 @@ func TestReportedSuccessParksTUIRunAtTurnEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
-	if p.Reason != reportedSuccessReason || p.From != domain.RunRunning || !p.OutcomeUnseen {
+	if p.Reason != reportedSuccessReason || p.From != domain.RunRunning || !p.OutcomeUnseen || !p.FinishUnopened {
 		t.Fatalf("park event = %+v", p)
 	}
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || row.FinishedAt != nil {
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || !row.FinishUnopened || row.FinishedAt != nil {
 		t.Fatalf("parked row = %+v", row)
 	}
 	if got := e.git.commitsFor(run.ID); len(got) != 0 {
@@ -112,8 +113,11 @@ func TestReportedSuccessParksTUIRunAtTurnEnd(t *testing.T) {
 	if err = e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged); p.OutcomeUnseen {
-		t.Fatalf("close event = %+v", p)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged); p.OutcomeUnseen || p.FinishUnopened {
+		t.Fatalf("close event = %+v, want a member's close to clear both flags", p)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); row.OutcomeUnseen || row.FinishUnopened {
+		t.Fatalf("closed row = %+v, want neither flag", row)
 	}
 	sc, err = e.sched.readSidecar(run.ID)
 	if err != nil || !sc.Retained || !sc.Paused || sc.RetainedUntil == nil ||
@@ -347,8 +351,8 @@ func TestInteractiveRunReportsAgainWithoutRelaunch(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
 		t.Fatal(err)
 	}
-	if row := e.waitStoreStatus(t, run.ID, domain.RunRunning); row.OutcomeUnseen {
-		t.Fatal("follow-up retained unseen outcome")
+	if row := e.waitStoreStatus(t, run.ID, domain.RunRunning); row.OutcomeUnseen || row.FinishUnopened {
+		t.Fatalf("follow-up row = %+v, want neither flag", row)
 	}
 	second := &store.CoordReport{WorkspaceID: e.ws.ID, RunID: run.ID, Outcome: store.CoordOutcomeSuccess, Summary: "round two", IdempotencyKey: "round-2"}
 	if err := e.db.AppendCoordReport(ctx, second); err != nil {
@@ -364,7 +368,7 @@ func TestInteractiveRunReportsAgainWithoutRelaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || e.rt.byName(string(run.ID)) != container {
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || !row.FinishUnopened || e.rt.byName(string(run.ID)) != container {
 		t.Fatalf("second outcome = %+v", row)
 	}
 	if got, err := e.db.GetCoordReport(ctx, first.ID); err != nil || got.SupersededAt == nil {
@@ -373,13 +377,17 @@ func TestInteractiveRunReportsAgainWithoutRelaunch(t *testing.T) {
 }
 
 // TestRetainedExpiryRelabelsAReportedRun: the status stays, the retention
-// promise leaves the reason, and relaunch is refused.
+// promise leaves the reason, relaunch is refused, and a finish a teammate
+// opened does not read as unopened again.
 func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
 	run, _ := e.launchFake(t, "expire me")
 	e.retainLegacyReportedRun(t, run.ID)
+	if _, err := e.sched.Seen(ctx, run.ID, newSteerer(t, e, "Cody", "", "").ID); err != nil {
+		t.Fatalf("Seen by a teammate: %v", err)
+	}
 	e.sched.mu.Lock()
 	past := time.Now().UTC().Add(-time.Second)
 	e.sched.runs[run.ID].retainedUntil = &past
@@ -387,77 +395,96 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 
 	sub := e.subscribe(t)
 	e.sched.sweepRetained(ctx)
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted); p.Reason != reportedSuccessReason || !p.OutcomeUnseen {
-		t.Fatalf("expiry relabel event = %+v, want %q with the outcome still unseen", p, reportedSuccessReason)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunCompleted); p.Reason != reportedSuccessReason || !p.OutcomeUnseen || p.FinishUnopened {
+		t.Fatalf("expiry relabel event = %+v, want %q with the outcome still unseen and the finish still opened", p, reportedSuccessReason)
 	}
 	waitFor(t, "expired container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen {
-		t.Fatalf("expired row = %q, unseen %v; want %q, unseen", row.Reason, row.OutcomeUnseen, reportedSuccessReason)
+	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || row.FinishUnopened {
+		t.Fatalf("expired row = %q, unseen %v, unopened %v; want %q, unseen, opened", row.Reason, row.OutcomeUnseen, row.FinishUnopened, reportedSuccessReason)
 	}
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Relaunch after expiry = %v, want ErrInvalidTransition", err)
 	}
 }
 
-// TestSeenClearsTheUnseenOutcomeForItsOwner: only the owner clears the
-// flag, the first clear publishes run.outcome_seen and a timeline note,
-// and a repeat returns the run without publishing again.
-func TestSeenClearsTheUnseenOutcomeForItsOwner(t *testing.T) {
+// TestSeenClearsEachFlagForWhoOpens: any member's open clears finish_unopened,
+// only the owner's clears outcome_unseen, and one call publishes one event:
+// run.outcome_seen with its timeline note when the outcome was unseen,
+// run.finish_opened otherwise, nothing on a repeat or after a member's close.
+func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := t.Context()
-	run, _ := e.launchFake(t, "review me")
-	if err := e.sched.FinishReported(ctx, run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
-		t.Fatalf("FinishReported: %v", err)
+	other := newSteerer(t, e, "Cody", "", "")
+	park := func(task string) domain.RunID {
+		t.Helper()
+		run, _ := e.launchFake(t, task)
+		if err := e.sched.FinishReported(ctx, run.ID, "report-"+task, domain.RunCompleted, time.Now()); err != nil {
+			t.Fatalf("FinishReported: %v", err)
+		}
+		e.expireReportDeadline(t, run.ID)
+		if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); !row.OutcomeUnseen || !row.FinishUnopened {
+			t.Fatalf("reported park = %+v, want outcome_unseen and finish_unopened", row)
+		}
+		return run.ID
 	}
-	e.expireReportDeadline(t, run.ID)
-	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); !row.OutcomeUnseen {
-		t.Fatal("reported finish left outcome_unseen clear")
+	seen := func(run domain.RunID, actor domain.MemberID, wantUnseen bool) {
+		t.Helper()
+		got, err := e.sched.Seen(ctx, run, actor)
+		if err != nil || got.FinishUnopened || got.OutcomeUnseen != wantUnseen {
+			t.Fatalf("Seen by %s = %+v, %v; want finish_unopened clear, outcome_unseen %v", actor, got, err, wantUnseen)
+		}
 	}
+	teammateFirst, ownerFirst := park("teammate first"), park("owner first")
 	sub := e.subscribe(t)
 
-	other := newSteerer(t, e, "Cody", "", "")
-	if _, err := e.sched.Seen(ctx, run.ID, other.ID); !errors.Is(err, permissions.ErrDenied) {
-		t.Fatalf("Seen by a non-owner = %v, want ErrDenied", err)
+	seen(teammateFirst, other.ID, true)
+	seen(teammateFirst, e.member.ID, false)
+	seen(teammateFirst, e.member.ID, false)
+	seen(ownerFirst, e.member.ID, false)
+	seen(ownerFirst, other.ID, false)
+	e.rt.byName(string(ownerFirst)).exitNow(0)
+	if row := e.waitStoreStatus(t, ownerFirst, domain.RunCompleted); row.OutcomeUnseen || !row.FinishUnopened {
+		t.Fatalf("exited row = %+v, want finish_unopened set again and no outcome to review", row)
 	}
-	seen, err := e.sched.Seen(ctx, run.ID, e.member.ID)
-	if err != nil || seen.OutcomeUnseen {
-		t.Fatalf("Seen by the owner = %+v, %v; want outcome_unseen clear", seen, err)
+	seen(ownerFirst, e.member.ID, false)
+	if err := e.sched.CloseRun(ctx, ownerFirst, other.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
 	}
-	again, err := e.sched.Seen(ctx, run.ID, e.member.ID)
-	if err != nil || again.OutcomeUnseen {
-		t.Fatalf("repeat Seen = %+v, %v; want the run, flag clear", again, err)
-	}
+	e.waitStoreStatus(t, ownerFirst, domain.RunMerged)
+	seen(ownerFirst, e.member.ID, false)
 	if _, err := e.sched.Seen(ctx, "run_missing", e.member.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Seen on a missing run = %v, want ErrNotFound", err)
 	}
 
-	seenEvents, notes := 0, 0
+	var got []string
 	deadline := time.After(200 * time.Millisecond)
 	for done := false; !done; {
 		select {
 		case ev := <-sub.Events():
-			if ev.RunID != run.ID {
-				continue
-			}
 			switch p := ev.Payload.(type) {
-			case events.RunOutcomeSeenPayload:
-				seenEvents++
-				if ev.ActorID != e.member.ID {
-					t.Fatalf("run.outcome_seen actor = %s, want the owner", ev.ActorID)
-				}
+			case events.RunOutcomeSeenPayload, events.RunFinishOpenedPayload:
+				got = append(got, fmt.Sprintf("%s %s %s", ev.Type, ev.RunID, ev.ActorID))
 			case events.TimelinePayload:
-				if p.Kind == events.TimelineNote {
-					notes++
+				if p.Message == "outcome seen by owner" {
+					got = append(got, fmt.Sprintf("note %s %s", ev.RunID, ev.ActorID))
 				}
 			}
 		case <-deadline:
 			done = true
 		}
 	}
-	if seenEvents != 1 || notes != 1 {
-		t.Fatalf("published %d run.outcome_seen and %d notes, want one of each", seenEvents, notes)
+	want := []string{
+		fmt.Sprintf("run.finish_opened %s %s", teammateFirst, other.ID),
+		fmt.Sprintf("run.outcome_seen %s %s", teammateFirst, e.member.ID),
+		fmt.Sprintf("note %s %s", teammateFirst, e.member.ID),
+		fmt.Sprintf("run.outcome_seen %s %s", ownerFirst, e.member.ID),
+		fmt.Sprintf("note %s %s", ownerFirst, e.member.ID),
+		fmt.Sprintf("run.finish_opened %s %s", ownerFirst, e.member.ID),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("seen events =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -787,7 +814,8 @@ func TestRecoveryParksLegacyArmedRunWhoseTurnEnded(t *testing.T) {
 
 // TestFailedRelaunchKeepsTheReportAndUnseenOutcome: a relaunch that rolls
 // back leaves the run as it was - its terminal report still active, so the
-// same agent cannot report a second outcome, and its outcome still unseen.
+// same agent cannot report a second outcome, its outcome still unseen, and
+// the finish a member opened still opened.
 func TestFailedRelaunchKeepsTheReportAndUnseenOutcome(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
@@ -798,6 +826,9 @@ func TestFailedRelaunchKeepsTheReportAndUnseenOutcome(t *testing.T) {
 		t.Fatalf("report: %v", err)
 	}
 	e.retainLegacyReportedRun(t, run.ID)
+	if changed, err := e.db.ClearRunFinishUnopened(ctx, run.ID); err != nil || !changed {
+		t.Fatalf("ClearRunFinishUnopened = %v, %v; want the retained finish opened", changed, err)
+	}
 	if err := e.sched.Close(); err != nil {
 		t.Fatalf("Close scheduler: %v", err)
 	}
@@ -815,8 +846,8 @@ func TestFailedRelaunchKeepsTheReportAndUnseenOutcome(t *testing.T) {
 		t.Fatalf("report after a failed relaunch = %+v, %v; want it still active", got, err)
 	}
 	row, err := e.db.GetRun(ctx, run.ID)
-	if err != nil || row.Status != domain.RunCompleted || row.Reason != reportedSuccessRetainedReason || !row.OutcomeUnseen {
-		t.Fatalf("row after a failed relaunch = %+v, %v; want the retained completed row, outcome unseen", row, err)
+	if err != nil || row.Status != domain.RunCompleted || row.Reason != reportedSuccessRetainedReason || !row.OutcomeUnseen || row.FinishUnopened {
+		t.Fatalf("row after a failed relaunch = %+v, %v; want the retained completed row, outcome unseen, finish opened", row, err)
 	}
 }
 
@@ -853,8 +884,8 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 		e := newTestEnv(t, nil)
 		ctx := t.Context()
 		row := exited(t, e, "exit first", 1, domain.RunFailed)
-		if row.Reason != "agent exited 1" {
-			t.Fatalf("exit reason = %q, want agent exited 1", row.Reason)
+		if row.Reason != "agent exited 1" || !row.FinishUnopened || row.OutcomeUnseen {
+			t.Fatalf("exit row = %+v, want agent exited 1, unopened, with no outcome to review", row)
 		}
 		report := reported(t, e, row.ID, store.CoordOutcomeSuccess)
 		sub := e.subscribe(t)
@@ -862,8 +893,8 @@ func TestReportAfterExitOverridesTheExitOutcome(t *testing.T) {
 			t.Fatalf("FinishReported after exit: %v", err)
 		}
 		p := expectOnlyStatusEvent(t, sub, row.ID, domain.RunCompleted)
-		if p.From != domain.RunFailed || p.Reason != reportedSuccessReason || !p.OutcomeUnseen {
-			t.Fatalf("override event = %+v, want failed -> completed because %q, outcome unseen", p, reportedSuccessReason)
+		if p.From != domain.RunFailed || p.Reason != reportedSuccessReason || !p.OutcomeUnseen || !p.FinishUnopened {
+			t.Fatalf("override event = %+v, want failed -> completed because %q, outcome unseen, finish unopened", p, reportedSuccessReason)
 		}
 		got, err := e.db.GetRun(ctx, row.ID)
 		if err != nil || got.Status != domain.RunCompleted || got.Reason != reportedSuccessReason || !got.OutcomeUnseen {
@@ -1374,7 +1405,7 @@ func TestSeenInteractiveOutcomeStaysSeenAfterRecovery(t *testing.T) {
 	}
 	s2.finishOverdueReports()
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if row.Reason != reportedSuccessReason || row.OutcomeUnseen || row.FinishedAt != nil {
+	if row.Reason != reportedSuccessReason || row.OutcomeUnseen || row.FinishUnopened || row.FinishedAt != nil {
 		t.Fatalf("restart changed reviewed outcome: %+v", row)
 	}
 }

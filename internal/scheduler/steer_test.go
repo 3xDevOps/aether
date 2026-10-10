@@ -3,7 +3,9 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,13 @@ func (s *failingRunStatusStore) UpdateRunStatus(ctx context.Context, id domain.R
 		return errors.New("test: status transition failed")
 	}
 	return s.Store.UpdateRunStatus(ctx, id, status, reason, startedAt, finishedAt)
+}
+
+func (s *failingRunStatusStore) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	if s.fail {
+		return errors.New("test: status transition failed")
+	}
+	return s.Store.FinishRunByMember(ctx, id, status, reason, startedAt, finishedAt)
 }
 
 type destroyFailureRuntime struct {
@@ -62,7 +71,13 @@ func TestKill(t *testing.T) {
 	if ev.ActorID != e.member.ID {
 		t.Fatalf("abandoned actor = %s, want %s", ev.ActorID, e.member.ID)
 	}
+	if p.FinishUnopened {
+		t.Fatalf("abandoned event = %+v, want a member's kill to leave the finish opened", p)
+	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if fresh.FinishUnopened {
+		t.Fatal("a member's kill left the finish unopened")
+	}
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "wip: long haul task" {
 		t.Fatalf("commits = %v", got)
 	}
@@ -873,7 +888,8 @@ func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
 }
 
 // A finished run is re-labeled in place by the close disposition, and a
-// second close at the same outcome is a no-op.
+// second close at the same outcome is a no-op. The member closing it has
+// dealt with it, so an unopened exit ends opened and stays so.
 func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -881,19 +897,126 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 
 	run, c := e.launchFake(t, "task")
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); !row.FinishUnopened {
+		t.Fatal("an exit nobody asked for left the finish opened")
+	}
+	sub := e.subscribe(t)
 
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
 		t.Fatalf("CloseRun completed to abandoned: %v", err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunAbandoned); p.FinishUnopened {
+		t.Fatalf("close event = %+v, want a member's close to leave the finish opened", p)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned); row.FinishUnopened {
+		t.Fatal("a member's close of an unopened run left it unopened")
+	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun abandoned to merged: %v", err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); row.FinishUnopened {
+		t.Fatal("a member's close of an opened run left it unopened")
+	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun at the same outcome: %v", err)
 	}
+}
+
+// A member's close or kill of a run that already finished changes no status
+// and still opens its finish, telling clients once: on the relabel's
+// run.status when the act relabels the row, else with run.finish_opened.
+func TestMemberDismissalOpensAnAlreadyFinishedRun(t *testing.T) {
+	t.Parallel()
+	dismissed := func(t *testing.T, e *testEnv, run domain.RunID, act func() error) []string {
+		t.Helper()
+		if row, err := e.db.GetRun(t.Context(), run); err != nil || !row.FinishUnopened {
+			t.Fatalf("row before the member's act = %+v, %v; want an unopened finish", row, err)
+		}
+		sub := e.subscribe(t)
+		if err := act(); err != nil {
+			t.Fatalf("member's act: %v", err)
+		}
+		var got []string
+		deadline := time.After(200 * time.Millisecond)
+		for done := false; !done; {
+			select {
+			case ev := <-sub.Events():
+				switch p := ev.Payload.(type) {
+				case events.RunStatusPayload:
+					got = append(got, fmt.Sprintf("%s %s unopened=%v by %s", ev.Type, p.To, p.FinishUnopened, ev.ActorID))
+				case events.RunFinishOpenedPayload, events.RunOutcomeSeenPayload:
+					got = append(got, fmt.Sprintf("%s by %s", ev.Type, ev.ActorID))
+				}
+			case <-deadline:
+				done = true
+			}
+		}
+		if row, err := e.db.GetRun(t.Context(), run); err != nil || row.FinishUnopened {
+			t.Fatalf("row after the member's act = %+v, %v; want the finish opened", row, err)
+		}
+		return got
+	}
+
+	t.Run("close at the outcome a swarm left", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		ctx := t.Context()
+		run, _ := e.launchFake(t, "stopped by its swarm")
+		if err := e.sched.Kill(ctx, run.ID, ""); err != nil {
+			t.Fatalf("Kill without an actor: %v", err)
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+		waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
+		got := dismissed(t, e, run.ID, func() error {
+			return e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned)
+		})
+		if want := []string{fmt.Sprintf("run.finish_opened by %s", e.member.ID)}; !slices.Equal(got, want) {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+	})
+	t.Run("kill after an exit", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		ctx := t.Context()
+		run, c := e.launchFake(t, "exited on its own")
+		c.exitNow(0)
+		e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+		waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
+		got := dismissed(t, e, run.ID, func() error { return e.sched.Kill(ctx, run.ID, e.member.ID) })
+		if want := []string{fmt.Sprintf("run.finish_opened by %s", e.member.ID)}; !slices.Equal(got, want) {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+	})
+	t.Run("kill of a retained run", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		ctx := t.Context()
+		run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
+		if err := e.sched.CompleteMission(ctx, run.ID, domain.RunCompleted); err != nil {
+			t.Fatalf("CompleteMission: %v", err)
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+		got := dismissed(t, e, run.ID, func() error { return e.sched.Kill(ctx, run.ID, e.member.ID) })
+		if want := []string{fmt.Sprintf("run.status completed unopened=false by %s", e.member.ID)}; !slices.Equal(got, want) {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+	})
+	t.Run("release is not a dismissal", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		ctx := t.Context()
+		run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
+		if err := e.sched.CompleteMission(ctx, run.ID, domain.RunCompleted); err != nil {
+			t.Fatalf("CompleteMission: %v", err)
+		}
+		e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+		if err := e.sched.Release(ctx, run.ID, e.member.ID); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		if row, err := e.db.GetRun(ctx, run.ID); err != nil || !row.FinishUnopened {
+			t.Fatalf("released row = %+v, %v; want the finish still unopened", row, err)
+		}
+	})
 }
 
 func TestCloseRunRelabelsWhileExitCleanupFinalizes(t *testing.T) {

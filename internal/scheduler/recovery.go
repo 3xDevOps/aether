@@ -131,7 +131,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 				}
 				s.mu.Unlock()
 			}
-			if expireErr := s.expireRetainedLocked(ctx, entry); expireErr != nil {
+			if expireErr := s.expireRetainedLocked(ctx, entry, ""); expireErr != nil {
 				return nil, expireErr
 			}
 		}
@@ -163,14 +163,18 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		return nil, fmt.Errorf("scheduler: relaunch: clear the reported outcome: %w", clearErr)
 	}
 	// archiveMu serializes this re-read-then-promote against SetArchived
-	// so the two can never interleave.
+	// so the two can never interleave. s.mu does the same against Seen, so
+	// the flags a rollback restores are the ones this promotion clears.
 	s.archiveMu.Lock()
+	s.mu.Lock()
 	latest, err := s.cfg.Store.GetRun(ctx, run)
 	if err != nil {
+		s.mu.Unlock()
 		s.archiveMu.Unlock()
 		return nil, err
 	}
 	if !latest.Mode.Interactive() || !retainedReason(latest.Status, latest.Reason) {
+		s.mu.Unlock()
 		s.archiveMu.Unlock()
 		return nil, retainedTransitionError()
 	}
@@ -189,6 +193,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	wasArchived := fresh.ArchivedAt != nil
 	if wasArchived {
 		if _, clearErr := s.cfg.Store.SetRunArchived(ctx, run, nil); clearErr != nil {
+			s.mu.Unlock()
 			s.archiveMu.Unlock()
 			return nil, fmt.Errorf("scheduler: clear archived run before relaunch: %w", clearErr)
 		}
@@ -202,9 +207,11 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 				updateErr = errors.Join(updateErr, fmt.Errorf("scheduler: re-archive run after failed relaunch: %w", rearchiveErr))
 			}
 		}
+		s.mu.Unlock()
 		s.archiveMu.Unlock()
 		return nil, updateErr
 	}
+	s.mu.Unlock()
 	if wasArchived {
 		s.publishArchived(ctx, &runningRow, actor)
 	}
@@ -291,24 +298,32 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 
 		// Only after the retained marker/deadline is durable may this owner
 		// become a retained terminal owner. A failed row write leaves the
-		// promoted running row and its paused owner in charge.
+		// promoted running row and its paused owner in charge. s.mu keeps
+		// Seen from reading the row between this write and its flags.
+		s.mu.Lock()
 		if rowErr := s.cfg.Store.UpdateRun(ctx, &terminalRow); rowErr != nil {
+			s.mu.Unlock()
 			restoreErr := s.writeSidecar(activeSidecar)
 			if restoreErr != nil {
 				restoreErr = fmt.Errorf("scheduler: relaunch rollback sidecar restore: %w", restoreErr)
 			}
 			return joinRollback(fmt.Errorf("scheduler: relaunch rollback row: %w", rowErr), restoreErr)
 		}
-		// UpdateRun cleared outcome_unseen with the status change; an
-		// outcome the owner had not seen is still unseen.
-		var unseenErr error
+		// UpdateRun cleared outcome_unseen and set finish_unopened with the
+		// status change; an outcome the owner had not seen is still unseen,
+		// and a finish a member had opened is still opened.
+		var unseenErr, unopenedErr error
 		if terminalRow.OutcomeUnseen {
 			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, nil, nil); flagErr != nil {
 				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
 			}
 		}
+		if !terminalRow.FinishUnopened {
+			if _, flagErr := s.cfg.Store.ClearRunFinishUnopened(ctx, run); flagErr != nil {
+				unopenedErr = fmt.Errorf("scheduler: relaunch rollback finish unopened: %w", flagErr)
+			}
+		}
 
-		s.mu.Lock()
 		if s.runs[run] == entry {
 			entry.status = terminalRow.Status
 			entry.paused = true
@@ -317,7 +332,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			entry.destroyPending = false
 		}
 		s.mu.Unlock()
-		return joinRollback(unseenErr)
+		return joinRollback(unseenErr, unopenedErr)
 	}
 
 	if paused {

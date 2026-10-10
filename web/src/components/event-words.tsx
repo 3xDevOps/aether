@@ -252,6 +252,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.mode': (p) => modeLine(p),
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,
+  'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished run</>,
   'run.title': (p) => <>Agent set the title to <Quote>{bounded(p.title, 160)}</Quote></>,
   'run.agent': (p) => agentLine(p),
   'run.diff': (p) => `${files(p.files)} changed`,

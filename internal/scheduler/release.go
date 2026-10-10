@@ -126,7 +126,7 @@ func (s *Scheduler) Release(ctx context.Context, run domain.RunID, _ domain.Memb
 		case destroyPending:
 			err = s.retryDestroyPendingLocked(ctx, entry)
 		case retained:
-			err = s.expireRetainedLocked(ctx, entry)
+			err = s.expireRetainedLocked(ctx, entry, "")
 		default:
 			err = fmt.Errorf("%w: release cleanup still in progress", ErrInvalidTransition)
 		}

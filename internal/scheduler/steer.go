@@ -44,9 +44,11 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 		retained := entry.retained
 		s.mu.Unlock()
 		if retained {
-			return s.expireRetainedLocked(ctx, entry)
+			if err := s.expireRetainedLocked(ctx, entry, actor); err != nil {
+				return err
+			}
 		}
-		return nil
+		return s.dismissFinished(ctx, run, actor)
 	}
 	entry.killRequested = true
 	entry.killActor = actor
@@ -179,7 +181,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 			// route it through Kill as well so that state is not discarded.
 			return s.Kill(ctx, id, actor)
 		}
-		return nil
+		return s.dismissFinished(ctx, id, actor)
 	}
 
 	// Resolve an active durable cleanup owner before committing/publishing
@@ -240,7 +242,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return err
 	}
-	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
+	err = s.transitionOutcomeLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor, memberCause(actor))
 	s.mu.Unlock()
 	if err != nil {
 		return err
@@ -647,7 +649,10 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
-	return s.closeRun(ctx, run, humanClose(outcome, actor))
+	if err := s.closeRun(ctx, run, humanClose(outcome, actor)); err != nil {
+		return err
+	}
+	return s.dismissFinished(ctx, run, actor)
 }
 
 // closeRun shares exact-container retention between human Close and accepted
@@ -715,7 +720,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 				return nil
 			}
 			s.mu.Lock()
-			err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
+			err = s.transitionOutcomeLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor, spec.cause())
 			s.mu.Unlock()
 			if err != nil {
 				return err
@@ -786,7 +791,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			}
 			return nil
 		}
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
+		err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, "closed", actor, spec.cause())
 		s.mu.Unlock()
 		if err != nil {
 			return err
@@ -820,7 +825,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			return err
 		}
 		if s.cfg.RunContainerTTL < 0 {
-			return s.expireRetainedLocked(ctx, entry)
+			return s.expireRetainedLocked(ctx, entry, actor)
 		}
 		return nil
 	}
@@ -843,7 +848,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			s.mu.Unlock()
 			return retainedTransitionError()
 		}
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
+		err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, closeReason, actor, spec.cause())
 		s.mu.Unlock()
 		return err
 	}
@@ -938,7 +943,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, retentionReason, actor, spec.reported)
+			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, retentionReason, actor, spec.cause())
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
@@ -971,7 +976,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 	// terminal work before stopping the runtime; a failed capture retains the
 	// owner for the bounded retry sweep.
 	s.mu.Lock()
-	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.reported)
+	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.cause())
 	if err == nil && entry != nil {
 		entry.evidenceIdentity = "none"
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {

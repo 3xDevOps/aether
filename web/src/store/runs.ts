@@ -53,9 +53,12 @@ export interface RunsSlice {
     reason: string | undefined,
     time: string,
     outcomeUnseen?: boolean,
+    finishUnopened?: boolean,
   ) => void
   /** Clears `outcome_unseen`: the owner has opened the run. */
   applyOutcomeSeen: (runID: string) => void
+  /** Clears `finish_unopened`: a member has opened the run. */
+  applyFinishOpened: (runID: string) => void
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyAgentEvent: (runID: string, payload: AgentPayload, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
@@ -99,7 +102,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
       }
     }),
-  applyRunStatus: (runID, to, reason, time, outcomeUnseen = false) =>
+  applyRunStatus: (runID, to, reason, time, outcomeUnseen = false, finishUnopened = false) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
@@ -110,6 +113,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         stateChangedAt: time,
         stateChangedAtEstimated: false,
         outcome_unseen: outcomeUnseen,
+        finish_unopened: finishUnopened,
       }
       if (to !== current.status) delete next.activity
       if (to === 'running' && !next.started_at) next.started_at = time
@@ -129,6 +133,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current?.outcome_unseen) return {}
       return { runs: { ...s.runs, [runID]: { ...current, outcome_unseen: false } } }
+    }),
+  applyFinishOpened: (runID) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current?.finish_unopened) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, finish_unopened: false } } }
     }),
 
   applyRunInput: (runID, requests) =>

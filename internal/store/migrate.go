@@ -1556,6 +1556,11 @@ ALTER TABLE missions ADD COLUMN change_kinds TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE workspace_mirrors ADD COLUMN github_member_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE workspace_mirrors ADD COLUMN github_user_id INTEGER NOT NULL DEFAULT 0;
 `,
+	// v56: finish_unopened marks a finished run no member has opened since
+	// it finished. Runs that finished before this version count as opened.
+	`
+ALTER TABLE runs ADD COLUMN finish_unopened INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

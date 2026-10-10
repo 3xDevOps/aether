@@ -111,8 +111,12 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	switch {
 	case report.State == agentstatus.Idle || showsIdle:
 		if !finishes && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
+			cause := causeUnattended
+			if showsIdle {
+				cause = idleCause(reason)
+			}
 			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunNeedsAttention, reason, "", showsIdle && reportedIdleReason(reason))
+				domain.RunNeedsAttention, reason, "", cause)
 		}
 	case report.State == agentstatus.Working:
 		if entry.status == domain.RunNeedsAttention {

@@ -104,6 +104,30 @@ describe('watchOutcomeSeen', () => {
     stop()
   })
 
+  it('marks a finish opened for a teammate, once the tab is visible, and leaves the owner the review', async () => {
+    const store = setup(bob)
+    store.setState({ runs: { [reported.id]: toRecord({ ...reported, status: 'running', outcome_unseen: false }) } })
+    const doc = fakeDocument(true)
+    const answer = deferred<ReturnType<typeof run>>()
+    const client = fakeApi({ runSeen: vi.fn(() => answer.promise) })
+    const stop = watchOutcomeSeen(store, client, doc)
+    store.getState().navigate('run', { runId: reported.id })
+
+    store.getState().applyRunStatus(reported.id, 'completed', 'agent reported success', '2026-08-14T11:00:00Z', true, true)
+    expect(client.runSeen).not.toHaveBeenCalled()
+
+    doc.hidden = false
+    doc.dispatchEvent(new Event('visibilitychange'))
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+    expect(store.getState().runs[reported.id].finish_unopened).toBe(true)
+
+    answer.resolve({ ...reported, finish_unopened: false })
+    await settle()
+    expect(store.getState().runs[reported.id]).toMatchObject({ finish_unopened: false, outcome_unseen: true })
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
   it('asks when the outcome lands on a run the owner is viewing, once the tab is visible', async () => {
     const store = setup()
     store.setState({ runs: { [reported.id]: toRecord({ ...reported, status: 'running', outcome_unseen: false }) } })
@@ -118,6 +142,36 @@ describe('watchOutcomeSeen', () => {
     doc.hidden = false
     doc.dispatchEvent(new Event('visibilitychange'))
     expect(client.runSeen).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
+  it('drops an answer that a newer status change overtook, and asks again about that finish', async () => {
+    const store = setup()
+    store.setState({ runs: { [reported.id]: toRecord({ ...reported, finish_unopened: true }) } })
+    const answers = [deferred<ReturnType<typeof run>>(), deferred<ReturnType<typeof run>>()]
+    const client = fakeApi({
+      runSeen: vi.fn().mockReturnValueOnce(answers[0].promise).mockReturnValueOnce(answers[1].promise),
+    })
+    const stop = watchOutcomeSeen(store, client, fakeDocument())
+    store.getState().navigate('run', { runId: reported.id })
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+
+    // The run goes back to work and reports again while the first answer is in flight.
+    store.getState().applyRunStatus(reported.id, 'running', undefined, '2026-08-14T11:00:00Z')
+    store.getState().applyRunStatus(reported.id, 'failed', 'agent reported failure', '2026-08-14T11:05:00Z', true, true)
+    expect(client.runSeen).toHaveBeenCalledTimes(1)
+
+    const cleared = { ...reported, outcome_unseen: false, finish_unopened: false }
+    answers[0].resolve(cleared)
+    await settle()
+    expect(store.getState().runs[reported.id]).toMatchObject({ outcome_unseen: true, finish_unopened: true })
+    expect(client.runSeen).toHaveBeenCalledTimes(2)
+
+    answers[1].resolve(cleared)
+    await settle()
+    expect(store.getState().runs[reported.id]).toMatchObject({ outcome_unseen: false, finish_unopened: false })
+    expect(client.runSeen).toHaveBeenCalledTimes(2)
+    expect(toast.error).not.toHaveBeenCalled()
     stop()
   })
 

@@ -12,7 +12,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
-	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -44,6 +43,13 @@ type closeSpec struct {
 	// reported marks the close an agent's report causes, which leaves the
 	// outcome unseen by the run's owner.
 	reported bool
+}
+
+func (c closeSpec) cause() finishCause {
+	if c.reported {
+		return causeReported
+	}
+	return memberCause(c.actor)
 }
 
 func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
@@ -99,14 +105,20 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 }
 
 // relabelLocked rewrites a terminal run's reason without changing its status.
-// The caller must hold s.mu, which Seen also holds, so the outcome_unseen flag
-// read here is the one this event reports.
+// actor is the member whose close or kill caused it, if any: their act opens
+// the finish in the same write. The caller must hold s.mu, which Seen also
+// holds, so the outcome_unseen and finish_unopened flags read here are the
+// ones this event reports.
 func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, status domain.RunStatus, reason string, actor domain.MemberID) error {
 	if !status.Terminal() {
 		return fmt.Errorf("%w: relabel %s", ErrInvalidTransition, status)
 	}
 	public := publicRunStatusReason(reason)
-	if err := s.cfg.Store.UpdateRunStatus(ctx, run, status, public, nil, nil); err != nil {
+	write := s.cfg.Store.UpdateRunStatus
+	if memberCause(actor) == causeMember {
+		write = s.cfg.Store.FinishRunByMember
+	}
+	if err := write(ctx, run, status, public, nil, nil); err != nil {
 		return err
 	}
 	row, err := s.cfg.Store.GetRun(ctx, run)
@@ -117,24 +129,50 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen},
+		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen, FinishUnopened: row.FinishUnopened},
 	})
 	return nil
 }
 
-// Seen clears a run's outcome_unseen flag for its owner. s.mu orders the
-// clear and its event against the run.status events that also carry the flag.
-func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
-	current, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil {
-		return nil, err
-	}
-	if current.MemberID != actor {
-		return nil, fmt.Errorf("%w: only the run's owner can mark its outcome seen", permissions.ErrDenied)
+// dismissFinished opens the finish of a run a member closed or killed when
+// that act changed no status: the run had already finished, and the member
+// has still dealt with it. A finish their act already opened publishes
+// nothing, so each act tells clients once.
+func (s *Scheduler) dismissFinished(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	if memberCause(actor) != causeMember {
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed, err := s.cfg.Store.ClearRunOutcomeUnseen(ctx, run, actor)
+	opened, err := s.cfg.Store.ClearRunFinishUnopened(ctx, run)
+	if err != nil || !opened {
+		return err
+	}
+	row, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	s.publish(ctx, events.Event{
+		WorkspaceID: row.WorkspaceID,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunFinishOpenedPayload{},
+	})
+	return nil
+}
+
+// Seen records that actor opened a run: it clears finish_unopened, and
+// outcome_unseen too when actor owns the run. One call publishes at most one
+// event; run.outcome_seen covers both flags. s.mu orders the clears and
+// their event against the run.status events that also carry the flags.
+func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	outcomeSeen, err := s.cfg.Store.ClearRunOutcomeUnseen(ctx, run, actor)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := s.cfg.Store.ClearRunFinishUnopened(ctx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +180,8 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 	if err != nil {
 		return nil, err
 	}
-	if changed {
+	switch {
+	case outcomeSeen:
 		s.publish(ctx, events.Event{
 			WorkspaceID: fresh.WorkspaceID,
 			RunID:       run,
@@ -150,6 +189,13 @@ func (s *Scheduler) Seen(ctx context.Context, run domain.RunID, actor domain.Mem
 			Payload:     events.RunOutcomeSeenPayload{},
 		})
 		s.publishTimeline(ctx, fresh.WorkspaceID, run, actor, events.TimelineNote, "outcome seen by owner")
+	case opened:
+		s.publish(ctx, events.Event{
+			WorkspaceID: fresh.WorkspaceID,
+			RunID:       run,
+			ActorID:     actor,
+			Payload:     events.RunFinishOpenedPayload{},
+		})
 	}
 	return fresh, nil
 }
@@ -225,6 +271,13 @@ func reportedIdleReason(reason string) bool {
 	return reason == reportedSuccessReason || reason == reportedFailureReason
 }
 
+func idleCause(reason string) finishCause {
+	if reportedIdleReason(reason) {
+		return causeReported
+	}
+	return causeUnattended
+}
+
 // recordIdleReportLocked shares the blocked-report watermark and park machinery
 // with interactive outcomes. No native execution report is synthesized.
 func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
@@ -264,7 +317,7 @@ func (s *Scheduler) parkIdleReportLocked(ctx context.Context, entry *supervised)
 		return fmt.Errorf("scheduler: persist idle outcome: %w", err)
 	}
 	if err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status,
-		domain.RunNeedsAttention, entry.idleReason, "", reportedIdleReason(entry.idleReason)); err != nil {
+		domain.RunNeedsAttention, entry.idleReason, "", idleCause(entry.idleReason)); err != nil {
 		entry.idleShown = shown
 		return errors.Join(err, s.writeSidecar(entry.sidecar()))
 	}
@@ -318,7 +371,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	s.publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,
 		RunID:       run,
-		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: true},
+		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: true, FinishUnopened: true},
 	})
 	return nil
 }

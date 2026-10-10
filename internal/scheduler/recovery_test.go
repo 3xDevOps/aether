@@ -1637,6 +1637,83 @@ func TestRelaunchRestoresTerminalRowWhenResumeFails(t *testing.T) {
 	}
 }
 
+// promotionHookStore runs promote just before a relaunch writes its running row.
+type promotionHookStore struct {
+	store.Store
+	promote func()
+}
+
+func (s *promotionHookStore) UpdateRun(ctx context.Context, r *domain.Run) error {
+	if r.Status == domain.RunRunning {
+		s.promote()
+	}
+	return s.Store.UpdateRun(ctx, r)
+}
+
+// A member who opens the run while a relaunch that then fails is promoting it
+// is ordered against that promotion and its rollback: clients are told the
+// finish was opened exactly when the row ends opened.
+func TestFailedRelaunchKeepsAnOpenMadeWhileItPromotes(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "opened during a relaunch")
+	e.retainLegacyReportedRun(t, run.ID)
+	other := newSteerer(t, e, "Cody", "", "")
+	if err := e.sched.Close(); err != nil {
+		t.Fatalf("Close scheduler: %v", err)
+	}
+
+	resumeErr := errors.New("runtime resume unavailable")
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = &resumeFailureRuntime{Runtime: e.rt, resumeErr: resumeErr}
+	t.Cleanup(func() { _ = s2.Close() })
+	seen := make(chan error, 1)
+	s2.cfg.Store = &promotionHookStore{Store: e.db, promote: func() {
+		done := make(chan error, 1)
+		go func() {
+			_, err := s2.Seen(ctx, run.ID, other.ID)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			seen <- err
+		case <-time.After(100 * time.Millisecond):
+			go func() { seen <- <-done }()
+		}
+	}}
+	if err := s2.recoverRuns(ctx); err != nil {
+		t.Fatalf("recoverRuns: %v", err)
+	}
+	sub := e.subscribe(t)
+	if _, err := s2.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, resumeErr) {
+		t.Fatalf("Relaunch error = %v, want resume error", err)
+	}
+	if err := <-seen; err != nil {
+		t.Fatalf("Seen during the relaunch: %v", err)
+	}
+
+	opened := 0
+	deadline := time.After(200 * time.Millisecond)
+	for done := false; !done; {
+		select {
+		case ev := <-sub.Events():
+			if _, ok := ev.Payload.(events.RunFinishOpenedPayload); ok && ev.RunID == run.ID {
+				opened++
+			}
+		case <-deadline:
+			done = true
+		}
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || row.Status != domain.RunCompleted || !row.OutcomeUnseen {
+		t.Fatalf("row after the failed relaunch = %+v, %v; want the retained completed row, outcome unseen", row, err)
+	}
+	if (opened == 1) == row.FinishUnopened {
+		t.Fatalf("published %d run.finish_opened, row finish_unopened = %v; want the event exactly when the row is opened", opened, row.FinishUnopened)
+	}
+}
+
 func TestRelaunchRollbackStoreUpdateFailureKeepsActiveOwner(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {

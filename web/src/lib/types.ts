@@ -68,6 +68,8 @@ export interface Run {
   controller_member_id?: string
   /** An agent-reported outcome its owner has not opened yet; the session may remain live. */
   outcome_unseen?: boolean
+  /** A finish no member has opened yet; absent on older gateways. */
+  finish_unopened?: boolean
   base_commit?: string
   base_branch?: string
   base_source?: string
@@ -665,8 +667,9 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
-  /** The run's flag after this transition; absent means false. */
+  /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
+  finish_unopened?: boolean
 }
 
 /** Complete runtime ownership metadata; omitted fields clear previous values. */

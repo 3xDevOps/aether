@@ -240,16 +240,45 @@ func (s *Scheduler) publishRetentionLocked(run domain.RunID) {
 	}
 }
 
+// finishCause is what moved a run to its status, which decides the
+// outcome_unseen and finish_unopened flags the row and its run.status event
+// carry. The transition's actor cannot stand in for it: a launch passes the
+// launching member, so a provisioning failure carries an actor who ended
+// nothing.
+type finishCause int
+
+const (
+	// causeUnattended is a change no member asked for: an exit, a failure, a
+	// restart, or a swarm completing or stopping its workers.
+	causeUnattended finishCause = iota
+	// causeReported is an agent's success or failure report.
+	causeReported
+	// causeMember is a close or kill a member asked for.
+	causeMember
+)
+
+// memberCause is the cause of a close or kill asked for by actor. CloseRun
+// and Kill carry the member; CompleteMission and CancelMission, the swarm's
+// and its integrator's own endings, carry none.
+func memberCause(actor domain.MemberID) finishCause {
+	if actor == "" {
+		return causeUnattended
+	}
+	return causeMember
+}
+
 // transitionLocked persists a legal status change via UpdateRunStatus and
 // publishes the run.status event. The caller must hold s.mu; from must be
 // the run's current status.
 func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID) error {
-	return s.transitionOutcomeLocked(ctx, run, workspace, from, to, reason, actor, false)
+	return s.transitionOutcomeLocked(ctx, run, workspace, from, to, reason, actor, causeUnattended)
 }
 
-// transitionOutcomeLocked also marks a newly reported outcome unseen, including
-// a nonterminal interactive park. Ordinary transitions clear the visible flag.
-func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, reported bool) error {
+// transitionOutcomeLocked also marks a newly reported outcome unseen and
+// unopened, including a nonterminal interactive park. Other transitions
+// clear outcome_unseen and leave finish_unopened set only on a terminal
+// status no member asked for.
+func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, cause finishCause) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
 	}
@@ -263,8 +292,11 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	}
 	public := publicRunStatusReason(reason)
 	write := s.cfg.Store.UpdateRunStatus
-	if reported {
+	switch cause {
+	case causeReported:
 		write = s.cfg.Store.FinishRunReported
+	case causeMember:
+		write = s.cfg.Store.FinishRunByMember
 	}
 	if err := write(ctx, run, to, public, startedAt, finishedAt); err != nil {
 		return err
@@ -294,7 +326,11 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: from, To: to, Reason: public, OutcomeUnseen: reported},
+		Payload: events.RunStatusPayload{
+			From: from, To: to, Reason: public,
+			OutcomeUnseen:  cause == causeReported,
+			FinishUnopened: cause == causeReported || (cause == causeUnattended && to.Terminal()),
+		},
 	})
 	if to.Terminal() || s.retentionPublished[run] != (events.RunRetentionPayload{}) {
 		s.publishRetentionLocked(run)

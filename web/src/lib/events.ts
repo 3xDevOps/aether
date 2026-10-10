@@ -13,6 +13,7 @@ export const eventLabel = {
   'run.mode': 'Run mode',
   'run.archived': 'Archive',
   'run.outcome_seen': 'Result opened',
+  'run.finish_opened': 'Result opened',
   'run.agent': 'Agent tool use',
   'run.diff': 'File changes',
   'run.cost': 'Usage',

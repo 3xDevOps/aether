@@ -118,7 +118,7 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 			entry.lifecycleMu.Unlock()
 			return
 		}
-		if err := s.expireRetainedLocked(context.Background(), entry); err != nil {
+		if err := s.expireRetainedLocked(context.Background(), entry, ""); err != nil {
 			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
 		}
 		entry.lifecycleMu.Unlock()
@@ -196,16 +196,16 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// after the handoff so Close can relabel while runtime cleanup is pending.
 	entry.lifecycleMu.Lock()
 	var (
-		to       domain.RunStatus
-		reason   string
-		actor    domain.MemberID
-		byReport bool
+		to     domain.RunStatus
+		reason string
+		actor  domain.MemberID
+		cause  finishCause
 	)
 	switch {
 	case killed:
-		to, reason, actor = domain.RunAbandoned, "killed", killActor
+		to, reason, actor, cause = domain.RunAbandoned, "killed", killActor, memberCause(killActor)
 	case reported != "":
-		to, reason, byReport = reported, reportedClose(reported).reason, true
+		to, reason, cause = reported, reportedClose(reported).reason, causeReported
 	case code == 0:
 		to, reason = domain.RunCompleted, exitedCompletedReason
 	default:
@@ -220,9 +220,9 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	// were committing still outranks the exit code.
 	switch {
 	case entry.killRequested:
-		to, reason, actor, byReport = domain.RunAbandoned, "killed", entry.killActor, false
+		to, reason, actor, cause = domain.RunAbandoned, "killed", entry.killActor, memberCause(entry.killActor)
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
-		to, reason, byReport = entry.reported, reportedClose(entry.reported).reason, true
+		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
 	}
 	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0
 	if retain {
@@ -245,7 +245,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		entry.evidencePending = true
 		reason = retainedCompletionReason
 	}
-	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, byReport)
+	err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status, to, reason, actor, cause)
 	s.mu.Unlock()
 	if err != nil && !errors.Is(err, ErrInvalidTransition) {
 		slog.Warn("scheduler: record exit status", "run", entry.runID, "error", err)
@@ -473,7 +473,7 @@ func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
-	err := s.expireRetainedLocked(ctx, entry)
+	err := s.expireRetainedLocked(ctx, entry, "")
 	if err == nil {
 		return nil
 	}
@@ -486,8 +486,9 @@ func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error
 	return err
 }
 
-// expireRetainedLocked is called with entry.lifecycleMu held.
-func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised) error {
+// expireRetainedLocked is called with entry.lifecycleMu held. actor is the
+// member whose close or kill expires the container, if any.
+func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised, actor domain.MemberID) error {
 	s.mu.Lock()
 	if s.runs[entry.runID] != entry || !entry.retained {
 		s.mu.Unlock()
@@ -537,7 +538,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry && entry.retained {
 		if released, ok := releasedReason(run.Status, run.Reason, reason); ok {
-			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, "")
+			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, actor)
 		}
 		entry.retained = false
 		entry.retainedUntil = nil

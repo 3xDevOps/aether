@@ -110,8 +110,8 @@ const (
 	// MethodRunArchive hides or restores a finished run; its data is
 	// untouched (same gate as run.delete: Kill).
 	MethodRunArchive = "run.archive"
-	// MethodRunSeen clears a run's outcome_unseen flag once its owner has
-	// opened it (owner only).
+	// MethodRunSeen records that the caller opened a run: it clears
+	// finish_unopened, and outcome_unseen too when the caller owns the run.
 	MethodRunSeen = "run.seen"
 	// MethodSyncConflict notifies both affected members via the event feed
 	// (Steer-gated, like the sync bridge).

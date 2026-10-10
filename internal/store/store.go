@@ -110,11 +110,16 @@ type Store interface {
 	// timestamps when non-nil, leaving every other field untouched. This
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields. A status change clears
-	// outcome_unseen; a same-status write keeps it.
+	// outcome_unseen and sets finish_unopened to whether the new status
+	// is terminal; a same-status write keeps both.
 	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// FinishRunReported is UpdateRunStatus that also sets outcome_unseen
-	// in the same write, for the transition an agent's report causes.
+	// and finish_unopened in the same write, for the transition an agent's
+	// report causes.
 	FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// FinishRunByMember is UpdateRunStatus that also clears finish_unopened
+	// in the same write, for the close or kill a member asked for.
+	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
@@ -137,6 +142,9 @@ type Store interface {
 	// ClearRunOutcomeUnseen clears outcome_unseen while owner owns the
 	// run, and reports whether this call changed it.
 	ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error)
+	// ClearRunFinishUnopened clears finish_unopened, and reports whether
+	// this call changed it.
+	ClearRunFinishUnopened(ctx context.Context, id domain.RunID) (bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
 	DeleteMission(ctx context.Context, id domain.MissionID, runs []domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering

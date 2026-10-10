@@ -434,7 +434,10 @@ func TestHappyPath(t *testing.T) {
 	if prov.ActorID != e.member.ID {
 		t.Fatalf("provisioning event actor = %s, want %s", prov.ActorID, e.member.ID)
 	}
-	waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	running := waitStatusEvent(t, sub, run.ID, domain.RunRunning)
+	if p := running.Payload.(events.RunStatusPayload); p.FinishUnopened {
+		t.Fatalf("running event = %+v, want finish_unopened clear", p)
+	}
 
 	c.output("agent working\r\n")
 	waitFor(t, "pty output", func() bool {
@@ -444,8 +447,8 @@ func TestHappyPath(t *testing.T) {
 
 	c.exitNow(0)
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunCompleted)
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" || p.OutcomeUnseen {
-		t.Fatalf("completed event = %+v, want an unreported exit with outcome_unseen clear", p)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != "agent exited; results committed" || p.OutcomeUnseen || !p.FinishUnopened {
+		t.Fatalf("completed event = %+v, want an unreported exit with outcome_unseen clear and finish_unopened set", p)
 	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if fresh.FinishedAt == nil {
@@ -453,6 +456,9 @@ func TestHappyPath(t *testing.T) {
 	}
 	if fresh.OutcomeUnseen {
 		t.Fatal("an unreported clean exit must not mark the outcome unseen")
+	}
+	if !fresh.FinishUnopened {
+		t.Fatal("an unreported clean exit must mark the finish unopened")
 	}
 	completedAt := *fresh.FinishedAt
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: fix the auth bug" {
@@ -773,7 +779,13 @@ func TestProvisioningFailure(t *testing.T) {
 	if !strings.HasPrefix(p.Reason, "provisioning: ") || !strings.Contains(p.Reason, "no such image") {
 		t.Fatalf("failed reason = %q", p.Reason)
 	}
-	e.waitStoreStatus(t, prov.RunID, domain.RunFailed)
+	// The event names the launcher, who did not end the run.
+	if failed.ActorID != e.member.ID || !p.FinishUnopened {
+		t.Fatalf("failed event actor = %q, payload = %+v; want the launcher and an unopened finish", failed.ActorID, p)
+	}
+	if row := e.waitStoreStatus(t, prov.RunID, domain.RunFailed); !row.FinishUnopened {
+		t.Fatal("a provisioning failure left the finish opened")
+	}
 }
 
 func TestLaunchValidation(t *testing.T) {

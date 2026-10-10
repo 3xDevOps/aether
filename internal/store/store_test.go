@@ -1353,7 +1353,8 @@ func TestTerminalPersistence(t *testing.T) {
 	}
 }
 
-// A database at v47 gains outcome_unseen clear on every existing run.
+// A database at v47 gains outcome_unseen and finish_unopened clear on every
+// existing run, so an upgrade marks no finished run as unopened.
 func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	t.Parallel()
 	const previous = 47
@@ -1396,8 +1397,8 @@ func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	got, err := db.GetRun(context.Background(), "r1")
-	if err != nil || got.OutcomeUnseen {
-		t.Fatalf("migrated run = %+v, %v; want outcome_unseen clear", got, err)
+	if err != nil || got.OutcomeUnseen || got.FinishUnopened {
+		t.Fatalf("migrated run = %+v, %v; want outcome_unseen and finish_unopened clear", got, err)
 	}
 }
 
@@ -1464,4 +1465,109 @@ func TestRunOutcomeUnseen(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", err)
 	}
 	unseen(false, "relaunch through UpdateRun")
+}
+
+// finish_unopened is set when a run enters a terminal status nobody asked
+// for or an agent's report parks it, survives a same-status relabel in either
+// direction, and follows the run back to work. A member's close or kill
+// leaves it clear whatever it was. ClearRunFinishUnopened clears it once, for
+// any caller, and leaves outcome_unseen alone.
+func TestRunFinishUnopened(t *testing.T) {
+	t.Parallel()
+	for _, snapshot := range []bool{false, true} {
+		t.Run(fmt.Sprintf("snapshot=%v", snapshot), func(t *testing.T) {
+			t.Parallel()
+			db := openTestDB(t)
+			ctx := context.Background()
+			workspace := mustCreateWorkspace(t, db)
+			member := mustCreateMember(t, db)
+			run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+			write := func(status domain.RunStatus, reason string) {
+				t.Helper()
+				if !snapshot {
+					if err := db.UpdateRunStatus(ctx, run.ID, status, reason, nil, nil); err != nil {
+						t.Fatalf("UpdateRunStatus %s %q: %v", status, reason, err)
+					}
+					return
+				}
+				row, err := db.GetRun(ctx, run.ID)
+				if err != nil {
+					t.Fatalf("GetRun: %v", err)
+				}
+				row.Status, row.Reason = status, reason
+				if err := db.UpdateRun(ctx, row); err != nil {
+					t.Fatalf("UpdateRun %s %q: %v", status, reason, err)
+				}
+			}
+			report := func(reason string) {
+				t.Helper()
+				if err := db.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, nil, nil); err != nil {
+					t.Fatalf("FinishRunReported %q: %v", reason, err)
+				}
+			}
+			byMember := func(status domain.RunStatus, reason string) {
+				t.Helper()
+				if err := db.FinishRunByMember(ctx, run.ID, status, reason, nil, nil); err != nil {
+					t.Fatalf("FinishRunByMember %s %q: %v", status, reason, err)
+				}
+			}
+			open := func(want bool, what string) {
+				t.Helper()
+				if changed, err := db.ClearRunFinishUnopened(ctx, run.ID); err != nil || changed != want {
+					t.Fatalf("%s: ClearRunFinishUnopened = %v, %v; want %v", what, changed, err, want)
+				}
+			}
+			unopened := func(want bool, what string) {
+				t.Helper()
+				got, err := db.GetRun(ctx, run.ID)
+				if err != nil {
+					t.Fatalf("%s: GetRun: %v", what, err)
+				}
+				if got.FinishUnopened != want {
+					t.Fatalf("%s: finish_unopened = %v, want %v", what, got.FinishUnopened, want)
+				}
+			}
+
+			unopened(false, "working")
+			write(domain.RunAbandoned, "killed")
+			unopened(true, "swarm stopped its worker")
+			write(domain.RunAbandoned, "retained container expired")
+			unopened(true, "relabel before anyone opened it")
+			open(true, "first open")
+			unopened(false, "first open")
+			open(false, "repeat open")
+			write(domain.RunAbandoned, "retained container unavailable")
+			unopened(false, "relabel after a member opened it")
+
+			write(domain.RunRunning, "")
+			unopened(false, "back to work")
+			report("agent reported success")
+			unopened(true, "reported park")
+			open(true, "open by a member")
+			got, err := db.GetRun(ctx, run.ID)
+			if err != nil || got.FinishUnopened || !got.OutcomeUnseen {
+				t.Fatalf("opened park = %+v, %v; want finish_unopened clear, outcome_unseen kept", got, err)
+			}
+			write(domain.RunNeedsAttention, "agent reported success")
+			unopened(false, "same park rewritten")
+
+			write(domain.RunRunning, "agent resumed")
+			report("agent reported failure")
+			unopened(true, "reported again after more work")
+			write(domain.RunNeedsAttention, "blocked: need a decision")
+			unopened(false, "park replaced by a blocker")
+			write(domain.RunCompleted, "agent exited; results committed")
+			unopened(true, "exit without a report")
+
+			byMember(domain.RunAbandoned, "closed; retained container")
+			unopened(false, "member close of an unopened run")
+			byMember(domain.RunMerged, "closed; retained container")
+			unopened(false, "member close of an opened run")
+			write(domain.RunMerged, "retained container expired")
+			unopened(false, "relabel after a member's close")
+			write(domain.RunRunning, "")
+			byMember(domain.RunAbandoned, "killed")
+			unopened(false, "member kill of a working run")
+		})
+	}
 }
