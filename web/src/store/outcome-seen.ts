@@ -29,16 +29,26 @@ export function watchOutcomeSeen(
     if (!capability(s.capabilities).hasMethod('run.seen')) return
     tried = run.id
     inFlight.add(run.id)
-    client
-      .runSeen(run.id)
-      .then((seen) => {
+    const asked = run.stateChangedAt
+    client.runSeen(run.id).then(
+      (seen) => {
+        inFlight.delete(run.id)
+        // The answer is not ordered against the event stream. One from before
+        // the run's latest status change says nothing about the flags that
+        // change set, so it is dropped and the run asked about again.
+        if (store.getState().runs[run.id]?.stateChangedAt !== asked) {
+          if (tried === run.id) tried = null
+          check()
+          return
+        }
         if (!seen.outcome_unseen) store.getState().applyOutcomeSeen(seen.id)
         if (!seen.finish_unopened) store.getState().applyFinishOpened(seen.id)
-      })
-      .catch((err: unknown) => {
+      },
+      (err: unknown) => {
+        inFlight.delete(run.id)
         toast.error(`Could not mark the run seen: ${errorSentence(err)}`)
-      })
-      .finally(() => inFlight.delete(run.id))
+      },
+    )
   }
 
   const stopStore = store.subscribe(check)

@@ -1061,6 +1061,9 @@ owner. `watchOutcomeSeen` (`src/store/outcome-seen.ts`) calls `run.seen` when
 the owner reveals the run through `navigate()`, or is already on it in a
 visible tab when the flag arrives. It makes one call per reveal: a refusal
 shows the server's error and is not retried until the owner opens it again.
+An answer is not ordered against the event stream, so one that a newer
+`run.status` event for the run overtook is dropped and the run is asked about
+again.
 
 Once the flag clears, the run presents **Done** or **Failed** in Finished.
 An interactive run still accepts messages and terminal input; the reason
