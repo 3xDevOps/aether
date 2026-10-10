@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,28 +247,18 @@ func TestHistoryRetentionIsIndependentOfCheckout(t *testing.T) {
 
 type sizedRuntime struct {
 	runtime.Runtime
-	sizes map[string]uint64
-	err   error
+	sizes   map[string]uint64
+	err     error
+	calls   *atomic.Int32
+	release chan struct{}
 }
 
 func (r sizedRuntime) ContainerSizes(context.Context) (map[string]uint64, error) {
-	return r.sizes, r.err
-}
-
-func measuredUsage(t *testing.T, enrich func(*disk.Usage), measured func(disk.Usage) bool) disk.Usage {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var u disk.Usage
-		enrich(&u)
-		if measured(u) {
-			return u
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("container sizes were never reported: %+v", u)
-		}
-		time.Sleep(time.Millisecond)
+	if r.calls != nil {
+		r.calls.Add(1)
+		<-r.release
 	}
+	return r.sizes, r.err
 }
 
 func TestServerDiskAttributesContainerSizes(t *testing.T) {
@@ -276,18 +267,29 @@ func TestServerDiskAttributesContainerSizes(t *testing.T) {
 	if err := s.db.CreateRun(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	rt := sizedRuntime{sizes: map[string]uint64{
+	var calls atomic.Int32
+	rt := sizedRuntime{calls: &calls, release: make(chan struct{}), sizes: map[string]uint64{
 		"terminal:" + string(admin.ID):       2 << 20,
 		string(run.ID):                       47 << 30,
 		"harness-update-" + string(admin.ID): 5,
 	}}
 	enrich := storageEnricher(Deps{Store: s.db, Runtime: rt})
-	var first disk.Usage
-	enrich(&first)
-	if first.ContainersAt != nil || len(first.Containers) != 0 {
-		t.Fatalf("the first reading waited for the measurement: %+v", first)
+	for range 2 {
+		var waiting disk.Usage
+		enrich(&waiting)
+		if waiting.ContainersAt != nil || len(waiting.Containers) != 0 {
+			t.Fatalf("a reading waited for the measurement: %+v", waiting)
+		}
 	}
-	u := measuredUsage(t, enrich, func(u disk.Usage) bool { return u.ContainersAt != nil })
+	close(rt.release)
+	var u disk.Usage
+	for deadline := time.Now().Add(10 * time.Second); u.ContainersAt == nil; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("container sizes were never reported")
+		}
+		u = disk.Usage{}
+		enrich(&u)
+	}
 	want := []disk.Container{
 		{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(admin.ID), Bytes: 47 << 30},
 		{OwnerKind: "member", OwnerID: string(admin.ID), MemberID: string(admin.ID), Bytes: 2 << 20},
@@ -296,9 +298,41 @@ func TestServerDiskAttributesContainerSizes(t *testing.T) {
 		t.Fatalf("containers = %+v (%q), want %+v", u.Containers, u.ContainersError, want)
 	}
 
-	failing := storageEnricher(Deps{Store: s.db, Runtime: sizedRuntime{err: errors.New("docker container sizes unavailable")}})
-	u = measuredUsage(t, failing, func(u disk.Usage) bool { return u.ContainersError != "" })
-	if u.ContainersAt != nil || len(u.Containers) != 0 || u.ContainersError != "docker container sizes unavailable" {
-		t.Fatalf("failed measurement = %+v", u)
+	heir := &domain.Member{DisplayName: "Grace", TailnetLogin: "grace@example.test", Role: domain.RoleCollaborator}
+	if err := s.db.CreateMember(t.Context(), heir); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.TransferRun(t.Context(), run.ID, heir.ID); err != nil {
+		t.Fatal(err)
+	}
+	u = disk.Usage{}
+	enrich(&u)
+	if len(u.Containers) != 2 || u.Containers[0].MemberID != string(heir.ID) {
+		t.Fatalf("handed-off run kept its previous owner: %+v", u.Containers)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("readings started %d measurements, want one", got)
+	}
+}
+
+func TestContainerSizesKeepLastMeasurementThroughFailure(t *testing.T) {
+	// A recent start keeps read from launching its own measurement.
+	c := containerSizes{started: time.Now()}
+	c.measure(sizedRuntime{sizes: map[string]uint64{"run-1": 1}})
+	first, at, failure := c.read(sizedRuntime{})
+	if first["run-1"] != 1 || at == nil || failure != "" {
+		t.Fatalf("first measurement = %v at %v (%q)", first, at, failure)
+	}
+
+	c.measure(sizedRuntime{err: errors.New("docker container sizes unavailable")})
+	kept, keptAt, failure := c.read(sizedRuntime{})
+	if kept["run-1"] != 1 || keptAt != at || failure != "docker container sizes unavailable" {
+		t.Fatalf("failed measurement = %v at %v (%q), want the previous sizes", kept, keptAt, failure)
+	}
+
+	c.measure(sizedRuntime{sizes: map[string]uint64{"run-1": 2}})
+	recovered, _, failure := c.read(sizedRuntime{})
+	if recovered["run-1"] != 2 || failure != "" {
+		t.Fatalf("recovered measurement = %v (%q)", recovered, failure)
 	}
 }

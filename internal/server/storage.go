@@ -32,36 +32,42 @@ const (
 	containerSizeTimeout = 2 * time.Minute
 )
 
-// containerSizes keeps the last completed measurement. The daemon walks
-// every writable layer, which can outlast a request, so read never waits.
+// containerSizes keeps the last completed measurement by creation key. The
+// daemon walks every writable layer, which can outlast a request, so read
+// never waits. Owners are resolved per reading: a handoff must show at once.
 type containerSizes struct {
 	mu      sync.Mutex
 	sizes   map[string]uint64
 	at      *time.Time
-	err     error
+	err     string
 	started time.Time
 	running bool
 }
 
-func (c *containerSizes) read(rt containerSizer) (map[string]uint64, *time.Time, error) {
+func (c *containerSizes) read(rt containerSizer) (map[string]uint64, *time.Time, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.running && time.Since(c.started) >= containerSizeTTL {
 		c.running, c.started = true, time.Now()
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), containerSizeTimeout)
-			defer cancel()
-			sizes, err := rt.ContainerSizes(ctx)
-			c.mu.Lock()
-			defer c.mu.Unlock()
-			c.running, c.err = false, err
-			if err == nil {
-				now := time.Now().UTC()
-				c.sizes, c.at = sizes, &now
-			}
-		}()
+		go c.measure(rt)
 	}
 	return c.sizes, c.at, c.err
+}
+
+// measure keeps the previous sizes when the daemon fails.
+func (c *containerSizes) measure(rt containerSizer) {
+	ctx, cancel := context.WithTimeout(context.Background(), containerSizeTimeout)
+	defer cancel()
+	sizes, err := rt.ContainerSizes(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.running = false
+	if err != nil {
+		c.err = err.Error()
+		return
+	}
+	now := time.Now().UTC()
+	c.sizes, c.at, c.err = sizes, &now, ""
 }
 
 func storageEnricher(d Deps) func(*disk.Usage) {
@@ -75,12 +81,10 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 		}
 		attributeStorage(ctx, d, u, time.Now().UTC())
 		if rt, ok := d.Runtime.(containerSizer); ok {
-			sizes, at, err := containers.read(rt)
-			u.ContainersAt = at
-			if err != nil {
-				u.ContainersError = err.Error()
-			}
-			attributeContainers(ctx, d.Store, u, sizes)
+			sizes, at, failure := containers.read(rt)
+			owned, lookup := attributeContainers(ctx, d.Store, sizes)
+			u.Containers, u.ContainersAt = owned, at
+			u.ContainersError = strings.Join(nonemptyStorageErrors(failure, lookup), "; ")
 		}
 		if rt, ok := d.Runtime.(storageRuntime); ok {
 			usage := rt.StorageUsage(ctx, d.DataDir)
@@ -91,13 +95,14 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 	}
 }
 
-// attributeContainers keeps run and environment containers. Short-lived
-// updater and verification containers have no durable owner to show.
-func attributeContainers(ctx context.Context, db store.Store, u *disk.Usage, sizes map[string]uint64) {
-	lookupFailed := false
+// attributeContainers keeps run and environment containers, largest first.
+// Short-lived updater and verification containers have no durable owner.
+func attributeContainers(ctx context.Context, db store.Store, sizes map[string]uint64) ([]disk.Container, string) {
+	var containers []disk.Container
+	var failure string
 	for key, size := range sizes {
 		if member, ok := strings.CutPrefix(key, "terminal:"); ok {
-			u.Containers = append(u.Containers, disk.Container{OwnerKind: "member", OwnerID: member, MemberID: member, Bytes: size})
+			containers = append(containers, disk.Container{OwnerKind: "member", OwnerID: member, MemberID: member, Bytes: size})
 			continue
 		}
 		run, err := db.GetRun(ctx, domain.RunID(key))
@@ -105,17 +110,15 @@ func attributeContainers(ctx context.Context, db store.Store, u *disk.Usage, siz
 			continue
 		}
 		if err != nil {
-			lookupFailed = true
+			failure = "Container owner lookup failed"
 			continue
 		}
-		u.Containers = append(u.Containers, disk.Container{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(run.MemberID), Bytes: size})
+		containers = append(containers, disk.Container{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(run.MemberID), Bytes: size})
 	}
-	if lookupFailed {
-		u.ContainersError = strings.Join(nonemptyStorageErrors(u.ContainersError, "Container owner lookup failed"), "; ")
-	}
-	slices.SortFunc(u.Containers, func(a, b disk.Container) int {
+	slices.SortFunc(containers, func(a, b disk.Container) int {
 		return cmp.Or(cmp.Compare(b.Bytes, a.Bytes), cmp.Compare(a.OwnerID, b.OwnerID))
 	})
+	return containers, failure
 }
 
 func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time) {
