@@ -861,6 +861,7 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 	if !e.sched.IdleEnhanced(run.ID) {
 		t.Fatal("an enhanced run at turn end is not idle")
 	}
+	offered := len(coord.idleWakeRuns())
 	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil {
 		t.Fatal(err)
 	}
@@ -870,6 +871,11 @@ func TestEnhancedRunIdleWakesMailAndBusyRefuses(t *testing.T) {
 	}) {
 		t.Fatal("the wake prompt is not in the item log")
 	}
+	// The turn's end reaches coordination after its item is logged; counted
+	// later, it would pass for the offer Resume makes below.
+	waitFor(t, "the wake turn's idle session handed to coordination", func() bool {
+		return len(coord.idleWakeRuns()) > offered
+	})
 
 	if err := e.sched.Pause(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
