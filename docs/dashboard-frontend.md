@@ -387,10 +387,13 @@ avatars at most: a fourth person turns the stack into two avatars and `+2`.
 the row's right edge (`run-details.tsx`): the full title, the state's
 reason, the workspace, the agent and mode, the branch, a swarm parent's
 worker counts, when the run started, when it last changed if that is later,
-its owner, and everyone on it with the controller marked **Controlling**. A
-live run nobody controls says so and names who had control last, when the
-server knows. Moving to another row swaps the box without the delay or the
-animation. The box takes no pointer events, closes when the row is pressed,
+its owner, and the people on it with the controller marked **Controlling**.
+A live run nobody controls says so above them and names who had control
+last, when the server knows. The box cannot scroll, so it lists seven lines
+of people at most, fewer in a window too short for them, and ends the list
+with a count of the rest ("and 16 more"); seven keeps the tallest box inside
+a 600px-tall window at every text size. Moving to another row swaps the box
+without the delay or the animation. The box takes no pointer events, closes when the row is pressed,
 scrolled or left, and gives way to the hint of a button inside the row. It
 does not open on keyboard focus, on a coarse pointer, or under 768px, where
 the sidebar is a sheet. It replaces the row's native tooltip.

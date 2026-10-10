@@ -1,5 +1,5 @@
 import { Tooltip as TooltipPrimitive } from 'radix-ui'
-import { useRef, useState, type ComponentProps, type ReactElement } from 'react'
+import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactElement } from 'react'
 import { Avatar } from '@/components/ui/avatar'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
@@ -19,6 +19,9 @@ interface Shown {
   counts: string
   people: string[]
 }
+
+/** How far the box stays from the viewport's edges. */
+const edge = 8
 
 /** Rows inside share one delay: the first box waits, the next follows the pointer. */
 export function RunDetailsGroup(props: ComponentProps<'div'>) {
@@ -56,7 +59,7 @@ export function RunDetails({ label, children, ...shown }: Shown & { label: strin
           side="right"
           align="start"
           sideOffset={offset}
-          collisionPadding={8}
+          collisionPadding={edge}
           className={cn(
             surface,
             'pointer-events-none z-50 max-h-(--radix-tooltip-content-available-height) w-72 overflow-hidden rounded-tl-none p-3 text-ui-sm data-[state=delayed-open]:animate-expand-right motion-reduce:animate-none',
@@ -70,6 +73,10 @@ export function RunDetails({ label, children, ...shown }: Shown & { label: strin
 }
 
 const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+// The box cannot scroll. Seven lines of people keep its tallest form inside a
+// 600px window, the desktop shell's minimum, at every text size.
+const peopleLines = 7
 
 function Details({ run, state, reason, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
@@ -91,8 +98,18 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
     : people.length === 0 ? 'Nobody is on this run'
       : controller === '' ? 'Nobody is controlling'
         : undefined
+  const [lines, setLines] = useState(peopleLines)
+  const content = useRef<HTMLDivElement>(null)
+  // A shorter window gets fewer lines, so the list ends in a count and never in a cut.
+  useLayoutEffect(() => {
+    const box = content.current?.parentElement
+    if (box && lines > 2 && box.scrollHeight + box.offsetHeight - box.clientHeight > window.innerHeight - 2 * edge) {
+      setLines(lines - 1)
+    }
+  })
+  const listed = people.length > lines ? people.slice(0, lines - 1) : people
   return (
-    <div className="flex flex-col gap-2.5">
+    <div ref={content} className="flex flex-col gap-2.5">
       <div className="flex flex-col gap-1">
         <p className="line-clamp-3 text-ui font-medium break-words">{runLabel(run)}</p>
         <p className="flex gap-1.5">
@@ -127,18 +144,19 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
       {(people.length > 0 || unattended) && (
         <div className="flex flex-col gap-1 border-t border-seam pt-2.5">
           {people.length > 0 && <p className="font-medium text-muted">On this run</p>}
-          {people.map((id) => (
-            <div key={id} className="flex items-center justify-between gap-2">
-              {person(id)}
-              {id === controller && <span className="shrink-0 font-medium">Controlling</span>}
-            </div>
-          ))}
           {unattended && (
             <p className="text-muted">
               {unattended}
               {!controller && last && <span className="block truncate">{last === self ? 'You' : name(last)} had control last</span>}
             </p>
           )}
+          {listed.map((id) => (
+            <div key={id} className="flex items-center justify-between gap-2">
+              {person(id)}
+              {id === controller && <span className="shrink-0 font-medium">Controlling</span>}
+            </div>
+          ))}
+          {people.length > listed.length && <p className="text-muted">and {people.length - listed.length} more</p>}
         </div>
       )}
     </div>

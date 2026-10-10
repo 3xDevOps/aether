@@ -255,6 +255,42 @@ describe('run rows', () => {
       }
     })
 
+    it('lists seven lines of people at most in the details, after the control line, and counts the rest', () => {
+      vi.useFakeTimers()
+      try {
+        const crowd = Array.from({ length: 9 }, (_, i) => ({
+          id: `mem_${i}`, display_name: `Member ${i}`, color: '#4363d8', role: 'viewer' as const,
+        }))
+        useStore.setState((s) => ({
+          members: { [alice.id]: alice, ...Object.fromEntries(crowd.map((member) => [member.id, member])) },
+          presence: on(...crowd),
+          runs: { ...s.runs, run_1: toRecord(run({ controller_member_id: '', last_controller_member_id: crowd[8].id })) },
+        }))
+        render(<AppShell />)
+        fireEvent.pointerMove(row())
+        act(() => {
+          vi.advanceTimersByTime(400)
+        })
+        const lines = () => [...within(details()!).getByText('On this run').parentElement!.children].map((line) => line.textContent)
+
+        expect(lines()).toEqual([
+          'On this run',
+          'Nobody is controllingMember 8 had control last',
+          'MMember 8', 'MMember 0', 'MMember 1', 'MMember 2', 'MMember 3', 'MMember 4',
+          'and 3 more',
+        ])
+
+        act(() => useStore.getState().setPresence(on(...crowd.slice(0, 7))))
+        expect(lines()).toEqual([
+          'On this run',
+          'Nobody is controllingMember 8 had control last',
+          ...crowd.slice(0, 7).map((member) => `M${member.display_name}`),
+        ])
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('opens no details for a finger', () => {
       atViewport(1024, { pointer: 'coarse' })
       vi.useFakeTimers()
