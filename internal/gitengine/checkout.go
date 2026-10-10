@@ -276,7 +276,11 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 //
 // The checkout - .git included - is agent-writable, so anything in it
 // that names a command to run is hostile input that must never execute
-// as the server: hooks are pointed at an empty path, fsmonitor is
+// as the server. Staging therefore runs under the server-owned scratch
+// repository, exactly as a diff snapshot does: the fork point's attributes
+// convert line endings back, linked worktrees stay out, and the checkout's
+// config is not read at all. The commit itself needs the checkout's own
+// refs, so for it hooks are pointed at an empty path, fsmonitor is
 // disabled, attribute lookups read from the empty tree instead of the
 // worktree so a planted .gitattributes cannot select a clean filter, and
 // .git/info/attributes (which GIT_ATTR_SOURCE does not override) is
@@ -296,6 +300,16 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 	if rmErr := os.Remove(filepath.Join(checkout, ".git", "info", "attributes")); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		return "", fmt.Errorf("gitengine: drop checkout attributes override: %w", rmErr)
 	}
+	store, err := e.snapshotStorePath(run)
+	if err != nil {
+		return "", err
+	}
+	// The commit is read from the checkout's own object database, so the
+	// blobs staging hashes are written there, not to the scratch store.
+	if _, _, addErr := e.gitWorktreeObjects(ctx, checkout, store, filepath.Join(checkout, ".git", "index"),
+		filepath.Join(checkout, ".git", "objects"), 0, "add", "-A"); addErr != nil {
+		return "", addErr
+	}
 	// The empty tree exists implicitly in every repository, whatever its
 	// object format, so it is resolved here rather than hardcoded.
 	emptyTree, err := e.git(ctx, checkout, "hash-object", "-t", "tree", os.DevNull)
@@ -303,21 +317,19 @@ func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string
 		return "", err
 	}
 	env := append(gitEnv(), "GIT_ATTR_SOURCE="+emptyTree)
-	// core.fsmonitor in the checkout's config would be executed by add and
-	// status; false disables it. Hooks likewise come from writable config.
+	// core.fsmonitor in the checkout's config would be executed by commit;
+	// false disables it. Hooks likewise come from writable config.
 	neutral := []string{"-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false"}
 	git := func(args ...string) (string, error) {
 		return e.gitIn(ctx, checkout, env, append(neutral, args...)...)
 	}
-	if _, addErr := git("add", "-A"); addErr != nil {
-		return "", addErr
-	}
-	status, err := git("status", "--porcelain")
-	if err != nil {
-		return "", err
-	}
-	if status == "" {
+	// Only the index decides whether there is work: a worktree comparison
+	// here would run without the fork point's attributes.
+	var unchanged *exec.ExitError
+	if _, diffErr := git("diff-index", "--cached", "--quiet", "HEAD", "--"); diffErr == nil {
 		return "", nil
+	} else if !errors.As(diffErr, &unchanged) || unchanged.ExitCode() != 1 {
+		return "", diffErr
 	}
 	// The committer is Aether - this commit is the server's act - while the
 	// author is the member the run belongs to, so the branch credits a
