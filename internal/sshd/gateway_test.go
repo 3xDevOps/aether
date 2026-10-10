@@ -2,9 +2,12 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -158,5 +161,44 @@ func TestServerDiskWithoutSeamIsUnavailable(t *testing.T) {
 	err := c.Call(protocol.MethodServerDisk, nil, nil)
 	if pe := wireErrOf(t, err); pe.Code != protocol.CodeUnavailable {
 		t.Errorf("nil seam code = %d, want %d", pe.Code, protocol.CodeUnavailable)
+	}
+}
+
+func TestServerDiskContainersAreOwnOrAdmin(t *testing.T) {
+	t.Parallel()
+	measured := time.Date(2026, 10, 10, 6, 0, 0, 0, time.UTC)
+	reader := &fakeDisk{}
+	e := newTestEnv(t, func(c *Config) { c.Services.Disk = reader })
+	_, member := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	reader.usage = disk.Usage{
+		ContainersAt: &measured,
+		Containers: []disk.Container{
+			{OwnerKind: "run", OwnerID: "run-big", MemberID: string(e.member.ID), Bytes: 47 << 30},
+			{OwnerKind: "run", OwnerID: "run-own", MemberID: string(member.ID), Bytes: 16 << 30},
+			{OwnerKind: "member", OwnerID: string(member.ID), MemberID: string(member.ID), Bytes: 2 << 20},
+		},
+	}
+	read := func(id domain.MemberID) protocol.ServerDiskResult {
+		t.Helper()
+		raw, err := e.srv.Local(id).Call(t.Context(), protocol.MethodServerDisk, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result protocol.ServerDiskResult
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if all := read(e.member.ID); len(all.Containers) != 3 || all.Containers[0].OwnerID != "run-big" || all.ContainersMeasuredAt != "2026-10-10T06:00:00Z" {
+		t.Fatalf("admin containers = %+v", all)
+	}
+	own := read(member.ID)
+	want := []protocol.ServerDiskContainer{
+		{OwnerKind: "run", OwnerID: "run-own", Bytes: 16 << 30},
+		{OwnerKind: "member", OwnerID: string(member.ID), Bytes: 2 << 20},
+	}
+	if !slices.Equal(own.Containers, want) || own.ContainersMeasuredAt == "" {
+		t.Fatalf("member containers = %+v, want only their own", own.Containers)
 	}
 }

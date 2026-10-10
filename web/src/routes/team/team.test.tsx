@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { PresenceEntry } from '@/lib/types'
 import { useTeamRefresh } from '@/routes/team'
@@ -326,6 +326,34 @@ describe('team refresh and summary', () => {
     })
     expect(useStore.getState().info?.disk).toEqual(current)
     expect(screen.queryByText(failure.message)).toBeNull()
+  })
+
+  it('lists what each container holds outside its mounted folders', () => {
+    seed({ info: { ...serverInfo, disk: { ...serverInfo.disk!, containers: undefined } } })
+    const { unmount } = render(<ServerSection />)
+    expect(screen.queryByText('Container sizes')).toBeNull()
+    unmount()
+
+    seed({
+      info: {
+        ...serverInfo,
+        disk: {
+          ...serverInfo.disk!,
+          containers: [
+            { owner_kind: 'run', owner_id: 'run_1', bytes: 3 * 1024 * 1024 * 1024 },
+            { owner_kind: 'member', owner_id: bob.id, bytes: 1024 * 1024 * 1024 },
+          ],
+          containers_measured_at: '2026-08-14T10:04:00Z',
+          containers_error: 'Docker container sizes unavailable: request timed out.',
+        },
+      },
+    })
+    render(<ServerSection />)
+    const list = screen.getByText(/2 containers hold 4\.0 GB/).closest('details') as HTMLElement
+    const items = within(list).getAllByRole('listitem').map((item) => item.textContent)
+    expect(items[0]).toContain('(run_1) · 3.0 GB')
+    expect(items[1]).toContain(`environment ${bob.display_name} (${bob.id}) · 1.0 GB`)
+    expect(screen.getByText('Docker container sizes unavailable: request timed out.')).toBeDefined()
   })
 })
 

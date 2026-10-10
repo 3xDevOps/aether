@@ -10,6 +10,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
 import { isRetainedRun } from '@/lib/commands'
+import { formatBytes } from '@/lib/format'
 import { plainReason } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -154,6 +155,7 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
   const status = useStore((s) => s.roomStatus[run.id])
   const selfID = useStore((s) => s.info?.member.id)
   const controllerID = agent.localControl ? selfID : status?.controller?.member_id
+  const containerBytes = useStore((s) => s.info?.disk?.containers?.find((c) => c.owner_kind === 'run' && c.owner_id === run.id)?.bytes)
   return (
     <Section id="details-people" title="Details" inset={inset}>
       {run.task.trim() && <p className="max-h-48 overflow-y-auto break-words whitespace-pre-wrap text-ui text-text">{run.task}</p>}
@@ -174,6 +176,9 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
             : 'Nobody else'}
         </Row>
         <Row label="Container">{container(run)}</Row>
+        {containerBytes !== undefined && (
+          <Row label="Container size">{formatBytes(containerBytes)} <span className="text-muted">outside the mounted home, checkout and cache</span></Row>
+        )}
         {run.archived_at && <Row label="Archived"><RelativeTime at={run.archived_at} /></Row>}
         {run.reason && <Row label="Last reason">{plainReason(run.reason)}</Row>}
       </dl>

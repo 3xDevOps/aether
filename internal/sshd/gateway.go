@@ -98,8 +98,18 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		SnapshotBytes:   usage.SnapshotBytes,
 		Warnings:        usage.Warnings,
 		Docker:          (*protocol.ServerDockerDisk)(usage.Docker),
+		ContainersError: usage.ContainersError,
 	}
-	if s.requireAdmin(ctx, member, protocol.MethodServerDisk) == nil {
+	if usage.ContainersAt != nil {
+		result.ContainersMeasuredAt = usage.ContainersAt.UTC().Format(time.RFC3339Nano)
+	}
+	admin := s.requireAdmin(ctx, member, protocol.MethodServerDisk) == nil
+	for _, c := range usage.Containers {
+		if admin || c.MemberID == string(member) {
+			result.Containers = append(result.Containers, protocol.ServerDiskContainer{OwnerKind: c.OwnerKind, OwnerID: c.OwnerID, Bytes: c.Bytes})
+		}
+	}
+	if admin {
 		result.Truncated = usage.Truncated || len(usage.Entries) > 50
 		for _, entry := range usage.Entries[:min(len(usage.Entries), 50)] {
 			wire := protocol.ServerDiskEntry{

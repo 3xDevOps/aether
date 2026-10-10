@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/build"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
@@ -144,5 +146,18 @@ func TestDockerStorageErrorsRetainCausesWithoutPrivateValues(t *testing.T) {
 				t.Errorf("error leaked %q: %s", secret, got)
 			}
 		}
+	}
+}
+
+func TestContainerSizesKeepKnownWritableLayersByCreationKey(t *testing.T) {
+	got := containerSizes([]container.Summary{
+		{Labels: map[string]string{labelCreationKey: "run-1"}, SizeRw: 47 << 30, SizeRootFs: 49 << 30},
+		{Labels: map[string]string{labelCreationKey: "terminal:member-1"}},
+		{Labels: map[string]string{labelCreationKey: "run-2"}, SizeRw: -1},
+		{Labels: map[string]string{"other": "label"}, SizeRw: 9},
+	})
+	want := map[string]uint64{"run-1": 47 << 30, "terminal:member-1": 0}
+	if !maps.Equal(got, want) {
+		t.Fatalf("container sizes = %v, want %v", got, want)
 	}
 }

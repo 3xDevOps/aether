@@ -2261,7 +2261,9 @@ whatever opened it. Sections (`details.tsx`):
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
-  or "Removed"), Archived, and **Last reason**, the server's `run.reason`, so
+  or "Removed"), Container size (what the run wrote inside its container
+  outside the mounted home, checkout and cache; shown to the run's owner and
+  admins once measured), Archived, and **Last reason**, the server's `run.reason`, so
   a parked error or stall detail the reason line leaves out is never hidden.
 
 A failed room action shows its error above the sections with **Dismiss**;
@@ -3269,7 +3271,11 @@ through either gateway:
   its own block; filesystem used totals are never added together. Docker's
   unused classification is not permission to delete saved environments.
   Missing values stay unknown, and partial-measurement warnings and Docker
-  errors remain visible. Admins can expand **Largest storage owners** for up
+  errors remain visible. **Container sizes** expands to each run's and
+  environment's container, largest first, with the bytes it wrote outside its
+  mounted home, checkout and cache, such as `/tmp`. Those files are deleted
+  with the container and are not counted in the categories above. Admins see
+  every container, other members their own. Admins can expand **Largest storage owners** for up
   to 50 entries with ownership, bytes, retention deadlines and errors; their
   bytes overlap category totals and are not extra usage. Cache-pool deadlines
   are age targets, not guaranteed minimum retention. **Free retained containers…**

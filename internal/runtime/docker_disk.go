@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
 )
@@ -63,6 +64,30 @@ func (d *Docker) StorageUsage(ctx context.Context, dataDir string) disk.DockerUs
 		out.Error = strings.TrimSpace(out.Error + " " + dockerStorageError("filesystem identity", identityErr))
 	}
 	return out
+}
+
+// ContainerSizes returns the writable-layer bytes of every container that
+// carries a creation key, keyed by that key. The daemon walks each layer to
+// answer, so callers measure off the request path. The error is safe to show.
+func (d *Docker) ContainerSizes(ctx context.Context) (map[string]uint64, error) {
+	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
+		All: true, Size: true, Filters: make(client.Filters).Add("label", labelCreationKey),
+	})
+	if err != nil {
+		return nil, errors.New(dockerStorageError("container sizes", err))
+	}
+	return containerSizes(list.Items), nil
+}
+
+func containerSizes(items []container.Summary) map[string]uint64 {
+	sizes := make(map[string]uint64, len(items))
+	for _, item := range items {
+		// A negative size is the daemon's unknown, not an empty layer.
+		if key := item.Labels[labelCreationKey]; key != "" && item.SizeRw >= 0 {
+			sizes[key] = uint64(item.SizeRw)
+		}
+	}
+	return sizes
 }
 
 func dockerCategoryUsage(usage client.DiskUsageResult) disk.DockerUsage {

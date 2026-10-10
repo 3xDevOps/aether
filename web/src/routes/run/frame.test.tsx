@@ -225,6 +225,24 @@ describe('run details', () => {
     expect(within(facts).getByText('aether/run-1-checkout')).toBeDefined()
   })
 
+  it('shows the size of the run\'s own container and no other', async () => {
+    useStore.setState({
+      info: {
+        ...serverInfo,
+        disk: {
+          ...serverInfo.disk!,
+          containers: [
+            { owner_kind: 'run', owner_id: 'run_2', bytes: 9 * 1024 * 1024 * 1024 },
+            { owner_kind: 'run', owner_id: 'run_1', bytes: 3 * 1024 * 1024 * 1024 },
+          ],
+        },
+      },
+    })
+    open()
+    const facts = within((await details()).getByRole('region', { name: 'Details' }))
+    expect(facts.getByText('Container size').nextElementSibling?.textContent).toBe('3.0 GB outside the mounted home, checkout and cache')
+  })
+
   it('lists a teammate question among the notes', async () => {
     vi.mocked(api.runRoomList).mockResolvedValue({ messages: [roomMessage({ id: 'q_1', kind: 'question', actor_id: bob.id, body: 'which port?' })] })
     open()

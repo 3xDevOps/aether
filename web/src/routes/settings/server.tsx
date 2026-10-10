@@ -1,5 +1,6 @@
 import { useUpdateNotice } from '@/components/update-banner'
 import { Button } from '@/components/ui/button'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
 import { formatBytes } from '@/lib/format'
 import type { DiskUsage } from '@/lib/types'
@@ -116,9 +117,42 @@ export function ServerSection() {
           </div>
         </SettingRow>
       )}
+      {disk && (disk.containers_measured_at || disk.containers_error) && <ContainerSizes disk={disk} />}
       {disk?.entries && <StorageOwners disk={disk} />}
       {admin && <RetainedContainersRow />}
     </SettingsSection>
+  )
+}
+
+function ContainerSizes({ disk }: { disk: DiskUsage }) {
+  const runs = useStore((s) => s.runs)
+  const members = useStore((s) => s.members)
+  const containers = disk.containers ?? []
+  const total = containers.reduce((sum, c) => sum + c.bytes, 0)
+  return (
+    <SettingRow
+      label="Container sizes"
+      help="Files written inside a container outside its mounted home, checkout and cache, such as /tmp. They are deleted with the container and are not counted in the categories above."
+    >
+      <details className="min-w-0 text-ui-sm text-muted">
+        <summary className="cursor-pointer py-2">
+          {disk.containers_measured_at
+            ? <>{containers.length} {containers.length === 1 ? 'container holds' : 'containers hold'} {formatBytes(total)} · measured <RelativeTime at={disk.containers_measured_at} /></>
+            : 'Not measured yet'}
+        </summary>
+        <ul className="flex min-w-0 flex-col gap-1">
+          {containers.map((c) => {
+            const name = c.owner_kind === 'run' ? runs[c.owner_id]?.title : members[c.owner_id]?.display_name
+            return (
+              <li key={`${c.owner_kind}:${c.owner_id}`} className="min-w-0 break-words">
+                <span className="font-medium text-text">{c.owner_kind === 'run' ? 'run' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span> · {formatBytes(c.bytes)}
+              </li>
+            )
+          })}
+        </ul>
+      </details>
+      {disk.containers_error && <p className="whitespace-pre-wrap break-words text-ui-sm text-muted">{disk.containers_error}</p>}
+    </SettingRow>
   )
 }
 
