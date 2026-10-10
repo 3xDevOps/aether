@@ -4,7 +4,7 @@ import { useStore } from '@/store'
 import { registerShellSocket, unregisterShellSocket, type RunShellSocket } from '@/store/terminal'
 
 function terminal(id: string, incarnation = `${id}-process`): DevTerminal {
-  return { terminal_id: id, incarnation, name: id, cols: 80, rows: 24, process: { state: 'running' } }
+  return { terminal_id: id, incarnation, name: id, started_by: 'run_agent', cols: 80, rows: 24, process: { state: 'running' } }
 }
 function socket(close = vi.fn()): RunShellSocket {
   return {
@@ -57,5 +57,18 @@ describe('authoritative development terminals', () => {
       activeTab: 'agent-command', tabs: ['agent-command'],
       terminals: [{ process: { state: 'exited', exit_code: 9 } }],
     })
+  })
+
+  it('never opens a tab for a shell that had already ended, or reopens one that was closed', () => {
+    const ended: DevTerminal = { ...terminal('finished'), process: { state: 'exited', exit_code: 0 } }
+    const command = terminal('agent-command')
+    useStore.getState().syncShellTerminals('run_1', [ended, command])
+    expect(useStore.getState().shellDocks.run_1.tabs).toEqual(['agent-command'])
+    const stopped: DevTerminal = { ...command, process: { state: 'stopped', exit_code: 143 } }
+    useStore.getState().syncShellTerminals('run_1', [ended, stopped])
+    expect(useStore.getState().shellDocks.run_1.tabs).toEqual(['agent-command'])
+    useStore.getState().closeShellTab('run_1', command.terminal_id)
+    useStore.getState().syncShellTerminals('run_1', [ended, stopped])
+    expect(useStore.getState().shellDocks.run_1).toMatchObject({ tabs: [], activeTab: null, shellShown: false })
   })
 })

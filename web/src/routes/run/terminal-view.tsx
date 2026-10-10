@@ -6,7 +6,7 @@ import { isRetainedRun } from '@/lib/commands'
 import { endedStatuses, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { usePresenceSummary } from '@/routes/run/multiplayer-controls'
 import { ShellTerminal } from '@/routes/run/shell-terminal'
-import { terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
+import { StopShellDialog, terminalPanelID, TerminalTabs, type RunShells } from '@/routes/run/shells'
 import { TerminalHistory } from '@/routes/terminal/history'
 import { ControlButton } from '@/routes/terminal/control-button'
 import { cn } from '@/lib/utils'
@@ -67,7 +67,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
 }) {
   const shellShown = shells.dock.shellShown && shells.dock.activeTab !== null && shells.canOpen
   const tabs = <TerminalTabs shells={shells} agent={agent.hasAgentTerminal} />
-  const tabbed = agent.hasAgentTerminal && shells.canOpen && shells.dock.tabs.length > 0
+  const tabbed = shells.canOpen && shells.dock.tabs.length > 0
   const { controller, session, takeover } = agent
   const { state, replaying, controlMetadata } = session
 
@@ -136,6 +136,7 @@ export function TerminalView({ run, agent, shells, onCaptures }: {
         </div>
       )}
       </div>
+      <StopShellDialog shells={shells} />
     </div>
   )
 }

@@ -1700,23 +1700,46 @@ above every sheet and dialog for the holder's decision; the dialog restores
 the interrupted focus. Worker runs never ask for the lease on open.
 
 **Shells.** A shell is a shared development terminal in the run's container
-([terminal.md](terminal.md#run-shells)). **+ Shell** (named
-"New shell") starts one with `dev.terminal.start`, at most four per run; when
-hidden shells exist it is a menu with **New shell** and **Show <shell>**.
-`useRunShells` lists them with `dev.terminal.list` every ten seconds while the
-run is open and the tab is visible. A shell's tab shows its name, else "Shell
-1", "Shell 2" by position, plus its process state once it is no longer
-running. A run's shells start hidden behind the agent's terminal (`shellShown:
-false` in `initialRunShellDock`, keyed by run id in `shellDocks`).
+([terminal.md](terminal.md#run-shells)). **+ Shell** (named "New shell")
+starts one with `dev.terminal.start`. `useRunShells(runID, visible)` in
+`shells.tsx` lists them with `dev.terminal.list` every two seconds while the
+Terminal view is showing and every ten behind another view, and holds what
+outlives one mounted shell: the write intent and control session of each
+incarnation, and `open`, `show` and `stop`. A run's shells start hidden behind
+the agent's terminal (`shellShown: false` in `initialRunShellDock`, keyed by
+run id in `shellDocks`).
+
+`TerminalTabs` draws one tab per shell: its name ("Shell 2" for the server's
+`tab-2`, so a number never moves), the agent's glyph when `started_by` is
+`run_agent`, its process state once it is no longer running, and a close
+button. `ShellCloseItems` is what closing means, in the tab's menu and in
+**Shell actions** alike: **Hide, keep running** and **Stop shell** for a
+running shell, one **Close** for an ended one. Hidden running shells are a
+count beside **+ Shell** ("2 hidden") whose menu shows them again; on a phone
+they follow **New shell** in the terminal menu. At four running shells started
+by people (`maxOwnShells`, mirroring `maxRunShells` in
+`internal/scheduler/run_shell.go`) **+ Shell** is `aria-disabled` beside "At
+most 4 shells", and the phone's **New shell** carries the reason as its
+description. `syncShellTerminals` gives an ended shell a tab only where it
+ended in front of this viewer, so a closed one never returns.
+
 `ShellTerminal` (`shell-terminal.tsx`) owns the selected shell's attach on
 `/ws/attach/<run>?shell=<terminal_id>` (sockets registered in
 `store/terminal.ts`) and its own control lease, independent of the agent's and
-the Browser's: the toolbar names who controls it ("You control", "<name>
-controls", "The agent controls") with **Take control** or **Release**, and
-**Shell actions** holds **Take a screenshot**, **Hide this shell** and **Stop
-this shell**. Taking control from someone else and stopping both confirm;
-hiding leaves the process running. A member without steer permission gets "You
-can view this run but not open a shell in it" in place of the terminal.
+the Browser's. A shell that `open` started attaches asking for the lease. In
+any other shell nobody else controls, the first `onData` buffers what is typed
+and reopens the attach with `write` and `resume`; `onControl` sends the buffer
+under the granted fence, and a refusal or a dropped connection discards it.
+The toolbar reads "You control" with a ghost **Release**, or "<name> controls"
+/ "The agent controls" with **Take control**, which confirms; with nobody
+controlling it shows neither. Under 768px the controller's name moves to the
+line under the toolbar. Leaving the Terminal view releases the lease, and a
+swarm worker's shell never takes it without **Take control**. **Shell
+actions** holds **Take a screenshot** and the close items. `shells.stop` uses
+the lease the page holds, or acquires one with `dev.control.acquire` and
+releases it afterwards; `StopShellDialog` asks first when someone else holds
+it. A member without steer permission gets "You can view this run but not
+open a shell in it" in place of the terminal.
 
 `TerminalTools` in `src/components/terminal-pane.tsx` is the **Tools** menu
 (named "Terminal tools"): **Find** (**Find in recorded output** while
@@ -3813,8 +3836,9 @@ not take the keyboard back from a button that disabled itself mid-flight.
 There is no target left to read, so the fallback asks whether a dialog or a
 menu is open, and a dialog playing its exit animation does not count. It does
 not ask about terminals: focus on `body` with a terminal on screen is
-ordinary, and hiding a shell hands the keyboard to the next running shell or,
-when there is none, to the shell's actions button rather than orphaning it.
+ordinary, and closing a shell hands the keyboard to the next running shell or,
+when there is none, to the selected terminal tab or **+ Shell** rather than
+orphaning it.
 
 An open tooltip is the one overlay that neither guard names, and it does not
 need to: a tooltip owns no keys, and its trigger is an ordinary control.
@@ -3847,8 +3871,8 @@ Environment dock (`components/dock.tsx`) carry `role="tablist"`,
 through `onTabListKeyDown` in `src/lib/keys.ts`. The terminal strip's Agent
 tab controls the agent pane and each shell tab the shell pane, both
 `tabpanel`s while a shell is open; with only the agent there is one terminal
-and no tab list. A removable dock tab advertises unmodified Delete and
-Backspace through `aria-keyshortcuts`.
+and no tab list. A removable dock tab and a shell tab advertise unmodified
+Delete and Backspace through `aria-keyshortcuts`.
 
 Those keys move focus and nothing else. Selection does not follow focus here,
 which the ARIA tab list pattern reserves for panels that are cheap to swap:
@@ -3857,7 +3881,8 @@ arrowing must not open the tab it lands on. Enter or Space opens the focused
 tab, and a click opens the tab it landed on. Delete or Backspace closes the
 focused removable dock tab. A close repairs focus to the next surviving tab,
 the previous one when closing the last tab, or **Add terminal tab** when the
-dock becomes empty.
+dock becomes empty. On a shell tab the same keys open its close choices, or
+close a shell that has ended.
 
 **Resize handles are window splitters.** The sidebar's and the docks'
 `separator` handles take Tab, name the pane they size with `aria-controls`,
@@ -4051,7 +4076,8 @@ moderated messages, explicit control transfer, the phone Details sheet and
 Captures on a phone; `run-evidence.spec.ts` and `run-evidence.mobile.spec.ts`
 cover retained captures. `src/routes/run/frame.test.tsx` covers the view
 switch, header actions, Details sections and composer gating;
-`shells.test.tsx` covers the shell tabs; `terminal.test.tsx` covers the agent
+`shells.test.tsx` covers the shell tabs, closing, the limit and shell
+control; `terminal.test.tsx` covers the agent
 attach, presence and occupied-lease fencing; `src/store/sessions.test.ts`
 covers the Session rows; `src/store/session-rows.test.ts`,
 `acp-sessions.test.ts`, `src/lib/acp-stream.test.ts`,

@@ -429,6 +429,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
         terminal_id: `terminal_${terminalSequence}`,
         incarnation: `incarnation_${terminalSequence}`,
         name: name || `Terminal ${terminalSequence}`,
+        started_by: 'member',
         cols: cols || 80,
         rows: rows || 24,
         process: { state: 'running' },
