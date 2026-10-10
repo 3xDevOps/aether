@@ -605,6 +605,10 @@ also carry `control_session_id` and `control_generation`. Coordinate actions
 use the observed `viewport_id`; semantic actions use revision-scoped node IDs
 from `snapshot`. Re-observe after navigation/DOM/viewport changes. `reset` is
 explicit, invalidates old identities, and requires a new control acquisition.
+`console` records only `error` and `warning` messages, uncaught page errors and
+dismissed dialogs; `network` records only failed requests and responses with
+status 400 or above. Neither records `console.log` output or successful
+requests.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
 `paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
 session reports `available: false`, `running: false`, and its actual error.
