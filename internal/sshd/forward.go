@@ -146,7 +146,14 @@ func rejectDirectTCPIP(nc ssh.NewChannel, reason ssh.RejectionReason, message st
 	_ = nc.Reject(reason, message)
 }
 
-func proxyDirectTCPIP(ctx context.Context, tcp *net.TCPConn, ch ssh.Channel) {
+// halfCloser is the far side of a forward: a TCP connection, or the channel
+// a run's forwarding relay opened.
+type halfCloser interface {
+	io.ReadWriteCloser
+	CloseWrite() error
+}
+
+func proxyDirectTCPIP(ctx context.Context, tcp halfCloser, ch ssh.Channel) {
 	var closeOnce sync.Once
 	closeBoth := func() {
 		closeOnce.Do(func() {
