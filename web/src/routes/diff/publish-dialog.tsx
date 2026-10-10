@@ -14,8 +14,9 @@ import { useStore } from '@/store'
 import { useHeaderPrimary } from '@/store/hooks'
 
 /** Stays mounted while the run is open so a typed message or an uncertain
- * PR creation survives closing the dialog and switching views. */
-export function PublishDialog({ run, client = api }: { run: Run; client?: Api }) {
+ * PR creation survives closing the dialog and switching views. `quiet` gives
+ * the view's one filled button to another action. */
+export function PublishDialog({ run, client = api, quiet = false }: { run: Run; client?: Api; quiet?: boolean }) {
   useHeaderPrimary(true)
   const [open, setOpen] = useState(false)
   const p = usePublish(run, client, open)
@@ -25,7 +26,7 @@ export function PublishDialog({ run, client = api }: { run: Run; client?: Api })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">Publish…</Button>
+        <Button size="sm" variant={quiet ? 'secondary' : 'primary'}>Publish…</Button>
       </DialogTrigger>
       <DialogContent className="md:max-w-3xl">
         <DialogHeader>

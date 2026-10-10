@@ -17,6 +17,7 @@ import { ConflictChips } from '@/routes/diff/conflict-chips'
 import type { PatchFile } from '@/routes/diff/parse'
 import { Counts } from '@/routes/diff/patch-view'
 import { PublishDialog } from '@/routes/diff/publish-dialog'
+import { useReviewing } from '@/routes/diff/review'
 import { ReviewLocallyDialog, useCanReviewLocally } from '@/routes/diff/review-commands'
 import { useCapability } from '@/store/hooks'
 import type { DiffSnapshot } from '@/store/diff'
@@ -62,6 +63,7 @@ export function SummaryStrip({
 }) {
   const caps = useCapability()
   const local = useCanReviewLocally(run)
+  const commenting = useReviewing(run.id)
   const [reviewing, setReviewing] = useState(false)
   const more = useRef<HTMLButtonElement>(null)
   const additions = files.reduce((sum, file) => sum + file.additions, 0)
@@ -136,7 +138,7 @@ export function SummaryStrip({
             )}
           </MenuContent>
         </Menu>
-        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} />}
+        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} quiet={commenting} />}
       </span>
       {local && <ReviewLocallyDialog run={run} open={reviewing} onOpenChange={setReviewing} returnFocus={more} />}
     </div>

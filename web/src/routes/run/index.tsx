@@ -184,7 +184,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           </TabsContent>
           {visited.has('changes') && (
             <TabsContent value="changes" forceMount inert={view !== 'changes'} className={cn(panel, view !== 'changes' && 'invisible')}>
-              <ChangesView runID={run.id} />
+              <ChangesView runID={run.id} agent={agent} agentName={agentName} />
             </TabsContent>
           )}
           {view === 'browser' && (

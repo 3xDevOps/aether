@@ -2099,6 +2099,64 @@ both what it renders and the overlap set the conflict chips read.
   file and scrolls to it once the diff has it. Each row of the Session view's
   **Changed N files** navigates this way. `file` is not written to the
   address.
+- **Lines take comments.** A review comment is a note on one line or a range
+  of lines of the diff, held in this browser until it is sent to the agent.
+  Each line's number gutter is a button (`LineGutter`,
+  `components/ui/line-gutter.tsx`) that shows a `+` while the pointer is on
+  the line or the button has focus, and nothing otherwise. A click opens an
+  editor under the line (`comment-card.tsx`). **Comment** or `Mod+Enter` pins
+  it, **Cancel** closes it, and `Esc` closes one nobody typed into. A pinned
+  comment has **Edit comment** and **Delete comment**. For a range, drag
+  across the gutters, Shift-click another line while the editor is open, or
+  hold `Shift` with `↑`/`↓` and press `Enter`; a range stops at the edge of
+  its hunk. A file's gutters are one tab stop and `↑`/`↓` move between its
+  lines. On a touch screen a tap on a line shows its `+`, and a tap on another
+  line while the new editor is still empty makes the range. A new editor
+  nobody typed into closes when another opens. Commented lines keep a tinted
+  gutter and the file header counts its comments. The Files diff pane and the
+  Publish dialog pass `FilePatch` no `review`, so their lines stay plain.
+- **A review is one message.** The review bar (`review-bar.tsx`) is a row
+  under the strip that exists only while a pinned comment waits or the last
+  send has a receipt. It holds the count, **Discard** behind a confirmation,
+  and **Send to agent**, the view's filled button while it shows (**Publish…**
+  turns secondary). Sending builds one message (`reviewMessage` in
+  `review.ts`): a numbered block per comment in file order then line order,
+  each with `path:line` or `path:start-end`, the lines in a `diff` fence with
+  their `+`, `-` or space markers, and the comment. Line numbers are the new
+  file's; lines that were only removed give the old numbers and `(removed)`.
+  Text in an open editor is sent too. A sent or queued review clears its
+  comments and leaves "Sent 2 comments to <agent>." with **Open the
+  session**; the receipt reads the room message from the store, so a later
+  denial or failed delivery replaces it. A send the server refuses, cannot
+  deliver or cannot vouch for keeps every comment and shows the server's
+  error in the bar.
+- **`sendToAgent` is the send path.** `src/lib/send-to-agent.ts` takes a run,
+  the text and, when the tab holds it, the control lease. It posts a room
+  `steer_request` and returns the room message, whose `state` is the receipt,
+  so the composer's rules in [Run control](terminal.md#run-control) apply
+  unchanged. A send the server has not answered keeps its idempotency key per
+  run: the same text sent again is delivered once. The review bar passes the
+  lease and, for the owner of a run nobody controls, takes it first
+  (`useImplicitControl`); anyone else's review waits 45 seconds for the
+  controller, and the bar says so. **Send to agent** is disabled, with the
+  composer's own sentence beside it, for a finished, starting or switching
+  run, a Background run, a protected run and a member who may not message the
+  agent. The Publish dialog's PR feedback uses the same function without a
+  lease.
+- **Comments follow their lines.** Unsent comments sit in their own Zustand
+  store in `review.ts`, keyed by run, for the reason composer drafts do. They
+  survive switching views, opening another page and every diff refresh, and
+  end with the page, a deleted run or another identity. A comment stores the
+  lines it was written on - kind, text, old and new numbers - and which diff
+  that was, the current one or an interval. `locate` finds those lines in the
+  diff on screen: at the same numbers first, otherwise where the same block
+  appears exactly once. A comment therefore follows code that moved, and is
+  never pinned to one of two identical blocks by guess. A comment whose lines
+  the diff no longer shows is kept and marked **Outdated** with its quote, at
+  the top of its file, or above the files when the file left the diff; it is
+  sent with that quote and a note that the lines changed. A comment written
+  on another interval shows wherever its lines appear and is counted
+  otherwise.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there
   is no editor and no language grammar. The server sends complete run diffs
