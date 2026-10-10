@@ -92,9 +92,10 @@ const permission = {
 
 /** jsdom lays nothing out; the virtualizer learns sizes only from ResizeObserver. */
 class SizedObserver {
+  static viewport = 4000
   constructor(private readonly callback: ResizeObserverCallback) {}
   observe(target: Element) {
-    const height = (target as HTMLElement).style.overflowY ? 4000 : 24
+    const height = (target as HTMLElement).style.overflowY ? SizedObserver.viewport : 24
     const box = [{ blockSize: height, inlineSize: 736 }]
     this.callback([{ target, contentRect: { height, width: 736 }, borderBoxSize: box, contentBoxSize: box } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
   }
@@ -111,6 +112,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  SizedObserver.viewport = 4000
   vi.stubGlobal('ResizeObserver', SizedObserver)
   StubSocket.install()
   resetItems()
@@ -232,6 +234,37 @@ describe('the Enhanced session view', () => {
     expect(first.compareDocumentPosition(within(log).getByText('Rounded.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(api.runACPHistory).toHaveBeenCalledTimes(1)
     expect(api.runACPHistory).toHaveBeenCalledWith('run_1', latest.seq, 1000)
+  })
+
+  it('keeps the reading position when earlier items merge into the first loaded row', async () => {
+    SizedObserver.viewport = 240
+    const earlier = [
+      item('turn_start', 1), say(1, 'user', 'Round the totals'), tool(1, 'r1', 'read', 'Read a.js', 'completed'),
+      say(1, 'assistant', 'Reading on.'), tool(1, 'r2', 'read', 'Read b.js', 'completed'),
+    ]
+    const loaded = [
+      tool(1, 'r3', 'read', 'Read c.js', 'completed'), ...Array.from({ length: 20 }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ]
+    const page = Promise.withResolvers<SessionHistory>()
+    vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
+    open()
+    acpSocket().open({ oldest_seq: loaded[0]!.seq }, loaded)
+    const log = await screen.findByRole('log', { name: 'Session' })
+    log.scrollBy = ((to: ScrollToOptions) => {
+      log.scrollTop += to.top ?? 0
+      fireEvent.scroll(log)
+    }) as typeof log.scrollBy
+    const fromTop = () => Number.parseFloat(within(log).getByText('Reply 0').closest<HTMLElement>('[role=article]')!.parentElement!.style.top) - log.scrollTop
+    expect(await within(log).findByRole('button', { name: /Read 1 file/ })).toBeDefined()
+    fireEvent.wheel(log)
+    log.scrollTop = 24
+    fireEvent.scroll(log)
+    await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(1))
+    const before = fromTop()
+    await act(async () => page.resolve({ frames: earlier.map((it) => ({ seq: it.seq, item: it })), oldest_seq: 1 }))
+    expect(await within(log).findByRole('button', { name: /Read 2 files/ })).toBeDefined()
+    expect(fromTop()).toBe(before)
   })
 
   it('keeps a queued copy of the oldest loaded prompt as its own row', async () => {

@@ -1588,9 +1588,11 @@ they do or history ends. Inactive views and failed reads do not auto-page;
 failures keep the server's error with **Retry**. While older items remain, a
 room message or agent message from before the oldest item held stays hidden
 until the items around it load; a message the agent has not taken yet always
-shows. The list
-anchors pure prepends from the end; when history and live rows arrive
-together, it restores the visible row's key and offset instead. A closed
+shows. A page can merge into the first loaded row and change its key (tool
+calls joining a `work` row), so the list matches rows by key from the end.
+While every row below the top visible one is unchanged it anchors the page
+from the end; when history and live rows arrive together, it restores the
+first visible row that survives, by key and offset, instead. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (the run's
