@@ -23,14 +23,38 @@ const steps: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', Number.POSITIVE_INFINITY],
 ]
 
-export function timeAgo(iso: string, now = Date.now()): string {
+function relativeStep(iso: string, now: number): [number, Intl.RelativeTimeFormatUnit] | undefined {
   let delta = (new Date(iso).getTime() - now) / 1000
-  if (!Number.isFinite(delta)) return ''
+  if (!Number.isFinite(delta)) return undefined
   for (const [unit, span] of steps) {
-    if (Math.abs(delta) < span) return relative.format(Math.round(delta), unit)
+    const value = Math.round(delta)
+    // A value that rounds up to the span belongs to the next unit: 1 hour, not 60 minutes.
+    if (Math.abs(delta) < span && Math.abs(value) < span) return [value, unit]
     delta /= span
   }
-  return ''
+  return undefined
+}
+
+export function timeAgo(iso: string, now = Date.now()): string {
+  const step = relativeStep(iso, now)
+  return step ? relative.format(...step) : ''
+}
+
+const compactUnits: Partial<Record<Intl.RelativeTimeFormatUnit, string>> = {
+  minute: 'm',
+  hour: 'h',
+  day: 'd',
+  week: 'w',
+  month: 'mo',
+  year: 'y',
+}
+
+export function compactAge(iso: string, now = Date.now()): string {
+  const step = relativeStep(iso, now)
+  if (!step) return ''
+  const [value, unit] = step
+  const suffix = compactUnits[unit]
+  return suffix && value < 0 ? `${-value}${suffix}` : 'now'
 }
 
 /** Release tags are "v1.2.3" but the desktop shell records "1.2.3". */

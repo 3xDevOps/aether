@@ -244,9 +244,10 @@ keep Board and Swarms outside the overflow menu. The header and sidebar use
 `bg-chrome` with seams against the content; navigation rows have muted icons
 and the open page in `bg-selection`. **New run** at the sidebar's top is the
 only filled button in the shell.
-Run rows carry a shaped `StatusDot`, the agent's title and a monochrome
-`AgentGlyph`. A swarm's root also has a `Waypoints` graph-node button before
-the agent glyph; it opens swarm controls while the row opens the run. Use
+Run rows carry a shaped `StatusDot`, the agent's title, a compact age
+("15m") in `text-ui-sm` muted tabular figures and a monochrome `AgentGlyph`.
+A swarm's root also has a `Waypoints` graph-node button before the age; it
+opens swarm controls while the row opens the run. Use
 the same icon for swarm navigation and commands. Swarm children are
 indented under the root with a vertical tree guide. A row that does not need
 the viewer shows its title in `text-muted`, never with opacity. Group headers

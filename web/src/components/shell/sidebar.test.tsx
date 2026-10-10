@@ -105,6 +105,41 @@ describe('run rows', () => {
     expect(row.getAttribute('aria-current')).toBe('page')
   })
 
+  it('shows how long ago each row last changed and says it in full in its name', () => {
+    vi.useFakeTimers({ now: new Date('2026-08-14T10:17:00Z') })
+    try {
+      useStore.setState((s) => ({
+        runs: {
+          ...s.runs,
+          run_integrator: toRecord(run({
+            id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+            started_at: '2026-08-14T09:00:00Z',
+          })),
+        },
+        missions: { mission_1: mission() },
+      }))
+      render(<AppShell />)
+
+      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · Agent working · 15 minutes ago' })
+      const age = within(row).getByText('15m')
+      expect(age.getAttribute('dateTime')).toBe('2026-08-14T10:02:00Z')
+      // A swarm parent's age sits outside its button, so the row's tooltip carries the exact time.
+      const exact = (button: HTMLElement, at: string) => `${button.getAttribute('aria-label')} · ${new Date(at).toLocaleString()}`
+      const parent = runList().getByRole('button', { name: /^Working · coordinate · / })
+      expect(age.getAttribute('title')).toBeNull()
+      expect(row.getAttribute('title')).toBe(exact(row, '2026-08-14T10:02:00Z'))
+      expect(parent.getAttribute('title')).toBe(exact(parent, '2026-08-14T09:00:00Z'))
+
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(within(row).getByText('16m')).toBe(age)
+      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago$/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('prefixes a Needs you row from another workspace and answers it where it waits', () => {
     render(<AppShell />)
 

@@ -17,7 +17,7 @@ let frameId = 0
 
 function card(overrides: Partial<Run> = {}): BoardCard {
   const record = toRecord(run(overrides))
-  return { run: record, owner: alice, state: 'working', group: 'working', reason: 'Agent working', waitingSince: record.stateChangedAt, children: [] }
+  return { run: record, owner: alice, state: 'working', group: 'working', reason: 'Agent working', since: record.stateChangedAt, waitingSince: record.stateChangedAt, children: [] }
 }
 
 function canvas() {

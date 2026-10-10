@@ -10,7 +10,7 @@ function card(overrides: Partial<Run>): BoardCard {
   return {
     run: record,
     owner: [alice, bob].find((member) => member.id === record.member_id),
-    state: 'working', group: 'working', reason: 'Agent working', waitingSince: record.stateChangedAt, children: [],
+    state: 'working', group: 'working', reason: 'Agent working', since: record.stateChangedAt, waitingSince: record.stateChangedAt, children: [],
   }
 }
 
