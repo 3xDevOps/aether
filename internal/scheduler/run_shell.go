@@ -14,8 +14,13 @@ import (
 
 var (
 	ErrInvalidRunShellTab = errors.New("scheduler: invalid run shell tab")
-	ErrRunShellTabLimit   = errors.New("scheduler: at most 4 shell tabs per run")
+	ErrRunShellTabLimit   = errors.New("scheduler: shell limit reached")
 )
+
+// maxRunShells bounds the processes and PTY state one starter holds in a run.
+// The agent and the run's people are counted apart, so neither can use up
+// the other's.
+const maxRunShells = 4
 
 var runShellTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
@@ -53,7 +58,7 @@ func (s *Scheduler) EnsureRunShellTabReserved(ctx context.Context, run domain.Ru
 	key := ptyhost.RunShellSession(run, tab)
 	terminal := set.Terminals[tab]
 	if terminal == nil {
-		terminal, err = s.startRunTerminalLocked(ctx, run, set, live, protocol.DevTerminalStartParams{Name: tab, Cols: cols, Rows: rows})
+		terminal, err = s.startRunTerminalLocked(ctx, run, set, live, protocol.DevTerminalStartParams{Name: tab, Cols: cols, Rows: rows}, false)
 		if err != nil {
 			return nil, err
 		}

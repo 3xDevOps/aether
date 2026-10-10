@@ -173,7 +173,8 @@ func DevelopmentErrorCode(err error) int {
 	switch {
 	case errors.Is(err, ErrDiskFull), errors.Is(err, ErrMemoryPressure), errors.Is(err, ErrCapacityUnknown), errors.Is(err, ErrBrowserCPUCapacity), errors.Is(err, browser.ErrUnavailable):
 		return protocol.CodeUnavailable
-	case errors.Is(err, control.ErrStale), errors.Is(err, control.ErrOccupied), errors.Is(err, control.ErrTakeoverRequired), errors.Is(err, protocol.ErrDevScreenChanged):
+	case errors.Is(err, control.ErrStale), errors.Is(err, control.ErrOccupied), errors.Is(err, control.ErrTakeoverRequired), errors.Is(err, protocol.ErrDevScreenChanged),
+		errors.Is(err, ErrRunShellTabLimit):
 		return protocol.CodeConflict
 	case errors.Is(err, control.ErrInvalid), errors.Is(err, control.ErrInvalidSession):
 		return protocol.CodeInvalidParams

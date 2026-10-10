@@ -562,6 +562,11 @@ aether-internal terminal screenshot --help
 aether-internal artifact list
 ```
 
+At most four terminals the agent started can run at once; a fifth `terminal
+start` is refused with `-32003` until one stops. Terminals that people opened
+are counted apart. An ended terminal stays readable until a new one needs its
+place, oldest first.
+
 Retain the returned `terminal_id` and `incarnation`. Read raw/text output with
 `terminal output`, current styled cells with `terminal screen`, and an image
 with `terminal screenshot`: these are three different observations. Follow
@@ -621,7 +626,8 @@ the recorded owned companion; another `open` never silently recreates it.
 Stale identities are refused with `-32003` (exit 3): a superseded control
 generation or surface incarnation, a surface held by another controller, a
 changed page revision, node or viewport, or a terminal screen that changed
-between pages. Re-observe and retry with the current values. Malformed
+between pages. Re-observe and retry with the current values. A `terminal
+start` past the limit above has the same code. Malformed
 parameters, an unknown browser action, or an invalid surface or control
 session are refused with `-32602` (exit 2), and an unavailable or timed-out
 browser companion with `-32004` (exit 4).
