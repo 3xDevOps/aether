@@ -236,14 +236,17 @@ describe('the Enhanced session view', () => {
     expect(api.runACPHistory).toHaveBeenCalledWith('run_1', latest.seq, 1000)
   })
 
-  it('keeps the reading position when earlier items merge into the first loaded row', async () => {
+  it.each([
+    ['far above the end of the list', 30, false],
+    ['with the end of the list mounted', 12, true],
+  ])('keeps the reading position %s when earlier items merge into the first loaded row', async (_, replies, mounted) => {
     SizedObserver.viewport = 240
     const earlier = [
       item('turn_start', 1), say(1, 'user', 'Round the totals'), tool(1, 'r1', 'read', 'Read a.js', 'completed'),
       say(1, 'assistant', 'Reading on.'), tool(1, 'r2', 'read', 'Read b.js', 'completed'),
     ]
     const loaded = [
-      tool(1, 'r3', 'read', 'Read c.js', 'completed'), ...Array.from({ length: 20 }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
+      tool(1, 'r3', 'read', 'Read c.js', 'completed'), ...Array.from({ length: replies }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ]
     const page = Promise.withResolvers<SessionHistory>()
@@ -251,6 +254,7 @@ describe('the Enhanced session view', () => {
     open()
     acpSocket().open({ oldest_seq: loaded[0]!.seq }, loaded)
     const log = await screen.findByRole('log', { name: 'Session' })
+    log.scrollTo = vi.fn()
     log.scrollBy = ((to: ScrollToOptions) => {
       log.scrollTop += to.top ?? 0
       fireEvent.scroll(log)
@@ -265,6 +269,9 @@ describe('the Enhanced session view', () => {
     await act(async () => page.resolve({ frames: earlier.map((it) => ({ seq: it.seq, item: it })), oldest_seq: 1 }))
     expect(await within(log).findByRole('button', { name: /Read 2 files/ })).toBeDefined()
     expect(fromTop()).toBe(before)
+    // A row growing at a mounted end would move the reader, so there the view also holds the row it shows.
+    const held = vi.mocked(log.scrollTo).mock.lastCall?.[0] as ScrollToOptions | undefined
+    expect(held?.top === log.scrollTop).toBe(mounted)
   })
 
   it('keeps a queued copy of the oldest loaded prompt as its own row', async () => {
