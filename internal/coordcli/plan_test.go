@@ -186,7 +186,7 @@ func TestCLISkillPhaseActionBoundaries(t *testing.T) {
 			if hasIntegration != (phase == "active") {
 				t.Fatalf("integration guidance in phase %s: %s", phase, raw)
 			}
-			if phase != "active" && strings.Contains(raw, "aether-internal worker start ") {
+			if phase != "active" && phase != "completed" && strings.Contains(raw, "aether-internal worker start ") {
 				t.Fatalf("phase %s advertises new dispatch: %s", phase, raw)
 			}
 			if hasStart := strings.Contains(raw, "aether-internal mission start "); hasStart != (phase == "planning") {

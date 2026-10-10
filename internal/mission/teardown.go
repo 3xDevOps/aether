@@ -31,6 +31,15 @@ func (s *Service) stopEndedMission(ctx context.Context, mission *domain.Mission)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
+	// The integrator may have reopened the mission and dispatched since
+	// mission was read. Any attempt listed while it is still ended is a leftover.
+	current, err := s.cfg.Missions.GetMission(ctx, mission.ID)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	if !current.Phase.Terminal() {
+		return nil
+	}
 	for _, attempt := range attempts {
 		if attempt == nil || !attempt.State.HoldsConcurrency() {
 			continue

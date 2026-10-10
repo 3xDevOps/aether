@@ -26,10 +26,12 @@ type MissionIntegrator struct {
 // MissionPhase is where a mission is in its life. A mission starts in
 // MissionPhasePlanning, where the integrator may ask the accountable human
 // questions and proposes tasks; mission.start accepts the proposed tasks and
-// moves it to MissionPhaseActive. Completed and cancelled are terminal.
+// moves it to MissionPhaseActive. Cancelled is final; the integrator reopens a
+// completed mission by taking up new work.
 //
 //	planning         --mission.start------------------>  active
 //	active           --integrator success report------>  completed
+//	completed        --task.propose or worker.start--->  active
 //	planning|active  --mission.cancel----------------->  cancelled
 type MissionPhase string
 
@@ -40,7 +42,8 @@ const (
 	MissionPhaseCancelled MissionPhase = "cancelled"
 )
 
-// Terminal reports whether the mission has ended: no agent of it runs again.
+// Terminal reports whether the mission has ended. Only the integrator of a
+// completed mission can reopen it.
 func (p MissionPhase) Terminal() bool {
 	return p == MissionPhaseCompleted || p == MissionPhaseCancelled
 }

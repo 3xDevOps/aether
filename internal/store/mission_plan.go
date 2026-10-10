@@ -378,6 +378,30 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 	return m, nil
 }
 
+// reopenCompletedMission moves a completed mission back to active inside the
+// caller's transaction when run, its current integrator, takes up new work,
+// so a refused call leaves it completed.
+func reopenCompletedMission(ctx context.Context, tx *sql.Tx, m *domain.Mission, run domain.RunID) error {
+	if m.Phase != domain.MissionPhaseCompleted || run != m.CurrentIntegratorRunID {
+		return nil
+	}
+	n, err := encodeTime(missionNow(time.Time{}))
+	if err != nil {
+		return err
+	}
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseActive, n, m.ID); updateErr != nil {
+		return fmt.Errorf("store: move mission %s to active: %w", m.ID, updateErr)
+	}
+	if enqueueErr := enqueueMissionControlChange(ctx, tx, m.ID); enqueueErr != nil {
+		return fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+	}
+	if changeErr := recordMissionChange(ctx, tx, m.ID, domain.MissionPhaseChanged, run); changeErr != nil {
+		return changeErr
+	}
+	m.Phase = domain.MissionPhaseActive
+	return nil
+}
+
 // CancelMission ends a planning or active mission by moving it to cancelled;
 // the reconcile loop then stops its workers and its integrator. A key names
 // one cancellation of one mission.

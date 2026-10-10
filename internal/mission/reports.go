@@ -26,7 +26,7 @@ type EvidenceReader interface {
 // accepted, while a stale worker/coordinator fails closed through
 // resolveAssignment. The integrator's success completes its mission, which is
 // only possible once the mission is active and no approved delivery is left
-// undone: completion is terminal, so nobody could run it afterwards.
+// undone: a completed mission refuses delivery.
 func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome store.CoordOutcome) error {
 	m, attempt, err := s.resolveAssignment(ctx, run)
 	if err != nil {

@@ -163,7 +163,7 @@ func TestCompletingAMissionRetainsASubmittedWorker(t *testing.T) {
 }
 
 // TestIntegratorCannotReportSuccessWithAnApprovedUndeliveredCandidate: a
-// success report ends the mission for good, so coord.report refuses it while a
+// completed mission refuses delivery, so coord.report refuses success while a
 // candidate's approved delivery has not run and can still run. Nothing to
 // deliver, or a request a later delivery to the same ref replaced, still
 // completes the mission.
@@ -212,5 +212,66 @@ func TestIntegratorCannotReportSuccessWithAnApprovedUndeliveredCandidate(t *test
 	saveCandidate("candidate-2", now.Add(-time.Minute), protocol.DeliveryDelivered, true)
 	if err = svc.ValidateReport(ctx, m.CurrentIntegratorRunID, store.CoordOutcomeSuccess); err != nil {
 		t.Fatalf("success report after a later delivery to the same ref: %v", err)
+	}
+}
+
+// TestIntegratorReopensACompletedMissionByTakingUpNewWork: an interactive
+// integrator stays open after its success report, so a follow-up prompt has
+// to be able to dispatch again. A new task or a worker start moves the
+// mission back to active, a refused call does not, and a reconcile pass still
+// holding the completed mission must not stop the worker just dispatched.
+func TestIntegratorReopensACompletedMissionByTakingUpNewWork(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	tasks := f.activate(t, taskSpec{key: "propose-1", title: "first"})
+	pending, err := f.db.GetTask(ctx, domain.TaskID(f.propose(t, "propose-pending")))
+	if err != nil {
+		t.Fatalf("load pending task: %v", err)
+	}
+	complete := func() *domain.Mission {
+		t.Helper()
+		report := &store.CoordReport{
+			WorkspaceID: f.mission.WorkspaceID, RunID: f.mission.CurrentIntegratorRunID,
+			Outcome: store.CoordOutcomeSuccess, Summary: "done",
+		}
+		if reportErr := f.svc.ReconcileReport(ctx, f.mission.CurrentIntegratorRunID, report, protocol.EvidencePacket{}); reportErr != nil {
+			t.Fatalf("integrator success report: %v", reportErr)
+		}
+		m := f.reloadMission(t)
+		if m.Phase != domain.MissionPhaseCompleted {
+			t.Fatalf("phase after the success report = %s, want completed", m.Phase)
+		}
+		return m
+	}
+	completed := complete()
+
+	f.phaseRefusal(t, protocol.MethodTaskAccept, protocol.TaskAcceptParams{
+		TaskID: string(pending.ID), Revision: 1, ExpectedIntegratorGeneration: f.mission.IntegratorGeneration,
+		IdempotencyKey: "accept-while-completed",
+	})
+	if startErr := f.startWorker(t, pending, "dispatch-pending"); !errors.Is(startErr, store.ErrMissionNotReady) {
+		t.Fatalf("worker.start on an unaccepted task = %v, want ErrMissionNotReady", startErr)
+	}
+	if m := f.reloadMission(t); m.Phase != domain.MissionPhaseCompleted {
+		t.Fatalf("phase after refused calls = %s, want completed", m.Phase)
+	}
+
+	if startErr := f.startWorker(t, tasks[0], "dispatch-follow-up"); startErr != nil {
+		t.Fatalf("worker.start on a completed mission: %v", startErr)
+	}
+	if m := f.reloadMission(t); m.Phase != domain.MissionPhaseActive {
+		t.Fatalf("phase after worker.start = %s, want active", m.Phase)
+	}
+	if reconcileErr := f.svc.reconcileMission(ctx, completed); reconcileErr != nil {
+		t.Fatalf("reconcile with the completed mission: %v", reconcileErr)
+	}
+	if len(f.canceller.runs) != 0 {
+		t.Fatalf("stopped runs = %v, want none: the mission was reopened", f.canceller.runs)
+	}
+
+	complete()
+	f.propose(t, "propose-follow-up")
+	if m := f.reloadMission(t); m.Phase != domain.MissionPhaseActive {
+		t.Fatalf("phase after task.propose = %s, want active", m.Phase)
 	}
 }

@@ -1175,8 +1175,10 @@ accountable human who lost `run.launch` or the integrator's account share
 cannot carry the swarm forward. In `active` the integrator dispatches
 workers, accepts their work, adds or revises tasks and accepts them itself,
 and delivers the verified candidate. Its success report moves the swarm to
-`completed` and stops leftover workers; a failure report ends the integrator
-run and leaves the swarm `active` for **Replace integrator**. See
+`completed` and stops leftover workers; a failure report leaves the swarm
+`active` for **Replace integrator**. The integrator's run stays open either
+way. Prompt it again on a `completed` swarm and its first new task or worker
+moves the swarm back to `active`. See
 [coordination.md](coordination.md#mission-phases).
 
 Five control-channel methods are the human's part. Each needs the `run.launch`

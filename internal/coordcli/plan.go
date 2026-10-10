@@ -140,7 +140,11 @@ success; that completes the mission and stops leftover workers. Success is
 refused while an approved delivery request has not run; deliver it first.
 `
 
-const completedFlow = `The mission is completed. Take no further action.
+const completedFlow = `The mission is completed. For follow-up work, propose a task or start a
+worker: either makes the mission active again. Then rerun aether-internal skill.
+  aether-internal task propose --help
+  aether-internal worker start --help
+Otherwise take no further action.
 `
 
 const cancelledFlow = `The mission was cancelled and its runs are being stopped.

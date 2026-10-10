@@ -768,7 +768,7 @@ the wrong phase with code `-32002`.
 | --- | --- | --- |
 | `planning` | refused | `task propose`, `task revise`, `task abandon` allowed; `task accept` and `task accept-submission` refused |
 | `active` | allowed | all allowed |
-| `completed` | refused | all refused |
+| `completed` | allowed; reopens the swarm | `task propose` allowed, and reopens the swarm; all others refused |
 | `cancelled` | refused | all refused |
 
 Transitions are exactly:
@@ -776,10 +776,18 @@ Transitions are exactly:
 ```
 planning  --mission start------------->  active
 active    --integrator reports success-->  completed
+completed --task propose, worker start->  active
 planning  --cancel-------------------->  cancelled
 active    --cancel-------------------->  cancelled
-completed, cancelled: terminal
+cancelled: terminal
 ```
+
+An interactive integrator stays open after its success report, so a
+follow-up prompt can give it more work. Its first `task propose`, `worker
+start`, or `worker retry` in `completed` moves the swarm back to `active` in
+the same transaction as the task or the worker attempt; a refused call
+leaves the swarm `completed`. Nothing else reopens a swarm, and only its
+current integrator can. Report success again when the follow-up is done.
 
 `mission.cancel` is the human's stop button. It is not reachable from the run
 socket; the accountable human or an admin cancels with **Cancel swarm…** in the
@@ -879,7 +887,8 @@ set version are untouched.
 
 `aether-internal skill` prints only the current phase's immediate guidance:
 ask, propose, and start in `planning`; dispatch, review, deliver, and report
-in `active`; and stop in `completed` or `cancelled`. Open question count
+in `active`; propose or dispatch follow-up work in `completed`; and stop in
+`cancelled`. Open question count
 accompanies integrator phase guidance. Run `skill` again after the phase
 changes. Replace integrator is a human action, not an agent one.
 
@@ -1007,8 +1016,9 @@ they cannot accept them or dispatch workers.
 
 Which of these the server accepts depends on the swarm phase, as the table
 above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
-`accept` and `accept-submission` only in `active`; and nothing at all in
-`completed` or `cancelled`. `abandon` takes an optional
+`accept` and `accept-submission` only in `active`; in `completed` only
+`propose`, which reopens the swarm; and nothing at all in `cancelled`.
+`abandon` takes an optional
 `--revision <n>` that drops one pending revision instead of the task.
 
 `worker start` needs only `--task-id`:
@@ -1202,9 +1212,11 @@ What a report does depends on the run:
 - **Swarm integrator.** Success completes an `active` swarm and stops
   any leftover workers; it is refused in `planning`. Failure leaves the
   swarm in its phase for another attempt or **Replace integrator**.
-  An interactive integrator remains open for follow-up; a Background
-  integrator finishes. Report success only after the verified candidate is delivered,
-  or, with nothing to deliver, once the findings are gathered.
+  An interactive integrator remains open for follow-up, and
+  [reopens the swarm](#mission-phases) by proposing a task or starting a
+  worker; a Background integrator finishes. Report success only after the
+  verified candidate is delivered, or, with nothing to deliver, once the
+  findings are gathered.
 
 Reported outcomes carry `outcome_unseen: true` until the owner opens the run
 (`run.seen`) or work resumes, Close or another status change clears it. They
