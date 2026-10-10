@@ -48,6 +48,8 @@ export interface Run {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** When the run entered its status, or its reason while it needs attention; absent on older gateways and older runs. */
+  status_changed_at?: string
   profile_snapshot_id?: string
   /** Server-computed unanswered room questions; absent on older gateways. */
   unanswered_questions?: number

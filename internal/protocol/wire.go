@@ -54,6 +54,7 @@ type Run struct {
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
+	StatusChangedAt   *string `json:"status_changed_at,omitempty"`
 	ProfileSnapshotID string  `json:"profile_snapshot_id,omitempty"`
 	// Always present, including zero; web clients keep it optional for older
 	// gateways.
@@ -160,6 +161,7 @@ func RunFromDomain(r *domain.Run) Run {
 		CreatedAt:           rfc3339(r.CreatedAt),
 		StartedAt:           rfc3339Ptr(r.StartedAt),
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
+		StatusChangedAt:     rfc3339Ptr(r.StatusChangedAt),
 		ProfileSnapshotID:   string(r.ProfileSnapshotID),
 		UnansweredQuestions: r.UnansweredQuestions,
 		UnackedMessages:     r.UnackedMessages,

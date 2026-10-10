@@ -392,6 +392,7 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 	past := time.Now().UTC().Add(-time.Second)
 	e.sched.runs[run.ID].retainedUntil = &past
 	e.sched.mu.Unlock()
+	finished := e.waitStoreStatus(t, run.ID, domain.RunCompleted).StatusChangedAt
 
 	sub := e.subscribe(t)
 	e.sched.sweepRetained(ctx)
@@ -402,6 +403,9 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if row.Reason != reportedSuccessReason || !row.OutcomeUnseen || row.FinishUnopened {
 		t.Fatalf("expired row = %q, unseen %v, unopened %v; want %q, unseen, opened", row.Reason, row.OutcomeUnseen, row.FinishUnopened, reportedSuccessReason)
+	}
+	if finished == nil || !row.StatusChangedAt.Equal(*finished) {
+		t.Fatalf("expired row StatusChangedAt = %v, want the finish at %v", row.StatusChangedAt, finished)
 	}
 	if _, err := e.sched.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("Relaunch after expiry = %v, want ErrInvalidTransition", err)

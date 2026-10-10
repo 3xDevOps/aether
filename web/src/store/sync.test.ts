@@ -842,6 +842,68 @@ describe('applyEvent', () => {
     expect(store.getState().lastSeq).toBe(5)
   })
 
+  it('takes the status-change time from the wire and moves it only when the server does', async () => {
+    const store = createRootStore()
+    const finished = run({
+      status: 'completed', reason: 'agent reported success; retained container',
+      finished_at: '2026-08-14T10:00:00Z', status_changed_at: '2026-08-14T10:00:05Z',
+    })
+    const parked = run({
+      id: 'run_parked', status: 'needs-attention', reason: 'agent idle', status_changed_at: '2026-08-14T10:17:00Z',
+    })
+    const legacy = run({ id: 'run_legacy', status: 'needs-attention', reason: 'agent idle' })
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [finished, parked, legacy]) }))
+    const changed = (id: string) => {
+      const { stateChangedAt, stateChangedAtEstimated } = store.getState().runs[id]
+      return [stateChangedAt, stateChangedAtEstimated]
+    }
+    const status = (run_id: string, seq: number, time: string, payload: Event['payload']) =>
+      applyEvent(store, statusEvent({ id: `evt_${seq}`, seq, run_id, time, payload }), fakeApi())
+    expect(changed('run_1')).toEqual(['2026-08-14T10:00:05Z', false])
+    expect(changed('run_parked')).toEqual(['2026-08-14T10:17:00Z', false])
+    expect(changed('run_legacy')).toEqual([legacy.started_at, true])
+
+    // Retention expiry relabels a run that finished a week ago.
+    await status('run_1', 6, '2026-08-21T10:00:00Z', { from: 'completed', to: 'completed', reason: 'agent reported success' })
+    expect(store.getState().runs.run_1.reason).toBe('agent reported success')
+    expect(changed('run_1')).toEqual(['2026-08-14T10:00:05Z', false])
+    await status('run_1', 7, '2026-08-21T11:00:00Z', { from: 'completed', to: 'merged', reason: 'closed' })
+    expect(changed('run_1')).toEqual(['2026-08-21T11:00:00Z', false])
+    // A retention update re-reads the record, not the snapshot's time.
+    await applyEvent(
+      store,
+      statusEvent({ id: 'evt_8', seq: 8, type: 'run.retention', payload: { cleanup_pending: true } }),
+      fakeApi(),
+    )
+    expect(changed('run_1')).toEqual(['2026-08-21T11:00:00Z', false])
+
+    await status('run_parked', 9, '2026-08-14T10:30:00Z', { from: 'needs-attention', to: 'needs-attention', reason: 'agent idle' })
+    expect(changed('run_parked')).toEqual(['2026-08-14T10:17:00Z', false])
+    await status('run_parked', 10, '2026-08-14T10:31:00Z', { from: 'needs-attention', to: 'needs-attention', reason: 'blocked: need a decision' })
+    expect(changed('run_parked')).toEqual(['2026-08-14T10:31:00Z', false])
+  })
+
+  it('keeps the newer change time when an older snapshot of the same status arrives late', async () => {
+    const store = createRootStore()
+    const parked = run({ status: 'needs-attention', reason: 'agent idle', status_changed_at: '2026-08-14T10:05:00Z' })
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [parked]) }))
+    const changedAt = () => store.getState().runs.run_1.stateChangedAt
+
+    // The reason changes while a run.get sent before it is still in flight.
+    const blocked = { from: 'needs-attention', to: 'needs-attention', reason: 'blocked: need a decision' }
+    await applyEvent(store, statusEvent({ time: '2026-08-14T10:18:00.523Z', payload: blocked }), fakeApi())
+    store.getState().upsertRun(parked)
+    expect(changedAt()).toBe('2026-08-14T10:18:00.523Z')
+    expect(store.getState().runs.run_1.stateChangedAtEstimated).toBe(false)
+
+    // The same change read back in whole seconds does not move it either.
+    store.getState().upsertRun({ ...parked, reason: blocked.reason, status_changed_at: '2026-08-14T10:18:00Z' })
+    expect(changedAt()).toBe('2026-08-14T10:18:00.523Z')
+    // A later change the stream has not delivered yet does.
+    store.getState().upsertRun({ ...parked, status_changed_at: '2026-08-14T10:20:00Z' })
+    expect(changedAt()).toBe('2026-08-14T10:20:00Z')
+  })
+
   it('applies input for an unseen run and protects the cleared set from a late snapshot', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ runList: vi.fn(async () => []) }))

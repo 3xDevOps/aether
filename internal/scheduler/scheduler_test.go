@@ -460,6 +460,9 @@ func TestHappyPath(t *testing.T) {
 	if !fresh.FinishUnopened {
 		t.Fatal("an unreported clean exit must mark the finish unopened")
 	}
+	if fresh.StatusChangedAt == nil || fresh.StatusChangedAt.Before(*fresh.FinishedAt) || !fresh.StatusChangedAt.After(*fresh.StartedAt) {
+		t.Fatalf("completed StatusChangedAt = %v, want the finish at %v", fresh.StatusChangedAt, fresh.FinishedAt)
+	}
 	completedAt := *fresh.FinishedAt
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "aether: fix the auth bug" {
 		t.Fatalf("commits = %v", got)

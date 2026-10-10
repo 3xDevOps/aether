@@ -383,6 +383,13 @@ them rather than choosing an arbitrary parent; repeated attempts within one
 swarm retain that swarm. These fields come from durable relationships,
 not task text, and confer no authorization.
 
+Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
+current `status`, or its current `reason` while it is `needs-attention`. A
+same-status rewrite of the reason, such as retention expiry relabelling a
+finished run, leaves it alone. It is absent on a run whose status last
+changed before the server recorded it; a client then estimates from
+`finished_at`, `started_at` or `created_at`.
+
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of

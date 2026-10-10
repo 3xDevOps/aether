@@ -96,16 +96,17 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		`INSERT INTO runs (id, workspace_id, member_id, account_member_id, home_member_id, task, harness, mode, status,
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
-		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp,
+		                   status_changed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
-	r.ID, r.CreatedAt = domain.RunID(id), ts
+	r.ID, r.CreatedAt, r.StatusChangedAt = domain.RunID(id), ts, &ts
 	return nil
 }
 
@@ -117,13 +118,14 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		lastCommitAt          *int64
 		baseCheckedAt         *int64
 		archivedAt            *int64
+		statusChangedAt       *int64
 		oldestUnacked         *int64
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.HomeMemberID, &r.Task, &r.Harness,
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &r.ACP, &r.UnansweredQuestions,
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt, &r.ACP, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
 	}
@@ -138,13 +140,14 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		r.BaseCheckedAt = decodeTime(*baseCheckedAt)
 	}
 	r.ArchivedAt = decodeTimePtr(archivedAt)
+	r.StatusChangedAt = decodeTimePtr(statusChangedAt)
 	return &r, nil
 }
 
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.acp`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at, runs.acp`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -240,7 +243,9 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 // never writes archived_at, outcome_unseen or finish_unopened directly; a
 // changed status or needs-attention reason clears outcome_unseen and sets
 // finish_unopened to whether the new status is terminal, as UpdateRunStatus
-// does.
+// does. That same change is the only one that writes status_changed_at, from
+// the snapshot, so a caller that moves the status sets it and a rollback
+// restores it.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err
@@ -262,6 +267,10 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: update run: base checked at: %w", err)
 	}
+	statusChangedAt, err := encodeTimePtr(r.StatusChangedAt)
+	if err != nil {
+		return fmt.Errorf("store: update run: status changed at: %w", err)
+	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
@@ -270,13 +279,15 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		     harness_session_id = ?, base_commit = ?, base_branch = ?, base_source = ?,
 		     base_checked_at = ?,
 		     outcome_unseen = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
-		     finish_unopened = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END
+		     finish_unopened = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
+		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
 		 WHERE id = ?`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.Status, r.Reason,
-		r.Status, r.Reason, r.Status.Terminal(), r.ID,
+		r.Status, r.Reason, r.Status.Terminal(),
+		r.Status, r.Reason, statusChangedAt, r.ID,
 	))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -372,7 +383,8 @@ func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status doma
 // outcome, and clears it when status or an idle reason changes. Terminal
 // retention relabels keep it. finish_unopened follows the same rule, except
 // that byMember clears it and any other change into a terminal status sets
-// it. SET expressions see the row before the update.
+// it. status_changed_at moves to now on the changes that do not keep the
+// flags. SET expressions see the row before the update.
 func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, reported, byMember bool) error {
 	if !status.Valid() {
 		return fmt.Errorf("store: update run status: invalid status %q", status)
@@ -385,15 +397,21 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	if err != nil {
 		return fmt.Errorf("store: update run status: finished at: %w", err)
 	}
+	changed, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("store: update run status: %w", err)
+	}
 	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
 		`UPDATE runs SET status = ?, reason = ?,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
 		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
-		     finish_unopened = CASE WHEN ? THEN 1 WHEN ? THEN 0 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END
+		     finish_unopened = CASE WHEN ? THEN 1 WHEN ? THEN 0 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
+		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
 		 WHERE id = ?`,
 		status, reason, started, finished, reported, status, reason,
-		reported, byMember, status, reason, status.Terminal(), id))
+		reported, byMember, status, reason, status.Terminal(),
+		status, reason, changed, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run status: %w", err)
 	}

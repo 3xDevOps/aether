@@ -1561,6 +1561,12 @@ ALTER TABLE workspace_mirrors ADD COLUMN github_user_id INTEGER NOT NULL DEFAULT
 	`
 ALTER TABLE runs ADD COLUMN finish_unopened INTEGER NOT NULL DEFAULT 0;
 `,
+	// v57: status_changed_at is when a run entered its current status, or
+	// its current reason while it needs attention. Rows written before this
+	// version have none.
+	`
+ALTER TABLE runs ADD COLUMN status_changed_at INTEGER;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

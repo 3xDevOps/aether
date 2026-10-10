@@ -1354,7 +1354,8 @@ func TestTerminalPersistence(t *testing.T) {
 }
 
 // A database at v47 gains outcome_unseen and finish_unopened clear on every
-// existing run, so an upgrade marks no finished run as unopened.
+// existing run, so an upgrade marks no finished run as unopened, and no
+// status_changed_at, which nothing recorded for it.
 func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	t.Parallel()
 	const previous = 47
@@ -1397,8 +1398,8 @@ func TestRunOutcomeUnseenMigrationFromV47(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	got, err := db.GetRun(context.Background(), "r1")
-	if err != nil || got.OutcomeUnseen || got.FinishUnopened {
-		t.Fatalf("migrated run = %+v, %v; want outcome_unseen and finish_unopened clear", got, err)
+	if err != nil || got.OutcomeUnseen || got.FinishUnopened || got.StatusChangedAt != nil {
+		t.Fatalf("migrated run = %+v, %v; want outcome_unseen and finish_unopened clear, no status_changed_at", got, err)
 	}
 }
 
@@ -1465,6 +1466,73 @@ func TestRunOutcomeUnseen(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", err)
 	}
 	unseen(false, "relaunch through UpdateRun")
+}
+
+// status_changed_at starts at creation and moves to now when the status, or
+// a needs-attention reason, changes. A same-status rewrite keeps it. UpdateRun
+// writes the snapshot's value on such a change and the row's otherwise.
+func TestRunStatusChangedAt(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	row := func(what string) *domain.Run {
+		t.Helper()
+		got, err := db.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("%s: GetRun: %v", what, err)
+		}
+		return got
+	}
+	last := row("created").StatusChangedAt
+	if last == nil || !last.Equal(run.CreatedAt) || !run.StatusChangedAt.Equal(run.CreatedAt) {
+		t.Fatalf("created run status_changed_at = %v, want created_at %v", last, run.CreatedAt)
+	}
+	step := func(what string, moves bool, write func() error) {
+		t.Helper()
+		if err := write(); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		got := row(what).StatusChangedAt
+		if got == nil || got.After(*last) != moves || (!moves && !got.Equal(*last)) {
+			t.Fatalf("%s: status_changed_at = %v after %v, want moved %v", what, got, last, moves)
+		}
+		last = got
+	}
+	status := func(write func(context.Context, domain.RunID, domain.RunStatus, string, *time.Time, *time.Time) error, to domain.RunStatus, reason string) func() error {
+		return func() error { return write(ctx, run.ID, to, reason, nil, nil) }
+	}
+
+	step("turn ended", true, status(db.UpdateRunStatus, domain.RunNeedsAttention, "agent idle"))
+	step("same park rewritten", false, status(db.UpdateRunStatus, domain.RunNeedsAttention, "agent idle"))
+	step("park replaced by a blocker", true, status(db.UpdateRunStatus, domain.RunNeedsAttention, "blocked: need a decision"))
+	step("reported finish", true, status(db.FinishRunReported, domain.RunCompleted, "agent reported success; retained container"))
+	step("retention relabel", false, status(db.UpdateRunStatus, domain.RunCompleted, "agent reported success"))
+	step("member close", true, status(db.FinishRunByMember, domain.RunMerged, "closed; retained container"))
+
+	snapshot := func(to domain.RunStatus, reason string, at *time.Time) func() error {
+		return func() error {
+			r := row("snapshot")
+			r.Status, r.Reason, r.StatusChangedAt = to, reason, at
+			return db.UpdateRun(ctx, r)
+		}
+	}
+	closed := *last
+	stale := closed.Add(-time.Hour)
+	step("snapshot relabel", false, snapshot(domain.RunMerged, "retained container expired", &stale))
+	relaunched := closed.Add(time.Hour)
+	step("relaunch snapshot", true, snapshot(domain.RunRunning, "", &relaunched))
+	if !last.Equal(relaunched) {
+		t.Fatalf("relaunch snapshot status_changed_at = %v, want the snapshot's %v", last, relaunched)
+	}
+	if err := snapshot(domain.RunMerged, "retained container expired", &closed)(); err != nil {
+		t.Fatalf("rollback snapshot: %v", err)
+	}
+	if got := row("rollback snapshot").StatusChangedAt; got == nil || !got.Equal(closed) {
+		t.Fatalf("rollback snapshot status_changed_at = %v, want the restored %v", got, closed)
+	}
 }
 
 // finish_unopened is set when a run enters a terminal status nobody asked
