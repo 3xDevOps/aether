@@ -94,6 +94,8 @@ export async function testPush(client: Api): Promise<void> {
 
 const activityEvents = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const
 const activityEveryMs = 20_000
+const methodNotFound = -32601
+const denied = -32001
 
 /**
  * Opens the run a tapped notification names, which the worker posts to a
@@ -116,9 +118,9 @@ export function watchPush(store: RootStore, client: Api): () => void {
     if (refused || now - reported < activityEveryMs || !s.info || !capability(s.capabilities).hasMethod('push.active')) return
     reported = now
     // An older server has no such method and a pending member may not call
-    // it. Neither has notifications to hold, so the first refusal is the last.
+    // it. Neither has notifications to hold, so that refusal is the last.
     client.pushActive().catch((err: unknown) => {
-      refused = err instanceof ApiError
+      refused = err instanceof ApiError && (err.code === methodNotFound || err.code === denied)
     })
   }
   navigator.serviceWorker?.addEventListener('message', open)

@@ -210,18 +210,22 @@ describe('watchPush', () => {
     expect(api.pushActive).toHaveBeenCalledTimes(2)
   })
 
-  it('stops reporting to a server that refuses the report', async () => {
+  it('stops reporting to a server that has no such method, and keeps trying one that is only unreachable', async () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 })
     const store = createRootStore()
     store.setState({ info: serverInfo, capabilities: caps })
-    const api = fakeApi({ pushActive: vi.fn(async () => { throw new ApiError(404, 'push.active: method not found: push.active', -32601) }) })
-    const stop = watchPush(store, api)
+    const report = async (api: ReturnType<typeof fakeApi>) => {
+      const stop = watchPush(store, api)
+      window.dispatchEvent(new Event('keydown'))
+      await vi.advanceTimersByTimeAsync(20_000)
+      window.dispatchEvent(new Event('keydown'))
+      stop()
+      return api.pushActive
+    }
 
-    window.dispatchEvent(new Event('keydown'))
-    await vi.advanceTimersByTimeAsync(20_000)
-    window.dispatchEvent(new Event('keydown'))
-
-    expect(api.pushActive).toHaveBeenCalledTimes(1)
-    stop()
+    const older = fakeApi({ pushActive: vi.fn(async () => { throw new ApiError(404, 'push.active: method not found: push.active', -32601) }) })
+    expect(await report(older)).toHaveBeenCalledTimes(1)
+    const down = fakeApi({ pushActive: vi.fn(async () => { throw new ApiError(503, 'push.active: ssh: connection lost', -32004) }) })
+    expect(await report(down)).toHaveBeenCalledTimes(2)
   })
 })
