@@ -386,19 +386,27 @@ While a Needs you row shows its action the stack steps aside for it, so the
 title keeps its room.
 
 **Run details.** Resting a mouse on a row for 400ms opens a box docked to
-the row's right edge (`run-details.tsx`): the full title, the state's
+the row's right edge (`run-details.tsx`): the whole title, the state's
 reason, the workspace, the agent and mode, the branch, a swarm parent's
 worker counts, when the run started, when it last changed if that is later,
 its owner, and the people on it with the controller marked **Controlling**.
 A live run nobody controls says so above them and names who had control
-last, when the server knows. The box cannot scroll, so it lists seven lines
-of people at most, fewer in a window too short for them, and ends the list
-with a count of the rest ("and 16 more"); seven keeps the tallest box inside
-a 600px-tall window at every text size. Moving to another row swaps the box
-without the delay or the animation. The box takes no pointer events, closes when the row is pressed,
-scrolled or left, and gives way to the hint of a button inside the row. It
-does not open on keyboard focus, on a coarse pointer, or under 768px, where
-the sidebar is a sheet. It replaces the row's native tooltip.
+last, when the server knows. Moving to another row swaps the box without
+the delay or the animation. The box takes no pointer events, closes when the
+row is pressed, scrolled or left, and gives way to the hint of a button
+inside the row. It does not open on keyboard focus, on a coarse pointer, or
+under 768px, where the sidebar is a sheet. It replaces the row's native
+tooltip.
+
+The title is whole up to 120 characters, where the task fallback and the
+server's provisional title stop; an agent's own longer title is cut there
+(`clipLabel` in `src/lib/status.ts`). The box cannot scroll, so it lists
+seven lines of people at most and ends the list with a count of the rest
+("and 16 more"). Under a 120-character title, with every other part at its
+tallest, that fits a 600px-tall window at the Default and Large text sizes;
+Larger keeps six lines. A box still too tall for its window gives way in
+order: people, a line at a time down to a bare count ("22 people"); then
+the reason, to one line; then the title, to three.
 
 The row's accessible name starts with the state word, then the workspace
 when it is another one, the title, the reason, the age in words, whose run

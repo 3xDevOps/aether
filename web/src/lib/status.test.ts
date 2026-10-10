@@ -1,5 +1,5 @@
 import { awaitingReview } from '@/lib/needs-you'
-import { groupOf, plainReason, presentRun, runLabel } from '@/lib/status'
+import { clipLabel, groupOf, plainReason, presentRun, runLabel } from '@/lib/status'
 import { isTerminal, toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
@@ -33,6 +33,20 @@ describe('runLabel', () => {
     expect(tabbed).toBe(`${'a'.repeat(70)}\u2026`)
     const astral = runLabel({ task: `${'a'.repeat(119)}\u{1F600}${'b'.repeat(50)}` })
     expect(astral).toBe(`${'a'.repeat(119)}\u{1F600}\u2026`)
+  })
+
+  it('holds any label to the same length, and leaves one it already held alone', () => {
+    const exact = 'a'.repeat(120)
+    expect(clipLabel(exact)).toBe(exact)
+    const provisional = `${'word '.repeat(24)}\u2026`
+    expect(Array.from(provisional)).toHaveLength(121)
+    expect(clipLabel(provisional)).toBe(provisional)
+    for (const long of [`${exact}b`, Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')]) {
+      const held = clipLabel(long)
+      expect(Array.from(held).length).toBeLessThanOrEqual(121)
+      expect(held.endsWith('\u2026')).toBe(true)
+      expect(clipLabel(held)).toBe(held)
+    }
   })
 })
 

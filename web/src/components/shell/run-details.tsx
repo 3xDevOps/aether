@@ -4,7 +4,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
-import { runLabel, type PresentationState } from '@/lib/status'
+import { clipLabel, runLabel, type PresentationState } from '@/lib/status'
 import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
@@ -74,8 +74,9 @@ export function RunDetails({ label, children, ...shown }: Shown & { label: strin
 
 const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-// The box cannot scroll. Seven lines of people keep its tallest form inside a
-// 600px window, the desktop shell's minimum, at every text size.
+// The box cannot scroll, so it lists seven lines of people at most. With every other part at its
+// tallest under a 120-character title, that fits a 600px window, the desktop shell's minimum, at the
+// Default and Large text sizes. Larger text or a shorter window gives lines up in `Details`.
 const peopleLines = 7
 
 function Details({ run, state, reason, since, counts, people }: Shown) {
@@ -98,23 +99,36 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
     : people.length === 0 ? 'Nobody is on this run'
       : controller === '' ? 'Nobody is controlling'
         : undefined
-  const [lines, setLines] = useState(peopleLines)
+  // A box too tall for the window gives way one step per layout pass: a line of people at a time,
+  // down to a bare count; then the reason, to one line; then the title, to three. The list ends in
+  // a count and never in a cut.
+  const [squeeze, setSqueeze] = useState(0)
   const content = useRef<HTMLDivElement>(null)
-  // A shorter window gets fewer lines, so the list ends in a count and never in a cut.
   useLayoutEffect(() => {
     const box = content.current?.parentElement
-    if (box && lines > 2 && box.scrollHeight + box.offsetHeight - box.clientHeight > window.innerHeight - 2 * edge) {
-      setLines(lines - 1)
+    if (box && squeeze <= peopleLines && box.scrollHeight + box.offsetHeight - box.clientHeight > window.innerHeight - 2 * edge) {
+      setSqueeze(squeeze + 1)
     }
   })
+  const lines = Math.max(1, peopleLines - squeeze)
   const listed = people.length > lines ? people.slice(0, lines - 1) : people
+  const unlisted = people.length - listed.length
   return (
     <div ref={content} className="flex flex-col gap-2.5">
       <div className="flex flex-col gap-1">
-        <p className="line-clamp-3 text-ui font-medium break-words">{runLabel(run)}</p>
+        {/* An agent's own title has no length limit; every other title already stops where clipLabel does. */}
+        <p className={cn('text-ui font-medium break-words', squeeze > peopleLines && 'line-clamp-3')}>{clipLabel(runLabel(run))}</p>
         <p className="flex gap-1.5">
           <StatusDot tone={state} className="mt-0.75" />
-          <span className={cn('line-clamp-3 min-w-0 break-words', state !== 'needs-you' && 'text-muted')}>{reason}</span>
+          <span
+            className={cn(
+              'min-w-0 break-words',
+              squeeze < peopleLines ? 'line-clamp-3' : 'line-clamp-1',
+              state !== 'needs-you' && 'text-muted',
+            )}
+          >
+            {reason}
+          </span>
         </p>
       </div>
       <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 [&_dt]:text-muted">
@@ -156,7 +170,7 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
               {id === controller && <span className="shrink-0 font-medium">Controlling</span>}
             </div>
           ))}
-          {people.length > listed.length && <p className="text-muted">and {people.length - listed.length} more</p>}
+          {unlisted > 0 && <p className="text-muted">{listed.length > 0 ? `and ${unlisted} more` : `${unlisted} people`}</p>}
         </div>
       )}
     </div>

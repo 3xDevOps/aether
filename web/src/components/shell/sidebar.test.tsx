@@ -306,6 +306,29 @@ describe('run rows', () => {
       }
     })
 
+    it('shows a 120-character title whole in the details, and holds a longer one to that length', () => {
+      vi.useFakeTimers()
+      try {
+        const title = Array.from({ length: 11 }, (_, i) => `checkout${String(i).padStart(2, '0')}`).join(' ')
+        expect(title).toHaveLength(120)
+        seed({ title })
+        render(<AppShell />)
+        fireEvent.pointerMove(runList().getByRole('button', { name: /^Working · checkout00/ }))
+        act(() => {
+          vi.advanceTimersByTime(400)
+        })
+        const shown = () => details()!.querySelector('p')!
+
+        expect(shown().textContent).toBe(title)
+        expect(shown().className).not.toContain('line-clamp')
+
+        act(() => useStore.getState().applyRunTitle('run_1', `${title} and a tail no surface promised to keep`))
+        expect(shown().textContent).toBe(`${title.slice(0, title.lastIndexOf(' '))}\u2026`)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('opens no details for a finger', () => {
       atViewport(1024, { pointer: 'coarse' })
       vi.useFakeTimers()
