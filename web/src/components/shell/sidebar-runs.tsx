@@ -132,6 +132,13 @@ export function SidebarRuns() {
   )
 }
 
+// --spacing(3.25) is the centre of ListRow's status dot: px-2 plus half of size-2.5.
+const connectors = cn(
+  'relative pl-6.5',
+  'before:absolute before:top-0 before:left-[calc(--spacing(3.25)-0.5px)] before:h-[calc(50%+0.5px)] before:w-[calc(--spacing(3.25)+0.5px)] before:border-b before:border-l before:border-icon-faint',
+  'after:absolute after:top-[calc(50%+0.5px)] after:bottom-0 after:left-[calc(--spacing(3.25)-0.5px)] after:border-l after:border-icon-faint last:after:hidden',
+)
+
 function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
   return (
@@ -158,9 +165,9 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
-              <ul aria-label={`Runs in ${runLabel(tree.run)}`} className="ml-3 border-l border-seam pl-1">
+              <ul aria-label={`Runs in ${runLabel(tree.run)}`}>
                 {tree.children.map((child) => (
-                  <li key={child.run.id}>
+                  <li key={child.run.id} className={connectors}>
                     <RunRowItem tree={{ ...child, children: [] }} />
                   </li>
                 ))}
