@@ -357,7 +357,7 @@ func TestSubscribeValidatesAndBoundsDevices(t *testing.T) {
 	if err := h.svc.Subscribe(h.ctx, h.ada.ID, "http://push.example/x", phone.p256dh(), phone.authKey()); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("subscribing a plain-http endpoint = %v, want ErrInvalid", err)
 	}
-	for i := range maxDevices {
+	for i := range store.MaxPushSubscriptions {
 		if err := h.svc.Subscribe(h.ctx, h.ada.ID, fmt.Sprintf("https://push.example/%d", i), phone.p256dh(), phone.authKey()); err != nil {
 			t.Fatalf("Subscribe device %d: %v", i, err)
 		}

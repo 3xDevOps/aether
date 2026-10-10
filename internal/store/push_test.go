@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -33,6 +34,33 @@ func TestPushSubscriptions(t *testing.T) {
 	got, err := db.ListPushSubscriptions(ctx, ada.ID)
 	if err != nil || len(got) != 2 || *got[0] != *phone || *got[1] != *laptop {
 		t.Fatalf("ListPushSubscriptions = %+v, %v; want the phone then the laptop", got, err)
+	}
+
+	// The bound holds under concurrent subscribes, and never refuses a
+	// browser that is already counted.
+	results := make(chan error, 2*MaxPushSubscriptions)
+	for i := range 2 * MaxPushSubscriptions {
+		go func() {
+			results <- db.PutPushSubscription(ctx, &PushSubscription{
+				Endpoint: fmt.Sprintf("https://push.example/bob-%d", i), MemberID: bob.ID, P256DH: "key", Auth: "auth",
+			})
+		}()
+	}
+	refused := 0
+	for range 2 * MaxPushSubscriptions {
+		if putErr := <-results; errors.Is(putErr, ErrLimit) {
+			refused++
+		} else if putErr != nil {
+			t.Fatalf("PutPushSubscription: %v", putErr)
+		}
+	}
+	bobs, err := db.ListPushSubscriptions(ctx, bob.ID)
+	if err != nil || len(bobs) != MaxPushSubscriptions || refused != MaxPushSubscriptions {
+		t.Fatalf("after %d concurrent subscribes: %d stored, %d refused, %v; want %d and %d",
+			2*MaxPushSubscriptions, len(bobs), refused, err, MaxPushSubscriptions, MaxPushSubscriptions)
+	}
+	if err := db.PutPushSubscription(ctx, bobs[0]); err != nil {
+		t.Fatalf("subscribing a counted browser again at the bound: %v", err)
 	}
 
 	if err := db.DeletePushSubscription(ctx, bob.ID, phone.Endpoint); !errors.Is(err, ErrNotFound) {
