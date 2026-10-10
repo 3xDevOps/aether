@@ -148,6 +148,10 @@ describe('workspaces view', () => {
 
     fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Repository' }))
     expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id } })
+
+    useStore.getState().navigate('workspaces')
+    fireEvent.click(within(await rowMenu(workspace.name)).getByRole('menuitem', { name: 'Environment' }))
+    expect(useStore.getState().route).toEqual({ name: 'workspace', params: { workspaceId: workspace.id, section: 'environment' } })
   })
 
   it.each([bob, vera])('does not offer deletion to $role members', async (member) => {

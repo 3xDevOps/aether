@@ -4,6 +4,7 @@ import { Code } from '@/components/ui/code'
 import { EmptyState } from '@/components/ui/empty-state'
 import { SectionLabel } from '@/components/ui/section-label'
 import { ViewHeader } from '@/components/view-header'
+import { WorkspaceEnvironmentSection } from '@/components/workspace-environment'
 import { WorkspaceRepository } from '@/components/workspace-repository'
 import { api, type Api } from '@/lib/api'
 import { budgetStateLabel, money } from '@/lib/format'
@@ -63,6 +64,15 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               />
             </div>
           </section>
+          {caps.hasMethod('workspace.environment.get') && (
+            <WorkspaceEnvironmentSection
+              key={workspace.id}
+              workspaceID={workspace.id}
+              client={client}
+              editable={isAdmin && caps.hasMethod('workspace.environment.set')}
+              reveal={params.section === 'environment'}
+            />
+          )}
           <SettingsSection title="Team">
             <SettingRow
               label="Budget"

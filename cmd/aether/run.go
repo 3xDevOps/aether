@@ -84,6 +84,20 @@ func launchParams(workspace, task, agent, mode, account, cachedBase string) prot
 	}
 }
 
+// setupOutput is what the workspace setup script printed, when err is a
+// launch that script stopped.
+func setupOutput(err error) string {
+	var rpcErr *protocol.Error
+	if !errors.As(err, &rpcErr) || len(rpcErr.Data) == 0 {
+		return ""
+	}
+	var failure protocol.SetupFailure
+	if json.Unmarshal(rpcErr.Data, &failure) != nil {
+		return ""
+	}
+	return failure.SetupOutput
+}
+
 // cachedBaseLaunchError turns a structured base-capture refusal into an
 // explicit, copyable retry without changing ordinary RPC error handling.
 func cachedBaseLaunchError(err error, task, agent, mode, workspace, account string) error {

@@ -85,6 +85,8 @@ import type {
   UpdateBuildStatus,
   UpdateStatus,
   Workspace,
+  WorkspaceEnvironment,
+  WorkspaceVariable,
 } from '@/lib/types'
 import type {
   IntegrationDecideParams,
@@ -768,6 +770,15 @@ export const api = {
       workspace_id: params.workspace_id,
       steer_others: params.steer_others ?? '',
     }).then((r) => r.workspace),
+  workspaceEnvironment: (workspaceID: string) =>
+    call<WorkspaceEnvironment>('workspace.environment.get', { workspace_id: workspaceID }),
+  // Everything not named is kept; `setup_script` absent leaves the script alone.
+  workspaceEnvironmentSet: (params: {
+    workspace_id: string
+    setup_script?: string
+    set?: WorkspaceVariable[]
+    unset?: string[]
+  }) => call<WorkspaceEnvironment>('workspace.environment.set', params),
   workspaceMirrorStatus: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.status', {
       workspace_id: workspaceID,

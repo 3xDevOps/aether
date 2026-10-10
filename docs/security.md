@@ -358,6 +358,55 @@ git config --global --unset gpg.format
 `aether env reset` does none of this - it forgets the saved image and never
 touches the home.
 
+### Workspace secrets
+
+A workspace variable marked secret
+([environments.md](environments.md#secrets)) is write-only in the settings
+and an ordinary environment variable in a run. Hiding it protects the value
+from someone reading the settings, not from someone who can run code in the
+workspace.
+
+**At rest.** The values of a workspace's secrets are one JSON file,
+`<data-dir>/workspace-secrets/<workspace-id>.json`, in plain text with mode
+`0600` in a mode-`0700` directory. They are not in `aether.db`, the event
+log, a member home or a saved image. The server administrator and any
+process that can read the data directory can copy the file, and a backup of
+`workspace-secrets/` is a credential backup. Deleting the workspace deletes
+the file. Plain variables and the setup script are in `aether.db` and are
+readable by every member, so neither is a place for a credential. Marking a
+plain variable secret hides it from then on: every member could read it
+before, and earlier copies of `aether.db` still hold it, so change the value
+when you mark it.
+
+**In a run.** Each new run container, and each candidate verification
+container, is created with the workspace's variables and secrets in its
+environment. From there:
+
+- Every process in the container reads them: the agent, the setup script,
+  and any shell opened on the run. **Anyone who can launch a run in the
+  workspace, or message a run there, can make it print a secret**, and what
+  it prints lands in the run's transcript like any other output.
+- Anyone who can inspect containers on the server host reads them and the
+  setup script with `docker inspect`; Docker access there is root access
+  already.
+- A container keeps the values it was created with. Removing or replacing a
+  secret does not reach a container that already exists, so rotate a leaked
+  credential at its issuer, not only here.
+
+**What never carries a value.** `workspace.environment.get` and the result
+of `workspace.environment.set` name a secret and omit its value, for admins
+too. The timeline note for a change lists names. Refusals do not echo a
+value. A candidate verification's `environment_sha256` covers a secret by
+name, not by value.
+
+**Setup script output.** When the script fails, the launcher gets the end of
+what it printed and the server log gets the same text; the run's status
+reason, which every member reads, gets only the exit code. In that text
+every exact occurrence of a secret's value is replaced with `***`. A value
+the script transforms first - encodes or splits -
+is not recognized and is not masked, and nothing masks what the agent
+prints later.
+
 ## Remote development and browser isolation
 
 Development terminals, the shared app browser and transient captures require

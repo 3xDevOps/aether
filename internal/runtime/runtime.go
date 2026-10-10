@@ -116,6 +116,9 @@ type Spec struct {
 	// metadata - like Env it is visible to anyone who can inspect the
 	// container, so it must not embed secrets.
 	SetupScript string
+	// SecretEnv names the Env entries whose values are masked wherever the
+	// setup script's output is logged or returned.
+	SecretEnv []string
 	// CPULimit caps CPU usage in (possibly fractional) cores; 0 means
 	// unlimited.
 	CPULimit float64
@@ -240,6 +243,17 @@ type ExecExitError struct {
 
 func (e *ExecExitError) Error() string {
 	return fmt.Sprintf("runtime: exec exited with status %d", e.Code)
+}
+
+// SetupError reports a setup script that exited nonzero. Output is the end
+// of what it printed, with Spec.SecretEnv values masked.
+type SetupError struct {
+	ExitCode int
+	Output   string
+}
+
+func (e *SetupError) Error() string {
+	return fmt.Sprintf("runtime: setup script exited %d: %s", e.ExitCode, strings.TrimSpace(e.Output))
 }
 
 // ContextWriter is an input writer that bounds and interrupts one physical

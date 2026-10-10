@@ -478,6 +478,16 @@ describe('workspace switcher', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'All workspaces' }))
     expect(useStore.getState().route.name).toBe('overview')
   })
+
+  it('opens the active workspace at its Environment section', async () => {
+    render(<AppShell />)
+    fireEvent.keyDown(nav().getByRole('button', { name: /^Workspace:/ }), { key: 'Enter' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Environment' }))
+    expect(useStore.getState().route).toEqual({
+      name: 'workspace',
+      params: { workspaceId: useStore.getState().activeWorkspace, section: 'environment' },
+    })
+  })
 })
 
 describe('sidebar visibility', () => {

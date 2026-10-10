@@ -5,6 +5,7 @@ import { AccountOptions, WorkspaceLine } from '@/components/launch/launch-option
 import { ModeControl } from '@/components/launch/mode-control'
 import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
 import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -70,6 +71,7 @@ export function LaunchDialog() {
   const integratorRefused = { ...refusals(agent, harness), headless: backgroundIntegrator }
   const integratorMode = integratorRefused[chosenIntegratorMode] ? 'tui' : chosenIntegratorMode
   const [error, setError] = useState<string | null>(null)
+  const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
 
   const errorCallout = useRef<HTMLDivElement>(null)
@@ -184,11 +186,13 @@ export function LaunchDialog() {
   const submit = async () => {
     setLaunching(true)
     setError(null)
+    setSetup(null)
     try {
       await (kind === 'run' ? launchRun() : createSwarm())
     } catch (err) {
       setLaunching(false)
       setError(message(err))
+      setSetup(setupOutput(err))
     }
   }
 
@@ -277,7 +281,7 @@ export function LaunchDialog() {
             </TabsContent>
             {notes}
             {options}
-            {error && <Callout ref={errorCallout} tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}</Callout>}
+            {error && <Callout ref={errorCallout} tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}{setup && <SetupOutput output={setup} />}</Callout>}
           </form>
         </Tabs>
         <DialogFooter className="sm:items-center">
