@@ -8,10 +8,10 @@ export const dynamic = 'force-static'
 
 /**
  * What both mobile browsers read to keep the dashboard on a home screen. Why
- * these fields and why no service worker ships is in
- * `docs/dashboard-frontend.md`; the constraint here is that the colours come
- * from `theme-color.ts` rather than being written twice, because the layout's
- * viewport export and the icon script hold the other copies.
+ * these fields is in `docs/dashboard-frontend.md`; the constraint here is
+ * that the colours come from `theme-color.ts` rather than being written
+ * twice, because the layout's viewport export and the icon script hold the
+ * other copies.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {

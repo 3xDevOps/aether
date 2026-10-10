@@ -279,7 +279,8 @@ aether-server <version> serving SSH on :2222 and the dashboard on https://my-ser
 
 On Android, the [app on every release](install.md#android-app) wraps this same
 URL full screen. It is a WebView and nothing more, so everything below holds
-for it unchanged.
+for it unchanged, except [notifications](#notifications), which a WebView
+cannot receive.
 
 `web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
 setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
@@ -305,10 +306,82 @@ anyway. The server-hosted dashboard has no token to lose: every request is
 identified by tailnet WhoIs, so the installed app is signed in whenever the
 phone is on the tailnet.
 
-There is no offline mode and no service worker. The dashboard is served out of
-the server binary and has to change the moment the binary does, so nothing is
-cached; away from the tailnet the installed app shows the same connection
-error the browser does.
+There is no offline mode. The dashboard is served out of the server binary and
+has to change the moment the binary does, so nothing is cached; away from the
+tailnet the installed app shows the same connection error the browser does.
+The one service worker the dashboard ships, `/sw.js`, shows
+[notifications](#notifications) and answers no requests.
+
+### Notifications
+
+The server-hosted dashboard can notify a device when one of your runs needs
+you. On that device, open **Settings** and turn on **Notify this device when a
+run needs me**. The browser asks for permission once. Each browser subscribes
+on its own, and turning the switch off unsubscribes that one. **Send test
+notification** sends one through the whole path and shows the push service's
+own error when it fails.
+
+A notification goes to a run's owner when the run starts needing them:
+
+| The run | The notification says |
+| --- | --- |
+| asks for a permission | `Permission: <action>`, or `Permission requested` |
+| asks a question | `Question from the agent` |
+| ends its turn and waits | `Waiting for your reply`, `Agent idle`, or `No activity` after a stall |
+| reports that it is blocked | `Blocked: <summary>` |
+| loses its Enhanced session | `Enhanced unavailable: <error>` |
+| reports a result | `Agent reported success, review the result`, `Finished, review the result` or `Failed, review the result` |
+
+These are the owner's **Needs you** reasons that depend on the run alone
+([dashboard-frontend.md](dashboard-frontend.md#run-state)), with the same
+exceptions: a Background run does not notify for a question or an idle turn,
+and a swarm worker, whose integrator answers for it, notifies only when
+blocked. A teammate's question, a queued message and the swarm rows do not
+notify.
+
+- The title is the run's title, or the first line of its task. Tapping the
+  notification opens that run, in a dashboard window that is already open
+  when there is one.
+- One notification per run: a newer one replaces the older.
+- A standing state is announced once, and nothing is sent for one that has
+  cleared. A notification already on a device stays until it is dismissed.
+- While you are using a dashboard on any device, notifications wait. Moving
+  the pointer, typing and scrolling count as using it. A notification is sent
+  once you have left every dashboard alone for a minute, if the run still
+  needs you.
+- `aether handoff` moves a run's notifications to its new owner.
+
+It needs:
+
+- **The dashboard your server hosts.** `aether gui` serves from a loopback
+  port behind a per-process token, where a notification could not open the run
+  later, so its Settings say so instead of offering the switch. The
+  [desktop app](install.md#desktop-app) shows its own notification while it is
+  open.
+- **A browser with Web Push.** Chrome, Edge and Firefox on a computer or on
+  Android, and Safari on a Mac. On an iPhone or iPad it works only in the
+  dashboard [added to the home screen](#add-it-to-your-home-screen), on iOS
+  16.4 or later; in a Safari tab the switch says so. The
+  [Android app](install.md#android-app) cannot receive notifications at all:
+  on an Android phone, install the dashboard from Chrome as above and turn the
+  switch on there.
+- **Outbound HTTPS from the server to the browser vendors' push services**, on
+  port 443: `fcm.googleapis.com` for Chrome and most Chromium browsers,
+  `updates.push.services.mozilla.com` for Firefox, `web.push.apple.com` for
+  Safari, and `*.notify.windows.com` for Edge. The server connects directly,
+  not through an `HTTPS_PROXY`, and only to public addresses: an endpoint on
+  the server's own host, LAN or tailnet is refused.
+
+The server signs every message with a key it creates on first start,
+`<data-dir>/push/vapid_key.pem`, mode `0600`. Each subscription is bound to
+that key. If the file is lost, turn the switch off and on again on each
+device.
+
+A notification the push service does not take is logged as `push:
+notification not delivered` with the service's answer, and never delays the
+run. A device the push service reports gone is forgotten, and its switch reads
+off the next time Settings opens. What the push service receives is in
+[privacy.md](privacy.md#push-notifications).
 
 ### What it needs
 

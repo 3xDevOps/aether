@@ -7,6 +7,7 @@ import { OnboardingSection } from '@/routes/onboarding/settings-section'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { GitHubSection } from '@/routes/settings/github'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { NotificationsSection } from '@/routes/settings/notifications'
 import { ServerSection } from '@/routes/settings/server'
 import { ThisComputerSection } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
@@ -80,6 +81,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
           <AppearanceSection />
+          <NotificationsSection client={client} />
           <GitHubSection client={client} />
           <ThisComputerSection client={client} />
           <ServerSection />
