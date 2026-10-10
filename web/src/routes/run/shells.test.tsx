@@ -44,7 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function attach(write = false, replay = '', terminal = process) {
+async function attach(write = false, replay = '', terminal = process, position: object = {}) {
   await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(0))
   const socket = StubSocket.last()
   act(() => {
@@ -52,7 +52,7 @@ async function attach(write = false, replay = '', terminal = process) {
     socket.onmessage?.({ data: JSON.stringify({
       ok: true, cols: 73, rows: 19, replay: new TextEncoder().encode(replay).length,
       terminal_id: terminal.terminal_id, incarnation: terminal.incarnation,
-      server_owned_responder: true, has_control: write, control_generation: 7,
+      server_owned_responder: true, has_control: write, control_generation: 7, ...position,
     }) })
     if (replay) socket.onmessage?.({ data: new TextEncoder().encode(replay).buffer })
   })
@@ -123,6 +123,56 @@ it('takes control on the first key in a shell nobody drives, then sends what was
   expect(StubSocket.opened).toHaveLength(2)
   fireEvent.click(await screen.findByRole('button', { name: 'Release' }))
   await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith(expect.objectContaining({ surface, control_generation: 7 })))
+  view.unmount()
+})
+
+it('keeps what is typed while the control change redraws the shell', async () => {
+  const view = render(<Shells />)
+  await attach(false, '', process, { resume_id: 'epoch-1', cursor: 0 })
+  await type(view, 'a')
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  const socket = StubSocket.last()
+  const input = view.container.querySelector('.xterm-helper-textarea')!
+  act(() => {
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({
+      ok: true, cols: 73, rows: 19, replay: 3, resumed: true, resume_id: 'epoch-1', cursor: 3,
+      terminal_id: process.terminal_id, incarnation: process.incarnation,
+      server_owned_responder: true, has_control: true, control_generation: 7,
+    }) })
+  })
+  expect(socket.frames()[0]).toMatchObject({ write: true, resume: true, resume_id: 'epoch-1' })
+  fireEvent.paste(input, { clipboardData: { getData: () => 'bc' } })
+  act(() => socket.onmessage?.({ data: new TextEncoder().encode('new').buffer }))
+  await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(2))
+  fireEvent.paste(input, { clipboardData: { getData: () => 'd' } })
+  await waitFor(() => expect(vi.mocked(api.devTerminalInput).mock.calls.map(([params]) => params.text).join('')).toBe('abcd'))
+  expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+  view.unmount()
+})
+
+it('keeps the terminal on screen and typing when the server redraws it in full instead', async () => {
+  const view = render(<Shells />)
+  await attach()
+  await type(view, 'a')
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  const socket = StubSocket.last()
+  const input = view.container.querySelector('.xterm-helper-textarea')!
+  act(() => {
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({
+      ok: true, cols: 73, rows: 19, replay: 6, terminal_id: process.terminal_id, incarnation: process.incarnation,
+      server_owned_responder: true, has_control: true, control_generation: 7,
+    }) })
+  })
+  await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(1))
+  expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
+  fireEvent.paste(input, { clipboardData: { getData: () => 'bc' } })
+  await act(async () => { await Promise.resolve() })
+  expect(api.devTerminalInput).toHaveBeenCalledTimes(1)
+  act(() => socket.onmessage?.({ data: new TextEncoder().encode('screen').buffer }))
+  await waitFor(() => expect(vi.mocked(api.devTerminalInput).mock.calls.map(([params]) => params.text).join('')).toBe('abc'))
+  expect(screen.queryByRole('status', { name: 'Restoring terminal history' })).toBeNull()
   view.unmount()
 })
 

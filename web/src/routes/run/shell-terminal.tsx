@@ -114,7 +114,13 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
   const writeRequested = shells.writeIntent
   const controlHeld = useRef<Record<string, boolean>>({})
   const sessions = shells.controlSessions
+  // What was typed while it could not be sent: before the lease is granted,
+  // and while the redraw that follows a control change mutes input.
   const pendingInput = useRef('')
+  const sendPending = useRef(() => {})
+  // The shell whose lease typing asked for. Until it settles its redraw stays
+  // on screen: hiding it would blur the terminal under the person's hands.
+  const [typedFor, setTypedFor] = useState<string | null>(null)
   const [controlState, setControlState] = useState<{ key: string; held: boolean } | null>(null)
   const activeControlKey = activeTab && incarnation ? `${runID}:${activeTab}:${incarnation}` : ''
   const activeHasControl = controlState?.key === activeControlKey && controlState.held
@@ -176,6 +182,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
           setReplaying(full)
           return
         }
+        sendPending.current()
         if (!full) {
           setReplaying(false)
           return
@@ -212,6 +219,12 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       },
     ),
   )
+  sendPending.current = () => {
+    if (!pendingInput.current || controlHeld.current[activeControlKey] !== true || gate.current.muted()) return
+    const typed = pendingInput.current
+    pendingInput.current = ''
+    sendText(typed)
+  }
   // A lease this page's own session still holds is reclaimed by attaching.
   // One a closed page of the same member left behind is theirs to take back.
   const ownSession = owner?.control_session_id === sessions.current[activeControlKey]
@@ -241,12 +254,14 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
         pendingInput.current += data
         if (writeRequested.current[key]) return
         writeRequested.current[key] = true
-        shells.focusShell.current = true
+        setTypedFor(key)
         takeoverGeneration.current = abandoned ? owner.control_generation : 0
         getShellSocket(runID, activeTab)?.reopen({ resume: true, takeover: abandoned })
         return
       }
-      if (!gate.current.muted()) sendText(data)
+      if (gate.current.muted() && terminalReport.test(data)) return
+      pendingInput.current += data
+      sendPending.current()
     },
     onBinary: (data) => {
       if (gate.current.muted()) return
@@ -400,7 +415,10 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       },
       onState: (connection: ConnectionState) => {
         // Keys typed before a dropped connection must not arrive after it.
-        if (connection === 'reconnecting' || connection === 'offline') pendingInput.current = ''
+        if (connection === 'reconnecting' || connection === 'offline') {
+          pendingInput.current = ''
+          setTypedFor(null)
+        }
         if (isCurrent()) {
           if (connection !== 'live') setAttachedIdentity(null)
           if (connection !== 'live') {
@@ -419,16 +437,14 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
         sessions.current[controlKey] = metadata.control_session_id
         if (!isCurrent()) return
         setControlState({ key: controlKey, held: metadata.has_control })
-        if (!metadata.has_control) return
-        const typed = pendingInput.current
-        pendingInput.current = ''
-        sendText(typed)
+        sendPending.current()
       },
       onControlLost: () => {
         writeGeneration.current++
         writeRequested.current[controlKey] = false
         controlHeld.current[controlKey] = false
         pendingInput.current = ''
+        setTypedFor(null)
         if (!isCurrent()) return
         setControlState({ key: controlKey, held: false })
         readOwner().catch(reportError)
@@ -493,7 +509,6 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
     refresh,
     reportError,
     runID,
-    sendText,
     sessions,
     setShellRefused,
     terminal,
@@ -541,6 +556,10 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
     shells.focusShell.current = false
     focusTerminal()
   }, [shells.focusShell, terminal, attached, replaying, focusTerminal])
+  const typedHere = typedFor !== null && typedFor === activeControlKey
+  useEffect(() => {
+    if (typedHere && activeHasControl && attached && !replaying) setTypedFor(null)
+  }, [typedHere, activeHasControl, attached, replaying])
   const screenshot = async () => {
     if (!activeTab || !incarnation) return
     setBusy(true)
@@ -609,7 +628,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
           </p>
         )}
         writable={processRunning && (activeHasControl || typeToControl)}
-        replaying={processRunning && replaying}
+        replaying={processRunning && replaying && !typedHere}
         className="min-h-0 flex-1 overflow-auto"
         imageTarget={runID}
         imageTargetKey={activeControlKey}
