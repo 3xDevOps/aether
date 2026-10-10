@@ -48,6 +48,8 @@ type Fixture struct {
 		Updates []json.RawMessage `json:"updates"`
 		Result  json.RawMessage   `json:"result"`
 	} `json:"load"`
+	// List holds successive session/list results; the last one repeats.
+	List []json.RawMessage `json:"list"`
 }
 
 func Load(name string) (Fixture, error) {
@@ -78,6 +80,7 @@ type Agent struct {
 	mu      sync.Mutex
 	session string
 	methods []string
+	listed  int
 	// turn ends at a session/cancel that follows the latest session/prompt
 	// on the wire.
 	turn       context.Context
@@ -198,6 +201,15 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		return map[string]any{"outcome": "injected"}, nil
 	case acp.AgentMethodSessionCancel:
 		return nil, nil
+	case acp.AgentMethodSessionList:
+		if len(a.fix.List) == 0 {
+			break
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		result := a.fix.List[min(a.listed, len(a.fix.List)-1)]
+		a.listed++
+		return result, nil
 	case acp.AgentMethodSessionSetMode:
 		return map[string]any{}, nil
 	case acp.AgentMethodSessionSetConfigOption:

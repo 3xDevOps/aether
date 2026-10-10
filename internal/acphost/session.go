@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,10 @@ var ErrClosed = errors.New("acphost: agent connection closed")
 var ErrUnsupportedImage = errors.New("acphost: agent does not support image prompts")
 
 const subscriberBuffer = 1024
+
+// titleLookupPages bounds how far one title lookup follows session/list: every
+// run of a member keeps its sessions under the same working directory.
+const titleLookupPages = 10
 
 // Config describes the session to host.
 type Config struct {
@@ -57,6 +62,11 @@ type Config struct {
 	// it thinks, at most once a second.
 	OnActivity func(kind, target string)
 	OnTitle    func(title string)
+	// TitleLookup, when positive, asks session/list for the session's title
+	// that long after a turn starts while the agent has reported none. Claude
+	// Code titles a session at its first prompt, but its adapter sends
+	// session_info_update only when the turn ends.
+	TitleLookup time.Duration
 }
 
 // Receipt says what happened to a prompt.
@@ -158,6 +168,8 @@ type Session struct {
 	actAt      time.Time
 	actNext    *[2]string
 	actTimer   *time.Timer
+	// prompted is the latest prompt's text with whitespace collapsed.
+	prompted string
 }
 
 // Start initializes the agent over r and w, restores or creates its session
@@ -289,9 +301,10 @@ func (s *Session) Close() error {
 // returns once the agent accepted it; a refusal is an error. While a turn
 // runs, steer asks the agent to add the input to that turn if it advertises
 // steering; otherwise the input waits for the turn to end. delivered, if set,
-// is called once for a queued prompt: with nil when the agent accepts it, or
-// with why it was never delivered.
-func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool, delivered func(error)) (Receipt, error) {
+// is called once for a prompt that started, awaited or joined a turn, in the
+// order the agent took its prompts: with nil when the agent accepted it, or
+// with why it never did. queued says the prompt waited for a turn to end.
+func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer bool, delivered func(queued bool, err error)) (Receipt, error) {
 	if len(blocks) == 0 {
 		return Receipt{}, errors.New("acphost: empty prompt")
 	}
@@ -304,15 +317,16 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks, nil)
+		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
 	if !steer || !s.conn.Info().Steering {
-		s.queue = append(s.queue, queuedPrompt{blocks, delivered})
+		s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeQueued}, nil
 	}
+	starting := s.starting
 	s.mu.Unlock()
 
 	outcome, err := s.conn.steer(ctx, blocks)
@@ -330,7 +344,15 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	s.mu.Lock()
 	switch outcome {
 	case OutcomeInjected:
+		// The agent adds input only to a turn whose prompt it accepted. A
+		// later turn may have started while the steer was answered.
+		if starting != nil && s.starting == starting {
+			s.acceptedLocked()
+		}
 		s.userMessageLocked(blocks)
+		if delivered != nil {
+			s.callback(func() { delivered(false, nil) })
+		}
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeInjected}, nil
 	case "startedNewTurn":
@@ -354,13 +376,20 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		return Receipt{}, ErrClosed
 	}
 	if !s.turnActive {
-		ack := s.startTurnLocked(blocks, nil)
+		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
 	}
-	s.queue = append(s.queue, queuedPrompt{blocks, delivered})
+	s.queue = append(s.queue, queuedPrompt{blocks, report(delivered, true)})
 	s.mu.Unlock()
 	return Receipt{Outcome: OutcomeQueued}, nil
+}
+
+func report(delivered func(queued bool, err error), queued bool) func(error) {
+	if delivered == nil {
+		return nil
+	}
+	return func(err error) { delivered(queued, err) }
 }
 
 // awaitAccept reports a turn's prompt sent once the agent accepted it, or
@@ -426,8 +455,49 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 			s.cfg.OnState(true, "prompt", nil)
 		}
 	})
+	if s.cfg.TitleLookup > 0 && s.proj.title == "" && s.conn.Info().List {
+		time.AfterFunc(s.cfg.TitleLookup, s.lookupTitle)
+	}
 	go s.runTurn(blocks, ack, s.conn.w.sendingPrompt())
 	return ack
+}
+
+// lookupTitle adopts the title session/list reports for this session. An
+// agent lists a session it has not titled under its latest prompt, which is
+// not a title.
+func (s *Session) lookupTitle() {
+	s.mu.Lock()
+	prompted := s.prompted
+	skip := s.closed || s.proj.title != "" || prompted == ""
+	s.mu.Unlock()
+	if skip {
+		return
+	}
+	var cursor string
+	for range titleLookupPages {
+		sessions, next, err := s.conn.listSessions(s.ctx, s.cfg.Cwd, cursor)
+		if err != nil {
+			if s.ctx.Err() == nil {
+				s.logger.Warn("acphost: look up the session title", "err", err)
+			}
+			return
+		}
+		i := slices.IndexFunc(sessions, func(listed SessionSummary) bool { return listed.SessionID == s.conn.SessionID() })
+		if i >= 0 {
+			title := strings.Join(strings.Fields(sessions[i].Title), " ")
+			s.mu.Lock()
+			if s.proj.title == "" && !strings.HasPrefix(prompted, strings.TrimSpace(strings.TrimSuffix(title, "…"))) {
+				s.proj.title = title
+				s.emitLocked(Item{Kind: KindSessionInfo, Title: title})
+			}
+			s.mu.Unlock()
+			return
+		}
+		if next == "" {
+			return
+		}
+		cursor = next
+	}
 }
 
 // acceptedLocked resolves the starting turn's prompt as accepted.
@@ -449,6 +519,7 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 			attachments = append(attachments, contentRef(b))
 		}
 	}
+	s.prompted = strings.Join(strings.Fields(text.String()), " ")
 	body, cut := cutTail(text.String(), maxTextSegment)
 	s.emitLocked(Item{Kind: KindMessage, Truncated: cut, Message: &Message{
 		Role: "user", MessageID: rand.Text(), Text: body, Attachments: attachments, Complete: true,

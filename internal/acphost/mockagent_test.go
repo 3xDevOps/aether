@@ -51,6 +51,7 @@ type mockAgent struct {
 	// Overrides, set before the session starts.
 	onPrompt func(m *mockAgent, call promptCall) (any, *acp.RequestError)
 	onSteer  func(m *mockAgent, params json.RawMessage) (any, *acp.RequestError)
+	onList   func(cursor string) any
 	resume   func() *acp.RequestError
 	load     func() *acp.RequestError
 	newErr   *acp.RequestError
@@ -164,6 +165,13 @@ func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMe
 	case acp.AgentMethodSessionSetMode:
 		return map[string]any{}, nil
 	case acp.AgentMethodSessionList:
+		if m.onList != nil {
+			var p struct {
+				Cursor string `json:"cursor"`
+			}
+			_ = json.Unmarshal(params, &p)
+			return m.onList(p.Cursor), nil
+		}
 		return map[string]any{"sessions": []any{map[string]any{"sessionId": m.sessionID(), "cwd": "/workspace", "title": "Earlier"}}}, nil
 	}
 	return nil, acp.NewMethodNotFound(method)

@@ -1331,8 +1331,10 @@ deadline.
 ### Header
 
 The header (`header.tsx`) is a 56px `PaneHeader size="run"`: the title (the
-agent's last terminal or Enhanced session title, else the task's first line
-cut at 120 characters, with a lock for a protected run), then a state line with the
+agent's last terminal or Enhanced session title,
+[until then](enhanced-runs.md#status) a taskless Enhanced run's first message
+line, else the task's first line cut at 120 characters, with a lock for a
+protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
 the branch (click copies it) and the owner. Container queries on the state

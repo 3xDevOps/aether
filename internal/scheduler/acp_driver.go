@@ -41,6 +41,10 @@ const (
 	oneShotResume   = "Aether's server restarted and interrupted your previous turn. Continue the task where you stopped."
 )
 
+// Claude Code stored its title within a second of the prompt in every
+// traced session.
+var acpTitleLookupDelay = 3 * time.Second
+
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
 var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
 
@@ -166,7 +170,15 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		block.Image.Uri = &uri
 		blocks = append(blocks, block)
 	}
-	receipt, err := sess.Prompt(ctx, blocks, steer, delivered)
+	untitled := run.Task == "" && run.Title == ""
+	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
+		if untitled && taken == nil {
+			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
+		}
+		if queued && delivered != nil {
+			delivered(taken)
+		}
+	})
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}
@@ -312,6 +324,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp"}, Env: []acp.EnvVariable{},
 		}}}
 	}
+	var titleLookup time.Duration
+	if profile.ACPTitleLookup {
+		titleLookup = acpTitleLookupDelay
+	}
 	runID := entry.runID
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
@@ -321,6 +337,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		RequireRestore: how == openSwitch,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
+		TitleLookup:    titleLookup,
 		OnState: func(working bool, reason string, failed error) {
 			if oneShot && !working {
 				if reason != "" {

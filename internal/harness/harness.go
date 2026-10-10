@@ -241,6 +241,10 @@ type Profile struct {
 	// ACPMode is the session mode a new enhanced session starts in: the
 	// agent's mode that acts without asking. Empty keeps the agent's default.
 	ACPMode string
+	// ACPTitleLookup marks an agent that titles a session at its first
+	// prompt, sends session_info_update only when that turn ends, and reports
+	// the title in session/list meanwhile.
+	ACPTitleLookup bool
 	// ACPDefault makes an enhanced run the agent's default once its ACP
 	// server is installed. Claude stays on its terminal by default: its
 	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
@@ -359,6 +363,7 @@ var profiles = map[string]Profile{
 		ACPArgs:          []string{claudeACP.Binary},
 		ACPInstall:       claudeACP,
 		ACPMode:          "bypassPermissions",
+		ACPTitleLookup:   true,
 		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		ACPSessionShared: true,
 		SwitchVerified:   true,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -13,8 +14,12 @@ import (
 
 var runTitleDebounceInterval = 5 * time.Second
 
+const provisionalTitleRunes = 120
+
 type pendingRunTitle struct {
-	title       string
+	title string
+	// provisional titles only a run that has no title.
+	provisional bool
 	workspaceID domain.WorkspaceID
 	timer       *time.Timer
 }
@@ -38,13 +43,38 @@ func (s *Scheduler) setRunTitle(runID domain.RunID, title string) {
 		s.titleMu.Unlock()
 		return
 	}
-	pending.title = title
+	pending.title, pending.provisional = title, false
 	if pending.timer == nil {
 		pending.timer = time.AfterFunc(runTitleDebounceInterval, func() {
 			s.flushRunTitle(runID)
 		})
 	}
 	s.titleMu.Unlock()
+}
+
+// setProvisionalRunTitle titles a run that has no title with the first line
+// of a prompt, without the debounce. A title waiting out the debounce wins.
+func (s *Scheduler) setProvisionalRunTitle(runID domain.RunID, prompt string) {
+	var line string
+	for l := range strings.Lines(prompt) {
+		if line = strings.TrimSpace(l); line != "" {
+			break
+		}
+	}
+	if line == "" {
+		return
+	}
+	s.titleMu.Lock()
+	if s.titleUpdates[runID] != nil {
+		s.titleMu.Unlock()
+		return
+	}
+	if s.titleUpdates == nil {
+		s.titleUpdates = make(map[domain.RunID]*pendingRunTitle)
+	}
+	s.titleUpdates[runID] = &pendingRunTitle{title: truncateRunes(line, provisionalTitleRunes), provisional: true}
+	s.titleMu.Unlock()
+	s.flushRunTitle(runID)
 }
 
 func (s *Scheduler) flushRunTitle(runID domain.RunID) {
@@ -62,7 +92,7 @@ func (s *Scheduler) flushRunTitleWithRetry(runID domain.RunID, retry bool) {
 		pending.timer.Stop()
 		pending.timer = nil
 	}
-	title := pending.title
+	title, provisional := pending.title, pending.provisional
 	workspaceID := pending.workspaceID
 	s.titleMu.Unlock()
 
@@ -75,7 +105,7 @@ func (s *Scheduler) flushRunTitleWithRetry(runID domain.RunID, retry bool) {
 			return
 		}
 		workspaceID = run.WorkspaceID
-		changed = run.Title != title
+		changed = run.Title != title && (!provisional || run.Title == "")
 		s.titleMu.Lock()
 		if entry := s.titleUpdates[runID]; entry != nil && entry.workspaceID == "" {
 			entry.workspaceID = workspaceID
