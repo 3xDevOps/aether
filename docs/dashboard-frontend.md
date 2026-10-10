@@ -1728,8 +1728,12 @@ ended in front of this viewer, so a closed one never returns.
 `store/terminal.ts`) and its own control lease, independent of the agent's and
 the Browser's. A shell that `open` started attaches asking for the lease. In
 any other shell nobody else controls, the first `onData` buffers what is typed
-and reopens the attach with `write` and `resume`; `onControl` sends the buffer
-under the granted fence, and a refusal or a dropped connection discards it.
+and reopens the attach with `write` and `resume`. `sendPending` sends the
+buffer under the granted fence once the lease is held and the replay gate is
+no longer muted, so keys typed while the shell redraws arrive in order; a
+refusal or a dropped connection discards them. If the server answers with a
+full replay instead of resuming, that redraw stays on screen rather than
+behind "Restoring terminal history", which would blur the terminal mid-word.
 The toolbar reads "You control" with a ghost **Release**, or "<name> controls"
 / "The agent controls" with **Take control**, which confirms; with nobody
 controlling it shows neither. Under 768px the controller's name moves to the
