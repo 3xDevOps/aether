@@ -236,9 +236,12 @@ from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
 subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
 board card, a run list row, a feed entry, an approval, the members and
 devices views or the Changes interval menu keeps moving without re-rendering
-the row. A per-second countdown, such as a queued message's delivery
-(`DeliveryCountdown`), is its own small component and re-renders only its
-text.
+the row. `compact` renders `compactAge` instead: the same steps as `timeAgo`
+in a few characters ("now" under a minute, then "15m", "3h", "2d", "1w",
+"2mo", "1y"). A sidebar run row reads the clock itself as well, because its
+accessible name carries the age. A per-second countdown, such as a queued
+message's delivery (`DeliveryCountdown`), is its own small component and
+re-renders only its text.
 
 The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
 swarm, or run scope, merged by message ID. A scope's list is held only while
@@ -357,9 +360,16 @@ top to bottom:
    and the spend against workspace budgets.
 
 A run row is a 28px `ListRow` (44px on a coarse pointer): a static
-`StatusDot`, the title, and the agent's monochrome glyph. Its accessible name
-starts with the state word, then the workspace when it is another one, the
-title and the reason. Paused, finished and other members' working rows
+`StatusDot`, the title, the row's age and the agent's monochrome glyph. The
+age is the compact form ("15m", "3h", "2d") of the time the explorer sorts
+by: when a Needs you row began waiting on the viewer, else the run's last
+status change (`since` on the row, `src/store/selectors.ts`). A run read
+from a snapshot has only an estimate of that change (see
+[Run state](#run-state)), so after a reload a live run's age counts from its
+start until its next status event. The title truncates before the age does.
+The row's accessible name starts with the state word, then the workspace
+when it is another one, the title, the reason and the age in words
+("15 minutes ago"). Paused, finished and other members' working rows
 recede: their title is in the muted colour. A Needs you row offers the
 condition's primary action on hover, focus and a coarse pointer, the same one
 its board card shows (see [Board](#board)): **Approve** resolves in place,
@@ -374,11 +384,11 @@ A swarm's integrator row uses the agent's title, not the swarm objective.
 Every unarchived worker and previous integrator is indented beneath the current
 integrator, with a tree guide connecting the children. **Mine** also filters
 these children under Working and Finished; Needs you keeps the whole tree
-visible. Selecting a run row opens that run. The graph-node button to the
-right of the title, before the
-agent glyph, opens the swarm control page; its tooltip includes the workers'
-counts. The same `Waypoints` icon marks Swarms in navigation and New swarm in
-the command palette. Unread integrator mail still appears in the row's name
+visible. Selecting a run row opens that run, from anywhere on the row
+outside its buttons. The graph-node button to the right of the title, before
+the age and the agent glyph, opens the swarm control page; its tooltip
+includes the workers' counts. The same `Waypoints` icon marks Swarms in
+navigation and New swarm in the command palette. Unread integrator mail still appears in the row's name
 and tooltip. The whole tree sits in Needs you while any member needs the
 viewer, but only those waiting runs contribute to that group's count.
 A swarm whose integrator is missing or archived is rooted at its oldest

@@ -119,13 +119,17 @@ describe('swarms', () => {
   })
 
   it('lists the swarm in Needs you with only the members that need the viewer', () => {
-    const blocked = worker('blocked', { status: 'needs-attention', reason: 'blocked: no database access' })
+    const blocked = worker('blocked', {
+      status: 'needs-attention', reason: 'blocked: no database access', started_at: '2026-08-14T09:30:00Z',
+    })
     const groups = runGroups(input([integrator, worker('w1'), blocked], {}, { missions: { mission_1: mission() } }))
     expect(ids(groups['needs-you'])).toEqual(['run_integrator'])
     const [swarm] = groups['needs-you']
     expect(swarm.state).toBe('working')
     expect(ids(swarm.children)).toEqual(['blocked'])
     expect(swarm.swarm?.counts).toEqual({ working: 1, needsYou: 1, done: 0, failed: 0 })
+    expect(swarm.waitingSince).toBe(blocked.stateChangedAt)
+    expect(swarm.since).toBe(integrator.stateChangedAt)
   })
 
   it("roots a replaced integrator's swarm at the current one", () => {

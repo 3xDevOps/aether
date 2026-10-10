@@ -24,6 +24,9 @@ export interface RunRow {
   needsYou?: NeedsYouID
   unread?: number
   group: RunGroup
+  /** When the row began what it shows: its wait when it needs the viewer, else its last status change. */
+  since: string
+  /** The Needs you sort key: `since`, or for a swarm its oldest wait. */
   waitingSince: string
   owner?: Member
   workspaceName?: string
@@ -76,6 +79,7 @@ export function runRows(ctx: StateContext): RunRow[] {
     // A live run can never be hidden.
     if (run.archived_at && isArchivable(run.status)) continue
     const shown = presentRun(run, ctx)
+    const since = shown.needsYou?.since(run, ctx) ?? run.stateChangedAt
     rows.push({
       run,
       state: shown.state,
@@ -83,7 +87,8 @@ export function runRows(ctx: StateContext): RunRow[] {
       needsYou: shown.needsYou?.id,
       unread: shown.unread,
       group: groupOf(shown.state),
-      waitingSince: shown.needsYou?.since(run, ctx) ?? run.stateChangedAt,
+      since,
+      waitingSince: since,
       owner: ctx.members[run.member_id],
     })
   }

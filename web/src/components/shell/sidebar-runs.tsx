@@ -3,7 +3,10 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight, Waypoints } from '@/components/icons'
 import { ListRow } from '@/components/ui/list-row'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
+import { useClock } from '@/lib/clock'
+import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
@@ -204,6 +207,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
       runID={tree.run.id}
       state={tree.state}
       reason={tree.reason}
+      since={tree.since}
       workspaceName={tree.workspaceName}
       swarm={tree.swarm}
       unread={tree.unread}
@@ -215,6 +219,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   runID: string
   state: PresentationState
   reason: string
+  since: string
   workspaceName?: string
   swarm?: SwarmSummary
   unread?: number
@@ -223,10 +228,11 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   return run ? <RunRowButton run={run} {...shown} /> : null
 })
 
-function RunRowButton({ run, state, reason, workspaceName, swarm, unread }: {
+function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread }: {
   run: RunRecord
   state: PresentationState
   reason: string
+  since: string
   workspaceName?: string
   swarm?: SwarmSummary
   unread?: number
@@ -245,7 +251,14 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, unread }: {
     } else navigate('run', { runId: run.id })
   }
   const recedes = state !== 'needs-you' && (state !== 'working' || (!swarm && run.member_id !== self))
-  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason].filter(Boolean).join(' · ')
+  useClock()
+  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason, timeAgo(since)].filter(Boolean).join(' · ')
+  const indicators = (
+    <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
+      <RelativeTime at={since} compact />
+      <AgentGlyph agent={run.harness} />
+    </span>
+  )
   return (
     <ListRow
       data-run-row=""
@@ -255,7 +268,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, unread }: {
       selected={selected}
       onClick={open}
       leading={<StatusDot tone={state} />}
-      trailing={!swarm ? <AgentGlyph agent={run.harness} /> : undefined}
+      trailing={!swarm ? indicators : undefined}
       action={swarm && run.mission_id && (
         <>
           <Button
@@ -268,7 +281,7 @@ function RunRowButton({ run, state, reason, workspaceName, swarm, unread }: {
           >
             <Waypoints />
           </Button>
-          <AgentGlyph agent={run.harness} />
+          {indicators}
         </>
       )}
       hoverAction={state === 'needs-you' && <AnswerButton run={run} />}

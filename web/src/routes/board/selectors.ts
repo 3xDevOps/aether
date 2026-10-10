@@ -38,6 +38,7 @@ function archivedRows(s: RunsInput): RunRow[] {
       state: shown.state,
       reason: shown.reason,
       group: groupOf(shown.state),
+      since: run.stateChangedAt,
       waitingSince: run.stateChangedAt,
       owner: s.ctx.members[run.member_id],
     })

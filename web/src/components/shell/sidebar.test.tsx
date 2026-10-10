@@ -109,6 +109,25 @@ describe('run rows', () => {
     expect(row.getAttribute('aria-current')).toBe('page')
   })
 
+  it('shows how long ago each row last changed and says it in full in its name', () => {
+    vi.useFakeTimers({ now: new Date('2026-08-14T10:17:00Z') })
+    try {
+      render(<AppShell />)
+
+      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · Agent working · 15 minutes ago' })
+      const age = within(row).getByText('15m')
+      expect(age.getAttribute('dateTime')).toBe('2026-08-14T10:02:00Z')
+
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      expect(within(row).getByText('16m')).toBe(age)
+      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago$/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('prefixes a Needs you row from another workspace and answers it where it waits', () => {
     render(<AppShell />)
 
