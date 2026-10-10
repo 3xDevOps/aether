@@ -495,16 +495,17 @@ test('a coarse pointer wraps long lines until the toggle says otherwise, and the
   expect(screen.getByRole('button', { name: 'Wrap lines' }).getAttribute('aria-pressed')).toBe('false')
 })
 
-function gutter(file: string, name: string) {
-  return within(screen.getByRole('region', { name: file })).getByRole('button', { name })
+/** The number gutter of the line whose code reads `code`, marker included. */
+function gutter(file: string, code: string) {
+  return within(screen.getByRole('region', { name: file })).getByText(code).previousElementSibling as HTMLElement
 }
 
 function editor() {
   return screen.getByRole<HTMLTextAreaElement>('textbox', { name: /^Comment on / })
 }
 
-function comment(file: string, line: string, text: string) {
-  fireEvent.click(gutter(file, line))
+function comment(file: string, code: string, text: string) {
+  fireEvent.click(gutter(file, code))
   fireEvent.change(editor(), { target: { value: text } })
   fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
 }
@@ -530,7 +531,7 @@ test('a comment pins under its line, can be edited and deleted, and brings the r
   renderDiff()
   expect(screen.queryByRole('group', { name: 'Review' })).toBeNull()
 
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 11'))
+  fireEvent.click(gutter('cmd/main.go', '+new line'))
   expect(document.activeElement).toBe(editor())
   fireEvent.change(editor(), { target: { value: 'use the helper' } })
   expect(screen.queryByRole('group', { name: 'Review' })).toBeNull()
@@ -555,7 +556,7 @@ test('a comment pins under its line, can be edited and deleted, and brings the r
 test('Escape closes an editor nobody typed into and leaves a typed one alone', () => {
   seed(ready)
   renderDiff()
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 11'))
+  fireEvent.click(gutter('cmd/main.go', '+new line'))
   fireEvent.change(editor(), { target: { value: 'half a thought' } })
   fireEvent.keyDown(editor(), { key: 'Escape' })
   expect(editor().value).toBe('half a thought')
@@ -569,27 +570,50 @@ test('a drag, a Shift-click and Shift with the arrow keys each make a range', ()
   seed(ready)
   renderDiff()
 
-  fireEvent.pointerDown(gutter('cmd/main.go', 'Comment on line 10'), { button: 0 })
-  fireEvent.pointerOver(gutter('cmd/main.go', 'Comment on line 11'))
+  fireEvent.pointerDown(gutter('cmd/main.go', 'package main'), { button: 0 })
+  fireEvent.pointerOver(gutter('cmd/main.go', '+new line'))
   act(() => void window.dispatchEvent(new Event('pointerup')))
   expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10-11')
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 11'))
+  fireEvent.click(gutter('cmd/main.go', '+new line'))
   expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:11')
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 10'), { shiftKey: true })
+  fireEvent.click(gutter('cmd/main.go', 'package main'), { shiftKey: true })
   expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10-11')
   expect(document.activeElement).toBe(editor())
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-  const first = gutter('cmd/main.go', 'Comment on line 10')
-  first.focus()
-  fireEvent.keyDown(first, { key: 'ArrowDown', shiftKey: true })
-  expect(document.activeElement).toBe(gutter('cmd/main.go', 'Comment on removed line 11'))
-  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown', shiftKey: true })
-  fireEvent.click(document.activeElement!)
+  // Each file has one gutter button; closing an editor leaves it on that
+  // comment's last line, and the arrow keys move it.
+  const file = within(screen.getByRole('region', { name: 'cmd/main.go' }))
+  const cursor = () => file.getByRole('button', { name: /^Comment on / })
+  expect(cursor().getAttribute('aria-label')).toBe('Comment on line 11')
+  expect(document.activeElement).toBe(cursor())
+  fireEvent.keyDown(cursor(), { key: 'ArrowUp' })
+  fireEvent.keyDown(cursor(), { key: 'ArrowUp' })
+  expect(cursor()).toBe(gutter('cmd/main.go', 'package main'))
+  expect(document.activeElement).toBe(cursor())
+  fireEvent.keyDown(cursor(), { key: 'ArrowDown', shiftKey: true })
+  expect(cursor().getAttribute('aria-label')).toBe('Comment on removed line 11')
+  fireEvent.keyDown(cursor(), { key: 'ArrowDown', shiftKey: true })
+  fireEvent.click(cursor())
   expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10-11')
   expect(screen.getAllByRole('textbox')).toHaveLength(1)
+})
+
+test('a drag whose press blurs a control in the same file still makes its range', () => {
+  seed(ready)
+  renderDiff()
+  comment('cmd/main.go', '+new line', 'use the helper')
+  const edit = screen.getByRole('button', { name: 'Edit comment' })
+  edit.focus()
+
+  fireEvent.pointerDown(gutter('cmd/main.go', 'package main'), { button: 0 })
+  fireEvent.blur(edit)
+  fireEvent.pointerOver(gutter('cmd/main.go', '+new line'))
+  act(() => void window.dispatchEvent(new Event('pointerup')))
+
+  expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10-11')
 })
 
 test('on a touch screen a tapped line shows its gutter, and a second tap on an empty editor makes a range', () => {
@@ -598,23 +622,23 @@ test('on a touch screen a tapped line shows its gutter, and a second tap on an e
   renderDiff()
 
   fireEvent.click(screen.getByText('+new line'))
-  expect(document.activeElement).toBe(gutter('cmd/main.go', 'Comment on line 11'))
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comment on line 11' }))
   expect(screen.queryByRole('textbox')).toBeNull()
 
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 11'))
-  fireEvent.click(gutter('cmd/main.go', 'Comment on line 10'))
+  fireEvent.click(gutter('cmd/main.go', '+new line'))
+  fireEvent.click(gutter('cmd/main.go', 'package main'))
   expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10-11')
 
   fireEvent.change(editor(), { target: { value: 'typed' } })
-  fireEvent.click(gutter('notes.md', 'Comment on line 1'))
+  fireEvent.click(gutter('notes.md', '+hello'))
   expect(screen.getAllByRole('textbox')).toHaveLength(2)
 })
 
 test('send posts every comment as one message under the lease this tab holds and says where it went', async () => {
   seed(ready)
   renderDiff()
-  comment('notes.md', 'Comment on line 1', 'say more')
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('notes.md', '+hello', 'say more')
+  comment('cmd/main.go', '+new line', 'use the helper')
   vi.mocked(api.runRoomPost).mockResolvedValueOnce({ message: roomMessage({ id: 'msg_review', run_id: active.id, kind: 'steer_request' }), receipt: 'sent' })
 
   fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
@@ -635,8 +659,8 @@ test('send posts every comment as one message under the lease this tab holds and
 test('send takes the text in an open editor with it', async () => {
   seed(ready)
   renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
-  fireEvent.click(gutter('notes.md', 'Comment on line 1'))
+  comment('cmd/main.go', '+new line', 'use the helper')
+  fireEvent.click(gutter('notes.md', '+hello'))
   fireEvent.change(editor(), { target: { value: 'say more' } })
 
   fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
@@ -649,7 +673,7 @@ test('send takes the text in an open editor with it', async () => {
 test('a send that fails keeps every comment, shows the server error, and resends under the same key', async () => {
   seed(ready)
   renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('cmd/main.go', '+new line', 'use the helper')
   vi.mocked(api.runRoomPost).mockRejectedValueOnce(new Error('run.room.post: connection lost'))
 
   fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
@@ -666,8 +690,8 @@ test('a send that fails keeps every comment, shows the server error, and resends
 test('text changed while a send is out stays, and a send that outlives a sign-in leaves nothing behind', async () => {
   seed(ready)
   renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
-  comment('notes.md', 'Comment on line 1', 'say more')
+  comment('cmd/main.go', '+new line', 'use the helper')
+  comment('notes.md', '+hello', 'say more')
   let answer!: () => void
   let answers = 0
   vi.mocked(api.runRoomPost).mockImplementation(() => new Promise((resolve) => {
@@ -702,7 +726,7 @@ test('text changed while a send is out stays, and a send that outlives a sign-in
 test('a message the server could not deliver keeps the comments and says why', async () => {
   seed(ready)
   renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('cmd/main.go', '+new line', 'use the helper')
   vi.mocked(api.runRoomPost).mockResolvedValueOnce({
     message: roomMessage({ run_id: active.id, kind: 'steer_request', state: 'not_sent', failure: { code: 'session_unavailable', message: 'run session unavailable' } }),
     receipt: 'not_sent',
@@ -717,7 +741,7 @@ test('a message the server could not deliver keeps the comments and says why', a
 test('without the lease the message waits for the controller, and the bar says so before and after', async () => {
   seed(ready)
   renderDiff({ localControl: false, roomControl: undefined, controlUnavailable: true })
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('cmd/main.go', '+new line', 'use the helper')
   const bar = within(screen.getByRole('group', { name: 'Review' }))
   expect(bar.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeTruthy()
   vi.mocked(api.runRoomPost).mockResolvedValueOnce({ message: roomMessage({ id: 'msg_queued', run_id: active.id, kind: 'steer_request', state: 'queued' }) })
@@ -735,7 +759,7 @@ test('a run that cannot take a message disables send and says why', () => {
   seed(ready)
   useStore.setState({ runs: { [active.id]: toRecord(run({ id: active.id, status: 'completed' })) } })
   const view = renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('cmd/main.go', '+new line', 'use the helper')
   const bar = within(screen.getByRole('group', { name: 'Review' }))
   expect(bar.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
   expect(bar.getByText('This run has finished.')).toBeTruthy()
@@ -753,8 +777,8 @@ test('a run that cannot take a message disables send and says why', () => {
 test('discarding asks first, then removes every comment', async () => {
   seed(ready)
   renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
-  comment('notes.md', 'Comment on line 1', 'say more')
+  comment('cmd/main.go', '+new line', 'use the helper')
+  comment('notes.md', '+hello', 'say more')
 
   fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
   const dialog = within(await screen.findByRole('alertdialog', { name: 'Discard 2 comments?' }))
@@ -770,7 +794,7 @@ test('discarding asks first, then removes every comment', async () => {
 test('a comment follows its line through a refresh, and is kept as outdated when the line or the file goes', async () => {
   seed(ready)
   const view = renderDiff()
-  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('cmd/main.go', '+new line', 'use the helper')
   const refresh = (next: string) => act(() => useStore.getState().applyPatch({ run_id: active.id, base: ready.base, patch: next, truncated: false }, 0))
 
   refresh(patch.replace('@@ -10,3 +10,3 @@\n package main', '@@ -10,3 +10,4 @@\n package main\n+import "fmt"'))

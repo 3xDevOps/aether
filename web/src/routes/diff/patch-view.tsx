@@ -1,10 +1,11 @@
 import { Fragment, memo, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
+import { flushSync } from 'react-dom'
 import { VList } from 'virtua'
 import { ChevronDown, ChevronRight, MessageSquare } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { LineGutter } from '@/components/ui/line-gutter'
-import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { coarsePointer, useDrag, useMediaQuery } from '@/lib/hooks'
 import { cn } from '@/lib/utils'
 import { CommentCard } from '@/routes/diff/comment-card'
 import { linePrefix, type FileStatus, type PatchFile, type PatchLine } from '@/routes/diff/parse'
@@ -72,6 +73,8 @@ export const FilePatch = memo(function FilePatch({
   const runID = review?.runID ?? ''
   const comments = useFileComments(runID, file.path)
   const picker = useLinePicker(file, review, comments)
+  // A long file's lines are virtual; its tab stop has to exist wherever the list is scrolled.
+  const kept = useMemo(() => [picker.tab], [picker.tab])
   const noted = written(comments).length
 
   const thread = (cards: React.ReactNode) => (
@@ -155,7 +158,7 @@ export const FilePatch = memo(function FilePatch({
             <CommentCard key={comment.id} runID={runID} comment={comment} lines={comment.lines} outdated />
           )))}
           {size > largeFile ? (
-            <VList data-slot="patch-lines" style={{ height: 'min(70dvh, 40rem)' }} data={file.lines}>
+            <VList data-slot="patch-lines" style={{ height: 'min(70dvh, 40rem)' }} data={file.lines} keepMounted={review ? kept : undefined}>
               {row}
             </VList>
           ) : (
@@ -182,17 +185,14 @@ function inGutter(target: EventTarget): boolean {
   return (target as HTMLElement).closest('[data-slot="line-gutter"]') !== null
 }
 
-/**
- * Picks lines to comment on. A click on a gutter opens an editor on that
- * line; a drag, Shift with the arrow keys, or a Shift-click while an editor
- * is open makes it a range. A range never leaves its hunk.
- */
+/** A range never leaves its hunk. `cursor` is the one line per file whose gutter the keyboard can reach. */
 function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, comments: ReviewComment[]) {
   const coarse = useMediaQuery(coarsePointer)
   const body = useRef<HTMLDivElement>(null)
   const [picked, setPicked] = useState<Picked | null>(null)
   const live = useRef<Picked | null>(null)
   const dragging = useRef(false)
+  const beginDrag = useDrag()
   const [cursor, setCursor] = useState(-1)
   const scope = review?.scope ?? ''
   const { placed, outdated } = useMemo(() => placeComments(file.lines, comments, scope), [file.lines, comments, scope])
@@ -218,8 +218,10 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
     live.current = next
     setPicked(next)
   }
-  const gutterAt = (index: number) =>
-    body.current?.querySelector<HTMLElement>(`[data-line="${index}"] > [data-slot="line-gutter"]`)
+  const focusLine = (index: number) => {
+    flushSync(() => setCursor(index))
+    body.current?.querySelector<HTMLElement>(`[data-line="${index}"] > [data-slot="line-gutter"]`)?.focus()
+  }
   const comment = ({ anchor, head }: Picked) => {
     const { file: current, review: target } = latest.current
     if (!target) return
@@ -234,14 +236,18 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
     onPointerDown: (event) => {
       if (event.button !== 0 || event.pointerType === 'touch' || !inGutter(event.target)) return
       const index = lineOf(event.target)
+      const drag = beginDrag()
       dragging.current = true
       pick({ anchor: index, head: index })
-      window.addEventListener('pointerup', () => {
+      const end = (keep: boolean) => {
         const range = live.current
+        drag.abort()
         dragging.current = false
         pick(null)
-        if (range && range.head !== range.anchor) comment(range)
-      }, { once: true })
+        if (keep && range && range.head !== range.anchor) comment(range)
+      }
+      window.addEventListener('pointerup', () => end(true), { signal: drag.signal })
+      window.addEventListener('pointercancel', () => end(false), { signal: drag.signal })
     },
     onPointerOver: (event) => {
       const range = live.current
@@ -255,11 +261,12 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
       const index = lineOf(event.target)
       if (index < 0) return
       if (!inGutter(event.target)) {
-        if (coarse) gutterAt(index)?.focus()
+        if (coarse && commentable(file.lines[index])) focusLine(index)
         return
       }
       const range = live.current
       pick(null)
+      setCursor(index)
       if (range) return comment(range)
       const growing = placed
         .filter((entry) => entry.comment.draft !== undefined && (event.shiftKey || (coarse && !entry.comment.body && !entry.comment.draft)))
@@ -290,13 +297,10 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
         if (!file.lines[to]) return
         pick(null)
       }
-      gutterAt(to)?.focus()
-    },
-    onFocus: (event) => {
-      if (inGutter(event.target)) setCursor(lineOf(event.target))
+      focusLine(to)
     },
     onBlur: (event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) pick(null)
+      if (!dragging.current && !event.currentTarget.contains(event.relatedTarget)) pick(null)
     },
   }
 
@@ -308,7 +312,7 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
     outdated,
     picking: picked !== null,
     tab: commentable(file.lines[cursor]) ? cursor : file.lines.findIndex(commentable),
-    focusLine: (index: number) => requestAnimationFrame(() => gutterAt(index)?.focus()),
+    focusLine,
   }
 }
 
@@ -325,9 +329,10 @@ const Line = memo(function Line({
   index: number
   wrap: boolean
   gutter?: string
-  /** The gutter keeps room for the `+`, and is a button on a line that takes comments. */
+  /** The gutter keeps room for the `+`, and takes a click on a line that takes comments. */
   review: boolean
   marked: boolean
+  /** This line's gutter is its file's tab stop. */
   tab: boolean
 }) {
   const numbers = gutter && (
@@ -339,10 +344,7 @@ const Line = memo(function Line({
   return (
     <div data-line={index} className={cn('group/line flex leading-5', !wrap && 'min-w-max', lineTint[line.kind])}>
       {review && commentable(line) ? (
-        <LineGutter
-          tabIndex={tab ? 0 : -1}
-          aria-label={`Comment on ${line.new === undefined ? `removed line ${line.old}` : `line ${line.new}`}`}
-        >
+        <LineGutter focusable={tab} label={`Comment on ${line.new === undefined ? `removed line ${line.old}` : `line ${line.new}`}`}>
           {numbers}
         </LineGutter>
       ) : numbers}

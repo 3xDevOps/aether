@@ -55,6 +55,15 @@ const localGroups: { name: string; entries: [string, string][] }[] = [
     ],
   },
   {
+    name: 'Changes (on a line number that has focus)',
+    entries: [
+      ['Up / Down', 'Move between the lines of a file'],
+      ['Shift+Up / Down', 'Select a range of lines'],
+      ['Enter', 'Comment on the line or the range'],
+      [formatKeys('$mod+Enter'), 'Pin the comment being written; Esc closes an empty one'],
+    ],
+  },
+  {
     name: 'Terminal (in the terminal that has focus)',
     entries: [
       ['Copy', 'Ctrl+Shift+C - a plain Ctrl+C copies too when text is selected'],

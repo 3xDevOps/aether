@@ -2101,16 +2101,18 @@ both what it renders and the overlap set the conflict chips read.
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
   of lines of the diff, held in this browser until it is sent to the agent.
-  Each line's number gutter is a button (`LineGutter`,
-  `components/ui/line-gutter.tsx`) that shows a `+` while the pointer is on
-  the line or the button has focus, and nothing otherwise. A click opens an
+  Each line's number gutter takes a click (`LineGutter`,
+  `components/ui/line-gutter.tsx`) and shows a `+` while the pointer is on
+  the line or the gutter has focus, and nothing otherwise. A click opens an
   editor under the line (`comment-card.tsx`). **Comment** or `Mod+Enter` pins
   it, **Cancel** closes it, and `Esc` closes one nobody typed into. A pinned
   comment has **Edit comment** and **Delete comment**. For a range, drag
   across the gutters, Shift-click another line while the editor is open, or
   hold `Shift` with `↑`/`↓` and press `Enter`; a range stops at the edge of
   its hunk. A file's gutters are one tab stop and `↑`/`↓` move between its
-  lines. On a touch screen a tap on a line shows its `+`, and a tap on another
+  lines: only the line the keyboard is on has a real button, so a long file
+  adds one control to the page and to a screen reader, not one per line. On a
+  touch screen a tap on a line shows its `+`, and a tap on another
   line while the new editor is still empty makes the range. A new editor
   nobody typed into closes when another opens. Commented lines keep a tinted
   gutter and the file header counts its comments. The Files diff pane and the
@@ -3799,7 +3801,7 @@ Apple platforms and Ctrl elsewhere; a space separates the two presses of a
 sequence). The table drives the handlers, the tooltips (`shortcutLabel(id)`)
 and the shortcuts dialog (`?`, or **Keyboard shortcuts** in the sidebar footer
 menu), which groups it by scope and adds the keys a focused tab strip,
-splitter or terminal owns itself. `keybindings.test.ts` fails when two
+splitter, Changes line or terminal owns itself. `keybindings.test.ts` fails when two
 bindings in overlapping scopes share keys, or one begins the other's sequence.
 
 | Key | Scope | What it does |
