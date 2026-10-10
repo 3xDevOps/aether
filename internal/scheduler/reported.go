@@ -105,14 +105,20 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 }
 
 // relabelLocked rewrites a terminal run's reason without changing its status.
-// The caller must hold s.mu, which Seen also holds, so the outcome_unseen and
-// finish_unopened flags read here are the ones this event reports.
+// actor is the member whose close or kill caused it, if any: their act opens
+// the finish in the same write. The caller must hold s.mu, which Seen also
+// holds, so the outcome_unseen and finish_unopened flags read here are the
+// ones this event reports.
 func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, status domain.RunStatus, reason string, actor domain.MemberID) error {
 	if !status.Terminal() {
 		return fmt.Errorf("%w: relabel %s", ErrInvalidTransition, status)
 	}
 	public := publicRunStatusReason(reason)
-	if err := s.cfg.Store.UpdateRunStatus(ctx, run, status, public, nil, nil); err != nil {
+	write := s.cfg.Store.UpdateRunStatus
+	if memberCause(actor) == causeMember {
+		write = s.cfg.Store.FinishRunByMember
+	}
+	if err := write(ctx, run, status, public, nil, nil); err != nil {
 		return err
 	}
 	row, err := s.cfg.Store.GetRun(ctx, run)
@@ -124,6 +130,33 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 		RunID:       run,
 		ActorID:     actor,
 		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen, FinishUnopened: row.FinishUnopened},
+	})
+	return nil
+}
+
+// dismissFinished opens the finish of a run a member closed or killed when
+// that act changed no status: the run had already finished, and the member
+// has still dealt with it. A finish their act already opened publishes
+// nothing, so each act tells clients once.
+func (s *Scheduler) dismissFinished(ctx context.Context, run domain.RunID, actor domain.MemberID) error {
+	if memberCause(actor) != causeMember {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	opened, err := s.cfg.Store.ClearRunFinishUnopened(ctx, run)
+	if err != nil || !opened {
+		return err
+	}
+	row, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	s.publish(ctx, events.Event{
+		WorkspaceID: row.WorkspaceID,
+		RunID:       run,
+		ActorID:     actor,
+		Payload:     events.RunFinishOpenedPayload{},
 	})
 	return nil
 }

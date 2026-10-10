@@ -118,7 +118,7 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 			entry.lifecycleMu.Unlock()
 			return
 		}
-		if err := s.expireRetainedLocked(context.Background(), entry); err != nil {
+		if err := s.expireRetainedLocked(context.Background(), entry, ""); err != nil {
 			slog.Warn("scheduler: expire retained container after exit", "run", entry.runID, "error", err)
 		}
 		entry.lifecycleMu.Unlock()
@@ -473,7 +473,7 @@ func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error
 	}
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
-	err := s.expireRetainedLocked(ctx, entry)
+	err := s.expireRetainedLocked(ctx, entry, "")
 	if err == nil {
 		return nil
 	}
@@ -486,8 +486,9 @@ func (s *Scheduler) expireRetained(ctx context.Context, entry *supervised) error
 	return err
 }
 
-// expireRetainedLocked is called with entry.lifecycleMu held.
-func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised) error {
+// expireRetainedLocked is called with entry.lifecycleMu held. actor is the
+// member whose close or kill expires the container, if any.
+func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised, actor domain.MemberID) error {
 	s.mu.Lock()
 	if s.runs[entry.runID] != entry || !entry.retained {
 		s.mu.Unlock()
@@ -537,7 +538,7 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised)
 	s.mu.Lock()
 	if s.runs[entry.runID] == entry && entry.retained {
 		if released, ok := releasedReason(run.Status, run.Reason, reason); ok {
-			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, "")
+			transitionErr = s.relabelLocked(ctx, entry.runID, run.WorkspaceID, run.Status, released, actor)
 		}
 		entry.retained = false
 		entry.retainedUntil = nil

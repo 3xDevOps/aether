@@ -44,9 +44,11 @@ func (s *Scheduler) Kill(ctx context.Context, run domain.RunID, actor domain.Mem
 		retained := entry.retained
 		s.mu.Unlock()
 		if retained {
-			return s.expireRetainedLocked(ctx, entry)
+			if err := s.expireRetainedLocked(ctx, entry, actor); err != nil {
+				return err
+			}
 		}
-		return nil
+		return s.dismissFinished(ctx, run, actor)
 	}
 	entry.killRequested = true
 	entry.killActor = actor
@@ -179,7 +181,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 			// route it through Kill as well so that state is not discarded.
 			return s.Kill(ctx, id, actor)
 		}
-		return nil
+		return s.dismissFinished(ctx, id, actor)
 	}
 
 	// Resolve an active durable cleanup owner before committing/publishing
@@ -647,7 +649,10 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 	if outcome != domain.RunMerged && outcome != domain.RunAbandoned {
 		return fmt.Errorf("%w: close outcome must be merged or abandoned, got %q", ErrInvalidTransition, outcome)
 	}
-	return s.closeRun(ctx, run, humanClose(outcome, actor))
+	if err := s.closeRun(ctx, run, humanClose(outcome, actor)); err != nil {
+		return err
+	}
+	return s.dismissFinished(ctx, run, actor)
 }
 
 // closeRun shares exact-container retention between human Close and accepted
@@ -820,7 +825,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			return err
 		}
 		if s.cfg.RunContainerTTL < 0 {
-			return s.expireRetainedLocked(ctx, entry)
+			return s.expireRetainedLocked(ctx, entry, actor)
 		}
 		return nil
 	}

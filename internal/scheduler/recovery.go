@@ -131,7 +131,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 				}
 				s.mu.Unlock()
 			}
-			if expireErr := s.expireRetainedLocked(ctx, entry); expireErr != nil {
+			if expireErr := s.expireRetainedLocked(ctx, entry, ""); expireErr != nil {
 				return nil, expireErr
 			}
 		}
