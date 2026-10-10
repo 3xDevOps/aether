@@ -1,27 +1,34 @@
 import type { Page } from '@playwright/test'
 import { expect } from '../fixtures'
 import type { DevBrowserActionResult, DevBrowserSnapshotResult, DevControlAcquireResult } from '../../src/lib/types'
-import { appURL, clickRemote, typeRemote, type BrowserFixture } from './fixture'
+import { addressBar, appAddress, browserAction, chooseViewport, clickRemote, expectLive, remotePage, typeRemote, type BrowserFixture } from './fixture'
+
+const driving = (page: Page) => page.getByRole('img', { name: 'You are driving', exact: true })
 
 export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, phone: boolean): Promise<void> {
   const before = await fixture.member.api.rpc<{ running: boolean }>('dev.browser.status', { run_id: fixture.runID })
   expect(before.running).toBe(false)
-  await expect(page.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Page tools', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Other address…', exact: true }).click()
-  await page.getByLabel('Browser URL', { exact: true }).fill(appURL)
-  await page.getByRole('button', { name: 'Open', exact: true }).click()
-  await fixture.waitText('Viewport 1280')
-  if (phone) {
-    await page.getByRole('button', { name: 'Page tools', exact: true }).click()
-    await page.getByLabel('Browser viewport').selectOption('390x844')
-    await page.keyboard.press('Escape')
-    await fixture.waitText('Viewport 390')
-    await expect(page.getByText('Live frame · 390 × 844')).toBeVisible()
-  }
-  await expect(page.getByText(/Live frame ·/)).toBeVisible()
-  await expect(page.getByText(/You are driving/)).toBeVisible()
-  if (phone) await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Take control|Take over/ })).toHaveCount(0)
+  await addressBar(page).fill(appAddress)
+  await addressBar(page).press('Enter')
+  await expect(page.getByText('Starting the browser', { exact: true })).toBeVisible()
+  // The first page has the browser's start-up budget, not the default expectation's.
+  await fixture.waitText('Viewport')
+  await expectLive(page)
+  await expect(driving(page)).toBeVisible()
+  await expect(addressBar(page)).toHaveValue(`http://${appAddress}/`)
+
+  // The first page opens at the pane's size, so nothing is letterboxed.
+  const fitted = await remotePage(page).evaluate((element) => {
+    const pane = element.parentElement!.getBoundingClientRect()
+    return { frame: [(element as HTMLCanvasElement).width, (element as HTMLCanvasElement).height], pane: [Math.floor(pane.width), Math.floor(pane.height)] }
+  })
+  expect(fitted.frame).toEqual(fitted.pane)
+  await fixture.waitText(`Viewport ${fitted.pane[0]}`)
+
+  // The fixture app is laid out for these sizes; the rest of the scenario uses a preset.
+  await chooseViewport(page, phone ? 'Phone' : 'Desktop', phone ? 390 : 1280)
+  await fixture.waitText(phone ? 'Viewport 390' : 'Viewport 1280')
 
   await clickRemote(page, 80, 125, phone)
   await typeRemote(page, 'test@example.invalid', phone)
@@ -42,30 +49,28 @@ export async function signInAndHotUpdate(page: Page, fixture: BrowserFixture, ph
   await fixture.waitText('Updated without logout')
   await fixture.waitText('Signed in as test@example.invalid')
   expect((await fixture.currentPage()).page_revision).toBe(signedIn.page_revision)
-  if (phone) await page.getByRole('button', { name: 'Restore browser controls', exact: true }).click()
+
+  // Leaving the view gives the lease up; coming back needs no button to take it again.
   await page.getByRole('tab', { name: 'Terminal', exact: true }).click()
   await page.getByRole('tab', { name: 'Browser', exact: true }).click()
-  await expect(page.getByText(/Live frame ·/)).toBeVisible()
+  await expectLive(page)
   await fixture.waitText('Signed in as test@example.invalid')
-  await page.getByRole('button', { name: 'Page tools', exact: true }).click()
-  await page.getByRole('button', { name: 'Reconnect', exact: true }).click()
-  await page.keyboard.press('Escape')
-  await expect(page.getByText(/Live frame ·/)).toBeVisible()
-  const reconnected = await fixture.currentPage()
-  expect(reconnected.session_id).toBe(signedIn.session_id)
-  expect(reconnected.page_id).toBe(signedIn.page_id)
-  await page.getByRole('button', { name: 'Take control', exact: true }).click()
-  await expect(page.getByText(/You are driving/)).toBeVisible()
-  await page.getByRole('button', { name: 'Reload page', exact: true }).click()
+  const returned = await fixture.currentPage()
+  expect(returned.session_id).toBe(signedIn.session_id)
+  expect(returned.page_id).toBe(signedIn.page_id)
+  await expect(driving(page)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Take control|Take over/ })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Reload', exact: true }).click()
+  await expect(driving(page)).toBeVisible()
   await fixture.waitText('Signed in as test@example.invalid')
-  await expect(page.getByText(/Live frame ·/)).toBeVisible()
-  if (phone) await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
+  await expectLive(page)
+  await expect(remotePage(page)).toHaveAttribute('width', phone ? '390' : '1280')
 }
 
-export async function shareWithAgent(page: Page, fixture: BrowserFixture): Promise<void> {
+export async function shareWithAgent(page: Page, fixture: BrowserFixture, phone: boolean): Promise<void> {
   const before = await fixture.currentPage()
-  await page.getByRole('button', { name: 'Release control', exact: true }).click()
-  await expect(page.getByText(/Nobody is driving/)).toBeVisible()
+  await browserAction(page, 'Release control')
+  await expect(driving(page)).toHaveCount(0)
   const surface = { kind: 'browser', id: 'browser', incarnation: before.session_id }
   const acquired = await fixture.agent<DevControlAcquireResult>('control', 'acquire', { surface, control_session_id: 'real-run-agent-browser' })
   expect(acquired.controller?.kind).toBe('run_agent')
@@ -75,9 +80,13 @@ export async function shareWithAgent(page: Page, fixture: BrowserFixture): Promi
   const request = { session_id: snapshot.page.session_id, page_id: snapshot.page.page_id, page_revision: snapshot.page.page_revision, control_session_id: acquired.controller!.control_session_id, control_generation: acquired.controller!.control_generation, action: 'fill', node_id: note!.node_id, text: 'Written by the run principal' }
   await fixture.agent<DevBrowserActionResult>('browser', 'action', request)
   await fixture.waitText('Note: Written by the run principal')
-  await expect(page.getByText(/The agent is driving/)).toBeVisible()
+  await expect(page.getByText('The agent is driving', { exact: true })).toBeVisible()
+  // The rendered Log out button: a press while the agent drives must not reach it.
+  await clickRemote(page, 80, 365, phone)
+  await expect(page.getByText('The agent is driving. Take over to use the page.', { exact: true })).toBeVisible()
+  await fixture.waitText('Signed in as test@example.invalid')
   await page.getByRole('button', { name: 'Take over', exact: true }).click()
-  await expect(page.getByText(/You are driving/)).toBeVisible()
+  await expect(driving(page)).toBeVisible()
   await expect(fixture.agent('browser', 'action', { ...request, text: 'STALE AGENT MUST NOT WRITE' })).rejects.toThrow()
   await fixture.waitText('Note: Written by the run principal')
   expect((await fixture.currentPage()).page_id).toBe(before.page_id)

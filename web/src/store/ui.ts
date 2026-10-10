@@ -165,6 +165,16 @@ export interface UiSlice {
   /** The view each run was last shown in during this visit; never persisted. */
   runViewMemory: Record<string, RunView>
   detailsOpen: boolean
+  /** Whether a run's Browser sits beside its other views on a wide window. */
+  browserBeside: boolean
+  /** Null until the divider is moved: half the run's frame. */
+  browserBesideWidth: number | null
+  /** The viewport preset each run's Browser was given; without one it follows
+   * its pane. Never persisted. */
+  browserPresets: Record<string, string>
+  /** The address each run's Browser was asked to open and has not taken yet;
+   * never persisted. */
+  browserRequests: Record<string, string>
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
   updatesOpen: boolean
@@ -199,6 +209,17 @@ export interface UiSlice {
   setUpdatesOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
   setDetailsOpen: (open: boolean) => void
+  setBrowserBeside: (beside: boolean) => void
+  setBrowserBesideWidth: (width: number) => void
+  setBrowserPreset: (runID: string, preset: string | null) => void
+  requestBrowser: (runID: string, address: string | null) => void
+}
+
+function withEntry(record: Record<string, string>, key: string, value: string | null): Record<string, string> {
+  const next = { ...record }
+  if (value === null) delete next[key]
+  else next[key] = value
+  return next
 }
 
 export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
@@ -231,6 +252,10 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   route: initialRoute(),
   runViewMemory: {},
   detailsOpen: true,
+  browserBeside: false,
+  browserBesideWidth: null,
+  browserPresets: {},
+  browserRequests: {},
   dismissedUpdates: { cli: '', server: '', shell: '' },
   updatesOpen: false,
   shortcutsOpen: false,
@@ -310,4 +335,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
+  setBrowserBeside: (browserBeside) => set({ browserBeside }),
+  setBrowserBesideWidth: (browserBesideWidth) => set({ browserBesideWidth }),
+  setBrowserPreset: (runID, preset) => set((s) => ({ browserPresets: withEntry(s.browserPresets, runID, preset) })),
+  requestBrowser: (runID, address) => set((s) => ({ browserRequests: withEntry(s.browserRequests, runID, address) })),
 })

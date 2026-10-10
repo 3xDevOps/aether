@@ -9,6 +9,7 @@ import { errorSentence } from '@/lib/format'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
+import { openRunLink } from '@/routes/browser/open'
 import type { TakeoverAction } from '@/routes/terminal/attach'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { useRunTerminalSession } from '@/routes/terminal/session'
@@ -73,7 +74,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
     onLink: (uri) => {
       if (!capability.hasLocal('forward.start')) {
         const remote = remoteOAuthInstructions(`run:${runID}`, uri)
-        if (remote === null) return false
+        if (remote === null) return openRunLink(runID, uri)
         toast.info(`Run ${remote.command}, then open this link on that machine.`, {
           description: uri,
           action: { label: 'Copy link', onClick: () => void copyText(uri, null) },
@@ -86,7 +87,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
         uri,
         (port) => toast.success(`OAuth callback ready on localhost:${port}`),
         (err) => toast.error(`OAuth callback forward failed: ${errorSentence(err)}`),
-      )
+      ) || openRunLink(runID, uri)
     },
   })
   const session = useRunTerminalSession({

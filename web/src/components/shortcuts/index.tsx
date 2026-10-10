@@ -21,6 +21,7 @@ import { useStore } from '@/store'
 const scopeNames: Record<KeyScope, string> = {
   global: 'Everywhere',
   run: 'In a run',
+  browser: 'In a run’s Browser',
   card: 'On a focused board card',
   request: 'On a request card',
   composer: 'In the composer',
