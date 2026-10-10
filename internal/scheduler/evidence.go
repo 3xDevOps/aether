@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -65,10 +67,29 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 		SourceFacts:           []store.EvidenceSourceFact{roomSource},
 		Provenance:            "scheduler-finish",
 	}
+	// Git refuses a checkout over its size bound or the disk's headroom on
+	// every retry, so waiting for that capture would pin the container and
+	// checkout whose removal frees the disk.
 	var packet protocol.EvidencePacket
 	if cleanup == nil {
 		packet, err = service.Capture(ctx, req)
+		if errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+			// The checkout outlives this capture, so nothing is lost yet.
+			slog.Warn("scheduler: release run without evidence", "run", run, "error", err)
+			return nil
+		}
 	} else {
+		// cleanup removes the checkout: its work must be on the run branch.
+		req.Uncaptured = func(ctx context.Context, refusal error) error {
+			if _, commitErr := s.commitAll(ctx, run, "wip: "+taskLine(r.Task)); commitErr != nil {
+				return fmt.Errorf("scheduler: commit uncaptured checkout: %w", commitErr)
+			}
+			if _, publishErr := s.cfg.Git.PublishRunBranch(ctx, run); publishErr != nil {
+				return fmt.Errorf("scheduler: publish uncaptured checkout: %w", publishErr)
+			}
+			slog.Warn("scheduler: remove checkout without evidence", "run", run, "error", refusal)
+			return nil
+		}
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
 	}
 	if err != nil {

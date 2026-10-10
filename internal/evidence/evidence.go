@@ -213,6 +213,11 @@ type Request struct {
 	// bounded local reads. Nil is reserved for trusted lifecycle captures.
 	// Explicit selection must supply it, never a caller-controlled identity.
 	Authorize func() error
+	// Uncaptured lets CaptureBeforeCleanup proceed for a checkout Git refuses
+	// with gitengine.ErrEvidenceStorageLimit, which no retry can capture. It
+	// receives the refusal and must return nil only once the checkout's work
+	// is saved elsewhere. Nil keeps the refusal fatal.
+	Uncaptured func(ctx context.Context, refusal error) error
 }
 
 type Service struct {
@@ -293,7 +298,8 @@ func (s *Service) Capture(ctx context.Context, req Request) (protocol.EvidencePa
 
 // CaptureBeforeCleanup serializes required evidence preservation with the
 // caller's checkout cleanup. cleanup is called only after Git retention,
-// transcript staging, and metadata persistence have all succeeded.
+// transcript staging, and metadata persistence have all succeeded, or after
+// req.Uncaptured accepted a checkout Git refused; that returns no packet.
 func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup func(context.Context) error) (protocol.EvidencePacket, error) {
 	if err := validateRequest(req); err != nil {
 		return protocol.EvidencePacket{}, err
@@ -303,7 +309,12 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 	defer lock.Unlock()
 	packet, err := s.captureLocked(ctx, req)
 	if err != nil {
-		return protocol.EvidencePacket{}, err
+		if req.Uncaptured == nil || !errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+			return protocol.EvidencePacket{}, err
+		}
+		if saveErr := req.Uncaptured(ctx, err); saveErr != nil {
+			return protocol.EvidencePacket{}, fmt.Errorf("evidence: keep uncaptured run %s: %w", req.RunID, saveErr)
+		}
 	}
 	if cleanup != nil {
 		cleanupCtx, cancel := s.cleanupContext(ctx)

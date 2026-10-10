@@ -507,6 +507,14 @@ to eligible finished runs in the selected workspace, including archived
 runs. A run whose container was freed cannot be reopened; the existing checkout and history retention rules still apply.
 These actions use the same evidence-preserving cleanup as Kill: an evidence
 or runtime error leaves cleanup incomplete and is shown in the dashboard.
+The exception is a checkout Git refuses to capture, because its files exceed
+the 64 MiB evidence bound or the disk lacks headroom for the copy. No retry
+can capture it, so the container is released without an evidence packet and
+the server logs `scheduler: release run without evidence` with the refusal;
+the checkout stays. Checkout cleanup then commits and publishes the run
+branch again before removing that checkout, and logs `scheduler: remove
+checkout without evidence`. If the commit or publish fails, the checkout is
+kept and the next hourly cleanup retries.
 Unfinished finalization and interrupted-finish recovery return a release error
 instead of reporting that resources were freed.
 **Archive closed runs…** only hides runs and starts the archive deletion
