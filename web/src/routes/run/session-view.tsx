@@ -190,17 +190,25 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const viewport = useRef<HTMLDivElement>(null)
   const previous = useRef({ flat, older })
   const before = previous.current
-  const prepended = before.flat.length > 0 && flat.length > before.flat.length &&
-    flat[flat.length - before.flat.length]?.key === before.flat[0]!.key
-  const shift = prepended || (before.older && !older && flat.length === before.flat.length)
+  let shift = false
   let anchor: { index: number; offset: number } | undefined
   const handle = list.current
-  // shift anchors from the end, which also moves when live rows arrive with history.
-  if (!shift && !pinned.current && handle && before.flat.length > 0 && flat[0]?.key !== before.flat[0]?.key) {
-    const index = Math.max(Number(before.older), handle.findItemIndex(handle.scrollOffset))
-    const key = before.flat[index - Number(before.older)]?.key
-    const next = flat.findIndex((row) => row.key === key)
-    if (next >= 0) anchor = { index: next + Number(older), offset: handle.scrollOffset - handle.getItemOffset(index) }
+  if (handle && before.flat.length > 0 && (older !== before.older || flat[0]?.key !== before.flat[0]!.key)) {
+    const placeholder = Number(before.older)
+    // A page of history can merge into the first loaded row and change its key, so rows are matched from the end.
+    let kept = 0
+    while (kept < flat.length && kept < before.flat.length &&
+      flat[flat.length - 1 - kept]!.key === before.flat[before.flat.length - 1 - kept]!.key) kept++
+    const top = Math.max(0, handle.findItemIndex(handle.scrollOffset) - placeholder)
+    // shift keeps the distance from the end, which moves with any row that resizes below the reader, so a row they see is restored too.
+    shift = before.flat.length - kept <= top + 1
+    if (!pinned.current) {
+      const last = handle.findItemIndex(handle.scrollOffset + handle.viewportSize) - placeholder
+      for (let row = top; row <= last && !anchor; row++) {
+        const next = flat.findIndex((item) => item.key === before.flat[row]!.key)
+        if (next >= 0) anchor = { index: next + Number(older), offset: handle.scrollOffset - handle.getItemOffset(row + placeholder) }
+      }
+    }
   }
   useLayoutEffect(() => {
     previous.current = { flat, older }
