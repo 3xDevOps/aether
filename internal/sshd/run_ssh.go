@@ -562,6 +562,9 @@ func (c *runSSHConn) relayConn(ctx context.Context) (ssh.Conn, error) {
 		return nil, err
 	}
 	att := exec.Attachment()
+	// An execution's output is never dropped, so an unread stderr would
+	// stall the relay once it filled.
+	go func() { _, _ = io.Copy(io.Discard, att.Stderr()) }()
 	handshake := time.AfterFunc(runSSHRelayTimeout, func() { _ = att.Close() })
 	conn, chans, reqs, err := ssh.NewClientConn(devexec.Stream{Reader: att.Stdout(), Writer: att.Stdin(), Closer: att}, "", &ssh.ClientConfig{
 		// The transport is the stdio of an execution this server started,
