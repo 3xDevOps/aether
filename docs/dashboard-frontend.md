@@ -1591,10 +1591,10 @@ until the items around it load; a message the agent has not taken yet always
 shows. A page can merge into the first loaded row and change its key (tool
 calls joining a `work` row), so the list matches rows by key from the end.
 While every row below the top visible one keeps its key, it anchors the page
-from the end, which holds the reader still only while nothing below them
-resizes. When live rows arrive with the page, or the last row is mounted
-(within the 200px `overscan` below the viewport) and can still grow, it also
-restores the first mounted row that survives, by key and offset. A closed
+from the end. That keeps the distance from the end, which moves with any row
+that resizes below the reader, so an unpinned view also restores the first
+visible row that survives, by key and offset; that alone places the view when
+live rows arrive with the page. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
 opened others keep their newest 200 items. Rows: `user` (the run's

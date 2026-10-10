@@ -30,7 +30,6 @@ const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
 const bottomSlack = 24
 const historyViewports = 3
-const overscan = 200
 const userScrollWindow = 600
 const sameMessageWindow = 120_000
 
@@ -201,11 +200,11 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     while (kept < flat.length && kept < before.flat.length &&
       flat[flat.length - 1 - kept]!.key === before.flat[before.flat.length - 1 - kept]!.key) kept++
     const top = Math.max(0, handle.findItemIndex(handle.scrollOffset) - placeholder)
+    // shift keeps the distance from the end, which moves with any row that resizes below the reader, so a row they see is restored too.
     shift = before.flat.length - kept <= top + 1
-    const end = handle.findItemIndex(handle.scrollOffset + handle.viewportSize + overscan) - placeholder
-    // shift keeps the distance from the end, which moves when live rows arrive with history or a mounted last row grows.
-    if (!pinned.current && (!shift || end === before.flat.length - 1)) {
-      for (let row = top; row <= end && !anchor; row++) {
+    if (!pinned.current) {
+      const last = handle.findItemIndex(handle.scrollOffset + handle.viewportSize) - placeholder
+      for (let row = top; row <= last && !anchor; row++) {
         const next = flat.findIndex((item) => item.key === before.flat[row]!.key)
         if (next >= 0) anchor = { index: next + Number(older), offset: handle.scrollOffset - handle.getItemOffset(row + placeholder) }
       }
@@ -356,7 +355,6 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           style={enhanced && count === 0 ? { display: 'none' } : undefined}
           data={older ? [null, ...flat] : flat}
           shift={shift}
-          bufferSize={overscan}
           keepMounted={focused !== null && focused < count ? [focused] : undefined}
           onScroll={(offset) => {
             const handle = list.current
