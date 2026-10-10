@@ -326,10 +326,15 @@ function main() {
 
     // The window is a browser locked to the gateway origin: anything else
     // opens in the user's real browser, never in this privileged shell.
+    // The one other thing let out is the run view's Open in editor link, in
+    // exactly the shape the dashboard writes it: a link in agent output
+    // reaches this function too, and an editor scheme can carry far more
+    // than "open this run's checkout".
+    const editorLink = /^(?:(?:vscode|cursor):\/\/vscode-remote\/ssh-remote\+|zed:\/\/ssh\/)[a-z0-9-]+\.aether\/workspace$/
     const openExternalURL = (target) => {
       try {
         const protocol = new URL(target).protocol
-        if (protocol === 'http:' || protocol === 'https:') shell.openExternal(target)
+        if (protocol === 'http:' || protocol === 'https:' || editorLink.test(target)) shell.openExternal(target)
       } catch {
         // Invalid navigation targets are denied without launching anything.
       }
