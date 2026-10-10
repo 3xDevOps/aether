@@ -803,6 +803,38 @@ aether message <run-id> "also update the README"
 The message appears in the run's **Session** under your name, so everyone
 watching sees who sent it.
 
+### Open a run in your editor
+
+A live run is a machine your own editor attaches to over SSH. Run this once
+on your computer:
+
+```sh
+aether ssh-config
+```
+
+It writes a `Host *.aether` block to `~/.ssh/aether_config` and adds one
+`Include` line for it at the top of `~/.ssh/config`; nothing else in your
+config changes. From then on every run is an ssh host named after its id:
+
+```sh
+ssh <run-id>.aether                          # a login shell in the run's checkout
+ssh <run-id>.aether git status               # one command, with its exit status
+scp notes.md <run-id>.aether:                # into the checkout; sftp works the same way
+ssh -L 3000:localhost:3000 <run-id>.aether   # a port on the run's own loopback
+```
+
+In the dashboard, a live run's **More** menu has **Open in editor…**, with
+**VS Code**, **Cursor** and **Zed** buttons that open the checkout at
+`/workspace`. In the editor itself, connect to the SSH host
+`<run-id>.aether`. `aether ssh <run-id> [command]` works without the setup
+step.
+
+You can connect to a run you could open a shell in: your own, or a
+teammate's when you may control it and they have shared their agent account
+with you. Any other attempt is refused with the server's reason. The editor
+downloads its remote server into the run's home directory on first
+connection. [terminal.md](terminal.md#ssh-and-editors) has the details.
+
 ## 8. Review and publish the result
 
 ### Remote-only: commit, push and open a PR

@@ -397,6 +397,129 @@ run's **More** or the toolbar's **Tools**) to inspect transient captures and
 explicitly retain them with verification notes. Taking a screenshot alone
 does not retain it.
 
+## SSH and editors
+
+A live run is also an ssh host. Run this once on your computer:
+
+```sh
+aether ssh-config
+```
+
+```
+wrote /home/you/.ssh/aether_config
+added an Include line for it at the top of /home/you/.ssh/config
+ssh <run-id>.aether now opens a shell in that run. scp, sftp, rsync and editors take the same host name.
+```
+
+`~/.ssh/aether_config` holds one block, which you should not edit: running
+the command again rewrites it.
+
+```
+Host *.aether
+  ProxyCommand /usr/local/bin/aether ssh --stdio %h
+  UserKnownHostsFile "/home/you/.ssh/aether_known_hosts"
+  HostKeyAlias aether
+  StrictHostKeyChecking yes
+```
+
+The only change to `~/.ssh/config` is the `Include` line, placed first so a
+`Host *` block of your own cannot set `ProxyCommand` before it. The block
+names the `aether` binary by path, so run `aether ssh-config` again after
+moving it. `aether ssh [ssh options] <run-id> [command]` passes the same
+options to `ssh` itself and needs no configuration.
+
+The host name is the run id plus `.aether`, for example
+`run-gejd5cbk74.aether`. It reaches the server your CLI is linked to, the
+default link, over the connection every other command uses: a tailnet, an
+SSH key or an edge.
+
+### What a session runs
+
+| You run | In the run's container |
+| --- | --- |
+| `ssh <host>` | A login shell in the checkout, `/workspace`: `bash -l`, or `sh -l` in an image without bash, as a run shell starts. |
+| `ssh <host> <command>` | The command, through `bash -c` or `sh -c`. Its output and exit status come back unchanged, with no banner. |
+| `scp`, `sftp` | Aether's own SFTP server, so the image needs none. Relative paths are in the checkout. |
+| `ssh -L`, `-D`, `-W` | A connection to a port on the run's own loopback: `localhost`, `127.0.0.1` or `::1`. Any other destination is refused. |
+
+Every process runs as the container's user with the container's environment,
+like a run shell. `ssh -t` and a plain `ssh <host>` get a terminal, and
+resizing your window resizes it. `TERM`, `LANG` and `LC_*` come from your
+side; other `SendEnv` variables are refused. Several sessions can share one
+connection (`ControlMaster`).
+
+`scp -O` and `rsync` run `scp` and `rsync` inside the container, so the image
+has to have them; the standard image has `scp` and no `rsync`. Agent
+forwarding, X11 forwarding, remote forwarding (`ssh -R`) and `signal`
+requests are refused.
+
+**A session's processes end with it.** When its command exits or the
+connection drops, everything the session started is stopped, background and
+detached processes included. Start what must outlive your connection from a
+run shell (**+ Shell**) or through the agent.
+
+Pausing the run freezes its SSH sessions with everything else in the
+container. The connection stays open and carries on when the run resumes;
+until then a new session or forward is refused. A session dropped while the
+run is paused is stopped when it resumes.
+
+One run takes 16 SSH connections at a time. One connection takes 10 sessions
+and 64 forwarded connections.
+
+### Who can connect
+
+Exactly who can open a writable run shell: a member with `steer` on the run
+([teams.md](teams.md#roles)) who owns the run's agent account or has been
+given it ([Account sharing](security.md#account-sharing)), while the run is
+`running` or `needs-attention` and not paused. The server checks again every
+few seconds and closes the connection once the member may no longer open it
+or the run has finished. Each
+time a member connects to a run they have no other SSH connection to,
+**Activity** shows **Connected over SSH** beside their avatar.
+
+A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
+`Connection closed by UNKNOWN port 65535`:
+
+| Message | What happened |
+| --- | --- |
+| `aether: ssh into <run-id>: run not found` | No run has that id on the server the CLI is linked to. |
+| `aether: ssh into <run-id>: permission denied: run is protected: only its owner or an admin may steer` | The run is protected and is not yours. The other steer refusals read the same way. |
+| `aether: ssh into <run-id>: permission denied: member <member-id> has not shared their account with you` | The run uses that member's agent account. |
+| `aether: ssh into <run-id>: scheduler: the run has no live environment: the run is paused` | Resume the run. A finished run names its status and says its container is gone. |
+| `aether: ssh into <run-id>: run <run-id> already has 16 SSH connections open, the most one run takes` | Close one. |
+| `aether: not linked; run aether link <addr>` | This computer's CLI has no server yet. |
+| `ssh: Could not resolve hostname <run-id>.aether` | `aether ssh-config` has not been run here. |
+
+### Editors
+
+**Open in editor…** in a live run's **More** menu has a button per editor
+and the two commands above. It is not offered on a phone, for a finished
+run, or to a member who may not control the run.
+
+| Editor | Connect from the editor | Link the button opens |
+| --- | --- | --- |
+| VS Code, with the Remote - SSH extension | **Remote-SSH: Connect to Host…**, then `<run-id>.aether` | `vscode://vscode-remote/ssh-remote+<run-id>.aether/workspace` |
+| Cursor | **Remote-SSH: Connect to Host…**, then `<run-id>.aether` | `cursor://vscode-remote/ssh-remote+<run-id>.aether/workspace` |
+| Zed | **Connect New Server**, then `ssh <run-id>.aether` | `zed://ssh/<run-id>.aether/workspace` |
+
+An editor installs its own server in the container on first connection, so
+the run needs:
+
+- **A glibc Linux image.** The standard image is one. These servers are
+  built for glibc; check your editor's requirements before attaching to a
+  musl image such as Alpine.
+- **A writable home.** A run's home is its launcher's persistent home
+  ([environment-home.md](environment-home.md)), so the server
+  (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`) is downloaded
+  once and reused by that member's later runs. A teammate who attaches to
+  your run installs their editor's server in your home.
+- **Outbound network** from the container, where the editor downloads its
+  server.
+
+Because a session's processes end with it, an editor that loses its
+connection starts its server again when it reconnects, and whatever was
+running in the editor's own terminals is gone.
+
 ## Set up agents and GitHub
 
 The Agents page and the onboarding wizard set up an agent in three steps. In
