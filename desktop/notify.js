@@ -7,8 +7,7 @@
 
 const { app, Notification } = require('electron')
 
-// Runs currently needing attention, each with the notification shown for it
-// once its name is known; its size is the dock/taskbar badge.
+// Runs currently needing attention; its size is the dock/taskbar badge.
 const needsAttention = new Map()
 
 let socket = null
@@ -72,13 +71,13 @@ function connect(wsURL) {
     const p = ev.payload || {}
     if (p.to === 'needs-attention') {
       if (!needsAttention.has(ev.run_id)) {
-        needsAttention.set(ev.run_id, null)
+        const shown = { notification: null }
+        needsAttention.set(ev.run_id, shown)
         updateBadge()
-        void show(ev.run_id, p.reason)
+        void show(ev.run_id, p.reason, shown)
       }
     } else if (needsAttention.has(ev.run_id)) {
-      // The need has cleared, so its notification goes with it.
-      needsAttention.get(ev.run_id)?.close()
+      needsAttention.get(ev.run_id).notification?.close()
       needsAttention.delete(ev.run_id)
       updateBadge()
     }
@@ -111,7 +110,7 @@ function scheduleReconnect(wsURL) {
   }, delay)
 }
 
-async function show(runId, reason) {
+async function show(runId, reason, shown) {
   if (!Notification.isSupported()) return
   // run.status carries {from, to, reason} and no name, so the run is read
   // for it. A run that cannot be read is still announced, by its ID.
@@ -126,12 +125,12 @@ async function show(runId, reason) {
   } catch {
     // the gateway went away; the fallback below still names the run
   }
-  // It resumed, or the stream dropped, while its name was being read.
-  if (!needsAttention.has(runId)) return
-  const n = new Notification({ title: run ? titleOf(run) : runId, body: bodyOf(run || { reason }) })
-  n.on('click', () => openRun(runId))
-  needsAttention.set(runId, n)
-  n.show()
+  // The run resumed, or the stream dropped, while its name was being read.
+  // Needing attention again since then is another entry, with its own read.
+  if (needsAttention.get(runId) !== shown) return
+  shown.notification = new Notification({ title: run ? titleOf(run) : runId, body: bodyOf(run || { reason }) })
+  shown.notification.on('click', () => openRun(runId))
+  shown.notification.show()
 }
 
 // titleOf and bodyOf are runTitle and statusBody of internal/push/need.go,
