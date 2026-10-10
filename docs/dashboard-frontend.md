@@ -2134,8 +2134,9 @@ both what it renders and the overlap set the conflict chips read.
   the text and, when the tab holds it, the control lease. It posts a room
   `steer_request` and returns the room message, whose `state` is the receipt,
   so the composer's rules in [Run control](terminal.md#run-control) apply
-  unchanged. A send the server has not answered keeps its idempotency key per
-  run: the same text sent again is delivered once. The review bar passes the
+  unchanged. A send the server has not answered keeps its idempotency key by
+  run and text until it is answered or another member signs in: the same text
+  sent again is delivered once, whatever went to the run in between. The review bar passes the
   lease and, for the owner of a run nobody controls, takes it first
   (`useImplicitControl`); anyone else's review waits 45 seconds for the
   controller, and the bar says so. **Send to agent** is disabled, with the
