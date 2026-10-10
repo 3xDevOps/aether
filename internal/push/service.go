@@ -77,10 +77,13 @@ type Service struct {
 	wg   sync.WaitGroup
 	stop context.CancelFunc
 
-	mu      sync.Mutex
-	sub     events.Subscription
-	closed  bool
-	active  map[domain.MemberID]time.Time
+	mu     sync.Mutex
+	sub    events.Subscription
+	closed bool
+	active map[domain.MemberID]time.Time
+	outbox map[domain.RunID]*outbox
+
+	// waiting is owned by the consume goroutine.
 	waiting map[domain.RunID]*standing
 }
 
@@ -97,6 +100,22 @@ type notification struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Run   string `json:"run,omitempty"`
+}
+
+// message is one announcement on its way to a member's devices.
+type message struct {
+	member  domain.MemberID
+	payload []byte
+	topic   string
+}
+
+// outbox orders one run's announcements. Every message for a run carries the
+// same topic and replaces the last one on a device, so they must arrive in
+// order: one is sent at a time, only the newest waits behind it, and the one
+// being sent stops at the next device once it is stale.
+type outbox struct {
+	next  *message
+	stale bool
 }
 
 // New loads the server's VAPID key, creating it on first use; call Start to
@@ -123,6 +142,7 @@ func New(cfg Config) (*Service, error) {
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
 		active:  map[domain.MemberID]time.Time{},
+		outbox:  map[domain.RunID]*outbox{},
 		waiting: map[domain.RunID]*standing{},
 	}, nil
 }
@@ -166,8 +186,8 @@ func (s *Service) Close() error {
 	return nil
 }
 
-// consume owns s.waiting. A dropped event costs at most one announcement,
-// so a slow consumer is not replayed: an old need would be announced late.
+// A dropped event costs at most one announcement, so a slow consumer is not
+// replayed: an old need would be announced late.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
@@ -200,15 +220,12 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 // evaluate reads the run and announces its need when one is new and due.
 func (s *Service) evaluate(ctx context.Context, id domain.RunID, now time.Time) {
 	run, n, err := s.read(ctx, id)
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Warn("push: read run", "run", id, "error", err)
-		}
-		delete(s.waiting, id)
-		return
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		slog.Warn("push: read run", "run", id, "error", err)
 	}
-	if n == nil {
+	if err != nil || n == nil {
 		delete(s.waiting, id)
+		s.post(ctx, id, nil)
 		return
 	}
 	st := s.waiting[id]
@@ -233,9 +250,45 @@ func (s *Service) evaluate(ctx context.Context, id domain.RunID, now time.Time) 
 		return
 	}
 	digest := sha256.Sum256([]byte(run.ID))
-	topic := b64.EncodeToString(digest[:])[:32]
-	member := run.MemberID
-	s.wg.Go(func() { s.deliver(ctx, member, payload, topic) })
+	s.post(ctx, id, &message{member: run.MemberID, payload: payload, topic: b64.EncodeToString(digest[:])[:32]})
+}
+
+// post makes m the run's next announcement, or with a nil m withdraws what
+// has not been sent yet because the run no longer needs anyone.
+func (s *Service) post(ctx context.Context, id domain.RunID, m *message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	box := s.outbox[id]
+	if box != nil {
+		box.next, box.stale = m, true
+		return
+	}
+	if m == nil {
+		return
+	}
+	box = &outbox{next: m}
+	s.outbox[id] = box
+	s.wg.Go(func() { s.drain(ctx, id, box) })
+}
+
+func (s *Service) drain(ctx context.Context, id domain.RunID, box *outbox) {
+	for {
+		s.mu.Lock()
+		m := box.next
+		box.next, box.stale = nil, false
+		if m == nil {
+			delete(s.outbox, id)
+		}
+		s.mu.Unlock()
+		if m == nil {
+			return
+		}
+		s.deliver(ctx, m, func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return box.stale
+		})
+	}
 }
 
 // read is the run as it stands and what it needs of its owner, if anything.
@@ -266,17 +319,20 @@ func (s *Service) freeAt(member domain.MemberID) time.Time {
 	return s.active[member].Add(s.quiet)
 }
 
-// deliver sends payload to every device of member, forgetting the ones the
-// push service reports gone.
-func (s *Service) deliver(ctx context.Context, member domain.MemberID, payload []byte, topic string) {
-	subs, err := s.store.ListPushSubscriptions(ctx, member)
+// deliver sends m to every device of its member until it is stale,
+// forgetting the devices the push service reports gone.
+func (s *Service) deliver(ctx context.Context, m *message, stale func() bool) {
+	subs, err := s.store.ListPushSubscriptions(ctx, m.member)
 	if err != nil {
-		slog.Warn("push: list subscriptions", "member", member, "error", err)
+		slog.Warn("push: list subscriptions", "member", m.member, "error", err)
 		return
 	}
 	for _, sub := range subs {
-		if err := s.send(ctx, sub, payload, topic); err != nil {
-			slog.Warn("push: notification not delivered", "member", member, "error", err)
+		if stale() {
+			return
+		}
+		if err := s.send(ctx, sub, m.payload, m.topic); err != nil {
+			slog.Warn("push: notification not delivered", "member", m.member, "error", err)
 		}
 	}
 }
