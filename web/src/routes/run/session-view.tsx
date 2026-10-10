@@ -54,6 +54,7 @@ function historyFloor(session: AcpSession | undefined): number {
 
 function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): SessionRow[] {
   const steers = room.filter((m) => m.kind === 'steer_request')
+  const partial = floor > -Infinity
   const used = new Set<string>()
   const matched = rows.map((row) => {
     if (row.kind !== 'user') return row
@@ -61,10 +62,13 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
     const sameImageMessage = imageMessageID !== undefined && row.images!.every((image) => image.messageID === imageMessageID)
     const sameText = (m: RoomMessage) => !used.has(m.id) && !m.attachments?.length && m.body.trim() === row.body.trim() &&
       Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow
-    // A repeated prompt from before the floor belongs to a row that is not loaded yet.
+    // The oldest copy of a repeated prompt may belong to a row that is not loaded,
+    // so a delivered copy sent within the loaded items, before this row, comes first.
+    const loadedCopy = (m: RoomMessage) => sameText(m) && deliveryOf(m).delivery === 'Sent' &&
+      Date.parse(m.created_at) >= floor && Date.parse(m.created_at) <= Date.parse(row.at)
     const steer = imageMessageID
       ? sameImageMessage && steers.find((m) => m.id === imageMessageID)
-      : steers.find((m) => sameText(m) && Date.parse(m.created_at) >= floor) ?? steers.find(sameText)
+      : (partial ? steers.find(loadedCopy) : undefined) ?? steers.find(sameText)
     const messageID = steer ? steer.id : sameImageMessage ? imageMessageID : undefined
     if (messageID) {
       if (used.has(messageID)) return null

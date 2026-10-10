@@ -1502,10 +1502,10 @@ and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
 answer") with the amber dot while a request is pending. A person's
-message is matched to the room message that carried it for its author,
-preferring one sent within the loaded items when the same text was sent more
-than once; one not in the log yet shows its delivery word. One polite
-`status` region
+message is matched to the room message that carried it for its author. While
+older items remain and the same text was sent more than once, a delivered
+room message sent within the loaded items, before the row, is matched first.
+One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.

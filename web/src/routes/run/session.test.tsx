@@ -234,6 +234,38 @@ describe('the Enhanced session view', () => {
     expect(api.runACPHistory).toHaveBeenCalledWith('run_1', latest.seq, 1000)
   })
 
+  it('keeps a queued copy of the oldest loaded prompt as its own row', async () => {
+    const [gone, prompt] = [item('turn_start', 1), say(1, 'user', 'continue')]
+    vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)
+    open()
+    acpSocket().open({ oldest_seq: prompt.seq }, [prompt])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    act(() => {
+      useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_sent', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: gone.time }))
+      useStore.getState().upsertRoomMessage(roomMessage({
+        id: 'msg_queued', actor_id: bob.id, kind: 'steer_request', body: 'continue', agent_delivery: 'queued',
+        created_at: new Date(Date.parse(prompt.time) + 1000).toISOString(),
+      }))
+    })
+    expect(await within(log).findByText('Queued')).toBeDefined()
+    expect(within(log).getAllByText('continue')).toHaveLength(2)
+    expect(within(log).getAllByText('Sent')).toHaveLength(1)
+  })
+
+  it('shows a repeated prompt once while its earlier copies are not loaded', async () => {
+    const [gone, reply, prompt] = [item('turn_start', 1), say(1, 'assistant', 'Rounded.'), say(1, 'user', 'continue')]
+    vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)
+    open()
+    acpSocket().open({ oldest_seq: reply.seq }, [reply, prompt])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    act(() => {
+      useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_early', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: gone.time }))
+      useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_recent', kind: 'steer_request', body: 'continue', agent_delivery: 'delivered', created_at: reply.time }))
+    })
+    expect(await within(log).findByText('Sent')).toBeDefined()
+    expect(within(log).getAllByText('continue')).toHaveLength(1)
+  })
+
   it('docks a permission on the composer and answers it with the lease, by click or by digit', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [permission] }) }, [
