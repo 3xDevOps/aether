@@ -34,6 +34,11 @@ type ExecSpec struct {
 	Env         []string
 	Cols, Rows  uint
 	CreationKey string
+	// Lossless makes every output stream slow the command when its reader
+	// falls behind, instead of dropping the oldest bytes past the buffer.
+	// The caller must then read them all: one unread stream stalls the
+	// others.
+	Lossless bool
 }
 
 // ExecIdentity must be persisted before publishing the terminal. ExecID names a

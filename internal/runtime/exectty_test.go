@@ -15,7 +15,7 @@ import (
 
 func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close() })
 	go func() {
 		_, _ = io.WriteString(writer, "final command output\n")
@@ -46,7 +46,7 @@ func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 	reader, writer := net.Pipe()
 	defer func() { _ = writer.Close() }()
-	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	readDone := make(chan error, 1)
 	go func() {
 		_, err := io.ReadAll(attachment.Stdout())
@@ -72,7 +72,7 @@ func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 
 func TestExecAttachmentPublishesDeviceCodeBeforeEOF(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "oauth-exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "oauth-exec", false, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close(); _ = writer.Close() })
 	const code = "! First copy your one-time code: ABCD-1234"
 	const url = "Open this URL to continue in your web browser: https://github.com/login/device"
@@ -137,7 +137,7 @@ func TestExecAttachmentPublishesDeviceCodeBeforeEOF(t *testing.T) {
 
 func TestPipeExecStdoutIsLossless(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", false, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close() })
 	const total = maxStreamBuffer + 3<<20
 	go func() {
@@ -157,5 +157,43 @@ func TestPipeExecStdoutIsLossless(t *testing.T) {
 	n, err := io.Copy(io.Discard, attachment.Stdout())
 	if err != nil || n != total {
 		t.Fatalf("read %d bytes (%v), want %d", n, err, total)
+	}
+}
+
+func TestLosslessExecKeepsStderrAndTerminalOutput(t *testing.T) {
+	const total = maxStreamBuffer + 3<<20
+	for name, tc := range map[string]struct {
+		tty    bool
+		stream func(*execAttachment) io.Reader
+	}{
+		"pipe stderr": {false, (*execAttachment).Stderr},
+		"terminal":    {true, (*execAttachment).Stdout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader, writer := net.Pipe()
+			attachment := newExecAttachment(nil, "exec", tc.tty, true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+			t.Cleanup(func() { _ = attachment.Close() })
+			go func() {
+				// A terminal's stream is raw; a pipe's stderr arrives
+				// in Docker frames of stream 2.
+				chunk := make([]byte, 32<<10)
+				if !tc.tty {
+					chunk = make([]byte, 8+32<<10)
+					chunk[0] = byte(stdcopy.Stderr)
+					binary.BigEndian.PutUint32(chunk[4:8], 32<<10)
+				}
+				for sent := 0; sent < total; sent += 32 << 10 {
+					if _, err := writer.Write(chunk); err != nil {
+						return
+					}
+				}
+				_ = writer.Close()
+			}()
+			time.Sleep(200 * time.Millisecond)
+			n, err := io.Copy(io.Discard, tc.stream(attachment))
+			if err != nil || n != total {
+				t.Fatalf("read %d bytes (%v), want %d", n, err, total)
+			}
+		})
 	}
 }

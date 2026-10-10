@@ -16,7 +16,8 @@ var ErrRunPaused = fmt.Errorf("%w: the run is paused", ErrNoLiveEnvironment)
 
 // RunExec is one process a member's SSH connection starts in a run's
 // container. It runs as the container's user, with its environment, in the
-// run's checkout.
+// run's checkout. None of its output is ever dropped, so the caller must
+// read every stream.
 type RunExec struct {
 	Argv       []string
 	Env        []string
@@ -64,7 +65,7 @@ func (s *Scheduler) StartRunExec(ctx context.Context, id domain.RunID, p control
 	}
 	exec := runtime.ExecSpec{
 		Argv: spec.Argv, WorkingDir: live.Workdir, Env: spec.Env,
-		Cols: spec.Cols, Rows: spec.Rows, CreationKey: "ssh-" + rand.Text(),
+		Cols: spec.Cols, Rows: spec.Rows, CreationKey: "ssh-" + rand.Text(), Lossless: true,
 	}
 	if spec.TTY {
 		return managed.StartExecTTY(ctx, live.ContainerID, exec)
