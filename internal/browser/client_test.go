@@ -103,23 +103,39 @@ func TestTypedOperationLimits(t *testing.T) {
 	}
 }
 
+type stalledBody struct{ ctx context.Context }
+
+func (b stalledBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+func (stalledBody) Close() error { return nil }
+
 func TestStalledCompanionIsATimeout(t *testing.T) {
 	client := NewClient("unused")
 	defer client.Close()
-	client.http.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
-		<-request.Context().Done()
-		return nil, request.Context().Err()
-	})
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
-	defer cancel()
-	_, err := client.Health(ctx)
-	var browserErr *Error
-	if !errors.As(err, &browserErr) || browserErr.Code != "timeout" {
-		t.Fatalf("stalled companion = %v", err)
+	stalls := map[string]transportFunc{
+		"before headers": func(request *http.Request) (*http.Response, error) {
+			<-request.Context().Done()
+			return nil, request.Context().Err()
+		},
+		"mid body": func(request *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: stalledBody{request.Context()}}, nil
+		},
 	}
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := client.Health(cancelled); errors.As(err, &browserErr) {
-		t.Fatalf("caller cancellation reported as %v", err)
+	for name, stall := range stalls {
+		client.http.Transport = stall
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		_, err := client.Health(ctx)
+		cancel()
+		var browserErr *Error
+		if !errors.As(err, &browserErr) || browserErr.Code != "timeout" {
+			t.Fatalf("stalled %s = %v", name, err)
+		}
+		cancelled, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := client.Health(cancelled); errors.As(err, &browserErr) {
+			t.Fatalf("caller cancellation %s reported as %v", name, err)
+		}
 	}
 }
