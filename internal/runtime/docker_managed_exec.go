@@ -97,7 +97,7 @@ func (d *Docker) startManagedExec(ctx context.Context, id ID, spec ExecSpec, tty
 	if err != nil {
 		return nil, fmt.Errorf("runtime: attach managed execution: %w", err)
 	}
-	execution.attachment = newExecAttachment(d.cli, created.ID, tty, attached.HijackedResponse)
+	execution.attachment = newExecAttachment(d.cli, created.ID, tty, spec.Lossless, attached.HijackedResponse)
 	if _, err := execution.control(ctx, "start", 0); err != nil {
 		return nil, err
 	}

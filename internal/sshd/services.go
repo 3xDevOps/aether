@@ -42,6 +42,8 @@ type Services struct {
 	Integration IntegrationService
 	// Development is the live run terminal, browser, and capture broker.
 	Development DevelopmentService
+	// RunSSH starts the processes behind ssh into a run.
+	RunSSH RunSSHService
 	// RunRepo executes native Git/GitHub commands in the selected run account.
 	RunRepo RunRepoService
 	// GitHub reads repositories accessible to the caller's native gh account.

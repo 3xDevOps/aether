@@ -928,9 +928,75 @@ exclude arbitrary live-agent filesystem writers. A stale or failed save leaves
 the browser draft available. Repeat imports do not replace open editor buffers;
 **Reload from server** explicitly discards a draft and reads remote content.
 
+## SSH into a run
+
+`ssh <run-id>.aether` ([terminal.md](terminal.md#ssh-and-editors)) gives a
+member a shell, file transfer and port forwarding in a run's container. It
+is a second door into the place a run shell already reaches, not a wider
+one.
+
+- **Admission is the run shell's.** The `aether-run-ssh` subsystem asks
+  exactly what a writable shell tab asks (`developmentAuthority` in
+  `internal/sshd`, then the scheduler's development authorization): current
+  membership, **Steer** on the run, access to the run's backing account, and
+  a `running` or `needs-attention` run that is not paused. The check runs
+  again for every session and every forwarded connection, and every few
+  seconds for the connection as a whole, which is closed once the member
+  fails it or the run has finished. A pause closes nothing: the connection's
+  processes are frozen with the container, and it starts nothing new until
+  the run resumes. A refusal carries the server's reason. Each connection a member opens to a
+  run they have no other SSH connection to is stamped on the workspace
+  timeline under that member.
+- **The run asks for no second credential.** The member is authenticated by
+  the connection the `aether` CLI makes: tailnet identity, SSH key or edge
+  device ([networking.md](networking.md)). The SSH connection the member's
+  `ssh` client speaks is nested inside one channel of it and is reachable no
+  other way, so it accepts any user name and no key. It presents the
+  server's own host key. The CLI has verified that key on its own
+  connection and writes it to `~/.ssh/aether_known_hosts`, which is why
+  `ssh` can check it strictly without ever prompting.
+- **No sshd, no port and no key in the container.** The server speaks the
+  SSH protocol itself and starts each session as an owned execution in the
+  container, the way run shells start. Nothing listens for it in the
+  container or on the host.
+- **The server picks the container.** It resolves the run id to its
+  supervised container after authorization; a client names no container,
+  path, user or host. A session runs as that container's user with its
+  filesystem, network, home and credentials, so what
+  [Remote development](#remote-development-and-browser-isolation) says of a
+  run shell holds here: it is not a restricted sandbox, and it is not a way
+  out of one. There is no path to a shell on the server host, to another
+  run, or to a container the member could not open a shell in.
+- **Forwarding stays in the run.** `ssh -L`, `-D` and `-W` are accepted for
+  `localhost` and loopback addresses only, and the connection is dialed by a
+  process inside the run's network namespace
+  (`aether-internal dev-exec forward`), never by the server. It cannot reach
+  the host's loopback or another container. Remote forwarding, agent
+  forwarding and X11 are refused.
+- **A session owns its processes.** When a session ends, its connection
+  drops, or its authorization is withdrawn, everything it started is
+  stopped; in a paused container, as soon as the run resumes. A server that
+  is killed instead of shut down stops nothing: a session's processes then
+  run until they exit or the run's container stops.
+- **Bounded.** A run takes 16 SSH connections; a connection takes 10
+  sessions and 64 forwarded connections. Every process runs inside the
+  run's container, under its CPU, memory and process limits.
+- **Not recorded.** An SSH session has no transcript and no control lease.
+  Teammates see that a member connected, not what they did.
+
+The desktop app lets one kind of link leave its window besides `http` and
+`https`: the **Open in editor…** links, matched in full as
+`vscode://vscode-remote/ssh-remote+<run-id>.aether/workspace`, the same
+under `cursor://`, and `zed://ssh/<run-id>.aether/workspace`. Links in agent
+output pass through the same filter, so the worst such a link does is open
+an editor on a run the member can already connect to. Every other use of
+those schemes is dropped.
+
 ## SSH port forwarding
 
-Port forwarding is limited to direct-tcpip channels whose destination is
+`aether forward` and the dashboard's OAuth forwards open channels on the
+CLI's own connection, not through `ssh`. There, port forwarding is limited
+to direct-tcpip channels whose destination is
 `run:<run-id>` or exactly `terminal`. Run targets require the Steer capability
 for the authenticated member; the terminal target resolves that member's own
 live environment container and requires current membership. The server

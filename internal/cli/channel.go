@@ -81,7 +81,7 @@ func (c *Conn) openSubsystem(name string, pty *ptyGeometry) (*sessionStream, err
 	}
 	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Subsystem string }{name}))
 	if err == nil && !ok {
-		err = errors.New("request refused")
+		err = errSubsystemRefused
 	}
 	if err != nil {
 		_ = ch.Close()
