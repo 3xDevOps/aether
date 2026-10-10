@@ -266,6 +266,12 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	if left, _ := identities(t, e).ListInvitations(context.Background()); len(left) != 0 {
 		t.Fatalf("invitation %s not consumed: %+v", inv.ID, left)
 	}
+	// The connection that loses the race looks for its invitation after the
+	// other one consumed it.
+	late, err := e.srv.edgeInvitee(context.Background(), identities(t, e), account, edgeproto.DeviceKeyLine(signer.PublicKey()), "laptop")
+	if err != nil || string(late.ID) != got.ID {
+		t.Fatalf("accept after the invitation was consumed = %+v, %v; want member %s", late, err, got.ID)
+	}
 	// Another account that now holds the verified email is another
 	// member, and the consumed invitation admits nobody else.
 	other := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "7007", Login: "someone", Email: "octo@example.com", IdentityAt: time.Now()}

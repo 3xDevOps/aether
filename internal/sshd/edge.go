@@ -339,7 +339,13 @@ func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, accou
 		return nil, err
 	}
 	if len(invs) == 0 {
-		return nil, notMember
+		// Another connection of this account may have accepted its
+		// invitation since admitEdge found no member.
+		m, lookupErr := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
+		if errors.Is(lookupErr, store.ErrNotFound) {
+			return nil, notMember
+		}
+		return m, lookupErr
 	}
 	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
 		return nil, s.invitationDevice(ctx, ids, invs[0], account, keyLine, label)
