@@ -608,7 +608,7 @@ call is refused with `-32602`, and with a lease another session holds with
 | `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
 | `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
-| `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 500 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
+| `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 1000 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
 | `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole; expired IDs return unavailable with an explicit retained-history expiry message, missing IDs return not-found |
 | `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |
 
