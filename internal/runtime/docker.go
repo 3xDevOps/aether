@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,8 @@ const (
 	labelManaged       = "aether.managed"
 	labelSetupScript   = "aether.setup-script"
 	labelSetupSentinel = "aether.setup-sentinel"
+	// labelSecretEnv holds Spec.SecretEnv, the names only, as a JSON array.
+	labelSecretEnv = "aether.secret-env"
 	// labelCreationKey persists Spec.CreationKey so FindByCreationKey can
 	// recover a container created before its ID was persisted.
 	labelCreationKey = "aether.creation-key"
@@ -43,6 +46,10 @@ const (
 
 // execOutputLimit covers stdout and stderr together.
 const execOutputLimit = 1 << 20
+
+// setupOutputLimit is how much of a setup script's output is kept, from the
+// end, where the failure is.
+const setupOutputLimit = 16 << 10
 
 // hijackWriteTimeout bounds one stdin write. Cancellation interrupts a write
 // only through its deadline; it never closes the shared stdin stream.
@@ -177,6 +184,10 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 		cfg.Cmd = spec.Command
 		cfg.Labels[labelSetupScript] = spec.SetupScript
 		cfg.Labels[labelSetupSentinel] = sentinel
+		if len(spec.SecretEnv) > 0 {
+			names, _ := json.Marshal(spec.SecretEnv)
+			cfg.Labels[labelSecretEnv] = string(names)
+		}
 	}
 
 	initEnabled := true
@@ -341,7 +352,8 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 		return nil
 	}
 	sentinel := info.Container.Config.Labels[labelSetupSentinel]
-	if err := d.runSetup(ctx, id, script, sentinel, info.Container.Config.WorkingDir); err != nil {
+	secrets := secretEnvValues(info.Container.Config.Labels[labelSecretEnv], info.Container.Config.Env)
+	if err := d.runSetup(ctx, id, script, sentinel, info.Container.Config.WorkingDir, secrets); err != nil {
 		// Never kill a run that was already live before this Start call: a
 		// redundant Start must not take down a healthy container.
 		if !wasRunning {
@@ -356,8 +368,8 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 	return nil
 }
 
-func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir string) error {
-	code, output, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "")
+func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir string, secrets []string) error {
+	code, output, _, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "")
 	if err != nil {
 		slog.Error("runtime: setup gate probe failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: probe setup gate: %w", err)
@@ -365,17 +377,18 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	if code == 0 {
 		return nil // setup already completed for this container
 	}
-	code, output, err = d.execCombined(ctx, id, []string{"/bin/sh", "-ec", script}, workDir)
+	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", script}, workDir)
+	output = setupOutput(output, cut, secrets)
 	if err != nil {
 		slog.Error("runtime: setup script execution failed", "container", id, "working_dir", workDir, "script", script, "output", output, "error", err)
 		return fmt.Errorf("runtime: setup script: %w", err)
 	}
 	if code != 0 {
 		slog.Error("runtime: setup script exited nonzero", "container", id, "working_dir", workDir, "script", script, "output", output, "exit_code", code)
-		return fmt.Errorf("runtime: setup script exited %d: %s", code, strings.TrimSpace(output))
+		return &SetupError{ExitCode: code, Output: output}
 	}
 	release := []string{"/bin/sh", "-c", "mkdir -p /tmp && : > " + sentinel}
-	code, output, err = d.execCombined(ctx, id, release, "")
+	code, output, _, err = d.execCombined(ctx, id, release, "")
 	if err != nil {
 		slog.Error("runtime: release setup gate failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: release setup gate: %w", err)
@@ -387,14 +400,87 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	return nil
 }
 
-// execCombined is Exec for the setup script, whose log lines want one
-// transcript rather than two streams.
-func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir string) (int, string, error) {
-	code, stdout, stderr, err := d.Exec(ctx, id, cmd, workDir)
-	return code, stdout + stderr, err
+func secretEnvValues(label string, env []string) []string {
+	var names []string
+	if json.Unmarshal([]byte(label), &names) != nil {
+		return nil
+	}
+	var values []string
+	for _, pair := range env {
+		name, value, _ := strings.Cut(pair, "=")
+		if value != "" && slices.Contains(names, name) {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+// setupOutput masks exact secret values, longest first so a secret holding
+// another is masked whole, then keeps the last setupOutputLimit bytes. cut
+// says output already lost its beginning, which may have split a secret: the
+// span that could hold its remainder is dropped.
+func setupOutput(output string, cut bool, secrets []string) string {
+	if len(secrets) > 0 {
+		slices.SortFunc(secrets, func(a, b string) int { return len(b) - len(a) })
+		pairs := make([]string, 0, 2*len(secrets))
+		for _, secret := range secrets {
+			pairs = append(pairs, secret, "***")
+		}
+		output = strings.NewReplacer(pairs...).Replace(output)
+		if cut {
+			output = output[min(len(secrets[0]), len(output)):]
+		}
+	}
+	if cut || len(output) > setupOutputLimit {
+		output = output[max(0, len(output)-setupOutputLimit):]
+		if i := strings.IndexByte(output, '\n'); i >= 0 {
+			output = output[i+1:]
+		}
+		output = "[earlier output omitted]\n" + output
+	}
+	return strings.ToValidUTF8(output, "\uFFFD")
+}
+
+// tailWriter keeps the last limit bytes written to it.
+type tailWriter struct {
+	limit int
+	buf   []byte
+	cut   bool
+}
+
+func (w *tailWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	if over := len(w.buf) - w.limit; over > 0 {
+		w.buf = w.buf[:copy(w.buf, w.buf[over:])]
+		w.cut = true
+	}
+	return len(p), nil
+}
+
+// execCombined is Exec for the setup script: stdout and stderr as one
+// transcript in arrival order, of which the last execOutputLimit bytes are
+// kept however much the script prints. cut reports that more was printed.
+func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir string) (code int, output string, cut bool, err error) {
+	tail := &tailWriter{limit: execOutputLimit}
+	code, err = d.exec(ctx, id, cmd, workDir, func(r io.Reader) error {
+		_, copyErr := stdcopy.StdCopy(tail, tail, r)
+		return copyErr
+	})
+	return code, string(tail.buf), tail.cut, err
 }
 
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
+	var stdout, stderr string
+	code, err := d.exec(ctx, id, cmd, workDir, func(r io.Reader) (copyErr error) {
+		stdout, stderr, copyErr = readExecOutput(r)
+		return copyErr
+	})
+	return code, stdout, stderr, err
+}
+
+// exec runs cmd in the container, hands its multiplexed output to read, and
+// returns its exit code.
+func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir string, read func(io.Reader) error) (int, error) {
 	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
 		Cmd:          cmd,
 		WorkingDir:   workDir,
@@ -402,11 +488,11 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 		AttachStderr: true,
 	})
 	if err != nil {
-		return 0, "", "", fmt.Errorf("exec create: %w", err)
+		return 0, fmt.Errorf("exec create: %w", err)
 	}
 	att, err := d.cli.ExecAttach(ctx, created.ID, client.ExecAttachOptions{})
 	if err != nil {
-		return 0, "", "", fmt.Errorf("exec attach: %w", err)
+		return 0, fmt.Errorf("exec attach: %w", err)
 	}
 	defer att.Close()
 	// After the hijack, ctx no longer governs the connection; closing it on
@@ -420,24 +506,24 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 		case <-watchDone:
 		}
 	}()
-	stdout, stderr, copyErr := readExecOutput(att.Reader)
+	copyErr := read(att.Reader)
 	if err := ctx.Err(); err != nil {
-		return 0, stdout, stderr, err
+		return 0, err
 	}
 	if copyErr != nil {
-		return 0, stdout, stderr, fmt.Errorf("exec output: %w", copyErr)
+		return 0, fmt.Errorf("exec output: %w", copyErr)
 	}
 	for {
 		ins, err := d.cli.ExecInspect(ctx, created.ID, client.ExecInspectOptions{})
 		if err != nil {
-			return 0, stdout, stderr, fmt.Errorf("exec inspect: %w", err)
+			return 0, fmt.Errorf("exec inspect: %w", err)
 		}
 		if !ins.Running {
-			return ins.ExitCode, stdout, stderr, nil
+			return ins.ExitCode, nil
 		}
 		select {
 		case <-ctx.Done():
-			return 0, stdout, stderr, ctx.Err()
+			return 0, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

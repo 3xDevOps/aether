@@ -323,8 +323,9 @@ top to bottom:
    (`workspace-switcher.tsx`) shows the active workspace's name and base
    branch, and the total Needs you count across every workspace. Its menu
    lists each workspace with its own count, **All workspaces** (the
-   `overview` route), **Manage workspaces** and **Repository** (the
-   workspace page). With one workspace and no `workspace.list` method it is a
+   `overview` route), **Manage workspaces**, **Repository** (the
+   workspace page) and **Environment** (the same page, scrolled to that
+   section). With one workspace and no `workspace.list` method it is a
    plain label. The search button opens the command palette.
 2. **New run**, the only filled button in the shell (`n`), for a member who
    may launch.
@@ -3128,8 +3129,9 @@ dashboard, and updates the viewer's own name when it is theirs.
 
 `src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
 workspace: it becomes the active one and the board shows. Each row's menu
-holds **Repository** (the repository page), **Settings…** (who may message
-others' runs) and **Delete…**, each gated by its permission. **Add
+holds **Repository** (the repository page), **Environment** (its Environment
+section), **Settings…** (who may message others' runs) and **Delete…**, each
+gated by its permission. **Add
 workspace** in the header shows the creation choices above the list; with no
 workspace yet they show without it. Open the page from the workspace
 switcher or the command palette.
@@ -3220,11 +3222,46 @@ workspace in sections: **Base branch**, read-only because runs have already
 forked from it; **Source and clone**, the shared
 `components/workspace-repository.tsx` (link a local clone, the
 server-fetched source with its mirror status and deploy key, the checkout
-Origin) with its Advanced part open; and **Team**, the budget with **Set
-budget…** (`budget.set`) and who may message others' runs with **Change…**
-(`workspace.settings`). Each button is gated by its server-side permission; a
-member without it reads the same facts. The page lists no runs: the board
-does.
+Origin) with its Advanced part open; **Environment**, below; and **Team**,
+the budget with **Set budget…** (`budget.set`) and who may message others'
+runs with **Change…** (`workspace.settings`). Each button is gated by its
+server-side permission; a member without it reads the same facts. The page
+lists no runs: the board does.
+
+**Environment** (`components/workspace-environment.tsx`) is the workspace's
+setup script and variables ([environments.md](environments.md#workspace-environment)),
+read with `workspace.environment.get` when the page opens. Opening the page
+through an **Environment** menu item passes `section: 'environment'`, and the
+section scrolls into view once it has loaded.
+
+- An admin edits the **Setup script** in a monospace field and each variable
+  as a row: name, value, a **Secret** checkbox and **Remove**. A saved secret
+  shows a fixed row of dots, since the page never holds its value: its name is
+  read-only, **Replace** swaps the dots for an empty field and **Keep
+  current** puts them back. Ticking **Secret** on a plain variable masks the
+  field and saves it as one; a saved secret cannot be made plain, only removed.
+- **Import .env…** (`components/workspace-environment-import.tsx`) takes
+  pasted `NAME=VALUE` lines or a chosen file, parsed by `lib/dotenv.ts`, the
+  format `aether workspace env import` reads. It lists each name as **New** or
+  **Replaces the current value**, counts the lines it skips, and has **Store
+  as secrets** ticked. **Add _n_ variables** puts them in the list; nothing
+  is sent yet.
+- **Save** sends one `workspace.environment.set` holding only what changed,
+  so an untouched secret is never named. It is disabled until something
+  differs; **Unsaved changes.** and **Discard** show while it does. Beside it
+  the page says what a save reaches: runs launched afterwards, not containers
+  that exist. A row that cannot be saved - no name, a name used twice, `=` in
+  a name, a secret with no value - is marked on **Save**, which focuses it and
+  sends nothing. The server's refusal shows verbatim under **Not saved**, and
+  the edits stay.
+- Any other member reads the script, each name and each plain value, with
+  **Secret** in place of a secret's value and **Only an admin can change
+  this.** A failed read shows the server's error with **Retry**.
+
+When the setup script fails a launch, the New run and template launch
+dialogs show the server's reason and, under **Setup script output**, what
+the script printed (`components/launch/setup-output.tsx`, from the error's
+`setup_output`).
 
 The source mirror dialog reports local-only, pending, ready or failure,
 including the configured source, branch, accepted SHA and last check time.
@@ -4061,6 +4098,10 @@ Enhanced rows, store, stream client, composer and requests, and
 opens 2,000. `src/routes/browser/index.test.tsx` covers progressive page
 controls, close/reset identity fencing and raw refusals.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
+`src/components/workspace-environment.test.tsx` covers the workspace
+Environment section: the change a save sends, replacing a secret, the `.env`
+preview, rows that cannot be saved, the server's refusal and the read-only
+view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

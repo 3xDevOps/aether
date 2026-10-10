@@ -87,6 +87,9 @@ export function WorkspaceSwitcher() {
         {current && (
           <MenuItem onSelect={() => navigate('workspace', { workspaceId: current.id })}>Repository</MenuItem>
         )}
+        {current && caps.hasMethod('workspace.environment.get') && (
+          <MenuItem onSelect={() => navigate('workspace', { workspaceId: current.id, section: 'environment' })}>Environment</MenuItem>
+        )}
       </MenuContent>
     </Menu>
   )

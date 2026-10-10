@@ -33,6 +33,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/servergw"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -332,6 +333,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
 	s.control = control.New(control.Config{OnHolderChange: s.publishController})
+	secrets := secretstore.New(filepath.Join(cfg.DataDir, "workspace-secrets"))
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -341,6 +343,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
 		DataDir:       cfg.DataDir,
 		Homes:         homes,
+		Secrets:       secrets,
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
 		Profiles:      prof,
 		StandardImage: cfg.StandardImage,
@@ -392,7 +395,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		node, nodeErr = tailscaled.Self(discoverCtx)
 		cancel()
 	}
-	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus}
+	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus, secrets: secrets}
 	sshCfg := sshd.Config{
 		Addr:              cfg.Addr,
 		HostKeyPath:       HostKeyPath(cfg.DataDir),
@@ -403,6 +406,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Runs:              s.sched,
 		Control:           s.control,
 		Homes:             homes,
+		Secrets:           secrets,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
 		TailnetRequireKey: cfg.TailnetRequireKey,

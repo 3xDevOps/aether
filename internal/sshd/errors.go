@@ -112,6 +112,12 @@ func rpcError(err error) *protocol.Error {
 			out.Data = data
 		}
 	}
+	var setup *scheduler.SetupFailure
+	if errors.As(err, &setup) {
+		if data, marshalErr := json.Marshal(protocol.SetupFailure{SetupOutput: setup.Output}); marshalErr == nil {
+			out.Data = data
+		}
+	}
 	return out
 }
 

@@ -258,8 +258,8 @@ Until the environment is saved, only the member home is shared with runs. The
 container layer outside `$HOME` belongs to that terminal container and is not
 available to runs or a replacement terminal.
 
-Workspace environment variables and the workspace setup script still apply to
-runs. They are workspace settings, not image selection.
+The workspace's setup script and variables still apply to runs; see
+[Workspace environment](#workspace-environment).
 
 ## Save the environment
 
@@ -316,6 +316,120 @@ saved tag, the member's runs and terminal fail with an error that names the
 missing tag and tells the member to run `aether env reset`. Aether does not
 silently fall back to the standard image.
 
+## Workspace environment
+
+A member's environment decides the image a run starts from. A workspace's
+environment decides what every new run in that workspace starts with,
+whoever launches it: a **setup script** that runs before the agent, and
+**variables** set in the run's container. A variable can be marked
+**secret**; its value is then never shown again.
+
+An admin edits both under **Environment** on the workspace's Repository page
+(workspace switcher > **Environment**) or with `aether workspace env`. Every
+member can read the script, the variable names and the values that are not
+secret.
+
+A change applies to runs launched after it. A container that already exists
+keeps the variables it was created with and never reruns the script, so
+pausing, reopening or switching the mode of a run changes nothing in it.
+Candidate verification containers ([integration.md](integration.md)) get the
+workspace environment too. A member's own Environment terminal does not.
+
+### Setup script
+
+```sh
+aether workspace env script                    # print it
+aether workspace env script --file setup.sh    # replace it; - reads stdin
+aether workspace env script --clear
+```
+
+For a Node project `setup.sh` can be one line:
+
+```sh
+npm ci
+```
+
+The server runs the script once in each new run's container, after the
+container starts and before the agent's process does:
+
+- **How:** `/bin/sh -ec '<script>'`. It is POSIX `sh`, it stops at the first
+  command that fails, and it is not a login shell.
+- **Where:** `/workspace`, the run's checkout.
+- **As:** the container's user: root in the standard image, otherwise the
+  user the image or the agent sets.
+- **With:** the container's environment: the workspace variables, the
+  launching member's `$HOME` and tool caches
+  ([environment-home.md](environment-home.md)), `AETHER_RUN_ID` and
+  `AETHER_WORKSPACE_ID`.
+- **For how long:** the launch waits until it exits; there is no time limit.
+  `run.launch` calls are admitted one at a time, so every other launch on the
+  server waits behind a slow script. Install dependencies in it and leave
+  builds and tests to the agent.
+
+If the script exits non-zero, the container is removed and the launch fails:
+
+```
+aether: rpc error -32603: provisioning: start container: runtime: setup script exited 1
+setup script output:
+npm error code E401
+```
+
+The run is listed as failed with `provisioning: start container: runtime:
+setup script exited 1` as its reason. The script's output, its last 16 KiB,
+goes only to whoever launched: `aether run` prints it and the dashboard's
+launch dialog shows it. It is not stored with the run. The server log has
+the same output. In both, the exact value of each secret is replaced with
+`***`.
+
+### Variables
+
+```sh
+aether workspace env list
+aether workspace env set NODE_ENV=test API_URL=https://api.example.test
+aether workspace env unset NODE_ENV
+```
+
+A name must not be empty or contain `=`. The server sets some variables
+after the workspace's, among them `HOME`, `TERM`, the `AETHER_*` run
+identifiers and the `GIT_AUTHOR_*` and `GIT_COMMITTER_*` identity, so a
+workspace variable with one of those names has no effect. A `PATH` variable
+is kept, with `~/.local/bin` put in front of it.
+
+### Secrets
+
+A secret is a variable whose value the server stores and never returns. Its
+value is read from stdin, so it stays out of your shell history:
+
+```sh
+aether workspace env set --secret NPM_TOKEN < token.txt
+aether workspace env set --secret NPM_TOKEN     # on a terminal: prompts, input hidden
+```
+
+Stdin is taken whole, less one trailing newline. `aether workspace env list`
+and the dashboard show a secret as its name alone, to admins as well. To
+change one, set it again; there is no way to read it back.
+
+Import a `.env` file to add many at once. Its values are stored as secrets
+unless you pass `--plain`:
+
+```sh
+aether workspace env import .env
+aether workspace env import --plain .env
+```
+
+The file holds `NAME=VALUE` lines. Blank lines and `#` comments are skipped,
+a leading `export ` is dropped, single quotes keep a value as written and
+double quotes unescape `\n`, `\r`, `\t`, `\"` and `\\`. A later line
+replaces an earlier one of the same name. The dashboard's **Import .env…**
+reads the same format and lists what each line adds or replaces before
+anything is saved.
+
+A secret is hidden from the settings, not from a run. It is an ordinary
+environment variable inside the container, so the agent can read it and so
+can anyone who can launch a run in the workspace or message one.
+[security.md](security.md#workspace-secrets) lists where the value is kept
+and who can reach it.
+
 ## Status and protocol
 
 `aether terminal status` reports `image`, the image used by the current
@@ -332,3 +446,7 @@ The member-scoped control-channel methods are:
 Both environment methods use the normal protocol error path. Saving without a
 running terminal returns an invalid-state error telling the member to open the
 terminal first.
+
+The workspace environment is read with `workspace.environment.get` and
+changed with `workspace.environment.set`, which needs the admin role;
+[local-gateway.md](local-gateway.md) lists their parameters.

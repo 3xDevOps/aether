@@ -257,6 +257,7 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 			WorktreeMountPath: "/workspace",
 			WorkingDir:        "/workspace",
 			SetupScript:       plan.SetupScript,
+			SecretEnv:         plan.SecretEnv,
 			Mounts:            plan.Mounts,
 			User:              plan.User,
 		}, nil

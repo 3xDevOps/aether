@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -356,7 +357,7 @@ func (s *Service) runVerification(ctx context.Context, actor Actor, workspaceID 
 			return
 		}
 	}
-	environmentSHA256 := digest(spec.Env)
+	environmentSHA256 := environmentDigest(spec)
 	setupScriptSHA256 := digest(spec.SetupScript)
 
 	// Recheck authorization immediately before materializing the runtime.
@@ -771,6 +772,18 @@ func (o *boundedOutput) ReadError() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.readErr
+}
+
+// environmentDigest covers a workspace secret by name alone: members read
+// the digest, and a hash of the value would let a guess at it be checked.
+func environmentDigest(spec runtime.Spec) string {
+	env := maps.Clone(spec.Env)
+	for _, name := range spec.SecretEnv {
+		if _, set := env[name]; set {
+			env[name] = ""
+		}
+	}
+	return digest(env)
 }
 
 func (s *Service) updateVerificationMetadata(ctx context.Context, workspaceID domain.WorkspaceID, candidateID, verificationID, image, observedImage, user, workingDir string, timeoutSeconds int, cpuLimit float64, memoryLimit int64, environmentSHA256, setupScriptSHA256 string) error {

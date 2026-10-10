@@ -925,7 +925,8 @@ aether workspace init <name> --base <branch>
 ```
 
 Workspace variables and the setup script remain workspace settings and still
-apply to runs.
+apply to runs; set them with `aether workspace env`
+([environments.md](environments.md#workspace-environment)).
 
 ### Headless browser companion
 
@@ -1331,6 +1332,7 @@ automatic.
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
+| `workspace-secrets/` | One `<workspace-id>.json` per workspace that has secret variables: their values in plain text, mode `0600` in a mode-`0700` directory ([security.md](security.md#workspace-secrets)). |
 | `checkouts/` | Per-run worktrees. An explicitly closed Standard or Enhanced run and a completed swarm worker keep their exact checkouts for `--run-container-ttl`; other finished-run checkouts are garbage-collected after `--checkout-ttl`. Open interactive runs are not eligible for finished-checkout cleanup. Each run's `<run-id>.diffsnap/` sidecar holds durable recorded diff history, survives checkout cleanup, and is counted in `worktree_bytes`. |
 | `transcripts/` | Per-session PTY recordings (asciicast v2), rotated into 16 MiB files without deleting older segments. Enhanced runs also have an append-only ACP item log. Recordings persist until explicit run/session deletion, not until a byte or age threshold. |
 | `homes/<member>/` | One persistent environment home per member: installed agents, vendor login state, browser-imported and Files-edited configuration, and - once that member connects GitHub - their gh token in `.config/gh/hosts.yml` and their commit signing key in `.ssh/aether_signing`. |
@@ -1340,11 +1342,12 @@ automatic.
 | `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
-Member homes and mirror credentials are server-owned state. Back up the
-database, `homes/`, `profiles/`, and `mirrors/` when recovery matters. Those
-backups carry credentials: every member's vendor logins, GitHub tokens, signing
-keys, and mirror deploy private keys. Encrypt them, restrict access, and do not
-publish or paste them into issue reports.
+Member homes, mirror credentials and workspace secrets are server-owned
+state. Back up the database, `homes/`, `profiles/`, `mirrors/`, and
+`workspace-secrets/` when recovery matters. Those backups carry credentials:
+every member's vendor logins, GitHub tokens, signing keys, mirror deploy
+private keys, and workspace secret values. Encrypt them, restrict access, and
+do not publish or paste them into issue reports.
 ([security.md](security.md#github-credentials-and-signing-keys)).
 
 Diff sidecars retain captured trees until explicit run deletion. Checkout
@@ -1367,8 +1370,11 @@ the recipient's runs, through a Docker volume named `aether-home-<hash>`
 Storage rules:
 
 - **Back up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`,
-  `homes/`, `profiles/`, and `mirrors/`** to recover core state, recorded history,
-  installed agents, credentials, profile snapshots and source mirrors.
+  `homes/`, `profiles/`, `mirrors/`, and `workspace-secrets/`** to recover core
+  state, recorded history, installed agents, credentials, profile snapshots,
+  source mirrors and workspace secrets. A database restored without
+  `workspace-secrets/` keeps each workspace's script and plain variables and
+  has none of its secrets.
 - **Durable code and retained runtime have separate lifetimes.** Closed compute
   expires automatically after the `1h` default grace; old retained terminal
   deadlines are shortened on recovery from their durable completion time,

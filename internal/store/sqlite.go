@@ -314,6 +314,23 @@ func (d *DB) SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, orig
 	return err
 }
 
+func (d *DB) SetWorkspaceEnvironment(ctx context.Context, id domain.WorkspaceID, environment domain.WorkspaceEnvironment) error {
+	envDef, err := normalizeWorkspaceEnvironment(environment)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(envDef)
+	if err != nil {
+		return fmt.Errorf("store: encode workspace environment: %w", err)
+	}
+	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE workspaces SET environment = ? WHERE id = ?`, string(encoded), id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set workspace environment: %w", err)
+	}
+	return err
+}
+
 // Workspace mirrors
 
 const workspaceMirrorCols = `workspace_id, source_url, source_identity, branch,

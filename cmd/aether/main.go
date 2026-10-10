@@ -18,6 +18,9 @@ import (
 func main() {
 	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "aether:", err)
+		if output := setupOutput(err); output != "" {
+			fmt.Fprintf(os.Stderr, "setup script output:\n%s\n", strings.TrimRight(output, "\n"))
+		}
 		code := 1
 		var status *exitStatusError
 		if errors.As(err, &status) {

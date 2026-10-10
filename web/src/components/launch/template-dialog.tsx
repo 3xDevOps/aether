@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { WorkspaceLine } from '@/components/launch/launch-options'
 import { modeLabel } from '@/components/launch/modes'
+import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -24,6 +25,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('')
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [setup, setSetup] = useState<string | null>(null)
 
   useEffect(() => {
     if (!workspaceID) return
@@ -52,6 +54,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
   const launch = async () => {
     setLaunching(true)
     setError(null)
+    setSetup(null)
     try {
       const { run } = await api.templateLaunch(workspaceID, name)
       // Seed the store so the terminal view attaches without a refetch.
@@ -62,6 +65,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
     } catch (err) {
       setLaunching(false)
       setError(`Launch failed: ${message(err)}`)
+      setSetup(setupOutput(err))
     }
   }
 
@@ -104,7 +108,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
               <p className="max-h-32 overflow-y-auto text-ui break-words whitespace-pre-wrap text-text">{selected.task}</p>
             </div>
           )}
-          {error && <Callout tone="failed" role="alert">{error}</Callout>}
+          {error && <Callout tone="failed" role="alert">{error}{setup && <SetupOutput output={setup} />}</Callout>}
         </form>
         <DialogFooter className="sm:items-center">
           <div className="min-w-0 max-sm:order-last sm:mr-auto">
