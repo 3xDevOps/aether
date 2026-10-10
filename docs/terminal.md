@@ -416,6 +416,7 @@ the command again rewrites it.
 
 ```
 Host *.aether
+  HostName %h
   ProxyCommand /usr/local/bin/aether ssh --stdio %h
   UserKnownHostsFile "/home/you/.ssh/aether_known_hosts"
   HostKeyAlias aether
@@ -423,7 +424,8 @@ Host *.aether
 ```
 
 The only change to `~/.ssh/config` is the `Include` line, placed first so a
-`Host *` block of your own cannot set `ProxyCommand` before it. The block
+`Host *` block of your own cannot set `HostName`, `ProxyCommand` or
+`ProxyJump` for a run before it. The block
 names the `aether` binary by path, so run `aether ssh-config` again after
 moving it. `aether ssh [ssh options] <run-id> [command]` passes the same
 options to `ssh` itself and needs no configuration.

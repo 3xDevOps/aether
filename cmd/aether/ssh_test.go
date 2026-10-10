@@ -28,8 +28,8 @@ func TestSSHArgvPutsTheRunOptionsAheadOfTheCallers(t *testing.T) {
 	if !slices.Equal(argv, want) {
 		t.Fatalf("argv = %q\nwant   %q", argv, want)
 	}
-	if !strings.HasSuffix(argv[1], " ssh --stdio %h") {
-		t.Fatalf("first option = %q, want this binary as the ProxyCommand", argv[1])
+	if argv[1] != "HostName=%h" || !strings.HasSuffix(argv[3], " ssh --stdio %h") {
+		t.Fatalf("leading options = %q, want the host name pinned and this binary as the ProxyCommand", argv[:4])
 	}
 
 	// A host already written in full is not suffixed twice.

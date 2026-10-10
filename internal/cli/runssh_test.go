@@ -36,7 +36,7 @@ func TestInstallSSHConfigIncludesItsOwnFileAndLeavesTheRestAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"\nHost *.aether\n",
+		"\nHost *.aether\n  HostName %h\n  ProxyCommand ",
 		" ssh --stdio %h\n",
 		"\n  UserKnownHostsFile \"" + filepath.ToSlash(filepath.Join(home, ".ssh", "aether_known_hosts")) + "\"\n",
 		"\n  HostKeyAlias aether\n",
