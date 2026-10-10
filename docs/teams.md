@@ -695,8 +695,8 @@ the run's container to still be alive.
 Aether captures an evidence packet automatically when a run is handed off and
 when it finishes. The finish capture happens before automatic checkout or
 transcript cleanup. A run whose checkout exceeds the 64 MiB capture bound gets
-no finish packet; its results stay on the run branch
-([failure-handling.md](failure-handling.md)). A packet is a factual record of the run at capture time,
+no finish packet; its checkout is removed only once its results are published
+on the run branch ([failure-handling.md](failure-handling.md)). A packet is a factual record of the run at capture time,
 including its objective and identity, capture time and event-log boundary, base
 and retained Git revisions, changed-file facts, source availability, unresolved
 facts, next action, and provenance. Source metadata says when a source is

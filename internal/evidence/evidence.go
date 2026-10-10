@@ -213,6 +213,11 @@ type Request struct {
 	// bounded local reads. Nil is reserved for trusted lifecycle captures.
 	// Explicit selection must supply it, never a caller-controlled identity.
 	Authorize func() error
+	// Uncaptured lets CaptureBeforeCleanup proceed for a checkout Git refuses
+	// with gitengine.ErrEvidenceStorageLimit, which no retry can capture. It
+	// receives the refusal and must return nil only once the checkout's work
+	// is saved elsewhere. Nil keeps the refusal fatal.
+	Uncaptured func(ctx context.Context, refusal error) error
 }
 
 type Service struct {
@@ -294,9 +299,7 @@ func (s *Service) Capture(ctx context.Context, req Request) (protocol.EvidencePa
 // CaptureBeforeCleanup serializes required evidence preservation with the
 // caller's checkout cleanup. cleanup is called only after Git retention,
 // transcript staging, and metadata persistence have all succeeded, or after
-// Git refused the checkout with gitengine.ErrEvidenceStorageLimit. No retry
-// can capture that checkout, and holding it is what keeps a full disk full,
-// so cleanup still runs and the refusal is returned once it has succeeded.
+// req.Uncaptured accepted a checkout Git refused; that returns no packet.
 func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup func(context.Context) error) (protocol.EvidencePacket, error) {
 	if err := validateRequest(req); err != nil {
 		return protocol.EvidencePacket{}, err
@@ -304,9 +307,14 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 	lock := s.runLock(req.RunID)
 	lock.Lock()
 	defer lock.Unlock()
-	packet, captureErr := s.captureLocked(ctx, req)
-	if captureErr != nil && !errors.Is(captureErr, gitengine.ErrEvidenceStorageLimit) {
-		return protocol.EvidencePacket{}, captureErr
+	packet, err := s.captureLocked(ctx, req)
+	if err != nil {
+		if req.Uncaptured == nil || !errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+			return protocol.EvidencePacket{}, err
+		}
+		if saveErr := req.Uncaptured(ctx, err); saveErr != nil {
+			return protocol.EvidencePacket{}, fmt.Errorf("evidence: keep uncaptured run %s: %w", req.RunID, saveErr)
+		}
 	}
 	if cleanup != nil {
 		cleanupCtx, cancel := s.cleanupContext(ctx)
@@ -316,7 +324,7 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 			return packet, fmt.Errorf("evidence: cleanup run %s: %w", req.RunID, err)
 		}
 	}
-	return packet, captureErr
+	return packet, nil
 }
 func validateRequest(req Request) error {
 	if req.RunID == "" || req.IdempotencyKey == "" {

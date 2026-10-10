@@ -76,7 +76,12 @@ func (f *schedulerEvidenceCapture) Capture(_ context.Context, req evidence.Reque
 func (f *schedulerEvidenceCapture) CaptureBeforeCleanup(ctx context.Context, req evidence.Request, cleanup func(context.Context) error) (protocol.EvidencePacket, error) {
 	packet, err := f.Capture(ctx, req)
 	if err != nil {
-		return packet, err
+		if req.Uncaptured == nil || !errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+			return packet, err
+		}
+		if saveErr := req.Uncaptured(ctx, err); saveErr != nil {
+			return packet, saveErr
+		}
 	}
 	f.mu.Lock()
 	f.beforeCalls++
@@ -591,6 +596,56 @@ func TestAutomaticCheckoutCleanupCapturesBeforeRemoval(t *testing.T) {
 	}
 	if fresh.Worktree != "" {
 		t.Fatalf("worktree after automatic cleanup = %q", fresh.Worktree)
+	}
+}
+
+func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = -time.Second
+		cfg.CheckoutTTL = time.Hour
+	})
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "oversized checkout")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-2 * time.Hour)
+	row.FinishedAt = &old
+	if err = e.db.UpdateRun(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	worktree := func() string {
+		t.Helper()
+		fresh, getErr := e.db.GetRun(t.Context(), run.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		return fresh.Worktree
+	}
+
+	e.git.mu.Lock()
+	e.git.publishErr = errors.New("repository unavailable")
+	e.git.mu.Unlock()
+	e.sched.sweepCheckouts(t.Context())
+	if _, statErr := os.Stat(row.Worktree); statErr != nil || worktree() == "" {
+		t.Fatalf("unpublished checkout was removed without evidence: %v", statErr)
+	}
+
+	e.git.mu.Lock()
+	e.git.publishErr = nil
+	e.git.mu.Unlock()
+	e.sched.sweepCheckouts(t.Context())
+	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) || worktree() != "" {
+		t.Fatalf("published checkout over the evidence limit was kept: %v", statErr)
+	}
+	if capture.packetCount() != 0 {
+		t.Fatalf("refused captures produced %d packets", capture.packetCount())
 	}
 }
 
