@@ -50,6 +50,10 @@ type device struct {
 	service  *httptest.Server
 	received chan notification
 	answer   atomic.Int32
+	// While slow is set, the push service takes a message and answers only
+	// once release is closed.
+	slow    atomic.Bool
+	release chan struct{}
 }
 
 func (d *device) endpoint() string { return d.service.URL + "/send/device" }
@@ -120,7 +124,7 @@ func (h *harness) member(name string) *domain.Member {
 // subscribe gives member a new device with notifications on.
 func (h *harness) subscribe(member *domain.Member) *device {
 	h.t.Helper()
-	d := &device{browser: newBrowser(h.t), received: make(chan notification, 8)}
+	d := &device{browser: newBrowser(h.t), received: make(chan notification, 8), release: make(chan struct{})}
 	d.answer.Store(http.StatusCreated)
 	d.service = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -139,6 +143,9 @@ func (h *harness) subscribe(member *domain.Member) *device {
 			return
 		}
 		d.received <- n
+		if d.slow.Load() {
+			<-d.release
+		}
 		w.WriteHeader(http.StatusCreated)
 	}))
 	h.t.Cleanup(d.service.Close)
@@ -272,6 +279,36 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("FinishRunByMember: %v", err)
 	}
 	h.publish(closed, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunAbandoned})
+	phone.expectNone(t, testQuiet)
+}
+
+// Every notification for a run replaces the last one on a device, so an
+// older one must never arrive after a newer one, however slow a push service
+// is.
+func TestANewerNeedIsNeverOvertakenByAnOlderOne(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
+	slow.slow.Store(true)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+	permission := notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: string(run.ID)}
+
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	slow.expect(t, idle)
+	// The first device's push service has not answered yet when the run
+	// asks for a permission.
+	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
+	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
+	phone.expectNone(t, testQuiet)
+	slow.slow.Store(false)
+	close(slow.release)
+
+	slow.expect(t, permission)
+	phone.expect(t, permission)
 	phone.expectNone(t, testQuiet)
 }
 
