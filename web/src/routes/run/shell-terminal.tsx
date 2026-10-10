@@ -10,6 +10,7 @@ import { api } from '@/lib/api'
 import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/types'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { type ConnectionState } from '@/lib/stream'
+import { openRunLink } from '@/routes/browser/open'
 import type { RunShells } from '@/routes/run/shells'
 import {
   type AttachDataKind,
@@ -203,6 +204,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       dock.shellShown &&
       dock.refusedMessage === null,
     follow: phone || !activeHasControl,
+    onLink: (uri) => openRunLink(runID, uri),
     onData: (data) => {
       if (!activeTab || gate.current.muted()) return
       const current = currentAttachmentRef.current

@@ -1,24 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Spinner } from '@/components/ui/spinner'
 import { api, browserStreamURL } from '@/lib/api'
 import { message } from '@/lib/format'
+import { useDelayed } from '@/lib/hooks'
 import type { DevBrowserActionParams, DevBrowserFrameMetadata, DevBrowserPage, DevControlFence, DevStreamResponse } from '@/lib/types'
 import { decodeBrowserFrame, framePoint, sameFrameTarget, type BrowserFrame } from './frames'
 
+export interface BrowserSurfaceHandle {
+  /** Gives the page the keyboard; on a phone this opens its keyboard. */
+  focus: () => void
+  /** False while input is queued or a pointer is down on the page. */
+  idle: () => boolean
+}
+
 interface BrowserSurfaceProps {
+  ref?: Ref<BrowserSurfaceHandle>
   runID: string
   page: DevBrowserPage
   control: DevControlFence | null
-  connection: number
-  expanded: boolean
-  onExpandedChange: (expanded: boolean) => void
+  /** Nobody else holds the lease, so input may take it through `acquire`. */
+  free: boolean
+  acquire: () => Promise<DevControlFence | null>
+  /** The toolbar is changing the page; input is dropped until it is done. */
+  paused: boolean
+  onBlocked: () => void
   onError: (error: string) => void
+  /** A painted frame is of a newer revision than `page`. */
+  onNavigated: () => void
   onPage: (page: DevBrowserPage) => void
 }
-interface PendingInput { request: DevBrowserActionParams; frame: DevBrowserFrameMetadata; time: number; epoch: number }
 type BrowserInput = Omit<DevBrowserActionParams, 'run_id' | 'session_id' | 'page_id' | 'page_revision' | 'control_session_id' | 'control_generation'>
-const inputSentinel = '\u200b'
+interface PendingInput { input: BrowserInput; frame: DevBrowserFrameMetadata; time: number; epoch: number }
+const inputSentinel = '​'
+const retryDelays = [500, 1000, 2000, 4000, 8000]
 interface PointerGesture {
   kind: string
   button: string
@@ -26,7 +43,6 @@ interface PointerGesture {
   clickCount: number
   modifiers: string[]
   frame: DevBrowserFrameMetadata
-  control: DevControlFence
   point: { x: number; y: number }
 }
 
@@ -43,25 +59,36 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const sendInput = useRef<(input: BrowserInput) => void>(() => {})
   const repaintParked = useRef(() => {})
   const composing = useRef(false)
-  const compositionTarget = useRef<{ frame: DevBrowserFrameMetadata; control: DevControlFence } | null>(null)
+  const compositionFrame = useRef<DevBrowserFrameMetadata | null>(null)
   const pointers = useRef(new Map<number, PointerGesture>())
   const lastClick = useRef({ time: 0, x: 0, y: 0, button: -1, count: 0 })
+  const controlled = useRef(false)
+  const failures = useRef(0)
   const [live, setLive] = useState(false)
-  const [dimensions, setDimensions] = useState('')
+  const [failure, setFailure] = useState('')
+  const [connection, setConnection] = useState(0)
+  const connecting = useDelayed(!live && !failure, 400)
+  const watching = props.control === null && !props.free
 
   const clearInput = useCallback(() => {
     inputEpoch.current++
     queue.current = []
     pointers.current.clear()
-    compositionTarget.current = null
+    compositionFrame.current = null
     composing.current = false
     if (keyboard.current) {
       keyboard.current.value = inputSentinel
       keyboard.current.setSelectionRange(1, 1)
     }
   }, [])
+  useImperativeHandle(props.ref, () => ({
+    focus: () => keyboard.current?.focus({ preventScroll: true }),
+    idle: () => !sending.current && queue.current.length === 0 && pointers.current.size === 0,
+  }), [])
   useEffect(() => {
-    clearInput()
+    // Input queued while a free lease is being taken belongs to that lease.
+    if (controlled.current) clearInput()
+    controlled.current = props.control !== null
   }, [props.control?.control_session_id, props.control?.control_generation, clearInput])
   useEffect(() => {
     const visibility = () => { if (document.hidden) clearInput() }
@@ -74,7 +101,9 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   }, [clearInput])
   useEffect(() => {
     active.current = true
-    clearInput()
+    return () => { active.current = false }
+  }, [])
+  useEffect(() => {
     let disposed = false
     let acknowledged = false
     let failed = false
@@ -83,21 +112,20 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     let painted = 0
     let decoding = false
     let sequence = 0
-    const target = { run_id: props.runID, session_id: props.page.session_id, page_id: props.page.page_id, page_revision: props.page.page_revision }
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const target = { run_id: props.runID, session_id: props.page.session_id, page_id: props.page.page_id, page_revision: current.current.page.page_revision }
     const socket = new WebSocket(browserStreamURL(target))
     socket.binaryType = 'arraybuffer'
-    const clear = () => {
-      displayed.current = null
-      clearInput()
-      canvas.current?.getContext('2d')?.clearRect(0, 0, canvas.current.width, canvas.current.height)
-      setLive(false)
-    }
-    clear()
+    // The last painted frame stays up while the stream reconnects.
     const fail = (text: string) => {
       if (disposed || failed) return
       failed = true
-      clear()
-      current.current.onError(text)
+      latest = null
+      parked = null
+      setLive(false)
+      const delay = retryDelays[failures.current++]
+      if (delay === undefined) setFailure(text)
+      else retry = setTimeout(() => setConnection((value) => value + 1), delay)
     }
     const paint = async () => {
       if (decoding || disposed || failed) return
@@ -128,8 +156,9 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
             element.height = frame.metadata.height
             context.drawImage(bitmap, 0, 0, element.width, element.height)
             displayed.current = frame.metadata
-            setDimensions(`${frame.metadata.width} × ${frame.metadata.height}`)
+            failures.current = 0
             setLive(true)
+            if (frame.metadata.page_revision > observed.page_revision) current.current.onNavigated()
           } finally { bitmap.close() }
         }
       } catch (cause) {
@@ -164,44 +193,36 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
         socket.close()
       }
     }
-    socket.onerror = () => fail('Browser stream connection failed. Reconnect to observe the surviving session.')
-    socket.onclose = (event) => fail(`Browser stream ended${event.reason ? `: ${event.reason}` : ''}. Reconnect does not open or reset a session.`)
+    socket.onerror = () => fail('The page stream could not connect.')
+    socket.onclose = (event) => fail(`The page stream closed${event.reason ? `: ${event.reason}` : '.'}`)
     return () => {
       disposed = true
-      active.current = false
+      clearTimeout(retry)
       latest = null
       parked = null
       repaintParked.current = () => {}
-      displayed.current = null
-      clearInput()
       socket.close()
     }
     // Revisions arrive in the stream; they are not new observation sessions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.runID, props.page.session_id, props.page.page_id, props.connection])
+  }, [props.runID, props.page.session_id, props.page.page_id, connection])
   useEffect(() => repaintParked.current(), [props.page.page_revision, props.page.viewport_id])
 
   const send = (input: BrowserInput) => {
     const frame = displayed.current
-    const control = current.current.control
-    if (!frame || !control || !active.current) return
+    if (!frame || !active.current || current.current.paused || failure) return
     const observed = current.current.page
     if (frame.page_revision < observed.page_revision || (frame.page_revision === observed.page_revision && frame.viewport_id !== observed.viewport_id)) {
       current.current.onError('Input discarded: wait for the current page frame.')
       return
     }
-    const entry: PendingInput = {
-      request: { ...input, run_id: frame.run_id, session_id: frame.session_id, page_id: frame.page_id, page_revision: frame.page_revision, viewport_id: frame.viewport_id, ...control },
-      frame,
-      time: performance.now(),
-      epoch: inputEpoch.current,
-    }
+    const entry: PendingInput = { input, frame, time: performance.now(), epoch: inputEpoch.current }
     const previous = queue.current.at(-1)
-    if (input.phase === 'move' && previous?.request.action === input.action && previous.request.phase === 'move' && previous.request.touch_id === input.touch_id) queue.current[queue.current.length - 1] = entry
+    if (input.phase === 'move' && previous?.input.action === input.action && previous.input.phase === 'move' && previous.input.touch_id === input.touch_id) queue.current[queue.current.length - 1] = entry
     else if (queue.current.length < 32) queue.current.push(entry)
     else {
       queue.current = []
-      current.current.onError('Input discarded: browser input is congested. Release control before continuing.')
+      current.current.onError('Input discarded: browser input is congested.')
       return
     }
     if (sending.current) return
@@ -209,18 +230,30 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     void (async () => {
       try {
         while (active.current && queue.current.length) {
-          const next = queue.current.shift()!
+          let control = current.current.control
+          if (!control) {
+            control = await current.current.acquire()
+            if (!control) {
+              clearInput()
+              break
+            }
+            // Taking the lease is not time the input spent going stale.
+            const now = performance.now()
+            for (const waiting of queue.current) waiting.time = now
+          }
+          const next = queue.current.shift()
+          if (!next) break
           if (next.epoch !== inputEpoch.current) continue
           const now = current.current
           const visible = displayed.current
           const observedChanged = now.page.session_id !== next.frame.session_id || now.page.page_id !== next.frame.page_id || now.page.page_revision > next.frame.page_revision || (now.page.page_revision === next.frame.page_revision && now.page.viewport_id !== next.frame.viewport_id)
-          if (!visible || !sameFrameTarget(visible, next.frame) || observedChanged || !now.control || now.control.control_session_id !== next.request.control_session_id || now.control.control_generation !== next.request.control_generation || performance.now() - next.time > 1000) {
+          if (!visible || !sameFrameTarget(visible, next.frame) || observedChanged || performance.now() - next.time > 1000) {
             clearInput()
-            now.onError('Input discarded: the displayed frame or control changed, or input expired. Nothing was replayed.')
+            now.onError('Input discarded: the displayed frame changed or input expired. Nothing was replayed.')
             break
           }
           try {
-            const result = await api.devBrowserAction(next.request)
+            const result = await api.devBrowserAction({ ...next.input, run_id: next.frame.run_id, session_id: next.frame.session_id, page_id: next.frame.page_id, page_revision: next.frame.page_revision, viewport_id: next.frame.viewport_id, ...control })
             if (active.current && next.epoch === inputEpoch.current) current.current.onPage(result.page)
           } catch (cause) {
             if (active.current && next.epoch === inputEpoch.current) {
@@ -239,8 +272,14 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     if (!element) return
     const wheel = (event: WheelEvent) => {
       const frame = displayed.current
-      if (!current.current.control || !frame) return
+      const now = current.current
+      if (!frame) return
       event.preventDefault()
+      if (now.paused) return
+      if (!now.control && !now.free) {
+        now.onBlocked()
+        return
+      }
       const point = framePoint(frame, element.getBoundingClientRect(), event.clientX, event.clientY)
       if (!point) return
       const factor = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? frame.height : 1
@@ -269,22 +308,33 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   }, [])
 
   const onKey = (event: KeyboardEvent<HTMLElement>) => {
-    if (!props.control || event.nativeEvent.isComposing || composing.current || event.key === 'Process' || event.key === 'Unidentified' || event.key === 'Dead') return
+    if (watching || event.nativeEvent.isComposing || composing.current || event.key === 'Process' || event.key === 'Unidentified' || event.key === 'Dead') return
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return
     event.preventDefault()
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return
     send({ action: 'key', key: event.key === ' ' ? 'Space' : event.key, modifiers: [event.altKey && 'Alt', event.ctrlKey && 'Control', event.metaKey && 'Meta', event.shiftKey && 'Shift'].filter((value): value is string => Boolean(value)) })
   }
   const onPointer = (event: ReactPointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up' | 'cancel') => {
-    if (!props.control || !displayed.current) return
+    if (!displayed.current || props.paused) return
+    if (watching) {
+      if (phase === 'down') props.onBlocked()
+      return
+    }
     const existing = pointers.current.get(event.pointerId)
-    if (existing && (!sameFrameTarget(existing.frame, displayed.current) || existing.control.control_session_id !== props.control.control_session_id || existing.control.control_generation !== props.control.control_generation)) {
+    // Hovering a page nobody drives does not take it; the first press does.
+    if (!props.control && !existing && phase !== 'down') return
+    if (existing && !sameFrameTarget(existing.frame, displayed.current)) {
       pointers.current.delete(event.pointerId)
-      current.current.onError('Gesture discarded: the displayed page or control changed.')
+      current.current.onError('Gesture discarded: the displayed page changed.')
       return
     }
     const point = framePoint(displayed.current, event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
-    if (!point && phase !== 'up' && phase !== 'cancel') return
+    if (!point && phase !== 'up' && phase !== 'cancel') {
+      // A press beside a page that does not fill the pane still takes the
+      // lease, which is what lets the viewport follow the pane.
+      if (phase === 'down' && !props.control) void props.acquire()
+      return
+    }
     event.preventDefault()
     const coordinates = point ?? existing?.point
     if (!coordinates) return
@@ -301,7 +351,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       const previous = lastClick.current
       const count = event.pointerType !== 'touch' && performance.now() - previous.time < 500 && previous.button === event.button && Math.hypot(previous.x - coordinates.x, previous.y - coordinates.y) < 5 ? previous.count % 3 + 1 : 1
       lastClick.current = { time: performance.now(), ...coordinates, button: event.button, count }
-      pointers.current.set(event.pointerId, { kind: event.pointerType, button: ['left', 'middle', 'right'][event.button] ?? 'left', modifiers, touchID, clickCount: count, point: coordinates, frame: displayed.current, control: props.control })
+      pointers.current.set(event.pointerId, { kind: event.pointerType, button: ['left', 'middle', 'right'][event.button] ?? 'left', modifiers, touchID, clickCount: count, point: coordinates, frame: displayed.current })
       for (const key of modifiers) send({ action: 'key', phase: 'down', key })
     }
     const gesture = pointers.current.get(event.pointerId)
@@ -322,61 +372,66 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     }
   }
 
-  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 text-ui-sm text-muted">
-      <span role="status" className="min-w-0 break-words">{live ? `Live frame · ${dimensions}` : 'Waiting for browser frame'}</span>
-      <div className="flex items-center gap-2">
-        <Button variant="secondary" disabled={!props.control || !live} onClick={() => keyboard.current?.focus()}>Keyboard</Button>
-        <Button variant="secondary" aria-label={props.expanded ? 'Restore browser controls' : 'Expand browser'} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? 'Restore' : 'Expand'}</Button>
-      </div>
-      <span className="min-w-0 flex-1 basis-60">{props.control ? 'Click or touch the page. Keyboard opens phone input.' : props.expanded ? 'Watch only - restore the browser controls to take control.' : 'Watch only - take control to interact.'}</span>
-    </div>
-    <div className="relative min-h-48 min-w-0 flex-1 overflow-hidden bg-chrome">
-      <canvas ref={canvas} aria-label="Shared browser page" tabIndex={props.control ? 0 : -1}
-        className="h-full w-full touch-none object-contain outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        onFocus={() => keyboard.current?.focus({ preventScroll: true })}
-        onKeyDown={onKey} onContextMenu={(event) => event.preventDefault()}
-        onPointerDown={(event) => onPointer(event, 'down')} onPointerMove={(event) => onPointer(event, 'move')}
-        onPointerUp={(event) => onPointer(event, 'up')} onPointerCancel={(event) => onPointer(event, 'cancel')}
-        onLostPointerCapture={(event) => { if (pointers.current.has(event.pointerId)) onPointer(event, 'cancel') }}
-        />
-      <textarea ref={keyboard} aria-label="Remote browser keyboard" autoCapitalize="off" autoCorrect="off" spellCheck={false} defaultValue={inputSentinel}
-        className="absolute bottom-0 left-0 h-px w-px resize-none opacity-0" tabIndex={-1} disabled={!props.control}
-        onKeyDown={onKey}
-        onFocus={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
-        onPaste={(event) => {
-          event.preventDefault()
-          const text = event.clipboardData.getData('text/plain')
+  return <div className="relative h-full min-h-0 min-w-0 overflow-hidden bg-chrome focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-accent">
+    <canvas ref={canvas} aria-label="Shared browser page" aria-busy={!live} tabIndex={watching ? -1 : 0}
+      className="h-full w-full touch-none object-scale-down outline-none"
+      onFocus={() => keyboard.current?.focus({ preventScroll: true })}
+      onKeyDown={onKey} onContextMenu={(event) => event.preventDefault()}
+      onPointerDown={(event) => onPointer(event, 'down')} onPointerMove={(event) => onPointer(event, 'move')}
+      onPointerUp={(event) => onPointer(event, 'up')} onPointerCancel={(event) => onPointer(event, 'cancel')}
+      onLostPointerCapture={(event) => { if (pointers.current.has(event.pointerId)) onPointer(event, 'cancel') }}
+      />
+    <textarea ref={keyboard} aria-label="Remote browser keyboard" autoCapitalize="off" autoCorrect="off" spellCheck={false} defaultValue={inputSentinel}
+      className="absolute bottom-0 left-0 h-px w-px resize-none opacity-0" tabIndex={-1} disabled={watching}
+      onKeyDown={onKey}
+      onFocus={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
+      onPaste={(event) => {
+        event.preventDefault()
+        const text = event.clipboardData.getData('text/plain')
+        if (text) send({ action: 'text', text })
+      }}
+      onCompositionStart={() => {
+        composing.current = true
+        compositionFrame.current = displayed.current
+      }}
+      onCompositionEnd={(event) => {
+        composing.current = false
+        const frame = compositionFrame.current
+        compositionFrame.current = null
+        const text = event.data
+        if (text && frame) {
+          if (displayed.current && sameFrameTarget(frame, displayed.current)) send({ action: 'text', text })
+          else current.current.onError('Composed text discarded: the displayed page changed.')
+        }
+        event.currentTarget.value = inputSentinel
+        event.currentTarget.setSelectionRange(1, 1)
+      }}
+      onInput={(event) => {
+        const input = event.nativeEvent as InputEvent
+        if (composing.current || input.isComposing) return
+        // Some keyboards emit the final composition input after
+        // compositionend. That text was already committed or fenced there.
+        if (input.inputType !== 'insertCompositionText' && input.inputType !== 'insertFromComposition') {
+          const text = event.currentTarget.value.startsWith(inputSentinel) ? event.currentTarget.value.slice(1) : event.currentTarget.value
           if (text) send({ action: 'text', text })
-        }}
-        onCompositionStart={() => {
-          composing.current = true
-          compositionTarget.current = displayed.current && props.control ? { frame: displayed.current, control: props.control } : null
-        }}
-        onCompositionEnd={(event) => {
-          composing.current = false
-          const target = compositionTarget.current
-          compositionTarget.current = null
-          const text = event.data
-          if (text && target) {
-            if (displayed.current && props.control && sameFrameTarget(target.frame, displayed.current) && target.control.control_session_id === props.control.control_session_id && target.control.control_generation === props.control.control_generation) send({ action: 'text', text })
-            else current.current.onError('Composed text discarded: the displayed page or control changed.')
-          }
-          event.currentTarget.value = inputSentinel
-          event.currentTarget.setSelectionRange(1, 1)
-        }}
-        onInput={(event) => {
-          const input = event.nativeEvent as InputEvent
-          if (composing.current || input.isComposing) return
-          // Some keyboards emit the final composition input after
-          // compositionend. That text was already committed or fenced there.
-          if (input.inputType !== 'insertCompositionText' && input.inputType !== 'insertFromComposition') {
-            const text = event.currentTarget.value.startsWith(inputSentinel) ? event.currentTarget.value.slice(1) : event.currentTarget.value
-            if (text) send({ action: 'text', text })
-          }
-          event.currentTarget.value = inputSentinel
-          event.currentTarget.setSelectionRange(1, 1)
-        }} />
-    </div>
+        }
+        event.currentTarget.value = inputSentinel
+        event.currentTarget.setSelectionRange(1, 1)
+      }} />
+    {connecting && <div className="pointer-events-none absolute inset-0 grid place-items-center"><Spinner label="Connecting to the page" className="size-5" /></div>}
+    {failure && (
+      <div role="alert" className="absolute inset-0 grid place-items-center overflow-y-auto bg-canvas">
+        <EmptyState
+          title="The page stream stopped"
+          action={<Button variant="secondary" onClick={() => {
+            failures.current = 0
+            setFailure('')
+            setConnection((value) => value + 1)
+          }}>Retry</Button>}
+        >
+          <span className="break-words">{failure}</span>
+        </EmptyState>
+      </div>
+    )}
   </div>
 }

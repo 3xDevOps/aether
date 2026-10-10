@@ -77,6 +77,8 @@ const persistedUi = (s: RootState) => ({
   sidebarCollapsed: s.sidebarCollapsed,
   terminalDockHeight: s.terminalDockHeight,
   detailsOpen: s.detailsOpen,
+  browserBeside: s.browserBeside,
+  browserBesideWidth: s.browserBesideWidth,
   terminalFontSize: s.terminalFontSize,
   singleKeyShortcuts: s.singleKeyShortcuts,
   diffWrap: s.diffWrap,

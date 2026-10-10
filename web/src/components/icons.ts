@@ -108,6 +108,11 @@ import {
   Unplug as LucideUnplug,
   UserPlus as LucideUserPlus,
   WifiOff as LucideWifiOff,
+  Columns2 as LucideColumns2,
+  MousePointer2 as LucideMousePointer2,
+  RotateCw as LucideRotateCw,
+  Smartphone as LucideSmartphone,
+  Tablet as LucideTablet,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -244,3 +249,8 @@ export const Sun = icon(LucideSun)
 export const Unplug = icon(LucideUnplug)
 export const UserPlus = icon(LucideUserPlus)
 export const WifiOff = icon(LucideWifiOff)
+export const Columns2 = icon(LucideColumns2)
+export const MousePointer2 = icon(LucideMousePointer2)
+export const RotateCw = icon(LucideRotateCw)
+export const Smartphone = icon(LucideSmartphone)
+export const Tablet = icon(LucideTablet)

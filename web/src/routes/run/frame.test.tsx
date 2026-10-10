@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
+import { openRunLink } from '@/routes/browser/open'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import { useStore } from '@/store'
@@ -51,6 +52,9 @@ beforeEach(() => {
     roomStatusControl: {},
     approvalsByRun: {},
     runViewMemory: {},
+    browserBeside: false,
+    browserBesideWidth: null,
+    browserRequests: {},
     sessionLogs: {},
     agentList: null,
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
@@ -126,6 +130,95 @@ describe('run frame', () => {
     fireEvent.keyDown(window, { key: '[' })
     fireEvent.keyDown(window, { key: '[' })
     expect(useStore.getState().route.params.view).toBe('session')
+  })
+})
+
+describe('the Browser view', () => {
+  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+  /** Lays the run's frame out at `width`, which jsdom never does. */
+  function measured(width: number) {
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private readonly report: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.report([{ target, contentRect: { width, height: 700 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+  }
+
+  it('is offered for every live run the gateway can serve it for, before any browser has started', () => {
+    open()
+    expect(views().getByRole('tab', { name: 'Browser' })).toBeDefined()
+    expect(api.devBrowserOpen).not.toHaveBeenCalled()
+  })
+
+  it('is not offered for a finished run or by a gateway without the browser', () => {
+    const finished = open({ status: 'completed' })
+    expect(views().queryByRole('tab', { name: 'Browser' })).toBeNull()
+    finished.unmount()
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events', 'attach'] } })
+    open()
+    expect(views().queryByRole('tab', { name: 'Browser' })).toBeNull()
+  })
+
+  it('leaves the session’s control strip off the Browser view', async () => {
+    const view = open({ mode: 'acp' }, 'session')
+    expect(await screen.findByRole('group', { name: 'Multiplayer controls' })).toBeDefined()
+    view.rerender(rerouted('browser'))
+    expect(screen.queryByRole('group', { name: 'Multiplayer controls' })).toBeNull()
+    expect(screen.getByRole('toolbar', { name: 'Browser' })).toBeDefined()
+  })
+
+  it('takes a run-local terminal link, and leaves every other link alone', () => {
+    const view = open()
+    expect(openRunLink('run_1', 'https://example.com/docs')).toBe(false)
+    expect(openRunLink('run_missing', 'http://localhost:3000/')).toBe(false)
+    let taken = false
+    act(() => { taken = openRunLink('run_1', 'http://localhost:3000/app') })
+    expect(taken).toBe(true)
+    expect(useStore.getState().route.params.view).toBe('browser')
+    view.unmount()
+    open({ status: 'completed' })
+    expect(openRunLink('run_1', 'http://localhost:3000/app')).toBe(false)
+  })
+
+  it('sits beside the other views on a wide frame, from one remembered toggle', async () => {
+    measured(1200)
+    const view = open({ mode: 'acp' }, 'browser')
+    fireEvent.click(await screen.findByRole('button', { name: 'Show beside Session' }))
+    expect(useStore.getState().browserBeside).toBe(true)
+    view.rerender(rerouted(useStore.getState().route.params.view!))
+    expect(views().queryByRole('tab', { name: 'Browser' })).toBeNull()
+    expect(views().getByRole('tab', { name: 'Session' }).getAttribute('aria-selected')).toBe('true')
+    const beside = within(screen.getByRole('region', { name: 'Browser' }))
+    expect(beside.getByRole('toolbar', { name: 'Browser' })).toBeDefined()
+    expect(screen.getByRole('group', { name: 'Multiplayer controls' })).toBeDefined()
+
+    const divider = screen.getByRole('separator', { name: 'Resize the Browser' })
+    expect(divider.getAttribute('aria-valuenow')).toBe('600')
+    fireEvent.keyDown(divider, { key: 'ArrowLeft' })
+    expect(useStore.getState().browserBesideWidth).toBe(616)
+    fireEvent.keyDown(divider, { key: 'End' })
+    expect(useStore.getState().browserBesideWidth).toBe(880)
+
+    act(() => { openRunLink('run_1', 'http://localhost:3000/') })
+    expect(useStore.getState().route.params.view).toBe('session')
+
+    fireEvent.click(beside.getByRole('button', { name: 'Show the Browser as a tab' }))
+    view.rerender(rerouted('browser'))
+    expect(useStore.getState().browserBeside).toBe(false)
+    expect(views().getByRole('tab', { name: 'Browser' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByRole('separator', { name: 'Resize the Browser' })).toBeNull()
+  })
+
+  it('stays a tab, with no toggle, on a frame too narrow for two panes', async () => {
+    measured(600)
+    useStore.setState({ browserBeside: true })
+    open({}, 'browser')
+    expect(views().getByRole('tab', { name: 'Browser' }).getAttribute('aria-selected')).toBe('true')
+    expect(await screen.findByRole('toolbar', { name: 'Browser' })).toBeDefined()
+    expect(screen.queryByRole('button', { name: /Show beside|as a tab/ })).toBeNull()
   })
 })
 

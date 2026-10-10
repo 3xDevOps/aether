@@ -1396,11 +1396,11 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Browser appears once the run has a browser session:
-`useBrowserTab` (`src/routes/browser/visibility.ts`) polls
-`dev.browser.status` every 10 seconds for a live run on a gateway that serves
-it, and `?view=browser` opens it before then. `isRunRoute` in `views.ts` keeps a sidebar row lit
-across views.
+Terminal otherwise. Browser is in the list for every run that has not
+finished, on a gateway that serves `dev.browser.status` (`hasBrowser` in
+`src/routes/browser/open.ts`); no browser has to be running, and opening the
+view starts none. `isRunRoute` in `views.ts` keeps a sidebar row lit across
+views.
 
 The frame (header, view switch, Details) stays mounted while the view
 changes; `CenterView` remounts it only for another run, identity or event
@@ -1408,10 +1408,24 @@ epoch. Session, Terminal and Changes mount on first visit and stay mounted,
 laid out but `invisible` and `inert`: xterm hidden with `display: none`
 measures zero and would resize the shared PTY, and a Publish draft (commit
 message, an uncertain pull request) must survive a view switch. Browser
-mounts only while shown, so a hidden Browser streams no screencast. The
-agent's attach lives in `useAgentTerminal` at frame level, so switching views
-never reattaches, and `useRunRoom` reads the newest room page once per frame,
-then follows `workspace.room_message` events; after the event stream
+mounts only while shown, so a hidden Browser streams no screencast.
+
+The Browser can also sit beside the other three views instead of being a tab:
+its toolbar's **Show beside Session** (**Show beside Terminal** on a Standard
+run) docks it at the right of the frame with a divider, and **Show the Browser
+as a tab** puts it back. The choice and the divider's position are view
+preferences (`browserBeside`, `browserBesideWidth`, persisted). Docked, it
+stays on screen across Session, Terminal and Changes, leaves the view switch,
+and each side keeps at least 320px (`BrowserDock` in
+`src/routes/browser/dock.tsx`). The frame is measured, not the window: the
+toggle is offered only while the space left by the sidebar and Details is at
+least 640px, and below that the Browser is a tab whatever the preference
+says. The divider is a `separator` that takes a drag or the arrow keys, Home
+and End.
+
+The agent's attach lives in `useAgentTerminal` at frame level, so switching
+views never reattaches, and `useRunRoom` reads the newest room page once per
+frame, then follows `workspace.room_message` events; after the event stream
 reconnects it reads back to the cached history, as one page or more, so a gap
 is closed. It polls presence every ten seconds with an abortable 15-second
 deadline.
@@ -1472,8 +1486,11 @@ with the composer focused the header keeps only the title line.
 ### Multiplayer controls
 
 Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
-below the view switch at frame level, so Session, Terminal, Changes and
-Browser share one control surface. It shows the controller and every watcher
+below the view switch at frame level, so Session, Terminal and Changes share
+one control surface. The Browser view leaves it out: it is about who controls
+the agent's session, and the page has a lease of its own
+([Browser view](#browser-view)). With the Browser docked beside another view
+the strip is back, above both. It shows the controller and every watcher
 with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for five seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
@@ -2135,109 +2152,172 @@ both what it renders and the overlap set the conflict chips read.
 
 ### Browser view
 
-`src/routes/browser/` is the run-detail **Browser** tab in the same bundle
-used by the local SSH gateway and server-hosted tailnet gateway. It observes
-the run's actual isolated Chromium companion, not an iframe or a forwarded
-preview host. App JavaScript, cookies, redirects, popups and hot updates run
-there against the run's own network namespace: `http://localhost:3000` means
-the app in the run, not the phone or laptop. No debugging/CDP endpoint is
-exposed to the dashboard.
+`src/routes/browser/` is the run's **Browser**: a tab among the run's views,
+or a pane beside them (see [Run view](#run-view)), in the same bundle the
+local SSH gateway and the server-hosted tailnet gateway serve. It shows the
+run's own Chromium, which the server starts beside the run's container in the
+same network namespace, so `http://localhost:3000` is the app in the run, not
+the phone or laptop looking at it. It is not an iframe or a forwarded preview
+host: app JavaScript, cookies, redirects, popups and hot updates run there.
+No debugging/CDP endpoint is exposed to the dashboard.
 
-Opening the view reads status, pages and ownership; it does not create a
-session. It re-reads every 1.5 seconds while the tab is visible and the run
-is live; a finished run is read once. A run that is not running has no
-browser; every read answers
-`-32002` (HTTP 409) with the reason, which the pane shows:
+Opening the view reads status, pages and the control lease; it starts no
+browser. It re-reads every 1.5 seconds while the tab is visible and the run
+is live. The first page starts the browser, which takes longer than later
+pages; the pane says **Starting the browser** meanwhile. A server that cannot
+run one answers the status read with its reason, and the pane shows that
+reason under **Browser unavailable**. A status read that fails shows its
+error the same way:
 
 ```
-dev.browser.status: scheduler: the run has no live environment: the run is completed and its container is gone
+dev.browser.status: scheduler: the run has no live environment: the run is provisioning
 ```
 
-With no page selected the view is one **No page open** empty state: the
-state in words ("Browser not started · Nobody is driving") and one action,
-**Open http://localhost:3000**, or **Take control** / **Take over** when a
-session exists and the viewer does not hold it. **Other address…** swaps the
-button for a URL field. A selected page exposes **Go**, **Back**,
-**Forward** and **Reload page** beside the URL. **Page tools** contains the
-secondary page, viewport, capture, reconnect and destructive controls. **New
-page** opens another page in the existing context. The **Page** selector
-includes popups and changes the selected page for the agent and other viewers,
-so it requires control. **Viewport** offers **Desktop · 1280 × 800**, **Phone
-· 390 × 844** and **Phone landscape · 844 × 390**; these change the real
-remote viewport, not just the displayed image. They do not emulate a different
-user agent, operating system or hardware.
+**One row of chrome** (`index.tsx`), a `toolbar` named "Browser":
 
-The pane uses shared 13px inputs and buttons and native selectors styled with
-`field`: 28px high for mouse input and 44px for coarse pointers. Primary
-controls wrap responsively; secondary controls stay in Page tools. Long
-addresses, page titles and errors stay within the pane.
+- **Back**, **Forward** and **Reload**, icon buttons whose tooltips carry
+  their shortcuts. Reload is a spinner while a navigation this tab started is
+  in flight.
+- The **Address** field (`address-bar.tsx`).
+- **Keyboard**, on a coarse pointer only: it opens the phone's keyboard for
+  the page, which a tap on the page deliberately does not.
+- **Viewport**, a menu: **Fit the pane**, **Desktop** 1280 × 800, **Tablet**
+  820 × 1180, **Phone** 390 × 844. In a pane narrower than 480px the same
+  choices head the **Browser actions** menu instead.
+- **Show beside Session** / **Show the Browser as a tab**, only on a frame
+  wide enough for both.
+- **Browser actions**: **New page**, **Screenshot**, **Release control**
+  while this tab drives, **Close page…** and **Reset session…**.
+- Who is driving, when it is not nobody; see Control below.
 
-The status line names the lifecycle state and who is driving: "You are
-driving", "Alice is driving", "The agent is driving" or "Nobody is
-driving". **Take control** claims an unoccupied browser; **Take over**
-explicitly displaces the displayed lease.
-**Release control** gives up only that browser surface, not a swarm control
-hold. Watchers see the same selected page but cannot navigate, resize, select
-pages or send input. The server revalidates the steer permission, current
-membership and the
-surface generation; a visible old control button never authorizes a stale
-mutation.
+A second page or a popup adds a `tablist` named "Pages" under the toolbar;
+with one page there is no strip. A page that opened by itself carries a dot
+and "(new)" in its name until it is selected. Selecting a tab selects that
+page for the agent and every other viewer. **New page** opens a blank page
+and puts the caret in the address field.
 
-Click or touch the image to interact. Keyboard shortcuts carry their
-modifiers, pointer gestures include button/click count, wheel input scrolls
-the remote page, and up to ten touch contacts retain distinct IDs. **Keyboard**
-focuses the phone's text input bridge; committed composition/IME text is sent
-once rather than forwarding intermediate composition candidates. Native
-hardware-bound login flows and identity providers which reject automated
-Chromium remain limitations; use test accounts rather than importing a
-personal browser profile.
+Under the chrome there is only the page. Before one is open the pane reads
+**Open a page** and the address field has focus, except on a touch device and
+when the Browser is docked beside another view. A message about an action,
+such as a failed navigation or who is driving, is laid over the top of the
+page with a **Dismiss** button, so it never changes the page's size.
 
-**Expand** fills the run pane with the selected page, hiding the run header
-and navigation/capture controls. **Restore** brings those controls back.
-Neither action reconnects the stream, changes the remote viewport, or
-reacquires control. The current controller and errors remain visible, and
-**Keyboard** remains available for phone input.
+**Address.** `normalizeAddress` (`address.ts`) gives a scheme to an address
+typed without one, because the server accepts absolute `http(s)` URLs and
+`about:blank` only: `localhost`, `*.localhost`, an IPv4 literal or a bracketed
+IPv6 literal becomes `http://`, any other host `https://`, and an address
+that already has a scheme is sent as typed. There is no search fallback and
+no history. Focus selects the whole address. What is being typed is kept
+until it is submitted, dropped with Escape, or the page moves on while the
+field is not focused. Enter navigates the selected page, or opens the first
+one. A navigation the server refuses shows the server's message and leaves
+the typed address in the field:
 
-The stream accepts one bounded binary frame per WebSocket message (16 KiB
-metadata and 2 MiB image maximum). It keeps one pending compressed image and
-one decode, closes decoded bitmaps after painting, and never builds an image
-history. Input uses the metadata of the frame actually painted, including
-session/page revision and viewport ID. Coordinates exclude letterboxing and
-undo image/page scaling. The ordered input buffer is capped at 32 operations
-and one second; redundant moves for the same contact are coalesced. Changed
-frame identity, expired input or changed authority discards pending input with
-a visible error. Failed mutations are not automatically retried or replayed.
+```
+dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/
+```
+
+**Control.** Input to the page is serialized by one lease per run browser
+(`dev.control.*`, surface `browser`). The server fences every mutation by the
+lease's session and generation, an agent may take a free lease but never one
+a person holds, and a person may take over from anyone; see
+[coordination.md](coordination.md#development-terminals-browser-and-captures).
+The dashboard holds that lease only while its window is the one in use:
+
+- Nobody driving: the first click, key, scroll, toolbar action or Enter takes
+  the lease without asking and then acts, so the first click lands on the
+  page. A click beside a page that does not fill the pane takes it too. There
+  is no **Take control** button.
+- This tab driving: a pointer mark in the toolbar, **You are driving** beside
+  it in a wide pane, and **Release control** in **Browser actions**.
+- Someone else driving: the toolbar names them ("The agent is driving", "Pat
+  is driving", "You are driving in another tab") beside one **Take over**
+  button, which displaces exactly the lease it shows. Until then every action
+  here does nothing but say who is driving.
+- The window loses focus or is hidden: the tab releases its lease, so the
+  agent or a teammate can drive while its user is elsewhere. Nothing is shown
+  as blocked on return; the next interaction takes the lease again when it is
+  free. Leaving the view or the dashboard releases it too.
+
+A reload starts a new tab-local control identity. A lease the old one still
+holds reads "You are driving in another tab".
+
+**Viewport.** While this tab drives, the page's viewport follows a target:
+the pane's size (`paneViewport` in `viewport.ts`, inside the 240-2560 by
+240-1600 the server accepts) or the chosen preset. A mismatch is corrected
+250ms after it last changed, and never while a pointer is down or input is
+queued. The first page opens at the target. A preset is remembered for the
+run while the dashboard stays open (`browserPresets`). Presets change the
+real remote viewport, not the displayed image, and emulate no user agent,
+pixel ratio or hardware. A page someone else drives keeps their size here and
+is shrunk to fit; a frame is never enlarged, so a preset smaller than the
+pane shows at its true size.
+
+**Stream.** The page arrives as frames on `/ws/dev/browser/{run_id}`
+(`surface.tsx`), one bounded binary frame per WebSocket message (16 KiB
+metadata and 2 MiB image maximum). The view keeps one pending compressed image
+and one decode, closes decoded bitmaps after painting, and never builds an
+image history. A stream that closes or is refused reconnects by itself after
+0.5, 1, 2, 4 and 8 seconds, with the last frame still on screen and the lease
+untouched. When the sixth attempt fails the pane shows **The page stream
+stopped**, the server's last refusal or the socket's close reason, and
+**Retry**.
+
+**Input.** Click or touch the image to interact. Keys carry their modifiers,
+pointer gestures include button and click count, wheel input scrolls the
+remote page, and up to ten touch contacts retain distinct IDs. Committed
+composition/IME text is sent once rather than forwarding intermediate
+candidates. Input uses the metadata of the frame actually painted, including
+page revision and viewport ID; coordinates exclude the margin around a shrunk
+frame and undo image/page scaling. The ordered input buffer is capped at 32
+operations and one second, not counting the time taken to acquire a free
+lease; redundant moves for the same contact are coalesced. A changed frame
+identity, expired input or changed authority discards pending input with a
+visible message. Failed mutations are not retried or replayed. While a toolbar
+action or a viewport change is in flight, input is dropped without a message.
+Native hardware-bound login flows and identity providers which reject
+automated Chromium remain limitations; use test accounts rather than
+importing a personal browser profile.
+
+**Shortcuts.** The page receives every key pressed on it, so the four
+Browser bindings are matched first and kept from it; see
+[Keyboard and focus](#keyboard-and-focus). The address-bar shortcut is also
+the way out of the page for a keyboard user, since Tab goes to the page.
+
+**Links from a terminal.** `openRunLink` (`open.ts`) is the link handler of a
+run's agent terminal and shells. An `http(s)` link to `localhost`,
+`127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the run
+frame shows the Browser unless it is already docked, and the Browser opens
+the address as if it had been typed. Every other link opens in a new tab as
+before, and an OAuth callback link is still intercepted first.
 
 Switching to another run view or closing the dashboard detaches observation
 only. The app, pages and login continue according to the run's lifetime.
-**Reconnect** reads surviving state and reconnects observation; it never opens
-a fresh session. Reloading the dashboard creates a new tab-local control
-identity and initially watches the surviving owner; taking over is explicit.
-Stream failures, lifecycle unavailability and mutation refusals remain visible.
-**Close page** and **Reset session** both require current control and use the
-shared `AlertDialog` confirmation primitive. Close removes the selected page
-for everyone while leaving the other pages and session; Reset destroys shared
-pages/cookies and requires acquiring the new session before opening pages.
-Each confirmation captures the session and control identity/generation, plus
-the page and revision for Close. A replacement page, session or authority
-invalidates it rather than retargeting the mutation. Cancel restores focus to
-Page tools, and raw failures remain readable in the confirmation. Closing
-the run owns stopping the companion itself.
+**Close page…** and **Reset session…** take the lease like any other action
+and then confirm in the shared `AlertDialog`. Close removes the selected page
+for everyone while leaving the other pages and the session; Reset destroys
+shared pages, cookies and logins. Each confirmation captures the session and
+control identity and generation, plus the page and revision for Close. A
+replacement page, session or authority invalidates it rather than retargeting
+the mutation; that includes the lease released by a window blur. Cancel
+restores focus to **Browser actions**, and raw failures remain readable in
+the confirmation. Closing the run owns stopping the companion itself.
 
 **Screenshot** calls the real capture API at its own recorded boundary, not
-a canvas copy or the last received frame. It creates a private transient
-capture and displays its ID. **Captures…** in the run's **More** menu is
-where a member inspects it and chooses to retain it (see
+a canvas copy or the last received frame, and needs no lease. It creates a
+private transient capture. **Captures…** in the run's **More** menu is where
+a member inspects it and chooses to retain it (see
 [Captures and candidate review](#captures-and-candidate-review)). Taking a
 screenshot does not publish or retain anything.
 
 `web/e2e/development-browser/` adds real-server Playwright scenarios using the
 existing server/SSH-gateway harness, a Node 22.14.0 app process bound only to
-run-loopback, and the real browser companion. They cover invalid credentials,
-cookie-backed sign-in/logout, module hot replacement without logout,
-desktop/phone input, native Chromium composition, multiple touch contacts,
-same-page run-principal actions, popups, detach/reconnect, watch/takeover and
-stale control/viewport rejection. The app container publishes no host port.
+run-loopback, and the real browser companion. They cover the first page from
+the address bar, invalid credentials, cookie-backed sign-in/logout, module
+hot replacement without logout, desktop/phone input, native Chromium
+composition, multiple touch contacts, same-page run-principal actions,
+popups, fit-to-pane and presets, silent acquisition, watch/takeover and stale
+control/viewport rejection. The app container publishes no host port.
 Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
 image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
 deterministic harness only holds the run alive: these are not proof of an
@@ -3751,16 +3831,21 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘.` / `Ctrl+.` | run | Show or hide run details |
 | `c` | run | Message the agent (focuses the Session composer) |
 | `Esc` | run | Leave a run for the board |
+| `⌘L` / `Ctrl+L` | browser | Focus the Browser's address bar, from anywhere in the run |
+| `⌘R` / `Ctrl+R` | browser | Reload the page |
+| `⌘[` / `Alt+←` | browser | Go back |
+| `⌘]` / `Alt+→` | browser | Go forward |
 | `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
 | `1` to `4` | request | Pick that option of the focused Session request |
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
-The scopes are `global`, `run`, `card`, `request` and `composer`; `card` is
-the board's `a`/`r`/`o` on the focused card, `request` the option digits on
-a focused Session request and `composer` the send keys while the Session
-composer has focus. When a key matches in two live scopes, the
+The scopes are `global`, `run`, `browser`, `card`, `request` and `composer`;
+`card` is the board's `a`/`r`/`o` on the focused card, `request` the option
+digits on a focused Session request, `composer` the send keys while the
+Session composer has focus and `browser` the four keys of a run's Browser
+while it is on screen. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
@@ -3799,6 +3884,17 @@ store flag that names the form the shell is hosting. They take the key from
 the browser either way, so a stand-down cannot land the reader in the address
 bar. `Mod+B` stands down like a single key, so a terminal keeps Ctrl+B for
 tmux.
+
+The Browser's chords are the host browser's own, taken from it only where
+they are about the page. `Mod+L` answers anywhere in the run except inside a
+terminal, a menu or a dialog, so Ctrl+L still clears a shell. Reload, back
+and forward answer only while focus is inside the Browser (its page, its
+address field or its toolbar); anywhere else the host browser or the desktop
+shell keeps them. History uses the platform's keys, `⌘[` and `⌘]` on macOS
+and `Alt+←` and `Alt+→` elsewhere, because Alt and an arrow moves a caret by
+a word on macOS. Each handler prevents the default and stops the event while
+it is still capturing, so neither the host browser nor the remote page, which
+is sent every other key, acts on it.
 
 That guard reads the event target rather than the document. Radix dismisses an
 overlay from a capturing document listener without stopping the event, and
@@ -4058,8 +4154,13 @@ covers the Session rows; `src/store/session-rows.test.ts`,
 `src/routes/run/composer-state.test.ts` and `session.test.tsx` cover the
 Enhanced rows, store, stream client, composer and requests, and
 `src/store/session-perf.test.tsx` (`RUN_PERF=1`) streams 5,000 items and
-opens 2,000. `src/routes/browser/index.test.tsx` covers progressive page
-controls, close/reset identity fencing and raw refusals.
+opens 2,000. `src/routes/browser/index.test.tsx` covers the first page,
+silent acquisition, takeover, release on blur, the address field, shortcuts,
+fit-to-pane and presets, the page strip, close/reset identity fencing and raw
+refusals; `surface.test.tsx` covers input queued across acquiring a lease,
+watching, stream reconnection and its failure; `address.test.ts` covers the
+scheme rules; and `src/routes/run/frame.test.tsx` covers when Browser is
+offered, the docked layout and run-local terminal links.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
 
 Use the browser workflow for real computed geometry, top bar and sidebar

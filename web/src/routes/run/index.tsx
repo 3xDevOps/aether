@@ -3,11 +3,12 @@ import { MissingRun } from '@/components/missing-run'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
-import { useMediaQuery } from '@/lib/hooks'
+import { useElementSize, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
-import { useBrowserTab } from '@/routes/browser/visibility'
 import { BrowserView } from '@/routes/browser'
+import { BrowserDock, minBesideWidth } from '@/routes/browser/dock'
+import { hasBrowser } from '@/routes/browser/open'
 import { ChangesView } from '@/routes/diff'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -22,7 +23,7 @@ import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
 import { TerminalView } from '@/routes/run/terminal-view'
-import { defaultView, isRunView, runViews, type RunView } from '@/routes/run/views'
+import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
 import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -64,8 +65,14 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [noteDraft, setNoteDraft] = useState<{ text: string } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
-  const browserTab = useBrowserTab(run, cap.hasMethod('dev.browser.status'))
-  const views = runViews.filter((view) => view !== 'browser' || browserTab || (params.view === 'browser' && cap.hasMethod('dev.browser.status')))
+  const browser = hasBrowser(run, cap)
+  const beside = useStore((s) => s.browserBeside)
+  const setBeside = useStore((s) => s.setBrowserBeside)
+  const browserRequest = useStore((s) => s.browserRequests[run.id])
+  const [frameRef, frame] = useElementSize<HTMLDivElement>()
+  const splittable = browser && frame.width >= 2 * minBesideWidth
+  const docked = splittable && beside
+  const views = runViews.filter((view) => view !== 'browser' || (browser && !docked))
   const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
@@ -85,6 +92,22 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   }, [inline, setDetailsPreference])
 
   const go = useCallback((next: RunView) => navigate('run', { runId: run.id, view: next }), [navigate, run.id])
+  useEffect(() => {
+    if (browserRequest && browser && !docked) go('browser')
+  }, [browserRequest, browser, docked, go])
+  const browserView = (
+    <BrowserView
+      runID={run.id}
+      split={splittable ? {
+        beside: docked,
+        view: runViewLabel[defaultView(run)],
+        toggle: () => {
+          setBeside(!beside)
+          go(beside ? 'browser' : view === 'browser' ? defaultView(run) : view)
+        },
+      } : undefined}
+    />
+  )
   const nav: RunNavigation = {
     go,
     reveal: (cardID) => {
@@ -157,41 +180,44 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           agentName={agentName}
           agentEntry={agentEntry}
         />
-        {run.mode === 'acp' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
-        <div className="relative min-h-0 flex-1">
-          {visited.has('session') && (
-            <TabsContent value="session" forceMount inert={view !== 'session'} className={cn(panel, view !== 'session' && 'invisible')}>
-              <SessionView
-                run={run}
-                agent={agent}
-                agentName={agentName}
-                room={room}
-                nav={nav}
-                active={view === 'session'}
-                textarea={textarea}
-                focusComposer={composeRequested}
-                onComposing={(focused) => {
-                  setComposing(focused)
-                  if (focused) setComposeRequested(false)
-                }}
-                shells={shells}
-                switchable={switchable}
-              />
+        {run.mode === 'acp' && view !== 'browser' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
+        <div ref={frameRef} className="flex min-h-0 flex-1">
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {visited.has('session') && (
+              <TabsContent value="session" forceMount inert={view !== 'session'} className={cn(panel, view !== 'session' && 'invisible')}>
+                <SessionView
+                  run={run}
+                  agent={agent}
+                  agentName={agentName}
+                  room={room}
+                  nav={nav}
+                  active={view === 'session'}
+                  textarea={textarea}
+                  focusComposer={composeRequested}
+                  onComposing={(focused) => {
+                    setComposing(focused)
+                    if (focused) setComposeRequested(false)
+                  }}
+                  shells={shells}
+                  switchable={switchable}
+                />
+              </TabsContent>
+            )}
+            <TabsContent value="terminal" forceMount inert={view !== 'terminal'} className={cn(panel, view !== 'terminal' && 'invisible')}>
+              <TerminalView run={run} agent={agent} shells={shells} onCaptures={openCaptures} />
             </TabsContent>
-          )}
-          <TabsContent value="terminal" forceMount inert={view !== 'terminal'} className={cn(panel, view !== 'terminal' && 'invisible')}>
-            <TerminalView run={run} agent={agent} shells={shells} onCaptures={openCaptures} />
-          </TabsContent>
-          {visited.has('changes') && (
-            <TabsContent value="changes" forceMount inert={view !== 'changes'} className={cn(panel, view !== 'changes' && 'invisible')}>
-              <ChangesView runID={run.id} />
-            </TabsContent>
-          )}
-          {view === 'browser' && (
-            <TabsContent value="browser" className={panel}>
-              <BrowserView runID={run.id} />
-            </TabsContent>
-          )}
+            {visited.has('changes') && (
+              <TabsContent value="changes" forceMount inert={view !== 'changes'} className={cn(panel, view !== 'changes' && 'invisible')}>
+                <ChangesView runID={run.id} />
+              </TabsContent>
+            )}
+            {view === 'browser' && (
+              <TabsContent value="browser" className={panel}>
+                {browserView}
+              </TabsContent>
+            )}
+          </div>
+          {docked && <BrowserDock available={frame.width}>{browserView}</BrowserDock>}
         </div>
       </div>
       {inline && detailsOpen && (
