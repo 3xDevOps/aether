@@ -126,6 +126,71 @@ func TestPromptsAreReportedInTheOrderTheAgentTookThem(t *testing.T) {
 	rec.waitIdle(t)
 }
 
+// The agent may answer a steer only after the turn it joined has ended and the
+// next queued turn has started; that answer says nothing about the new turn.
+func TestLateSteerAnswerDoesNotAcceptTheNextTurn(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	releaseFirst, answerSteer, refuseQueued := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
+		if strings.Contains(string(call.params.Prompt), "queued") {
+			<-refuseQueued
+			return nil, &acp.RequestError{Code: -32000, Message: "Authentication required"}
+		}
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "working"}})
+		<-releaseFirst
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
+		<-answerSteer
+		return map[string]any{"outcome": OutcomeInjected}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("first"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	queued := make(deliveries, 1)
+	if r, err := s.Prompt(context.Background(), textPrompt("queued"), false, queued.report); err != nil || r.Outcome != OutcomeQueued {
+		t.Fatalf("queued: %+v %v", r, err)
+	}
+	steered := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), textPrompt("steered"), true, nil)
+		steered <- err
+	}()
+	received := func(method string, n int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			m.mu.Lock()
+			got := 0
+			for _, called := range m.methods {
+				if called == method {
+					got++
+				}
+			}
+			m.mu.Unlock()
+			if got >= n {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the agent received %d %s, want %d", got, method, n)
+			}
+		}
+	}
+	received(methodSteering, 1)
+	close(releaseFirst)
+	received(acp.AgentMethodSessionPrompt, 2)
+	close(answerSteer)
+	if err := <-steered; err != nil {
+		t.Fatal(err)
+	}
+	queued.none(t)
+	close(refuseQueued)
+	if err := queued.next(t); err == nil || !strings.Contains(err.Error(), "Authentication required") {
+		t.Fatalf("queued prompt reported %v, want the agent's refusal", err)
+	}
+	rec.waitIdle(t)
+}
+
 func TestQueuedPromptReportsTheConnectionClosing(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	started := make(chan struct{})

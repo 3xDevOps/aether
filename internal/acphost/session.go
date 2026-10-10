@@ -326,6 +326,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{Outcome: OutcomeQueued}, nil
 	}
+	starting := s.starting
 	s.mu.Unlock()
 
 	outcome, err := s.conn.steer(ctx, blocks)
@@ -343,8 +344,11 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	s.mu.Lock()
 	switch outcome {
 	case OutcomeInjected:
-		// The agent adds input only to a turn whose prompt it accepted.
-		s.acceptedLocked()
+		// The agent adds input only to a turn whose prompt it accepted. A
+		// later turn may have started while the steer was answered.
+		if starting != nil && s.starting == starting {
+			s.acceptedLocked()
+		}
 		s.userMessageLocked(blocks)
 		if delivered != nil {
 			s.callback(func() { delivered(false, nil) })
