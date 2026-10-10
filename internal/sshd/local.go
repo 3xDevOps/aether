@@ -133,6 +133,12 @@ func (l *Local) open(ctx context.Context, header, ack any, serve func(context.Co
 	go func() {
 		defer l.s.wg.Done()
 		defer l.s.untrackConn(server)
+		// Presence is recorded only for a member with a live connection, and
+		// a member on the server-hosted dashboard has no other.
+		if svc := l.s.cfg.Services.Approvals; svc != nil {
+			svc.ConnectionOpened(l.member)
+			defer svc.ConnectionClosed(l.member)
+		}
 		serve(ctx, ch)
 	}()
 	stream := &localStream{conn: client, server: ch, cancel: cancel}
