@@ -1518,6 +1518,20 @@ messages are allowed, incomplete uploads block sending, and failures preserve
 the draft and previews. `prompt_images` from the ACP snapshot gates image input.
 Footer controls wrap on narrow screens.
 
+An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
+attached images with their uploaded paths, and the idempotency key of the last
+`run.inject` attempt, so sending the same prompt again delivers it once. The
+Standard and Enhanced composers read the same draft, so it survives opening
+another run or page, an event-log restart that remounts the run, and a switch
+between Standard and Enhanced. An upload still running when the composer
+unmounts finishes into the draft, and the first focus of a composer that
+mounts with text puts the caret after it. A sent prompt empties the draft;
+deleting the run, or authenticating as another member or server, drops it.
+Drafts live in memory and end with the page. They sit in their own Zustand
+store, not a root-store slice: every root-store write rewrites `aether.ui`,
+and one made while events drain notifies on the next frame, which drops
+keystrokes in a controlled textarea.
+
 User rows keep room-message IDs and attachment indices, not image bytes.
 Image-bearing ACP rows match room messages by those IDs rather than caption
 text, so separate image-only messages remain separate. `message-images.tsx`

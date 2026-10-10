@@ -13,7 +13,7 @@ import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ComposerImagePicker, ComposerImages, useComposerImages } from '@/routes/run/composer-images'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
-import { composerBlock, enhancedBlock, pillFor, pillHint, type Pill } from '@/routes/run/composer-state'
+import { composerBlock, composerDraft, enhancedBlock, pillFor, pillHint, saveComposerDraft, useComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -77,6 +77,7 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
 }) {
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
+  const caretPlaced = useRef(false)
   useEffect(() => {
     if (autoFocus) textarea.current?.focus()
   }, [autoFocus, textarea])
@@ -114,7 +115,12 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
         placeholder={placeholder}
         className="resize-none [field-sizing:content] max-md:[--composer-lines:6.5rem]"
         style={{ maxHeight: 'var(--composer-lines, 10rem)' }}
-        onFocus={() => {
+        onFocus={(event) => {
+          // A textarea that mounts with a draft starts its caret before the text.
+          if (!caretPlaced.current) {
+            caretPlaced.current = true
+            event.target.setSelectionRange(value.length, value.length)
+          }
           setFocused(true)
           onFocusChange(true)
         }}
@@ -141,7 +147,8 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const cap = useCapability()
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const coarse = useMediaQuery(coarsePointer)
-  const [body, setBody] = useState('')
+  const { body } = useComposerDraft(run.id)
+  const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
@@ -242,14 +249,14 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const control = useImplicitControl(run, agent)
   const coarse = useMediaQuery(coarsePointer)
-  const [body, setBody] = useState('')
+  const { body } = useComposerDraft(run.id)
+  const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
   const [caret, setCaret] = useState(0)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const [error, setError] = useState<string>()
   const [focused, setFocused] = useState(false)
   const [active, setActive] = useState(0)
-  const idempotency = useRef<{ identity: string; key: string } | null>(null)
   const hintID = useId()
   const listID = useId()
   const queueHeld = useQueueHeld(focused)
@@ -317,21 +324,21 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
       return
     }
     const identity = JSON.stringify([text, attachments])
-    const key = idempotency.current?.identity === identity ? idempotency.current.key : crypto.randomUUID()
-    idempotency.current = { identity, key }
+    const previous = composerDraft(run.id).idempotency
+    const key = previous?.identity === identity ? previous.key : crypto.randomUUID()
+    saveComposerDraft(run.id, { idempotency: { identity, key } })
     const sent = await attempt(async () => {
       const result = await api.runInject(run.id, text, key, { steer, lease, attachments })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
       if (delivery !== 'sent' && delivery !== 'queued') {
-        if (delivery !== 'uncertain') idempotency.current = null
+        if (delivery !== 'uncertain') saveComposerDraft(run.id, { idempotency: undefined })
         throw new Error(result.message.failure?.message ?? (delivery === 'uncertain'
           ? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.'
           : 'The message was not sent. Your draft was kept.'))
       }
     })
     if (sent) {
-      idempotency.current = null
       setBody('')
       images.clear()
     }

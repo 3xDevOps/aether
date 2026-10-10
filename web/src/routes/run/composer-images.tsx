@@ -5,15 +5,12 @@ import { Button } from '@/components/ui/button'
 import { api, TERMINAL_IMAGE_TYPES } from '@/lib/api'
 import { message } from '@/lib/format'
 import { imageFiles } from '@/lib/term-clipboard'
+import { composerDraft, saveComposerDraft, useComposerDraft, type ComposerImage } from '@/routes/run/composer-state'
 
 export const maxAttachments = 8
 export const imageTypes = TERMINAL_IMAGE_TYPES.join(',')
 
-interface ComposerImage {
-  id: number
-  file: File
-  path?: string
-}
+let nextID = 0
 
 export interface ComposerImageState {
   attachments: string[]
@@ -33,32 +30,16 @@ export interface ComposerImageState {
 }
 
 export function useComposerImages(runID: string, enabled: boolean, isBusy: () => boolean): ComposerImageState {
-  const [previews, setPreviews] = useState<ComposerImage[]>([])
+  const previews = useComposerDraft(runID).images
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string>()
-  const selected = useRef<ComposerImage[]>([])
-  const paths = useRef<string[]>([])
-  const nextID = useRef(0)
   const pending = useRef(false)
   const generation = useRef(0)
   const target = useRef({ runID, enabled, isBusy })
   target.current = { runID, enabled, isBusy }
 
-  useEffect(() => {
-    selected.current = []
-    paths.current = []
-    pending.current = false
-    setPreviews([])
-    setUploading(false)
-    setUploadError(undefined)
-    return () => { generation.current += 1 }
-  }, [runID])
-
-  const update = (next: ComposerImage[]) => {
-    selected.current = next
-    paths.current = next.flatMap((image) => image.path ? [image.path] : [])
-    setPreviews(next)
-  }
+  const selected = () => composerDraft(runID).images
+  const update = (next: ComposerImage[]) => saveComposerDraft(runID, { images: next })
   const clear = () => {
     generation.current += 1
     pending.current = false
@@ -68,7 +49,7 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
   }
   const remove = (index: number) => {
     if (target.current.isBusy() || pending.current) return
-    update(selected.current.filter((_, at) => at !== index))
+    update(selected().filter((_, at) => at !== index))
     setUploadError(undefined)
   }
   const retry = async () => {
@@ -79,12 +60,12 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
     setUploading(true)
     setUploadError(undefined)
     try {
-      for (const image of selected.current) {
+      for (const image of selected()) {
         if (image.path) continue
         if (!current() || !target.current.enabled) return
         const result = await api.uploadTerminalImage(image.file, runID)
         if (!current() || !target.current.enabled) return
-        update(selected.current.map((item) => item.id === image.id ? { ...item, path: result.path } : item))
+        update(selected().map((item) => item.id === image.id ? { ...item, path: result.path } : item))
       }
     } catch (cause) {
       if (current()) setUploadError(`Image upload failed: ${message(cause)}`)
@@ -97,11 +78,11 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
   }
   const upload = async (files: File[]) => {
     if (!files.length || !target.current.enabled || target.current.isBusy() || pending.current) return
-    if (selected.current.length + files.length > maxAttachments) {
+    if (selected().length + files.length > maxAttachments) {
       setUploadError(`Attach at most ${maxAttachments} images.`)
       return
     }
-    update([...selected.current, ...files.map((file) => ({ id: nextID.current++, file }))])
+    update([...selected(), ...files.map((file) => ({ id: nextID++, file }))])
     await retry()
   }
 
@@ -119,8 +100,8 @@ export function useComposerImages(runID: string, enabled: boolean, isBusy: () =>
     uploadError, upload, retry, clear, remove, onPaste,
     clearError: () => setUploadError(undefined),
     isUploading: () => pending.current,
-    isReady: () => !pending.current && selected.current.every((image) => Boolean(image.path)),
-    getPaths: () => paths.current,
+    isReady: () => !pending.current && selected().every((image) => Boolean(image.path)),
+    getPaths: () => selected().flatMap((image) => image.path ? [image.path] : []),
   }
 }
 
