@@ -174,8 +174,10 @@ images, so it never interrupts; `Mod+Shift+Enter` always queues.
 
 An unsent message stays with its run: its text and attached images are still
 in the composer after you open another run or page, switch the run between
-Standard and Enhanced, or reconnect. Sending it clears it. Reloading the page
-discards every unsent message.
+Standard and Enhanced, or reconnect. Sending it clears it. A send or image
+upload still running when you return keeps the composer locked, on
+**Sending…** or **Uploading…**, until it settles; one that fails shows its
+error there. Reloading the page discards every unsent message.
 
 Without control, an authorized collaborator still gets **Send**. The
 instruction waits 45 seconds unless the controller approves or denies it

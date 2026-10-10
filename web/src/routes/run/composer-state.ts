@@ -15,6 +15,11 @@ export interface ComposerDraft {
   images: ComposerImage[]
   /** Sending the same prompt again reuses the key, so the server delivers it once. */
   idempotency?: { identity: string; key: string }
+  /** The send or other request in flight, which the next composer to mount waits for too. */
+  busy?: number
+  uploading?: number
+  error?: string
+  uploadError?: string
 }
 
 const noDraft: ComposerDraft = { body: '', images: [] }
@@ -34,8 +39,32 @@ export function useComposerDraft(runID: string): ComposerDraft {
 export function saveComposerDraft(runID: string, patch: Partial<ComposerDraft>): void {
   const draft = { ...composerDraft(runID), ...patch }
   const drafts = { ...useDrafts.getState(), [runID]: draft }
-  if (!draft.body && draft.images.length === 0) delete drafts[runID]
+  if (!draft.body && draft.images.length === 0 && !draft.busy && !draft.uploading && !draft.error && !draft.uploadError) delete drafts[runID]
   useDrafts.setState(drafts, true)
+}
+
+let requests = 0
+
+/**
+ * A request outlives the composer that started it, so it marks the draft. It
+ * writes only while its mark is there: a draft dropped meanwhile has a successor.
+ */
+export function beginDraftRequest(runID: string, kind: 'busy' | 'uploading', patch: Partial<ComposerDraft> = {}) {
+  const request = ++requests
+  saveComposerDraft(runID, { ...patch, [kind]: request })
+  const current = () => composerDraft(runID)[kind] === request
+  return {
+    current,
+    settle: (settled: Partial<ComposerDraft> = {}) => {
+      if (current()) saveComposerDraft(runID, { ...settled, [kind]: undefined })
+    },
+  }
+}
+
+/** The key to send these contents under: the last attempt's while they are unchanged. */
+export function draftSendKey(draft: ComposerDraft, text: string, attachments: string[]): NonNullable<ComposerDraft['idempotency']> {
+  const identity = JSON.stringify([text, attachments])
+  return { identity, key: draft.idempotency?.identity === identity ? draft.idempotency.key : crypto.randomUUID() }
 }
 
 useStore.subscribe((state, previous) => {

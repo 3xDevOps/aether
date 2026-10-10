@@ -1520,13 +1520,20 @@ Footer controls wrap on narrow screens.
 
 An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
 attached images with their uploaded paths, and the idempotency key of the last
-`run.inject` attempt, so sending the same prompt again delivers it once. The
+attempt to send them, so sending the same prompt again delivers it once. The
 Standard and Enhanced composers read the same draft, so it survives opening
 another run or page, an event-log restart that remounts the run, and a switch
-between Standard and Enhanced. An upload still running when the composer
-unmounts finishes into the draft, and the first focus of a composer that
-mounts with text puts the caret after it. A sent prompt empties the draft;
-deleting the run, or authenticating as another member or server, drops it.
+between Standard and Enhanced. A sent prompt empties the draft; deleting the
+run, or authenticating as another member or server, drops it.
+
+A send or an image upload outlives the composer that started it, so the
+request in flight and its error are part of the draft too. A composer that
+mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
+the request settles: nothing can be added to a prompt that is being sent, and
+it cannot be sent or uploaded a second time. A request settles only the draft
+it marked (`beginDraftRequest`), never one that replaced it. The first focus
+of a composer that mounts with text puts the caret after it.
+
 Drafts live in memory and end with the page. They sit in their own Zustand
 store, not a root-store slice: every root-store write rewrites `aether.ui`,
 and one made while events drain notifies on the next frame, which drops

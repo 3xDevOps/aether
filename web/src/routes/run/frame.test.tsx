@@ -324,6 +324,31 @@ describe('the session composer', () => {
     expect((box as HTMLTextAreaElement).value).toBe('run the tests')
   })
 
+  it('waits for a send that outlives it, and sends a failed one again under the same key', async () => {
+    const View = lookupRoute('run')!
+    let settle = { resolve: (_: { message: ReturnType<typeof roomMessage> }) => {}, reject: (_: Error) => {} }
+    const pending = () => new Promise<{ message: ReturnType<typeof roomMessage> }>((resolve, reject) => { settle = { resolve, reject } })
+    vi.mocked(api.runRoomPost).mockReset().mockImplementationOnce(pending).mockImplementationOnce(pending)
+    const view = open({}, 'session')
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message the agent' }), 'run the tests')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    view.rerender(<p>Board</p>)
+    view.rerender(<View params={{ runId: 'run_1', view: 'session' }} />)
+    const waiting = screen.getByRole('textbox', { name: 'Message the agent' })
+    expect(waiting).toMatchObject({ value: 'run the tests', readOnly: true })
+    expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+    fireEvent.keyDown(waiting, { key: 'Enter', ctrlKey: true })
+    act(() => settle.reject(new Error('403 forbidden: steering is not allowed')))
+    await waitFor(() => expect(waiting).toMatchObject({ value: 'run the tests', readOnly: false }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    act(() => settle.resolve({ message: roomMessage() }))
+    await waitFor(() => expect(waiting).toHaveProperty('value', ''))
+    const [failed, resent] = vi.mocked(api.runRoomPost).mock.calls
+    expect(vi.mocked(api.runRoomPost)).toHaveBeenCalledTimes(2)
+    expect(resent![0].idempotency_key).toBe(failed![0].idempotency_key)
+  })
+
   it.each([
     { status: 'completed' },
     { status: 'failed', mode: 'headless' },

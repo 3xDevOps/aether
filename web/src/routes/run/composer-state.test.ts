@@ -1,4 +1,4 @@
-import { composerBlock, composerDraft, enhancedBlock, pillFor, saveComposerDraft } from '@/routes/run/composer-state'
+import { beginDraftRequest, composerBlock, composerDraft, enhancedBlock, pillFor, saveComposerDraft } from '@/routes/run/composer-state'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
@@ -15,6 +15,18 @@ describe('composer drafts', () => {
     saveComposerDraft('run_2', { body: '' })
     expect(composerDraft('run_1').body).toBe('first')
     expect(composerDraft('run_2')).toEqual({ body: '', images: [] })
+  })
+
+  it('lets a request settle only the draft it marked', () => {
+    const stale = beginDraftRequest('run_1', 'busy')
+    useStore.getState().setIdentityKey('bob')
+    saveComposerDraft('run_1', { body: 'typed by the next member' })
+    const current = beginDraftRequest('run_1', 'busy')
+    stale.settle({ body: '', error: 'acphost: agent connection closed' })
+    expect(composerDraft('run_1')).toMatchObject({ body: 'typed by the next member', busy: expect.any(Number) })
+    expect(composerDraft('run_1').error).toBeUndefined()
+    current.settle({ body: '' })
+    expect(composerDraft('run_1')).toEqual({ body: '', images: [] })
   })
 
   it('saves without a root-store write, which would rewrite aether.ui', () => {

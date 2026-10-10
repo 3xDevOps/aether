@@ -348,17 +348,25 @@ describe('the Enhanced composer draft', () => {
   const lease = { has_control: true, control_generation: 4, state: state({ prompt_images: true }) }
   const box = () => screen.findByRole('combobox', { name: 'Message the agent' })
   const prompt = 'Round the totals\n  then update the docs'
+  const sent = { message: roomMessage({ id: 'm', kind: 'steer_request' }) }
+  let show: (runID: string) => void
 
-  it('keeps each run\'s unsent prompt and images while another run or page is shown, until the prompt is sent', async () => {
-    let uploaded = (_: { path: string }) => {}
-    vi.mocked(api.uploadTerminalImage).mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
+  /** Opens run_1 beside run_2, the run the member looks at in between. */
+  function openBesideAnotherRun() {
     useStore.getState().upsertRun(run({ id: 'run_2', mode: 'acp', acp: true }))
     const view = open()
-    const show = (runID: string) => {
+    show = (runID) => {
       view.rerender(<View params={{ runId: runID, view: 'session' }} />)
       acpSocket(runID).open(lease)
     }
     acpSocket().open(lease)
+    return view
+  }
+
+  it('keeps each run\'s unsent prompt and images while another run or page is shown, until the prompt is sent', async () => {
+    let uploaded = (_: { path: string }) => {}
+    vi.mocked(api.uploadTerminalImage).mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
+    const view = openBesideAnotherRun()
     await userEvent.type(await box(), 'Round the totals{Enter}  then update the docs')
     await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
 
@@ -382,7 +390,7 @@ describe('the Enhanced composer draft', () => {
     show('run_1')
     expect(await box()).toHaveProperty('value', prompt)
 
-    vi.mocked(api.runInject).mockResolvedValueOnce({ message: roomMessage({ id: 'm', kind: 'steer_request', body: prompt }) })
+    vi.mocked(api.runInject).mockResolvedValueOnce(sent)
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
     const [failed, retried] = vi.mocked(api.runInject).mock.calls
@@ -392,6 +400,61 @@ describe('the Enhanced composer draft', () => {
     show('run_1')
     expect(await box()).toHaveProperty('value', '')
     expect(screen.queryByRole('button', { name: /Remove attached image/ })).toBeNull()
+  })
+
+  it('waits for a send that outlives its composer, so nothing is added to it or sent twice', async () => {
+    let settle = { resolve: (_: typeof sent) => {}, reject: (_: Error) => {} }
+    const pending = () => new Promise<typeof sent>((resolve, reject) => { settle = { resolve, reject } })
+    vi.mocked(api.runInject).mockReset().mockImplementationOnce(pending).mockImplementationOnce(pending)
+    openBesideAnotherRun()
+    await userEvent.type(await box(), 'Round the totals')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    show('run_2')
+    show('run_1')
+    const waiting = await box()
+    expect(waiting).toMatchObject({ value: 'Round the totals', readOnly: true })
+    expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
+    fireEvent.keyDown(waiting, { key: 'Enter', ctrlKey: true })
+    act(() => settle.resolve(sent))
+    await waitFor(() => expect(waiting).toMatchObject({ value: '', readOnly: false }))
+    expect(api.runInject).toHaveBeenCalledTimes(1)
+
+    await userEvent.type(waiting, 'Update the docs')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    show('run_2')
+    show('run_1')
+    expect(await box()).toMatchObject({ value: 'Update the docs', readOnly: true })
+    act(() => settle.reject(new Error('acphost: agent connection closed')))
+    expect((await screen.findByRole('alert')).textContent).toContain('acphost: agent connection closed')
+    expect(await box()).toMatchObject({ value: 'Update the docs', readOnly: false })
+  })
+
+  it('waits for an upload that outlives its composer, so a resent prompt keeps its attachment and key', async () => {
+    let uploaded = (_: { path: string }) => {}
+    vi.mocked(api.uploadTerminalImage).mockReset().mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
+    openBesideAnotherRun()
+    await userEvent.type(await box(), 'Round the totals')
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
+    show('run_2')
+    show('run_1')
+    await box()
+    expect(screen.getByText('Uploading…')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Retry image upload' })).toBeNull()
+    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
+    act(() => uploaded({ path: '/home/alice/totals.png' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
+    expect(api.uploadTerminalImage).toHaveBeenCalledTimes(1)
+
+    const uncertain = { message: roomMessage({ id: 'm', kind: 'steer_request', state: 'uncertain' as const }), receipt: 'uncertain' as const }
+    vi.mocked(api.runInject).mockReset().mockResolvedValueOnce(uncertain).mockResolvedValueOnce(sent)
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Delivery is uncertain')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
+    const [first, resent] = vi.mocked(api.runInject).mock.calls
+    expect(first![3]).toMatchObject({ attachments: ['/home/alice/totals.png'] })
+    expect(resent).toEqual(first)
   })
 
   it('keeps the draft through the run\'s views, a reconnect, an event-log restart and a switch to Standard', async () => {
