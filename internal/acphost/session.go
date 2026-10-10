@@ -57,6 +57,11 @@ type Config struct {
 	// it thinks, at most once a second.
 	OnActivity func(kind, target string)
 	OnTitle    func(title string)
+	// TitleLookup, when positive, asks session/list for the session's title
+	// that long after a turn starts while the agent has reported none. Claude
+	// Code titles a session at its first prompt, but its adapter sends
+	// session_info_update only when the turn ends.
+	TitleLookup time.Duration
 }
 
 // Receipt says what happened to a prompt.
@@ -158,6 +163,8 @@ type Session struct {
 	actAt      time.Time
 	actNext    *[2]string
 	actTimer   *time.Timer
+	// prompted is the latest prompt's text with whitespace collapsed.
+	prompted string
 }
 
 // Start initializes the agent over r and w, restores or creates its session
@@ -426,8 +433,42 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 			s.cfg.OnState(true, "prompt", nil)
 		}
 	})
+	if s.cfg.TitleLookup > 0 && s.proj.title == "" && s.conn.Info().List {
+		time.AfterFunc(s.cfg.TitleLookup, s.lookupTitle)
+	}
 	go s.runTurn(blocks, ack, s.conn.w.sendingPrompt())
 	return ack
+}
+
+// lookupTitle adopts the title session/list reports for this session. An
+// agent lists a session it has not titled under its latest prompt, which is
+// not a title.
+func (s *Session) lookupTitle() {
+	s.mu.Lock()
+	prompted := s.prompted
+	skip := s.closed || s.proj.title != "" || prompted == ""
+	s.mu.Unlock()
+	if skip {
+		return
+	}
+	sessions, _, err := s.conn.listSessions(s.ctx, s.cfg.Cwd, "")
+	if err != nil {
+		if s.ctx.Err() == nil {
+			s.logger.Warn("acphost: look up the session title", "err", err)
+		}
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, listed := range sessions {
+		title := strings.Join(strings.Fields(listed.Title), " ")
+		echo := strings.HasPrefix(prompted, strings.TrimSpace(strings.TrimSuffix(title, "…")))
+		if listed.SessionID != s.conn.SessionID() || s.proj.title != "" || echo {
+			continue
+		}
+		s.proj.title = title
+		s.emitLocked(Item{Kind: KindSessionInfo, Title: title})
+	}
 }
 
 // acceptedLocked resolves the starting turn's prompt as accepted.
@@ -449,6 +490,7 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 			attachments = append(attachments, contentRef(b))
 		}
 	}
+	s.prompted = strings.Join(strings.Fields(text.String()), " ")
 	body, cut := cutTail(text.String(), maxTextSegment)
 	s.emitLocked(Item{Kind: KindMessage, Truncated: cut, Message: &Message{
 		Role: "user", MessageID: rand.Text(), Text: body, Attachments: attachments, Complete: true,

@@ -306,8 +306,19 @@ What the agent is doing reaches the dashboard's state line as a `run.agent`
 The agent's `session_info_update` title becomes the run's title in the
 sidebar, run header and command palette. It uses the same five-second
 coalescing and persisted `run.title` event as Standard terminal titles.
-Title changes received during session restoration apply too. Until the
-agent supplies a title, the dashboard uses the prompt's bounded first line.
+Title changes received during session restoration apply too.
+
+Claude Code titles a session about a second after its first prompt, but its
+adapter sends `session_info_update` only when that turn ends. Three seconds
+into a turn, the server therefore asks the adapter's `session/list` for the
+title of a session that has reported none. An untitled session is listed
+under its latest prompt, which the server ignores.
+
+Until the agent supplies a title, a run launched with a task shows the
+task's bounded first line. A run launched without one takes the first
+non-empty line of the first message its agent accepts, cut at 120 characters,
+stored and published as `run.title` at once. That line never replaces a
+title, and the agent's title replaces it.
 
 ## Mail
 

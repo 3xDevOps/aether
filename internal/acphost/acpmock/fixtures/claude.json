@@ -447,5 +447,27 @@
     }
    ]
   }
- }
+ },
+ "list": [
+  {
+   "sessions": [
+    {
+     "sessionId": "dd6af2e5-4b03-4b80-88cf-53a2b8b4cb54",
+     "cwd": "/workspace",
+     "title": "Reply with exactly the word pong and nothing else; do not use tools.",
+     "updatedAt": "2026-10-10T00:31:52.722Z"
+    }
+   ]
+  },
+  {
+   "sessions": [
+    {
+     "sessionId": "dd6af2e5-4b03-4b80-88cf-53a2b8b4cb54",
+     "cwd": "/workspace",
+     "title": "Pong response",
+     "updatedAt": "2026-10-10T00:31:53.404Z"
+    }
+   ]
+  }
+ ]
 }

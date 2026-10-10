@@ -2,8 +2,12 @@ package scheduler
 
 import (
 	"bytes"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -57,6 +61,152 @@ func TestEnhancedRunTitleFollowsAgentAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitTitle("Pong response request")
+}
+
+func TestEnhancedRunIsTitledFromItsFirstPrompt(t *testing.T) {
+	oldDebounce, oldLookup := runTitleDebounceInterval, acpTitleLookupDelay
+	runTitleDebounceInterval, acpTitleLookupDelay = 25*time.Millisecond, 25*time.Millisecond
+	t.Cleanup(func() { runTitleDebounceInterval, acpTitleLookupDelay = oldDebounce, oldLookup })
+
+	e, rt := newACPEnv(t, withMockClaude)
+	storedTitle := func(run domain.RunID) string {
+		t.Helper()
+		fresh, err := e.db.GetRun(t.Context(), run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fresh.Title
+	}
+	inject := func(s *Scheduler, run domain.RunID, text string) {
+		t.Helper()
+		if _, err := s.Inject(t.Context(), run, e.member.ID, domain.AgentPrompt{Text: text}, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listedSince := func(first int) func() bool {
+		return func() bool {
+			return slices.ContainsFunc(rt.all()[first:], func(exec *acpExec) bool {
+				return slices.Contains(exec.agent.Methods(), acp.AgentMethodSessionList)
+			})
+		}
+	}
+
+	withTask := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, withTask.ID, "the task's turn", turnEnded("end_turn", 1))
+	inject(e.sched, withTask.ID, "then say ping")
+	if title := storedTitle(withTask.ID); title != "" {
+		t.Fatalf("a follow-up titled a run launched with a task %q", title)
+	}
+
+	sub := e.subscribe(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextTitle := func() string {
+		t.Helper()
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case ev := <-sub.Events():
+				if title, ok := ev.Payload.(events.RunTitlePayload); ok && ev.RunID == run.ID {
+					return title.Title
+				}
+			case <-timer.C:
+				t.Fatal("no run.title event")
+			}
+		}
+	}
+
+	// The recorded adapter lists an untitled session under this prompt.
+	const prompt = "\nReply with exactly the word pong\nand nothing else; do not use tools."
+	inject(e.sched, run.ID, prompt)
+	if title := storedTitle(run.ID); title != "Reply with exactly the word pong" {
+		t.Fatalf("title after the first prompt = %q, want its first line", title)
+	}
+	if title := nextTitle(); title != "Reply with exactly the word pong" {
+		t.Fatalf("first run.title = %q, want the prompt's first line", title)
+	}
+	waitFor(t, "the title lookup", listedSince(0))
+	waitItems(t, e.sched, run.ID, "first turn", turnEnded("end_turn", 1))
+
+	inject(e.sched, run.ID, "again")
+	if title := nextTitle(); title != "Pong response" {
+		t.Fatalf("second run.title = %q, want the agent's listed title", title)
+	}
+	waitItems(t, e.sched, run.ID, "second turn", turnEnded("end_turn", 2))
+
+	execs := len(rt.all())
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	restarted, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	startScheduler(t, restarted)
+	waitFor(t, "resumed session", func() bool { return restarted.acp.session(run.ID) != nil })
+	inject(restarted, run.ID, prompt)
+	waitFor(t, "the restored session's title lookup", listedSince(execs))
+	time.Sleep(4 * runTitleDebounceInterval)
+	if title := storedTitle(run.ID); title != "Pong response" {
+		t.Fatalf("title after a restart and another prompt = %q, want the agent's", title)
+	}
+}
+
+func TestProvisionalRunTitleNeverReplacesATitle(t *testing.T) {
+	oldInterval := runTitleDebounceInterval
+	runTitleDebounceInterval = 25 * time.Millisecond
+	t.Cleanup(func() { runTitleDebounceInterval = oldInterval })
+
+	e := newTestEnv(t, nil)
+	run := &domain.Run{
+		WorkspaceID: e.ws.ID,
+		MemberID:    e.member.ID,
+		Harness:     "fake",
+		Mode:        domain.LaunchACP,
+		Status:      domain.RunQueued,
+	}
+	if err := e.db.CreateRun(t.Context(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	title := func() string {
+		t.Helper()
+		fresh, err := e.db.GetRun(t.Context(), run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fresh.Title
+	}
+
+	e.sched.setRunTitle(run.ID, "Agent title")
+	e.sched.setProvisionalRunTitle(run.ID, "a prompt sent before the agent's title was stored")
+	flushed := func() bool {
+		e.sched.titleMu.Lock()
+		defer e.sched.titleMu.Unlock()
+		return e.sched.titleUpdates[run.ID] == nil
+	}
+	waitFor(t, "the agent's title", flushed)
+	e.sched.setProvisionalRunTitle(run.ID, "a prompt sent after it")
+	if got := title(); got != "Agent title" {
+		t.Fatalf("a provisional title replaced the agent's: %q", got)
+	}
+
+	if err := e.db.SetRunTitle(t.Context(), run.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.setProvisionalRunTitle(run.ID, "\n  "+strings.Repeat("é", 130)+"\nsecond line")
+	if got, want := title(), strings.Repeat("é", 120)+"…"; got != want {
+		t.Fatalf("provisional title = %q, want %q", got, want)
+	}
+	e.sched.setRunTitle(run.ID, "Agent title")
+	waitFor(t, "the agent's title over the provisional one", func() bool { return title() == "Agent title" })
+	waitFor(t, "the last title flush", flushed)
 }
 
 func TestSetRunTitleDebouncesAndKeepsLatest(t *testing.T) {
