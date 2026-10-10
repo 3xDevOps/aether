@@ -71,32 +71,28 @@ describe('shell landmarks', () => {
     expect(within(footer).queryByText('NI')).toBeNull()
   })
 
-  it('groups runs under an h2 each, Finished collapsed by default', () => {
+  it('groups runs under an h2 each, every group expanded until its header is pressed', () => {
     render(<AppShell />)
 
     const groups = runList().getAllByRole('heading', { level: 2 })
     expect(groups.map((heading) => heading.textContent)).toEqual(['Needs you2', 'Working1', 'Finished1'])
     const finished = runList().getByRole('button', { name: /^Finished/ })
+    expect(finished.getAttribute('aria-expanded')).toBe('true')
+    expect(runList().getByText('tidy the readme')).toBeDefined()
+    fireEvent.click(finished)
     expect(finished.getAttribute('aria-expanded')).toBe('false')
     expect(runList().queryByText('tidy the readme')).toBeNull()
-    fireEvent.click(finished)
-    expect(runList().getByText('tidy the readme')).toBeDefined()
   })
 })
 
 describe('run rows', () => {
-  it('shows five Needs you rows, then the rest behind Show all', () => {
+  it('lists every Needs you row', () => {
     const waiting = Array.from({ length: 7 }, (_, i) =>
       run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention' }))
     useStore.setState({ runs: Object.fromEntries(waiting.map((r) => [r.id, toRecord(r)])) })
     render(<AppShell />)
-    const needsYou = () => runList().getAllByRole('button', { name: /^Needs you · question/ })
-    expect(needsYou()).toHaveLength(5)
 
-    fireEvent.click(runList().getByRole('button', { name: 'Show all 7' }))
-
-    expect(needsYou()).toHaveLength(7)
-    expect(runList().queryByRole('button', { name: /^Show all/ })).toBeNull()
+    expect(runList().getAllByRole('button', { name: /^Needs you · question/ })).toHaveLength(7)
   })
 
   it('names the state first, marks the open run, and opens its terminal', () => {

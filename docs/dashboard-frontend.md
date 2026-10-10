@@ -327,15 +327,15 @@ top to bottom:
    may launch.
 3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
-   holding an `aria-expanded` disclosure button and its count. Finished starts
-   collapsed. Needs you lists every workspace; a row outside the selected
-   workspace leads with that workspace's name. Working and Finished list the
-   selected workspace, and only the viewer's own runs while **Mine**
-   (`mineOnly`, persisted) in the Working header is pressed. Needs you shows
-   its first five rows, then **Show all n**. The region scrolls on its own,
-   and while more rows sit below the fold its bottom edge fades out. The
-   sidebar never collapses on its own at narrow widths; the splitter and
-   `⌘B` stay the reader's call.
+   holding an `aria-expanded` disclosure button and its count. Every group
+   starts expanded and lists all of its runs; a group closes only when its
+   header is pressed. Needs you lists every workspace; a row outside the
+   selected workspace leads with that workspace's name. Working and Finished
+   list the selected workspace, and only the viewer's own runs while **Mine**
+   (`mineOnly`, persisted) in the Working header is pressed. The region
+   scrolls on its own, and while more rows sit below the fold its bottom edge
+   fades out. The sidebar never collapses on its own at narrow widths; the
+   splitter and `⌘B` stay the reader's call.
 4. **Members** (admins only) and **Settings**. Board through Templates live
    in the header instead, leaving the sidebar's height for runs. The current
    destination carries `aria-current="page"`. Gates come from
@@ -3853,7 +3853,7 @@ while Reopen run appears only for eligible retained Standard runs. Free
 container is also offered for finished retained swarm workers; its
 confirmation and error path do not hide or delete history. Expired or
 unavailable runs offer no Free container. Sidebar tests cover group
-disclosure, with Finished collapsed by default.
+disclosure: every group starts expanded and closes when its header is pressed.
 `src/lib/needs-you.test.ts` has one case per Needs you condition.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
