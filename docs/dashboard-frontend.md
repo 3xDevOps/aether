@@ -1447,9 +1447,21 @@ The actions, in order:
 3. **More** (`components/run-actions.tsx`, an icon button on a phone): every
    run verb from `lib/commands.ts` except **Send a message to the agent…**,
    which the composer replaces, then **Hand off…**, the mode switch,
-   **Captures…** and **Raw events…**, then **Close run…**, **Kill run** and
-   **Delete run** after a separator. Kill, Delete and **Free container…**
-   confirm first.
+   **Open in editor…**, **Captures…** and **Raw events…**, then **Close
+   run…**, **Kill run** and **Delete run** after a separator. Kill, Delete
+   and **Free container…** confirm first.
+
+**Open in editor…** (`open-in-editor.tsx`) is offered for a live run the
+member may steer, by the same `allowed('steer', …)` question the run verbs
+ask, and never on a phone (`phoneScreen`), which has no editor to hand the
+run to. A paused run shows it disabled with **Resume the run first**. Its
+dialog has a **VS Code**, a **Cursor** and a **Zed** button, each navigating
+to that editor's deep link for the ssh host `<run-id>.aether` and the
+checkout `/workspace`, then `ssh <run-id>.aether` and `aether ssh-config` as
+copyable commands for whoever has not set the host up. The dashboard calls
+nothing: the server authorizes when the editor connects
+([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
+those three link shapes out of its window.
 
 The mode switch (`mode-switch.tsx`) is **Switch to Enhanced…** or **Switch
 to Standard…**, shown only for a live run of an agent `agent.list` reports
