@@ -769,15 +769,15 @@ func decodeTerminalParams(raw json.RawMessage, params any) error {
 		raw = json.RawMessage(`{}`)
 	}
 	if len(raw) > protocol.MaxDevParamsBytes {
-		return fmt.Errorf("terminal parameters exceed limit")
+		return fmt.Errorf("%w: terminal parameters exceed limit", control.ErrInvalid)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(params); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", control.ErrInvalid, err)
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("terminal parameters contain trailing data")
+		return fmt.Errorf("%w: terminal parameters contain trailing data", control.ErrInvalid)
 	}
 	return nil
 }

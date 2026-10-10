@@ -188,7 +188,7 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 			req.Operation = "navigate"
 		}
 		if req.Operation != "navigate" && req.Operation != "back" && req.Operation != "forward" && req.Operation != "reload" {
-			return nil, errors.New("invalid navigation direction")
+			return nil, fmt.Errorf("%w: invalid navigation direction", control.ErrInvalid)
 		}
 		req.URL = p.URL
 		req.TimeoutMS = p.TimeoutMS
@@ -258,7 +258,7 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 		switch p.Action {
 		case "click", "fill", "select_option", "key", "scroll", "text", "pointer", "touch", "select":
 		default:
-			return nil, errors.New("invalid browser action")
+			return nil, fmt.Errorf("%w: invalid browser action", control.ErrInvalid)
 		}
 		fence = p.DevControlFence
 		mutation = true
@@ -324,7 +324,7 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 			p.Limit = protocol.MaxDevLogEntries
 		}
 		if p.Limit < 1 || p.Limit > protocol.MaxDevLogEntries {
-			return nil, errors.New("log page exceeds limit")
+			return nil, fmt.Errorf("%w: log page exceeds limit", control.ErrInvalid)
 		}
 		req = browserTarget(p.DevBrowserPageTarget)
 		req.Operation = strings.TrimPrefix(method, "dev.browser.")
@@ -430,7 +430,7 @@ func (s *Scheduler) openDevelopmentBrowser(ctx context.Context, live LiveRun, p 
 		return nil, err
 	}
 	if req.ControlSessionID == "" {
-		return nil, errors.New("browser open requires control_session_id")
+		return nil, fmt.Errorf("%w: browser open requires control_session_id", control.ErrInvalid)
 	}
 	if err := (browser.Request{Operation: "open", SessionID: req.SessionID, URL: req.URL, Width: req.Width, Height: req.Height}).Validate(); err != nil {
 		return nil, err

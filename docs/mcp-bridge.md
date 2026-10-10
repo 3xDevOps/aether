@@ -83,6 +83,10 @@ The bridge returns the established structured result directly. This
 presentation differs from any CLI envelope, but it does not add operations or
 make MCP a Release B-parity interface.
 
+`aether_status` lists every capability of the run, including `dev.*` methods
+that have no MCP tool. Its tool description tells the agent to run
+`aether-internal skill` for those.
+
 `aether_send`, `aether_ask`, `aether_reply`, and `aether_report` require an
 explicit `idempotency_key`; the bridge never invents one. For a retry after a
 timeout or lost response, provide the same key and the same semantic inputs.

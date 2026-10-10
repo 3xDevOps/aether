@@ -283,6 +283,41 @@ func TestDevelopmentTerminalPhysicalInputTakeoverAndResize(t *testing.T) {
 	}
 }
 
+func TestDevelopmentAgentStaleAndInvalidRequestsAreNotInternal(t *testing.T) {
+	e := newTerminalTestEnv(t, nil)
+	run, _ := e.launchFake(t, "agent errors")
+	terminal := startTestTerminal(t, e, run.ID, "fenced")
+	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	fence := terminalTestFence(t, e, run.ID, terminal, agent, "agent", false)
+	fence.ControlGeneration++
+	screen, err := terminalTestCall(t, e.sched, run.ID, agent, protocol.MethodDevTerminalScreen, protocol.DevTerminalScreenParams{DevTerminalTarget: terminalTestTarget(terminal)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		method string
+		params any
+		code   int
+	}{
+		{protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{DevTerminalTarget: terminalTestTarget(terminal), DevControlFence: fence, Kind: "text", Text: "x"}, protocol.CodeConflict},
+		{protocol.MethodDevTerminalScreen, protocol.DevTerminalScreenParams{DevTerminalTarget: terminalTestTarget(terminal), ExpectedScreenRevision: screen.(protocol.DevTerminalScreenResult).ScreenRevision + 1}, protocol.CodeConflict},
+		{protocol.MethodDevControlStatus, protocol.DevControlStatusParams{}, protocol.CodeInvalidParams},
+		{protocol.MethodDevTerminalList, json.RawMessage(`{"unknown":true}`), protocol.CodeInvalidParams},
+		{protocol.MethodDevControlStatus, json.RawMessage(`{"unknown":true}`), protocol.CodeInvalidParams},
+	}
+	for _, c := range cases {
+		raw, err := json.Marshal(c.params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = e.sched.HandleAgent(t.Context(), run.ID, c.method, raw)
+		var rpcErr *protocol.Error
+		if !errors.As(err, &rpcErr) || rpcErr.Code != c.code || !strings.HasPrefix(rpcErr.Message, c.method+": ") {
+			t.Fatalf("%s = %v, want code %d", c.method, err, c.code)
+		}
+	}
+}
+
 func TestDevelopmentTerminalRecoveryDoesNotRerunAndCanStop(t *testing.T) {
 	e := newTerminalTestEnv(t, nil)
 	run, primary := e.launchFake(t, "recovery")

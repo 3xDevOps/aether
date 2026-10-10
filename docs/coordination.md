@@ -605,6 +605,10 @@ also carry `control_session_id` and `control_generation`. Coordinate actions
 use the observed `viewport_id`; semantic actions use revision-scoped node IDs
 from `snapshot`. Re-observe after navigation/DOM/viewport changes. `reset` is
 explicit, invalidates old identities, and requires a new control acquisition.
+`console` records only `error` and `warning` messages, uncaught page errors and
+dismissed dialogs; `network` records only failed requests and responses with
+status 400 or above. Neither records `console.log` output or successful
+requests.
 Browser status also reports `state`: `not_started`, `creating`, `running`,
 `paused`, `session_lost`, or `unavailable`. An unreachable or failed Chromium
 session reports `available: false`, `running: false`, and its actual error.
@@ -613,6 +617,14 @@ Failed initial creation may return an opaque
 Acquire the browser surface with that exact incarnation, then explicitly
 `browser reset` with the acquired lease to recover. The broker destroys only
 the recorded owned companion; another `open` never silently recreates it.
+
+Stale identities are refused with `-32003` (exit 3): a superseded control
+generation or surface incarnation, a surface held by another controller, a
+changed page revision, node or viewport, or a terminal screen that changed
+between pages. Re-observe and retry with the current values. Malformed
+parameters, an unknown browser action, or an invalid surface or control
+session are refused with `-32602` (exit 2), and an unavailable or timed-out
+browser companion with `-32004` (exit 4).
 
 Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image

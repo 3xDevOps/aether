@@ -161,14 +161,37 @@ func (s *Scheduler) HandleAgent(ctx context.Context, id domain.RunID, method str
 		return nil, err
 	}
 	result, err := s.CallDevelopment(ctx, id, control.Principal{Kind: control.PrincipalRunAgent, RunID: id}, method, params, func() error { return nil })
-	if errors.Is(err, ErrDiskFull) || errors.Is(err, ErrMemoryPressure) || errors.Is(err, ErrCapacityUnknown) || errors.Is(err, ErrBrowserCPUCapacity) {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	if code := DevelopmentErrorCode(err); code != 0 {
+		return nil, &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 	}
 	return result, err
 }
+
+// DevelopmentErrorCode is zero for a failure the caller cannot correct or retry.
+func DevelopmentErrorCode(err error) int {
+	var browserErr *browser.Error
+	switch {
+	case errors.Is(err, ErrDiskFull), errors.Is(err, ErrMemoryPressure), errors.Is(err, ErrCapacityUnknown), errors.Is(err, ErrBrowserCPUCapacity), errors.Is(err, browser.ErrUnavailable):
+		return protocol.CodeUnavailable
+	case errors.Is(err, control.ErrStale), errors.Is(err, control.ErrOccupied), errors.Is(err, control.ErrTakeoverRequired), errors.Is(err, protocol.ErrDevScreenChanged):
+		return protocol.CodeConflict
+	case errors.Is(err, control.ErrInvalid), errors.Is(err, control.ErrInvalidSession):
+		return protocol.CodeInvalidParams
+	case errors.As(err, &browserErr):
+		switch browserErr.Code {
+		case "invalid_request":
+			return protocol.CodeInvalidParams
+		case "stale_target", "stale_viewport", "resource_limit":
+			return protocol.CodeConflict
+		case "unavailable", "timeout":
+			return protocol.CodeUnavailable
+		}
+	}
+	return 0
+}
 func decodeDevelopment(raw json.RawMessage, target any) error {
 	if len(raw) > protocol.MaxDevParamsBytes {
-		return errors.New("development parameters exceed limit")
+		return fmt.Errorf("%w: development parameters exceed limit", control.ErrInvalid)
 	}
 	if len(raw) == 0 {
 		raw = []byte("{}")
@@ -176,10 +199,10 @@ func decodeDevelopment(raw json.RawMessage, target any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(target); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", control.ErrInvalid, err)
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
-		return errors.New("development request must contain one JSON object")
+		return fmt.Errorf("%w: development request must contain one JSON object", control.ErrInvalid)
 	}
 	return nil
 }

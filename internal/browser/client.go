@@ -61,7 +61,7 @@ func (c *Client) request(ctx context.Context, method, endpoint string, value any
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("browser companion: %w", err)
+		return nil, transportError(err)
 	}
 	if response.StatusCode == http.StatusOK {
 		return response, nil
@@ -80,10 +80,18 @@ func (c *Client) request(ctx context.Context, method, endpoint string, value any
 	return nil, fmt.Errorf("browser companion returned HTTP %d", response.StatusCode)
 }
 
+func transportError(err error) error {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return &Error{Code: "timeout", Message: err.Error()}
+	}
+	return fmt.Errorf("browser companion: %w", err)
+}
+
 func readBounded(reader io.Reader, maximum int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, maximum+1))
 	if err != nil {
-		return nil, err
+		return nil, transportError(err)
 	}
 	if int64(len(data)) > maximum {
 		return nil, &Error{Code: "resource_limit", Message: "companion response exceeds byte limit"}
