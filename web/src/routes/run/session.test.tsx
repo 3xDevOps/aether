@@ -390,9 +390,13 @@ describe('the Enhanced composer draft', () => {
     show('run_1')
     expect(await box()).toHaveProperty('value', prompt)
 
+    const tooMany = Array.from({ length: 8 }, (_, index) => new File(['png'], `extra-${index}.png`, { type: 'image/png' }))
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), tooMany)
+    expect(screen.getByText('Attach at most 8 images.')).toBeDefined()
     vi.mocked(api.runInject).mockResolvedValueOnce(sent)
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
+    expect(screen.queryByRole('alert')).toBeNull()
     const [failed, retried] = vi.mocked(api.runInject).mock.calls
     expect(retried).toEqual(['run_1', prompt, failed![2], expect.objectContaining({ attachments: ['/home/alice/totals.png'] })])
     show('run_2')
@@ -400,6 +404,7 @@ describe('the Enhanced composer draft', () => {
     show('run_1')
     expect(await box()).toHaveProperty('value', '')
     expect(screen.queryByRole('button', { name: /Remove attached image/ })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('waits for a send that outlives its composer, so nothing is added to it or sent twice', async () => {

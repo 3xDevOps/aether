@@ -13,7 +13,7 @@ import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ComposerImagePicker, ComposerImages, useComposerImages } from '@/routes/run/composer-images'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
-import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, useComposerDraft, type Pill } from '@/routes/run/composer-state'
+import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -174,7 +174,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
       const idempotency = draftSendKey(latest, text, attachments)
       const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined })
       const posted = await room.post({ kind: 'steer_request', body: text, attachments, key: idempotency.key })
-      request.settle(posted ? { body: '', images: [], idempotency: undefined } : {})
+      request.settle(posted ? sentDraft : {})
     }
     if (control.canAct) control.withControl(() => void post())
     else void post()
@@ -331,7 +331,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
       const result = await api.runInject(run.id, text, idempotency.key, { steer, lease, attachments })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
-      if (delivery === 'sent' || delivery === 'queued') request.settle({ body: '', images: [], idempotency: undefined })
+      if (delivery === 'sent' || delivery === 'queued') request.settle(sentDraft)
       else if (delivery === 'uncertain') request.settle({ error: result.message.failure?.message ?? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.' })
       else request.settle({ error: result.message.failure?.message ?? 'The message was not sent. Your draft was kept.', idempotency: undefined })
     } catch (err) {

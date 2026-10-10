@@ -281,12 +281,16 @@ describe('the session composer', () => {
     attached(true)
     const box = screen.getByRole('textbox', { name: 'Message the agent' })
     expect(screen.getByText('Sends to the agent’s terminal.')).toBeDefined()
+    const tooMany = Array.from({ length: 9 }, (_, index) => new File(['png'], `extra-${index}.png`, { type: 'image/png' }))
+    await userEvent.upload(screen.getByLabelText('Choose images to attach'), tooMany)
+    expect(screen.getByRole('alert').textContent).toContain('Attach at most 8 images.')
     await userEvent.type(box, 'run the tests')
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'steer_request', body: 'run the tests', control_generation: 3,
     })))
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('focuses the composer when the route asks for it', async () => {

@@ -67,6 +67,9 @@ export function draftSendKey(draft: ComposerDraft, text: string, attachments: st
   return { identity, key: draft.idempotency?.identity === identity ? draft.idempotency.key : crypto.randomUUID() }
 }
 
+/** What a delivered prompt leaves of its draft. */
+export const sentDraft: Partial<ComposerDraft> = { body: '', images: [], idempotency: undefined, uploadError: undefined }
+
 useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useDrafts.setState({}, true)
   else if (state.runs !== previous.runs) useDrafts.setState(pruneRuns(useDrafts.getState(), (runID) => runID in state.runs), true)
