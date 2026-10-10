@@ -117,6 +117,9 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
                           </MenuTrigger>
                           <MenuContent align="end">
                             <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id })}>Repository</MenuItem>
+                            {caps.hasMethod('workspace.environment.get') && (
+                              <MenuItem onSelect={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>Environment</MenuItem>
+                            )}
                             {canSettings && <MenuItem onSelect={() => setSettings(workspace)}>Settings…</MenuItem>}
                             {canDelete && (
                               <>

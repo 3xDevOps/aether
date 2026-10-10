@@ -310,7 +310,9 @@ func TestDockerSetupFailure(t *testing.T) {
 		WorktreeHostPath:  worktree,
 		WorktreeMountPath: "/workspace",
 		WorkingDir:        "/workspace",
-		SetupScript:       "echo doomed >&2; exit 7",
+		Env:               map[string]string{"AETHER_TEST_TOKEN": "setup-secret-4f1c", "AETHER_TEST_MODE": "plain-mode"},
+		SecretEnv:         []string{"AETHER_TEST_TOKEN"},
+		SetupScript:       `echo "doomed $AETHER_TEST_MODE $AETHER_TEST_TOKEN" >&2; exit 7`,
 		Command:           []string{"/bin/sh", "-c", "touch /workspace/main-ran; sleep 30"},
 	}
 	id := createContainer(t, d, spec)
@@ -319,10 +321,14 @@ func TestDockerSetupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Start() = nil error, want setup failure")
 	}
-	for _, want := range []string{"exited 7", "doomed"} {
+	for _, want := range []string{"exited 7", "doomed plain-mode ***"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Start() error %q missing %q", err, want)
 		}
+	}
+	var setup *SetupError
+	if !errors.As(err, &setup) || setup.ExitCode != 7 || strings.Contains(setup.Output, "setup-secret-4f1c") {
+		t.Errorf("Start() error = %#v, want a SetupError with exit 7 and the secret masked", err)
 	}
 	info, ierr := d.cli.ContainerInspect(t.Context(), string(id), client.ContainerInspectOptions{})
 	if ierr != nil {
@@ -333,6 +339,40 @@ func TestDockerSetupFailure(t *testing.T) {
 	}
 	if _, serr := os.Stat(filepath.Join(worktree, "main-ran")); serr == nil {
 		t.Error("main command ran despite setup failure")
+	}
+}
+
+// TestDockerSetupOutputPastTheBuffer verifies a setup script may print more
+// than execOutputLimit: a passing one still starts the container, and a
+// failing one reports the end of what it printed.
+func TestDockerSetupOutputPastTheBuffer(t *testing.T) {
+	t.Parallel()
+	d := newTestDocker(t)
+	const noisy = `i=0; while [ $i -lt 20000 ]; do echo "line $i of a chatty install, padded so twenty thousand of them pass one mebibyte"; i=$((i+1)); done`
+	spec := func(name, script string) Spec {
+		return Spec{
+			Name:              fmt.Sprintf("it-setup-%s-%d", name, time.Now().UnixNano()),
+			Image:             testImage,
+			WorktreeHostPath:  t.TempDir(),
+			WorktreeMountPath: "/workspace",
+			WorkingDir:        "/workspace",
+			SetupScript:       script,
+			Command:           []string{"/bin/sh", "-c", "sleep 30"},
+		}
+	}
+
+	if err := d.Start(t.Context(), createContainer(t, d, spec("noisy", noisy))); err != nil {
+		t.Fatalf("Start() with a chatty passing setup script: %v", err)
+	}
+
+	err := d.Start(t.Context(), createContainer(t, d, spec("noisyfail", noisy+`; echo "the real error" >&2; exit 9`)))
+	var setup *SetupError
+	if !errors.As(err, &setup) || setup.ExitCode != 9 {
+		t.Fatalf("Start() error = %v, want a SetupError with exit 9", err)
+	}
+	if !strings.HasPrefix(setup.Output, "[earlier output omitted]\n") || !strings.Contains(setup.Output, "line 19999 of") ||
+		!strings.Contains(setup.Output, "the real error") || len(setup.Output) > setupOutputLimit+64 {
+		t.Errorf("setup output is %d bytes ending %q, want the end of the transcript", len(setup.Output), setup.Output[max(0, len(setup.Output)-160):])
 	}
 }
 

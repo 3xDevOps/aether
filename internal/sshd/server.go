@@ -21,6 +21,7 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -73,6 +74,9 @@ type Config struct {
 	// Homes owns the persistent per-member home directories. It is optional
 	// in narrow unit-test configurations.
 	Homes *memberhome.Manager
+
+	// Secrets holds workspace secret variables. Nil refuses to store one.
+	Secrets *secretstore.Store
 
 	// WhoIs resolves connections to tailnet identities via tailscaled;
 	// nil disables tailnet auth entirely (key auth only). WhoIs runs
@@ -173,6 +177,10 @@ type Server struct {
 	// cannot acquire a replacement lock and recreate removed resources.
 	workspaceLocksMu sync.Mutex
 	workspaceLocks   map[domain.WorkspaceID]*sync.RWMutex
+
+	// environmentMu makes workspace.environment.set's read, merge and write
+	// of the workspace row and its secret file one step.
+	environmentMu sync.Mutex
 
 	mu    sync.Mutex
 	ln    net.Listener

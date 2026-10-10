@@ -476,3 +476,19 @@ func TestVerificationFailedDestroyRecoveryKeepsDurableCleanupKey(t *testing.T) {
 		t.Fatalf("restart did not release confirmed cleanup: %v, released=%v", err, released)
 	}
 }
+
+func TestEnvironmentDigestDoesNotCoverSecretValues(t *testing.T) {
+	spec := func(token, mode string) runtime.Spec {
+		return runtime.Spec{Env: map[string]string{"API_TOKEN": token, "APP_MODE": mode}, SecretEnv: []string{"API_TOKEN"}}
+	}
+	base := environmentDigest(spec("one", "ci"))
+	if environmentDigest(spec("two", "ci")) != base {
+		t.Error("the digest changed with a secret's value")
+	}
+	if environmentDigest(spec("one", "dev")) == base {
+		t.Error("the digest ignored a plain variable's value")
+	}
+	if environmentDigest(runtime.Spec{Env: map[string]string{"APP_MODE": "ci"}}) == base {
+		t.Error("the digest ignored that a secret is set")
+	}
+}

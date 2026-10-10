@@ -176,6 +176,19 @@ describe('new run', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('shows what the workspace setup script printed when it fails the launch', async () => {
+    vi.mocked(api.runLaunch).mockRejectedValueOnce(Object.assign(
+      new Error('run.launch: provisioning: start container: runtime: setup script exited 1'),
+      { data: { setup_output: 'npm error code E401\n' } },
+    ))
+    await open()
+    fireEvent.click(launchButton())
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('setup script exited 1')
+    expect(within(alert).getByLabelText('Setup script output').textContent).toBe('npm error code E401\n')
+  })
+
   it('needs a task for Background and says so', async () => {
     await open()
     await userEvent.click(modeSegment('Background'))

@@ -264,6 +264,50 @@ func TestContainerConfigSetupGate(t *testing.T) {
 	}
 }
 
+func TestSetupOutputMasksSecretEnv(t *testing.T) {
+	d := &Docker{namePrefix: defaultNamePrefix}
+	spec := validSpec()
+	spec.Env = map[string]string{"TOKEN": "abc", "LONG_TOKEN": "abc-and-more", "MODE": "plain", "EMPTY": ""}
+	spec.SecretEnv = []string{"TOKEN", "LONG_TOKEN", "EMPTY"}
+	cfg, _ := d.containerConfig(spec)
+
+	secrets := secretEnvValues(cfg.Labels[labelSecretEnv], cfg.Env)
+	got := setupOutput("+ curl -H abc-and-more\nmode plain, token abc\n", false, secrets)
+	if want := "+ curl -H ***\nmode plain, token ***\n"; got != want {
+		t.Errorf("setupOutput = %q, want %q", got, want)
+	}
+
+	spec.SetupScript = ""
+	if cfg, _ := d.containerConfig(spec); cfg.Labels[labelSecretEnv] != "" {
+		t.Errorf("secret label = %q without a setup script, want none", cfg.Labels[labelSecretEnv])
+	}
+}
+
+func TestSetupOutputKeepsTheEnd(t *testing.T) {
+	long := strings.Repeat("noise\n", setupOutputLimit) + "npm error missing script\n"
+	got := setupOutput(long, false, nil)
+	if len(got) > setupOutputLimit+64 || !strings.HasPrefix(got, "[earlier output omitted]\nnoise\n") || !strings.HasSuffix(got, "npm error missing script\n") {
+		t.Errorf("setupOutput kept %d bytes, starting %q", len(got), got[:min(len(got), 40)])
+	}
+
+	// However much a script prints, its transcript is the end of it, and a
+	// secret the cut split in two does not survive as its second half.
+	tail := &tailWriter{limit: 32}
+	for _, chunk := range []string{"first line\n", "token secret-", "value\n", "last line\n"} {
+		if n, err := tail.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("Write(%q) = %d, %v", chunk, n, err)
+		}
+	}
+	if kept := string(tail.buf); !tail.cut || kept != "ne\ntoken secret-value\nlast line\n" {
+		t.Fatalf("tail = %q, cut %v", kept, tail.cut)
+	}
+	half := &tailWriter{limit: 36}
+	_, _ = half.Write([]byte("token secret-value\npadding line one\nlast line\n"))
+	if got := setupOutput(string(half.buf), half.cut, []string{"secret-value"}); strings.Contains(got, "value") || !strings.HasSuffix(got, "last line\n") {
+		t.Errorf("setupOutput after a cut inside the secret = %q", got)
+	}
+}
+
 func TestContainerConfigTTY(t *testing.T) {
 	d := &Docker{namePrefix: defaultNamePrefix}
 	spec := validSpec()
