@@ -221,6 +221,21 @@ describe('run rows', () => {
       expect(row().querySelector('[data-slot=run-people]')).toBeNull()
     })
 
+    it('steps the stack aside while a Needs you row shows its action', () => {
+      seed({}, alice)
+      useStore.getState().setPresence([
+        { member_id: alice.id, state: 'watching', watching: ['run_1', 'run_2'], last_seen: '2026-08-14T10:10:00Z' },
+      ])
+      render(<AppShell />)
+      const waiting = runList().getByRole('button', { name: /^Needs you · answer the schema question/ })
+      const yielding = ['group-hover/row:hidden', 'group-focus-within/row:hidden']
+
+      for (const token of yielding) {
+        expect(waiting.querySelector('[data-slot=run-people]')?.className).toContain(token)
+        expect(row().querySelector('[data-slot=run-people]')?.className).not.toContain(token)
+      }
+    })
+
     it('opens the run details beside a row a mouse rests on, in place of a native tooltip', () => {
       vi.useFakeTimers()
       try {

@@ -275,7 +275,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
       <RelativeTime at={since} compact title={undefined} />
       <AgentGlyph agent={run.harness} />
-      {people.length > 0 && <PeopleStack people={people} />}
+      {people.length > 0 && <PeopleStack people={people} yields={state === 'needs-you'} />}
     </span>
   )
   return (
@@ -326,12 +326,18 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
 
 const peopleShown = 3
 
-/** The first member sits whole at the right edge; each one after shows from behind it, to its left. */
-function PeopleStack({ people }: { people: string[] }) {
+/**
+ * The first member sits whole at the right edge; each one after shows from behind it, to its left.
+ * `yields` hides the stack while the row's hover action shows, which would otherwise leave the title no room.
+ */
+function PeopleStack({ people, yields }: { people: string[]; yields: boolean }) {
   const members = useStore((s) => s.members)
   const faces = people.length > peopleShown ? people.slice(0, peopleShown - 1) : people
   return (
-    <span data-slot="run-people" className="pointer-events-none flex items-center">
+    <span
+      data-slot="run-people"
+      className={cn('pointer-events-none flex items-center', yields && 'group-focus-within/row:hidden group-hover/row:hidden')}
+    >
       {people.length > faces.length && <span className="mr-1 text-ui-xs">+{people.length - faces.length}</span>}
       {[...faces].reverse().map((id, behind) => (
         <span

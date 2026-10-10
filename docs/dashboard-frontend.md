@@ -382,6 +382,8 @@ edge and each one after shows from behind it, to its left. First is the
 run's controller. While nobody holds control it is the last controller, if
 they are still on the run. The rest follow by name. A row draws three
 avatars at most: a fourth person turns the stack into two avatars and `+2`.
+While a Needs you row shows its action the stack steps aside for it, so the
+title keeps its room.
 
 **Run details.** Resting a mouse on a row for 400ms opens a box docked to
 the row's right edge (`run-details.tsx`): the full title, the state's
