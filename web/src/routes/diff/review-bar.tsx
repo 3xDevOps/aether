@@ -142,18 +142,14 @@ export function ReviewBar({
 
   const count = written(comments).length
   const note = blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.')
-  const failure = blocked ? undefined : error
   return (
     <div role="group" aria-label="Review" className="flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-seam bg-chrome px-3 py-0.5 text-ui-sm">
       <span className="flex shrink-0 items-center gap-1.5 font-medium text-text tabular-nums">
         <MessageSquare aria-hidden className="size-3.5 text-muted" />
         {plural(count)}
       </span>
-      {failure ? (
-        <p role="alert" className="min-w-0 flex-1 basis-40 break-words text-state-failed">{failure}</p>
-      ) : note && (
-        <p className="min-w-0 flex-1 basis-40 text-muted">{note}</p>
-      )}
+      {error && <p role="alert" className="min-w-0 flex-1 basis-40 break-words text-state-failed">{error}</p>}
+      {note && <p className="min-w-0 flex-1 basis-40 text-muted">{note}</p>}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <Button variant="ghost" size="sm" disabled={Boolean(sending)} onClick={() => setDiscarding(true)}>
           Discard

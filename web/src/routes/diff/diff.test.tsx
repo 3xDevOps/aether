@@ -723,6 +723,21 @@ test('text changed while a send is out stays, and a send that outlives a sign-in
   expect(stored).not.toContain('msg_2')
 })
 
+test('a send error stays in the bar when the run stops taking messages', async () => {
+  seed(ready)
+  renderDiff()
+  comment('cmd/main.go', '+new line', 'use the helper')
+  vi.mocked(api.runRoomPost).mockRejectedValueOnce(new Error('run.room.post: connection lost'))
+  fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+  await screen.findByRole('alert')
+
+  act(() => useStore.setState({ runs: { [active.id]: toRecord(run({ id: active.id, status: 'completed' })) } }))
+
+  expect(screen.getByRole('alert').textContent).toBe('run.room.post: connection lost')
+  expect(screen.getByText('This run has finished.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', true)
+})
+
 test('a message the server could not deliver keeps the comments and says why', async () => {
   seed(ready)
   renderDiff()

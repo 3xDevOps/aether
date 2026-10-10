@@ -2131,7 +2131,8 @@ both what it renders and the overlap set the conflict chips read.
   comments to <agent>." with **Open the session**; the receipt reads the room
   message from the store, so a later denial or failed delivery replaces it. A
   send the server refuses, cannot deliver or cannot vouch for keeps every
-  comment and shows the server's error in the bar.
+  comment and shows the server's error in the bar, beside the reason when the
+  run has since stopped taking messages.
 - **`sendToAgent` is the send path.** `src/lib/send-to-agent.ts` takes a run,
   the text and, when the tab holds it, the control lease. It posts a room
   `steer_request` and returns the room message, whose `state` is the receipt,
