@@ -75,7 +75,12 @@ func RunSSHOptions() ([]SSHOption, error) {
 		command = `"` + exe + `"`
 	}
 	return []SSHOption{
-		// %% is a literal percent sign to ssh; %h is the host name.
+		// %h is the host name ssh was given until a HostName replaces it.
+		// These options are read first, so this HostName keeps a Host * of
+		// the user's own from renaming the run. ProxyCommand's %n would
+		// too, but only from OpenSSH 8.1 on.
+		{"HostName", "%h"},
+		// %% is a literal percent sign to ssh.
 		{"ProxyCommand", strings.ReplaceAll(command, "%", "%%") + " ssh --stdio %h"},
 		{"UserKnownHostsFile", sshConfigPath(filepath.Join(dir, runKnownHostsFile))},
 		{"HostKeyAlias", runHostKeyAlias},

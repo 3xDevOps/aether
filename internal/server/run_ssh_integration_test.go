@@ -49,6 +49,12 @@ func newSSHUser(t *testing.T, aether, addr, keyPath string) *sshUser {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(configDir, "aether", "config.json"), string(link))
+	// A Host * of the member's own, which must not rename the run or send
+	// it somewhere else.
+	if err = os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(home, ".ssh", "config"), "Host *\n  HostName elsewhere.invalid\n  ProxyJump bastion.invalid\n")
 	u := &sshUser{
 		t: t, aether: aether, config: filepath.Join(home, ".ssh", "config"),
 		// No agent: the member's key is the one the link names.
