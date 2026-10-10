@@ -480,3 +480,16 @@ test('a coarse pointer wraps long lines until the toggle says otherwise, and the
   renderDiff()
   expect(screen.getByRole('button', { name: 'Wrap lines' }).getAttribute('aria-pressed')).toBe('false')
 })
+
+test('a route that names a file opens the current diff at it', async () => {
+  seed(ready)
+  useStore.setState({ route: { name: 'run', params: { runId: active.id, view: 'changes', file: 'db/schema.sql' } } })
+  renderDiff()
+
+  expect(screen.getByRole('button', { name: 'Collapse db/schema.sql' })).toBeTruthy()
+  const files = within(screen.getByRole('navigation', { name: 'Changed files' }))
+  expect(files.getByRole('button', { name: /schema\.sql/ }).getAttribute('aria-current')).toBe('true')
+
+  act(() => useStore.getState().navigate('run', { runId: active.id, view: 'changes', file: 'notes.md' }))
+  await waitFor(() => expect(files.getByRole('button', { name: /notes\.md/ }).getAttribute('aria-current')).toBe('true'))
+})

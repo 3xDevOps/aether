@@ -12,6 +12,7 @@ import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
 import { isLiveRun } from '@/routes/files/sources'
 import { openInFiles } from '@/routes/files/open'
+import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { initialDiff, intervalKey, type DiffSnapshot, type IntervalPatch } from '@/store/diff'
@@ -27,9 +28,11 @@ function collapsedByDefault(file: PatchFile): boolean {
 export function ChangesView({ runID }: { runID: string }) {
   const caps = useCapability()
   const run = useStore((s) => s.runs[runID])
+  const route = useStore((s) => s.route)
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
   // Keep the chosen interval even when newer snapshots move it out of the menu.
   const [snapshot, setSnapshot] = useState<DiffSnapshot | null>(null)
+  const [asked, setAsked] = useState<string | null>(null)
   const wrapping = useStore((s) => s.diffWrap)
   const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
@@ -65,6 +68,20 @@ export function ChangesView({ runID }: { runID: string }) {
       else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
     })
   }, [files, virtual, ids])
+
+  // A link to one file names it in the route; it is opened in the current
+  // diff once that diff has it.
+  useEffect(() => {
+    if (!isRunRoute(route, runID) || route.params.view !== 'changes' || !route.params.file) return
+    setSnapshot(null)
+    setAsked(route.params.file)
+  }, [route, runID])
+  useEffect(() => {
+    if (!asked || snapshot) return
+    if (cumulative.some((file) => file.path === asked)) jump(asked)
+    else if (state.status === 'loading') return
+    setAsked(null)
+  }, [asked, snapshot, cumulative, state.status, jump])
 
   if (!run) return <MissingRun />
 

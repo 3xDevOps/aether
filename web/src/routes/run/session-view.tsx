@@ -229,7 +229,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
       to.go('terminal')
       if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
     },
-    go: (view) => latest.current.nav.go(view),
+    openChange: (path) => useStore.getState().navigate('run', { runId: run.id, view: 'changes', file: path }),
     reveal: (id) => latest.current.nav.reveal(id),
   }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
 

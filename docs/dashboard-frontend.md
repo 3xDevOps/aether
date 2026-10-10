@@ -1604,7 +1604,8 @@ so only the streaming block re-renders, code highlighted with the Lezer
 languages), `thinking`, `work` (folded by kind; expanded entries and their
 detail - command, output tail, `DiffBlock` - splice into the same list,
 and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
-`plan`, `changed-files`, `answered`, `event` (notices, mode changes, a new
+`plan`, `changed-files` (each row opens the Changes view at that file),
+`answered`, `event` (notices, mode changes, a new
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
 answer") with the amber dot while a request is pending. A person's
@@ -2093,6 +2094,11 @@ both what it renders and the overlap set the conflict chips read.
   path, then the Files route. It needs `files.tree` and a run the Files tree
   still lists. Binary files and files the current diff shows as deleted have
   no link.
+- **A link can name a file.** A navigation to the run route with
+  `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
+  file and scrolls to it once the diff has it. Each row of the Session view's
+  **Changed N files** navigates this way. `file` is not written to the
+  address.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there
   is no editor and no language grammar. The server sends complete run diffs
