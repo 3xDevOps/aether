@@ -156,12 +156,15 @@ It declares `display: standalone` and `start_url: '/'`, and names four icons
 from `web/public/icons/`: 192px and 512px in both `any` and `maskable`. 192
 and 512 are the pair Chrome and MDN document; what the installability check
 enforces is lower - one `any` icon of at least 144px - so shipping both
-documented sizes is belt and braces. No service worker ships. Chromium's
-installability check no longer looks for one; the post announcing the removal
+documented sizes is belt and braces. Installing does not depend on a service
+worker: Chromium's installability check no longer looks for one, and the post
+announcing the removal
 ([update-install-criteria](https://developer.chrome.com/blog/update-install-criteria))
 scopes it to installing "from the menu, since version 108 on mobile and 112 on
-Desktop". The dashboard could not cache anyway, because it lives inside the
-server binary and has to change with it.
+Desktop". The one that ships, `web/public/sw.js`, exists for
+[push notifications](#push-notifications) and has no `fetch` handler: the
+dashboard is never cached, because it lives inside the server binary and has
+to change with it.
 
 **Both mobile browsers read the manifest.** Safari has since iOS 11.3
 (`display`, `name`, `short_name`, `start_url`, `scope`), with `theme_color`
@@ -3252,6 +3255,8 @@ through either gateway:
   scales the interface type tokens through `data-text-size` on the root
   element and leaves terminal zoom alone), and **Single-key shortcuts** (see
   [Keyboard and focus](#keyboard-and-focus)).
+- **Notifications**: **Notify this device when a run needs me**, described
+  under [Push notifications](#push-notifications).
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`), **Saved servers** with **Switch**, the
   **Sync daemon** (`daemon.status`), and **Mirror run files**, which starts
@@ -3295,6 +3300,52 @@ through either gateway:
 
 Repository settings, base freshness and the source mirror live on the
 [Repository page](#repository-page) on either gateway.
+
+### Push notifications
+
+`src/routes/settings/notifications.tsx` is one row over `src/lib/push.ts`.
+What a notification is sent for, and what the server needs, is in
+[networking.md](networking.md#notifications); the server side is
+`internal/push`.
+
+`readPush` gives the row its state, and the checkbox is enabled only for the
+first two:
+
+| State | When | The row shows |
+| --- | --- | --- |
+| on | the browser holds a push subscription and `push.status` says the server holds it too | checked, with **Send test notification** |
+| off | no subscription, or one the server has dropped | unchecked |
+| blocked | `Notification.permission` is `denied` | how to allow notifications in the browser |
+| unsupported, `desktop` | the Electron shell | that the desktop app notifies by itself |
+| unsupported, `gateway` | any gateway but the server's own | that `aether gui` cannot be opened by a notification later |
+| unsupported, `home-screen` | no Web Push, on an iPhone or iPad outside a home-screen app | a link to [Add it to your home screen](networking.md#add-it-to-your-home-screen) |
+| unsupported, `browser` | no Web Push anywhere else, the Android app's WebView included | the same link |
+
+`enablePush` calls `Notification.requestPermission()` before anything else is
+awaited, because Safari grants the prompt only straight from the tap. It then
+registers `/sw.js`, subscribes with the key `push.status` returns and hands
+the subscription to `push.subscribe`. A subscription the browser made for
+another server key is replaced. `disablePush` unsubscribes on the server and
+then in the browser. A failure of either, or of **Send test notification**
+(`push.test`), is shown as the error the browser or the server gave.
+
+`web/public/sw.js` is the whole worker. On `push` it shows the notification
+with the run's ID as its `tag`, so a newer one for a run replaces the older,
+and it shows a fallback for a message it cannot read, because Safari drops a
+subscription whose push shows nothing. On `notificationclick` it focuses a
+dashboard window that is already open and posts it
+`{type: 'aether:open-run', run}`, or opens `/?run=<id>` when none is.
+`watchPush`, started with the connection in `src/store/sync.ts`, navigates on
+that message. It also calls `push.active` at most every 20 seconds while the
+pointer, the keyboard or the wheel is in use, which is what makes the server
+hold a member's notifications while they are at a dashboard. A server that
+refuses the call, an older one or one the member is still pending on, is not
+asked again.
+
+The desktop shell does not use Web Push. `desktop/notify.js` shows its own
+notification on a `run.status` change to `needs-attention`, reads the run
+with `run.get` for the title and words it as `internal/push/need.go` does;
+clicking it loads `?run=<id>`.
 
 ## Onboarding wizard
 
@@ -4061,6 +4112,10 @@ Enhanced rows, store, stream client, composer and requests, and
 opens 2,000. `src/routes/browser/index.test.tsx` covers progressive page
 controls, close/reset identity fencing and raw refusals.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
+`src/routes/settings/notifications.test.tsx` covers every state of the
+Notifications row, `src/lib/push.test.ts` the browser side behind it
+(permission before anything else, the server key, the activity report), and
+`src/sw.test.ts` runs `public/sw.js` against a stand-in for the worker scope.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

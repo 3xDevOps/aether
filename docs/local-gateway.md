@@ -557,6 +557,23 @@ work resumes, Close or another status change. `finish_unopened` is `true`
 from the finish until a member opens or closes the run, `false` after work
 resumes.
 
+The `push.*` methods manage Web Push for the caller's own browsers
+([networking.md](networking.md#notifications)). `push.status` accepts an
+optional `{"endpoint":"..."}` and returns
+`{"public_key":"...","subscribed":false}`: the server's VAPID key as the
+unpadded base64url point a browser subscribes with, and whether the caller
+has a subscription with that endpoint. `push.subscribe` takes a browser
+`PushSubscription` as its `toJSON` gives it,
+`{"endpoint":"https://...","keys":{"p256dh":"...","auth":"..."}}`. Anything
+but an `https` endpoint with valid keys is `-32602`, and a seventeenth device
+for one member is `-32002`. `push.unsubscribe` and `push.test` take
+`{"endpoint":"..."}`; an endpoint that is not the caller's is `-32000`.
+`push.test` sends one notification before it answers, and when the push
+service does not take it the error is `-32004` carrying that service's
+answer. `push.active` takes no params and records that the caller is using a
+dashboard, which holds their notifications until they have left it alone for
+a minute. Every method but `push.status` returns `{}`.
+
 `run.relaunch` is another proxied control-channel method:
 
 ```sh

@@ -25,6 +25,12 @@ Layers, per the design spec's testing strategy:
   progress, the newer-schema error and its version bounds, foreign-key
   restoration, and refusal to trust an uncommitted version.
   `TestConcurrentOpen` still races eight opens on a fresh database.
+  `internal/push` proves Web Push against a fake push service rather than a
+  real one: `TestSealMatchesRFC8291Example` reproduces the RFC's own message
+  byte for byte, `TestSendIsAStandardWebPushRequest` verifies the VAPID token
+  against the key it names and decrypts the body with the subscription's
+  keys, and `service_test.go` drives a real store and bus through what is
+  announced, held, not repeated and forgotten.
 - **Integration/E2E tests** are behind the `integration` build tag and run with
   `make test-integration` (real Docker, real git), which covers only the
   packages carrying integration-tagged tests. `INTEGRATION_PKGS` narrows that
@@ -1254,7 +1260,7 @@ covered - WebKit is not installed.
 | `run-evidence.mobile.spec.ts` | Captures at 390x600 with coarse-pointer touch input: open them from More, tap through Patch and Summary, read retained file content, and close with focus returned to More. The scenario attaches `short phone evidence sheet` |
 | `development-browser/browser.mobile.spec.ts` | Shared login and live app update on a phone viewport, control handoff, cancellation of Reset session from Page tools without losing the login, expanded browser input, Chromium composition and multi-touch without horizontal page overflow. The scenario attaches `phone shared app`; viewport and CDP input do not prove a physical phone keyboard |
 | `terminal-phone.mobile.spec.ts` | A real run's Terminal tab against the real gateway: a desktop writer sets 132x43, and the phone reaches the bottom-row prompt in normal and alternate screens, pans vertically, takes control by holding **Take control** in the run's presence controls and types with the viewport reduced to keyboard height, without resizing the shared PTY. It then follows the desktop writer's resize. A long-output run exercises continuous touch handoff into history, older-page prefetch and exact visible cursor/text/pixel/horizontal anchor preservation across a delayed prepend; horizontal panning does not raise a keyboard or send input |
-| `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, and the shell laying out whole in a phone viewport with no browser chrome: the top bar in view with its sidebar button and New run. A second scenario sets a 59px `--safe-top` inset: the top bar grows by it rather than moving down, Search sits below it, and the command palette drops with it |
+| `home-screen.mobile.spec.ts` | Everything a phone fetches before it offers to install the dashboard, served by the gateway to an unauthenticated request: the manifest linked from the page, served as `application/manifest+json` and naming a 192px and a 512px icon plus a maskable one, every icon and the `apple-touch-icon` behind it, `/sw.js` served as a script, and the shell laying out whole in a phone viewport with no browser chrome: the top bar in view with its sidebar button and New run. A second scenario sets a 59px `--safe-top` inset: the top bar grows by it rather than moving down, Search sits below it, and the command palette drops with it |
 
 The installed window itself is not in the suite. Chromium exposes no
 `display-mode` override - not through `emulateMedia`, not through CDP's

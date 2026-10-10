@@ -714,6 +714,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     ),
     runRelaunch: vi.fn(async () => run({ id: 'run_2' })),
     runSeen: vi.fn(async (runID: string) => run({ id: runID, status: 'completed' })),
+    pushStatus: vi.fn(async () => ({ public_key: 'BA', subscribed: false })),
+    pushSubscribe: vi.fn(async () => ({})),
+    pushUnsubscribe: vi.fn(async () => ({})),
+    pushTest: vi.fn(async () => ({})),
+    pushActive: vi.fn(async () => ({})),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,

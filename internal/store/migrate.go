@@ -1567,6 +1567,18 @@ ALTER TABLE runs ADD COLUMN finish_unopened INTEGER NOT NULL DEFAULT 0;
 	`
 ALTER TABLE runs ADD COLUMN status_changed_at INTEGER;
 `,
+	// v58: Web Push subscriptions, one row per browser a member turned
+	// notifications on in. The endpoint is the push service's own name for
+	// that browser, so it is the key.
+	`
+CREATE TABLE push_subscriptions (
+	endpoint  TEXT PRIMARY KEY,
+	member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	p256dh    TEXT NOT NULL,
+	auth      TEXT NOT NULL
+);
+CREATE INDEX idx_push_subscriptions_member ON push_subscriptions(member_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
