@@ -190,7 +190,6 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   const events = tabs.getByRole('tab', { name: 'Session' })
   await expect(events).toBeFocused()
   expectVisibleFocus('the run view tab', await indicator(events))
-  // Closing the run first would move its row under the collapsed Finished group.
   const row = page
     .getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
     .getByRole('button', { name: new RegExp(task) })

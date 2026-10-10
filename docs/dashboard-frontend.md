@@ -327,15 +327,15 @@ top to bottom:
    may launch.
 3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
-   holding an `aria-expanded` disclosure button and its count. Finished starts
-   collapsed. Needs you lists every workspace; a row outside the selected
-   workspace leads with that workspace's name. Working and Finished list the
-   selected workspace, and only the viewer's own runs while **Mine**
-   (`mineOnly`, persisted) in the Working header is pressed. Needs you shows
-   its first five rows, then **Show all n**. The region scrolls on its own,
-   and while more rows sit below the fold its bottom edge fades out. The
-   sidebar never collapses on its own at narrow widths; the splitter and
-   `⌘B` stay the reader's call.
+   holding an `aria-expanded` disclosure button and its count. Every group
+   starts expanded and lists all of its runs; a group closes only when its
+   header is pressed. Needs you lists every workspace; a row outside the
+   selected workspace leads with that workspace's name. Working and Finished
+   list the selected workspace, and only the viewer's own runs while **Mine**
+   (`mineOnly`, persisted) in the Working header is pressed. The region
+   scrolls on its own, and while more rows sit below the fold its bottom edge
+   fades out. The sidebar never collapses on its own at narrow widths; the
+   splitter and `⌘B` stay the reader's call.
 4. **Members** (admins only) and **Settings**. Board through Templates live
    in the header instead, leaving the sidebar's height for runs. The current
    destination carries `aria-current="page"`. Gates come from

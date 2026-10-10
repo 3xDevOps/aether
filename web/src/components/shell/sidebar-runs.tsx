@@ -18,8 +18,6 @@ import type { Route } from '@/store/ui'
 
 export const runRowSelector = '#sidebar-runs [data-run-row]'
 
-const needsYouShown = 5
-
 export function needsYouRoute(run: RunRecord, ctx: StateContext): Route {
   return targetRoute(run, needsYou(run, ctx)?.target)
 }
@@ -115,7 +113,7 @@ export function SidebarRuns() {
           )
         ) : (
           groups.map((group) => {
-            const open = expanded[group.key] ?? group.key !== 'finished'
+            const open = expanded[group.key] ?? true
             return (
               <Group
                 key={group.key}
@@ -133,9 +131,6 @@ export function SidebarRuns() {
 
 function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
-  const [showAll, setShowAll] = useState(false)
-  const capped = group.key === 'needs-you' && !showAll && group.runs.length > needsYouShown
-  const runs = capped ? group.runs.slice(0, needsYouShown) : group.runs
   return (
     <div className="pt-2">
       <div className="flex items-center gap-1">
@@ -156,7 +151,7 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         {group.key === 'working' && <MineToggle />}
       </div>
       <ul id={listID} hidden={!expanded}>
-        {expanded && runs.map((tree) => (
+        {expanded && group.runs.map((tree) => (
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
             {tree.children.length > 0 && (
@@ -171,13 +166,6 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
           </li>
         ))}
       </ul>
-      {expanded && capped && (
-        <div className="pl-4.5">
-          <Button variant="ghost" size="sm" onClick={() => setShowAll(true)}>
-            Show all {group.count}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }
