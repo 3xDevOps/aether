@@ -29,7 +29,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
   const navigate = useStore((s) => s.navigate)
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
-  const files = useStore((s) => s.diffs[run.id]?.snapshots.at(-1)?.files)
+  const files = useStore((s) => s.diffs[run.id]?.snapshots[0]?.files)
   const totals = useMemo(() => diffTotals(files), [files])
   const [replying, setReplying] = useState(false)
   const cardRef = useRef<HTMLElement>(null)

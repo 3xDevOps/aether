@@ -906,8 +906,8 @@ A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
 1. the state line: `StatusDot`, reason, and the wait or change time;
 2. the title (`runLabel`), two lines at most;
 3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
-   run's `harness` value), owner avatar, `+added −deleted` once a `run.diff`
-   snapshot is known, the workspace name for a run outside the active one, and
+   run's `harness` value), owner avatar, `+added −deleted` from the newest
+   `run.diff` snapshot, the workspace name for a run outside the active one, and
    the `card:meta` slot (file overlaps, sync, and on a swarm card the swarm's
    conflict count).
 
