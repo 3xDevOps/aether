@@ -312,6 +312,37 @@ func TestANewerNeedIsNeverOvertakenByAnOlderOne(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 }
 
+// A need that came and went while an older announcement was still being
+// sent is not announced afterwards, and the older one, standing again,
+// still reaches the remaining devices.
+func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
+	slow.slow.Store(true)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	slow.expect(t, idle)
+	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
+	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
+	if err := h.db.DecideApproval(h.ctx, approval.ID, string(events.ApprovalDenied), h.ada.ID, time.Now()); err != nil {
+		t.Fatalf("DecideApproval: %v", err)
+	}
+	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalDenied})
+	phone.expectNone(t, testQuiet)
+	slow.slow.Store(false)
+	close(slow.release)
+
+	phone.expect(t, idle)
+	phone.expectNone(t, testQuiet)
+	slow.expectNone(t, testQuiet)
+}
+
 func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

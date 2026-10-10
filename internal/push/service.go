@@ -102,8 +102,9 @@ type notification struct {
 	Run   string `json:"run,omitempty"`
 }
 
-// message is one announcement on its way to a member's devices.
+// message is the announcement of one need, on its way to a member's devices.
 type message struct {
+	key     string
 	member  domain.MemberID
 	payload []byte
 	topic   string
@@ -111,11 +112,13 @@ type message struct {
 
 // outbox orders one run's announcements. Every message for a run carries the
 // same topic and replaces the last one on a device, so they must arrive in
-// order: one is sent at a time, only the newest waits behind it, and the one
-// being sent stops at the next device once it is stale.
+// order and a stale one must not arrive late: one is sent at a time, only
+// the newest waits behind it, and a message for anything but the need the
+// run has now goes to no further device.
 type outbox struct {
-	next  *message
-	stale bool
+	// want is the key of the need the run has now, empty when it has none.
+	want string
+	next *message
 }
 
 // New loads the server's VAPID key, creating it on first use; call Start to
@@ -225,7 +228,7 @@ func (s *Service) evaluate(ctx context.Context, id domain.RunID, now time.Time) 
 	}
 	if err != nil || n == nil {
 		delete(s.waiting, id)
-		s.post(ctx, id, nil)
+		s.post(ctx, id, "", nil)
 		return
 	}
 	st := s.waiting[id]
@@ -236,46 +239,53 @@ func (s *Service) evaluate(ctx context.Context, id domain.RunID, now time.Time) 
 	if st.key != n.key {
 		st.key, st.due = n.key, now
 	}
-	if st.announced[n.key] || st.due.After(now) {
-		return
+	var m *message
+	if !st.announced[n.key] && !st.due.After(now) {
+		if free := s.freeAt(run.MemberID); free.After(now) {
+			st.due = free
+		} else if m, err = announcement(run, n); err != nil {
+			slog.Warn("push: encode notification", "run", id, "error", err)
+		} else {
+			st.announced[n.key] = true
+		}
 	}
-	if free := s.freeAt(run.MemberID); free.After(now) {
-		st.due = free
-		return
-	}
-	st.announced[n.key] = true
-	payload, err := json.Marshal(notification{Title: runTitle(run), Body: n.body, Run: string(run.ID)})
-	if err != nil {
-		slog.Warn("push: encode notification", "run", id, "error", err)
-		return
-	}
-	digest := sha256.Sum256([]byte(run.ID))
-	s.post(ctx, id, &message{member: run.MemberID, payload: payload, topic: b64.EncodeToString(digest[:])[:32]})
+	s.post(ctx, id, n.key, m)
 }
 
-// post makes m the run's next announcement, or with a nil m withdraws what
-// has not been sent yet because the run no longer needs anyone.
-func (s *Service) post(ctx context.Context, id domain.RunID, m *message) {
+func announcement(run *domain.Run, n *need) (*message, error) {
+	payload, err := json.Marshal(notification{Title: runTitle(run), Body: n.body, Run: string(run.ID)})
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256([]byte(run.ID))
+	return &message{key: n.key, member: run.MemberID, payload: payload, topic: b64.EncodeToString(digest[:])[:32]}, nil
+}
+
+// post records the need the run has now and, with m, queues its
+// announcement. A queued message for any other need is withdrawn.
+func (s *Service) post(ctx context.Context, id domain.RunID, want string, m *message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	box := s.outbox[id]
-	if box != nil {
-		box.next, box.stale = m, true
-		return
+	if box == nil {
+		if m == nil {
+			return
+		}
+		box = &outbox{}
+		s.outbox[id] = box
+		s.wg.Go(func() { s.drain(ctx, id, box) })
 	}
-	if m == nil {
-		return
+	box.want = want
+	if m != nil || (box.next != nil && box.next.key != want) {
+		box.next = m
 	}
-	box = &outbox{next: m}
-	s.outbox[id] = box
-	s.wg.Go(func() { s.drain(ctx, id, box) })
 }
 
 func (s *Service) drain(ctx context.Context, id domain.RunID, box *outbox) {
 	for {
 		s.mu.Lock()
 		m := box.next
-		box.next, box.stale = nil, false
+		box.next = nil
 		if m == nil {
 			delete(s.outbox, id)
 		}
@@ -286,7 +296,7 @@ func (s *Service) drain(ctx context.Context, id domain.RunID, box *outbox) {
 		s.deliver(ctx, m, func() bool {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			return box.stale
+			return box.want != m.key
 		})
 	}
 }
