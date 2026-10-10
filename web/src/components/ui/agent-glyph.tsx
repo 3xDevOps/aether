@@ -1,9 +1,9 @@
-import { Bot, Boxes, type LucideIcon, Pi, Sparkles, SquarePi, SquareTerminal, Wrench } from '@/components/icons'
+import { Bot, Boxes, Claude, type LucideIcon, Pi, SquarePi, SquareTerminal, Wrench } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
 // Keys are internal/harness registry names.
 const agents: Record<string, { icon: LucideIcon; colour: string }> = {
-  claude: { icon: Sparkles, colour: 'text-agent-claude' },
+  claude: { icon: Claude, colour: 'text-agent-claude' },
   codex: { icon: SquareTerminal, colour: 'text-agent-codex' },
   pi: { icon: Pi, colour: 'text-agent-pi' },
   omp: { icon: SquarePi, colour: 'text-agent-omp' },

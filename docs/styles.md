@@ -176,7 +176,8 @@ and `bg-*` class in `components/ui/` names a token defined in `index.css`.
 
 Icons come from `web/src/components/icons.ts`, which re-exports the lucide
 icons the dashboard uses at stroke width 1.75. Add a name there rather than
-importing `lucide-react`.
+importing `lucide-react`. The same module holds `Claude`, the Claude mark that
+`AgentGlyph` draws for the `claude` agent; it is filled, not stroked.
 
 ## Geometry and responsive behavior
 

@@ -64,6 +64,11 @@ The dashboard bundles these fonts under the SIL Open Font License 1.1:
 listing's feature graphic, `android/listing/feature-graphic.png`, whose
 tagline is JetBrainsMono NFM.
 
+The glyph for Claude Code runs is the Claude mark, a trademark of Anthropic,
+used only to identify that agent. Its path in `web/src/components/icons.ts`
+comes from [Simple Icons](https://github.com/simple-icons/simple-icons) 16.34.0,
+which publishes it under CC0-1.0.
+
 The terminal uses [xterm.js](https://github.com/xtermjs/xterm.js), including its
 fit, search and web-links addons, under the
 [MIT license](https://github.com/xtermjs/xterm.js/blob/6.0.0/LICENSE).
