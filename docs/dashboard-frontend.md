@@ -369,8 +369,8 @@ from a snapshot has only an estimate of that change (see
 start until its next status event. The title truncates before the age does.
 The row's accessible name starts with the state word, then the workspace
 when it is another one, the title, the reason and the age in words
-("15 minutes ago"). Paused, finished and other members' working rows
-recede: their title is in the muted colour. A Needs you row offers the
+("15 minutes ago"); its tooltip adds the exact time. Paused, finished and
+other members' working rows recede: their title is in the muted colour. A Needs you row offers the
 condition's primary action on hover, focus and a coarse pointer, the same one
 its board card shows (see [Board](#board)): **Approve** resolves in place,
 **Reply** opens the run's Session view with the composer focused, and every

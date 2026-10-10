@@ -255,7 +255,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
   const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason, timeAgo(since)].filter(Boolean).join(' · ')
   const indicators = (
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
-      <RelativeTime at={since} compact />
+      <RelativeTime at={since} compact title={undefined} />
       <AgentGlyph agent={run.harness} />
     </span>
   )
@@ -263,7 +263,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
     <ListRow
       data-run-row=""
       aria-label={label}
-      title={label}
+      title={`${label} · ${new Date(since).toLocaleString()}`}
       aria-current={selected ? 'page' : undefined}
       selected={selected}
       onClick={open}
