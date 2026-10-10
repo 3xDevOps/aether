@@ -177,7 +177,7 @@ function main() {
       gatewayURL = msg.url
       gatewayOrigin = new URL(msg.url).origin
       respawns = 0 // a healthy start resets the backoff budget
-      notify.start(msg.addr, msg.url, () => focusWindow())
+      notify.start(msg.addr, msg.url, openRun)
       openWindow()
     })
 
@@ -388,6 +388,11 @@ function main() {
       pendingRunId = id
       return
     }
+    openRun(id)
+  }
+
+  // Also what a clicked notification does (notify.js).
+  function openRun(id) {
     if (win && !win.isDestroyed()) {
       win.loadURL(gatewayURL + '&run=' + id)
       focusWindow()

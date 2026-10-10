@@ -7,26 +7,28 @@
 
 const { app, Notification } = require('electron')
 
-// Runs currently needing attention; its size is the dock/taskbar badge.
-const needsAttention = new Set()
+// Runs currently needing attention, each with the notification shown for it
+// once its name is known; its size is the dock/taskbar badge.
+const needsAttention = new Map()
 
 let socket = null
 let stopped = false
 let attempt = 0
 let reconnectTimer = null
-let focusWindow = () => {}
+let gateway = { origin: '', token: '' }
+let openRun = () => {}
 
 /**
  * Start streaming events from the gateway.
  * @param {string} addr    host:port of the loopback gateway
  * @param {string} url     the full gateway URL; its ?token= query is the auth
- * @param {() => void} onActivate  focus the window when a notification is clicked
+ * @param {(runId: string) => void} onOpen  open a run when its notification is clicked
  */
-function start(addr, url, onActivate) {
+function start(addr, url, onOpen) {
   stop() // a sidecar respawn hands us a fresh addr and token
   stopped = false
   attempt = 0
-  focusWindow = onActivate
+  openRun = onOpen
 
   if (typeof globalThis.WebSocket !== 'function') {
     // Older Electron main processes have no WHATWG WebSocket, and adding an
@@ -35,9 +37,10 @@ function start(addr, url, onActivate) {
     return
   }
 
-  const token = new URL(url).searchParams.get('token') || ''
+  const parsed = new URL(url)
+  gateway = { origin: parsed.origin, token: parsed.searchParams.get('token') || '' }
   const scheme = url.startsWith('https:') ? 'wss' : 'ws'
-  connect(`${scheme}://${addr}/ws/events?token=${token}`)
+  connect(`${scheme}://${addr}/ws/events?token=${gateway.token}`)
 }
 
 function connect(wsURL) {
@@ -69,11 +72,14 @@ function connect(wsURL) {
     const p = ev.payload || {}
     if (p.to === 'needs-attention') {
       if (!needsAttention.has(ev.run_id)) {
-        needsAttention.add(ev.run_id)
+        needsAttention.set(ev.run_id, null)
         updateBadge()
-        show(ev.run_id, p)
+        void show(ev.run_id, p.reason)
       }
-    } else if (needsAttention.delete(ev.run_id)) {
+    } else if (needsAttention.has(ev.run_id)) {
+      // The need has cleared, so its notification goes with it.
+      needsAttention.get(ev.run_id)?.close()
+      needsAttention.delete(ev.run_id)
       updateBadge()
     }
   }
@@ -105,16 +111,62 @@ function scheduleReconnect(wsURL) {
   }, delay)
 }
 
-function show(runId, payload) {
+async function show(runId, reason) {
   if (!Notification.isSupported()) return
-  // run.status payloads carry {from, to, reason} - no task name; the run id
-  // (shortened) is the best stable identifier we have.
-  const n = new Notification({
-    title: 'Run idle',
-    body: payload.reason || runId.slice(0, 12),
-  })
-  n.on('click', () => focusWindow())
+  // run.status carries {from, to, reason} and no name, so the run is read
+  // for it. A run that cannot be read is still announced, by its ID.
+  let run = null
+  try {
+    const res = await fetch(`${gateway.origin}/api/v1/run.get`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}` },
+      body: JSON.stringify({ run_id: runId }),
+    })
+    if (res.ok) run = (await res.json()).run
+  } catch {
+    // the gateway went away; the fallback below still names the run
+  }
+  // It resumed, or the stream dropped, while its name was being read.
+  if (!needsAttention.has(runId)) return
+  const n = new Notification({ title: run ? titleOf(run) : runId, body: bodyOf(run || { reason }) })
+  n.on('click', () => openRun(runId))
+  needsAttention.set(runId, n)
   n.show()
+}
+
+// titleOf and bodyOf are runTitle and statusBody of internal/push/need.go,
+// so this notification reads like the one a phone gets for the same run.
+
+function titleOf(run) {
+  const title = (run.title || '').trim()
+  if (title) return clip(title)
+  const line = (run.task || '').split('\n').map((l) => l.trim()).find(Boolean)
+  return line ? clip(line) : 'Untitled run'
+}
+
+function clip(text) {
+  const chars = Array.from(text)
+  return chars.length <= 120 ? text : chars.slice(0, 120).join('').trimEnd() + '…'
+}
+
+const enhancedFailures = [
+  'enhanced session failed: ',
+  'enhanced session ended: ',
+  'enhanced turn failed: ',
+]
+
+function bodyOf(run) {
+  const reason = run.reason || ''
+  if (reason.startsWith('blocked: ')) {
+    return (run.mission_role === 'worker' ? 'Worker blocked: ' : 'Blocked: ') + reason.slice('blocked: '.length)
+  }
+  const failure = enhancedFailures.find((prefix) => reason.startsWith(prefix))
+  if (failure) return 'Enhanced unavailable: ' + reason.slice(failure.length)
+  if (reason === 'agent reported success' || reason === 'agent reported failure') {
+    return 'Agent reported ' + reason.slice('agent reported '.length) + ', review the result'
+  }
+  if (reason.startsWith('stalled:')) return 'No activity'
+  return run.acp ? 'Waiting for your reply' : 'Agent idle'
 }
 
 function updateBadge() {
