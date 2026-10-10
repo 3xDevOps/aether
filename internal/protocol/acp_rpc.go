@@ -12,7 +12,7 @@ const (
 	MethodRunACPItem      = "run.acp.item"
 
 	// ACPHistoryMaxLimit caps one run.acp.history page.
-	ACPHistoryMaxLimit = 500
+	ACPHistoryMaxLimit = 1000
 
 	// ErrorReasonAlreadyAnswered is the data.reason of the CodeConflict
 	// run.input.answer returns when another answer won.

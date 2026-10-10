@@ -22,7 +22,7 @@ interface Owned {
 const owned = new Map<string, Owned>()
 const controlSessions = new Map<string, string>()
 
-const historyPage = 200
+const historyPage = 1000
 const autoRetryLimit = 5
 
 function controlSession(runID: string): string {
@@ -208,7 +208,7 @@ export async function loadOlderItems(store: RootStore, client: Api, runID: strin
     const page = await client.runACPHistory(runID, session.oldestSeq, historyPage)
     if (store.getState().acpSessions[runID]?.historyGeneration !== session.historyGeneration) return
     const oldest = page.frames.find((frame) => frame.item)?.item?.seq ?? 0
-    store.getState().acpOlder(runID, page.frames, page.frames.length === historyPage && oldest > (page.oldest_seq ?? 1), page.truncated_before)
+    store.getState().acpOlder(runID, page.frames, oldest > (page.oldest_seq ?? 1), page.truncated_before)
   } catch (err) {
     if (store.getState().acpSessions[runID]?.historyGeneration === session.historyGeneration) {
       store.getState().acpOlderState(runID, false, message(err))

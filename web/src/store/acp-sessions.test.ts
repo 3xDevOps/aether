@@ -48,10 +48,25 @@ describe('enhanced sessions in the store', () => {
     store.getState().acpFrames('run_1', frames(c!))
     const runACPHistory = vi.fn().mockResolvedValue({ frames: frames(a!, b!), oldest_seq: 1 })
     await loadOlderItems(store, fakeApi({ runACPHistory }), 'run_1')
-    expect(runACPHistory).toHaveBeenCalledWith('run_1', 3, 200)
+    expect(runACPHistory).toHaveBeenCalledWith('run_1', 3, 1000)
     const session = store.getState().acpSessions.run_1!
     expect(session.turns[0]!.items.map((it) => it.seq)).toEqual([1, 2, 3])
     expect(session.more).toBe(false)
+  })
+
+  it('keeps paging after a page shorter than it asked for', async () => {
+    const store = createRootStore()
+    const all = Array.from({ length: 5 }, () => item('usage', 1))
+    store.getState().acpAck('run_1', { ok: true, seq: 5, replay: 1, oldest_seq: 5, epoch: 0, live: true, has_control: false })
+    store.getState().acpFrames('run_1', frames(all[4]!))
+    const runACPHistory = vi.fn()
+      .mockResolvedValueOnce({ frames: frames(all[2]!, all[3]!), oldest_seq: 1 })
+      .mockResolvedValueOnce({ frames: frames(all[0]!, all[1]!), oldest_seq: 1 })
+    await loadOlderItems(store, fakeApi({ runACPHistory }), 'run_1')
+    expect(store.getState().acpSessions.run_1).toMatchObject({ oldestSeq: 3, more: true })
+    await loadOlderItems(store, fakeApi({ runACPHistory }), 'run_1')
+    expect(runACPHistory).toHaveBeenLastCalledWith('run_1', 3, 1000)
+    expect(store.getState().acpSessions.run_1).toMatchObject({ oldestSeq: 1, more: false })
   })
 
   it('stops at the retained boundary of a full page without duplicating live items', async () => {

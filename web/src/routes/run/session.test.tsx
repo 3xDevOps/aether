@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
+import type { SessionHistory } from '@/lib/session-types'
 import type { Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
@@ -210,6 +211,27 @@ describe('the Enhanced session view', () => {
     })))
     expect(await within(log).findByText('Not sent')).toBeDefined()
     expect(within(log).getByText('acphost: agent connection closed')).toBeDefined()
+  })
+
+  it('holds an earlier prompt back until the items after it are loaded', async () => {
+    const [start, prompt, reply, latest] = [item('turn_start', 1), say(1, 'user', 'Round the totals'), say(1, 'assistant', 'Rounded.'), say(1, 'assistant', 'Tests pass.')]
+    const page = Promise.withResolvers<SessionHistory>()
+    vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
+    open()
+    acpSocket().open({ oldest_seq: latest.seq }, [latest])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    act(() => {
+      useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_first', kind: 'steer_request', body: 'Round the totals', agent_delivery: 'delivered', created_at: prompt.time }))
+      useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_queued', kind: 'steer_request', body: 'and docs', agent_delivery: 'queued', created_at: prompt.time }))
+    })
+    expect(await within(log).findByText('Tests pass.')).toBeDefined()
+    expect(await within(log).findByText('and docs')).toBeDefined()
+    expect(within(log).queryByText('Round the totals')).toBeNull()
+    await act(async () => page.resolve({ frames: [start, prompt, reply].map((it) => ({ seq: it.seq, item: it })), oldest_seq: start.seq }))
+    const first = await within(log).findByText('Round the totals')
+    expect(first.compareDocumentPosition(within(log).getByText('Rounded.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(api.runACPHistory).toHaveBeenCalledTimes(1)
+    expect(api.runACPHistory).toHaveBeenCalledWith('run_1', latest.seq, 1000)
   })
 
   it('docks a permission on the composer and answers it with the lease, by click or by digit', async () => {

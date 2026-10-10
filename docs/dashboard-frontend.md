@@ -1476,11 +1476,17 @@ The `sessions` slice keeps each run's `AcpSession`: items grouped into
 turns (`store/session-rows.ts`), the ack's live state (turn in flight,
 pending requests, config options, commands, auth, steering), the lease and
 the stream state. A `reset` frame or an ack with `oldest_seq` starts the
-timeline over. Scrolling within 240px of the top automatically pages
-`run.acp.history` before the oldest item held, 200 items at a time, along with
-older room messages. If the loaded rows do not fill the viewport, paging
-continues until they do or history ends. Inactive views and failed reads do
-not auto-page; failures keep the server's error with **Retry**. The list
+timeline over. Scrolling within three viewport heights of the top
+automatically pages `run.acp.history` before the oldest item held, 1000 items
+at a time, along with older room messages, and repeats until that much is
+loaded above the viewport or history ends. A page shorter than the request
+does not end paging, so a server with a lower `limit` cap still pages to the
+start. If the loaded rows do not fill the viewport, paging continues until
+they do or history ends. Inactive views and failed reads do not auto-page;
+failures keep the server's error with **Retry**. While older items remain, a
+room message or agent message from before the oldest item held stays hidden
+until the items around it load; a message the agent has not taken yet always
+shows. The list
 anchors pure prepends from the end; when history and live rows arrive
 together, it restores the visible row's key and offset instead. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
@@ -1496,8 +1502,10 @@ and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
 answer") with the amber dot while a request is pending. A person's
-message is matched to the room message that carried it for its author; one
-not in the log yet shows its delivery word. One polite `status` region
+message is matched to the room message that carried it for its author,
+preferring one sent within the loaded items when the same text was sent more
+than once; one not in the log yet shows its delivery word. One polite
+`status` region
 announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.

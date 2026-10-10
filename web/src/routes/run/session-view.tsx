@@ -29,7 +29,7 @@ import { loadOlderItems } from '@/store/session-stream'
 const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
 const bottomSlack = 24
-const historySlack = 240
+const historyViewports = 3
 const userScrollWindow = 600
 const sameMessageWindow = 120_000
 
@@ -45,17 +45,26 @@ function byTime(rows: SessionRow[], extra: SessionRow[]): SessionRow[] {
   return [...out, ...sorted.slice(next)]
 }
 
-function withSteers(rows: SessionRow[], room: RoomMessage[]): SessionRow[] {
+/** The time before which a session's items are not loaded yet. */
+function historyFloor(session: AcpSession | undefined): number {
+  if (!session?.more) return -Infinity
+  const oldest = session.turns[0]?.items[0]
+  return oldest ? Date.parse(oldest.time) : Infinity
+}
+
+function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): SessionRow[] {
   const steers = room.filter((m) => m.kind === 'steer_request')
   const used = new Set<string>()
   const matched = rows.map((row) => {
     if (row.kind !== 'user') return row
     const imageMessageID = row.images?.[0]?.messageID
     const sameImageMessage = imageMessageID !== undefined && row.images!.every((image) => image.messageID === imageMessageID)
+    const sameText = (m: RoomMessage) => !used.has(m.id) && !m.attachments?.length && m.body.trim() === row.body.trim() &&
+      Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow
+    // A repeated prompt from before the floor belongs to a row that is not loaded yet.
     const steer = imageMessageID
       ? sameImageMessage && steers.find((m) => m.id === imageMessageID)
-      : steers.find((m) => !used.has(m.id) && !m.attachments?.length && m.body.trim() === row.body.trim() &&
-        Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow)
+      : steers.find((m) => sameText(m) && Date.parse(m.created_at) >= floor) ?? steers.find(sameText)
     const messageID = steer ? steer.id : sameImageMessage ? imageMessageID : undefined
     if (messageID) {
       if (used.has(messageID)) return null
@@ -64,7 +73,8 @@ function withSteers(rows: SessionRow[], room: RoomMessage[]): SessionRow[] {
     if (!steer) return messageID ? { ...row, id: messageID } : row
     return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, authorID: steer.actor_id, ...deliveryOf(steer) }
   }).filter((row): row is SessionRow => row !== null)
-  const waiting = steers.filter((m) => !used.has(m.id) && m.state !== 'cancelled')
+  const waiting = steers
+    .filter((m) => !used.has(m.id) && m.state !== 'cancelled' && (Date.parse(m.created_at) >= floor || deliveryOf(m).delivery === 'Queued'))
     .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), authorID: m.actor_id, ...deliveryOf(m) }))
   return byTime(matched, waiting)
 }
@@ -87,12 +97,14 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
   const rows = useMemo(() => {
+    const floor = historyFloor(session)
     const base = enhanced
-      ? withSteers(enhancedRows(session), room)
+      ? withSteers(enhancedRows(session), room, floor)
       : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => members[id]?.display_name ?? id })
     if (!showMessages) return base
     const reported = messages.some((m) => m.kind === 'report')
-    return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, messages.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
+    const mail = messages.filter((m) => Date.parse(m.created_at) >= floor)
+    return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, mail.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
   }, [enhanced, session, room, run, events, members, messages, showMessages, paused])
   const roomIDs = new Set(room.map((m) => m.id))
   const missingRoomImages = enhanced && rows.some((row) => row.kind === 'user' && row.images?.some((image) => !roomIDs.has(image.messageID)))
@@ -256,7 +268,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const loadEarlier = () => {
     const handle = list.current
     if (!active || !enhanced || !older || loadingOlder || olderError || roomError || !handle || handle.viewportSize === 0) return
-    if (handle.scrollOffset <= historySlack && (!pinned.current || handle.scrollSize <= handle.viewportSize + bottomSlack)) loadOlder()
+    if (handle.scrollOffset <= historyViewports * handle.viewportSize && (!pinned.current || handle.scrollSize <= handle.viewportSize + bottomSlack)) loadOlder()
   }
   useEffect(() => {
     const frame = requestAnimationFrame(loadEarlier)
