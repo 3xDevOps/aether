@@ -302,6 +302,8 @@ func TestDevelopmentAgentStaleAndInvalidRequestsAreNotInternal(t *testing.T) {
 		{protocol.MethodDevTerminalInput, protocol.DevTerminalInputParams{DevTerminalTarget: terminalTestTarget(terminal), DevControlFence: fence, Kind: "text", Text: "x"}, protocol.CodeConflict},
 		{protocol.MethodDevTerminalScreen, protocol.DevTerminalScreenParams{DevTerminalTarget: terminalTestTarget(terminal), ExpectedScreenRevision: screen.(protocol.DevTerminalScreenResult).ScreenRevision + 1}, protocol.CodeConflict},
 		{protocol.MethodDevControlStatus, protocol.DevControlStatusParams{}, protocol.CodeInvalidParams},
+		{protocol.MethodDevTerminalList, json.RawMessage(`{"unknown":true}`), protocol.CodeInvalidParams},
+		{protocol.MethodDevControlStatus, json.RawMessage(`{"unknown":true}`), protocol.CodeInvalidParams},
 	}
 	for _, c := range cases {
 		raw, err := json.Marshal(c.params)

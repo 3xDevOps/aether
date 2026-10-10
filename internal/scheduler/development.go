@@ -191,7 +191,7 @@ func DevelopmentErrorCode(err error) int {
 }
 func decodeDevelopment(raw json.RawMessage, target any) error {
 	if len(raw) > protocol.MaxDevParamsBytes {
-		return errors.New("development parameters exceed limit")
+		return fmt.Errorf("%w: development parameters exceed limit", control.ErrInvalid)
 	}
 	if len(raw) == 0 {
 		raw = []byte("{}")
@@ -199,10 +199,10 @@ func decodeDevelopment(raw json.RawMessage, target any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(target); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", control.ErrInvalid, err)
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
-		return errors.New("development request must contain one JSON object")
+		return fmt.Errorf("%w: development request must contain one JSON object", control.ErrInvalid)
 	}
 	return nil
 }
