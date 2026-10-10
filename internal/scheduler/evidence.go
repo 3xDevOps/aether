@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -70,6 +72,13 @@ func (s *Scheduler) captureEvidence(ctx context.Context, run domain.RunID, trigg
 		packet, err = service.Capture(ctx, req)
 	} else {
 		packet, err = service.CaptureBeforeCleanup(ctx, req, cleanup)
+	}
+	if errors.Is(err, gitengine.ErrEvidenceStorageLimit) {
+		// The refusal repeats on every retry, and the run's commits are
+		// already on its branch. Waiting would pin the container and checkout
+		// whose removal frees the disk.
+		slog.Warn("scheduler: clean up run without evidence", "run", run, "error", err)
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: capture evidence: %w", err)

@@ -293,7 +293,10 @@ func (s *Service) Capture(ctx context.Context, req Request) (protocol.EvidencePa
 
 // CaptureBeforeCleanup serializes required evidence preservation with the
 // caller's checkout cleanup. cleanup is called only after Git retention,
-// transcript staging, and metadata persistence have all succeeded.
+// transcript staging, and metadata persistence have all succeeded, or after
+// Git refused the checkout with gitengine.ErrEvidenceStorageLimit. No retry
+// can capture that checkout, and holding it is what keeps a full disk full,
+// so cleanup still runs and the refusal is returned once it has succeeded.
 func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup func(context.Context) error) (protocol.EvidencePacket, error) {
 	if err := validateRequest(req); err != nil {
 		return protocol.EvidencePacket{}, err
@@ -301,9 +304,9 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 	lock := s.runLock(req.RunID)
 	lock.Lock()
 	defer lock.Unlock()
-	packet, err := s.captureLocked(ctx, req)
-	if err != nil {
-		return protocol.EvidencePacket{}, err
+	packet, captureErr := s.captureLocked(ctx, req)
+	if captureErr != nil && !errors.Is(captureErr, gitengine.ErrEvidenceStorageLimit) {
+		return protocol.EvidencePacket{}, captureErr
 	}
 	if cleanup != nil {
 		cleanupCtx, cancel := s.cleanupContext(ctx)
@@ -313,7 +316,7 @@ func (s *Service) CaptureBeforeCleanup(ctx context.Context, req Request, cleanup
 			return packet, fmt.Errorf("evidence: cleanup run %s: %w", req.RunID, err)
 		}
 	}
-	return packet, nil
+	return packet, captureErr
 }
 func validateRequest(req Request) error {
 	if req.RunID == "" || req.IdempotencyKey == "" {

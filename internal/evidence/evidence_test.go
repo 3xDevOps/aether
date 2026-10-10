@@ -245,6 +245,7 @@ type evidenceTestGit struct {
 	captures         int
 	removes          int
 	captured         bool
+	captureErr       error
 	changedTruncated bool
 	captureStarted   chan struct{}
 	captureRelease   chan struct{}
@@ -254,6 +255,9 @@ func (g *evidenceTestGit) CaptureEvidence(_ context.Context, _ domain.RunID, _ s
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.captures++
+	if g.captureErr != nil {
+		return gitengine.EvidenceRevision{}, g.captureErr
+	}
 	g.captured = true
 	if g.captureStarted != nil {
 		close(g.captureStarted)
@@ -351,6 +355,33 @@ func newEvidenceTestService(t *testing.T, transcript *evidenceTestTranscript, no
 		t.Fatal(err)
 	}
 	return svc, st, git
+}
+
+func TestCaptureBeforeCleanupRunsCleanupWhenGitRefusesTheCheckout(t *testing.T) {
+	svc, st, git := newEvidenceTestService(t, &evidenceTestTranscript{}, time.Now)
+	git.captureErr = fmt.Errorf("%w: retained Git input exceeds %d bytes", gitengine.ErrEvidenceStorageLimit, gitengine.MaxEvidenceInputBytes)
+	cleaned := false
+	req := Request{RunID: "run-1", Trigger: store.EvidenceFinish, IdempotencyKey: "idem-1"}
+	_, err := svc.CaptureBeforeCleanup(context.Background(), req, func(context.Context) error {
+		cleaned = true
+		return nil
+	})
+	if !errors.Is(err, gitengine.ErrEvidenceStorageLimit) || !cleaned {
+		t.Fatalf("refused capture: cleaned = %v, err = %v", cleaned, err)
+	}
+	if len(st.packets) != 0 {
+		t.Fatalf("refused capture published %d packets", len(st.packets))
+	}
+
+	git.captureErr = errors.New("git unavailable")
+	cleaned = false
+	req.IdempotencyKey = "idem-2"
+	if _, err := svc.CaptureBeforeCleanup(context.Background(), req, func(context.Context) error {
+		cleaned = true
+		return nil
+	}); err == nil || cleaned {
+		t.Fatalf("retryable capture failure: cleaned = %v, err = %v", cleaned, err)
+	}
 }
 
 func TestCaptureRetainsTranscriptBeforeCleanup(t *testing.T) {

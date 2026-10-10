@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -22,6 +23,7 @@ type schedulerEvidenceCapture struct {
 	mu              sync.Mutex
 	workspace       domain.WorkspaceID
 	failures        int
+	refusal         error
 	reqs            []evidence.Request
 	packets         map[string]protocol.EvidencePacket
 	durable         map[string]bool
@@ -42,6 +44,9 @@ func (f *schedulerEvidenceCapture) Capture(_ context.Context, req evidence.Reque
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reqs = append(f.reqs, req)
+	if f.refusal != nil {
+		return protocol.EvidencePacket{}, f.refusal
+	}
 	if f.failures > 0 {
 		f.failures--
 		return protocol.EvidencePacket{}, errors.New("evidence capture unavailable")
@@ -222,6 +227,23 @@ func TestCloseRunCaptureFailureKeepsFrozenEvidenceUntilRetry(t *testing.T) {
 	waitFor(t, "captured container cleanup", func() bool { return e.rt.byName(string(run.ID)) == nil })
 	if capture.packetCount() != 1 {
 		t.Fatalf("retry captured %d packets, want one durable packet", capture.packetCount())
+	}
+}
+
+func TestReleaseFreesRunWhoseCheckoutExceedsEvidenceLimit(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	capture := newSchedulerEvidenceCapture(e.ws.ID)
+	capture.refusal = fmt.Errorf("evidence: retain git state: %w", gitengine.ErrEvidenceStorageLimit)
+	e.sched.UseEvidence(capture)
+	run, _ := e.launchFake(t, "free an oversized checkout")
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	if err := e.sched.Release(t.Context(), run.ID, e.member.ID); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if e.rt.byName(string(run.ID)) != nil || e.sched.RetainsContainer(t.Context(), run.ID) {
+		t.Fatal("a refused evidence capture kept the run's container")
 	}
 }
 
