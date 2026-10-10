@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -237,5 +241,64 @@ func TestHistoryRetentionIsIndependentOfCheckout(t *testing.T) {
 				t.Fatalf("history inherited checkout cleanup policy: %+v", entry)
 			}
 		}
+	}
+}
+
+type sizedRuntime struct {
+	runtime.Runtime
+	sizes map[string]uint64
+	err   error
+}
+
+func (r sizedRuntime) ContainerSizes(context.Context) (map[string]uint64, error) {
+	return r.sizes, r.err
+}
+
+func measuredUsage(t *testing.T, enrich func(*disk.Usage), measured func(disk.Usage) bool) disk.Usage {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var u disk.Usage
+		enrich(&u)
+		if measured(u) {
+			return u
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("container sizes were never reported: %+v", u)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestServerDiskAttributesContainerSizes(t *testing.T) {
+	s, _, admin, workspace := newWorkspaceDeletionServer(t)
+	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: admin.ID, Task: "scratch in /tmp", Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := s.db.CreateRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	rt := sizedRuntime{sizes: map[string]uint64{
+		"terminal:" + string(admin.ID):       2 << 20,
+		string(run.ID):                       47 << 30,
+		"harness-update-" + string(admin.ID): 5,
+	}}
+	enrich := storageEnricher(Deps{Store: s.db, Runtime: rt})
+	var first disk.Usage
+	enrich(&first)
+	if first.ContainersAt != nil || len(first.Containers) != 0 {
+		t.Fatalf("the first reading waited for the measurement: %+v", first)
+	}
+	u := measuredUsage(t, enrich, func(u disk.Usage) bool { return u.ContainersAt != nil })
+	want := []disk.Container{
+		{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(admin.ID), Bytes: 47 << 30},
+		{OwnerKind: "member", OwnerID: string(admin.ID), MemberID: string(admin.ID), Bytes: 2 << 20},
+	}
+	if !slices.Equal(u.Containers, want) || u.ContainersError != "" {
+		t.Fatalf("containers = %+v (%q), want %+v", u.Containers, u.ContainersError, want)
+	}
+
+	failing := storageEnricher(Deps{Store: s.db, Runtime: sizedRuntime{err: errors.New("docker container sizes unavailable")}})
+	u = measuredUsage(t, failing, func(u disk.Usage) bool { return u.ContainersError != "" })
+	if u.ContainersAt != nil || len(u.Containers) != 0 || u.ContainersError != "docker container sizes unavailable" {
+		t.Fatalf("failed measurement = %+v", u)
 	}
 }

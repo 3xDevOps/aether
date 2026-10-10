@@ -30,6 +30,20 @@ type Usage struct {
 	Entries         []Entry
 	Truncated       bool
 	Docker          *DockerUsage
+	// Containers are Docker writable layers, outside the data directory and
+	// every category above. ContainersAt is nil until one measurement ends.
+	Containers      []Container
+	ContainersAt    *time.Time
+	ContainersError string
+}
+
+// Container is the files one container wrote outside its mounted home,
+// checkout and cache. MemberID owns the run or environment it belongs to.
+type Container struct {
+	OwnerKind string
+	OwnerID   string
+	MemberID  string
+	Bytes     uint64
 }
 
 // Entry.Key is an internal lookup key, never a wire-visible filename.

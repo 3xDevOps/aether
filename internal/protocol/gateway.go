@@ -54,6 +54,22 @@ type ServerDiskResult struct {
 	Docker          *ServerDockerDisk `json:"docker,omitempty"`
 	Entries         []ServerDiskEntry `json:"entries,omitempty"`
 	Truncated       bool              `json:"truncated,omitempty"`
+	// Containers lists every Aether container for an admin, and the caller's
+	// own runs and environment otherwise. The bytes are outside the data
+	// directory and are not part of any total above.
+	Containers []ServerDiskContainer `json:"containers,omitempty"`
+	// ContainersMeasuredAt is empty until the first measurement completes.
+	ContainersMeasuredAt string `json:"containers_measured_at,omitempty"`
+	ContainersError      string `json:"containers_error,omitempty"`
+}
+
+// ServerDiskContainer is the files a container wrote outside its mounted
+// home, checkout and cache, such as /tmp. They are deleted with the container.
+// OwnerKind is "run", or "member" for a member's environment.
+type ServerDiskContainer struct {
+	OwnerKind string `json:"owner_kind"`
+	OwnerID   string `json:"owner_id"`
+	Bytes     uint64 `json:"bytes"`
 }
 
 // ServerDockerDisk is daemon-wide. Nil numbers are unknown, not zero.

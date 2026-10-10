@@ -1091,6 +1091,17 @@ unknown, not zero.
 redacted, without discarding available data-directory measurements. This
 endpoint never prunes Docker resources.
 
+`containers` lists what each Aether container holds in its own writable
+layer: files written outside its mounted home, checkout and cache, such as
+`/tmp`. They are deleted with the container, live outside the data directory,
+and are not part of any total above. Each item has `owner_kind` (`run`, or
+`member` for that member's environment), `owner_id` and `bytes`, largest
+first. Admins receive every container; other members receive their own runs
+and environment. Docker walks each layer to answer, so the server measures in
+the background at most every five minutes: `containers_measured_at` (ISO 8601)
+is absent until the first measurement completes, and `containers_error` carries
+a failed measurement while the previous sizes stay.
+
 Admins additionally receive an optional `entries` array, bounded to the
 largest 50 measured owners; `truncated` indicates clipping. Each entry has
 `kind`, `owner_kind` (`run`, `member`, `workspace` or `server`), optional

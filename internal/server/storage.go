@@ -1,10 +1,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/disk"
@@ -20,7 +23,49 @@ type storageRuntime interface {
 	StorageUsage(context.Context, string) disk.DockerUsage
 }
 
+type containerSizer interface {
+	ContainerSizes(context.Context) (map[string]uint64, error)
+}
+
+const (
+	containerSizeTTL     = 5 * time.Minute
+	containerSizeTimeout = 2 * time.Minute
+)
+
+// containerSizes keeps the last completed measurement. The daemon walks
+// every writable layer, which can outlast a request, so read never waits.
+type containerSizes struct {
+	mu      sync.Mutex
+	sizes   map[string]uint64
+	at      *time.Time
+	err     error
+	started time.Time
+	running bool
+}
+
+func (c *containerSizes) read(rt containerSizer) (map[string]uint64, *time.Time, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.running && time.Since(c.started) >= containerSizeTTL {
+		c.running, c.started = true, time.Now()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), containerSizeTimeout)
+			defer cancel()
+			sizes, err := rt.ContainerSizes(ctx)
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			c.running, c.err = false, err
+			if err == nil {
+				now := time.Now().UTC()
+				c.sizes, c.at = sizes, &now
+			}
+		}()
+	}
+	return c.sizes, c.at, c.err
+}
+
 func storageEnricher(d Deps) func(*disk.Usage) {
+	var containers containerSizes
 	return func(u *disk.Usage) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -29,6 +74,14 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 			u.Truncated = true
 		}
 		attributeStorage(ctx, d, u, time.Now().UTC())
+		if rt, ok := d.Runtime.(containerSizer); ok {
+			sizes, at, err := containers.read(rt)
+			u.ContainersAt = at
+			if err != nil {
+				u.ContainersError = err.Error()
+			}
+			attributeContainers(ctx, d.Store, u, sizes)
+		}
 		if rt, ok := d.Runtime.(storageRuntime); ok {
 			usage := rt.StorageUsage(ctx, d.DataDir)
 			u.Docker = &usage
@@ -36,6 +89,33 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 			u.Docker = &disk.DockerUsage{Error: "Docker storage reporting is unavailable for this runtime."}
 		}
 	}
+}
+
+// attributeContainers keeps run and environment containers. Short-lived
+// updater and verification containers have no durable owner to show.
+func attributeContainers(ctx context.Context, db store.Store, u *disk.Usage, sizes map[string]uint64) {
+	lookupFailed := false
+	for key, size := range sizes {
+		if member, ok := strings.CutPrefix(key, "terminal:"); ok {
+			u.Containers = append(u.Containers, disk.Container{OwnerKind: "member", OwnerID: member, MemberID: member, Bytes: size})
+			continue
+		}
+		run, err := db.GetRun(ctx, domain.RunID(key))
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			lookupFailed = true
+			continue
+		}
+		u.Containers = append(u.Containers, disk.Container{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(run.MemberID), Bytes: size})
+	}
+	if lookupFailed {
+		u.ContainersError = strings.Join(nonemptyStorageErrors(u.ContainersError, "Container owner lookup failed"), "; ")
+	}
+	slices.SortFunc(u.Containers, func(a, b disk.Container) int {
+		return cmp.Or(cmp.Compare(b.Bytes, a.Bytes), cmp.Compare(a.OwnerID, b.OwnerID))
+	})
 }
 
 func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time) {

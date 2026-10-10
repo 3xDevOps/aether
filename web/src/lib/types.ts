@@ -427,6 +427,19 @@ export interface DiskUsage {
   docker?: DockerDiskUsage
   entries?: DiskEntry[]
   truncated?: boolean
+  /** Every Aether container for an admin, the caller's own otherwise. Not part of any total above. */
+  containers?: DiskContainer[]
+  /** Absent until the server's first measurement completes. */
+  containers_measured_at?: string
+  containers_error?: string
+}
+
+/** Files a container wrote outside its mounted home, checkout and cache; deleted with the container. */
+export interface DiskContainer {
+  /** `member` is that member's environment. */
+  owner_kind: 'run' | 'member'
+  owner_id: string
+  bytes: number
 }
 
 /** Daemon-wide Docker accounting, including workloads outside Aether. */
