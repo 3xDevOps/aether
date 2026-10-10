@@ -2,7 +2,9 @@ package acphost
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +69,60 @@ func TestQueuedPromptReportsDeliveryOrRefusal(t *testing.T) {
 	if err := refused.next(t); err == nil || !strings.Contains(err.Error(), "the agent refused the prompt") || !strings.Contains(err.Error(), "Authentication required") {
 		t.Fatalf("refused prompt: %v", err)
 	}
+	rec.waitIdle(t)
+}
+
+func TestPromptsAreReportedInTheOrderTheAgentTookThem(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	release := make(chan struct{})
+	m.onPrompt = func(_ *mockAgent, call promptCall) (any, *acp.RequestError) {
+		if strings.Contains(string(call.params.Prompt), "first") {
+			<-release
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	m.onSteer = func(*mockAgent, json.RawMessage) (any, *acp.RequestError) {
+		return map[string]any{"outcome": OutcomeInjected}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	reports := make(chan string, 3)
+	report := func(name string) func(bool, error) {
+		return func(queued bool, err error) { reports <- fmt.Sprintf("%s queued=%v err=%v", name, queued, err) }
+	}
+	next := func(want string) {
+		t.Helper()
+		select {
+		case got := <-reports:
+			if got != want {
+				t.Fatalf("report %q, want %q", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no report, want %q", want)
+		}
+	}
+
+	go func() { _, _ = s.Prompt(context.Background(), textPrompt("first"), false, report("first")) }()
+	for deadline := time.Now().Add(5 * time.Second); !m.called(acp.AgentMethodSessionPrompt); {
+		if time.Now().After(deadline) {
+			t.Fatal("the first prompt never reached the agent")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if r, err := s.Prompt(context.Background(), textPrompt("steered"), true, report("steered")); err != nil || r.Outcome != OutcomeInjected {
+		t.Fatalf("steered: %+v %v", r, err)
+	}
+	if r, err := s.Prompt(context.Background(), textPrompt("queued"), false, report("queued")); err != nil || r.Outcome != OutcomeQueued {
+		t.Fatalf("queued: %+v %v", r, err)
+	}
+	next("first queued=false err=<nil>")
+	next("steered queued=false err=<nil>")
+	select {
+	case got := <-reports:
+		t.Fatalf("reported before the agent took the queued prompt: %s", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	next("queued queued=true err=<nil>")
 	rec.waitIdle(t)
 }
 

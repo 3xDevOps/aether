@@ -343,6 +343,8 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 	s.mu.Lock()
 	switch outcome {
 	case OutcomeInjected:
+		// The agent adds input only to a turn whose prompt it accepted.
+		s.acceptedLocked()
 		s.userMessageLocked(blocks)
 		if delivered != nil {
 			s.callback(func() { delivered(false, nil) })
