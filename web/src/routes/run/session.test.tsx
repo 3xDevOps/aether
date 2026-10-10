@@ -457,6 +457,26 @@ describe('the Enhanced composer draft', () => {
     expect(resent).toEqual(first)
   })
 
+  it('offers a restored partial command its suggestions again, and follows the selection', async () => {
+    useStore.getState().upsertRun(run({ id: 'run_2', mode: 'acp', acp: true }))
+    const view = open()
+    const withCommands = { ...lease, state: state({ commands: [{ name: 'help', description: 'List commands' }] }) }
+    acpSocket().open(withCommands)
+    await userEvent.type(await box(), '/hel')
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+    view.rerender(<View params={{ runId: 'run_2', view: 'session' }} />)
+    view.rerender(<View params={{ runId: 'run_1', view: 'session' }} />)
+    acpSocket().open(withCommands)
+    const restored = await box()
+    expect(screen.queryByRole('option')).toBeNull()
+    act(() => restored.focus())
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+    await userEvent.keyboard('{Home}')
+    expect(screen.queryByRole('option')).toBeNull()
+    await userEvent.keyboard('{End}')
+    expect(screen.getByRole('option', { name: /\/help/ })).toBeDefined()
+  })
+
   it('keeps the draft through the run\'s views, a reconnect, an event-log restart and a switch to Standard', async () => {
     const view = open()
     acpSocket().open(lease)

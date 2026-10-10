@@ -56,11 +56,12 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, imageAction }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, imageAction }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
   onChange: (value: string, caret: number) => void
+  onCaret?: (caret: number) => void
   onFocusChange: (focused: boolean) => void
   onSend: () => void
   onQueue?: () => void
@@ -120,10 +121,12 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onFocusChange, onSe
           if (!caretPlaced.current) {
             caretPlaced.current = true
             event.target.setSelectionRange(value.length, value.length)
+            onCaret?.(value.length)
           }
           setFocused(true)
           onFocusChange(true)
         }}
+        onSelect={(event) => onCaret?.(event.currentTarget.selectionStart)}
         onBlur={() => {
           setFocused(false)
           onFocusChange(false)
@@ -417,6 +420,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
             setActive(0)
             setDismissed(false)
           }}
+          onCaret={setCaret}
           onFocusChange={(next) => {
             setFocused(next)
             onFocusChange(next)

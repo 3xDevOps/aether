@@ -1532,7 +1532,8 @@ mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
 the request settles: nothing can be added to a prompt that is being sent, and
 it cannot be sent or uploaded a second time. A request settles only the draft
 it marked (`beginDraftRequest`), never one that replaced it. The first focus
-of a composer that mounts with text puts the caret after it.
+of a composer that mounts with text puts the caret after it, and the
+suggestion menu follows the selection as well as the text.
 
 Drafts live in memory and end with the page. They sit in their own Zustand
 store, not a root-store slice: every root-store write rewrites `aether.ui`,
