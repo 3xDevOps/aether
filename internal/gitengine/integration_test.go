@@ -1371,7 +1371,7 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 	statCh := make(chan []events.FileDiffStat, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		files, statErr := e.diffStats(ctx, "run1", checkout, base)
+		files, _, statErr := e.diffStats(ctx, "run1", checkout, base)
 		if statErr != nil {
 			errCh <- statErr
 			return

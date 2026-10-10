@@ -907,9 +907,10 @@ A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
 2. the title (`runLabel`), two lines at most;
 3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
    run's `harness` value), owner avatar, `+added −deleted` from the newest
-   `run.diff` snapshot, the workspace name for a run outside the active one, and
-   the `card:meta` slot (file overlaps, sync, and on a swarm card the swarm's
-   conflict count).
+   `run.diff` snapshot (`N+ files` when that snapshot is `truncated`, because
+   its counts are only a floor), the workspace name for a run outside the
+   active one, and the `card:meta` slot (file overlaps, sync, and on a swarm
+   card the swarm's conflict count).
 
 A click anywhere on the card opens the run. In **Board**, a swarm is one
 card: the objective, a phase word ("Swarm active") and its workers' counts; it opens
@@ -2066,7 +2067,8 @@ both what it renders and the overlap set the conflict chips read.
   too, so it cannot spin; the next snapshot or **Refresh** asks again.
 - **An interval is a menu row.** The interval menu lists **Current diff**
   (against the fork point) and then the `run.diff` snapshots, newest first,
-  as "What changed 5 min ago" with their file count and totals. Choosing one
+  as "What changed 5 min ago" with their file count and totals, or `N+ files`
+  alone for a `truncated` snapshot. Choosing one
   fetches `GET /api/v1/run/<id>/patch?from=<parent_tree>&to=<tree>`, the diff
   between the two trees, which is what the run changed in that interval. An
   interval is addressed by two tree ids and so never changes: each fetched

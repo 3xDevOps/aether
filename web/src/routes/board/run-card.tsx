@@ -29,8 +29,8 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
   const navigate = useStore((s) => s.navigate)
   const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
-  const files = useStore((s) => s.diffs[run.id]?.snapshots[0]?.files)
-  const totals = useMemo(() => diffTotals(files), [files])
+  const snapshot = useStore((s) => s.diffs[run.id]?.snapshots[0])
+  const totals = useMemo(() => diffTotals(snapshot?.files), [snapshot])
   const [replying, setReplying] = useState(false)
   const cardRef = useRef<HTMLElement>(null)
   const action = cardAction(card, approval)
@@ -58,11 +58,15 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
               </>
             )}
             <Avatar name={owner} color={card.owner?.color} />
-            {totals && (
-              <span className="shrink-0 tabular-nums">
-                <span className="text-diff-add">+{totals.additions}</span>{' '}
-                <span className="text-diff-del">−{totals.deletions}</span>
-              </span>
+            {snapshot?.truncated ? (
+              <span className="shrink-0 tabular-nums">{snapshot.files.length}+ files</span>
+            ) : (
+              totals && (
+                <span className="shrink-0 tabular-nums">
+                  <span className="text-diff-add">+{totals.additions}</span>{' '}
+                  <span className="text-diff-del">−{totals.deletions}</span>
+                </span>
+              )
             )}
             {card.workspaceName && <span className="min-w-0 truncate">{card.workspaceName}</span>}
             <CardControls className="empty:hidden">

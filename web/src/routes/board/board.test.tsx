@@ -172,6 +172,19 @@ describe('board columns', () => {
     expect(cardOf('still going').queryByText('+900')).toBeNull()
   })
 
+  it('shows a file floor for a snapshot too large to count', () => {
+    seed([working])
+    useStore.getState().noteDiffSnapshot(working.id, {
+      time: '2026-08-14T10:10:00Z',
+      files: [{ path: 'a.ts', additions: 12, deletions: 3 }, { path: 'b.ts', additions: 1, deletions: 0 }],
+      truncated: true,
+    })
+    renderBoard()
+
+    expect(cardOf('still going').getByText('2+ files')).toBeDefined()
+    expect(cardOf('still going').queryByText('+13')).toBeNull()
+  })
+
   it('opens the run from anywhere on the card', () => {
     seed([working])
     renderBoard()
