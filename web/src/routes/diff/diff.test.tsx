@@ -723,6 +723,23 @@ test('text changed while a send is out stays, and a send that outlives a sign-in
   expect(stored).not.toContain('msg_2')
 })
 
+test('an emptied editor sends its pinned text, and an editor nobody typed into stays open', async () => {
+  seed(ready)
+  renderDiff()
+  comment('cmd/main.go', '+new line', 'use the helper')
+  comment('notes.md', '+hello', 'say more')
+  fireEvent.click(within(screen.getByRole('article', { name: 'Comment on notes.md:1' })).getByRole('button', { name: 'Edit comment' }))
+  fireEvent.change(editor(), { target: { value: '' } })
+  expect(within(screen.getByRole('group', { name: 'Review' })).getByText('2 comments')).toBeTruthy()
+  fireEvent.click(gutter('cmd/main.go', 'package main'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+
+  await screen.findByText(/^Sent 2 comments to Claude Code/)
+  expect(vi.mocked(api.runRoomPost).mock.calls[0][0].body).toBe(sentBody)
+  expect(editor().getAttribute('aria-label')).toBe('Comment on cmd/main.go:10')
+})
+
 test('a send error stays in the bar when the run stops taking messages', async () => {
   seed(ready)
   renderDiff()

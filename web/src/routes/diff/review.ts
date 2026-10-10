@@ -59,8 +59,9 @@ export function patchReview(runID: string, patch: Partial<Review>): void {
   useReviews.setState(reviews, true)
 }
 
+/** What the comment says now: an open editor's text, or the pinned text while that editor is empty. */
 function text(comment: ReviewComment): string {
-  return (comment.draft ?? comment.body).trim()
+  return comment.draft?.trim() || comment.body
 }
 
 // The editor a click just opened takes the focus once; one that remounts later does not.
@@ -75,7 +76,7 @@ export function claimFocus(id: string): boolean {
 /** Opens an editor on `lines`. A new comment nobody typed into gives way to it. */
 export function addComment(runID: string, anchor: Pick<ReviewComment, 'path' | 'scope' | 'lines'>): void {
   opened = crypto.randomUUID()
-  const kept = review(runID).comments.filter((comment) => comment.body || text(comment))
+  const kept = review(runID).comments.filter(text)
   patchReview(runID, { comments: [...kept, { ...anchor, id: opened, body: '', draft: '' }], sent: undefined })
 }
 
@@ -109,7 +110,7 @@ export function closeEditor(runID: string, id: string, keep: boolean): void {
   else removeComment(runID, id)
 }
 
-/** The comments a send carries: everything with text, an open editor's included. */
+/** The comments a send carries, each saying what `text` reads. */
 export function written(comments: ReviewComment[]): ReviewComment[] {
   return comments.filter(text).map((comment) => ({ ...comment, body: text(comment), draft: undefined }))
 }

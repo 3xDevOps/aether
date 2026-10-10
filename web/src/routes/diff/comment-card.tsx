@@ -35,7 +35,7 @@ export function CommentCard({
   }, [editing, comment.id, comment.lines])
 
   const close = (keep: boolean) => {
-    const stays = Boolean(keep ? draft.trim() : comment.body)
+    const stays = Boolean((keep && draft.trim()) || comment.body)
     closeEditor(runID, comment.id, keep)
     if (stays) requestAnimationFrame(() => edit.current?.focus())
     else onRemoved?.()

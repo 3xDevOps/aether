@@ -107,9 +107,10 @@ export function ReviewBar({
         : undefined
       const posted = await sendToAgent(run, reviewMessage(entries), lease)
       if (posted.state !== 'sent' && posted.state !== 'queued') return settle({ error: refusal(posted) })
+      const carried = new Set(entries.map((entry) => entry.comment.id))
       settle({
-        // A comment edited while the request was out holds text the agent did not get.
-        comments: review(run.id).comments.filter((comment) => !taken.includes(comment)),
+        // Only what the agent got goes: not a comment the message left out, nor one edited while the request was out.
+        comments: review(run.id).comments.filter((comment) => !carried.has(comment.id) || !taken.includes(comment)),
         sent: { message: posted, count: entries.length },
       })
     } catch (cause) {
