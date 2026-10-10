@@ -311,8 +311,9 @@ Title changes received during session restoration apply too.
 Claude Code titles a session about a second after its first prompt, but its
 adapter sends `session_info_update` only when that turn ends. Three seconds
 into a turn, the server therefore asks the adapter's `session/list` for the
-title of a session that has reported none. An untitled session is listed
-under its latest prompt, which the server ignores.
+title of a session that has reported none, following the list for at most
+ten pages. An untitled session is listed under its latest prompt, which the
+server ignores.
 
 Until the agent supplies a title, a run launched with a task shows the
 task's bounded first line. A run launched without one takes the first

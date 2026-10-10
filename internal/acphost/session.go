@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,10 @@ var ErrClosed = errors.New("acphost: agent connection closed")
 var ErrUnsupportedImage = errors.New("acphost: agent does not support image prompts")
 
 const subscriberBuffer = 1024
+
+// titleLookupPages bounds how far one title lookup follows session/list: every
+// run of a member keeps its sessions under the same working directory.
+const titleLookupPages = 10
 
 // Config describes the session to host.
 type Config struct {
@@ -462,23 +467,30 @@ func (s *Session) lookupTitle() {
 	if skip {
 		return
 	}
-	sessions, _, err := s.conn.listSessions(s.ctx, s.cfg.Cwd, "")
-	if err != nil {
-		if s.ctx.Err() == nil {
-			s.logger.Warn("acphost: look up the session title", "err", err)
+	var cursor string
+	for range titleLookupPages {
+		sessions, next, err := s.conn.listSessions(s.ctx, s.cfg.Cwd, cursor)
+		if err != nil {
+			if s.ctx.Err() == nil {
+				s.logger.Warn("acphost: look up the session title", "err", err)
+			}
+			return
 		}
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, listed := range sessions {
-		title := strings.Join(strings.Fields(listed.Title), " ")
-		echo := strings.HasPrefix(prompted, strings.TrimSpace(strings.TrimSuffix(title, "…")))
-		if listed.SessionID != s.conn.SessionID() || s.proj.title != "" || echo {
-			continue
+		i := slices.IndexFunc(sessions, func(listed SessionSummary) bool { return listed.SessionID == s.conn.SessionID() })
+		if i >= 0 {
+			title := strings.Join(strings.Fields(sessions[i].Title), " ")
+			s.mu.Lock()
+			if s.proj.title == "" && !strings.HasPrefix(prompted, strings.TrimSpace(strings.TrimSuffix(title, "…"))) {
+				s.proj.title = title
+				s.emitLocked(Item{Kind: KindSessionInfo, Title: title})
+			}
+			s.mu.Unlock()
+			return
 		}
-		s.proj.title = title
-		s.emitLocked(Item{Kind: KindSessionInfo, Title: title})
+		if next == "" {
+			return
+		}
+		cursor = next
 	}
 }
 
