@@ -124,8 +124,10 @@ Identity colour never replaces run-state colour.
 `EmptyState`, `Callout`, `Badge`, `RequestCard`, `StatusDot` and
 `StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
 `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `Separator`, `Toaster`,
-and the Session view's timeline rows and blocks. Reach for one before writing
-markup, and pass its `variant`, `size` or `tone` rather than restyling it.
+`LineGutter` (a code line's clickable number gutter, for the Changes view's
+comments) and the Session view's timeline rows and blocks. Reach for one
+before writing markup, and pass its `variant`, `size` or `tone` rather than
+restyling it.
 
 `Button` variants:
 
