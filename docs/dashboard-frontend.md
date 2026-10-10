@@ -3339,13 +3339,15 @@ dashboard window that is already open and posts it
 that message. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server
 hold a member's notifications while they are at a dashboard. A server that
-refuses the call, an older one or one the member is still pending on, is not
-asked again.
+has no such method, or that the member is still pending on, is not asked
+again.
 
 The desktop shell does not use Web Push. `desktop/notify.js` shows its own
 notification on a `run.status` change to `needs-attention`, reads the run
-with `run.get` for the title and words it as `internal/push/need.go` does;
-clicking it loads `?run=<id>`.
+with `run.get` for the title and words it as `internal/push/need.go` does.
+Clicking it pushes `?run=<id>` onto the page's history and dispatches
+`popstate`, which `bindRouteToUrl` follows, so the run opens without the
+reload that would discard an unsent message.
 
 ## Onboarding wizard
 
