@@ -229,6 +229,63 @@ func TestLocalTerminalRunsTheTerminalHandler(t *testing.T) {
 	_ = term.Close()
 }
 
+// The roster records presence only for a member with a live connection. A
+// member on the server-hosted dashboard has no SSH connection, so the
+// in-process streams stand in for one.
+func TestLocalStreamsCountAsPresenceConnections(t *testing.T) {
+	t.Parallel()
+	e := inboxEnv(t)
+	ctx := context.Background()
+	_, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	l := e.srv.Local(cm.ID)
+	roster := func(run domain.RunID) []domain.MemberID {
+		var present []domain.MemberID
+		for _, p := range e.srv.cfg.Services.Approvals.Roster(e.ws.ID, run) {
+			present = append(present, p.Member)
+		}
+		return present
+	}
+	only := func(run domain.RunID) func() bool {
+		return func() bool {
+			present := roster(run)
+			return len(present) == 1 && present[0] == cm.ID
+		}
+	}
+
+	feed, err := l.Events(ctx, protocol.SubscribeRequest{})
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	params, err := json.Marshal(protocol.PresenceHeartbeatParams{WorkspaceID: string(e.ws.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := l.Call(ctx, protocol.MethodPresenceHeartbeat, params); perr != nil {
+		t.Fatalf("heartbeat: %v", perr)
+	}
+	if !only("")() {
+		t.Fatalf("roster after a heartbeat = %v, want only %s", roster(""), cm.ID)
+	}
+
+	term, ack, err := l.Attach(ctx, protocol.AttachRequest{RunID: string(e.run.ID), Cols: 80, Rows: 24})
+	if err != nil || !ack.OK {
+		t.Fatalf("attach: ack=%+v err=%v", ack, err)
+	}
+	eventually(t, "the attach to show as watching", only(e.run.ID))
+	if cerr := term.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	eventually(t, "the closed attach to stop watching", func() bool { return len(roster(e.run.ID)) == 0 })
+	if !only("")() {
+		t.Fatalf("roster with the event stream still open = %v, want only %s", roster(""), cm.ID)
+	}
+
+	if cerr := feed.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	eventually(t, "the last closed stream to take the member offline", func() bool { return len(roster("")) == 0 })
+}
+
 func TestWebIdentityNamesWhyHTTPCannotBeIdentified(t *testing.T) {
 	t.Parallel()
 	keyOnly := newTestEnv(t, nil)

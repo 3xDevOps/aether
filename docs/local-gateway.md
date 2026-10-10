@@ -32,6 +32,7 @@ gateway supplies only the identity and backend behind it.
 | `/api/v1/*`, `/ws/events`, `/ws/attach`, `/ws/terminal` | yes | yes |
 | `/local/v1/*` | yes | no - those verbs need the caller's machine |
 | Backend | shared webgate over one SSH connection to the linked server | shared webgate in-process, using the same handlers as the SSH transport |
+| Counts as connected for presence | while that SSH connection is open | while the browser holds a stream; `/ws/events` is one for as long as the dashboard is open |
 
 ## Running it
 
