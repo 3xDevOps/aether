@@ -40,6 +40,15 @@ func (d *developmentTestService) Call(ctx context.Context, run domain.Run, princ
 	if principal.Kind != control.PrincipalMember || principal.RunID != "" {
 		panic("human transport spoofed principal")
 	}
+	if method == protocol.MethodDevControlRelease {
+		var req protocol.DevControlReleaseParams
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		surface := control.Surface{Kind: control.SurfaceKind(req.Surface.Kind), ID: req.Surface.ID, Incarnation: req.Surface.Incarnation}
+		err := d.env.srv.cfg.Control.ReleaseSurface(string(run.ID), surface, principal, req.ControlSessionID, req.ControlGeneration, func() error { return authorize(ctx) })
+		return protocol.DevControlReleaseResult{Released: err == nil}, err
+	}
 	if method != protocol.MethodDevTerminalList {
 		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "unused test operation"}
 	}
@@ -108,6 +117,28 @@ func TestDevelopmentHumanCannotSupplyPrincipal(t *testing.T) {
 	raw := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `","principal":{"kind":"run_agent"}}`)
 	if _, err := e.srv.Local(e.member.ID).Call(t.Context(), protocol.MethodDevTerminalList, raw); err == nil || err.Code != protocol.CodeInvalidParams {
 		t.Fatalf("spoofed principal = %v", err)
+	}
+}
+
+func TestDevelopmentStaleAndInvalidControlAreNotInternal(t *testing.T) {
+	e := newTestEnv(t, nil)
+	installDevelopmentTestService(e)
+	release := protocol.DevControlReleaseParams{
+		DevControlStatusParams: protocol.DevControlStatusParams{
+			DevRunParams: protocol.DevRunParams{RunID: string(e.run.ID)},
+			Surface:      protocol.DevSurface{Kind: "terminal", ID: "shell", Incarnation: "shell-incarnation"},
+		},
+		DevControlFence: protocol.DevControlFence{ControlGeneration: 1},
+	}
+	for session, code := range map[string]int{"never-acquired": protocol.CodeConflict, "": protocol.CodeInvalidParams} {
+		release.ControlSessionID = session
+		raw, err := json.Marshal(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.srv.Local(e.member.ID).Call(t.Context(), protocol.MethodDevControlRelease, raw); err == nil || err.Code != code {
+			t.Fatalf("release with session %q = %v, want code %d", session, err, code)
+		}
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
 // DevelopmentService is the authenticated human entry point to the same run
@@ -87,6 +88,9 @@ func registerDevelopment[T any](method string) {
 		}
 		result, callErr := s.cfg.Services.Development.Call(ctx, *run, principal, method, raw, authorize)
 		if callErr != nil {
+			if code := scheduler.DevelopmentErrorCode(callErr); code != 0 {
+				return nil, &protocol.Error{Code: code, Message: callErr.Error()}
+			}
 			return nil, rpcError(callErr)
 		}
 		if authorizationErr := authorize(ctx); authorizationErr != nil {

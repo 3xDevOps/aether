@@ -614,6 +614,13 @@ Acquire the browser surface with that exact incarnation, then explicitly
 `browser reset` with the acquired lease to recover. The broker destroys only
 the recorded owned companion; another `open` never silently recreates it.
 
+Stale identities are refused with `-32003` (exit 3): a superseded control
+generation or surface incarnation, a surface held by another controller, a
+changed page revision, node or viewport, or a terminal screen that changed
+between pages. Re-observe and retry with the current values. A malformed
+surface or control session is refused with `-32602` (exit 2), and an
+unavailable or timed-out browser companion with `-32004` (exit 4).
+
 Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image
 history. Resizing to the current width and height preserves the viewport
