@@ -2210,8 +2210,11 @@ that already has a scheme is sent as typed. There is no search fallback and
 no history. Focus selects the whole address. What is being typed is kept
 until it is submitted, dropped with Escape, or the page moves on while the
 field is not focused. Enter navigates the selected page, or opens the first
-one. A navigation the server refuses shows the server's message and leaves
-the typed address in the field:
+one. Enter pressed while another action is still in flight runs when that
+action ends; of several, the last one. Once its own address has opened, the
+field hands the keyboard to the page, unless focus has moved or something
+else was typed meanwhile. A navigation the server refuses shows the server's
+message and leaves the typed address in the field:
 
 ```
 dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/
@@ -2222,7 +2225,8 @@ dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://
 lease's session and generation, an agent may take a free lease but never one
 a person holds, and a person may take over from anyone; see
 [coordination.md](coordination.md#development-terminals-browser-and-captures).
-The dashboard holds that lease only while its window is the one in use:
+A lease held over HTTP does not expire, so the dashboard holds one only
+while the Browser is what its user is working in:
 
 - Nobody driving: the first click, key, scroll, toolbar action or Enter takes
   the lease without asking and then acts, so the first click lands on the
@@ -2234,10 +2238,15 @@ The dashboard holds that lease only while its window is the one in use:
   is driving", "You are driving in another tab") beside one **Take over**
   button, which displaces exactly the lease it shows. Until then every action
   here does nothing but say who is driving.
-- The window loses focus or is hidden: the tab releases its lease, so the
-  agent or a teammate can drive while its user is elsewhere. Nothing is shown
-  as blocked on return; the next interaction takes the lease again when it is
-  free. Leaving the view or the dashboard releases it too.
+- The user goes elsewhere: the tab releases its lease, so the agent or a
+  teammate can drive. Elsewhere is the window losing focus or being hidden,
+  the view or the dashboard being left, and focus or a key press landing in
+  another part of the dashboard, such as the composer beside a docked
+  Browser. A menu or a dialog does not count, since it may be the Browser's
+  own. Nothing is shown as blocked on return; the next interaction takes the
+  lease again when it is free. A wheel over a window that is not focused
+  takes nothing. The release is sent `keepalive`, so it survives the tab
+  closing.
 
 A reload starts a new tab-local control identity. A lease the old one still
 holds reads "You are driving in another tab".
@@ -2245,8 +2254,10 @@ holds reads "You are driving in another tab".
 **Viewport.** While this tab drives, the page's viewport follows a target:
 the pane's size (`paneViewport` in `viewport.ts`, inside the 240-2560 by
 240-1600 the server accepts) or the chosen preset. A mismatch is corrected
-250ms after it last changed, and never while a pointer is down or input is
-queued. The first page opens at the target. A preset is remembered for the
+250ms after it last changed, but not until the page has had no input for half
+a second, and never while a pointer is down or text is being composed: a
+resize invalidates input aimed at the old viewport. The first page opens at
+the target. A preset is remembered for the
 run while the dashboard stays open (`browserPresets`). Presets change the
 real remote viewport, not the displayed image, and emulate no user agent,
 pixel ratio or hardware. A page someone else drives keeps their size here and
@@ -2281,15 +2292,17 @@ importing a personal browser profile.
 
 **Shortcuts.** The page receives every key pressed on it, so the four
 Browser bindings are matched first and kept from it; see
-[Keyboard and focus](#keyboard-and-focus). The address-bar shortcut is also
-the way out of the page for a keyboard user, since Tab goes to the page.
+[Keyboard and focus](#keyboard-and-focus). The address-bar shortcut shows the
+Browser first when it is neither selected nor docked. It is also the way out
+of the page for a keyboard user, since Tab goes to the page.
 
 **Links from a terminal.** `openRunLink` (`open.ts`) is the link handler of a
 run's agent terminal and shells. An `http(s)` link to `localhost`,
 `127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the run
 frame shows the Browser unless it is already docked, and the Browser opens
 the address as if it had been typed. Every other link opens in a new tab as
-before, and an OAuth callback link is still intercepted first.
+before, and an OAuth callback link is still intercepted first. The
+address-bar shortcut uses the same record with an empty address.
 
 Switching to another run view or closing the dashboard detaches observation
 only. The app, pages and login continue according to the run's lifetime.
@@ -3887,7 +3900,8 @@ tmux.
 
 The Browser's chords are the host browser's own, taken from it only where
 they are about the page. `Mod+L` answers anywhere in the run except inside a
-terminal, a menu or a dialog, so Ctrl+L still clears a shell. Reload, back
+terminal, a menu or a dialog, so Ctrl+L still clears a shell; the run frame
+registers it, so it works before the Browser is on screen. Reload, back
 and forward answer only while focus is inside the Browser (its page, its
 address field or its toolbar); anywhere else the host browser or the desktop
 shell keeps them. History uses the platform's keys, `⌘[` and `⌘]` on macOS
@@ -4155,10 +4169,11 @@ covers the Session rows; `src/store/session-rows.test.ts`,
 Enhanced rows, store, stream client, composer and requests, and
 `src/store/session-perf.test.tsx` (`RUN_PERF=1`) streams 5,000 items and
 opens 2,000. `src/routes/browser/index.test.tsx` covers the first page,
-silent acquisition, takeover, release on blur, the address field, shortcuts,
-fit-to-pane and presets, the page strip, close/reset identity fencing and raw
-refusals; `surface.test.tsx` covers input queued across acquiring a lease,
-watching, stream reconnection and its failure; `address.test.ts` covers the
+silent acquisition, takeover, release on blur and on focus elsewhere, the
+address field and its queue, shortcuts, fit-to-pane and presets, the page
+strip, close/reset identity fencing and raw refusals; `surface.test.tsx`
+covers input queued across acquiring a lease, watching, wheel input, stream
+reconnection and its failure; `address.test.ts` covers the
 scheme rules; and `src/routes/run/frame.test.tsx` covers when Browser is
 offered, the docked layout and run-local terminal links.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.

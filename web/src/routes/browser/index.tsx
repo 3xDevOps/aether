@@ -145,20 +145,29 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     }
   }, [runID])
 
-  // The lease is given up whenever this window is not the one being used, so
-  // the agent or a teammate can drive; ensureControl takes it back for free.
+  // A lease held here never expires and keeps the agent out, so it is given
+  // up as soon as the Browser is not what is being used: the window loses
+  // focus, or focus or a key lands elsewhere in the dashboard. A menu or a
+  // dialog may be the Browser's own, so those are left alone.
   useEffect(() => {
     focused.current = !document.hidden
     const blur = () => { focused.current = false; void release() }
     const focus = () => { focused.current = !document.hidden }
     const visibility = () => { if (document.hidden) blur(); else focus() }
+    const elsewhere = (event: Event) => {
+      if (event.target instanceof Element && !event.target.closest('[data-browser], [role="menu"], [role="dialog"], [role="alertdialog"]')) void release()
+    }
     window.addEventListener('blur', blur)
     window.addEventListener('focus', focus)
     document.addEventListener('visibilitychange', visibility)
+    document.addEventListener('focusin', elsewhere)
+    document.addEventListener('keydown', elsewhere)
     return () => {
       window.removeEventListener('blur', blur)
       window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', visibility)
+      document.removeEventListener('focusin', elsewhere)
+      document.removeEventListener('keydown', elsewhere)
       focused.current = false
       alive.current = false
       void release()
@@ -253,12 +262,9 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     finally {
       mutation.current++
       inFlight.current = false
-      const next = queued.current
-      queued.current = null
       if (alive.current) {
         setPending(null)
-        if (next) void go(next.typed).then(next.settle)
-        else await refresh()
+        if (!queued.current) await refresh()
       }
     }
   }
@@ -268,9 +274,6 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   }, kind)
   const updatePage = (next: DevBrowserPage) => {
     mutation.current++
-    // An action queued behind this one reads the page before the next render.
-    const shown = latest.current.page
-    if (shown?.page_id === next.page_id && shown.page_revision <= next.page_revision) latest.current = { ...latest.current, page: next }
     setPages((previous) => previous.map((item) => item.page_id === next.page_id && item.session_id === next.session_id && item.page_revision <= next.page_revision ? next : item))
   }
 
@@ -313,12 +316,14 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       }
     }, 'load')
     if (!alive.current) return false
-    setGoing('')
-    if (opened) {
-      address.current?.blur()
-      if (!window.matchMedia?.(coarsePointer).matches) requestAnimationFrame(() => surfaceHandle.current?.focus())
-    }
+    setGoing((current) => (current === url ? '' : current))
     return opened
+  }
+  const focusPage = () => {
+    // Focus that has moved on since Enter stays where it went.
+    if (document.activeElement !== address.current) return
+    address.current?.blur()
+    if (!window.matchMedia?.(coarsePointer).matches) requestAnimationFrame(() => surfaceHandle.current?.focus())
   }
   const navigate = (direction: 'back' | 'forward' | 'reload') => {
     if (!page) return
@@ -357,7 +362,6 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   }
 
   const ask = async (action: Confirmation['action']) => {
-    leavingMenu.current = true
     setNotice(null)
     const taken = await ensureControl()
     const now = latest.current
@@ -391,7 +395,6 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     })
   }
 
-  // While this tab drives, the page's viewport follows `target`.
   useEffect(() => {
     if (!fence || !page || !target || (page.width === target.width && page.height === target.height)) return
     let timer = setTimeout(function apply() {
@@ -413,11 +416,22 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fence?.control_generation, page?.page_id, page?.page_revision, page?.width, page?.height, target?.width, target?.height])
 
-  // An address handed over by openRunLink, opened once the browser can take it.
+  // Run from an effect so the queued address sees the page and session the
+  // finished action left, which an open or a navigation has only just set.
   useEffect(() => {
-    if (!request || !status) return
+    const next = queued.current
+    if (pending || !next) return
+    queued.current = null
+    void go(next.typed).then(next.settle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending])
+  // What was asked of this Browser from outside it: an address from
+  // openRunLink, or '' for the address bar alone.
+  useEffect(() => {
+    if (request === undefined || !status) return
     requestBrowser(runID, null)
-    void go(request)
+    if (request) void go(request)
+    else address.current?.focus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, status === null])
 
@@ -434,7 +448,6 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     act()
   }
   useKeybindings('browser', {
-    'browser-address': chord(() => address.current?.focus()),
     'browser-reload': chord(() => navigate('reload')),
     'browser-back': chord(() => navigate('back')),
     'browser-forward': chord(() => navigate('forward')),
@@ -465,7 +478,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       <Button variant="ghost" size="icon" label={loading ? 'Loading' : 'Reload'} hint={loading ? 'Loading' : `Reload (${shortcutLabel('browser-reload')})`} aria-disabled={!page || loading || undefined} onClick={() => navigate('reload')}>
         {loading ? <Spinner className="size-4" /> : <RotateCw />}
       </Button>
-      <AddressBar url={going || (page && page.url !== 'about:blank' ? page.url : '')} disabled={!status?.available} input={address} onSubmit={go} />
+      <AddressBar url={going || (page && page.url !== 'about:blank' ? page.url : '')} disabled={!status?.available} input={address} onSubmit={go} onOpened={focusPage} />
       <Button variant="ghost" size="icon" label="Keyboard" className="hidden coarse:inline-flex" aria-disabled={!page || undefined} onClick={() => surfaceHandle.current?.focus()}><Keyboard /></Button>
       {!compact && (
         <Menu>
@@ -474,7 +487,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
         </Menu>
       )}
       {split && (
-        <Button variant="ghost" size="icon" label={split.beside ? 'Show the Browser as a tab' : `Show beside ${split.view}`} aria-pressed={split.beside} onClick={split.toggle}><Columns2 /></Button>
+        <Button variant="ghost" size="icon" label={split.beside ? 'Show the Browser as a tab' : `Show beside ${split.view}`} onClick={split.toggle}><Columns2 /></Button>
       )}
       <Menu>
         <MenuTrigger asChild><Button ref={menuTrigger} variant="ghost" size="icon" label="Browser actions"><Ellipsis /></Button></MenuTrigger>
@@ -495,8 +508,8 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
           <MenuItem disabled={!page} onSelect={screenshot}>Screenshot</MenuItem>
           {lease && <MenuItem onSelect={() => void release()}>Release control</MenuItem>}
           <MenuSeparator />
-          <MenuItem disabled={!page} onSelect={() => void ask('close')}>Close page…</MenuItem>
-          <MenuItem tone="danger" disabled={!surface} onSelect={() => void ask('reset')}>Reset session…</MenuItem>
+          <MenuItem disabled={!page} onSelect={() => { leavingMenu.current = true; void ask('close') }}>Close page…</MenuItem>
+          <MenuItem tone="danger" disabled={!surface} onSelect={() => { leavingMenu.current = true; void ask('reset') }}>Reset session…</MenuItem>
         </MenuContent>
       </Menu>
       {lease && (

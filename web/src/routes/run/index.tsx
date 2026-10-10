@@ -69,6 +69,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const beside = useStore((s) => s.browserBeside)
   const setBeside = useStore((s) => s.setBrowserBeside)
   const browserRequest = useStore((s) => s.browserRequests[run.id])
+  const requestBrowser = useStore((s) => s.requestBrowser)
   const [frameRef, frame] = useElementSize<HTMLDivElement>()
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
@@ -93,7 +94,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
 
   const go = useCallback((next: RunView) => navigate('run', { runId: run.id, view: next }), [navigate, run.id])
   useEffect(() => {
-    if (browserRequest && browser && !docked) go('browser')
+    if (browserRequest !== undefined && browser && !docked) go('browser')
   }, [browserRequest, browser, docked, go])
   const browserView = (
     <BrowserView
@@ -146,6 +147,14 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       setDetails(!detailsOpen)
     },
     'focus-composer': nav.focusComposer,
+  })
+  useKeybindings('browser', {
+    'browser-address': browser ? (event) => {
+      // Stopped as well, so a focused page is not sent the key.
+      event.preventDefault()
+      event.stopPropagation()
+      requestBrowser(run.id, '')
+    } : undefined,
   })
 
   const openDialog = (kind: 'captures' | 'events') => (opener: HTMLElement | null) => {

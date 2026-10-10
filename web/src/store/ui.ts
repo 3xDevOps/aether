@@ -172,8 +172,8 @@ export interface UiSlice {
   /** The viewport preset each run's Browser was given; without one it follows
    * its pane. Never persisted. */
   browserPresets: Record<string, string>
-  /** The address each run's Browser was asked to open and has not taken yet;
-   * never persisted. */
+  /** The address each run's Browser was asked to open and has not taken yet,
+   * or '' to only put the keyboard in its address bar. Never persisted. */
   browserRequests: Record<string, string>
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>

@@ -183,6 +183,26 @@ describe('the Browser view', () => {
     expect(openRunLink('run_1', 'http://localhost:3000/app')).toBe(false)
   })
 
+  it('shows the Browser for the address-bar shortcut from another view, but not from a terminal', () => {
+    const view = open({ mode: 'acp' }, 'session')
+    const inShell = document.createElement('div')
+    inShell.className = 'xterm'
+    inShell.tabIndex = 0
+    document.body.append(inShell)
+    const kept = new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true, cancelable: true })
+    act(() => { inShell.dispatchEvent(kept) })
+    expect(kept.defaultPrevented).toBe(false)
+    expect(useStore.getState().route.params.view).toBe('session')
+    inShell.remove()
+
+    const press = new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true, cancelable: true })
+    act(() => { document.body.dispatchEvent(press) })
+    expect(press.defaultPrevented).toBe(true)
+    expect(useStore.getState().route.params.view).toBe('browser')
+    expect(useStore.getState().browserRequests).toEqual({ run_1: '' })
+    view.unmount()
+  })
+
   it('sits beside the other views on a wide frame, from one remembered toggle', async () => {
     measured(1200)
     const view = open({ mode: 'acp' }, 'browser')
