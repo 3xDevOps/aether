@@ -1063,6 +1063,10 @@ func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
 	if reopened.FinishedAt != nil {
 		t.Fatalf("reopened FinishedAt = %v, want nil", reopened.FinishedAt)
 	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if row.StatusChangedAt == nil || !row.StatusChangedAt.Equal(*row.StartedAt) || !row.StatusChangedAt.After(*closed.StatusChangedAt) {
+		t.Fatalf("reopened StatusChangedAt = %v, want the relaunch at %v, after the close at %v", row.StatusChangedAt, row.StartedAt, closed.StatusChangedAt)
+	}
 }
 
 func TestRetainedExpiryDestroysContainerAndHidesRelaunch(t *testing.T) {
@@ -1604,6 +1608,7 @@ func TestRelaunchRestoresTerminalRowWhenResumeFails(t *testing.T) {
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
+	closed := e.waitStoreStatus(t, run.ID, domain.RunMerged)
 	if err := e.sched.Close(); err != nil {
 		t.Fatalf("Close scheduler: %v", err)
 	}
@@ -1624,6 +1629,9 @@ func TestRelaunchRestoresTerminalRowWhenResumeFails(t *testing.T) {
 	}
 	if row.Status != domain.RunMerged || row.Reason != retainedCloseReason {
 		t.Fatalf("row after failed Relaunch = %+v, want retained terminal row", row)
+	}
+	if row.StatusChangedAt == nil || !row.StatusChangedAt.Equal(*closed.StatusChangedAt) {
+		t.Fatalf("StatusChangedAt after failed Relaunch = %v, want the close at %v", row.StatusChangedAt, closed.StatusChangedAt)
 	}
 	if got := container.currentState(); got != "paused" {
 		t.Fatalf("container after failed Relaunch = %q, want paused", got)

@@ -281,12 +281,18 @@ func TestRunWireShape(t *testing.T) {
 	if strings.Contains(string(raw), "checkouts") {
 		t.Error("host paths leaked onto the wire")
 	}
+	if _, ok := m["status_changed_at"]; ok {
+		t.Errorf("status_changed_at = %v on a run without one, want it absent", m["status_changed_at"])
+	}
 
 	started := created.Add(time.Minute)
-	r.StartedAt = &started
+	r.StartedAt, r.StatusChangedAt = &started, &started
 	raw, _ = json.Marshal(RunFromDomain(r))
 	if !strings.Contains(string(raw), `"started_at":"2026-08-09T12:01:00Z"`) {
 		t.Errorf("started_at not RFC3339: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"status_changed_at":"2026-08-09T12:01:00Z"`) {
+		t.Errorf("status_changed_at not RFC3339: %s", raw)
 	}
 }
 

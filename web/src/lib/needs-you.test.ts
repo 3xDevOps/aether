@@ -200,11 +200,10 @@ describe('needs you conditions', () => {
   })
 
   it('says the agent idled when the turn ended without a stall', () => {
-    const idle = {
-      ...record({ status: 'needs-attention', reason: 'agent idle' }),
-      stateChangedAt: '2026-08-14T10:17:00Z',
-      stateChangedAtEstimated: false,
-    }
+    const idle = record({
+      status: 'needs-attention', reason: 'agent idle', started_at: '2026-08-14T08:00:00Z',
+      status_changed_at: '2026-08-14T10:17:00Z',
+    })
     expect(presentRun(idle, stateContext())).toEqual(
       expect.objectContaining({ state: 'needs-you', reason: 'Agent idle for 3 min' }),
     )
@@ -249,7 +248,7 @@ describe('needs you conditions', () => {
     expect(needsYou(shown, stateContext())?.action(shown, undefined).label).toBe(label)
   })
 
-  it('names no wait for a run parked before the snapshot', () => {
+  it('names no wait for a run parked before a snapshot that has no change time', () => {
     const reloaded = record({ status: 'needs-attention', reason: 'agent idle', started_at: '2026-08-14T08:00:00Z' })
     expect(presentRun(reloaded, stateContext()).reason).toBe('Agent idle')
   })

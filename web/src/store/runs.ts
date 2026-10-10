@@ -3,24 +3,26 @@ import { nextActivity, type AgentPayload, type RunActivity } from '@/store/activ
 import type { SliceCreator } from '@/store/slice'
 
 /** A run plus its last execution-status change time, for sorting and acknowledgments. */
-export type RunRecord = Run & {
+export type RunRecord = Omit<Run, 'status_changed_at'> & {
   reason?: string
+  /** The wire's `status_changed_at`, then kept current by `run.status` events. */
   stateChangedAt: string
-  /** The wire has no status-change time, so a snapshot falls back to the run's start. */
+  /** The snapshot had no `status_changed_at`, so this is the run's finish, start or creation. */
   stateChangedAtEstimated: boolean
   /** Client-side only: what the agent did last, from `run.agent` events. */
   activity?: RunActivity
 }
 
 export function toRecord(run: Run, previous?: RunRecord): RunRecord {
+  const { status_changed_at: changedAt, ...wire } = run
   const carry = previous && previous.status === run.status
   const record: RunRecord = {
-    ...run,
+    ...wire,
     reason: run.reason ?? (carry ? previous.reason : undefined),
-    stateChangedAt: carry
-      ? previous.stateChangedAt
-      : (run.finished_at ?? run.started_at ?? run.created_at),
-    stateChangedAtEstimated: carry ? previous.stateChangedAtEstimated : !run.finished_at,
+    stateChangedAt:
+      changedAt ??
+      (carry ? previous.stateChangedAt : (run.finished_at ?? run.started_at ?? run.created_at)),
+    stateChangedAtEstimated: !changedAt && (carry ? previous.stateChangedAtEstimated : !run.finished_at),
   }
   // No snapshot carries activity, so a re-read must not erase it.
   if (carry && previous.activity) record.activity = previous.activity
@@ -106,12 +108,14 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
+      // The server moves `status_changed_at` on the same changes and no others.
+      const changed = to !== current.status || (to === 'needs-attention' && reason !== current.reason)
       const next: RunRecord = {
         ...current,
         status: to,
         reason,
-        stateChangedAt: time,
-        stateChangedAtEstimated: false,
+        stateChangedAt: changed ? time : current.stateChangedAt,
+        stateChangedAtEstimated: !changed && current.stateChangedAtEstimated,
         outcome_unseen: outcomeUnseen,
         finish_unopened: finishUnopened,
       }

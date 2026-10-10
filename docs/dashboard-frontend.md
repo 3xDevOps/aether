@@ -366,10 +366,10 @@ not the controller); the title; the row's age; the agent's monochrome glyph;
 and the avatars of whoever is on the run. The age is the compact form
 ("15m", "3h", "2d") of the time the explorer sorts by: when a Needs you row
 began waiting on the viewer, else the run's last status change (`since` on
-the row, `src/store/selectors.ts`). A run read from a snapshot has only an
-estimate of that change (see [Run state](#run-state)), so after a reload a
-live run's age counts from its start until its next status event. The title
-truncates before anything to its right does. Paused, finished and other
+the row, `src/store/selectors.ts`). Only a snapshot without
+`status_changed_at` (see [Run state](#run-state)) leaves an estimate of that
+change, which counts a live run's age from its start until its next status
+event. The title truncates before anything to its right does. Paused, finished and other
 members' working rows recede: their title is in the muted colour.
 
 **Who is on a run** is every member with a terminal or an Enhanced session
@@ -1074,12 +1074,19 @@ src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working".
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
 message's time, else the state change); Working and Finished sort by latest
 change. Reason lines that name a wait re-read the shared clock, so "for 3
-min" keeps moving. The run wire carries no status-change time, so the
-dashboard records one from each `run.status` event. A run loaded from a
-snapshot instead takes its finish, start or creation time
-(`stateChangedAtEstimated`): its idle reason drops the duration ("Agent
-idle") until the next status event, and it sorts and shows its change time
-by that estimate.
+min" keeps moving.
+
+**The change time** is `stateChangedAt` on the run record. A snapshot's
+`status_changed_at` sets it: when the run entered its status, or its reason
+while it needs attention. A `run.status` event moves it to the event's time
+on those same changes and leaves it alone on a same-status rewrite, as the
+server does, so a retention relabel of a run that finished last week does not
+make it the newest Finished row. An older gateway, and a run whose status
+last changed before the server recorded it, send no `status_changed_at`; the
+record then takes the run's finish, start or creation time and is marked
+`stateChangedAtEstimated`: its idle reason drops the duration ("Agent idle")
+until the next status event, and it sorts and shows its change time by that
+estimate.
 
 **Terminal controller** comes from `controller_member_id`, which the
 gateway decorates from the control lease on `run.get` and `run.list` (empty

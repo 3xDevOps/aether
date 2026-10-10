@@ -607,6 +607,10 @@ type Run struct {
 	StartedAt *time.Time
 	// FinishedAt is when the run reached a terminal status; nil until then.
 	FinishedAt *time.Time
+	// StatusChangedAt is when the run entered its current status, or its
+	// current reason while it needs attention. A same-status relabel of a
+	// terminal run leaves it alone. Nil on rows written before it existed.
+	StatusChangedAt *time.Time
 	// UnansweredQuestions is the number of non-denied, non-cancelled room
 	// questions to the run's owner (asked by anyone else) without a
 	// correlated reply. It is populated by run snapshot reads and is zero

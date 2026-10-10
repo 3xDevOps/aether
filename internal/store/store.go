@@ -110,8 +110,9 @@ type Store interface {
 	// timestamps when non-nil, leaving every other field untouched. This
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields. A status change clears
-	// outcome_unseen and sets finish_unopened to whether the new status
-	// is terminal; a same-status write keeps both.
+	// outcome_unseen, sets finish_unopened to whether the new status is
+	// terminal and moves status_changed_at to now; a same-status write
+	// keeps all three.
 	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// FinishRunReported is UpdateRunStatus that also sets outcome_unseen
 	// and finish_unopened in the same write, for the transition an agent's
