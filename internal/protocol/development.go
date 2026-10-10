@@ -188,6 +188,7 @@ type DevTerminal struct {
 	TerminalID  string          `json:"terminal_id"`
 	Incarnation string          `json:"incarnation"`
 	Name        string          `json:"name"`
+	StartedBy   string          `json:"started_by"` // run_agent or member
 	Cols        uint            `json:"cols"`
 	Rows        uint            `json:"rows"`
 	Process     DevProcessState `json:"process"`

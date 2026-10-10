@@ -71,6 +71,10 @@ export const initialRunShellDock: RunShellDockState = {
   refusedMessage: null,
 }
 
+/** Whether a shell's process is over. An `unavailable` one may still be running. */
+export const shellEnded = (terminal: DevTerminal) =>
+  terminal.process.state === 'exited' || terminal.process.state === 'stopped'
+
 /** The socket handle is deliberately kept outside Zustand's persisted state. */
 export type RunShellSocket = Attachment
 type ShellSocketDataListener = (
@@ -220,10 +224,13 @@ export const createTerminalSlice: SliceCreator<TerminalSlice> = (set) => ({
           unregisterShellSocket(runID, previous.terminal_id)
         }
       }
-      const hidden = current.hidden.filter((key) =>
-        terminals.some((item) => `${item.terminal_id}:${item.incarnation}` === key))
+      const key = (item: DevTerminal) => `${item.terminal_id}:${item.incarnation}`
+      const hidden = current.hidden.filter((entry) => terminals.some((item) => key(item) === entry))
+      // An ended shell has nothing to attach to, so it keeps a tab only where
+      // it ended in front of this viewer; it never comes back as a new one.
+      const shown = current.terminals.filter((item) => current.tabs.includes(item.terminal_id)).map(key)
       const tabs = terminals.filter((item) =>
-        !hidden.includes(`${item.terminal_id}:${item.incarnation}`)).map((item) => item.terminal_id)
+        !hidden.includes(key(item)) && (!shellEnded(item) || shown.includes(key(item)))).map((item) => item.terminal_id)
       return {
         shellDocks: {
           ...s.shellDocks,

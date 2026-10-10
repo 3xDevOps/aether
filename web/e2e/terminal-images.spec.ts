@@ -87,9 +87,9 @@ test('targets image bytes at a live run shell', async ({ page, aether }) => {
   const runDock = page.locator('[data-slot=shell-terminal]')
   const screen = runDock.locator('.xterm-screen')
   await expect(screen).toBeVisible({ timeout: 60_000 })
-  await runDock.getByRole('button', { name: 'Take control' }).click()
+  // A shell this page opened is already its own: no control step, no click.
   await expect(runDock.getByRole('button', { name: 'Release' })).toBeVisible({ timeout: 60_000 })
-  await screen.click()
+  await expect(runDock.locator('.xterm-helper-textarea')).toBeFocused()
   await page.keyboard.type('sha256sum ')
   await runDock.getByRole('button', { name: 'Terminal tools', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Upload image…' }).click()

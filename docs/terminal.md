@@ -341,34 +341,86 @@ above remain in force.
 
 A run shell is an extra shell in the run's container, started by a member or
 by the agent. **+ Shell** in the Terminal view's toolbar calls
-`dev.terminal.start` and opens it as a tab after **Agent**; an Enhanced run,
-which has no **Agent** tab, lists only its shells. The tabs appear once a
-shell exists; on a phone they are one menu. A shell the server gave no name
-reads **Shell 1**, **Shell 2** and so on, in start order. Displaying,
-selecting, reconnecting or showing a hidden shell never starts a process.
-At most four shells can run at once; **+ Shell** says **At most 4 shells**
-when that limit is reached. Shells can open only in a `running` or
+`dev.terminal.start` and opens it as a tab after **Agent**, focused and
+already yours to type in; an Enhanced run, which has no **Agent** tab, lists
+only its shells. The tabs appear once a shell exists; on a phone they are one
+menu. Displaying, selecting, reconnecting or showing a hidden shell never
+starts a process. The same compact replay, focus handling and phone panning
+are used as for the agent terminal.
+
+A shell the server named (`tab-1`, `tab-2`) reads **Shell 1**, **Shell 2**.
+The number stays with that shell until it ends, so closing another shell
+never renumbers it. A shell the agent started keeps the name the agent gave
+it and carries the agent's glyph; hovering the tab says **Started by the
+agent**, and the phone menu writes that under the name. `dev.terminal.list`
+reports it as `started_by`, `run_agent` or `member`. The dashboard reads that
+list every two seconds while the Terminal view is showing and every ten
+behind another view, so a shell the agent starts appears without a reload.
+
+At most four shells started by people and four started by the agent can run
+in a run at once. The two are counted apart, so the agent's shells never stop
+a member opening one. At the members' limit **+ Shell** is dimmed beside **At
+most 4 shells**, and its hint (on a phone, the line under **New shell**) says
+to stop one; `dev.terminal.start` refuses with `shell limit reached: people
+have 4 shells running in this run; stop one to start another`. An ended shell
+does not count: it stays listed until a new one from the same starter needs
+its place, oldest first. Shells can open only in a `running` or
 `needs-attention` run that is not paused; a refused open says **You can view
 this run but not open a shell in it**. The server assigns each shell a
 stable `terminal_id` and an `incarnation`; every attachment and mutation
 names that exact incarnation. An ended or replaced process is never
 implicitly rerun.
 
-A tab names its process state when it is not running (**Shell 1 · exited**),
-and the line under the toolbar shows its exit status and reason when
-available. **Hide this shell** (in **Shell actions**), switching to **Agent**
-or another view, and disconnecting only detach the viewer. The process keeps
-running in the run container. While a hidden shell exists, **+ Shell** opens
-a menu with **New shell** and **Show Shell 1**; the same compact replay,
-focus handling and phone panning are used as for the agent terminal. **Stop
-this shell** is different: the current controller confirms **Stop this
-shell?** before the process ends. Ended shells remain discoverable until the
-server replaces them; starting a new one is always a separate action.
+### Close a shell
 
-The shell's toolbar shows its current controller (**Alice controls**, **The
-agent controls** or **You control**). **Take control** acquires only that
-shell's lease; when someone holds it, **Take control of this shell?** asks
-first and the takeover fences the previously observed generation.
+Each tab has a close button, and Delete or Backspace on a focused tab does
+the same. On a phone the same choices are in **Shell actions**. Closing a
+running shell asks which you mean:
+
+- **Hide, keep running** detaches this viewer only. The process keeps
+  running in the run container and still counts toward the limit, so the
+  toolbar shows **1 hidden** (a phone lists **Hidden, still running**) with
+  **Show Shell 1** to bring it back. Switching to **Agent** or another view,
+  and disconnecting, detach the same way.
+- **Stop shell** ends the process and removes the tab. It takes the shell's
+  lease for the stop and returns it. When someone else controls the shell,
+  **Stop Shell 1?** names them and asks first.
+
+A shell that ends while you have it open keeps its tab, marked with its state
+(**Shell 1 · exited**), and the line under the toolbar gives its exit code
+and reason; its close button removes the tab at once. A shell that had ended
+before you opened the run gets no tab, and a closed one does not come back
+after a reload.
+
+### Who can type in a shell
+
+Each shell has one controller at a time, with its own lease. Watching a shell
+takes nothing, so the agent can go on driving a shell you are only reading.
+Control comes to you when you use the shell:
+
+- A shell you open starts under your control.
+- In a shell nobody else controls, the first key you press takes control, and
+  what you typed while the server answered is sent once it does. Focus and
+  mouse reports that the terminal sends by itself are not typing and take
+  nothing. A lease your own closed page left behind, after a reload or on a
+  phone that went to sleep, is taken back the same way.
+- The toolbar then reads **You control** beside **Release**. Leaving the
+  Terminal view releases the shell for you, and switching to another
+  terminal tab or closing the page lets the lease lapse after the 15-second
+  reconnect window, so the agent is not locked out of a shell you stopped
+  using.
+- When the agent or a teammate controls the shell, the toolbar names them
+  (**The agent controls**, **Alice controls**; on a phone, **Alice controls
+  this shell.** under the toolbar) beside **Take control**. **Take control of
+  this shell?** asks first, and the takeover fences the generation it
+  observed. The agent can take a shell nobody controls and can never take one
+  from a person.
+
+A swarm worker is the exception. There, shell control also sets the durable
+orchestration hold described above, so nothing takes it for you: the shell
+stays a mirror until **Take control**, the line under the toolbar says why,
+and **Stop shell** waits for control.
+
 **Release** releases only that shell's lease. It does **not** release agent
 terminal control or clear a durable swarm hold; use **Release control** on
 the swarm page for that separate decision. Input, paste, mouse sequences,
@@ -389,7 +441,8 @@ policy applies only to shells; agent terminal replay gating is unchanged.
 
 **Take a screenshot** (in **Shell actions**) calls the terminal screenshot
 API and captures the server's actual emulator state, without needing a
-connected viewer, then says **Captured <id>. Open Captures to keep it.** Its
+connected viewer or control, then says **Captured <id>. Open Captures to
+keep it.** Its
 total budget is 90 seconds, including first companion startup; rendering
 itself is bounded to 30 seconds. Cancelling the request closes only its
 isolated renderer, not the app's browser session. Open **Captures…** (in the
@@ -555,7 +608,9 @@ On a phone every run - including one you own - opens as a read-only mirror.
 On desktop, an owner's unoccupied agent terminal may already have acquired
 control; swarm workers start as mirrors on both. **Take control** is a tap.
 While it is a mirror the terminal takes no input, so tapping it does not
-raise the keyboard.
+raise the keyboard. A run shell nobody else controls is not a mirror, on a
+phone either: tapping it raises the keyboard, and the first key takes
+control.
 
 ### Paste or upload an image
 

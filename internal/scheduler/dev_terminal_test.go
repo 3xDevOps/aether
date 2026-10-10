@@ -186,7 +186,80 @@ func terminalTestFence(t *testing.T, e *testEnv, run domain.RunID, terminal prot
 	return protocol.DevControlFence{ControlSessionID: lease.SessionID, ControlGeneration: lease.Generation}
 }
 
-func TestDevelopmentTerminalSharesDockLimitAndStopsOnlyOwnedProcess(t *testing.T) {
+func terminalTestList(t *testing.T, e *testEnv, run domain.RunID) string {
+	t.Helper()
+	listed, err := terminalTestCall(t, e.sched, run, control.Principal{Kind: control.PrincipalRunAgent, RunID: run},
+		protocol.MethodDevTerminalList, protocol.DevTerminalListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, item := range listed.(protocol.DevTerminalListResult).Terminals {
+		names = append(names, item.TerminalID+"="+item.StartedBy)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestRunShellLimitCountsEachStarterApart(t *testing.T) {
+	e := newTerminalTestEnv(t, nil)
+	run, _ := e.launchFake(t, "shell limits")
+	agent := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
+	human := control.Principal{Kind: control.PrincipalMember, MemberID: e.member.ID}
+	start := func(principal control.Principal, name string) (protocol.DevTerminal, error) {
+		result, err := terminalTestCall(t, e.sched, run.ID, principal, protocol.MethodDevTerminalStart,
+			protocol.DevTerminalStartParams{Name: name, Cols: 12, Rows: 3})
+		if err != nil {
+			return protocol.DevTerminal{}, err
+		}
+		return result.(protocol.DevTerminalStartResult).Terminal, nil
+	}
+	mustStart := func(principal control.Principal, name string) protocol.DevTerminal {
+		t.Helper()
+		terminal, err := start(principal, name)
+		if err != nil {
+			t.Fatalf("start %q as %s: %v", name, principal.Kind, err)
+		}
+		return terminal
+	}
+	first := mustStart(agent, "a1")
+	for _, name := range []string{"a2", "a3", "a4"} {
+		mustStart(agent, name)
+	}
+	if _, err := start(agent, "a5"); !errors.Is(err, ErrRunShellTabLimit) || !strings.Contains(err.Error(), "the agent has 4 shells running") ||
+		DevelopmentErrorCode(err) != protocol.CodeConflict {
+		t.Fatalf("agent's fifth = %v", err)
+	}
+	var second protocol.DevTerminal
+	for n := 1; n <= 4; n++ {
+		opened := mustStart(human, "")
+		if opened.TerminalID != fmt.Sprintf("tab-%d", n) || opened.StartedBy != "member" {
+			t.Fatalf("shell %d = %+v", n, opened)
+		}
+		if n == 2 {
+			second = opened
+		}
+	}
+	if _, err := start(human, ""); !errors.Is(err, ErrRunShellTabLimit) || !strings.Contains(err.Error(), "people have 4 shells running") {
+		t.Fatalf("a person's fifth = %v", err)
+	}
+
+	terminalTestProcess(t, e, run.ID, second).process.endProcess(0)
+	reopened := mustStart(human, "")
+	if reopened.TerminalID != "tab-2" || reopened.Incarnation == second.Incarnation {
+		t.Fatalf("reopened = %+v, ended = %+v", reopened, second)
+	}
+	terminalTestProcess(t, e, run.ID, first).process.endProcess(1)
+	mustStart(agent, "a5")
+	want := "a2=run_agent,a3=run_agent,a4=run_agent,a5=run_agent,tab-1=member,tab-2=member,tab-3=member,tab-4=member"
+	if got := terminalTestList(t, e, run.ID); got != want {
+		t.Fatalf("list = %s, want %s", got, want)
+	}
+	if _, _, err := e.sched.CaptureDevelopmentTerminal(t.Context(), run.ID, terminalTestTarget(first)); !errors.Is(err, ptyhost.ErrNoSession) {
+		t.Fatalf("displaced terminal = %v", err)
+	}
+}
+
+func TestDevelopmentTerminalsShareOneListAndStopOnlyOwnedProcess(t *testing.T) {
 	e := newTerminalTestEnv(t, nil)
 	run, primary := e.launchFake(t, "shared terminals")
 	principal := control.Principal{Kind: control.PrincipalRunAgent, RunID: run.ID}
@@ -194,22 +267,8 @@ func TestDevelopmentTerminalSharesDockLimitAndStopsOnlyOwnedProcess(t *testing.T
 		t.Fatal(err)
 	}
 	terminal := startTestTerminal(t, e, run.ID, "agent")
-	for _, id := range []string{"third", "fourth"} {
-		startTestTerminal(t, e, run.ID, id)
-	}
-	if err := e.sched.EnsureRunShellTab(t.Context(), run.ID, "fifth", 80, 24); !errors.Is(err, ErrRunShellTabLimit) {
-		t.Fatalf("fifth = %v", err)
-	}
-	listed, err := terminalTestCall(t, e.sched, run.ID, principal, protocol.MethodDevTerminalList, protocol.DevTerminalListParams{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, item := range listed.(protocol.DevTerminalListResult).Terminals {
-		names = append(names, item.TerminalID)
-	}
-	if strings.Join(names, ",") != "agent,fourth,main,third" {
-		t.Fatalf("shared list = %v", names)
+	if got := terminalTestList(t, e, run.ID); got != "agent=run_agent,main=member" {
+		t.Fatalf("shared list = %s", got)
 	}
 	fence := terminalTestFence(t, e, run.ID, terminal, principal, "agent-control", false)
 	stopped, err := terminalTestCall(t, e.sched, run.ID, principal, protocol.MethodDevTerminalStop,
