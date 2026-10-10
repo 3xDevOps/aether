@@ -131,6 +131,8 @@ type runState struct {
 	surfaceGate sync.RWMutex
 	generation  uint64
 	current     *lease
+	// lastHolder outlives the lease that set it.
+	lastHolder domain.MemberID
 }
 
 // Service is a concurrency-safe in-memory controller lease table. Runtime
@@ -279,6 +281,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 			connectionDone: make(chan struct{}),
 		}
 		state.current = current
+		state.lastHolder = current.memberID
 		installed = true
 		result := s.snapshotLocked(runID, current)
 		return result, &displaced, nil
@@ -303,6 +306,7 @@ func (s *Service) acquireAuthorized(run, member, session string, force bool, exp
 		connectionDone: make(chan struct{}),
 	}
 	state.current = current
+	state.lastHolder = current.memberID
 	installed = true
 	return s.snapshotLocked(runID, current), nil, nil
 }
@@ -631,6 +635,19 @@ func (s *Service) Status(run string) (Snapshot, bool) {
 		return Snapshot{}, false
 	}
 	return s.snapshotLocked(domain.RunID(run), state.current), true
+}
+
+// LastHolder returns the member who most recently took the run's lease, the
+// current controller included. It is as ephemeral as the leases: empty until
+// someone takes control after a restart.
+func (s *Service) LastHolder(run string) domain.MemberID {
+	state := s.stateFor(domain.RunID(run), false)
+	if state == nil {
+		return ""
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.lastHolder
 }
 
 func (s *Service) holderChanged(run domain.RunID) {

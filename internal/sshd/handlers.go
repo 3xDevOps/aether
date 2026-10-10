@@ -221,6 +221,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 		if holder, ok := s.cfg.Control.Status(string(run.ID)); ok {
 			out.ControllerMemberID = string(holder.MemberID)
 		}
+		out.LastControllerMemberID = string(s.cfg.Control.LastHolder(string(run.ID)))
 	}
 	return out
 }

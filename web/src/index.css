@@ -252,6 +252,7 @@
   --animate-sheet-left: sheet-left var(--duration-overlay) var(--ease-out);
   --animate-sheet-right: sheet-right var(--duration-overlay) var(--ease-out);
   --animate-fade-in: fade-in var(--duration-overlay) var(--ease-out);
+  --animate-expand-right: expand-right var(--duration-overlay) var(--ease-out);
 
   @keyframes overlay-in {
     from {
@@ -277,6 +278,15 @@
   @keyframes fade-in {
     from {
       opacity: 0;
+    }
+  }
+  /* The negative insets keep the surface's shadow inside the clip. */
+  @keyframes expand-right {
+    from {
+      clip-path: inset(-2rem 100% -2rem 0);
+    }
+    to {
+      clip-path: inset(-2rem -2rem -2rem 0);
     }
   }
 }

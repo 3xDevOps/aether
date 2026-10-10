@@ -510,15 +510,15 @@ func TestRunSnapshotCarriesController(t *testing.T) {
 		}
 		return rg.Run
 	}
-	if got := get().ControllerMemberID; got != "" {
-		t.Fatalf("controller before any lease = %q", got)
+	if got := get(); got.ControllerMemberID != "" || got.LastControllerMemberID != "" {
+		t.Fatalf("before any lease: controller %q, last controller %q", got.ControllerMemberID, got.LastControllerMemberID)
 	}
 	lease, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(other.ID), "grace-tab", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := get().ControllerMemberID; got != string(other.ID) {
-		t.Fatalf("run.get controller = %q, want %q", got, other.ID)
+	if got := get(); got.ControllerMemberID != string(other.ID) || got.LastControllerMemberID != string(other.ID) {
+		t.Fatalf("run.get: controller %q, last controller %q, want %q for both", got.ControllerMemberID, got.LastControllerMemberID, other.ID)
 	}
 	var rl protocol.RunListResult
 	if err := c.Call(protocol.MethodRunList, protocol.RunListParams{}, &rl); err != nil {
@@ -530,7 +530,7 @@ func TestRunSnapshotCarriesController(t *testing.T) {
 	if err := e.srv.cfg.Control.Release(string(e.run.ID), other.ID, lease.SessionID, lease.Generation); err != nil {
 		t.Fatal(err)
 	}
-	if got := get().ControllerMemberID; got != "" {
-		t.Fatalf("controller after release = %q", got)
+	if got := get(); got.ControllerMemberID != "" || got.LastControllerMemberID != string(other.ID) {
+		t.Fatalf("after release: controller %q, last controller %q, want none and %q", got.ControllerMemberID, got.LastControllerMemberID, other.ID)
 	}
 }

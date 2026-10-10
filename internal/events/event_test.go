@@ -19,6 +19,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunTitlePayload{Title: "Fixing the login bug"},
 		RunProtectedPayload{Protected: true},
 		RunControllerPayload{MemberID: "mem_1"},
+		RunControllerPayload{LastMemberID: "mem_1"},
 		RunModePayload{Mode: domain.LaunchACP, Previous: domain.LaunchTUI, Switching: domain.LaunchACP, Reason: "Switching to Enhanced…"},
 		RunArchivedPayload{ArchivedAt: strPtr("2024-01-02T03:04:05Z")},
 		RunArchivedPayload{},

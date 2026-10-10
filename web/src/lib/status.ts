@@ -128,16 +128,23 @@ export function groupOf(state: PresentationState): RunGroup {
 
 const fallbackLabelLength = 120
 
+/**
+ * Holds a label to the fallback's length, cut at a word when one is near. One already cut there, as
+ * the server's provisional title is (internal/scheduler/runmeta_title.go), is returned as it is.
+ */
+export function clipLabel(line: string): string {
+  const chars = Array.from(line)
+  if (chars.length <= fallbackLabelLength || (chars.length === fallbackLabelLength + 1 && line.endsWith('…'))) return line
+  const cut = chars.slice(0, fallbackLabelLength).join('')
+  const space = cut.search(/\s\S*$/)
+  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
 export function runLabel(run: { task: string; title?: string }): string {
   const title = run.title?.trim()
   if (title) return title
   const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
-  if (!line) return 'Untitled run'
-  const chars = Array.from(line)
-  if (chars.length <= fallbackLabelLength) return line
-  const cut = chars.slice(0, fallbackLabelLength).join('')
-  const space = cut.search(/\s\S*$/)
-  return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+  return line ? clipLabel(line) : 'Untitled run'
 }
 
 export const stateLabel: Record<PresentationState, string> = {

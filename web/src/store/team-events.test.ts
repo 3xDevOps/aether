@@ -178,8 +178,9 @@ describe('team state from events', () => {
     const client = fakeApi()
     await applyEvent(store, event(1, 'run.controller', { member_id: 'mem_bob' }), client)
     expect(store.getState().runs.run_1.controller_member_id).toBe('mem_bob')
-    await applyEvent(store, event(2, 'run.controller', { member_id: '' }), client)
-    expect(store.getState().runs.run_1.controller_member_id).toBe('')
+    expect(store.getState().runs.run_1.last_controller_member_id).toBeUndefined()
+    await applyEvent(store, event(2, 'run.controller', { member_id: '', last_member_id: 'mem_bob' }), client)
+    expect(store.getState().runs.run_1).toMatchObject({ controller_member_id: '', last_controller_member_id: 'mem_bob' })
   })
 
   it('applies a budget event and re-reads the budget after a metered result', async () => {

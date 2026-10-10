@@ -485,10 +485,12 @@ export async function applyEvent(
       }
       break
     }
-    case 'run.controller':
+    case 'run.controller': {
       // A run this client has not loaded arrives with the holder in its snapshot.
-      store.getState().applyRunController(ev.run_id, (ev.payload as RunControllerPayload).member_id)
+      const p = ev.payload as RunControllerPayload
+      store.getState().applyRunController(ev.run_id, p.member_id, p.last_member_id)
       break
+    }
     case 'run.archived': {
       const p = ev.payload as RunArchivedPayload
       if (!store.getState().runs[ev.run_id]) {
