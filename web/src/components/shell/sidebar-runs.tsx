@@ -1,5 +1,7 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { RunDetails, RunDetailsGroup } from '@/components/shell/run-details'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight, Waypoints } from '@/components/icons'
 import { ListRow } from '@/components/ui/list-row'
@@ -14,8 +16,8 @@ import { cn } from '@/lib/utils'
 import { approveRequest, targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { useRun, useSidebarGroups, useStateContext } from '@/store/hooks'
-import type { RunRecord } from '@/store/runs'
+import { useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
+import { isTerminal, type RunRecord } from '@/store/runs'
 import { stateContextOf, type RunTree, type SidebarGroup, type SwarmSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
 
@@ -105,7 +107,7 @@ export function SidebarRuns() {
       onFocus={roving.onFocus}
       onKeyDown={roving.onKeyDown}
     >
-      <div>
+      <RunDetailsGroup>
         {groups.length === 0 ? (
           error !== null ? (
             <p className="px-2 py-1 text-ui-sm text-muted">{dead ? error : 'Cannot reach the server. Retrying.'}</p>
@@ -127,7 +129,7 @@ export function SidebarRuns() {
             )
           })
         )}
-      </div>
+      </RunDetailsGroup>
     </section>
   )
 }
@@ -223,6 +225,8 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   return run ? <RunRowButton run={run} {...shown} /> : null
 })
 
+const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
+
 function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread }: {
   run: RunRecord
   state: PresentationState
@@ -247,44 +251,100 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
   }
   const unopened = run.finish_unopened === true && (state === 'done' || state === 'failed')
   const recedes = state !== 'needs-you' && !unopened && (state !== 'working' || (!swarm && run.member_id !== self))
+  const members = useStore((s) => s.members)
+  const people = useRunPeople(run)
+  const exactTime = useId()
+  const name = (id: string) => members[id]?.display_name ?? id
+  const controller = run.controller_member_id
+  const watching = people.filter((id) => id !== controller).map((id) => (id === self ? 'you' : name(id)))
   useClock()
-  const label = [stateLabel[state], workspaceName, title, swarm && !unread ? counts : reason, unopened && 'Not opened yet', timeAgo(since)].filter(Boolean).join(' · ')
+  const label = [
+    stateLabel[state],
+    workspaceName,
+    title,
+    swarm && !unread ? counts : reason,
+    unopened && 'Not opened yet',
+    timeAgo(since),
+    run.member_id === self ? 'your run' : `${name(run.member_id)}'s run`,
+    controller
+      ? controller === self ? 'you control' : `${name(controller)} controls`
+      : controller === '' && people.length > 0 && !isTerminal(run.status) && 'nobody controls',
+    watching.length > 0 && `${names.format(watching)} watching`,
+  ].filter(Boolean).join(' · ')
   const indicators = (
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
       <RelativeTime at={since} compact title={undefined} />
       <AgentGlyph agent={run.harness} />
+      {people.length > 0 && <PeopleStack people={people} />}
     </span>
   )
   return (
-    <ListRow
-      data-run-row=""
-      aria-label={label}
-      title={`${label} · ${new Date(since).toLocaleString()}`}
-      aria-current={selected ? 'page' : undefined}
-      selected={selected}
-      onClick={open}
-      leading={<StatusDot tone={state} />}
-      trailing={!swarm ? indicators : undefined}
-      action={swarm && run.mission_id && (
-        <>
-          <Button
-            variant={swarmSelected ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            label={`Open swarm controls for ${title}`}
-            hint={counts ? `Open swarm controls · ${counts}` : 'Open swarm controls'}
-            aria-current={swarmSelected ? 'page' : undefined}
-            onClick={() => navigate('missions', { missionId: run.mission_id! })}
-          >
-            <Waypoints />
-          </Button>
-          {indicators}
-        </>
-      )}
-      hoverAction={state === 'needs-you' && <AnswerButton run={run} />}
-    >
-      {workspaceName && <span className="text-muted">{workspaceName} · </span>}
-      <span className={cn(recedes && !selected && 'text-muted')}>{title}</span>
-    </ListRow>
+    <RunDetails run={run} state={state} reason={reason} since={since} counts={counts} people={people} label={label}>
+      <ListRow
+        data-run-row=""
+        aria-label={label}
+        aria-describedby={exactTime}
+        aria-current={selected ? 'page' : undefined}
+        selected={selected}
+        onClick={open}
+        leading={
+          <>
+            <StatusDot tone={state} />
+            <span
+              data-slot="owner-mark"
+              aria-hidden
+              style={{ backgroundColor: members[run.member_id]?.color }}
+              className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
+            />
+          </>
+        }
+        trailing={!swarm ? indicators : undefined}
+        action={swarm && run.mission_id && (
+          <>
+            <Button
+              variant={swarmSelected ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              label={`Open swarm controls for ${title}`}
+              hint={counts ? `Open swarm controls · ${counts}` : 'Open swarm controls'}
+              aria-current={swarmSelected ? 'page' : undefined}
+              onClick={() => navigate('missions', { missionId: run.mission_id! })}
+            >
+              <Waypoints />
+            </Button>
+            {indicators}
+          </>
+        )}
+        hoverAction={state === 'needs-you' && <AnswerButton run={run} />}
+      >
+        {workspaceName && <span className="text-muted">{workspaceName} · </span>}
+        <span className={cn(recedes && !selected && 'text-muted')}>{title}</span>
+        <span id={exactTime} className="sr-only">{new Date(since).toLocaleString()}</span>
+      </ListRow>
+    </RunDetails>
+  )
+}
+
+const peopleShown = 3
+
+/** The first member sits whole at the right edge; each one after shows from behind it, to its left. */
+function PeopleStack({ people }: { people: string[] }) {
+  const members = useStore((s) => s.members)
+  const faces = people.length > peopleShown ? people.slice(0, peopleShown - 1) : people
+  return (
+    <span data-slot="run-people" className="pointer-events-none flex items-center">
+      {people.length > faces.length && <span className="mr-1 text-ui-xs">+{people.length - faces.length}</span>}
+      {[...faces].reverse().map((id, behind) => (
+        <span
+          key={id}
+          className={cn(
+            'flex rounded-full ring-[1.5px] ring-chrome group-hover/row:ring-hover-chrome group-data-[selected]/row:ring-selection',
+            behind > 0 && '-ml-1.5',
+          )}
+        >
+          <Avatar name={members[id]?.display_name ?? id} color={members[id]?.color} />
+        </span>
+      ))}
+    </span>
   )
 }
 

@@ -4,7 +4,7 @@ import { AppShell } from '@/components/shell/app-shell'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { hydrate } from '@/store/sync'
-import { fakeApi, mission, otherWorkspace, run, updateStatus, workspace } from '@/test/fixtures'
+import { alice, bob, fakeApi, mission, otherWorkspace, run, updateStatus, vera, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
 Element.prototype.scrollIntoView = vi.fn()
@@ -25,6 +25,7 @@ beforeEach(async () => {
     mineOnly: false,
     inbox: {},
     roomMessages: {},
+    presence: [],
     route: { name: 'board', params: {} },
     update: null,
     dismissedUpdates: { cli: '', server: '', shell: '' },
@@ -120,21 +121,22 @@ describe('run rows', () => {
       }))
       render(<AppShell />)
 
-      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · Agent working · 15 minutes ago' })
+      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · Agent working · 15 minutes ago · your run' })
       const age = within(row).getByText('15m')
       expect(age.getAttribute('dateTime')).toBe('2026-08-14T10:02:00Z')
-      // A swarm parent's age sits outside its button, so the row's tooltip carries the exact time.
-      const exact = (button: HTMLElement, at: string) => `${button.getAttribute('aria-label')} · ${new Date(at).toLocaleString()}`
+      // No native tooltip; the exact time is the row's description and is in its details box.
+      const described = (button: HTMLElement) => document.getElementById(button.getAttribute('aria-describedby')!)?.textContent
       const parent = runList().getByRole('button', { name: /^Working · coordinate · / })
       expect(age.getAttribute('title')).toBeNull()
-      expect(row.getAttribute('title')).toBe(exact(row, '2026-08-14T10:02:00Z'))
-      expect(parent.getAttribute('title')).toBe(exact(parent, '2026-08-14T09:00:00Z'))
+      expect(row.getAttribute('title')).toBeNull()
+      expect(described(row)).toBe(new Date('2026-08-14T10:02:00Z').toLocaleString())
+      expect(described(parent)).toBe(new Date('2026-08-14T09:00:00Z').toLocaleString())
 
       act(() => {
         vi.advanceTimersByTime(60_000)
       })
       expect(within(row).getByText('16m')).toBe(age)
-      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago$/)
+      expect(row.getAttribute('aria-label')).toMatch(/ · 16 minutes ago · your run$/)
     } finally {
       vi.useRealTimers()
     }
@@ -171,6 +173,102 @@ describe('run rows', () => {
     act(() => useStore.getState().applyFinishOpened('run_5'))
 
     expect(shown('Failed', 'bump the linter')).toEqual({ unopened: false, muted: true })
+  })
+
+  describe('people', () => {
+    const dan = { id: 'mem_dan', display_name: 'Dan', color: '#911eb4', role: 'viewer' as const }
+    const on = (...members: { id: string }[]) => members.map((member) => ({
+      member_id: member.id, state: 'watching' as const, watching: ['run_1'], last_seen: '2026-08-14T10:10:00Z',
+    }))
+    const seed = (over: Parameters<typeof run>[0], ...present: { id: string }[]) =>
+      useStore.setState((s) => ({
+        members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera, [dan.id]: dan },
+        presence: on(...present),
+        runs: { ...s.runs, run_1: toRecord(run(over)) },
+      }))
+    const row = () => runList().getByRole('button', { name: /^Working · rewrite the checkout flow/ })
+    const faces = () => [...row().querySelectorAll('[data-slot=run-people] [data-slot=avatar]')].map((face) => face.getAttribute('aria-label'))
+    const details = () => document.querySelector<HTMLElement>('[data-slot=run-details]')
+
+    it("fills the owner mark with the owner's colour, whoever backs or controls the run", () => {
+      seed({ member_id: bob.id, account_member_id: alice.id, controller_member_id: vera.id })
+      render(<AppShell />)
+
+      expect(row().querySelector<HTMLElement>('[data-slot=owner-mark]')?.style.backgroundColor).toBe('rgb(60, 180, 75)')
+      expect(row().getAttribute('aria-label')).toContain(" · Bob's run · Vera controls")
+    })
+
+    it('stacks who is on the run with its controller in front, and counts past three', () => {
+      seed({ controller_member_id: vera.id }, bob, alice, vera)
+      render(<AppShell />)
+
+      expect(faces()).toEqual(['Bob', 'Alice', 'Vera'])
+      expect(row().getAttribute('aria-label')).toMatch(/ · your run · Vera controls · you and Bob watching$/)
+
+      act(() => useStore.getState().setPresence(on(bob, alice, vera, dan)))
+      expect(faces()).toEqual(['Alice', 'Vera'])
+      expect(within(row()).getByText('+2')).toBeDefined()
+    })
+
+    it('puts the last controller in front while nobody controls, and draws nothing for an empty run', () => {
+      seed({ controller_member_id: '', last_controller_member_id: bob.id }, alice, bob)
+      render(<AppShell />)
+
+      expect(faces()).toEqual(['Alice', 'Bob'])
+      expect(row().getAttribute('aria-label')).toMatch(/ · nobody controls · Bob and you watching$/)
+
+      act(() => useStore.getState().setPresence([]))
+      expect(row().querySelector('[data-slot=run-people]')).toBeNull()
+    })
+
+    it('opens the run details beside a row a mouse rests on, in place of a native tooltip', () => {
+      vi.useFakeTimers()
+      try {
+        seed({ member_id: bob.id, controller_member_id: vera.id }, alice, vera)
+        render(<AppShell />)
+
+        fireEvent.pointerMove(row())
+        expect(details()).toBeNull()
+        act(() => {
+          vi.advanceTimersByTime(400)
+        })
+        const shown = within(details()!)
+        expect(shown.getByText('rewrite the checkout flow')).toBeDefined()
+        expect(shown.getByText('Agent working')).toBeDefined()
+        expect(shown.getByText('main-repo')).toBeDefined()
+        expect(shown.getByText('aether/run-1-checkout')).toBeDefined()
+        expect(shown.getByText('Started').nextElementSibling?.textContent).toBe(
+          new Date('2026-08-14T10:02:00Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }),
+        )
+        expect(shown.getByText('Owner').nextElementSibling?.textContent).toBe('BBob')
+        expect(shown.getByText('Controlling').parentElement?.textContent).toBe('VVeraControlling')
+        expect(shown.getByText('Alice (you)')).toBeDefined()
+
+        fireEvent.pointerLeave(row())
+        expect(details()).toBeNull()
+
+        act(() => useStore.getState().applyRunController('run_1', '', vera.id))
+        fireEvent.pointerMove(row())
+        expect(within(details()!).getByText('Nobody is controlling').textContent).toBe('Nobody is controllingVera had control last')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('opens no details for a finger', () => {
+      atViewport(1024, { pointer: 'coarse' })
+      vi.useFakeTimers()
+      try {
+        render(<AppShell />)
+        fireEvent.pointerMove(row())
+        act(() => {
+          vi.advanceTimersByTime(1000)
+        })
+        expect(details()).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   it('prefixes a Needs you row from another workspace and answers it where it waits', () => {

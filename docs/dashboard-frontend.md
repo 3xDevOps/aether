@@ -359,26 +359,56 @@ top to bottom:
    **Update…** when an update exists, and a **Team** line with who is online
    and the spend against workspace budgets.
 
-A run row is a 28px `ListRow` (44px on a coarse pointer): a static
-`StatusDot`, the title, the row's age and the agent's monochrome glyph. The
-age is the compact form ("15m", "3h", "2d") of the time the explorer sorts
-by: when a Needs you row began waiting on the viewer, else the run's last
-status change (`since` on the row, `src/store/selectors.ts`). A run read
-from a snapshot has only an estimate of that change (see
-[Run state](#run-state)), so after a reload a live run's age counts from its
-start until its next status event. The title truncates before the age does.
+A run row is a 28px `ListRow` (44px on a coarse pointer). From the left: a
+static `StatusDot`; the owner mark, a 6px right-pointing triangle filled
+with the colour of the run's owner (`member_id`, not the agent account and
+not the controller); the title; the row's age; the agent's monochrome glyph;
+and the avatars of whoever is on the run. The age is the compact form
+("15m", "3h", "2d") of the time the explorer sorts by: when a Needs you row
+began waiting on the viewer, else the run's last status change (`since` on
+the row, `src/store/selectors.ts`). A run read from a snapshot has only an
+estimate of that change (see [Run state](#run-state)), so after a reload a
+live run's age counts from its start until its next status event. The title
+truncates before anything to its right does. Paused, finished and other
+members' working rows recede: their title is in the muted colour.
+
+**Who is on a run** is every member with a terminal or an Enhanced session
+attached to it, the viewer included: the `watching` lists of
+`presence.roster`, which covers every workspace (`runWatchers` and
+`runPeople` in `src/store/presence.ts`). Their avatars stack at the row's
+right edge and the age, the glyph and a swarm's button move left to make
+room; a run nobody is on reserves none. The first avatar sits whole at the
+edge and each one after shows from behind it, to its left. First is the
+run's controller. While nobody holds control it is the last controller, if
+they are still on the run. The rest follow by name. A row draws three
+avatars at most: a fourth person turns the stack into two avatars and `+2`.
+
+**Run details.** Resting a mouse on a row for 400ms opens a box docked to
+the row's right edge (`run-details.tsx`): the full title, the state's
+reason, the workspace, the agent and mode, the branch, a swarm parent's
+worker counts, when the run started, when it last changed if that is later,
+its owner, and everyone on it with the controller marked **Controlling**. A
+live run nobody controls says so and names who had control last, when the
+server knows. Moving to another row swaps the box without the delay or the
+animation. The box takes no pointer events, closes when the row is pressed,
+scrolled or left, and gives way to the hint of a button inside the row. It
+does not open on keyboard focus, on a coarse pointer, or under 768px, where
+the sidebar is a sheet. It replaces the row's native tooltip.
+
 The row's accessible name starts with the state word, then the workspace
-when it is another one, the title, the reason and the age in words
-("15 minutes ago"); its tooltip adds the exact time. Paused, finished and
-other members' working rows recede: their title is in the muted colour. A Needs you row offers the
-condition's primary action on hover, focus and a coarse pointer, the same one
-its board card shows (see [Board](#board)): **Approve** resolves in place,
-**Reply** opens the run's Session view with the composer focused, and every
-other action and non-swarm rows go to the view the condition names. Run rows
-share one tab stop (roving `tabindex`); Arrow keys, Home and End move within
-them. Swarm-control buttons are separate tab stops. `j` and `k` move from
-anywhere (starting at the open run), and `u` opens the next run that needs
-you, oldest first.
+when it is another one, the title, the reason, the age in words, whose run
+it is, who controls it and who else is watching ("Working · rewrite the
+checkout flow · Agent working · 15 minutes ago · Bob's run · Vera controls ·
+you watching"). Its description is the exact time the age counts from.
+
+A Needs you row offers the condition's primary action on hover, focus and a
+coarse pointer, the same one its board card shows (see [Board](#board)):
+**Approve** resolves in place, **Reply** opens the run's Session view with
+the composer focused, and every other action and non-swarm rows go to the
+view the condition names. Run rows share one tab stop (roving `tabindex`);
+Arrow keys, Home and End move within them. Swarm-control buttons are
+separate tab stops. `j` and `k` move from anywhere (starting at the open
+run), and `u` opens the next run that needs you, oldest first.
 
 A Done or Failed row does not recede while no member has opened its run
 since it finished (`finish_unopened`, see [Run state](#run-state)): its title
@@ -396,9 +426,10 @@ visible. Selecting a run row opens that run, from anywhere on the row
 outside its buttons. The graph-node button to the right of the title, before
 the age and the agent glyph, opens the swarm control page; its tooltip
 includes the workers' counts. The same `Waypoints` icon marks Swarms in
-navigation and New swarm in the command palette. Unread integrator mail still appears in the row's name
-and tooltip. The whole tree sits in Needs you while any member needs the
-viewer, but only those waiting runs contribute to that group's count.
+navigation and New swarm in the command palette. Unread integrator mail
+still appears in the row's name and its details. The whole tree sits in
+Needs you while any member needs the viewer, but only those waiting runs
+contribute to that group's count.
 A swarm whose integrator is missing or archived is rooted at its oldest
 worker (`swarmRoot` in `src/store/selectors.ts`). The Board still aggregates a
 swarm into one card. Relationships come from the run snapshot's `mission_id`,
@@ -1044,6 +1075,13 @@ is taken, taken over, released, fenced or runs out its reconnect window,
 keeps it current, so a teammate holding control of someone else's run sees
 its requests without opening the run. Only a gateway too old to send
 the field falls back to the run's cached presence status.
+
+`last_controller_member_id` beside it names the latest member to hold that
+lease, the current holder included, and the `run.controller` event carries
+the same member as `last_member_id`. The server keeps it in memory with the
+leases (`LastHolder` in `internal/control`), so the field is absent until
+someone takes control after a server restart, and on a gateway too old to
+send it. The explorer then has no last controller to put first or to name.
 
 **Paused** comes from the `paused` field the gateway decorates from the
 scheduler on `run.get` and `run.list`; a paused run still reads `running`.
@@ -3919,7 +3957,8 @@ confirmation and error path do not hide or delete history. Expired or
 unavailable runs offer no Free container. Sidebar tests cover group
 disclosure: every group starts expanded and closes when its header is pressed.
 They also cover an unopened finish: the row and a nested worker keep the text
-colour and say so in their names until `finish_unopened` clears.
+colour and say so in their names until `finish_unopened` clears. They also
+cover a run row's age, owner mark, people stack and details box.
 `src/lib/needs-you.test.ts` has one case per Needs you condition.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar

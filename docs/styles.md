@@ -111,7 +111,8 @@ Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
 `AgentGlyph colored`.
 
 Member colours are the only arbitrary server data applied inline: avatar
-rings, the owner rail in run lists and member names on conflict chips.
+rings, the owner rail in run lists, the owner mark on sidebar run rows and
+member names on conflict chips.
 Identity colour never replaces run-state colour.
 
 ## Primitives
@@ -244,8 +245,12 @@ keep Board and Swarms outside the overflow menu. The header and sidebar use
 `bg-chrome` with seams against the content; navigation rows have muted icons
 and the open page in `bg-selection`. **New run** at the sidebar's top is the
 only filled button in the shell.
-Run rows carry a shaped `StatusDot`, the agent's title, a compact age
-("15m") in `text-ui-sm` muted tabular figures and a monochrome `AgentGlyph`.
+Run rows carry a shaped `StatusDot`, a 6×7px owner mark (a right-pointing
+triangle in the owner's colour, 4px from the dot and from the title), the
+agent's title, a compact age ("15m") in `text-ui-sm` muted tabular figures
+and a monochrome `AgentGlyph`. The people on a run follow as 16px avatars
+overlapping by 6px, the first one whole at the right edge, each ringed in
+the row's own background so the one in front cuts into the one behind.
 A swarm's root also has a `Waypoints` graph-node button before the age; it
 opens swarm controls while the row opens the run. Use
 the same icon for swarm navigation and commands. Swarm children are
@@ -256,7 +261,9 @@ dot. The trunk ends at the last child's wire. Connectors stay in the indent,
 outside every row's hover, selection and focus box. A row that recedes shows
 its title in `text-muted`, never with opacity; a finished row no member has
 opened yet keeps `text-text` (see
-[dashboard-frontend.md](dashboard-frontend.md#sidebar)). Group headers
+[dashboard-frontend.md](dashboard-frontend.md#sidebar)). A row's details box
+is a 288px floating surface docked flush to the row's right edge, its
+top-left corner square where it meets the row. Group headers
 are sentence-case 12px muted disclosure buttons with their count. The footer
 holds the avatar, name and a connection dot; the
 update notice above it is one 12px muted line with an **Update** link.
@@ -313,7 +320,8 @@ unchanged.
 
 `--duration-overlay` (120ms) and `--ease-out` are the overlay motion
 tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
-it, sheets slide in from their edge, and every one leaves at once. Panels
+it, sheets slide in from their edge, a run's details box wipes in from the
+row it docks to, and every one leaves at once. Panels
 change instantly. The `state-pulse` dot (the run header's working dot and the
 Session view's live row) and the `live-shimmer` text sweep step through a few
 frames per cycle rather than tweening, and stop under

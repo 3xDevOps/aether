@@ -247,6 +247,41 @@ func TestReleaseAndFenceAdvanceGeneration(t *testing.T) {
 	}
 }
 
+func TestLastHolderOutlivesTheLease(t *testing.T) {
+	service := New(Config{Now: newTestClock().Now})
+	if got := service.LastHolder("run-1"); got != "" {
+		t.Fatalf("last holder before any lease = %q", got)
+	}
+
+	first, _, err := service.Acquire("run-1", "member-1", "session-a", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := service.LastHolder("run-1"); got != "member-1" {
+		t.Fatalf("last holder while held = %q, want member-1", got)
+	}
+	if releaseErr := service.Release("run-1", "member-1", "session-a", first.Generation); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if got := service.LastHolder("run-1"); got != "member-1" {
+		t.Fatalf("last holder after release = %q, want member-1", got)
+	}
+
+	if _, _, acquireErr := service.Acquire("run-1", "member-2", "session-b", false); acquireErr != nil {
+		t.Fatal(acquireErr)
+	}
+	if _, _, acquireErr := service.Acquire("run-1", "member-3", "session-c", true); acquireErr != nil {
+		t.Fatal(acquireErr)
+	}
+	service.Fence("run-1")
+	if got := service.LastHolder("run-1"); got != "member-3" {
+		t.Fatalf("last holder after a takeover and a fence = %q, want member-3", got)
+	}
+	if got := service.LastHolder("run-2"); got != "" {
+		t.Fatalf("last holder of another run = %q", got)
+	}
+}
+
 func TestReleaseAdmittedCommitsOnlyAfterAdmission(t *testing.T) {
 	service := New(Config{})
 	held, _, err := service.Acquire("run-release-admit", "member-1", "session-a", false)

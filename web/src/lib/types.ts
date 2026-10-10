@@ -66,6 +66,8 @@ export interface Run {
   cleanup_error?: string
   /** Holder of the run's control lease; '' means nobody, absent on older gateways. */
   controller_member_id?: string
+  /** Latest holder of that lease, the current one included; absent until someone has held it since the server started, and on older gateways. */
+  last_controller_member_id?: string
   /** An agent-reported outcome its owner has not opened yet; the session may remain live. */
   outcome_unseen?: boolean
   /** A finish no member has opened yet; absent on older gateways. */
@@ -691,9 +693,10 @@ export interface RunTitlePayload {
 export interface RunProtectedPayload {
   protected: boolean
 }
-/** An empty member_id means nobody holds the control lease. */
+/** An empty member_id means nobody holds the control lease; last_member_id is its latest holder. */
 export interface RunControllerPayload {
   member_id: string
+  last_member_id?: string
 }
 /** Null means the run was restored. */
 export interface RunArchivedPayload {

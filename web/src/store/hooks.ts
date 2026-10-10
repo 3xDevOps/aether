@@ -5,6 +5,7 @@ import type { StateContext } from '@/lib/needs-you'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
+import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
 import {
@@ -56,6 +57,11 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
 /** One run's record; re-renders only when that run changes. */
 export function useRun(runID: string): RunRecord | undefined {
   return useStore((s) => s.runs[runID])
+}
+
+/** Who is on a run, in the order `runPeople` gives; stable while that list is. */
+export function useRunPeople(run: RunRecord): string[] {
+  return useStore(useShallow((s) => runPeople(run, runWatchers(s.presence, run.id), s.members)))
 }
 
 /** The IDs of a workspace's runs, every run when it is empty; stable while that set is. */

@@ -174,9 +174,11 @@ func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
 
-// An empty MemberID means nobody holds the run's control lease.
+// An empty MemberID means nobody holds the run's control lease. LastMemberID
+// is the latest member to hold it, the current holder included.
 type RunControllerPayload struct {
-	MemberID domain.MemberID `json:"member_id"`
+	MemberID     domain.MemberID `json:"member_id"`
+	LastMemberID domain.MemberID `json:"last_member_id,omitempty"`
 }
 
 func (RunControllerPayload) EventType() Type { return TypeRunController }

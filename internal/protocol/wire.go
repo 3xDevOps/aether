@@ -35,7 +35,11 @@ type Run struct {
 	// ControllerMemberID holds the run's control lease; empty means nobody
 	// does. No omitempty, so absence still means a gateway too old to say.
 	ControllerMemberID string `json:"controller_member_id"`
-	Switching          string `json:"switching,omitempty"`
+	// LastControllerMemberID is the latest member to hold that lease, the
+	// current holder included. The server keeps it in memory, so it is
+	// absent until someone takes control after a restart.
+	LastControllerMemberID string `json:"last_controller_member_id,omitempty"`
+	Switching              string `json:"switching,omitempty"`
 	// Always a list, including [].
 	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
 	Branch        string                   `json:"branch"`

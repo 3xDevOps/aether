@@ -39,13 +39,13 @@ func TestControlLeaseChangesPublishRunController(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := next(); p.MemberID != "mem-bob" {
+	if p := next(); p.MemberID != "mem-bob" || p.LastMemberID != "mem-bob" {
 		t.Fatalf("after acquire %+v", p)
 	}
 	if err := s.control.Release(string(run.ID), "mem-bob", lease.SessionID, lease.Generation); err != nil {
 		t.Fatal(err)
 	}
-	if p := next(); p.MemberID != "" {
+	if p := next(); p.MemberID != "" || p.LastMemberID != "mem-bob" {
 		t.Fatalf("after release %+v", p)
 	}
 }

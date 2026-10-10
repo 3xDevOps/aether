@@ -29,7 +29,10 @@ func (s *Server) publishController(run domain.RunID) {
 		if _, err := s.bus.Publish(ctx, events.Event{
 			WorkspaceID: r.WorkspaceID,
 			RunID:       run,
-			Payload:     events.RunControllerPayload{MemberID: holder.MemberID},
+			Payload: events.RunControllerPayload{
+				MemberID:     holder.MemberID,
+				LastMemberID: s.control.LastHolder(string(run)),
+			},
 		}); err != nil {
 			slog.Warn("server: publish run controller", "run", run, "error", err)
 		}
