@@ -266,7 +266,10 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
         .at(-1)
       if (!growing) return comment({ anchor: index, head: index })
       const to = reach(file.lines, index < growing.start ? growing.start : growing.end, index)
-      growComment(review.runID, growing.comment.id, file.lines.slice(Math.min(growing.start, to), Math.max(growing.end, to) + 1))
+      growComment(review.runID, growing.comment.id, {
+        scope: review.scope,
+        lines: file.lines.slice(Math.min(growing.start, to), Math.max(growing.end, to) + 1),
+      })
     },
     onKeyDown: (event) => {
       if (!inGutter(event.target)) return

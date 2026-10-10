@@ -8,7 +8,6 @@ import { formatKeys } from '@/lib/keybindings'
 import type { PatchLine } from '@/routes/diff/parse'
 import { claimFocus, closeEditor, editComment, lineLabel, quotePatch, removeComment, updateComment, type ReviewComment } from '@/routes/diff/review'
 
-/** One review comment: its editor while `draft` is set, the pinned text otherwise. */
 export function CommentCard({
   runID,
   comment,

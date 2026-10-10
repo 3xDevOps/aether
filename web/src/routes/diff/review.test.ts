@@ -1,5 +1,5 @@
 import type { PatchLine } from '@/routes/diff/parse'
-import { lineLabel, locate, placeComments, reach, reviewEntries, reviewMessage, type ReviewComment } from '@/routes/diff/review'
+import { addComment, growComment, lineLabel, locate, patchReview, placeComments, reach, review, reviewEntries, reviewMessage, type ReviewComment } from '@/routes/diff/review'
 
 const add = (text: string, line: number): PatchLine => ({ kind: 'add', text, new: line })
 const del = (text: string, line: number): PatchLine => ({ kind: 'del', text, old: line })
@@ -82,4 +82,14 @@ test('the message orders comments by file then line and fences a quote that hold
     '```',
     'keep this',
   ].join('\n'))
+})
+
+test('an editor extended on another diff belongs to that diff', () => {
+  addComment('run_scope', { path: 'a.go', scope: 'aaa..bbb', lines: [add('x', 3)] })
+  const [opened] = review('run_scope').comments
+
+  growComment('run_scope', opened.id, { scope: '', lines: [add('x', 3), add('y', 4)] })
+
+  expect(review('run_scope').comments[0]).toMatchObject({ scope: '', lines: [add('x', 3), add('y', 4)] })
+  patchReview('run_scope', { comments: [] })
 })

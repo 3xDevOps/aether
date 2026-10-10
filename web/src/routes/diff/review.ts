@@ -19,7 +19,8 @@ export interface ReviewComment {
 
 export interface Review {
   comments: ReviewComment[]
-  sending?: boolean
+  /** The send in flight. It settles only the review that still carries its mark. */
+  sending?: number
   /** Why the last send left the comments in place. */
   error?: string
   /** The room message that carried the last batch, as the server answered the send. */
@@ -41,7 +42,6 @@ export function useReview(runID: string): Review {
   return useReviews((reviews) => reviews[runID] ?? noReview)
 }
 
-/** Whether a pinned comment waits to be sent. */
 export function useReviewing(runID: string): boolean {
   return useReviews((reviews) => reviews[runID]?.comments.some((comment) => comment.body) ?? false)
 }
@@ -84,10 +84,10 @@ export function editComment(runID: string, comment: ReviewComment): void {
   updateComment(runID, comment.id, { draft: comment.body })
 }
 
-/** Re-targets an open editor, which keeps the focus wherever its card lands. */
-export function growComment(runID: string, id: string, lines: PatchLine[]): void {
+/** Re-targets an open editor to lines of the diff on screen. It keeps the focus wherever its card lands. */
+export function growComment(runID: string, id: string, anchor: Pick<ReviewComment, 'scope' | 'lines'>): void {
   opened = id
-  updateComment(runID, id, { lines })
+  updateComment(runID, id, anchor)
 }
 
 export function updateComment(runID: string, id: string, patch: Partial<ReviewComment>): void {

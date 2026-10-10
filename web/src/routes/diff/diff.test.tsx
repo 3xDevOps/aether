@@ -115,7 +115,7 @@ function chooseInterval(name: RegExp) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  patchReview(active.id, { comments: [], sending: false, sent: undefined })
+  patchReview(active.id, { comments: [], sending: undefined, sent: undefined })
 })
 
 test('parses a unified diff into files, kinds, counts and line numbers', () => {
@@ -661,6 +661,42 @@ test('a send that fails keeps every comment, shows the server error, and resends
   await screen.findByText(/^Sent 1 comment to Claude Code/)
   const [first, second] = vi.mocked(api.runRoomPost).mock.calls.map(([request]) => request.idempotency_key)
   expect(second).toBe(first)
+})
+
+test('text changed while a send is out stays, and a send that outlives a sign-in leaves nothing behind', async () => {
+  seed(ready)
+  renderDiff()
+  comment('cmd/main.go', 'Comment on line 11', 'use the helper')
+  comment('notes.md', 'Comment on line 1', 'say more')
+  let answer!: () => void
+  let answers = 0
+  vi.mocked(api.runRoomPost).mockImplementation(() => new Promise((resolve) => {
+    answer = () => resolve({ message: roomMessage({ id: `msg_${++answers}`, run_id: active.id, kind: 'steer_request' }), receipt: 'sent' })
+  }))
+  onTestFinished(() => {
+    vi.mocked(api.runRoomPost).mockImplementation(async () => ({ message: roomMessage() }))
+    useStore.setState({ identityKey: null, roomMessages: {} })
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+  await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledTimes(1))
+  fireEvent.click(within(screen.getByRole('article', { name: 'Comment on notes.md:1' })).getByRole('button', { name: 'Edit comment' }))
+  fireEvent.change(editor(), { target: { value: 'say much more' } })
+  await act(async () => answer())
+
+  expect(screen.queryByRole('article', { name: 'Comment on cmd/main.go:11' })).toBeNull()
+  expect(editor().value).toBe('say much more')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Send to agent' }))
+  await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledTimes(2))
+  act(() => useStore.setState({ identityKey: 'someone-else' }))
+  await act(async () => answer())
+
+  expect(screen.queryByRole('group', { name: 'Review' })).toBeNull()
+  const stored = useStore.getState().roomMessages[active.id].map((entry) => entry.id)
+  expect(stored).toContain('msg_1')
+  expect(stored).not.toContain('msg_2')
 })
 
 test('a message the server could not deliver keeps the comments and says why', async () => {

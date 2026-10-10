@@ -18,7 +18,7 @@ import { sendToAgent } from '@/lib/send-to-agent'
 import type { RoomMessage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import type { PatchFile } from '@/routes/diff/parse'
-import { patchReview, review, reviewEntries, reviewMessage, useReview, written } from '@/routes/diff/review'
+import { patchReview, review, reviewEntries, reviewMessage, useReview, written, type Review } from '@/routes/diff/review'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { composerBlock } from '@/routes/run/composer-state'
@@ -54,7 +54,8 @@ function receipt(sent: RoomMessage, count: number, agentName: string): { text: s
   }
 }
 
-/** The review in progress: how many comments wait, sending them as one message, and what became of the last send. */
+let sends = 0
+
 export function ReviewBar({
   run,
   agent,
@@ -91,26 +92,28 @@ export function ReviewBar({
 
   const deliver = async () => {
     const { files: shown, scope: at, held } = latest.current
-    const entries = reviewEntries(review(run.id).comments, shown, at)
+    const taken = review(run.id).comments
+    const entries = reviewEntries(taken, shown, at)
     if (review(run.id).sending || entries.length === 0) return
-    patchReview(run.id, { sending: true, error: undefined })
+    const mark = ++sends
+    patchReview(run.id, { sending: mark, error: undefined })
+    // A review dropped meanwhile, by a sign-in or a deleted run, has a successor this must not write to.
+    const settle = (patch: Partial<Review>) => {
+      if (review(run.id).sending === mark) patchReview(run.id, { ...patch, sending: undefined })
+    }
     try {
       const lease = held?.has_control && held.control_generation > 0
         ? { control_session_id: held.control_session_id, control_generation: held.control_generation }
         : undefined
       const posted = await sendToAgent(run, reviewMessage(entries), lease)
-      if (posted.state !== 'sent' && posted.state !== 'queued') {
-        patchReview(run.id, { sending: false, error: refusal(posted) })
-        return
-      }
-      const gone = new Set(entries.map((entry) => entry.comment.id))
-      patchReview(run.id, {
-        comments: review(run.id).comments.filter((comment) => !gone.has(comment.id)),
-        sending: false,
+      if (posted.state !== 'sent' && posted.state !== 'queued') return settle({ error: refusal(posted) })
+      settle({
+        // A comment edited while the request was out holds text the agent did not get.
+        comments: review(run.id).comments.filter((comment) => !taken.includes(comment)),
         sent: { message: posted, count: entries.length },
       })
     } catch (cause) {
-      patchReview(run.id, { sending: false, error: message(cause) })
+      settle({ error: message(cause) })
     }
   }
   const send = () => {
@@ -139,22 +142,23 @@ export function ReviewBar({
 
   const count = written(comments).length
   const note = blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.')
+  const failure = blocked ? undefined : error
   return (
     <div role="group" aria-label="Review" className="flex min-h-8 min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-b border-seam bg-chrome px-3 py-0.5 text-ui-sm">
       <span className="flex shrink-0 items-center gap-1.5 font-medium text-text tabular-nums">
         <MessageSquare aria-hidden className="size-3.5 text-muted" />
         {plural(count)}
       </span>
-      {error ? (
-        <p role="alert" className="min-w-0 flex-1 basis-40 break-words text-state-failed">{error}</p>
+      {failure ? (
+        <p role="alert" className="min-w-0 flex-1 basis-40 break-words text-state-failed">{failure}</p>
       ) : note && (
         <p className="min-w-0 flex-1 basis-40 text-muted">{note}</p>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
-        <Button variant="ghost" size="sm" disabled={sending} onClick={() => setDiscarding(true)}>
+        <Button variant="ghost" size="sm" disabled={Boolean(sending)} onClick={() => setDiscarding(true)}>
           Discard
         </Button>
-        <Button size="sm" disabled={sending || blocked !== null} onClick={send}>
+        <Button size="sm" disabled={Boolean(sending) || blocked !== null} onClick={send}>
           {sending ? 'Sending…' : 'Send to agent'}
         </Button>
       </span>
@@ -162,7 +166,7 @@ export function ReviewBar({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Discard {plural(count)}?</AlertDialogTitle>
-            <AlertDialogDescription>They have not been sent to the agent.</AlertDialogDescription>
+            <AlertDialogDescription>Nothing here has been sent to the agent, and a discarded comment cannot be brought back.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep</AlertDialogCancel>
