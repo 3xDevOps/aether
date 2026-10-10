@@ -117,6 +117,9 @@ type Store interface {
 	// and finish_unopened in the same write, for the transition an agent's
 	// report causes.
 	FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// FinishRunByMember is UpdateRunStatus that also clears finish_unopened
+	// in the same write, for the close or kill a member asked for.
+	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error

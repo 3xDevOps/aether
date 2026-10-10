@@ -352,22 +352,28 @@ func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) err
 }
 
 func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false)
+	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false, false)
 }
 
 // FinishRunReported records an agent's success/failure outcome, either
 // parking an interactive run or finishing a background run, and marks it
 // unseen and unopened.
 func (d *DB) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, true)
+	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, true, false)
+}
+
+// FinishRunByMember records a close or kill a member asked for. The member
+// has dealt with the run, so it ends opened whatever it was before.
+func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false, true)
 }
 
 // updateRunStatus sets outcome_unseen when reported, keeps it for the same
 // outcome, and clears it when status or an idle reason changes. Terminal
 // retention relabels keep it. finish_unopened follows the same rule, except
-// that a change into a terminal status sets it. SET expressions see the row
-// before the update.
-func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, reported bool) error {
+// that byMember clears it and any other change into a terminal status sets
+// it. SET expressions see the row before the update.
+func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, reported, byMember bool) error {
 	if !status.Valid() {
 		return fmt.Errorf("store: update run status: invalid status %q", status)
 	}
@@ -384,10 +390,10 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
 		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
-		     finish_unopened = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END
+		     finish_unopened = CASE WHEN ? THEN 1 WHEN ? THEN 0 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END
 		 WHERE id = ?`,
 		status, reason, started, finished, reported, status, reason,
-		reported, status, reason, status.Terminal(), id))
+		reported, byMember, status, reason, status.Terminal(), id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: update run status: %w", err)
 	}

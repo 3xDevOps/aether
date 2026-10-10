@@ -526,9 +526,12 @@ that the caller opened the run, which clears up to two flags on it:
   clears it; a call from anyone else, admins included, leaves it set.
 - `run.finish_unopened` is set by that same outcome, and by any change into a
   terminal status (`completed`, `failed`, `interrupted`, `merged` or
-  `abandoned`), reported or not. A call from any member who may view the run
-  clears it. Runs that finished before the server had this flag never carry
-  it.
+  `abandoned`) that no member asked for: an exit, a failure, a server
+  restart, or a swarm completing or stopping its workers. A member's own
+  `run.close` or `run.kill`, and the closes `mission.archive` makes for them,
+  leave it clear whatever it was before: that member has dealt with the run.
+  A `run.seen` call from any member who may view the run clears it. Runs that
+  finished before the server had this flag never carry it.
 
 One call publishes at most one event, with an empty payload:
 `run.outcome_seen` and a timeline note when it cleared `outcome_unseen`, which
@@ -539,7 +542,8 @@ carries both flags as the run's flags after that event. A same-status
 re-label such as retention expiry keeps them. `outcome_unseen` is `true` when
 a reported outcome becomes reviewable until the owner opens it, `false` after
 work resumes, Close or another status change. `finish_unopened` is `true`
-from the finish until a member opens the run, `false` after work resumes.
+from the finish until a member opens or closes the run, `false` after work
+resumes.
 
 `run.relaunch` is another proxied control-channel method:
 

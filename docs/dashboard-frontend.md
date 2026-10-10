@@ -1075,9 +1075,10 @@ acknowledged; then the reported Done or Failed state is shown again.
 
 **Unopened finish** marks a Done or Failed run that no member has opened
 since it finished, with or without a report: an exit, a failure, an
-interruption and a close count as much as a reported outcome. The server owns
-`finish_unopened`, so one member opening the run settles it for every member
-and device. `watchOutcomeSeen` makes the same `run.seen` call for any member
+interruption and a swarm ending its workers count as much as a reported
+outcome. A run a member closed or stopped is not one: ending it is dealing
+with it. The server owns `finish_unopened`, so one member opening the run
+settles it for every member and device. `watchOutcomeSeen` makes the same `run.seen` call for any member
 who reveals such a run, or is already on it in a visible tab when it
 finishes, under the same one-call-per-reveal rule; the owner's call clears
 both flags. The flag only keeps the run's sidebar row from receding (see

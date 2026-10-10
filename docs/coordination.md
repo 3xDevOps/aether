@@ -1196,8 +1196,8 @@ What a report does depends on the run:
 
 Reported outcomes carry `outcome_unseen: true` until the owner opens the run
 (`run.seen`) or work resumes, Close or another status change clears it. They
-also carry `finish_unopened: true` until any member opens the run or work
-resumes; see [local-gateway.md](local-gateway.md).
+also carry `finish_unopened: true` until any member opens or closes the run,
+or work resumes; see [local-gateway.md](local-gateway.md).
 
 Waiting on a peer uses ask/inbox, never report; waiting on a question's
 answer uses `mission plan show --wait`, not an outcome. Read the inbox once more before a

@@ -997,13 +997,14 @@ describe('applyEvent', () => {
     await applyEvent(store, statusEvent({ id: 'evt_seen', seq: 8, type: 'run.outcome_seen', payload: {} }), fakeApi())
     expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: false })
 
-    const closed = { from: 'completed', to: 'merged', reason: 'closed', finish_unopened: true }
-    await applyEvent(store, statusEvent({ id: 'evt_closed', seq: 9, payload: closed }), fakeApi())
+    const exited = { from: 'running', to: 'failed', reason: 'agent exited 1', finish_unopened: true }
+    await applyEvent(store, statusEvent({ id: 'evt_exited', seq: 9, payload: exited }), fakeApi())
     expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: true })
-    // A status event without the field - a relaunch, an older gateway - clears it.
+    // A status event without the field - a member's close, a relaunch, an
+    // older gateway - clears it.
     await applyEvent(
       store,
-      statusEvent({ id: 'evt_relaunched', seq: 10, payload: { from: 'merged', to: 'running' } }),
+      statusEvent({ id: 'evt_closed', seq: 10, payload: { from: 'failed', to: 'abandoned', reason: 'closed' } }),
       fakeApi(),
     )
     expect(flags()).toEqual({ outcome_unseen: false, finish_unopened: false })

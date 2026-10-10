@@ -45,6 +45,13 @@ type closeSpec struct {
 	reported bool
 }
 
+func (c closeSpec) cause() finishCause {
+	if c.reported {
+		return causeReported
+	}
+	return memberCause(c.actor)
+}
+
 func humanClose(outcome domain.RunStatus, actor domain.MemberID) closeSpec {
 	return closeSpec{outcome: outcome, actor: actor, reason: "closed", retained: retainedCloseReason}
 }
@@ -231,6 +238,13 @@ func reportedIdleReason(reason string) bool {
 	return reason == reportedSuccessReason || reason == reportedFailureReason
 }
 
+func idleCause(reason string) finishCause {
+	if reportedIdleReason(reason) {
+		return causeReported
+	}
+	return causeUnattended
+}
+
 // recordIdleReportLocked shares the blocked-report watermark and park machinery
 // with interactive outcomes. No native execution report is synthesized.
 func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
@@ -270,7 +284,7 @@ func (s *Scheduler) parkIdleReportLocked(ctx context.Context, entry *supervised)
 		return fmt.Errorf("scheduler: persist idle outcome: %w", err)
 	}
 	if err := s.transitionOutcomeLocked(ctx, entry.runID, entry.workspaceID, entry.status,
-		domain.RunNeedsAttention, entry.idleReason, "", reportedIdleReason(entry.idleReason)); err != nil {
+		domain.RunNeedsAttention, entry.idleReason, "", idleCause(entry.idleReason)); err != nil {
 		entry.idleShown = shown
 		return errors.Join(err, s.writeSidecar(entry.sidecar()))
 	}

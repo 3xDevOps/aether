@@ -257,7 +257,9 @@ func TestMissionNegativeTTLAndCancellationRemainDestructive(t *testing.T) {
 				if err := e.sched.CompleteMission(t.Context(), run.ID, domain.RunCompleted); err != nil {
 					t.Fatal(err)
 				}
-				e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+				if row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned); !row.FinishUnopened {
+					t.Fatal("a swarm's cancellation left the worker's finish opened")
+				}
 			}
 		})
 	}
@@ -320,6 +322,7 @@ func TestInteractiveIntegratorReportKeepsRunOpen(t *testing.T) {
 // TestWorkerReportLeavesCompletionToTheMission: a worker's terminal report
 // never arms the ordinary reported finish, so CompleteMission alone finishes
 // it, with the mission reason, and leaves no unseen outcome for the owner.
+// No member ended it, so the finish is unopened.
 func TestWorkerReportLeavesCompletionToTheMission(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run, _ := launchRetentionWorker(t, e, domain.LaunchTUI)
@@ -336,7 +339,7 @@ func TestWorkerReportLeavesCompletionToTheMission(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
-	if row.Reason != retainedCompletionReason || row.OutcomeUnseen {
-		t.Fatalf("completed worker = %q, unseen %v; want %q and seen", row.Reason, row.OutcomeUnseen, retainedCompletionReason)
+	if row.Reason != retainedCompletionReason || row.OutcomeUnseen || !row.FinishUnopened {
+		t.Fatalf("completed worker = %q, unseen %v, unopened %v; want %q, seen and unopened", row.Reason, row.OutcomeUnseen, row.FinishUnopened, retainedCompletionReason)
 	}
 }

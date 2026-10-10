@@ -113,8 +113,11 @@ func TestReportedSuccessParksTUIRunAtTurnEnd(t *testing.T) {
 	if err = e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged); p.OutcomeUnseen || !p.FinishUnopened {
-		t.Fatalf("close event = %+v, want the outcome seen and the close unopened", p)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunMerged); p.OutcomeUnseen || p.FinishUnopened {
+		t.Fatalf("close event = %+v, want a member's close to clear both flags", p)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); row.OutcomeUnseen || row.FinishUnopened {
+		t.Fatalf("closed row = %+v, want neither flag", row)
 	}
 	sc, err = e.sched.readSidecar(run.ID)
 	if err != nil || !sc.Retained || !sc.Paused || sc.RetainedUntil == nil ||
@@ -408,7 +411,7 @@ func TestRetainedExpiryRelabelsAReportedRun(t *testing.T) {
 // TestSeenClearsEachFlagForWhoOpens: any member's open clears finish_unopened,
 // only the owner's clears outcome_unseen, and one call publishes one event:
 // run.outcome_seen with its timeline note when the outcome was unseen,
-// run.finish_opened otherwise, nothing on a repeat.
+// run.finish_opened otherwise, nothing on a repeat or after a member's close.
 func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -441,13 +444,16 @@ func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 	seen(teammateFirst, e.member.ID, false)
 	seen(ownerFirst, e.member.ID, false)
 	seen(ownerFirst, other.ID, false)
-	if err := e.sched.CloseRun(ctx, ownerFirst, e.member.ID, domain.RunMerged); err != nil {
+	e.rt.byName(string(ownerFirst)).exitNow(0)
+	if row := e.waitStoreStatus(t, ownerFirst, domain.RunCompleted); row.OutcomeUnseen || !row.FinishUnopened {
+		t.Fatalf("exited row = %+v, want finish_unopened set again and no outcome to review", row)
+	}
+	seen(ownerFirst, e.member.ID, false)
+	if err := e.sched.CloseRun(ctx, ownerFirst, other.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun: %v", err)
 	}
-	if row := e.waitStoreStatus(t, ownerFirst, domain.RunMerged); row.OutcomeUnseen || !row.FinishUnopened {
-		t.Fatalf("closed row = %+v, want finish_unopened set again and no outcome to review", row)
-	}
-	seen(ownerFirst, other.ID, false)
+	e.waitStoreStatus(t, ownerFirst, domain.RunMerged)
+	seen(ownerFirst, e.member.ID, false)
 	if _, err := e.sched.Seen(ctx, "run_missing", e.member.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Seen on a missing run = %v, want ErrNotFound", err)
 	}
@@ -461,7 +467,7 @@ func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 			case events.RunOutcomeSeenPayload, events.RunFinishOpenedPayload:
 				got = append(got, fmt.Sprintf("%s %s %s", ev.Type, ev.RunID, ev.ActorID))
 			case events.TimelinePayload:
-				if p.Kind == events.TimelineNote {
+				if p.Message == "outcome seen by owner" {
 					got = append(got, fmt.Sprintf("note %s %s", ev.RunID, ev.ActorID))
 				}
 			}
@@ -475,7 +481,7 @@ func TestSeenClearsEachFlagForWhoOpens(t *testing.T) {
 		fmt.Sprintf("note %s %s", teammateFirst, e.member.ID),
 		fmt.Sprintf("run.outcome_seen %s %s", ownerFirst, e.member.ID),
 		fmt.Sprintf("note %s %s", ownerFirst, e.member.ID),
-		fmt.Sprintf("run.finish_opened %s %s", ownerFirst, other.ID),
+		fmt.Sprintf("run.finish_opened %s %s", ownerFirst, e.member.ID),
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("seen events =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

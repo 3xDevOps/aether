@@ -779,7 +779,13 @@ func TestProvisioningFailure(t *testing.T) {
 	if !strings.HasPrefix(p.Reason, "provisioning: ") || !strings.Contains(p.Reason, "no such image") {
 		t.Fatalf("failed reason = %q", p.Reason)
 	}
-	e.waitStoreStatus(t, prov.RunID, domain.RunFailed)
+	// The event names the launcher, who did not end the run.
+	if failed.ActorID != e.member.ID || !p.FinishUnopened {
+		t.Fatalf("failed event actor = %q, payload = %+v; want the launcher and an unopened finish", failed.ActorID, p)
+	}
+	if row := e.waitStoreStatus(t, prov.RunID, domain.RunFailed); !row.FinishUnopened {
+		t.Fatal("a provisioning failure left the finish opened")
+	}
 }
 
 func TestLaunchValidation(t *testing.T) {

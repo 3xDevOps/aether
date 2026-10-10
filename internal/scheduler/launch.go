@@ -506,7 +506,7 @@ func (s *Scheduler) failProvisioning(run *domain.Run, actor domain.MemberID, cau
 	s.mu.Lock()
 	var err error
 	if killed {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunAbandoned, "killed", killActor)
+		err = s.transitionOutcomeLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunAbandoned, "killed", killActor, memberCause(killActor))
 	} else {
 		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunFailed,
 			"provisioning: "+cause.Error(), actor)

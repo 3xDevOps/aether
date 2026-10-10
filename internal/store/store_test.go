@@ -1467,9 +1467,10 @@ func TestRunOutcomeUnseen(t *testing.T) {
 	unseen(false, "relaunch through UpdateRun")
 }
 
-// finish_unopened is set when a run enters a terminal status or an agent's
-// report parks it, survives a same-status relabel in either direction, and
-// follows the run back to work. ClearRunFinishUnopened clears it once, for
+// finish_unopened is set when a run enters a terminal status nobody asked
+// for or an agent's report parks it, survives a same-status relabel in either
+// direction, and follows the run back to work. A member's close or kill
+// leaves it clear whatever it was. ClearRunFinishUnopened clears it once, for
 // any caller, and leaves outcome_unseen alone.
 func TestRunFinishUnopened(t *testing.T) {
 	t.Parallel()
@@ -1504,6 +1505,12 @@ func TestRunFinishUnopened(t *testing.T) {
 					t.Fatalf("FinishRunReported %q: %v", reason, err)
 				}
 			}
+			byMember := func(status domain.RunStatus, reason string) {
+				t.Helper()
+				if err := db.FinishRunByMember(ctx, run.ID, status, reason, nil, nil); err != nil {
+					t.Fatalf("FinishRunByMember %s %q: %v", status, reason, err)
+				}
+			}
 			open := func(want bool, what string) {
 				t.Helper()
 				if changed, err := db.ClearRunFinishUnopened(ctx, run.ID); err != nil || changed != want {
@@ -1522,14 +1529,14 @@ func TestRunFinishUnopened(t *testing.T) {
 			}
 
 			unopened(false, "working")
-			write(domain.RunMerged, "closed; retained container")
-			unopened(true, "close without a report")
-			write(domain.RunMerged, "retained container expired")
+			write(domain.RunAbandoned, "killed")
+			unopened(true, "swarm stopped its worker")
+			write(domain.RunAbandoned, "retained container expired")
 			unopened(true, "relabel before anyone opened it")
 			open(true, "first open")
 			unopened(false, "first open")
 			open(false, "repeat open")
-			write(domain.RunMerged, "retained container unavailable")
+			write(domain.RunAbandoned, "retained container unavailable")
 			unopened(false, "relabel after a member opened it")
 
 			write(domain.RunRunning, "")
@@ -1549,8 +1556,18 @@ func TestRunFinishUnopened(t *testing.T) {
 			unopened(true, "reported again after more work")
 			write(domain.RunNeedsAttention, "blocked: need a decision")
 			unopened(false, "park replaced by a blocker")
-			write(domain.RunFailed, "agent exited 1")
+			write(domain.RunCompleted, "agent exited; results committed")
 			unopened(true, "exit without a report")
+
+			byMember(domain.RunAbandoned, "closed; retained container")
+			unopened(false, "member close of an unopened run")
+			byMember(domain.RunMerged, "closed; retained container")
+			unopened(false, "member close of an opened run")
+			write(domain.RunMerged, "retained container expired")
+			unopened(false, "relabel after a member's close")
+			write(domain.RunRunning, "")
+			byMember(domain.RunAbandoned, "killed")
+			unopened(false, "member kill of a working run")
 		})
 	}
 }

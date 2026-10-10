@@ -240,7 +240,7 @@ func (s *Scheduler) killUnsupervised(ctx context.Context, id domain.RunID, actor
 		s.mu.Unlock()
 		return err
 	}
-	err = s.transitionLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor)
+	err = s.transitionOutcomeLocked(ctx, id, r.WorkspaceID, r.Status, domain.RunAbandoned, "killed", actor, memberCause(actor))
 	s.mu.Unlock()
 	if err != nil {
 		return err
@@ -715,7 +715,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 				return nil
 			}
 			s.mu.Lock()
-			err = s.transitionLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor)
+			err = s.transitionOutcomeLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor, spec.cause())
 			s.mu.Unlock()
 			if err != nil {
 				return err
@@ -786,7 +786,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			}
 			return nil
 		}
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, "closed", actor)
+		err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, "closed", actor, spec.cause())
 		s.mu.Unlock()
 		if err != nil {
 			return err
@@ -843,7 +843,7 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 			s.mu.Unlock()
 			return retainedTransitionError()
 		}
-		err := s.transitionLocked(ctx, run, workspace, status, outcome, closeReason, actor)
+		err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, closeReason, actor, spec.cause())
 		s.mu.Unlock()
 		return err
 	}
@@ -938,7 +938,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 				}
 				return persistErr
 			}
-			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, retentionReason, actor, spec.reported)
+			transitionErr := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, retentionReason, actor, spec.cause())
 			if transitionErr == nil {
 				entry.status = outcome
 				entry.paused = true
@@ -971,7 +971,7 @@ func (s *Scheduler) closeLiveLocked(ctx context.Context, entry *supervised, stat
 	// terminal work before stopping the runtime; a failed capture retains the
 	// owner for the bounded retry sweep.
 	s.mu.Lock()
-	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.reported)
+	err := s.transitionOutcomeLocked(ctx, run, workspace, status, outcome, spec.reason, actor, spec.cause())
 	if err == nil && entry != nil {
 		entry.evidenceIdentity = "none"
 		if sidecarErr := s.writeSidecar(entry.sidecar()); sidecarErr != nil {

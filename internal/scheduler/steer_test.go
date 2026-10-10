@@ -27,6 +27,13 @@ func (s *failingRunStatusStore) UpdateRunStatus(ctx context.Context, id domain.R
 	return s.Store.UpdateRunStatus(ctx, id, status, reason, startedAt, finishedAt)
 }
 
+func (s *failingRunStatusStore) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+	if s.fail {
+		return errors.New("test: status transition failed")
+	}
+	return s.Store.FinishRunByMember(ctx, id, status, reason, startedAt, finishedAt)
+}
+
 type destroyFailureRuntime struct {
 	runtime.Runtime
 	destroyErr error
@@ -62,7 +69,13 @@ func TestKill(t *testing.T) {
 	if ev.ActorID != e.member.ID {
 		t.Fatalf("abandoned actor = %s, want %s", ev.ActorID, e.member.ID)
 	}
+	if p.FinishUnopened {
+		t.Fatalf("abandoned event = %+v, want a member's kill to leave the finish opened", p)
+	}
 	fresh := e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if fresh.FinishUnopened {
+		t.Fatal("a member's kill left the finish unopened")
+	}
 	if got := e.git.commitsFor(run.ID); len(got) != 1 || got[0] != "wip: long haul task" {
 		t.Fatalf("commits = %v", got)
 	}
@@ -873,7 +886,8 @@ func TestCloseRunRollbackPreservesPrePausedState(t *testing.T) {
 }
 
 // A finished run is re-labeled in place by the close disposition, and a
-// second close at the same outcome is a no-op.
+// second close at the same outcome is a no-op. The member closing it has
+// dealt with it, so an unopened exit ends opened and stays so.
 func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -881,16 +895,26 @@ func TestCloseRunRelabelsFinishedRun(t *testing.T) {
 
 	run, c := e.launchFake(t, "task")
 	c.exitNow(0)
-	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunCompleted); !row.FinishUnopened {
+		t.Fatal("an exit nobody asked for left the finish opened")
+	}
+	sub := e.subscribe(t)
 
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunAbandoned); err != nil {
 		t.Fatalf("CloseRun completed to abandoned: %v", err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunAbandoned)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunAbandoned); p.FinishUnopened {
+		t.Fatalf("close event = %+v, want a member's close to leave the finish opened", p)
+	}
+	if row := e.waitStoreStatus(t, run.ID, domain.RunAbandoned); row.FinishUnopened {
+		t.Fatal("a member's close of an unopened run left it unopened")
+	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun abandoned to merged: %v", err)
 	}
-	e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunMerged); row.FinishUnopened {
+		t.Fatal("a member's close of an opened run left it unopened")
+	}
 	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("CloseRun at the same outcome: %v", err)
 	}
