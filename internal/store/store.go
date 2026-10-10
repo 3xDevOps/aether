@@ -195,6 +195,7 @@ type Store interface {
 	ServerUpdateStore
 	CollaborationStore
 	RunMessageHistoryStore
+	PushStore
 
 	Close() error
 }

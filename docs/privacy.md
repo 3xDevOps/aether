@@ -5,7 +5,7 @@ publish it unless you sign in to the edge they run, at `auth.onaether.dev`
 and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
 policy for the Aether Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
-shows, and for that edge. Effective 2026-10-09.
+shows, and for that edge. Effective 2026-10-10.
 
 ## Who publishes it
 
@@ -120,6 +120,49 @@ source revision. Disabling or deleting a source mirror does not delete the
 native login or revoke authorization at GitHub. To remove the native login
 and revoke GitHub authorization, see
 [GitHub credentials and signing keys](security.md#github-credentials-and-signing-keys).
+
+## Push notifications
+
+Off until you turn on **Notify this device when a run needs me** in the
+dashboard's Settings, in a browser or in the dashboard added to a home screen
+([networking.md](networking.md#notifications)). The Android app cannot
+receive them and sends nothing described here.
+
+Turning it on makes that browser register with its vendor's push service -
+Google's for Chrome, Mozilla's for Firefox, Apple's for Safari, Microsoft's
+for Edge - and hand your server what the service issued: an address for that
+browser and two keys. Your server stores those three values with your member
+ID. It removes them when you turn the switch off on that device, when the
+push service reports the address gone, and when your member record is
+removed.
+
+When one of your runs starts needing you, your server sends one HTTPS request
+per subscribed browser to that browser's address. Nothing is sent for a
+member with no subscribed browser, and nothing is sent to the publisher. The
+push service receives:
+
+- **The address**, which is its own identifier for your browser, and your
+  server's IP address.
+- **The notification, encrypted** on your server so that only that browser
+  can read it (RFC 8291): the run's title or the first line of its task, one
+  line saying why it needs you, and the run's ID. The push service sees its
+  size, at most 4096 bytes, and when it was sent.
+- **A signed token** (RFC 8292): the public half of a key your server
+  generated for this purpose, the push service's own address, an expiry, and
+  the fixed contact `https://github.com/3xDevOps/Aether`. It names neither
+  your server nor you.
+- **Delivery settings**: a 24-hour time to live, high urgency, and a topic,
+  which is a hash of the run's ID, so that a newer notification for a run
+  replaces an undelivered older one.
+
+The push service relays the message to your browser under its own policy.
+**Send test notification** sends the same request with the text
+`Notifications work on this device.` and no run.
+
+While you use a dashboard, in any browser or in the desktop app, it tells
+your server so at most every 20 seconds. Your server keeps the time of the
+latest such report in memory, to hold your notifications while you are there.
+It is not stored, and no other member sees it.
 
 ## What an edge stores
 

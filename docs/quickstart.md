@@ -747,7 +747,9 @@ other tailnet device opens `https://<the server's MagicDNS name>/` with
 nothing installed and no token. Set `web-port` and restart the server; see
 [networking.md](networking.md#the-dashboard). On a phone the sidebar folds
 away: the top bar holds **Open sidebar** (with a dot when a run needs you),
-the current page's name, **Search** and **New run**. Hosted onboarding supports remote
+the current page's name, **Search** and **New run**. To hear about that run
+with the dashboard closed, turn on **Settings > Notify this device when a run
+needs me** ([networking.md](networking.md#notifications)). Hosted onboarding supports remote
 repository import, Git identity, agent setup, and configuration import/editing.
 It has no machine-local link, clone, push, or pull operations; those require
 the desktop app or `aether gui` on the computer holding the clone.

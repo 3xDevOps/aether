@@ -1,6 +1,7 @@
 import { toast } from 'sonner'
 import { api, ApiError, type Api } from '@/lib/api'
 import { edgeHost, errorSentence } from '@/lib/format'
+import { watchPush } from '@/lib/push'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
 import { redirectRoute } from '@/lib/url-state'
 import type {
@@ -746,6 +747,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   })
 
   const stopOutcomeSeen = watchOutcomeSeen(store, client)
+  const stopPush = watchPush(store, client)
 
   const missionRefreshes = new Set<string>()
   let refreshingMissions = false
@@ -925,6 +927,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     stopWake()
     stopSelection()
     stopOutcomeSeen()
+    stopPush()
     if (retryTimer) clearTimeout(retryTimer)
     stopStream()
   }
