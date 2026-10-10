@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -39,6 +40,23 @@ export function useDrag(): () => AbortController {
     drag.current = new AbortController()
     return drag.current
   }, [])
+}
+
+/** The element's content box in whole CSS pixels; zero until it is laid out. */
+export function useElementSize<T extends HTMLElement>(): [(node: T | null) => void, { width: number; height: number }] {
+  const [node, setNode] = useState<T | null>(null)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  useLayoutEffect(() => {
+    if (!node) return
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.floor(entry.contentRect.width)
+      const height = Math.floor(entry.contentRect.height)
+      setSize((previous) => (previous.width === width && previous.height === height ? previous : { width, height }))
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [node])
+  return [setNode, size]
 }
 
 export const coarsePointer = '(pointer: coarse)'

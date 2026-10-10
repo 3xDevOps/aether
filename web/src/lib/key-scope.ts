@@ -1,8 +1,8 @@
-export type KeyScope = 'global' | 'run' | 'card' | 'request' | 'composer'
+export type KeyScope = 'global' | 'run' | 'browser' | 'card' | 'request' | 'composer'
 
 /** Inner scopes first. A request card and the composer never hold focus at
  * once, so their relative order only settles a tie the table forbids. */
-const depth: Record<KeyScope, number> = { composer: 0, request: 1, card: 2, run: 2, global: 3 }
+const depth: Record<KeyScope, number> = { composer: 0, request: 1, browser: 1, card: 2, run: 2, global: 3 }
 
 export interface ScopeEntry {
   scope: KeyScope

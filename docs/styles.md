@@ -221,13 +221,16 @@ own surfaces. Floating menus stay inside the available viewport and scroll to
 their last action. Route roots own the shell's bounded height; their content
 regions use `min-h-0` and vertical overflow.
 
-The run Browser view: before a page is selected, one `EmptyState` ("No page
-open") with **Open http://localhost:3000** or **Take control**, and **Other
-address…** for a URL field; a selected page adds **Back**, **Forward**,
-**Reload page** and **Go**. **Page tools** holds page and viewport selection,
-**New page**, **Screenshot**, **Reconnect** and the gated **Close page** and
-**Reset session**, each behind an `AlertDialog` confirmation that keeps the
-raw failure and returns focus to **Page tools** when dismissed.
+The run Browser view has one `bg-chrome` toolbar row over the page: ghost
+icon buttons for **Back**, **Forward** and **Reload**, the address field,
+**Viewport**, the beside-or-tab toggle and **Browser actions**, then who is
+driving. A second page adds a row of small tab buttons. Messages are laid
+over the top of the page on a floating surface and never take a row. A page
+that does not fill its pane is centred on `bg-chrome` and never enlarged, and
+the page that has the keyboard wears a 1px inset accent outline. Beside
+another view the Browser is a pane with a seam and a resize handle like the
+sidebar's. [Browser view](dashboard-frontend.md#browser-view) has the
+behaviour.
 
 The terminal toolbar holds the terminal tabs, **Tools** (a menu; a bottom
 sheet under 768px) and, at its end, who controls the terminal beside **Take

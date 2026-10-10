@@ -790,6 +790,12 @@ them, and a **Details** panel holding **Needs you** and **Notes**. Watching is
 read-only by default; typing into a run needs the `steer` capability, which as
 the owner you have.
 
+**Browser** is a real Chromium that the server runs beside the run, so
+`localhost` there is the run's own app. Type `localhost:3000` in its address
+bar and press Enter; nothing has to be forwarded to your machine. A
+`localhost` link printed in the run's terminal opens there too. The agent can
+drive the same page, and the toolbar says so when it does.
+
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.
 Detach without killing anything: the PTY lives on the server.
