@@ -62,6 +62,9 @@ func (d *DB) ReserveAttempt(ctx context.Context, r *domain.AttemptReservation) (
 	if err != nil {
 		return nil, false, err
 	}
+	if reopenErr := reopenCompletedMission(ctx, tx, m, r.ActorRunID); reopenErr != nil {
+		return nil, false, reopenErr
+	}
 	// A pending revision cannot be reserved because it is not the task's
 	// current revision.
 	if phaseErr := requireMissionPhase(m, "worker dispatch", domain.MissionPhaseActive); phaseErr != nil {

@@ -95,7 +95,7 @@ func (f *archiveFixture) runsAre(t *testing.T, status domain.RunStatus) {
 
 func (f *archiveFixture) complete(t *testing.T) {
 	t.Helper()
-	if _, err := f.db.CompleteMission(context.Background(), f.mission.ID, f.mission.CurrentIntegratorRunID); err != nil {
+	if _, err := f.db.CompleteMission(context.Background(), f.mission.ID, f.mission.CurrentIntegratorRunID, "report-1"); err != nil {
 		t.Fatalf("complete mission: %v", err)
 	}
 	f.runsAre(t, domain.RunCompleted)
@@ -179,7 +179,7 @@ func TestArchiveRefusesASwarmThatIsStillRunning(t *testing.T) {
 	if _, err := f.svc.Archive(ctx, f.human, f.params()); !errors.Is(err, store.ErrMissionPhase) || !strings.Contains(err.Error(), "cancel it first") {
 		t.Fatalf("archive an active swarm = %v, want ErrMissionPhase saying cancel it first", err)
 	}
-	if _, err := f.db.CompleteMission(ctx, f.mission.ID, f.mission.CurrentIntegratorRunID); err != nil {
+	if _, err := f.db.CompleteMission(ctx, f.mission.ID, f.mission.CurrentIntegratorRunID, "report-1"); err != nil {
 		t.Fatalf("complete mission: %v", err)
 	}
 	_, err := f.svc.Archive(ctx, f.human, f.params())

@@ -26,7 +26,7 @@ type EvidenceReader interface {
 // accepted, while a stale worker/coordinator fails closed through
 // resolveAssignment. The integrator's success completes its mission, which is
 // only possible once the mission is active and no approved delivery is left
-// undone: completion is terminal, so nobody could run it afterwards.
+// undone: a completed mission refuses delivery.
 func (s *Service) ValidateReport(ctx context.Context, run domain.RunID, outcome store.CoordOutcome) error {
 	m, attempt, err := s.resolveAssignment(ctx, run)
 	if err != nil {
@@ -182,15 +182,17 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 // reconcileIntegratorReport completes the current integrator's mission on
 // success; reconciliation then stops leftover workers. Failure leaves the
 // mission in its phase. Interactive integrators stay open for follow-up.
-// A completed or cancelled mission is unchanged by later reports.
+// A completed or cancelled mission is unchanged by later reports. A completed
+// one still records the report, so its replay cannot complete the mission
+// after the integrator reopens it.
 func (s *Service) reconcileIntegratorReport(ctx context.Context, m *domain.Mission, run domain.RunID, report *store.CoordReport) error {
-	if report.Outcome != store.CoordOutcomeSuccess || m.Phase.Terminal() {
+	if report.Outcome != store.CoordOutcomeSuccess || m.Phase == domain.MissionPhaseCancelled {
 		return nil
 	}
 	s.cfg.AuthorizationMu.Lock()
-	_, err := s.cfg.Missions.CompleteMission(ctx, m.ID, run)
+	current, err := s.cfg.Missions.CompleteMission(ctx, m.ID, run, report.ID)
 	s.cfg.AuthorizationMu.Unlock()
-	if err != nil {
+	if err != nil || current.Phase == m.Phase {
 		return err
 	}
 	return s.publishMissionChanged(ctx, m.ID)

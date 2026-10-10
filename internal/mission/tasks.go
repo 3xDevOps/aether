@@ -268,6 +268,11 @@ func taskMutationPhase(mission *domain.Mission, method string) error {
 		if mission.Phase != domain.MissionPhaseActive {
 			return missionPhaseRefusal(mission, method)
 		}
+	case protocol.MethodTaskPropose:
+		// The store reopens a completed mission for its integrator.
+		if mission.Phase == domain.MissionPhaseCancelled {
+			return missionPhaseRefusal(mission, method)
+		}
 	default:
 		if mission.Phase.Terminal() {
 			return missionPhaseRefusal(mission, method)
