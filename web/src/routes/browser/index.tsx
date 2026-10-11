@@ -101,6 +101,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   // Set by a menu item that moves focus itself once its work is done.
   const leavingMenu = useRef(false)
   const inFlight = useRef(false)
+  const fitting = useRef(false)
   const alive = useRef(true)
   const reading = useRef(false)
   const mutation = useRef(0)
@@ -414,10 +415,11 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   useEffect(() => {
     if (!fence || !page || !target || (page.width === target.width && page.height === target.height)) return
     let timer = setTimeout(function apply() {
-      if (inFlight.current || (surfaceHandle.current && !surfaceHandle.current.idle())) {
+      if (inFlight.current || fitting.current || (surfaceHandle.current && !surfaceHandle.current.idle())) {
         timer = setTimeout(apply, fitDelay)
         return
       }
+      fitting.current = true
       setResizing(true)
       api.devBrowserViewport({ run_id: runID, session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision, ...fence, width: target.width, height: target.height })
         .then((result) => { if (alive.current) updatePage(result.page) }, (cause: unknown) => {
@@ -426,7 +428,10 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
           if (!isConflict(cause)) setNotice({ tone: 'failed', text: message(cause) })
           void refresh()
         })
-        .finally(() => { if (alive.current) setResizing(false) })
+        .finally(() => {
+          fitting.current = false
+          if (alive.current) setResizing(false)
+        })
     }, fitDelay)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps

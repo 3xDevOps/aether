@@ -2362,8 +2362,9 @@ holds reads "You are driving in another tab".
 the pane's size (`paneViewport` in `viewport.ts`, inside the 240-2560 by
 240-1600 the server accepts) or the chosen preset. A mismatch is corrected
 250ms after it last changed, but not until the page has had no input for half
-a second, and never while a pointer is down or text is being composed: a
-resize invalidates input aimed at the old viewport. The first page opens at
+a second, and never while a pointer is down, text is being composed or an
+earlier correction is still being applied: a resize invalidates input aimed
+at the old viewport. The first page opens at
 the target. A preset is remembered for the
 run while the dashboard stays open (`browserPresets`). Presets change the
 real remote viewport, not the displayed image, and emulate no user agent,

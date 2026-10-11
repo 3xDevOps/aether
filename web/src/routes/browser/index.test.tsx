@@ -496,6 +496,21 @@ describe('the viewport', () => {
     view.unmount()
   })
 
+  it('waits for a viewport change to finish before starting the next', async () => {
+    const first = Promise.withResolvers<{ page: DevBrowserPage }>()
+    vi.mocked(api.devBrowserViewport).mockReturnValueOnce(first.promise)
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(api.devBrowserViewport).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setBrowserPreset('run_1', 'phone'))
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)) })
+    expect(api.devBrowserViewport).toHaveBeenCalledTimes(1)
+    await act(async () => { first.resolve({ page: { ...page, page_revision: 4, width: 900, height: 600, viewport_id: 'viewport-900' } }) })
+    await waitFor(() => expect(api.devBrowserViewport).toHaveBeenCalledTimes(2))
+    expect(api.devBrowserViewport).toHaveBeenLastCalledWith(expect.objectContaining({ width: 390, height: 844, page_revision: 4 }))
+  })
+
   it('opens the first page at the pane’s size', async () => {
     vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: true, running: false, state: 'not_started' })
     vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [] })
