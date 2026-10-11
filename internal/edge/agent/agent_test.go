@@ -693,6 +693,19 @@ func TestUnenrollForgetsTheOwner(t *testing.T) {
 	}
 }
 
+func TestEdgeStateSurvivesARestart(t *testing.T) {
+	edge := newFakeEdge(t)
+	edge.state = edgeproto.StateUnclaimed
+	dir := t.TempDir()
+	run(t, newAgent(t, edge.srv.URL, dir, newFakeSSH()))
+	ec := edge.nextControl(t)
+	ec.send(edgeproto.Ping{})
+	expect[edgeproto.Pong](t, ec)
+	if got := newAgent(t, edge.srv.URL, dir, nil).EdgeState(); got != edgeproto.StateUnclaimed {
+		t.Fatalf("edge state after a restart = %q, want %q", got, edgeproto.StateUnclaimed)
+	}
+}
+
 func TestLeaveUnenrollsAndForgetsTheOwner(t *testing.T) {
 	edge := newFakeEdge(t)
 	dir := t.TempDir()

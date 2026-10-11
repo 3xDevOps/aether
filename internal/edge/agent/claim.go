@@ -33,7 +33,9 @@ func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func
 			slog.Warn("edge: refused claim", "conn", grant.ConnID, "error", err)
 			return err
 		}
-		a.setEdgeState(edgeproto.StateClaimed)
+		if err := a.setEdgeState(edgeproto.StateClaimed); err != nil {
+			return err
+		}
 		slog.Info("edge: server claimed", "conn", grant.ConnID,
 			"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 		return nil

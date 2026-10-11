@@ -99,6 +99,7 @@ type Agent struct {
 	live *session
 	// edgeState is the edge's last reported state for this server,
 	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+	// It is read from the state at New and recorded there on change.
 	edgeState string
 }
 
@@ -116,6 +117,10 @@ func New(cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("edgeagent: %w", err)
 	}
 	state := OpenState(cfg.DataDir)
+	edgeState, err := state.EdgeState()
+	if err != nil {
+		return nil, err
+	}
 	// The hostname only labels the server for its owner at the edge.
 	name, _ := os.Hostname()
 	// Encoding a hello now turns a hostname the edge would refuse into a
@@ -141,6 +146,7 @@ func New(cfg Config) (*Agent, error) {
 		slots:            make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
 		conns:            make(map[*relayConn]struct{}),
 		seen:             make(map[string]time.Time),
+		edgeState:        edgeState,
 	}, nil
 }
 

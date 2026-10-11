@@ -188,7 +188,9 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
 	s := &session{c: c, edgeKey: ready.EdgeKey, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
-	a.setEdgeState(ready.State)
+	if err = a.setEdgeState(ready.State); err != nil {
+		return time.Since(start), err
+	}
 	if err = a.reconcileOwner(s, ready.State); err != nil {
 		return time.Since(start), err
 	}
@@ -278,10 +280,11 @@ func (a *Agent) setLive(s *session) {
 	a.mu.Unlock()
 }
 
-func (a *Agent) setEdgeState(state string) {
+func (a *Agent) setEdgeState(state string) error {
 	a.mu.Lock()
 	a.edgeState = state
 	a.mu.Unlock()
+	return a.state.writeEdgeState(state)
 }
 
 // pushDirectory sends the directory whenever it may have changed, and
@@ -348,8 +351,7 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 				return err
 			}
 		case edgeproto.Unenroll:
-			a.setEdgeState(edgeproto.StateUnclaimed)
-			if err := a.state.ClearOwner(); err != nil {
+			if err := errors.Join(a.setEdgeState(edgeproto.StateUnclaimed), a.state.ClearOwner()); err != nil {
 				return err
 			}
 			return errors.New("the owner removed this server at the edge; it stays reachable directly and over the tailnet")
@@ -375,11 +377,7 @@ func (a *Agent) Leave(ctx context.Context) error {
 		return fmt.Errorf("edgeagent: leave %s: %w", a.origin, err)
 	}
 	_ = c.Close(websocket.StatusNormalClosure, "")
-	a.setEdgeState(edgeproto.StateUnclaimed)
-	if err := a.state.ClearOwner(); err != nil {
-		return err
-	}
-	return a.state.RemoveClaimCode()
+	return errors.Join(a.setEdgeState(edgeproto.StateUnclaimed), a.state.ClearOwner(), a.state.RemoveClaimCode())
 }
 
 func truncate(s string, n int) string {

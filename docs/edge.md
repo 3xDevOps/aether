@@ -393,6 +393,7 @@ the edge's host names. Directories are mode 0700, files 0600:
 | --- | --- |
 | `edge_key.json` | The pinned edge signing key |
 | `keys/sha256-<fingerprint>/owner.json` | The account that owns the server at the edge holding that key; the fingerprint is the key's, with `+` and `/` written `-` and `_` |
+| `keys/sha256-<fingerprint>/edge_state.json` | Whether the edge holding that key last reported the server `claimed` or `unclaimed`, read at startup; while `unclaimed`, admins cannot create invitations |
 | `claim.json` | The claim code's SHA-256 hash, expiry, attempts left and the admin `--admin` named; never the code |
 | `status.json` | Last connection state, for `edge status` |
 | `lock` | Serializes claim attempts and owner changes between the server and the commands |

@@ -31,6 +31,9 @@ const (
 	// keysDir holds one directory per edge key the server has pinned,
 	// with the owner it has at the edge holding that key.
 	keysDir = "keys"
+	// edgeStateFile, beside ownerFile, records the state the edge holding
+	// the key last reported for this server.
+	edgeStateFile = "edge_state.json"
 )
 
 // State is the agent's persistent state: the pinned edge key, the owner,
@@ -151,13 +154,52 @@ func (s *State) ClearOwner() error {
 
 // ownerName is the owner file of the pinned key, empty when none is
 // pinned.
-func (s *State) ownerName() (string, error) {
+func (s *State) ownerName() (string, error) { return s.keyFile(ownerFile) }
+
+// keyFile is file in the pinned key's directory, empty when no key is
+// pinned.
+func (s *State) keyFile(file string) (string, error) {
 	key, err := s.PinnedKey()
 	if err != nil || key == nil {
 		return "", err
 	}
 	id := strings.NewReplacer("+", "-", "/", "_").Replace(strings.TrimPrefix(edgeproto.EdgeKeyFingerprint(key), "SHA256:"))
-	return filepath.Join(keysDir, "sha256-"+id, ownerFile), nil
+	return filepath.Join(keysDir, "sha256-"+id, file), nil
+}
+
+type edgeStateRecord struct {
+	State string `json:"state"`
+}
+
+// EdgeState returns the state the edge holding the pinned key last
+// reported for this server, edgeproto.StateClaimed or StateUnclaimed,
+// empty when it never reported one or no key is pinned.
+func (s *State) EdgeState() (string, error) {
+	name, err := s.keyFile(edgeStateFile)
+	if err != nil || name == "" {
+		return "", err
+	}
+	var r edgeStateRecord
+	_, err = s.read(name, &r)
+	return r.State, err
+}
+
+// writeEdgeState records state as the one the edge holding the pinned key
+// last reported.
+func (s *State) writeEdgeState(state string) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	name, err := s.keyFile(edgeStateFile)
+	if err != nil {
+		return err
+	}
+	if name == "" {
+		return errors.New("edgeagent: no edge key is pinned, so no edge state can be recorded")
+	}
+	return s.write(name, edgeStateRecord{State: state})
 }
 
 // writeOwner records owner for the pinned key.
