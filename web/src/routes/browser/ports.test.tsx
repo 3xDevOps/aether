@@ -66,6 +66,7 @@ describe('before a page is open', () => {
     await screen.findByLabelText('Shared browser page')
     expect(api.devBrowserOpen).toHaveBeenCalledWith(expect.objectContaining({ run_id: 'run_1', url: 'http://localhost:5173' }))
     expect(api.devPortList).toHaveBeenCalledWith({ run_id: 'run_1' })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Remote browser keyboard')))
   })
 
   it('offers nothing under the address field, which the pane already lists', async () => {
@@ -204,5 +205,6 @@ describe('with a page open', () => {
     fireEvent.click(within(list).getByRole('button', { name: 'Open localhost:8000, python3.12' }))
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://localhost:8000' })))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Remote browser keyboard')))
   })
 })

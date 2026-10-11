@@ -14,7 +14,7 @@ export function runOnlyReason(port: DevPort): string {
 /** The address that reaches the port from inside the run. */
 export function portAddress(port: DevPort): string {
   const everywhere = port.address === '0.0.0.0' || port.address === '::'
-  const host = everywhere || runOnly(port) ? 'localhost' : port.address.includes(':') ? `[${port.address}]` : port.address
+  const host = everywhere || port.address === '127.0.0.1' || port.address === '::1' ? 'localhost' : port.address.includes(':') ? `[${port.address}]` : port.address
   return `${host}:${port.port}`
 }
 

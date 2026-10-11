@@ -13,6 +13,7 @@ describe('a run port', () => {
     expect(portAddress(everywhere)).toBe('localhost:8000')
     expect(portAddress({ port: 3000, address: '::' })).toBe('localhost:3000')
     expect(portAddress(loopback)).toBe('localhost:5173')
+    expect(portAddress({ port: 4000, address: '127.0.0.2' })).toBe('127.0.0.2:4000')
     expect(portAddress({ port: 9000, address: '172.17.0.6' })).toBe('172.17.0.6:9000')
     expect(portAddress({ port: 9000, address: 'fd00::6' })).toBe('[fd00::6]:9000')
   })

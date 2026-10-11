@@ -26,7 +26,7 @@ export function AddressBar({ url, going, disabled, ports, input, onSubmit, onOpe
 }) {
   const [draft, setDraft] = useState<string | null>(null)
   const [offering, setOffering] = useState(false)
-  const [chosen, setChosen] = useState(-1)
+  const [chosen, setChosen] = useState<number | null>(null)
   const list = useId()
   const typing = useRef(draft)
   typing.current = draft
@@ -39,7 +39,7 @@ export function AddressBar({ url, going, disabled, ports, input, onSubmit, onOpe
 
   const typed = (draft ?? '').trim().replace(/^https?:\/\//i, '')
   const offers = offering && !going ? ports.filter((port) => portAddress(port).includes(typed)) : []
-  const active = chosen < offers.length ? chosen : -1
+  const active = offers.findIndex((port) => port.port === chosen)
   const submit = (address: string) => {
     setOffering(false)
     void onSubmit(address).then((opened) => {
@@ -82,12 +82,12 @@ export function AddressBar({ url, going, disabled, ports, input, onSubmit, onOpe
         onChange={(event) => {
           setDraft(event.target.value)
           setOffering(true)
-          setChosen(-1)
+          setChosen(null)
         }}
         onFocus={(event) => {
           focused.current = true
           setOffering(true)
-          setChosen(-1)
+          setChosen(null)
           event.currentTarget.select()
         }}
         onBlur={() => {
@@ -108,7 +108,7 @@ export function AddressBar({ url, going, disabled, ports, input, onSubmit, onOpe
             if (offers.length === 0) return
             event.preventDefault()
             const step = event.key === 'ArrowDown' ? 1 : -1
-            setChosen(active < 0 && step < 0 ? offers.length - 1 : (active + step + offers.length) % offers.length)
+            setChosen(offers[active < 0 && step < 0 ? offers.length - 1 : (active + step + offers.length) % offers.length]!.port)
           } else if (event.key === 'Enter' && active >= 0) {
             event.preventDefault()
             pick(offers[active]!)
