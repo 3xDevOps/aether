@@ -299,6 +299,11 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
           <Callout tone="failed" role="alert" title="Not saved">{error}</Callout>
         </div>
       )}
+      {environment.warning && !error && (
+        <div className="px-4 py-3">
+          <Callout tone="needs-you" role="status" title="Saved">{environment.warning}</Callout>
+        </div>
+      )}
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
         <p className="min-w-0 flex-[1_1_16rem] text-ui-sm text-muted">
           {dirty && <span className="font-medium text-text">Unsaved changes. </span>}

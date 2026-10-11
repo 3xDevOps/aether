@@ -183,6 +183,14 @@ func TestWorkspaceEnvironmentSetThatHalfFails(t *testing.T) {
 	if kept, err := secrets.Get(e.ws.ID); err != nil || kept["NPM_TOKEN"] != secret {
 		t.Fatalf("secrets after the refused save = %v, %v, want NPM_TOKEN as it was", kept, err)
 	}
+	e.srv.cfg.Store = e.store
+
+	e.srv.cfg.Bus = &failingPublishBus{Bus: e.bus, failAt: 1, err: errors.New("event log unavailable")}
+	got, perr := set(protocol.WorkspaceVariable{Name: "NODE_ENV", Value: "test"})
+	want := []protocol.WorkspaceVariable{{Name: "NODE_ENV", Value: "test"}, {Name: "NPM_TOKEN", Secret: true}}
+	if perr != nil || !slices.Equal(got.Variables, want) || !strings.Contains(got.Warning, "timeline note was not recorded: event log unavailable") {
+		t.Fatalf("set with the timeline note refused = %+v, %+v, want the change saved and a warning", got, perr)
+	}
 }
 
 func TestSetupFailureReachesTheLauncherAsData(t *testing.T) {

@@ -3355,7 +3355,7 @@ section scrolls into view once it has loaded.
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
   a name, a secret with no value - is marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
-  the edits stay.
+  the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
   **Secret** in place of a secret's value and **Only an admin can change
   this.** A failed read shows the server's error with **Retry**.

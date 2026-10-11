@@ -352,6 +352,8 @@ export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
+  /** From a save that took effect while its timeline note was not recorded. */
+  warning?: string
 }
 
 export interface Member {

@@ -35,11 +35,14 @@ type WorkspaceEnvironmentSetParams struct {
 	Unset       []string            `json:"unset,omitempty"`
 }
 
-// WorkspaceEnvironmentResult lists Variables sorted by name.
+// WorkspaceEnvironmentResult lists Variables sorted by name. Warning is set
+// when workspace.environment.set saved the change and could not record its
+// timeline note.
 type WorkspaceEnvironmentResult struct {
 	WorkspaceID string              `json:"workspace_id"`
 	SetupScript string              `json:"setup_script"`
 	Variables   []WorkspaceVariable `json:"variables"`
+	Warning     string              `json:"warning,omitempty"`
 }
 
 // SetupFailure is the Data of a launch refused by the workspace setup

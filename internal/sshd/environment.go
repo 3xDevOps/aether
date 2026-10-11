@@ -159,15 +159,18 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 		}
 		return nil, rpcError(err)
 	}
+	result := environmentResult(ws, secrets)
 	if len(changes) > 0 {
-		_, _ = s.cfg.Bus.Publish(ctx, events.Event{
+		if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: id,
 			ActorID:     member,
 			Payload: events.TimelinePayload{
 				Kind:    events.TimelineNote,
 				Message: "workspace environment: " + strings.Join(changes, "; "),
 			},
-		})
+		}); err != nil {
+			result.Warning = "the change is saved, but its timeline note was not recorded: " + err.Error()
+		}
 	}
-	return environmentResult(ws, secrets), nil
+	return result, nil
 }

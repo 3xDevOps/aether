@@ -88,8 +88,10 @@ func sendWorkspaceEnv(c *protocol.Client, ws protocol.Workspace, change protocol
 	if err := printWorkspaceVariables(os.Stdout, ws, res); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(os.Stdout, workspaceEnvScope)
-	return err
+	if _, err := fmt.Fprintln(os.Stdout, workspaceEnvScope); err != nil {
+		return err
+	}
+	return printMirrorWarning(os.Stdout, res.Warning)
 }
 
 // parseWorkspaceEnvSet returns the plain variables to set, or the one name
@@ -253,8 +255,10 @@ func workspaceEnvScript(args []string, stdin io.Reader) error {
 		if res.SetupScript == "" {
 			state = "setup script removed"
 		}
-		_, err = fmt.Fprintf(os.Stdout, "workspace %s %s\n%s\n%s\n", ws.ID, ws.Name, state, workspaceEnvScope)
-		return err
+		if _, err = fmt.Fprintf(os.Stdout, "workspace %s %s\n%s\n%s\n", ws.ID, ws.Name, state, workspaceEnvScope); err != nil {
+			return err
+		}
+		return printMirrorWarning(os.Stdout, res.Warning)
 	})
 }
 

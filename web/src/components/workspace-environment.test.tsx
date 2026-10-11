@@ -108,6 +108,17 @@ describe('workspace environment', () => {
     }))
   })
 
+  it('says when a save took effect and its timeline note did not', async () => {
+    const warning = 'the change is saved, but its timeline note was not recorded: database is locked'
+    mount({ workspaceEnvironmentSet: vi.fn(async () => ({ ...saved, setup_script: 'make deps', warning })) })
+
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Setup script' }), { target: { value: 'make deps' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect((await screen.findByRole('status')).textContent).toBe(`Saved${warning}`)
+    expect(screen.queryByText('Unsaved changes.')).toBeNull()
+  })
+
   it('refuses two variables of one name before calling the server', async () => {
     const client = mount()
 
