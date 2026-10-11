@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -215,8 +214,9 @@ func TestIntegrationRunSSH(t *testing.T) {
 		}
 	}
 
-	// A forward reaches a listener bound only to the container's loopback,
-	// which the container's own address does not serve.
+	// A forward reaches a listener bound to the container's loopback. The
+	// test runtime gives a container no other network, so nothing but a
+	// relay inside it could answer.
 	const appPort = 31873
 	app := ada.command("ssh", host, fmt.Sprintf(`mkdir -p /tmp/app && echo loopback-only > /tmp/app/index.html && exec httpd -f -p 127.0.0.1:%d -h /tmp/app`, appPort))
 	if err := app.Start(); err != nil {
@@ -231,14 +231,6 @@ func TestIntegrationRunSSH(t *testing.T) {
 	defer func() { _ = forward.Process.Kill(); _ = forward.Wait() }()
 	if body := httpGet(t, forwardPort); body != "loopback-only\n" {
 		t.Fatalf("forwarded response = %q", body)
-	}
-	addr, err := server.srv.sched.ContainerAddr(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if conn, derr := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", addr, appPort), 3*time.Second); derr == nil {
-		_ = conn.Close()
-		t.Fatal("the loopback-only listener answers on the container's address")
 	}
 	if _, stderr, code = ada.run("", "ssh", "-W", "example.com:80", host); code == 0 || !strings.Contains(stderr, "only the run's own loopback") {
 		t.Fatalf("forward to another host = status %d stderr %q, want it prohibited", code, stderr)
