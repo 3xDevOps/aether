@@ -377,6 +377,12 @@ running inside it and both survive the restart like any other run. An SSH
 connection left open into a paused run still holds the update back. A second
 `--when idle` call replaces the pending one, and `--cancel` clears it.
 
+A run that survives the restart keeps the Aether helper binary its
+container was created with. What a newer server adds to that helper, such as
+file transfer and port forwarding over ssh
+([terminal.md](terminal.md#ssh-and-editors)), is there for runs launched
+after the upgrade.
+
 `--yes` skips the confirmation prompt. `--status` prints the running
 version, the latest release, whether this server can update itself, any
 pending update and what it is still waiting for, and the outcome of the

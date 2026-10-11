@@ -45,6 +45,9 @@ type runSSHTestService struct {
 	// execs are killed when the test ends, so a stop the server never
 	// delivered fails the test at once instead of waiting out the command.
 	execs []*localExec
+	// helperScript replaces the helper entry points with a shell script, as
+	// a container whose staged binary lacks them answers.
+	helperScript string
 	// stopped counts stops that landed; stopErr refuses them, as a paused
 	// container does, and refusedStops counts those.
 	stopped      int
@@ -138,6 +141,12 @@ func (f *runSSHTestService) StartRunExec(ctx context.Context, run domain.RunID, 
 	f.started = append(f.started, spec)
 	f.mu.Unlock()
 	if len(spec.Argv) == 3 && spec.Argv[1] == devexec.Command {
+		f.mu.Lock()
+		script := f.helperScript
+		f.mu.Unlock()
+		if script != "" {
+			return f.process(scheduler.RunExec{Argv: []string{"/bin/sh", "-c", script}})
+		}
 		return f.helper(spec.Argv[2])
 	}
 	return f.process(spec)
@@ -853,6 +862,30 @@ func TestRunSSHForwardReachesOnlyTheRunsLoopback(t *testing.T) {
 
 	if _, err = client.Listen("tcp", "127.0.0.1:0"); err == nil {
 		t.Fatal("reverse forwarding was accepted")
+	}
+}
+
+// A run created by a server that predates the forwarding helper keeps the
+// binary it was created with, which answers the entry point with its usage
+// and status 125. The member is shown that, not only a failed handshake.
+func TestRunSSHForwardReportsWhyItsRelayDidNotStart(t *testing.T) {
+	e := newTestEnv(t, nil)
+	svc := installRunSSHTestService(t, e)
+	const usage = "dev-exec: expected run|run-pipe <key> <claim> <argv...> or control <key> <exec-id> <claim> <action> [grace-ms]"
+	svc.mu.Lock()
+	svc.helperScript = "echo '" + usage + "' >&2; exit 125"
+	svc.mu.Unlock()
+	client := mustDialRunSSH(t, e, e.signer)
+
+	_, err := client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(listenLoopback(t, ""))))
+	var refused *ssh.OpenChannelError
+	want := "start the port forwarding relay: the helper exited 125: " + usage
+	if !errors.As(err, &refused) || refused.Reason != ssh.ConnectionFailed || !strings.HasPrefix(refused.Message, want) {
+		t.Fatalf("forward through a relay that did not start = %v, want it refused with %q", err, want)
+	}
+	// The connection is still good for what the old helper does have.
+	if stdout, _, status := runOverSSH(t, client, "echo still here", ""); stdout != "still here\n" || status != 0 {
+		t.Fatalf("command after the failed forward = %q status %d", stdout, status)
 	}
 }
 

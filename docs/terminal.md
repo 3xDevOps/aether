@@ -537,6 +537,15 @@ run is paused is stopped when it resumes.
 One run takes 16 SSH connections at a time, at most 8 of them from one
 member. One connection takes 10 sessions and 64 forwarded connections.
 
+**A run keeps the helper it was created with.** File transfer and port
+forwarding run entry points of the Aether binary mounted into the run's
+container, and that mount is fixed when the container is created. A run
+created before the server was upgraded to a version with these entry points
+still takes `ssh <host>` and `ssh <host> <command>`, but `scp`, `sftp`,
+forwarding and therefore editors fail there, with the old binary's own
+answer (see the table below). Relaunching resumes the same container, so
+launch a new run to use them.
+
 ### Who can connect
 
 Exactly who can open a writable run shell: a member with `steer` on the run
@@ -562,6 +571,7 @@ A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 | `aether: ssh into <run-id>: you already have 8 SSH connections open to run <run-id>, the most one member takes` | Close one of yours. |
 | `aether: ssh into <run-id>: run <run-id> already has 16 SSH connections open, the most one run takes` | Close one, or ask a teammate to. |
 | `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | The host is not a run id plus `.aether`. Nothing was sent to the server. |
+| `start the port forwarding relay: the helper exited 125: dev-exec: expected run\|run-pipe <key> <claim> <argv...> or control <key> <exec-id> <claim> <action> [grace-ms]: ssh: handshake failed: EOF`, or the same `dev-exec: expected …` line from `sftp` or `scp` | The run's container was created by a server without ssh file transfer and port forwarding. Launch a new run. |
 | `aether: not linked; run aether link <addr>` | This computer's CLI has no server yet. |
 | `ssh: Could not resolve hostname <run-id>.aether` | `aether ssh-config` has not been run here. |
 

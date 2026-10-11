@@ -50,6 +50,10 @@ const (
 	runSSHStopTimeout  = 30 * time.Second
 	runSSHStopRetries  = 5
 	runSSHRelayTimeout = 15 * time.Second
+	// runSSHRelayReport bounds the wait for a relay that failed to start to
+	// say why, and how much of what it said is kept.
+	runSSHRelayReport      = 2 * time.Second
+	runSSHRelayReportBytes = 1 << 10
 )
 
 // A session's shell is the one a run shell tab starts: bash, or sh in an
@@ -617,8 +621,14 @@ func (c *runSSHConn) relayConn(ctx context.Context) (ssh.Conn, error) {
 	}
 	att := exec.Attachment()
 	// An execution's output is never dropped, so an unread stderr would
-	// stall the relay once it filled.
-	go func() { _, _ = io.Copy(io.Discard, att.Stderr()) }()
+	// stall the relay once it filled. Its first bytes are kept: they are
+	// the relay's own account of a failure to start.
+	said := &headBuffer{limit: runSSHRelayReportBytes}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		_, _ = io.Copy(said, att.Stderr())
+	}()
 	handshake := time.AfterFunc(runSSHRelayTimeout, func() { _ = att.Close() })
 	conn, chans, reqs, err := ssh.NewClientConn(devexec.Stream{Reader: att.Stdout(), Writer: att.Stdin(), Closer: att}, "", &ssh.ClientConfig{
 		// The transport is the stdio of an execution this server started,
@@ -627,6 +637,7 @@ func (c *runSSHConn) relayConn(ctx context.Context) (ssh.Conn, error) {
 	})
 	handshake.Stop()
 	if err != nil {
+		err = runSSHRelayFailure(exec, said, drained, err)
 		c.stopExec(exec)
 		return nil, fmt.Errorf("start the port forwarding relay: %w", err)
 	}
@@ -643,4 +654,49 @@ func (c *runSSHConn) relayConn(ctx context.Context) (ssh.Conn, error) {
 	}()
 	c.relay = relay
 	return conn, nil
+}
+
+// headBuffer keeps the first limit bytes written to it and accepts the rest,
+// so copying into it drains a stream without holding it all.
+type headBuffer struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func (b *headBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if room := b.limit - len(b.buf); room > 0 {
+		b.buf = append(b.buf, p[:min(room, len(p))]...)
+	}
+	return len(p), nil
+}
+
+func (b *headBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.buf))
+}
+
+// runSSHRelayFailure adds what the relay itself reported to a handshake that
+// failed: its exit status and what it wrote to stderr, when it ended in time
+// to say. A relay that never ran, such as one the container's staged binary
+// does not have, fails the handshake with nothing but an end of stream.
+func runSSHRelayFailure(exec runtime.ManagedExec, said *headBuffer, drained <-chan struct{}, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), runSSHRelayReport)
+	defer cancel()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		return cause
+	}
+	status, err := exec.Wait(ctx)
+	if err != nil {
+		return cause
+	}
+	if report := said.String(); report != "" {
+		return fmt.Errorf("the helper exited %d: %s: %w", status.Code, report, cause)
+	}
+	return fmt.Errorf("the helper exited %d: %w", status.Code, cause)
 }
