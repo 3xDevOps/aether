@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -287,7 +288,7 @@ func (s cacheConfigReadFailure) ListWorkspaces(context.Context) ([]*domain.Works
 }
 
 func TestLegacyCacheExplicitChoicesSurviveInactiveSweep(t *testing.T) {
-	for _, source := range []string{"image", "idle workspace edit", "profile plan"} {
+	for _, source := range []string{"image", "idle workspace edit", "idle workspace secret", "profile plan"} {
 		t.Run(source, func(t *testing.T) {
 			e := newTestEnv(t, nil)
 			rt := &cacheImageRuntime{fakeRuntime: e.rt, user: "1000:1000"}
@@ -304,6 +305,12 @@ func TestLegacyCacheExplicitChoicesSurviveInactiveSweep(t *testing.T) {
 				// No plan has ever been built: GC must consult current storage.
 				e.ws.Environment.Variables["UV_CACHE_DIR"] = explicit
 				if err = e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+					t.Fatal(err)
+				}
+			case "idle workspace secret":
+				// An imported .env stores its values as secrets.
+				e.sched.cfg.Secrets = secretstore.New(t.TempDir())
+				if err = e.sched.cfg.Secrets.Put(e.ws.ID, map[string]string{"UV_CACHE_DIR": explicit}); err != nil {
 					t.Fatal(err)
 				}
 			case "profile plan":

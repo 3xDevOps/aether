@@ -91,20 +91,8 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	var setupScript string
 	var secrets map[string]string
 	if ws != nil {
-		if s.cfg.Secrets != nil {
-			// The caller read ws some time ago. The row is read again with
-			// the secret file, under the lock workspace.environment.set
-			// writes both under, so a variable changing between plain and
-			// secret is never missing from both.
-			s.cfg.Secrets.RLock()
-			ws, err = s.cfg.Store.GetWorkspace(ctx, ws.ID)
-			if err == nil {
-				secrets, err = s.cfg.Secrets.Get(ws.ID)
-			}
-			s.cfg.Secrets.RUnlock()
-			if err != nil {
-				return nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
-			}
+		if ws, secrets, err = s.workspaceEnvironment(ctx, ws); err != nil {
+			return nil, err
 		}
 		setupScript = ws.Environment.SetupPolicy.Script
 	}
@@ -201,6 +189,28 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		return nil, validateErr
 	}
 	return plan, nil
+}
+
+// workspaceEnvironment is ws as it is now, with its secrets. The caller read
+// ws some time ago; the row is read again with the secret file, under the
+// lock workspace.environment.set writes both under, so a variable changing
+// between plain and secret is never missing from both. Without a secret
+// store there is no pair to read, and ws stands.
+func (s *Scheduler) workspaceEnvironment(ctx context.Context, ws *domain.Workspace) (*domain.Workspace, map[string]string, error) {
+	if s.cfg.Secrets == nil {
+		return ws, nil, nil
+	}
+	s.cfg.Secrets.RLock()
+	defer s.cfg.Secrets.RUnlock()
+	current, err := s.cfg.Store.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
+	}
+	secrets, err := s.cfg.Secrets.Get(ws.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
+	}
+	return current, secrets, nil
 }
 
 var cacheEnvironmentKeys = [...]string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"}
@@ -306,7 +316,13 @@ func (s *Scheduler) protectConfiguredLegacyCaches(ctx context.Context, memberID 
 			home = "/root"
 		}
 		for _, ws := range workspaces {
-			env, err := explicitEnvironment(profile, ws, nil)
+			var secrets map[string]string
+			if ws != nil {
+				if ws, secrets, err = s.workspaceEnvironment(ctx, ws); err != nil {
+					return err
+				}
+			}
+			env, err := explicitEnvironment(profile, ws, secrets)
 			if err != nil {
 				return err
 			}
