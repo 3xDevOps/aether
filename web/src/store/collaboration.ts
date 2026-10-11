@@ -11,6 +11,13 @@ export interface PaginationState {
   exhausted: boolean
 }
 
+export interface FailedNote {
+  text: string
+  key: string
+  error: string
+  unanswered: boolean
+}
+
 export interface CollaborationSlice {
   roomMessages: Record<string, RoomMessage[]>
   roomNextBefore: Record<string, string | undefined>
@@ -23,6 +30,10 @@ export interface CollaborationSlice {
   /** Errors reading room history; presence and action failures live separately. */
   roomError: Record<string, string | undefined>
   roomActionError: Record<string, string | undefined>
+  noteDrafts: Record<string, string | undefined>
+  /** Per run, the key of each note text sent and not yet saved, so a resend never adds a second copy. */
+  noteKeys: Record<string, Record<string, string> | undefined>
+  failedNotes: Record<string, FailedNote[] | undefined>
   evidencePackets: Record<string, EvidencePacket[]>
   evidenceNextBefore: Record<string, string | undefined>
   evidencePagination: Record<string, PaginationState>
@@ -35,6 +46,15 @@ export interface CollaborationSlice {
   setRoomActionError: (runID: string, error?: string) => void
   setRoomPage: (runID: string, messages: RoomMessage[], nextBefore?: string, append?: boolean) => void
   upsertRoomMessage: (message: RoomMessage) => void
+  dropRoomMessage: (runID: string, id: string) => void
+  setNoteDraft: (runID: string, text: string) => void
+  noteSending: (runID: string, text: string, key: string) => void
+  /** A failure for a note whose saved copy is already here is ignored. */
+  noteFailed: (runID: string, note: FailedNote) => void
+  /** A refusal that came after the deadline replaces that note's failure. */
+  noteRefused: (runID: string, key: string, error: string) => void
+  dismissFailedNote: (runID: string, key: string) => void
+  resetNotes: () => void
   setRoomStatus: (runID: string, status: RoomStatusResult, control: ControlMetadata | undefined) => void
   setRoomStatusError: (runID: string, error?: string) => void
   initializeEvidencePagination: (runID: string) => void
@@ -72,7 +92,7 @@ function instant(value: string): bigint {
   return secondsSinceEpoch * NANOS_PER_SECOND + nanos
 }
 
-function compareInstants(left: string, right: string): number {
+export function compareInstants(left: string, right: string): number {
   const a = instant(left)
   const b = instant(right)
   return a < b ? -1 : a > b ? 1 : 0
@@ -90,6 +110,41 @@ function mergeByID<T extends { id: string; updated_at: string }>(current: T[], i
   }
   return [...merged.values()]
 }
+
+/** A provisional message is identified by its idempotency key until the server's copy replaces it. */
+export const isProvisional = (message: RoomMessage) => message.id === message.idempotency_key
+
+/**
+ * A page lists newest first, and its order wins for the messages it holds; an event keeps a held message where it is.
+ * The stable sort then keeps the server's insertion order among same-instant messages.
+ */
+function mergeRoomMessages(current: RoomMessage[], incoming: RoomMessage[], from: 'event' | 'page' | 'older page'): RoomMessage[] {
+  const saved = new Set([...current, ...incoming].filter((m) => !isProvisional(m)).map((m) => m.idempotency_key))
+  const pending = (m: RoomMessage) => isProvisional(m) && saved.has(m.id)
+  const kept = current.filter((m) => !pending(m))
+  const page = incoming.filter((m) => !pending(m)).reverse()
+  const merged = new Map(mergeByID(kept, page).map((m) => [m.id, m]))
+  const listed = new Set(page.map((m) => m.id))
+  const rest = from === 'event' ? kept : kept.filter((m) => !listed.has(m.id))
+  const order = new Set((from === 'older page' ? [...page, ...rest] : [...rest, ...page]).map((m) => m.id))
+  return [...order].map((id) => merged.get(id)!).sort((a, b) => compareInstants(a.created_at, b.created_at))
+}
+
+const isSaved = (messages: RoomMessage[], key: string) => messages.some((m) => !isProvisional(m) && m.idempotency_key === key)
+
+function settleNotes(state: CollaborationSlice, runID: string, messages: RoomMessage[]): Partial<CollaborationSlice> {
+  const keys = state.noteKeys[runID] ?? {}
+  const failed = state.failedNotes[runID] ?? []
+  if (!failed.length && !Object.keys(keys).length) return {}
+  const draft = state.noteDrafts[runID]?.trim()
+  const saved = failed.filter((n) => isSaved(messages, n.key))
+  return {
+    noteKeys: { ...state.noteKeys, [runID]: Object.fromEntries(Object.entries(keys).filter(([, key]) => !isSaved(messages, key))) },
+    failedNotes: { ...state.failedNotes, [runID]: failed.filter((n) => !saved.includes(n)) },
+    ...(saved.some((n) => n.text === draft) ? { noteDrafts: { ...state.noteDrafts, [runID]: '' } } : {}),
+  }
+}
+
 function pagePagination(
   previous: PaginationState | undefined,
   currentCursor: string | undefined,
@@ -132,6 +187,9 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
   roomLoading: {},
   roomError: {},
   roomActionError: {},
+  noteDrafts: {},
+  noteKeys: {},
+  failedNotes: {},
   evidencePackets: {},
   evidenceNextBefore: {},
   evidencePagination: {},
@@ -166,13 +224,10 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
         nextBefore,
         append,
       )
+      const merged = mergeRoomMessages(state.roomMessages[runID] ?? [], messages, append ? 'older page' : 'page')
       return {
-        roomMessages: {
-          ...state.roomMessages,
-          [runID]: byCreated(
-            mergeByID(state.roomMessages[runID] ?? [], messages),
-          ),
-        },
+        ...settleNotes(state, runID, merged),
+        roomMessages: { ...state.roomMessages, [runID]: merged },
         roomNextBefore: {
           ...state.roomNextBefore,
           [runID]: page.cursor,
@@ -184,13 +239,53 @@ export const createCollaborationSlice: SliceCreator<CollaborationSlice> = (set) 
       }
     }),
   upsertRoomMessage: (message) =>
+    set((state) => {
+      const merged = mergeRoomMessages(state.roomMessages[message.run_id] ?? [], [message], 'event')
+      return {
+        ...settleNotes(state, message.run_id, merged),
+        roomMessages: { ...state.roomMessages, [message.run_id]: merged },
+      }
+    }),
+  dropRoomMessage: (runID, id) =>
     set((state) => ({
       roomMessages: {
         ...state.roomMessages,
-        [message.run_id]: byCreated(
-          mergeByID(state.roomMessages[message.run_id] ?? [], [message]),
-        ),
+        [runID]: (state.roomMessages[runID] ?? []).filter((m) => m.id !== id),
       },
+    })),
+  setNoteDraft: (runID, text) =>
+    set((state) => ({ noteDrafts: { ...state.noteDrafts, [runID]: text } })),
+  noteSending: (runID, text, key) =>
+    set((state) => ({
+      noteKeys: { ...state.noteKeys, [runID]: { ...state.noteKeys[runID], [text]: key } },
+      failedNotes: { ...state.failedNotes, [runID]: (state.failedNotes[runID] ?? []).filter((n) => n.text !== text) },
+      noteDrafts: state.noteDrafts[runID]?.trim() === text ? { ...state.noteDrafts, [runID]: '' } : state.noteDrafts,
+    })),
+  noteFailed: (runID, note) =>
+    set((state) => {
+      if (isSaved(state.roomMessages[runID] ?? [], note.key)) return {}
+      return {
+        failedNotes: { ...state.failedNotes, [runID]: [...(state.failedNotes[runID] ?? []).filter((n) => n.key !== note.key), note] },
+        noteDrafts: state.noteDrafts[runID]?.trim() ? state.noteDrafts : { ...state.noteDrafts, [runID]: note.text },
+      }
+    }),
+  noteRefused: (runID, key, error) =>
+    set((state) => ({
+      failedNotes: {
+        ...state.failedNotes,
+        [runID]: (state.failedNotes[runID] ?? []).map((n) => (n.key === key ? { ...n, error, unanswered: false } : n)),
+      },
+    })),
+  dismissFailedNote: (runID, key) =>
+    set((state) => ({ failedNotes: { ...state.failedNotes, [runID]: (state.failedNotes[runID] ?? []).filter((n) => n.key !== key) } })),
+  resetNotes: () =>
+    set((state) => ({
+      noteDrafts: {},
+      noteKeys: {},
+      failedNotes: {},
+      roomMessages: Object.fromEntries(
+        Object.entries(state.roomMessages).map(([runID, messages]) => [runID, messages.filter((m) => !isProvisional(m))]),
+      ),
     })),
   setRoomStatus: (runID, status, control) =>
     set((state) => ({

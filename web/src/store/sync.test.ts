@@ -107,6 +107,53 @@ describe('hydrate', () => {
 
     expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
   })
+  it("drops the previous member's note drafts, keys, failed notes and invitations when the member changes", async () => {
+    let member = alice
+    const client = fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })) })
+    const store = createRootStore()
+    await hydrate(store, client)
+    store.getState().setNoteDraft('run_1', 'half typed')
+    store.getState().noteSending('run_1', 'sent', 'key-1')
+    store.getState().noteFailed('run_1', { text: 'sent', key: 'key-1', error: 'Failed to fetch', unanswered: true })
+    store.setState({ invitations: [], revokingInvitations: ['inv_octocat'] })
+
+    member = bob
+    await hydrate(store, client)
+
+    expect(store.getState().noteDrafts).toEqual({})
+    expect(store.getState().noteKeys).toEqual({})
+    expect(store.getState().failedNotes).toEqual({})
+    expect(store.getState().invitations).toBeNull()
+    expect(store.getState().revokingInvitations).toEqual([])
+  })
+  it("drops an invitation the previous member's write added while the new member's hydrate was pending", async () => {
+    let member = alice
+    const selection = Promise.withResolvers<{ workspace_id: string }>()
+    const read = vi.fn(() => selection.promise)
+    const client = fakeApi({
+      serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })),
+      capabilities: vi.fn(async () => ({ gateway: 'local', methods: ['*'], ws: ['events'], local: ['workspace.selection'] })),
+      localWorkspaceSelection: read,
+    })
+    const store = createRootStore()
+    selection.resolve({ workspace_id: '' })
+    await hydrate(store, client)
+    store.setState({ invitations: [], hydrated: false })
+
+    const sentAs = store.getState().identityKey
+    member = bob
+    const pending = Promise.withResolvers<{ workspace_id: string }>()
+    read.mockReturnValueOnce(pending.promise)
+    const loading = hydrate(store, client)
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+    if (store.getState().identityKey === sentAs) {
+      store.getState().addInvitation({ id: 'inv_1', provider: 'github', login: 'carol', role: 'collaborator', created_by: alice.id, created_at: '', expires_at: '' })
+    }
+    pending.resolve({ workspace_id: '' })
+    await loading
+
+    expect(store.getState().invitations).toBeNull()
+  })
   it('prunes write intents and control sessions absent from the run snapshot', async () => {
     const store = createRootStore()
     const surviving = {
@@ -1366,6 +1413,32 @@ describe('applyEvent', () => {
     expect(store.getState().roomMessages.run_1.map((item) => item.id)).toEqual(
       cached.concat(arrivals).map((item) => item.id),
     )
+  })
+
+  it('stops the room re-list at the oldest saved message when a sending note is older', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const saved = roomMessage({ id: 'saved' })
+    store.getState().initializeRoomPagination('run_1')
+    store.getState().setRoomPage('run_1', [saved], 'older-cursor')
+    store.getState().upsertRoomMessage(roomMessage({ id: 'key_1', idempotency_key: 'key_1', created_at: '2026-08-14T09:00:00Z' }))
+    const list = vi.fn()
+      .mockResolvedValueOnce({ messages: [saved, roomMessage({ id: 'new', created_at: '2026-08-14T11:00:00Z' })], next_before: 'older-cursor' })
+      .mockResolvedValueOnce({ messages: [] })
+    const client = fakeApi({ runRoomList: list })
+    const event: Event = {
+      id: 'room-provisional',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: {},
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(true)
+    expect(list).toHaveBeenCalledTimes(1)
   })
 
   it('paginates to an old room message before applying a mutable receipt update', async () => {

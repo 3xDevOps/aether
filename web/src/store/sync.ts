@@ -29,6 +29,7 @@ import type { AgentPayload } from '@/store/activity'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
+import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
@@ -131,11 +132,6 @@ export async function hydrate(
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
     const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
-    const previousIdentity = store.getState().identityKey
-    if (previousIdentity && previousIdentity !== incomingIdentity) {
-      // Reconnects retain drafts; a different authenticated owner must not.
-      store.getState().resetFiles()
-    }
     if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
       try {
         const saved = await client.localWorkspaceSelection()
@@ -150,6 +146,13 @@ export async function hydrate(
         // turning a successful server snapshot into a connection failure.
         toast.error(errorSentence(err))
       }
+    }
+    const previousIdentity = store.getState().identityKey
+    if (previousIdentity && previousIdentity !== incomingIdentity) {
+      // Reconnects retain drafts; a different authenticated owner must not.
+      store.getState().resetFiles()
+      store.getState().resetNotes()
+      store.setState({ invitations: null, revokingInvitations: [] })
     }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
@@ -239,7 +242,7 @@ async function reconcileRoomHistory(
   runID: string,
   targetMessageID?: string,
 ): Promise<void> {
-  const cached = store.getState().roomMessages[runID] ?? []
+  const cached = (store.getState().roomMessages[runID] ?? []).filter((message) => !isProvisional(message))
   const cachedIDs = new Set(cached.map((message) => message.id))
   const oldestCachedID = cached[0]?.id
   let before: string | undefined

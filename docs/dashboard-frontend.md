@@ -249,7 +249,9 @@ re-renders only its text.
 The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
 swarm, or run scope, merged by message ID. A scope's list is held only while
 a view that shows it is mounted (`useMessageList`); the last one to unmount
-drops it and the messages no other list holds. A `coord.message` event
+drops it and the messages no other list holds. Messages list oldest first;
+those created at the same instant keep the order the server inserted them,
+which it reports newest first. A `coord.message` event
 carries no body, so every held scope the message belongs to re-reads its
 newest page; a scope whose first read failed is held empty so it re-reads too.
 `coord.message.acked` stamps the row. Both re-read the recipient run for its
@@ -906,6 +908,66 @@ open, on an account change, on reconnect and on its refresh button; nothing
 polls. An older server that does not know this method is shown as needing an
 update.
 
+### Actions
+
+Every action the dashboard sends falls in one of two categories:
+
+- **The client can predict the result**, such as adding a note: the change
+  renders at once and is confirmed or reverted when the server answers. A
+  refusal reverts it, puts back what the user typed, and shows the server's
+  error verbatim (`errorSentence`, inline `Callout`).
+- **The server decides the result**, such as approving a teammate's message:
+  only the control that sent it shows a pending label, within one frame, and
+  past the deadline it reads "Still waiting for the server…".
+
+The deadline is `optimisticDeadlineMs` (`store/optimistic.ts`, 5 seconds).
+The slowest `run.room.post` measured through the local gateway over SSH
+under load took 57 ms (p99 42 ms); each gateway RPC also costs about three
+edge round trips, which were not measured, and 5 seconds leaves room for
+three 1.5-second round trips.
+`optimistic()` there runs a predictable action: it calls `apply`, then
+`send`, and either `confirm`s the server's answer or `revert`s on a refusal
+or at the deadline. The returned outcome carries the error and a `retry`
+that resends the same request, so `send` must carry one idempotency key
+across calls or be idempotent by nature. An answer that arrives after the
+deadline is still `confirm`ed, and the store dedupes it by id or idempotency
+key, so a late success shows as saved once and clears the error. Once any
+attempt of a mutation is answered, no attempt of it reverts, and a **Retry**
+still pending resolves as that success. A late
+refusal resolves the unanswered outcome's `refused` promise with the
+server's error, which replaces the timeout failure and drops **Retry**,
+unless an attempt of that mutation was answered first.
+Only a JSON-RPC error from the server is a refusal; a failure that carries no
+answer, such as `Failed to fetch`, a gateway 502 or 504, the local
+gateway's `server unreachable:` or `network unreachable:`, or any error
+whose data carries an edge-path `refusal`, is treated like the deadline,
+with its own error text and **Retry**, because the server may have
+committed.
+
+A server-decided action locks only its own control, and the siblings a
+second press would race with, such as the Deny beside a pressed Approve.
+`usePastDeadline` (`store/optimistic.ts`) turns true once a pending flag has
+held for the deadline; the label then reads "Still waiting for the server…".
+Past the deadline, **Cancel** stops waiting and unlocks the control, only
+where a resend is deduped or refused and the eventual result still shows:
+
+| Control | Pending label | Cancel past the deadline |
+| --- | --- | --- |
+| Question **Reply** (Details) | Replying… | Yes: a resend of the same text reuses the idempotency key, and the reply arrives as a room event |
+| Teammate message and permission **Approve** / **Deny** (Details, Approvals) | Approving… / Denying… | No: a second decision would race the first, and its "already decided" refusal would sit beside the first's success |
+| Board card **Approve** | Approving… | No, for the same reason |
+| Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
+| Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
+| **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
+| Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
+| **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
+| Device **Approve** / **Revoke** (confirm dialog) | Approving… / Revoking… | The dialog's **Cancel** turns into **Close**; it and `Esc` close the dialog while the request keeps going. A late success still refreshes the list and toasts but leaves the approval code field alone, since it may hold a code typed since; a late failure shows as a toast |
+| Schedule **Unschedule** | Unscheduling… | No |
+| Invite code **Generate code** | Generating… | No: each call mints a new code |
+| Roster **Remove** (confirm dialog) | Removing… | Closes the dialog, as for Device **Approve** |
+| Giving up your own admin role (confirm dialog) | Becoming *role*… | Closes the dialog, as for Device **Approve** |
+| Invitation **Invite** | The new row reads Creating… | No, and no **Retry**: the row stays until the server answers. A refusal drops it and reopens the dialog with the error; a failure with no answer re-reads `member.invitation.list` once and shows the invitation if the server holds it, else drops the row and reopens the dialog with the error |
+
 ## Board
 
 `src/routes/board/` is the default center view and the triage surface,
@@ -1496,7 +1558,8 @@ message the store already holds in the event's `state`, such as the author's
 own post, reads nothing, unless that message is a steering request, whose
 agent delivery the payload does not carry. After the event stream reconnects
 it reads back to the cached history, as one page or more, so a gap is
-closed. It polls presence every ten seconds with an abortable 15-second
+closed; each older page merges below the pages before it, so same-instant
+messages keep the server's order. It polls presence every ten seconds with an abortable 15-second
 deadline.
 
 ### Header
@@ -1789,7 +1852,12 @@ request in flight and its error are part of the draft too. A composer that
 mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
 the request settles: nothing can be added to a prompt that is being sent, and
 it cannot be sent or uploaded a second time. A request settles only the draft
-it marked (`beginDraftRequest`), never one that replaced it. The first focus
+it marked (`beginDraftRequest`), never one that replaced it. Past the
+deadline a send reads "Still waiting for the server…" with **Cancel**, which
+clears the mark and unlocks the draft, and a resend reuses the draft's key.
+A late success then settles nothing; a late failure of an Enhanced prompt
+still shows its error on the draft without locking it, unless a newer send
+is in flight or the draft no longer carries that send's key. The first focus
 of a composer that mounts with text puts the caret after it, and the
 suggestion menu follows the selection as well as the text.
 
@@ -2805,13 +2873,29 @@ whatever opened it. Sections (`details.tsx`):
 - **Needs you**: `RequestCard`s for pending native inputs, Aether approvals
   with **Approve** / **Deny**, teammate messages awaiting the controller with
   **Approve** / **Deny** through `run.room.decide`, and teammate questions
-  with a reply field. With none of these, one card with the needs-you reason
+  with a reply field. A pending decision or reply locks only its own card
+  ([Actions](#actions)). With none of these, one card with the needs-you reason
   and the header's action as a secondary button, or "Nothing is waiting on
   you."
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
 - **Notes**: notes are `comment` room messages, human to human on the run,
-  with an **Add a note** field and **Add**.
+  with an **Add a note** field and **Add**. **Add** follows
+  [Actions](#actions): the field empties and the note shows muted with
+  "Sending…" under its idempotency key as its id, until `run.room.post` or
+  the `workspace.room_message` refetch brings the server's copy with that
+  key. A refusal, the deadline or a failure with no answer removes it and
+  shows the error under the list beside the note's text, one entry per
+  failed note; the text goes back into the field when the field is empty.
+  Every failure except a refusal adds **Retry**. Until a saved copy arrives, resending the same text by
+  **Retry**, **Add**, or after **Dismiss** reuses its key, so a late answer
+  never shows twice. A refusal keeps the key too: `run.room.post` can save
+  the note and then fail, so the key is dropped only when a saved copy with
+  it arrives or the signed-in member changes. The field, pending keys and failures live in the store
+  per run, so they survive closing Details, and are dropped, with any note
+  still reading "Sending…", when the signed-in member changes; an answer or failure that arrives after the
+  change is dropped too. Adding a note never disables **Reply**,
+  **Approve** / **Deny** or the composer.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
@@ -2820,8 +2904,8 @@ whatever opened it. Sections (`details.tsx`):
   admins once measured), Archived, and **Last reason**, the server's `run.reason`, so
   a parked error or stall detail the reason line leaves out is never hidden.
 
-A failed room action shows its error above the sections with **Dismiss**;
-the composer's own failures stay above the composer.
+Any other failed room action shows its error above the sections with
+**Dismiss**; the composer's own failures stay above the composer.
 
 ### Captures and candidate review
 
