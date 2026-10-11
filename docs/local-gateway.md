@@ -82,6 +82,38 @@ must not erase an in-progress wizard's workspace or first-run draft. Public
 and private remote import need no local clone and remain available from
 onboarding and workspace management on hosted gateways.
 
+### Forwarding a port
+
+A forward opens a port on `127.0.0.1` of the machine it is started on and
+carries each connection to the same port in a run's container, or in your
+environment's. It needs the caller's machine, so the CLI and the local gateway
+can start one and the server gateway cannot:
+
+```sh
+aether forward <run-id> <port>               # a run's port on this machine
+aether forward terminal <port>               # a port in your environment
+aether forward <run-id> 5173 --local 8080    # on another local port
+```
+
+`run:<run-id>` names the same run as `<run-id>`. The command forwards until
+it is interrupted.
+
+In the dashboard, a run's **Browser** view lists the ports the run is
+listening on. On the local gateway each one has **Open on this computer**,
+which starts the forward and opens `http://localhost:<port>` in your own
+browser. **More > Forward a port…** forwards a port you type and lists the
+ports forwarded from that run, each a link beside **Stop**. A forward started
+in the dashboard lasts until it is stopped there or `aether gui` exits. On the
+server gateway the Browser view shows the `aether forward` command for the
+port instead.
+
+The server connects to the run from outside its container, so a forward
+reaches a server listening on every interface (`0.0.0.0` or `::`) and not one
+bound to `127.0.0.1` or `::1`. The dashboard names that address instead of
+starting a forward. The run's own Browser reaches both, because it runs
+inside the run's network. A CLI forward to a port that is closed or bound to
+loopback accepts each local connection and closes it.
+
 ### Agent OAuth logins
 
 When an agent prints an OAuth URL in the dashboard, click it. If the URL
@@ -248,6 +280,21 @@ the app; resize and stop require explicit control. `dev.terminal.list` names
 who started each terminal in `started_by` (`run_agent` or `member`).
 Development control changes
 use `dev.control.*` and reconnect, not interactive primary-agent attach.
+
+`dev.port.list` takes `{"run_id":"..."}` and returns the TCP ports listening
+in the run's network namespace, lowest first:
+
+```json
+{"ports":[{"port":5173,"address":"::1","process":"node"},
+          {"port":8000,"address":"0.0.0.0","process":"python3.12"}]}
+```
+
+`address` is what the port is bound to. `process` is the owner's executable
+name, absent when the run's user cannot see the owner. A port bound more than
+once is listed once, by its widest binding: every interface before one
+address before loopback. The server reads the list with one `/bin/sh` exec in
+the run container, which needs `grep` and `ls` there, so the run must be live
+and not paused. Run agents cannot call it; they are inside that namespace.
 
 Cancellation and authority revocation stop source work and close download
 readers before waiting for SSH status or close messages. A stalled SSH close
