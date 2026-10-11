@@ -767,8 +767,9 @@ func (s *serverNode) waitEnrolled() {
 // state is the server's edge agent state.
 func (s *serverNode) state() *edgeagent.State { return edgeagent.OpenState(s.dir) }
 
-// claimCode issues a claim code as `aether-server edge claim-code` does,
-// valid from issued for edgeproto.ClaimCodeTTL.
+// claimCode issues a claim code naming no admin, as `aether-server edge
+// claim-code` does on a server without members, valid from issued for
+// edgeproto.ClaimCodeTTL.
 func (s *serverNode) claimCode(t *testing.T, issued time.Time) string {
 	t.Helper()
 	code, _, err := s.state().IssueClaimCode(s.id, "", issued)

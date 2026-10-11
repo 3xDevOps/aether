@@ -874,7 +874,7 @@ go test -race ./internal/edge/edgetest/
 | `TestRevocationClosesLiveConnections` | Under both policies: member removal, device revocation, console revocation, `aether logout` and account deletion each close a live connection; the test logs how long each took |
 | `TestRevocationWhileTheEdgeIsDown` | Revocations made on the server while the edge is down hold once it is back |
 | `TestDeleteAccountAfterTransfer` | `server.owner.transfer`, then deletion: the server keeps its new owner and every member and role |
-| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; the console recovers it |
+| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; an admin's `member.identity.link` is refused while it has no owner; `claim-code --admin` recovers it |
 | `TestAccountDeletionReachesAnOfflineServer` | A deletion reaches a server that was offline when it next enrolls |
 | `TestLostAccountDeletionIsSentAgain` | A deletion dropped on its way to the server stays owed at the edge, is sent again when the server reconnects and is forgotten only on the server's answer; the identity and edge devices are then gone, the device key no longer connects directly, and a repeated notice changes nothing |
 | `TestConsoleRecoveryOfAnAdminWithoutAnAccount` | Under both policies: the only admin, reachable only through the edge, deletes their account; a claim code from `claim-code --admin` binds the account they sign in with again to the same member and approves the device; a code naming a collaborator claims nothing; no member or admin is added |
@@ -896,6 +896,8 @@ among them `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
 an invitation until one is approved, which creates the member and removes
 the others), `TestRevokedInvitationDropsItsWaitingDevices`,
 `TestMemberIdentityListAndRemove`,
+`TestInvitationsNeedAnEdgeOwner` (with the edge on and no owner, invitations
+and links are refused and nothing is stored), `TestServerEdge`,
 `TestClaimCodeForAnAdminRecoversThatAdmin`,
 `TestApprovalShowsWhomTheCodeAdmits` (a lookup names the member and role
 before approving, and an approval naming another device commits nothing),

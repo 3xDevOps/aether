@@ -300,20 +300,27 @@ claim this server with:
 ```
 
 The claim code lasts 30 minutes and five attempts; `sudo aether-server
-edge claim-code` prints a new one and is refused while the server has an
-owner. Start the server first: `aether link --claim <code>` opens an SSH
+edge claim-code` prints a new one for a server without members, and is
+refused while the server has an owner. Start the server first: `aether link --claim <code>` opens an SSH
 connection through the edge to the server the code names, and presents the
 code inside it once the server's host key has proved the id
 ([Claiming](#claiming)). The server compares the code in constant time,
 makes the claiming account its admin, and approves the claiming device
 under either policy, because the code came from the machine's console.
 
-A server that already has members is claimed by an admin who first links
-their edge account over SSH key or tailnet
-([teams.md](teams.md#linking-an-existing-member)), or by an admin the
-machine's administrator names ([Console recovery](#console-recovery)). Any
-other claim on such a server is refused with `server is already claimed`,
-so a claim never makes a new admin there.
+A server that already has members is claimed by an admin the machine's
+administrator names ([Console recovery](#console-recovery)). Without
+`--admin`, `claim-code` on such a server is refused and lists its admins:
+
+```
+the server has members, so a claim without --admin would be refused; name the admin to connect: aether-server edge claim-code --admin <member id>; the admins are: <member id> (<name>); an admin reaches the same result from the dashboard: Settings › Remote access › Connect my GitHub account, or aether edge connect
+```
+
+Any other claim on such a server is refused with `server is already
+claimed`, so a claim never makes a new admin there. While the edge is on
+and the server has no owner, `aether invite --github|--email` and `aether
+member link` are refused with `this server has no owner at its edge, so
+the edge relays nothing for it and keeps no directory`: claim it first.
 
 The edge records the owner only when the server reports the claim on its
 own control connection, within 60 seconds of the claim connection opening,
@@ -331,7 +338,7 @@ state](#transfer-and-the-ownerless-state)).
 | Command | Does |
 | --- | --- |
 | `sudo aether-server edge status` | Edge, access policy, server id, pinned edge key, owner or claim code state, connection state |
-| `sudo aether-server edge claim-code [--admin <member id>]` | Issue a new claim code, replacing the old one. Refused while the server has an owner. `--admin` names an existing admin the claim binds the claiming account to ([Console recovery](#console-recovery)) |
+| `sudo aether-server edge claim-code [--admin <member id>]` | Issue a new claim code, replacing the old one. Refused while the server has an owner, and without `--admin` while it has members. `--admin` names an existing admin the claim binds the claiming account to ([Console recovery](#console-recovery)) |
 | `sudo aether-server edge trust` | Fetch the edge's signing key from `GET <edge>/v1/edge`, show both fingerprints, and pin it after you type `yes` |
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner and the claim code, set `edge-url ""` |
 | `sudo aether-server device approve <code>` | Show the device a code names, the account it signed in as and the member and role approving admits it as, and approve it after you answer `y` |
@@ -730,19 +737,17 @@ repeated one (`TestTransferTakesOnlyItsOwnAnswer`).
 When the owner's identity leaves the server, because the member was
 removed or the account deleted, the server forgets the owner and reports
 itself ownerless. An ownerless server stays enrolled and keeps relaying for
-its members. Only a new claim code gives it an owner again:
+its members. Only a new claim code naming an admin gives it an owner
+again ([Console recovery](#console-recovery)):
 
 ```sh
-sudo aether-server edge claim-code      # on the machine
-aether member link --github <login>     # an admin, over SSH key or tailnet, when the admin's account is not linked
+sudo aether-server edge claim-code --admin <member id>   # on the machine
 aether login
 aether link --claim <code>
 ```
 
-A member who is not an admin cannot become owner this way: the claim is
-refused and makes no admin (`TestDeleteAccountLeavesTheServerOwnerless`).
-An admin with no SSH key or tailnet identity to link from is restored on
-the machine instead ([Console recovery](#console-recovery)).
+A code naming no admin makes no admin: a member who is not an admin
+claiming with one is refused (`TestDeleteAccountLeavesTheServerOwnerless`).
 
 ### Deleting an account
 
@@ -803,8 +808,9 @@ restore them ([Console recovery](#console-recovery)).
 ### Console recovery
 
 An admin who reached a server only through the edge, and lost that
-account, is restored on the machine. The server must have no owner, as
-after the owner deletes their account:
+account, is restored on the machine; so is an ownerless server that has
+members, for which `claim-code` without `--admin` prints no code. The
+server must have no owner, as after the owner deletes their account:
 
 ```sh
 sudo aether-server edge claim-code --admin <member id>

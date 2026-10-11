@@ -302,13 +302,34 @@ describe('onboarding link through an edge', () => {
     // before the code is sent.
     const form = screen.getByRole('form', { name: 'Add a server' })
     expect(form.textContent).toContain("Claiming makes octocat (GitHub) the server's admin.")
-    fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: ' abcdefgh-example ' } })
+    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: ' abcdefgh-example ' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect((await screen.findByText(/^Linked to/)).textContent).toBe(
       `Linked to ${serverID} through edge.example.test as Octo (admin).`,
     )
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-example', edge)
+  })
+
+  it('claims through the edge a pasted claim link names', async () => {
+    seed()
+    const other = 'https://edge.other.test'
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+      localEdgeClaim: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
+    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+      target: { value: `${other}/claim/${serverID}#secret` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
+
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-secret`, other)
   })
 
   it('makes the person choose the edge when signed in to more than one', async () => {
@@ -341,7 +362,7 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeServers).not.toHaveBeenCalledWith(edge)
 
     fireEvent.click(screen.getByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: 'abcdefgh-wrong' } })
+    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
     expect(await screen.findByText('claim code is wrong')).toBeDefined()
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-wrong', other)
@@ -364,10 +385,10 @@ describe('onboarding link through an edge', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
-    fireEvent.change(screen.getByLabelText('Claim code'), { target: { value: 'abcdefgh-wrong' } })
+    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: 'abcdefgh-wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect(await screen.findByText(refusal)).toBeDefined()
-    expect(screen.getByLabelText('Claim code')).toBeDefined()
+    expect(screen.getByLabelText('Claim code or link')).toBeDefined()
   })
 })

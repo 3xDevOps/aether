@@ -9,6 +9,7 @@ import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
+import { parseClaim } from '@/lib/claim-link'
 import { edgeHost, message, providerName } from '@/lib/format'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeServer } from '@/lib/types'
 
@@ -360,12 +361,13 @@ function ServerPicker({
             className="flex min-w-0 max-w-sm flex-col items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault()
-              void link(() => client.localEdgeClaim(code.trim(), edge))
+              const claim = parseClaim(code)
+              void link(() => client.localEdgeClaim(claim.code, claim.edge ?? edge))
             }}
           >
             <FormField
               className="self-stretch"
-              label="Claim code"
+              label="Claim code or link"
               help={<><span className="font-code">aether-server setup</span> printed it, valid for 30 minutes; <span className="font-code">sudo aether-server edge claim-code</span> prints a new one. Claiming makes {accountName(account)} the server&apos;s admin.</>}
             >
               <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />

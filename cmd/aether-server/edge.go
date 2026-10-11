@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -208,6 +209,8 @@ func edgeClaimCode(w io.Writer, dataDir string, admin domain.MemberID) error {
 		if m, err = recoveryAdmin(dataDir, admin); err != nil {
 			return err
 		}
+	} else if err = refuseClaimWithMembers(dataDir); err != nil {
+		return err
 	}
 	id, err := serverID(dataDir)
 	if err != nil {
@@ -240,13 +243,7 @@ func recoveryAdmin(dataDir string, id domain.MemberID) (*domain.Member, error) {
 		if lerr != nil {
 			return nil, lerr
 		}
-		var admins []string
-		for _, a := range members {
-			if a.Role == domain.RoleAdmin {
-				admins = append(admins, fmt.Sprintf("%s (%s)", a.ID, a.DisplayName))
-			}
-		}
-		return nil, fmt.Errorf("--admin: no member %s; the admins are: %s", id, strings.Join(admins, ", "))
+		return nil, fmt.Errorf("--admin: no member %s; the admins are: %s", id, adminsOf(members))
 	}
 	if err != nil {
 		return nil, err
@@ -255,6 +252,38 @@ func recoveryAdmin(dataDir string, id domain.MemberID) (*domain.Member, error) {
 		return nil, fmt.Errorf("--admin: member %s (%s) is %s; console recovery restores an admin and never raises a role", m.DisplayName, id, m.Role)
 	}
 	return m, nil
+}
+
+// refuseClaimWithMembers refuses a claim code without --admin on a server
+// that has members, so no code is issued that the server would refuse.
+func refuseClaimWithMembers(dataDir string) error {
+	path := server.StorePath(dataDir)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	db, err := store.Open(path)
+	if err != nil {
+		return err
+	}
+	defer db.Close() //nolint:errcheck // read only
+	members, err := db.ListMembers(context.Background())
+	if err != nil || len(members) == 0 {
+		return err
+	}
+	return fmt.Errorf("the server has members, so a claim without --admin would be refused; "+
+		"name the admin to connect: aether-server edge claim-code --admin <member id>; the admins are: %s; "+
+		"an admin reaches the same result from the dashboard: Settings › Remote access › Connect my GitHub account, or aether edge connect",
+		adminsOf(members))
+}
+
+func adminsOf(members []*domain.Member) string {
+	var admins []string
+	for _, a := range members {
+		if a.Role == domain.RoleAdmin {
+			admins = append(admins, fmt.Sprintf("%s (%s)", a.ID, a.DisplayName))
+		}
+	}
+	return strings.Join(admins, ", ")
 }
 
 func printClaimCode(w io.Writer, code string, expires time.Time) {

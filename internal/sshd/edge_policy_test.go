@@ -418,7 +418,13 @@ type fakeEdgeOwner struct {
 	mu     sync.Mutex
 	owners []edgeproto.Account
 	err    error
+	// owner is what Owner returns; nil is a server without one.
+	owner *edgeproto.Account
 }
+
+func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, nil }
+func (f *fakeEdgeOwner) Origin() string                     { return "https://edge.example" }
+func (f *fakeEdgeOwner) Connected() bool                    { return true }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 	f.mu.Lock()
@@ -484,7 +490,10 @@ func TestServerOwnerTransfer(t *testing.T) {
 
 // lockedEdgeOwner is an edge agent whose state lock a claim holds: the
 // transfer waits for claim, which needs registerMu, to finish.
-type lockedEdgeOwner struct{ claim func() error }
+type lockedEdgeOwner struct {
+	*fakeEdgeOwner
+	claim func() error
+}
 
 func (o lockedEdgeOwner) TransferOwner(edgeproto.Account) error {
 	done := make(chan error, 1)
@@ -504,7 +513,7 @@ func TestOwnerTransferDuringAClaim(t *testing.T) {
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	m := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
 	key := newSigner(t)
-	e.srv.SetEdgeOwner(lockedEdgeOwner{claim: func() error {
+	e.srv.SetEdgeOwner(lockedEdgeOwner{fakeEdgeOwner: &fakeEdgeOwner{}, claim: func() error {
 		_, err := e.srv.claimServer(context.Background(), claimGrantFor(octo, key), key.PublicKey(), "")
 		return err
 	}})

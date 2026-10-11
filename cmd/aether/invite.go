@@ -54,8 +54,13 @@ func runInvite(args []string) error {
 		}
 		inv := res.Invitation
 		fmt.Printf("invited %s as %s until %s (invitation %s)\n", inviteeOf(inv), inv.Role, inv.ExpiresAt, inv.ID)
-		fmt.Println("send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>.\n" +
-			"Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>")
+		var edge protocol.ServerEdgeResult
+		if err := c.Call(protocol.MethodServerEdge, struct{}{}, &edge); err != nil {
+			return fmt.Errorf("read the server id for invitation %s: %w", inv.ID, err)
+		}
+		fmt.Printf("server id: %s\n", edge.ServerID)
+		fmt.Printf("they run: aether login, then aether link %s\n", edge.ServerID)
+		fmt.Println("Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>")
 		return nil
 	})
 }

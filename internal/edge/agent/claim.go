@@ -65,6 +65,19 @@ func (a *Agent) TransferOwner(owner edgeproto.Account) error {
 	})
 }
 
+// Owner returns this server's owner at the edge, nil when it has none.
+func (a *Agent) Owner() (*edgeproto.Account, error) { return a.state.Owner() }
+
+// Origin is the edge's https origin.
+func (a *Agent) Origin() string { return a.origin }
+
+// Connected reports whether the control connection is enrolled.
+func (a *Agent) Connected() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.live != nil
+}
+
 // transfer reports owner as the new owner and waits for the edge's answer
 // to this report.
 func (s *session) transfer(owner edgeproto.Principal) error {

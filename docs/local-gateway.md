@@ -1403,9 +1403,11 @@ optional and, when given, must name that device),
 `member.invitation.revoke` (`{"invitation_id":"..."}`),
 `member.identity.link`, `member.identity.list` (`{"member_id":"..."}`),
 `member.identity.remove`
-(`{"member_id":"...","provider":"github","subject":"..."}`) and
-`server.owner.transfer` (`{"member_id":"..."}`). Their shapes are in
-`internal/protocol/identity.go`,
+(`{"member_id":"...","provider":"github","subject":"..."}`),
+`server.owner.transfer` (`{"member_id":"..."}`) and `server.edge`, which
+any member calls for the edge URL, server id, access policy, owner account
+or `null`, and whether the server is connected. Their shapes are in
+`internal/protocol/identity.go` and `internal/protocol/edge.go`,
 and [edge.md](edge.md) describes what each does.
 
 `workspace.selection` stores only the last selected workspace ID in

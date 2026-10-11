@@ -69,7 +69,8 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 
 // claim-code --admin names the existing admin a console recovery binds
 // the claiming account to. A member who is not an admin, or none, is
-// refused before a code exists.
+// refused before a code exists, and so is a code without --admin on a
+// server that has members.
 func TestClaimCodeForAnAdmin(t *testing.T) {
 	dir := t.TempDir()
 	db, err := storetest.Open(filepath.Join(dir, "aether.db"))
@@ -87,7 +88,12 @@ func TestClaimCodeForAnAdmin(t *testing.T) {
 	_ = db.Close()
 	state := edgeagent.OpenState(dir)
 	var out bytes.Buffer
-	for id, want := range map[domain.MemberID]string{viewer.ID: "is viewer; console recovery restores an admin", "nobody": "no member nobody; the admins are: " + string(admin.ID) + " (Ada)"} {
+	for id, want := range map[domain.MemberID]string{
+		viewer.ID: "is viewer; console recovery restores an admin",
+		"nobody":  "no member nobody; the admins are: " + string(admin.ID) + " (Ada)",
+		"": "the server has members, so a claim without --admin would be refused; name the admin to connect: aether-server edge claim-code --admin <member id>; " +
+			"the admins are: " + string(admin.ID) + " (Ada); an admin reaches the same result from the dashboard",
+	} {
 		if err := edgeClaimCode(&out, dir, id); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("claim-code --admin %s = %v, want %q", id, err, want)
 		}

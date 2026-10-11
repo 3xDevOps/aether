@@ -55,7 +55,8 @@ aether invite --email dana@example.com --role viewer
 
 ```
 invited <account> as collaborator until <expiry> (invitation <invitation-id>)
-send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>.
+server id: <server id>
+they run: aether login, then aether link <server id>
 Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>
 ```
 
@@ -111,8 +112,9 @@ aether member link --email dana@example.com
 That account then connects through the edge as the same member. Under
 `approved-devices` its first connection binds nothing: the device waits on
 the link, and the admin approves it from this SSH key or tailnet connection
-with `aether device approve <code>`, which binds the account. An admin does this before claiming, through the edge, a
-server that already has members. Only admins can link: nothing proves the caller holds the account
+with `aether device approve <code>`, which binds the account. While the
+edge is on and the server has no owner there, linking and inviting are
+refused until it is claimed ([edge.md](edge.md#server-id-and-claiming)). Only admins can link: nothing proves the caller holds the account
 they name. Any other member is invited by an admin with `aether invite
 --github` or `--email`, which creates a new member for that account.
 

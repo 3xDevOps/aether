@@ -797,6 +797,61 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 	e.mustRefuseEdge(t, octo, newSigner(t), "laptop", "not a member")
 }
 
+// Any member reads the server's edge, and it carries only what `aether
+// servers` shows: no claim code, token or key.
+func TestServerEdge(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	bobKey, _ := addMember(t, e, "Bob", domain.RoleViewer, false)
+	bob := controlAs(t, e, bobKey)
+	id := edgeproto.ServerID(e.srv.hostKey.PublicKey())
+
+	var off protocol.ServerEdgeResult
+	if err := bob.Call(protocol.MethodServerEdge, struct{}{}, &off); err != nil ||
+		off != (protocol.ServerEdgeResult{ServerID: id, AccessPolicy: string(edgeproto.PolicyApprovedDevices)}) {
+		t.Fatalf("server.edge with the edge off = %+v, %v", off, err)
+	}
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
+	var raw map[string]any
+	if err := bob.Call(protocol.MethodServerEdge, struct{}{}, &raw); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"edge_url": "https://edge.example", "server_id": id, "access_policy": "approved-devices", "connected": true,
+		"owner": map[string]any{"provider": "github", "subject": octo.Subject, "login": "octo", "email": ""}}
+	if fmt.Sprint(raw) != fmt.Sprint(want) {
+		t.Fatalf("server.edge = %v, want %v", raw, want)
+	}
+}
+
+// With the edge on and no owner there, invitations and links are refused
+// before anything is stored; with an owner they are made.
+func TestInvitationsNeedAnEdgeOwner(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	admin := controlClient(t, e)
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	calls := map[string]any{
+		protocol.MethodMemberInvitationCreate: protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"},
+		protocol.MethodMemberIdentityLink:     protocol.MemberIdentityLinkParams{Login: "octo-alt"},
+	}
+	var pe *protocol.Error
+	for method, params := range calls {
+		if err := admin.Call(method, params, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState ||
+			!strings.HasPrefix(pe.Message, method+": this server has no owner at its edge") || !strings.Contains(pe.Message, "aether edge connect") {
+			t.Fatalf("%s without an edge owner = %v, want CodeInvalidState", method, err)
+		}
+	}
+	if invs, _ := identities(t, e).ListInvitations(context.Background()); len(invs) != 0 {
+		t.Fatalf("refused calls stored %+v", invs)
+	}
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
+	for method, params := range calls {
+		if err := admin.Call(method, params, nil); err != nil {
+			t.Fatalf("%s with an edge owner: %v", method, err)
+		}
+	}
+}
+
 // A device key the server approved authenticates its member on the
 // direct path too. The direct path accepts approved device keys only
 // (rule 11), under either policy: it never asks the edge whether the

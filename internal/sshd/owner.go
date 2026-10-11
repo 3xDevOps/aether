@@ -23,6 +23,12 @@ type EdgeOwner interface {
 	// the edge. It refuses when the server has no owner: only a claim
 	// code from the machine's console gives it one.
 	TransferOwner(owner edgeproto.Account) error
+	// Owner returns the server's owner at its edge, nil when it has none.
+	Owner() (*edgeproto.Account, error)
+	// Origin is the edge's https origin.
+	Origin() string
+	// Connected reports whether the control connection to the edge is up.
+	Connected() bool
 }
 
 // SetEdgeOwner connects the edge agent that records ownership. Call it

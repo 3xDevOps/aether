@@ -87,9 +87,9 @@ func TestDeleteAccountAfterTransfer(t *testing.T) {
 
 // The owner deletes their account without transferring: the server
 // stays enrolled and becomes ownerless, keeps every member, role and
-// workspace, and gains no administrator. Its administrator recovers it
-// on the machine: an admin links the account again and a new claim code
-// claims it.
+// workspace, and gains no administrator. An admin's link is refused
+// while it has no owner. Its administrator recovers it on the machine: a
+// claim code naming the admin claims it.
 func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 	t.Parallel()
 	for _, policy := range policies {
@@ -132,7 +132,8 @@ func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 			h.mustDial(da, a)
 
 			// A member who is not an admin cannot take the ownerless server
-			// with a code: the claim makes no new admin.
+			// with a code naming no admin, such as one issued before it had
+			// members: the claim makes no new admin.
 			code := a.claimCode(t, time.Now())
 			_, err := h.claim(da, code)
 			wantClaimRefused(t, "a collaborator's claim of the ownerless server", err, edgeproto.RefusalClaimed)
@@ -140,14 +141,16 @@ func TestDeleteAccountLeavesTheServerOwnerless(t *testing.T) {
 				t.Fatalf("admins after the refused claim = %v", got.admins())
 			}
 
-			// Recovery on the machine: carol's member, on the tailnet
-			// dashboard, links her account again, and a new code claims.
+			// Carol's member, on the tailnet dashboard, cannot link her
+			// account again: the edge keeps no directory for the server.
+			var pe *protocol.Error
 			if err = a.local(t, carolID, protocol.MethodMemberIdentityLink,
-				protocol.MemberIdentityLinkParams{Login: carol.Login}, nil); err != nil {
-				t.Fatalf("link carol's account: %v", err)
+				protocol.MemberIdentityLinkParams{Login: carol.Login}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState {
+				t.Fatalf("link carol's account on the ownerless server: %v, want CodeInvalidState", err)
 			}
+			// Recovery on the machine: a code naming carol's member claims.
 			ca2 := h.login(carol)[0]
-			res, err := h.claim(ca2, a.claimCode(t, time.Now()))
+			res, err := h.claim(ca2, a.recoveryCode(t, carolID))
 			if err != nil || res.Info.Member.ID != string(carolID) || res.Info.Member.Role != "admin" {
 				t.Fatalf("recovery claim: %+v %v", res.Info.Member, err)
 			}

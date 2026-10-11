@@ -342,6 +342,9 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberInvitationCreate, false); perr != nil {
 		return nil, perr
 	}
+	if perr := s.requireEdgeOwner(protocol.MethodMemberInvitationCreate); perr != nil {
+		return nil, perr
+	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {
 		return nil, perr
@@ -370,6 +373,9 @@ func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID,
 		return nil, perr
 	}
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, false); perr != nil {
+		return nil, perr
+	}
+	if perr := s.requireEdgeOwner(protocol.MethodMemberIdentityLink); perr != nil {
 		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()
