@@ -649,7 +649,7 @@ export async function applyEvent(
       // server-computed attention count even for a room never opened.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
-      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string }
+      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
       if (
         runID &&
         (payload.kind === 'question' || payload.kind === 'reply')
@@ -662,7 +662,13 @@ export async function applyEvent(
           return false
         }
       }
-      if (runID && workspaceID && store.getState().roomMessages[runID]) {
+      const held = runID
+        ? store.getState().roomMessages[runID]?.find((message) => message.id === payload.message_id)
+        : undefined
+      // A steer request's agent delivery changes without its state, and the
+      // payload does not carry it.
+      const current = held !== undefined && held.kind !== 'steer_request' && held.state === payload.state
+      if (runID && workspaceID && store.getState().roomMessages[runID] && !current) {
         await reconcileRoomHistory(store, client, workspaceID, runID, payload.message_id)
           .then(() => store.getState().setRoomError(runID))
           .catch((err) => {

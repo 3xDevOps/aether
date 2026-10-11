@@ -1491,9 +1491,12 @@ and End.
 
 The agent's attach lives in `useAgentTerminal` at frame level, so switching
 views never reattaches, and `useRunRoom` reads the newest room page once per
-frame, then follows `workspace.room_message` events; after the event stream
-reconnects it reads back to the cached history, as one page or more, so a gap
-is closed. It polls presence every ten seconds with an abortable 15-second
+frame, then follows `workspace.room_message` events. An event naming a
+message the store already holds in the event's `state`, such as the author's
+own post, reads nothing, unless that message is a steering request, whose
+agent delivery the payload does not carry. After the event stream reconnects
+it reads back to the cached history, as one page or more, so a gap is
+closed. It polls presence every ten seconds with an abortable 15-second
 deadline.
 
 ### Header

@@ -1279,6 +1279,32 @@ describe('applyEvent', () => {
     expect(client.runGet).toHaveBeenCalledTimes(2)
   })
 
+  it('skips the room re-list for a message the author already stored', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().initializeRoomPagination('run_1')
+    store.getState().setRoomPage('run_1', [roomMessage({ id: 'mine', kind: 'question' })])
+    const client = fakeApi({
+      runGet: vi.fn(async () => run({ unanswered_questions: 1 })),
+      runRoomList: vi.fn(),
+    })
+    const event: Event = {
+      id: 'room-own-post',
+      seq: 8,
+      time: '2026-08-14T11:00:00Z',
+      workspace_id: workspace.id,
+      run_id: 'run_1',
+      actor_id: alice.id,
+      type: 'workspace.room_message',
+      payload: { message_id: 'mine', kind: 'question', state: 'sent' },
+    }
+
+    expect(await applyEvent(store, event, client)).toBe(true)
+    expect(client.runRoomList).not.toHaveBeenCalled()
+    expect(store.getState().runs.run_1.unanswered_questions).toBe(1)
+    expect(store.getState().lastSeq).toBe(8)
+  })
+
   it('keeps a question event unresolved when its attention refresh fails', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
