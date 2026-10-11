@@ -27,6 +27,11 @@ type execAttachment struct {
 	closeOnce sync.Once
 }
 
+// losslessExecBuffer is how much one stream of a lossless execution holds
+// before its command blocks. It only passes bytes along, and a caller may
+// hold many such streams open without reading them.
+const losslessExecBuffer = 256 << 10
+
 func newExecAttachment(cli *client.Client, id string, tty, lossless bool, resp client.HijackedResponse) *execAttachment {
 	a := &execAttachment{
 		cli:    cli,
@@ -42,6 +47,7 @@ func newExecAttachment(cli *client.Client, id string, tty, lossless bool, resp c
 	}
 	if lossless {
 		a.stderr = newLosslessStreamBuffer()
+		a.stdout.limit, a.stderr.limit = losslessExecBuffer, losslessExecBuffer
 	}
 	go func() {
 		var err error

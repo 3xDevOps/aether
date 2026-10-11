@@ -786,12 +786,14 @@ type streamBuffer struct {
 	cond     *sync.Cond
 	buf      bytes.Buffer
 	lossless bool
-	closed   bool
-	err      error
+	// limit is where a lossless buffer blocks its writer.
+	limit  int
+	closed bool
+	err    error
 }
 
 func newStreamBuffer() *streamBuffer {
-	b := &streamBuffer{}
+	b := &streamBuffer{limit: maxStreamBuffer}
 	b.cond = sync.NewCond(&b.mu)
 	return b
 }
@@ -805,7 +807,7 @@ func newLosslessStreamBuffer() *streamBuffer {
 func (b *streamBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for b.lossless && !b.closed && b.buf.Len() >= maxStreamBuffer {
+	for b.lossless && !b.closed && b.buf.Len() >= b.limit {
 		b.cond.Wait()
 	}
 	if b.closed {

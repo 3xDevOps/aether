@@ -190,7 +190,16 @@ func TestLosslessExecKeepsStderrAndTerminalOutput(t *testing.T) {
 				_ = writer.Close()
 			}()
 			time.Sleep(200 * time.Millisecond)
-			n, err := io.Copy(io.Discard, tc.stream(attachment))
+			// Unread, the stream holds its small cap and one more
+			// write, not the megabytes a lossy stream retains.
+			held := tc.stream(attachment).(*streamBuffer)
+			held.mu.Lock()
+			buffered := held.buf.Len()
+			held.mu.Unlock()
+			if buffered > losslessExecBuffer+64<<10 {
+				t.Fatalf("an unread lossless stream holds %d bytes, want about %d", buffered, losslessExecBuffer)
+			}
+			n, err := io.Copy(io.Discard, held)
 			if err != nil || n != total {
 				t.Fatalf("read %d bytes (%v), want %d", n, err, total)
 			}

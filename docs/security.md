@@ -1005,7 +1005,9 @@ one.
   run until they exit or the run's container stops.
 - **Bounded.** A run takes 16 SSH connections; a connection takes 10
   sessions and 64 forwarded connections. Every process runs inside the
-  run's container, under its CPU, memory and process limits.
+  run's container, under its CPU, memory and process limits. Output is
+  never dropped: the server holds at most 256 KiB of each stream a client
+  has not read, and past that the command blocks.
 - **Not recorded.** An SSH session has no transcript and no control lease.
   Teammates see that a member connected, not what they did.
 
