@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 import { approveRequest, targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
+import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import { stateContextOf, type RunTree, type SidebarGroup, type SwarmSummary } from '@/store/selectors'
 import type { Route } from '@/store/ui'
@@ -163,6 +163,7 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         {group.key === 'working' && <MineToggle />}
       </div>
       <ul id={listID} hidden={!expanded}>
+        {expanded && group.key === 'needs-you' && <DevicesRow />}
         {expanded && group.runs.map((tree) => (
           <li key={tree.run.id}>
             <RunRowItem tree={tree} />
@@ -179,6 +180,20 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         ))}
       </ul>
     </div>
+  )
+}
+
+function DevicesRow() {
+  const devices = useDeviceNeeds()
+  const navigate = useStore((s) => s.navigate)
+  if (devices.length === 0) return null
+  const waiting = devices.length === 1 ? devices[0].device.label : `${devices.length} devices`
+  return (
+    <li>
+      <ListRow data-run-row="" leading={<StatusDot tone="needs-you" />} onClick={() => navigate('board', {})}>
+        {waiting} waiting for approval
+      </ListRow>
+    </li>
   )
 }
 

@@ -76,8 +76,8 @@ func TestApproveDeviceByID(t *testing.T) {
 	} {
 		select {
 		case ev := <-sub.Events():
-			if ev.Payload != want || ev.WorkspaceID != e.ws.ID {
-				t.Fatalf("member.device = %+v in %s, want %+v in %s", ev.Payload, ev.WorkspaceID, want, e.ws.ID)
+			if ev.Payload != want || ev.WorkspaceID != events.ServerScope {
+				t.Fatalf("member.device = %+v in %s, want %+v in %s", ev.Payload, ev.WorkspaceID, want, events.ServerScope)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("no member.device event for %+v", want)

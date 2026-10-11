@@ -1,6 +1,6 @@
 import type { Api } from '@/lib/api'
 import type { Device } from '@/lib/types'
-import type { RootStore } from '@/store'
+import type { RootState, RootStore } from '@/store'
 import { capability } from '@/store/hooks'
 import type { SliceCreator } from '@/store/slice'
 
@@ -15,11 +15,22 @@ export const createDevicesSlice: SliceCreator<DevicesSlice> = (set) => ({
   setDevices: (devices) => set({ devices }),
 })
 
+const reads = new WeakMap<RootStore, number>()
+
+const listsDevices = (s: RootState) =>
+  s.info?.member.role === 'admin' && capability(s.capabilities).hasMethod('member.device.list')
+
+/** Only the latest read lands, and only for the viewer it was made for. */
 export async function loadDevices(store: RootStore, client: Api): Promise<void> {
+  const read = (reads.get(store) ?? 0) + 1
+  reads.set(store, read)
   const s = store.getState()
-  if (s.info?.member.role !== 'admin' || !capability(s.capabilities).hasMethod('member.device.list')) {
+  if (!listsDevices(s)) {
     s.setDevices([])
     return
   }
-  store.getState().setDevices(await client.memberDeviceList())
+  const devices = await client.memberDeviceList()
+  const now = store.getState()
+  if (reads.get(store) !== read || now.identityKey !== s.identityKey) return
+  now.setDevices(listsDevices(now) ? devices : [])
 }

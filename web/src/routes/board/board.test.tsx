@@ -603,4 +603,13 @@ describe('map view', () => {
     expect(screen.queryByRole('button', { name: 'other workspace' })).toBeNull()
     expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   })
+  it('shows a waiting device above the map', async () => {
+    seed([working])
+    useStore.setState({ devices: [pendingDevice()] })
+    renderBoard()
+    await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
+    const waiting = screen.getByRole('region', { name: 'Devices waiting for approval' })
+    expect(within(waiting).getByText('laptop (github mallory) wants to join as collaborator')).toBeDefined()
+    expect(within(waiting).getByRole('button', { name: 'Approve' })).toBeDefined()
+  })
 })

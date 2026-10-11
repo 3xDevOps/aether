@@ -498,7 +498,7 @@ func versionString(parts []int) string {
 func listsSigningKey(out, fingerprint string) bool {
 	for line := range strings.Lines(out) {
 		fields := strings.Split(strings.TrimSpace(line), "\t")
-		if len(fields) != 5 {
+		if len(fields) != 5 || fields[4] != "signing" {
 			continue
 		}
 		if listed, err := signingFingerprint(fields[1]); err == nil && listed == fingerprint {

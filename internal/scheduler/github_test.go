@@ -305,7 +305,8 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
-			return 0, "someone else\tssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAF8pjArJbfyChr37VkM1hXmEnJQ0KYQFLLae1N9MIjs\t2026-01-01T00:00:00Z\t9\tsigning\n", nil
+			return 0, "someone else\tssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAF8pjArJbfyChr37VkM1hXmEnJQ0KYQFLLae1N9MIjs\t2026-01-01T00:00:00Z\t9\tsigning\n" +
+				"aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t10\tauthentication\n", nil
 		}
 		return 0, "", nil
 	}

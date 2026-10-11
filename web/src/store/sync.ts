@@ -324,8 +324,9 @@ export async function applyEvent(
   }
 
   // No workspace.created event exists; without this a new workspace's runs
-  // would be stored but rendered nowhere.
-  if (ev.type !== 'workspace.deleted' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  // would be stored but rendered nowhere. Device events carry the server
+  // scope, which names no workspace.
+  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -421,7 +422,6 @@ export async function applyEvent(
       break
     }
     case 'member.device':
-      // Published once per workspace, so a burst of copies costs one read.
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
       break
     case 'run.status': {
@@ -919,8 +919,14 @@ export function connect(store: RootStore, client: Api = api): () => void {
 
   // A frozen tab stops the hydration retry timer, and reopened sockets cannot
   // restart it: with a cursor to replay from they go live without re-fetching.
+  // Approvals made with `aether-server device approve` publish nothing, and
+  // a read failed on an event is not retried.
   const stopWake = onWake(() => {
-    if (signal.aborted || !retryTimer) return
+    if (signal.aborted) return
+    if (!retryTimer) {
+      coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      return
+    }
     clearTimeout(retryTimer)
     retryTimer = null
     attempts = 0

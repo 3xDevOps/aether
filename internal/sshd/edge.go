@@ -289,21 +289,11 @@ func (s *Server) approvalRefusal(ctx context.Context, ids store.IdentityStore, d
 		Fingerprint: fingerprintOf(dev.Credential), Invitation: string(dev.Invitation),
 		Account:    accountName(edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Login: dev.Login, Email: dev.Email}),
 		Registered: dev.Status == domain.DeviceRegistered, Direct: !relayed, ApprovalCode: dev.ApprovalCode}
-	admits := dev.Member
-	if dev.Invitation != "" {
-		inv, err := ids.GetInvitation(ctx, dev.Invitation)
-		if err != nil {
-			return nil, fmt.Errorf("sshd: device %s: invitation %s: %w", dev.ID, dev.Invitation, err)
-		}
-		admits, r.Role = inv.Member, string(inv.Role)
+	member, name, role, err := s.admitsAs(ctx, ids, dev)
+	if err != nil {
+		return nil, fmt.Errorf("sshd: device %s: %w", dev.ID, err)
 	}
-	if admits != "" {
-		m, err := s.cfg.Store.GetMember(ctx, admits)
-		if err != nil {
-			return nil, fmt.Errorf("sshd: device %s: member %s: %w", dev.ID, admits, err)
-		}
-		r.MemberID, r.MemberName, r.Role = string(m.ID), m.DisplayName, string(m.Role)
-	}
+	r.MemberID, r.MemberName, r.Role = string(member), name, string(role)
 	return r, nil
 }
 

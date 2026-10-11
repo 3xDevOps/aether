@@ -10,6 +10,7 @@ import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
+import { DeviceCard } from '@/routes/board/device-card'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
@@ -49,7 +50,16 @@ export function Board() {
 
   let body: ReactNode
   if (view === 'map') {
-    body = <BoardMap agentNames={agentNames} />
+    body = (
+      <>
+        {devices.length > 0 && (
+          <div aria-label="Devices waiting for approval" role="region" className="grid max-h-[40%] shrink-0 grid-cols-1 gap-2 overflow-y-auto border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
+            {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
+          </div>
+        )}
+        <BoardMap agentNames={agentNames} />
+      </>
+    )
   } else if (unreachable && total === 0) {
     body = (
       <div className="p-4">

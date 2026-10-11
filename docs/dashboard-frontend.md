@@ -1069,8 +1069,10 @@ first that applies:
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin. The store's `devices` come from
-`member.device.list`, read at hydration and again on each `member.device`
-event:
+`member.device.list`, read at hydration, on each `member.device` event, and
+whenever the tab returns to the foreground or the browser comes back online,
+which catches a failed read and an approval made with
+`sudo aether-server device approve`, which publishes no event:
 
 | Device | Who it needs | Reason line | Actions |
 | --- | --- | --- | --- |
@@ -1079,8 +1081,9 @@ event:
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. Device cards list before
-runs in the board's Needs you, and the sidebar's Needs you count includes
-them.
+runs in the board's Needs you and above the Map. The sidebar's Needs you
+counts them and shows one row, "laptop waiting for approval" or "2 devices
+waiting for approval", that opens the board.
 
 A condition that applies to someone else leaves the run Working with "Waiting
 for Alice". A worker in a running swarm with a live integrator counts only for
