@@ -94,7 +94,6 @@ func (c *Conn) verified(key ssh.PublicKey) bool {
 	return c.hostKey != nil && bytes.Equal(key.Marshal(), c.hostKey.Marshal())
 }
 
-// SSHOption is one ssh_config keyword and its value.
 type SSHOption struct{ Key, Value string }
 
 // RunSSHOptions are the ssh options under which a <run>.aether host reaches
@@ -154,7 +153,6 @@ func sshConfigPath(path string) (string, error) {
 	return `"` + path + `"`, nil
 }
 
-// SSHConfigResult is what InstallSSHConfig wrote.
 type SSHConfigResult struct {
 	// Hosts is the file holding the Host block; Config is the user's own
 	// ssh config, which includes it.

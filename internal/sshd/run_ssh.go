@@ -220,7 +220,6 @@ func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID, record fu
 	}, nil
 }
 
-// runSSHConn is one nested SSH connection into a run.
 type runSSHConn struct {
 	s         *Server
 	svc       RunSSHService
