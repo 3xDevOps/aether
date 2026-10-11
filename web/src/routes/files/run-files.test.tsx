@@ -99,6 +99,19 @@ describe('a run’s Files view', () => {
     expect(await screen.findByRole('textbox', { name: 'Edit README.md' })).toBeDefined()
   })
 
+  it('shows the file a link names when the view mounts with another file already open', async () => {
+    const client = checkout()
+    act(() => openInFiles('run_1', { path: 'README.md' }))
+    const first = render(<RunFiles run={run()} shown client={client} />)
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    first.unmount()
+
+    act(() => openInFiles('run_1', { path: 'src/app.ts', line: 2 }))
+    render(<RunFiles run={run()} shown client={client} />)
+    await screen.findByRole('textbox', { name: 'Edit src/app.ts' })
+    await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe('two'))
+  })
+
   it('says a file the member may not change is read-only', async () => {
     act(() => openInFiles('run_1', { path: 'README.md' }))
     render(<RunFiles run={run()} shown client={checkout(false)} />)

@@ -75,7 +75,8 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
   useEffect(() => {
     if (!key) return
     lastSelected.set(run.id, key)
-    setActiveFileKey(key)
+    const { activeFileKey: current, fileTabs: open } = useStore.getState()
+    if (!open.some((tab) => tab.kind === 'workspace' && tab.runID === run.id && tab.key === current)) setActiveFileKey(key)
   }, [key, run.id, setActiveFileKey])
   const narrow = mobile || (size.width > 0 && size.width < besideWidth)
   const editor = selection && (
