@@ -187,7 +187,12 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     setPRReview({ target: { ...target }, expected, result })
     if (!result.pull_request || result.error) return
     setUncertain(false)
-    void trackPullRequest(run, target, client)
+    void follow(target)
+  }
+
+  // Only a destination the member chose is pinned: the checkout's own is found again as the checkout moves.
+  function follow(found: RunPRTarget) {
+    return pushEdit || targetEdit ? trackPullRequest(run, found, client) : refreshPullRequest(run, client)
   }
 
   async function createPR() {
@@ -206,7 +211,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
         identity: result.identity, account_member_id: result.account_member_id,
         pull_request: result.pull_request, output: result.output, error: result.error, actual: result.actual,
       } })
-      void trackPullRequest(run, currentPRReview.target, client)
+      void follow(currentPRReview.target)
     }
   }
 

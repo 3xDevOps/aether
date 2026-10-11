@@ -1481,8 +1481,9 @@ wins over running, and running over passed. A row under 480px wide keeps the
 dot and the failing count. The server stores no pull request, so the
 dashboard reads it (`routes/diff/publish-pr.ts`): `run.pr.feedback` for the
 pull request from the checkout's branch on its GitHub remote into the run's
-base branch, the same target the Publish dialog fills in, or the one last
-published to from that dialog. It asks once when the run page opens, every 60
+base branch, the same target the Publish dialog fills in, or one a member
+typed into that dialog and found or opened a pull request at. It asks once
+when the run page opens, every 60
 seconds while the page is visible and after each push or creation in the
 dialog, and re-reads `run.git.status` only when the answer says the branch or
 HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
