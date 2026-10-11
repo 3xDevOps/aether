@@ -225,8 +225,10 @@ regions use `min-h-0` and vertical overflow.
 
 The run Browser view has one `bg-chrome` toolbar row over the page: ghost
 icon buttons for **Back**, **Forward** and **Reload**, the address field,
-**Viewport**, the beside-or-tab toggle and **Browser actions**, then who is
-driving. A second page adds a row of small tab buttons. Messages are laid
+**Ports** with its count, **Viewport**, the beside-or-tab toggle and
+**Browser actions**, then who is driving. A listening port is a `secondary`
+button, its address in `font-code` and its process name muted, with a ghost
+icon button beside it. A second page adds a row of small tab buttons. Messages are laid
 over the top of the page on a floating surface and never take a row. A page
 that does not fill its pane is centred on `bg-chrome` and never enlarged, and
 the page that has the keyboard wears a 1px inset accent outline. Beside

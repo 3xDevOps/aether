@@ -793,10 +793,23 @@ read-only by default; typing into a run needs the `steer` capability, which as
 the owner you have.
 
 **Browser** is a real Chromium that the server runs beside the run, so
-`localhost` there is the run's own app. Type `localhost:3000` in its address
-bar and press Enter; nothing has to be forwarded to your machine. A
-`localhost` link printed in the run's terminal opens there too. The agent can
-drive the same page, and the toolbar says so when it does.
+`localhost` there is the run's own app. It lists the ports the run is
+listening on: click `localhost:5173` to open it, or type any address and
+press Enter. Nothing has to be forwarded to your machine. A `localhost` link
+printed in the run's terminal opens there too. The agent can drive the same
+page, and the toolbar says so when it does.
+
+To use your own browser instead, click **Open on this computer** beside the
+port. It forwards the port and opens `http://localhost:5173` on your machine.
+That needs `aether gui` or the desktop app; the dashboard your server hosts
+shows the command to run instead:
+
+```sh
+aether forward <run-id> 5173
+```
+
+A forward reaches a server listening on `0.0.0.0`, not one bound to
+`127.0.0.1`; the Browser view reaches both.
 
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.

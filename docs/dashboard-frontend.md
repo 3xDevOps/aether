@@ -1241,6 +1241,14 @@ reports gateway success or its real refusal in both the run's More menu and
 the palette. Deletion removes the confirmed run locally; archive, restore,
 protect and free do not overwrite the server's events with an RPC response.
 
+- **Forward a port…** opens `forward-dialog.tsx` over the local `forward.*`
+  verbs. It forwards the port typed to the same port on this machine and
+  lists the ports forwarded from that run, each a link to
+  `http://localhost:<port>` beside **Stop**. For a run it reads
+  `dev.port.list` first: a port bound to loopback is refused with the address
+  it is bound to, and a port nothing listens on is forwarded with a note that
+  its link works once something does. The Environment page's **Forward port**
+  opens the same dialog for the environment, whose ports no method lists.
 - **Archive / Restore** are gated on `isArchivable(status)`
   (`src/store/runs.ts`; `merged`, `abandoned`, `failed`, `interrupted`, never
   `completed`) plus the kill permission and the `run.archive` capability;
@@ -2377,6 +2385,9 @@ dev.browser.status: scheduler: the run has no live environment: the run is provi
   their shortcuts. Reload is a spinner while a navigation this tab started is
   in flight.
 - The **Address** field (`address-bar.tsx`).
+- **Ports** (`ports.tsx`): how many ports the run is listening on, with their
+  list behind it. A pane narrower than 480px has no room for it; the address
+  field and the empty pane list the ports there.
 - **Keyboard**, on a coarse pointer only: it opens the phone's keyboard for
   the page, which a tap on the page deliberately does not.
 - **Viewport**, a menu: **Fit the pane**, **Desktop** 1280 × 800, **Tablet**
@@ -2395,8 +2406,10 @@ page for the agent and every other viewer. **New page** opens a blank page
 and puts the caret in the address field.
 
 Under the chrome there is only the page. Before one is open the pane reads
-**Open a page** and the address field has focus, except on a touch device and
-when the Browser is docked beside another view. A message about an action,
+**Open a page** over the ports the run is listening on, each a button that
+opens it (see Ports below), and the address field has focus, except on a
+touch device and when the Browser is docked beside another view. A message
+about an action,
 such as a failed navigation or who is driving, is laid over the top of the
 page with a **Dismiss** button, so it never changes the page's size.
 
@@ -2417,6 +2430,54 @@ message and leaves the typed address in the field:
 ```
 dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/
 ```
+
+With a page open, the focused field is a `combobox` that offers the listening
+ports whose address contains what is typed, in a `listbox` under it. Up and
+Down choose one, Enter or a press opens it, and Escape drops the offers with
+the draft. With no page open the pane already lists them.
+
+**Ports.** `usePorts` (`ports.tsx`) reads `dev.port.list` when the view opens
+and every three seconds while the view is shown, the browser tab is visible
+and the run is live. Nothing is pushed, and a server without the method gets
+none of this. A port reads as the address that reaches it from inside the run
+and the name of the executable listening, as in `localhost:5173 node`:
+`localhost` for a port bound to every interface or to loopback, the address
+itself for any other binding (`portAddress` in `src/lib/ports.ts`). The ports
+are listed before a page is open, behind **Ports** in the toolbar, and under
+the address field. Picking one opens it like an address typed and entered:
+the first interaction takes the lease, and the keyboard goes to the page once
+it is open. With nothing listening the pane says what to do:
+
+```
+Nothing in this run is listening on a port yet. Start a server in the Terminal, or ask the agent to, and it appears here.
+```
+
+A read that fails shows the server's error where the list would be.
+
+Each listed port also has **Open on this computer** on the local gateway and
+in the desktop app. It reads the ports again, starts a forward from
+`127.0.0.1:<port>` on this machine (`forward.start`) and opens
+`http://localhost:<port>` in the person's own browser (`openOnThisComputer`).
+The tab is opened before the first request, so a popup blocker lets it
+through, and closed again when nothing was forwarded. The row then links the
+forwarded address and says where to stop it. A forward cannot reach a port
+bound to loopback ([local-gateway.md](local-gateway.md#forwarding-a-port)),
+so none is started and the row names the address:
+
+```
+Port 5173 is bound to ::1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.
+```
+
+A port that closed since the last read answers "Nothing in the run is
+listening on port 5173.", and a forward the gateway refuses shows its error:
+
+```
+localops: listen on 127.0.0.1:8000: bind: address already in use
+```
+
+The server-hosted dashboard has no machine of the viewer's to open a port on.
+There the button is **Open on your own computer**, and it shows
+`aether forward <run-id> <port>` beside **Copy the command**.
 
 **Control.** Input to the page is serialized by one lease per run browser
 (`dev.control.*`, surface `browser`). The server fences every mutation by the
@@ -4439,7 +4500,9 @@ address field and its queue, shortcuts, fit-to-pane and presets, the page
 strip, close/reset identity fencing and raw refusals; `surface.test.tsx`
 covers input queued across acquiring a lease, watching, wheel input, stream
 reconnection and its failure; `address.test.ts` covers the
-scheme rules; and `src/routes/run/frame.test.tsx` covers when Browser is
+scheme rules; `ports.test.tsx` covers the port list in the empty pane, the
+toolbar and the address field, its polling, and opening a port on this
+computer or showing the command for it; and `src/routes/run/frame.test.tsx` covers when Browser is
 offered, the docked layout and run-local terminal links.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
 `src/routes/settings/notifications.test.tsx` covers every state of the
