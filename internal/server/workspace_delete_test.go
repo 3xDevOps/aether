@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -81,6 +82,14 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if _, err := s.ssh.Local(member.ID).Call(ctx, protocol.MethodWorkspaceMirrorConfigure, mirrorParams); err != nil {
 		t.Fatal(err)
 	}
+	secretParams, _ := json.Marshal(protocol.WorkspaceEnvironmentSetParams{WorkspaceID: string(ws.ID), Set: []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "token", Secret: true}}})
+	if _, err := s.ssh.Local(member.ID).Call(ctx, protocol.MethodWorkspaceEnvironmentSet, secretParams); err != nil {
+		t.Fatal(err)
+	}
+	secretFile := filepath.Join(root, "workspace-secrets", string(ws.ID)+".json")
+	if _, err := os.Stat(secretFile); err != nil {
+		t.Fatalf("workspace secret file: %v", err)
+	}
 	candidateID := "finished-candidate"
 	candidate, _ := json.Marshal(protocol.Candidate{CandidateID: candidateID, WorkspaceID: string(ws.ID), State: protocol.CandidateUnavailable})
 	if err := s.db.CreateIntegrationCandidate(ctx, &store.IntegrationCandidate{ID: candidateID, WorkspaceID: ws.ID, ActorKey: "member:" + string(member.ID), IdempotencyKey: "prepare", Digest: "digest", State: "unavailable", Payload: candidate, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -130,7 +139,7 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if _, err := s.db.GetWorkspaceBudget(ctx, ws.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted budget: %v", err)
 	}
-	removed = append(removed, filepath.Join(root, "repos", string(ws.ID)+".git"), filepath.Join(root, "mirrors", string(ws.ID)))
+	removed = append(removed, filepath.Join(root, "repos", string(ws.ID)+".git"), filepath.Join(root, "mirrors", string(ws.ID)), secretFile)
 	for _, path := range removed {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("deleted artifact %s: %v", path, err)
@@ -214,6 +223,48 @@ func TestWorkspaceDeleteCleanupFailureRetainsRetryableWorkspace(t *testing.T) {
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+}
+
+func TestWorkspaceDeleteThatLeavesTheRowKeepsItsSecrets(t *testing.T) {
+	t.Parallel()
+	s, root, member, ws := newWorkspaceDeletionServer(t)
+	params, err := json.Marshal(protocol.WorkspaceEnvironmentSetParams{
+		WorkspaceID: string(ws.ID),
+		Set:         []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "token", Secret: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := s.ssh.Local(member.ID).Call(t.Context(), protocol.MethodWorkspaceEnvironmentSet, params); perr != nil {
+		t.Fatal(perr)
+	}
+	fault, err := sql.Open("sqlite", filepath.Join(root, "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fault.Close() })
+	if _, err = fault.ExecContext(t.Context(), `CREATE TRIGGER keep_workspace BEFORE DELETE ON workspaces BEGIN SELECT RAISE(ABORT, 'injected: the row stays'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	if perr := callWorkspaceDeletion(t, s, member.ID, ws.ID); perr == nil || !strings.Contains(perr.Message, "the row stays") {
+		t.Fatalf("deletion with the row refused = %v", perr)
+	}
+	secretFile := filepath.Join(root, "workspace-secrets", string(ws.ID)+".json")
+	file, err := os.ReadFile(secretFile)
+	if err != nil || !strings.Contains(string(file), "token") {
+		t.Fatalf("secret file after the failed deletion = %q, %v, want the secret kept", file, err)
+	}
+
+	if _, err = fault.ExecContext(t.Context(), `DROP TRIGGER keep_workspace`); err != nil {
+		t.Fatal(err)
+	}
+	if perr := callWorkspaceDeletion(t, s, member.ID, ws.ID); perr != nil {
+		t.Fatalf("retry: %v", perr)
+	}
+	if _, err = os.Stat(secretFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("secret file after the deletion: %v", err)
 	}
 }
 

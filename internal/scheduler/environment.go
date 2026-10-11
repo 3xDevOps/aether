@@ -42,6 +42,8 @@ type EnvironmentPlan struct {
 	// LoginMember is the account owner whose login paths are mounted, empty
 	// when the plan mounts nothing from another member's home.
 	LoginMember domain.MemberID
+	// SecretEnv names the workspace secrets in Env.
+	SecretEnv []string
 }
 
 // BuildEnvironmentPlan mounts the member's home. A run on another member's
@@ -87,10 +89,14 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		home = "/root"
 	}
 	var setupScript string
+	var secrets map[string]string
 	if ws != nil {
+		if ws, secrets, err = s.workspaceEnvironment(ctx, ws); err != nil {
+			return nil, err
+		}
 		setupScript = ws.Environment.SetupPolicy.Script
 	}
-	env, err := explicitEnvironment(profile, ws)
+	env, err := explicitEnvironment(profile, ws, secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +111,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	plan := &EnvironmentPlan{
 		Purpose: purpose, Image: image, Env: env,
 		SetupScript: setupScript,
+		SecretEnv:   slices.Sorted(maps.Keys(secrets)),
 		User:        user, Home: home, Path: env["PATH"],
 	}
 	var nestings map[string]string
@@ -184,9 +191,31 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	return plan, nil
 }
 
+// workspaceEnvironment is ws as it is now, with its secrets. The caller read
+// ws some time ago; the row is read again with the secret file, under the
+// lock workspace.environment.set writes both under, so a variable changing
+// between plain and secret is never missing from both. Without a secret
+// store there is no pair to read, and ws stands.
+func (s *Scheduler) workspaceEnvironment(ctx context.Context, ws *domain.Workspace) (*domain.Workspace, map[string]string, error) {
+	if s.cfg.Secrets == nil {
+		return ws, nil, nil
+	}
+	s.cfg.Secrets.RLock()
+	defer s.cfg.Secrets.RUnlock()
+	current, err := s.cfg.Store.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
+	}
+	secrets, err := s.cfg.Secrets.Get(ws.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
+	}
+	return current, secrets, nil
+}
+
 var cacheEnvironmentKeys = [...]string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"}
 
-func explicitEnvironment(profile harness.Profile, ws *domain.Workspace) (map[string]string, error) {
+func explicitEnvironment(profile harness.Profile, ws *domain.Workspace, secrets map[string]string) (map[string]string, error) {
 	env := make(map[string]string)
 	for _, key := range profile.EnvPassthrough {
 		if value, ok := os.LookupEnv(key); ok && value != "" {
@@ -200,6 +229,9 @@ func explicitEnvironment(profile harness.Profile, ws *domain.Workspace) (map[str
 		if err := harness.MergeEnv(env, ws.Environment.Variables); err != nil {
 			return nil, fmt.Errorf("scheduler: apply the workspace variables over %s's permission setting: %w", profile.Name, err)
 		}
+	}
+	if err := harness.MergeEnv(env, secrets); err != nil {
+		return nil, fmt.Errorf("scheduler: apply the workspace secrets over %s's permission setting: %w", profile.Name, err)
 	}
 	maps.Copy(env, profile.Env)
 	return env, nil
@@ -284,7 +316,13 @@ func (s *Scheduler) protectConfiguredLegacyCaches(ctx context.Context, memberID 
 			home = "/root"
 		}
 		for _, ws := range workspaces {
-			env, err := explicitEnvironment(profile, ws)
+			var secrets map[string]string
+			if ws != nil {
+				if ws, secrets, err = s.workspaceEnvironment(ctx, ws); err != nil {
+					return err
+				}
+			}
+			env, err := explicitEnvironment(profile, ws, secrets)
 			if err != nil {
 				return err
 			}

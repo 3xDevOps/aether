@@ -341,6 +341,21 @@ export interface Workspace {
   origin?: string
 }
 
+/** `value` is absent for a secret: the server never returns one. */
+export interface WorkspaceVariable {
+  name: string
+  value?: string
+  secret?: boolean
+}
+
+export interface WorkspaceEnvironment {
+  workspace_id: string
+  setup_script: string
+  variables: WorkspaceVariable[]
+  /** From a save that took effect while its timeline note was not recorded. */
+  warning?: string
+}
+
 export interface Member {
   id: string
   display_name: string

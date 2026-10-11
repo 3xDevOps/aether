@@ -27,6 +27,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/mirror"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -76,6 +77,8 @@ type Config struct {
 	BrowserImage                string
 	Control                     *control.Service
 	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
+	// Secrets holds workspace secret variables; nil runs without any.
+	Secrets *secretstore.Store
 	// DefaultStandardImage is this build's image; a server update moves the
 	// standard image only when StandardImage still equals it.
 	DefaultStandardImage string
@@ -848,6 +851,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		Image:             plan.Image,
 		Env:               env,
 		SetupScript:       plan.SetupScript,
+		SecretEnv:         plan.SecretEnv,
 		WorktreeHostPath:  run.Worktree,
 		WorktreeMountPath: s.cfg.WorktreeMount,
 		WorkingDir:        s.cfg.WorktreeMount,

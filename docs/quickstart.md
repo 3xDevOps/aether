@@ -501,6 +501,29 @@ Neither linking nor recording Origin supplies upstream credentials. See
 and [member environments](environments.md) for installing tools and saving
 the image new containers use.
 
+### Setup script and variables
+
+A workspace can prepare every run that starts in it. Its **setup script**
+runs in each new run's container before the agent does, in the run's
+checkout. Its **variables** are set in that container; one marked **secret**
+is never shown again once saved. Only an admin can change either.
+
+```sh
+printf 'npm ci\n' > setup.sh
+aether workspace env script --workspace myproject --file setup.sh
+aether workspace env set --workspace myproject NODE_ENV=test
+aether workspace env set --workspace myproject --secret NPM_TOKEN < token.txt
+aether workspace env import --workspace myproject .env
+```
+
+`set --secret` reads the value from stdin, and `import` stores the values of
+a `.env` file as secrets. The dashboard has the same settings under
+**Environment** on the workspace's Repository page. Runs launched afterwards
+get them; a container that already exists does not. If the script fails, the
+launch fails and shows what the script printed.
+[environments.md](environments.md#workspace-environment) covers how the
+script runs and who can read a secret.
+
 ## 5. Set up your agent
 
 An **agent** is the coding CLI a run starts. **Onboarding → Agent** opens

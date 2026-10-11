@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
@@ -98,6 +100,51 @@ func TestBuildEnvironmentPlanUsesSavedMemberImage(t *testing.T) {
 		if plan.Image != saved {
 			t.Fatalf("purpose %q image = %q, want %q", purpose, plan.Image, saved)
 		}
+	}
+}
+
+func TestBuildEnvironmentPlanReadsRowAndSecretsAsOneChange(t *testing.T) {
+	t.Parallel()
+	secrets := secretstore.New(t.TempDir())
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.StandardImage = "standard:latest"
+		cfg.Secrets = secrets
+	})
+	if err := secrets.Put(e.ws.ID, map[string]string{"API_TOKEN": "as-a-secret"}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	// What a launch read before API_TOKEN turned plain.
+	stale := *e.ws
+	e.ws.Environment.Variables = map[string]string{"API_TOKEN": "now-plain"}
+	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
+		t.Fatalf("UpdateWorkspace: %v", err)
+	}
+	if err := secrets.Put(e.ws.ID, nil); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	build := func() (*EnvironmentPlan, error) {
+		return e.sched.BuildEnvironmentPlan(t.Context(), nil, &stale, e.member, harness.Profile{}, EnvironmentPurposeRun)
+	}
+	plan, err := build()
+	if err != nil || plan.Env["API_TOKEN"] != "now-plain" || len(plan.SecretEnv) != 0 {
+		t.Fatalf("plan = %+v, %v, want API_TOKEN as the plain variable it became", plan, err)
+	}
+
+	// A change that has written one of the two holds the launch back.
+	secrets.Lock()
+	built := make(chan error, 1)
+	go func() {
+		_, err := build()
+		built <- err
+	}()
+	select {
+	case err := <-built:
+		t.Fatalf("plan built during an environment change: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	secrets.Unlock()
+	if err := <-built; err != nil {
+		t.Fatalf("plan after the change: %v", err)
 	}
 }
 

@@ -343,10 +343,25 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 	run.Status = domain.RunProvisioning
 	if err := s.provisionSteps(ctx, entry, run, ws, actor, argv, profile, persistSupervisor); err != nil {
 		s.failProvisioning(run, actor.ID, err)
-		return errors.New(publicRunStatusReason("provisioning: " + err.Error()))
+		reason := publicRunStatusReason("provisioning: " + err.Error())
+		var setup *runtime.SetupError
+		if errors.As(err, &setup) {
+			return &SetupFailure{reason: reason, Output: setup.Output}
+		}
+		return errors.New(reason)
 	}
 	return nil
 }
+
+// SetupFailure is a launch stopped by the workspace setup script. Its message
+// is the run's public status reason; Output is for the launching caller
+// alone, and is never stored or published.
+type SetupFailure struct {
+	reason string
+	Output string
+}
+
+func (e *SetupFailure) Error() string { return e.reason }
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
