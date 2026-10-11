@@ -178,7 +178,9 @@ Whoever holds this device gets that member's access. approve it? [y/N]:
 
 Only `y` or `yes` approves. `sudo aether-server device approve <code>`
 shows the same and asks the same, and the dashboard's Members > Devices tab shows it
-in a dialog before **Approve**.
+in a dialog before **Approve**. An admin's dashboard also raises a pending
+device as a Needs you card with its account, fingerprint and the member and
+role it admits as; **Approve** there needs no code.
 
 ```sh
 aether device list                 # yours; an admin sees every member's, and those waiting on invitations; never shows codes

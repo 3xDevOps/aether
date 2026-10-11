@@ -374,6 +374,7 @@ func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, 
 	case err == nil:
 		slog.Info("sshd: edge device waiting on an invitation", "invitation", inv.ID, "device", dev.ID,
 			"provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
+		s.publishDevice(ctx, "", dev)
 	}
 	if err != nil {
 		return fmt.Errorf("sshd: invitation device: %w", err)
@@ -466,6 +467,7 @@ func (s *Server) edgeDevice(ctx context.Context, ids store.IdentityStore, member
 		case err == nil:
 			slog.Info("sshd: edge device registered", "member", member, "device", dev.ID,
 				"status", dev.Status, "key", fingerprintOf(keyLine))
+			s.publishDevice(ctx, "", dev)
 		}
 	}
 	if err != nil {
@@ -647,7 +649,12 @@ func (s *Server) claimDevice(ctx context.Context, ids store.IdentityStore, membe
 		if err := ids.ApproveDevice(ctx, dev.ID, ""); err != nil {
 			return nil, fmt.Errorf("sshd: claim: approve device: %w", err)
 		}
-		return ids.GetDevice(ctx, dev.ID)
+		approved, err := ids.GetDevice(ctx, dev.ID)
+		if err != nil {
+			return nil, fmt.Errorf("sshd: claim: %w", err)
+		}
+		s.publishDevice(ctx, "", approved)
+		return approved, nil
 	}
 	return dev, nil
 }
@@ -673,6 +680,9 @@ func (s *Server) EdgeAccountDeleted(ctx context.Context, provider, subject strin
 	}
 	s.closeConns(func(id connIdentity) bool { return slices.Contains(devices, id.device) })
 	s.notifyDirectory()
+	for _, id := range devices {
+		s.publishDevice(ctx, "", &domain.Device{ID: id, Member: member, Status: domain.DeviceRevoked})
+	}
 	slog.Info("sshd: edge account deleted; removed its identity and edge devices",
 		"member", member, "provider", provider, "subject", subject, "devices", len(devices))
 	return nil

@@ -1,5 +1,6 @@
 import type {
   Approval,
+  Device,
   Member,
   Mission,
   RoomMessage,
@@ -414,4 +415,31 @@ export function waitingOn(run: RunRecord, ctx: StateContext): string | undefined
     if (member !== undefined) return member
   }
   return undefined
+}
+
+export interface DeviceNeed {
+  device: Device
+  reason: string
+  admits: string
+  waitingSince: string
+}
+
+/** Devices are not runs, so they sit beside the run table. Only a pending
+ * device asks: a registered one was admitted by signing in alone. */
+export function deviceNeeds(devices: Device[], viewerRole: Member['role'] | null): DeviceNeed[] {
+  if (viewerRole !== 'admin') return []
+  return devices
+    .filter((device) => device.status === 'pending')
+    .map((device) => {
+      const who = `${device.label} (${device.provider} ${device.account})`
+      return {
+        device,
+        reason: device.display_name
+          ? `${who} signed in as ${device.display_name}`
+          : `${who} wants to join as ${device.role}`,
+        admits: device.display_name ? `admits as: ${device.display_name} (${device.role})` : `new member, ${device.role}`,
+        waitingSince: device.created_at,
+      }
+    })
+    .sort((a, b) => a.waitingSince.localeCompare(b.waitingSince) || a.device.id.localeCompare(b.device.id))
 }

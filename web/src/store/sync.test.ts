@@ -16,6 +16,7 @@ import {
   fakeApi,
   mission,
   otherWorkspace,
+  pendingDevice,
   roomMessage,
   run,
   serverInfo as serverInfoFixture,
@@ -1576,6 +1577,17 @@ describe('applyEvent', () => {
 
     expect(store.getState().members[self.id].display_name).toBe('Renamed')
     expect(store.getState().info?.member.display_name).toBe('Renamed')
+  })
+
+  it('re-reads the devices on a device event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const client = fakeApi({ memberDeviceList: vi.fn(async () => [pendingDevice()]) })
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'member.device', payload: { device_id: 'dev_1', status: 'pending', invitation_id: 'inv_1' },
+    }), client)
+
+    await vi.waitFor(() => expect(store.getState().devices).toEqual([pendingDevice()]))
   })
 
   it('follows a server update and never moves it backwards', async () => {

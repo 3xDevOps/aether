@@ -1,4 +1,4 @@
-import { needsYou, needsYouConditions, waitingOn, type NeedsYouID } from '@/lib/needs-you'
+import { deviceNeeds, needsYou, needsYouConditions, waitingOn, type NeedsYouID } from '@/lib/needs-you'
 import { presentRun } from '@/lib/status'
 import type { MissionAttempt, Run } from '@/lib/types'
 import type { MissionDetail } from '@/store/missions'
@@ -9,6 +9,7 @@ import {
   bob,
   mission,
   missionQuestion,
+  pendingDevice,
   roomMessage,
   run,
   runRecords,
@@ -399,5 +400,16 @@ describe('background runs', () => {
   it('reach Needs you on an unreviewed failure', () => {
     const finished = record({ mode: 'headless', status: 'failed', outcome_unseen: true })
     expect(presentRun(finished, stateContext())).toMatchObject({ state: 'needs-you', reason: 'Failed, review the result' })
+  })
+})
+
+describe('device cards', () => {
+  it.each([
+    ['waiting on an invitation', pendingDevice(), 'laptop (github mallory) wants to join as collaborator', 'new member, collaborator'],
+    ['of a member', pendingDevice({ member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' }),
+      'laptop (github bob) signed in as Bob', 'admits as: Bob (collaborator)'],
+  ])('asks an admin to approve a device %s', (_, device, reason, admits) => {
+    expect(deviceNeeds([device], 'admin')).toEqual([{ device, reason, admits, waitingSince: device.created_at }])
+    expect(deviceNeeds([device], 'collaborator')).toEqual([])
   })
 })

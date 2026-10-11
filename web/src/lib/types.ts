@@ -1146,7 +1146,9 @@ export interface EdgeLinkResult {
 /** member.device.list: a client install a member reaches the server through
  * an edge with. `account` is the login, else email, of the edge account it
  * signed in as. A device waiting on an invitation has `invitation_id` and
- * an empty `member_id`. */
+ * an empty `member_id`. A device awaiting approval carries `role`, and
+ * `display_name` unless approving it adds a new member: whom approving
+ * admits it as, as member.device.lookup gives them. */
 export interface Device {
   id: string
   member_id: string
@@ -1159,6 +1161,8 @@ export interface Device {
   created_at: string
   last_seen_at?: string
   approved_by?: string
+  display_name?: string
+  role?: Member['role']
 }
 
 /** member.device.lookup: the device an approval code names and whom

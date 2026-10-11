@@ -27,6 +27,7 @@ import type { AgentPayload } from '@/store/activity'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
+import { loadDevices } from '@/store/devices'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
 import { inMessageScope, loadMessagePage } from '@/store/messages'
@@ -148,6 +149,9 @@ export async function hydrate(
     }
     if (signal?.aborted) return false
     s.setCapabilities(capabilities)
+    // Device cards are an extra; their failure must not fail hydration.
+    await loadDevices(store, client).catch(ignore)
+    if (signal?.aborted) return false
     // Nothing else fetches linkStatus before settings or onboarding opens, so
     // without this a linked machine launches looking unlinked. Must not fail hydration.
     if (store.getState().capabilities?.local?.includes('link.status')) {
@@ -389,6 +393,10 @@ export async function applyEvent(
       }
       break
     }
+    case 'member.device':
+      // Published once per workspace, so a burst of copies costs one read.
+      coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      break
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {

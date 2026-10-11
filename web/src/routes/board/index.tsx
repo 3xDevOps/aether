@@ -15,7 +15,7 @@ import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
+import { useCapability, useDeviceNeeds, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
 export function Board() {
   const { columns, archivedCards, hiddenByMine } = useBoard()
@@ -37,7 +37,8 @@ export function Board() {
     if (archivedCards.length === 0) setShowArchived(false)
   }, [archivedCards.length])
 
-  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
+  const devices = useDeviceNeeds()
+  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   const placeholder: Placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
@@ -68,7 +69,7 @@ export function Board() {
       <div
         className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
       >
-        <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
+        <Column column={column('needs-you')} devices={devices} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
         <Column
           key={stacked ? 'stacked' : 'wide'}

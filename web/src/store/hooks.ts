@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
-import type { StateContext } from '@/lib/needs-you'
+import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
@@ -23,11 +23,18 @@ export function useStateContext(): StateContext {
   return useMemo(() => ({ ...fields, now }), [fields, now])
 }
 
+export function useDeviceNeeds(): DeviceNeed[] {
+  const devices = useStore((s) => s.devices)
+  const role = useSelfRole()
+  return useMemo(() => deviceNeeds(devices, role), [devices, role])
+}
+
 export function useSidebarGroups(): SidebarGroup[] {
   const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
   const mineOnly = useStore((s) => s.mineOnly)
-  return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
+  const devices = useDeviceNeeds().length
+  return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }, devices), [workspace, mineOnly, ctx, devices])
 }
 
 export function useNeedsYouCount(workspace?: string): number {

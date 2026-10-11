@@ -226,14 +226,10 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 		t.Fatalf("lookup of the invitation's device = %+v, want a new collaborator", invited)
 	}
 
-	// An approval naming no device, or another device than the code's,
-	// commits nothing.
-	for _, id := range []string{"", invited.Device.ID} {
-		err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code, DeviceID: id}, nil)
-		var pe *protocol.Error
-		if !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, "nothing was approved") {
-			t.Fatalf("approve %s naming device %q = %v, want a conflict", code, id, err)
-		}
+	// An approval naming another device than the code's commits nothing.
+	var pe *protocol.Error
+	if err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code, DeviceID: invited.Device.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, "nothing was approved") {
+		t.Fatalf("approve %s naming device %q = %v, want a conflict", code, invited.Device.ID, err)
 	}
 	if deviceStatus(t, e, stray) != domain.DevicePending || deviceStatus(t, e, invitee) != domain.DevicePending {
 		t.Fatal("a refused approval approved a device")

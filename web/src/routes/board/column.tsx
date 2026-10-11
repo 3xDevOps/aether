@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { DeviceNeed } from '@/lib/needs-you'
+import { DeviceCard } from '@/routes/board/device-card'
 import { RunCard } from '@/routes/board/run-card'
 import type { BoardColumn } from '@/routes/board/selectors'
 
@@ -14,6 +16,7 @@ export function Column({
   collapsed,
   actions,
   footer,
+  devices = [],
 }: {
   column: BoardColumn
   label?: string
@@ -22,9 +25,10 @@ export function Column({
   collapsed?: boolean
   actions?: ReactNode
   footer?: ReactNode
+  devices?: DeviceNeed[]
 }) {
   const [open, setOpen] = useState(!collapsed)
-  const count = column.cards.length
+  const count = devices.length + column.cards.length
   const heading = (
     <>
       <span>{label}</span>{' '}
@@ -34,6 +38,9 @@ export function Column({
   const body = (
     <>
       <div className="flex flex-col gap-2">
+        {devices.map((need) => (
+          <DeviceCard key={need.device.id} need={need} />
+        ))}
         {column.cards.map((card) => (
           <RunCard key={card.run.id} card={card} agentName={agentNames[card.run.harness]} />
         ))}

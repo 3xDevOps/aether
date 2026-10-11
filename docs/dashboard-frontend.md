@@ -1065,6 +1065,21 @@ first that applies:
 | Parked at `needs-attention` without a reported outcome (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
 
+A device waiting for approval is not a run, so `deviceNeeds` in the same
+file turns it into a card for an admin. The store's `devices` come from
+`member.device.list`, read at hydration and again on each `member.device`
+event:
+
+| Device | Who it needs | Reason line | Actions |
+| --- | --- | --- | --- |
+| Pending, waiting on an invitation | an admin | laptop (github mallory) wants to join as collaborator | **Approve** (`member.device.approve {device_id}`), **Deny** (`member.device.revoke`) |
+| Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
+
+The card shows the account, the key fingerprint and whom approving admits
+it as, and waits since the device was recorded. Device cards list before
+runs in the board's Needs you, and the sidebar's Needs you count includes
+them.
+
 A condition that applies to someone else leaves the run Working with "Waiting
 for Alice". A worker in a running swarm with a live integrator counts only for
 a control hold or a blocked report: the integrator handles its stops and

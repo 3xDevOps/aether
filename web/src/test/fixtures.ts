@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  Device,
   DevController,
   DevControlStatusParams,
   DevTerminal,
@@ -205,6 +206,23 @@ export function approval(over: Partial<Approval> = {}): Approval {
     detail: 'the agent wants to edit a file outside its allowlist',
     decision: 'requested',
     created_at: '2026-08-14T10:03:00Z',
+    ...over,
+  }
+}
+
+/** A device waiting on an invitation that adds a new collaborator. */
+export function pendingDevice(over: Partial<Device> = {}): Device {
+  return {
+    id: 'dev_1',
+    member_id: '',
+    invitation_id: 'inv_1',
+    provider: 'github',
+    account: 'mallory',
+    label: 'laptop',
+    status: 'pending',
+    fingerprint: 'SHA256:examplefingerprint',
+    created_at: '2026-08-14T10:04:00Z',
+    role: 'collaborator',
     ...over,
   }
 }

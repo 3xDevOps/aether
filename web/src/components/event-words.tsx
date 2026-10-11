@@ -193,6 +193,13 @@ const captureWords: Record<string, string> = {
   report: "Saved evidence for the agent's report",
 }
 
+const deviceWords: Record<string, string> = {
+  pending: 'A device is waiting for approval',
+  registered: 'A device signed in for the first time',
+  approved: 'A device was approved',
+  revoked: 'A device was revoked',
+}
+
 const profileWords: Record<string, string> = {
   put: 'saved',
   rollback: 'rolled back',
@@ -279,6 +286,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'coord.message.acked': () => 'An agent read its message',
   'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
+  'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',
   'profile.change': (p, e) => <><Who id={p.member ?? e.actor_id} /> {profileWords[text(p.action)] ?? 'changed'} the {text(p.harness) || 'agent'} profile</>,
 }
 

@@ -732,10 +732,10 @@ export const api = {
   memberDeviceList: () =>
     call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
   memberDeviceLookup: (code: string) => call<DeviceLookup>('member.device.lookup', { code }),
-  /** Approves the device member.device.lookup named for code; the server
-   * refuses a code that now names another. */
-  memberDeviceApprove: (code: string, deviceID: string) =>
-    call<{ device: Device }>('member.device.approve', { code, device_id: deviceID }).then(
+  /** Approves the device by id. With a code, the server refuses it unless
+   * the code still names that device. */
+  memberDeviceApprove: (deviceID: string, code?: string) =>
+    call<{ device: Device }>('member.device.approve', { device_id: deviceID, code }).then(
       (r) => r.device,
     ),
   memberDeviceRevoke: (deviceID: string) =>

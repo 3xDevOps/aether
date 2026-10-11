@@ -79,7 +79,7 @@ export function DevicesPanel({ client }: { client: Api }) {
           {device.invitation_id ? `, and approving accepts invitation ${device.invitation_id}` : ''}. Whoever holds this device gets that member&apos;s access.
         </>}
         action="Approve"
-        onConfirm={() => client.memberDeviceApprove(confirming.code, device.id)}
+        onConfirm={() => client.memberDeviceApprove(device.id, confirming.code)}
         onDone={() => {
           toast.success(`${device.label} approved`)
           setCode('')
