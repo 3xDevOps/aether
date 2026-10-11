@@ -100,12 +100,12 @@ export function WorkspaceEnvironmentImport({ current, onAdd, onClose }: {
           {badLines.length > 0 && <Callout tone="needs-you" role="status">{skipped(badLines)}</Callout>}
           {count > 0 && (
             <ul aria-label="Variables to add" className="flex max-h-48 min-w-0 flex-col gap-1.5 overflow-y-auto">
-              {variables.map(({ name }) => (
+              {variables.map(({ name, value }) => (
                 <li key={name} className="flex min-w-0 items-center justify-between gap-3">
                   <Code>{name}</Code>
                   <span className="flex shrink-0 items-center gap-2 text-ui-sm text-muted">
                     {current.includes(name) ? 'Replaces the current value' : 'New'}
-                    {secret && <Badge>Secret</Badge>}
+                    {secret && value !== '' && <Badge>Secret</Badge>}
                   </span>
                 </li>
               ))}

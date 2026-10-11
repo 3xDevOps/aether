@@ -3350,8 +3350,10 @@ section scrolls into view once it has loaded.
   pasted `NAME=VALUE` lines or a chosen file, parsed by `lib/dotenv.ts`, the
   format `aether workspace env import` reads. It lists each name as **New** or
   **Replaces the current value**, counts the lines it skips, and has **Store
-  as secrets** ticked. **Add _n_ variables** puts them in the list; nothing
-  is sent yet.
+  as secrets** ticked. An empty value has nothing to hide and is added
+  plain; over a saved secret it stays a secret with no value, which **Save**
+  refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
+  puts them in the list; nothing is sent yet.
 - **Save** sends one `workspace.environment.set` holding only what changed,
   so an untouched secret is never named. It is disabled until something
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it

@@ -210,11 +210,15 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
     setRows((all) => [...all, row])
   }
 
-  const merge = (incoming: { name: string; value: string }[], secret: boolean) => {
+  const merge = (incoming: { name: string; value: string }[], asSecrets: boolean) => {
     setRows((all) => {
       const next = [...all]
       for (const { name, value } of incoming) {
         const at = next.findIndex((row) => row.name === name)
+        // An empty value has nothing to hide and is added plain. Over a saved
+        // secret it stays a secret, so that Save asks for a value instead of
+        // removing the one the server holds.
+        const secret = asSecrets && (value !== '' || next[at]?.from?.secret === true)
         const imported = { name, value, secret, kept: false, lines: value.includes('\n') }
         if (at < 0) next.push({ id: ++rowIDs, ...imported })
         // A saved secret imported as plain is a new plain variable of that name.

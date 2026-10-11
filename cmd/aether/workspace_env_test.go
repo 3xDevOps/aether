@@ -61,16 +61,17 @@ func TestReadSecretValueFromAPipe(t *testing.T) {
 
 func TestParseWorkspaceEnvImport(t *testing.T) {
 	file := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(file, []byte("DATABASE_URL=postgres://db.example.test/app\nNPM_TOKEN=abc\n"), 0o600); err != nil {
+	if err := os.WriteFile(file, []byte("DATABASE_URL=postgres://db.example.test/app\nNPM_TOKEN=abc\nSENTRY_DSN=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, got, err := parseWorkspaceEnvImport([]string{file}, nil)
 	want := []protocol.WorkspaceVariable{
 		{Name: "DATABASE_URL", Value: "postgres://db.example.test/app", Secret: true},
 		{Name: "NPM_TOKEN", Value: "abc", Secret: true},
+		{Name: "SENTRY_DSN"},
 	}
 	if err != nil || !slices.Equal(got, want) {
-		t.Fatalf("import = (%+v, %v), want secrets %+v", got, err, want)
+		t.Fatalf("import = (%+v, %v), want %+v: secrets, and the empty value plain", got, err, want)
 	}
 	if _, got, err = parseWorkspaceEnvImport([]string{"--plain", "-"}, strings.NewReader("A=1\n")); err != nil ||
 		!slices.Equal(got, []protocol.WorkspaceVariable{{Name: "A", Value: "1"}}) {

@@ -197,7 +197,9 @@ func parseWorkspaceEnvImport(args []string, stdin io.Reader) (string, []protocol
 		return "", nil, fmt.Errorf("%s has no NAME=VALUE lines", source)
 	}
 	for i := range variables {
-		variables[i].Secret = !*plain
+		// An empty value has nothing to hide, and a secret is listed without
+		// its value, which would hide that it is empty.
+		variables[i].Secret = !*plain && variables[i].Value != ""
 	}
 	return *workspace, variables, nil
 }

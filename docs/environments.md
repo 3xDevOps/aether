@@ -411,7 +411,8 @@ and the dashboard show a secret as its name alone, to admins as well. To
 change one, set it again; there is no way to read it back.
 
 Import a `.env` file to add many at once. Its values are stored as secrets
-unless you pass `--plain`:
+unless you pass `--plain`; an empty value has nothing to hide and is stored
+plain either way:
 
 ```sh
 aether workspace env import .env

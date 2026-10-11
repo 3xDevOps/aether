@@ -86,16 +86,27 @@ describe('workspace environment', () => {
     const dialog = within(screen.getByRole('dialog', { name: 'Import .env' }))
     expect(dialog.getByRole('button', { name: 'Add variables' })).toHaveProperty('disabled', true)
     fireEvent.change(dialog.getByRole('textbox', { name: 'NAME=VALUE lines' }), {
-      target: { value: 'NODE_ENV=production\nDATABASE_URL="postgres://db.example.test/app"\nnot a pair\n' },
+      target: { value: 'NODE_ENV=production\nDATABASE_URL="postgres://db.example.test/app"\nnot a pair\nSENTRY_DSN=\nNPM_TOKEN=\n' },
     })
     expect(dialog.getByRole('status').textContent).toBe('Line 3 is not NAME=VALUE and is skipped.')
     const preview = dialog.getAllByRole('listitem').map((item) => item.textContent)
-    expect(preview).toEqual(['NODE_ENVReplaces the current valueSecret', 'DATABASE_URLNewSecret'])
+    expect(preview).toEqual([
+      'NODE_ENVReplaces the current valueSecret',
+      'DATABASE_URLNewSecret',
+      'SENTRY_DSNNew',
+      'NPM_TOKENReplaces the current value',
+    ])
 
-    fireEvent.click(dialog.getByRole('button', { name: 'Add 2 variables' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Add 4 variables' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(client.workspaceEnvironmentSet).not.toHaveBeenCalled()
     expect(within(rowOf('DATABASE_URL')).getByLabelText('Value of DATABASE_URL')).toHaveProperty('type', 'password')
+
+    // An empty line over a saved secret does not remove it: Save asks first.
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(within(rowOf('NPM_TOKEN')).getByText('Enter the secret’s value.')).toBeDefined()
+    expect(client.workspaceEnvironmentSet).not.toHaveBeenCalled()
+    fireEvent.click(within(rowOf('NPM_TOKEN')).getByRole('button', { name: 'Keep current' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
@@ -103,6 +114,8 @@ describe('workspace environment', () => {
       set: [
         { name: 'NODE_ENV', value: 'production', secret: true },
         { name: 'DATABASE_URL', value: 'postgres://db.example.test/app', secret: true },
+        // An empty value that replaces no secret has nothing to hide.
+        { name: 'SENTRY_DSN', value: '' },
       ],
       unset: [],
     }))
