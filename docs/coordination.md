@@ -625,14 +625,15 @@ explicit, invalidates old identities, and requires a new control acquisition.
 and `y` in that viewport, and returns `element`: its `tag`, `role`, accessible
 `name`, visible `text`, a `selector` that matches it alone, a fixed set of
 `attributes`, `bounds` in viewport coordinates, `html` trimmed to 2000
-characters, 14 computed `styles`, and `frame_url` when it is inside a frame.
+characters, 14 computed `styles`, `scroll_x` and `scroll_y` (the page's scroll
+position when it was read) and `frame_url` when it is inside a frame.
 `component` and `source` (`file:line:column`) are present only when the page
 exposes them: a development build of React names its components, and React 18
 and earlier also record where each element was written. `element` is absent
 when nothing is under the point. Like `snapshot`, `inspect` is a read: it
 needs no control lease, moves no pointer and dispatches no event, so a person
 can inspect a page the agent is driving. It never returns a form control's
-value, drops `value` and event-handler attributes from `html`, and replaces an
+value, drops `value`, `srcdoc` and event-handler attributes from `html`, and replaces an
 attribute value that looks like a credential with `[redacted]`.
 `console` records only `error` and `warning` messages, uncaught page errors and
 dismissed dialogs; `network` records only failed requests and responses with

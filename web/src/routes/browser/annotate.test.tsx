@@ -17,7 +17,7 @@ const page: DevBrowserPage = {
 const theAgent: DevController = { kind: 'run_agent', control_session_id: 'agent', control_generation: 4, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
 const save: DevBrowserElement = {
   tag: 'button', role: 'button', name: 'Save changes', text: 'Save', selector: 'button#save',
-  attributes: { id: 'save', class: 'btn primary' }, bounds: { x: 40, y: 30, width: 120, height: 36 },
+  attributes: { id: 'save', class: 'btn primary' }, bounds: { x: 40, y: 30, width: 120, height: 36 }, scroll_x: 0, scroll_y: 0,
   html: '<button id="save" class="btn primary">Save</button>', styles: { display: 'block' },
   component: 'App > SaveButton', source: 'src/SaveButton.tsx:12:5',
 }
@@ -99,6 +99,14 @@ beforeEach(() => {
   vi.spyOn(api, 'runRoomPost').mockImplementation(async (params) => ({ message: roomMessage({ id: 'msg_1', run_id: 'run_1', kind: 'steer_request', body: params.body }) }))
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('does not describe an element the page scrolled to after the frame it was pointed at', async () => {
+  await show()
+  await userEvent.click(annotate())
+  vi.mocked(api.devBrowserInspect).mockResolvedValue({ page, element: { ...save, scroll_y: 300 } })
+  click(100, 50)
+  expect((await screen.findByRole('alert')).textContent).toContain('The page scrolled before it was read')
+})
 
 it('annotates an element of a page the agent is driving and sends it, without taking control', async () => {
   const complaints = vi.spyOn(console, 'error')

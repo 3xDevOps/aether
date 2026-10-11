@@ -604,6 +604,10 @@ type DevBrowserElement struct {
 	Component  string            `json:"component,omitempty"`
 	Source     string            `json:"source,omitempty"`
 	FrameURL   string            `json:"frame_url,omitempty"`
+	// ScrollX and ScrollY are the page's scroll position when it was read,
+	// for comparing with the frame the point came from.
+	ScrollX float64 `json:"scroll_x"`
+	ScrollY float64 `json:"scroll_y"`
 }
 
 // Element is absent when nothing is under the point.

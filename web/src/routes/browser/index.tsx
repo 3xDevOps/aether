@@ -116,7 +116,7 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
   // Why this browser session cannot inspect, in its server's words.
   const [refused, setRefused] = useState<{ session: string; reason: string } | null>(null)
   const [logsOpen, setLogsOpen] = useState(false)
-  const [seenLog, setSeenLog] = useState(0)
+  const [seenLog, setSeenLog] = useState<Record<string, number>>({})
   const pick = useRef<BrowserPick>(null)
   const annotateToggle = useRef<HTMLButtonElement>(null)
   const [paneRef, pane] = useElementSize<HTMLDivElement>()
@@ -154,7 +154,8 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
   latest.current = { surface, other, driver, page, status, target }
   const logs = useBrowserLogs(runID, page)
   const newestLog = logs.entries.at(-1)?.sequence ?? 0
-  const unseenLogs = logsOpen ? 0 : logs.entries.filter((entry) => entry.sequence > seenLog).length
+  const logKey = page ? `${page.session_id}:${page.page_id}` : ''
+  const unseenLogs = logsOpen ? 0 : logs.entries.filter((entry) => entry.sequence > (seenLog[logKey] ?? 0)).length
   const unannotatable = !cap.hasMethod('dev.browser.inspect')
     ? 'This server does not serve dev.browser.inspect, so a page cannot be annotated. Update aether-server.'
     : refused && refused.session === status?.session_id ? refused.reason : ''
@@ -274,8 +275,8 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
     if (!paged) setAnnotating(false)
   }, [paged])
   useEffect(() => {
-    if (logsOpen) setSeenLog(newestLog)
-  }, [logsOpen, newestLog])
+    if (logsOpen && logKey) setSeenLog((seen) => (seen[logKey] === newestLog ? seen : { ...seen, [logKey]: newestLog }))
+  }, [logsOpen, logKey, newestLog])
 
   const acquire = async (given: DevSurface, takeover: boolean, expected: number): Promise<DevControlFence | null> => {
     mutation.current++

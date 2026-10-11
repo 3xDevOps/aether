@@ -35,7 +35,8 @@ function pick({ x, y }) {
 
 // Every loop is bounded by a count or a character budget, not by the size of
 // the element: a pointer resting on <body> must cost the same as one on a link.
-// No form control's value is read, from its property or its attribute.
+// No form control's value is read, from its property or its attribute, and
+// srcdoc is left out because it holds a whole document, form values included.
 function describe(element) {
   const secretName = /token|secret|passw(?:or)?d|api[_-]?key|session[_-]?id|csrf|signature|credential/i;
   const secretPair = /(?:token|secret|passw(?:or)?d|api[_-]?key|session[_-]?id|csrf|signature|credential|x-amz-)[\w-]*=/i;
@@ -67,8 +68,15 @@ function describe(element) {
   const nth = (node) => {
     let index = 1;
     let alone = true;
-    for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) if (sibling.localName === node.localName) index++;
-    for (let sibling = node.nextElementSibling; sibling && alone; sibling = sibling.nextElementSibling) if (sibling.localName === node.localName) alone = false;
+    let steps = 0;
+    for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+      if (++steps > 200) return '';
+      if (sibling.localName === node.localName) index++;
+    }
+    for (let sibling = node.nextElementSibling; sibling && alone; sibling = sibling.nextElementSibling) {
+      if (++steps > 200) return '';
+      if (sibling.localName === node.localName) alone = false;
+    }
     return index > 1 || !alone ? `:nth-of-type(${index})` : '';
   };
   const parts = [];
@@ -96,8 +104,9 @@ function describe(element) {
     budget -= text.length;
   };
   const escape = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  let visits = 0;
   const write = (node) => {
-    if (budget <= 0) return;
+    if (budget <= 0 || ++visits > 400) return;
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.nodeValue.slice(0, budget + 1).replace(/\s+/g, ' ');
       if (text.trim()) emit(escape(text));
@@ -107,7 +116,7 @@ function describe(element) {
     let open = `<${node.localName}`;
     for (const attribute of [...node.attributes].slice(0, 32)) {
       const key = attribute.name.toLowerCase();
-      if (key === 'value' || key === 'content' || key.startsWith('on')) continue;
+      if (key === 'value' || key === 'content' || key === 'srcdoc' || key.startsWith('on')) continue;
       const value = secretName.test(key) || secretPair.test(attribute.value) ? '[redacted]' : clip(attribute.value, 120);
       open += value ? ` ${key}="${escape(value)}"` : ` ${key}`;
     }
@@ -180,7 +189,10 @@ export async function inspectPoint(page, x, y, read) {
         top += finite(found.inset?.y);
         continue;
       }
+      const [scrollX, scrollY] = await read(page.mainFrame().evaluate(() => [window.scrollX, window.scrollY]));
       return {
+        scroll_x: finite(scrollX),
+        scroll_y: finite(scrollY),
         tag: short(found.tag, 64),
         role: short(found.role, 64),
         name: short(found.name, 256),

@@ -93,7 +93,7 @@ test('real shared login, HMR, popups, watcher takeover and stale authority', asy
       await clickRemote(watchPage, 80, 365)
       await fixture.waitText('Signed out')
       await browserAction(watchPage, 'Screenshot')
-      await expect(watchPage.getByText(/nothing has been published/)).toBeVisible()
+      await expect(watchPage.getByRole('article', { name: /^Note \d+: Screenshot of the page$/ })).toBeVisible()
       await browserAction(watchPage, 'Reset session…')
       await watchPage.getByRole('alertdialog').getByRole('button', { name: 'Reset session', exact: true }).click()
       await expect.poll(async () => (await fixture.member.api.rpc<{ session_id: string }>('dev.browser.status', { run_id: fixture.runID })).session_id).not.toBe(stalePage.session_id)

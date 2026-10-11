@@ -95,6 +95,8 @@ type Element struct {
 	Component  string            `json:"component,omitempty"`
 	Source     string            `json:"source,omitempty"`
 	FrameURL   string            `json:"frame_url,omitempty"`
+	ScrollX    float64           `json:"scroll_x"`
+	ScrollY    float64           `json:"scroll_y"`
 }
 
 type Log struct {

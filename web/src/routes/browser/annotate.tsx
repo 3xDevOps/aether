@@ -36,6 +36,11 @@ function sameGeometry(a: DevBrowserFrameMetadata, b: DevBrowserFrameMetadata): b
     && (a.offset_top ?? 0) === (b.offset_top ?? 0) && (a.page_scale_factor ?? 1) === (b.page_scale_factor ?? 1)
 }
 
+/** Whether the page was read where the frame showed it: a scroll in between puts another element under the point. */
+function scrolledSince(element: DevBrowserElement, shown: DevBrowserFrameMetadata): boolean {
+  return Math.abs(element.scroll_x - (shown.scroll_x ?? 0)) > 2 || Math.abs(element.scroll_y - (shown.scroll_y ?? 0)) > 2
+}
+
 /** `button#save 120 × 36`, the way an element inspector labels its box. */
 function boxLabel(element: DevBrowserElement): string {
   const id = element.attributes?.id
@@ -101,7 +106,7 @@ export function AnnotateLayer({ ref, runID, page, surface, picking, onUnavailabl
         const started = performance.now()
         try {
           const result = await inspect(point, shown)
-          if (alive.current) setHover(result.element ? { element: result.element, frame: shown } : null)
+          if (alive.current) setHover(result.element && !scrolledSince(result.element, shown) ? { element: result.element, frame: shown } : null)
         } catch (cause) {
           // A frame that moved on answers stale; the next move reads again.
           if (!alive.current || unavailable(cause)) return
@@ -134,6 +139,7 @@ export function AnnotateLayer({ ref, runID, page, surface, picking, onUnavailabl
       try {
         const { element } = await inspect(point, shown)
         if (!element) updateNote(runID, id, { failure: 'The page has no element at that point.' })
+        else if (scrolledSince(element, shown)) updateNote(runID, id, { failure: 'The page scrolled before it was read. Delete this note and click the element again.' })
         else updateNote(runID, id, { element, image: (painted && await cropFrame(painted, shown, element.bounds)) ?? undefined })
       } catch (cause) {
         if (unavailable(cause)) removeNote(runID, id)

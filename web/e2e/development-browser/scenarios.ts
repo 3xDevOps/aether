@@ -109,7 +109,9 @@ async function annotateForAgent(page: Page, fixture: BrowserFixture, phone: bool
 
   await strip.getByRole('button', { name: 'Close', exact: true }).click()
   await toggle.click()
-  await expect(toggle).not.toHaveAttribute('aria-pressed', 'true')
+  // A phone's toolbar drops the toggle again once the mode is off.
+  if (phone) await expect(toggle).toHaveCount(0)
+  else await expect(toggle).not.toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText('The agent is driving', { exact: true })).toBeVisible()
   await fixture.waitText('Signed in as test@example.invalid')
 }

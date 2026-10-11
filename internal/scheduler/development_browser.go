@@ -243,7 +243,7 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 		convert = func(r browser.Result) (any, error) {
 			out := protocol.DevBrowserInspectResult{Page: browserPage(r.Page)}
 			if e := r.Element; e != nil {
-				out.Element = &protocol.DevBrowserElement{Tag: e.Tag, Role: e.Role, Name: e.Name, Text: e.Text, Selector: e.Selector, Attributes: e.Attributes, Bounds: protocol.DevBrowserRect(e.Bounds), HTML: e.HTML, Styles: e.Styles, Component: e.Component, Source: e.Source, FrameURL: e.FrameURL}
+				out.Element = &protocol.DevBrowserElement{Tag: e.Tag, Role: e.Role, Name: e.Name, Text: e.Text, Selector: e.Selector, Attributes: e.Attributes, Bounds: protocol.DevBrowserRect(e.Bounds), HTML: e.HTML, Styles: e.Styles, Component: e.Component, Source: e.Source, FrameURL: e.FrameURL, ScrollX: e.ScrollX, ScrollY: e.ScrollY}
 			}
 			return out, nil
 		}

@@ -356,6 +356,9 @@ export interface DevBrowserElement {
   component?: string
   source?: string
   frame_url?: string
+  /** The page's scroll position when it was read. */
+  scroll_x: number
+  scroll_y: number
 }
 
 export interface DevBrowserInspectResult {

@@ -11,6 +11,8 @@ const save: DevBrowserElement = {
   selector: 'button#save',
   attributes: { id: 'save', class: 'btn primary' },
   bounds: { x: 40.4, y: 30, width: 120, height: 36 },
+  scroll_x: 0,
+  scroll_y: 0,
   html: '<button id="save" class="btn primary">Save ```</button>',
   styles: { display: 'block', color: 'rgb(255, 255, 255)' },
   component: 'App > Toolbar > SaveButton',
@@ -117,7 +119,7 @@ describe('feedbackMessage', () => {
   })
 
   it('names the page on each note when they are from different pages, and leaves out what is absent', () => {
-    const bare: DevBrowserElement = { tag: 'div', selector: 'div.card', bounds: { x: 0, y: 0, width: 10, height: 10 } }
+    const bare: DevBrowserElement = { tag: 'div', selector: 'div.card', bounds: { x: 0, y: 0, width: 10, height: 10 }, scroll_x: 0, scroll_y: 0 }
     const notes = written([
       elementNote({ element: bare, body: 'Too much padding.' }),
       screenshotNote({ page: { ...page, url: 'http://localhost:3000/' } }),

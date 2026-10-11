@@ -346,6 +346,7 @@ test('inspect describes the element under a point without touching the page or r
     <iframe style="left:400px;top:50px;width:200px;height:100px;border:4px solid black" srcdoc='<body style="margin:0"><a href="/docs?access_token=tok123" style="position:absolute;left:10px;top:20px;width:80px;height:20px">Docs</a>'></iframe>
     <div id="host" style="left:400px;top:300px;width:100px;height:40px"></div>
     <div id="many" style="left:400px;top:400px;width:100px;height:40px;padding-left:20px;overflow:hidden"></div>
+    <div id="wrap" style="position:absolute;left:400px;top:500px;width:200px;height:60px"><iframe srcdoc='<input type="password" value="private-value">' style="width:50px;height:20px"></iframe></div>
     <script>
       document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button class="inner" style="width:100px;height:40px;border:0">Shadow</button>';
       document.getElementById('many').innerHTML = '<p>row with some text</p>'.repeat(5000);
@@ -380,6 +381,10 @@ test('inspect describes the element under a point without touching the page or r
   assert.deepEqual([form.tag, password.attributes.type, notes.tag], ['form', 'password', 'textarea']);
   assert.match(form.html, /^<form id="login" data-api-key="\[redacted\]" style="[^"]+"><input type="hidden" name="csrf_token"><input id="pass" type="password" style=/);
   for (const secret of ['key-abc123', 'csrf-abc123', 'hunter2', 'typed-secret-note']) assert.ok(!JSON.stringify([form, password, notes]).includes(secret), `${secret} left the page`);
+
+  const wrap = await inspect(590, 550);
+  assert.match(wrap.html, /^<div id="wrap" style="[^"]+"><iframe style="[^"]+"><\/iframe><\/div>$/);
+  assert.ok(!JSON.stringify(wrap).includes('private-value'), 'a document embedded in srcdoc stays on the page');
 
   const framed = await inspect(419, 79);
   assert.deepEqual([framed.tag, framed.role, framed.text, framed.frame_url, framed.attributes.href], ['a', 'link', 'Docs', 'about:srcdoc', '[redacted]']);
