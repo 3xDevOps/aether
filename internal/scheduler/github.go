@@ -234,9 +234,9 @@ func (s *Scheduler) connectGitHubLocked(ctx context.Context, member domain.Membe
 	if code != 0 {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: gh ssh-key list exited %d: %s", code, said)
 	}
-	if !listsFingerprint(listed, fingerprint) {
+	if !listsSigningKey(listed, fingerprint) {
 		return domain.GitHubConnection{}, fmt.Errorf(
-			"github: the signing key registered on the account does not match this member's key (fingerprint %s not listed)", fingerprint)
+			"github: gh ssh-key list on the account does not include the signing key Aether generated for this member (%s); this is not about your own GitHub keys", fingerprint)
 	}
 	return domain.GitHubConnection{Login: entry.Login, SigningKey: pub, Fingerprint: fingerprint}, nil
 }
@@ -492,11 +492,16 @@ func versionString(parts []int) string {
 	return strings.Join(out, ".")
 }
 
-// listsFingerprint reports whether gh ssh-key list names fingerprint. Each
-// line is tab separated: title, fingerprint, added, id, type.
-func listsFingerprint(out, fingerprint string) bool {
+// listsSigningKey reports whether gh ssh-key list carries the key with
+// fingerprint. Each line is tab separated: title, key type and base64,
+// created, id, and authentication or signing; gh prints no fingerprint.
+func listsSigningKey(out, fingerprint string) bool {
 	for line := range strings.Lines(out) {
-		if slices.Contains(strings.Split(strings.TrimSpace(line), "\t"), fingerprint) {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		if len(fields) != 5 {
+			continue
+		}
+		if listed, err := signingFingerprint(fields[1]); err == nil && listed == fingerprint {
 			return true
 		}
 	}

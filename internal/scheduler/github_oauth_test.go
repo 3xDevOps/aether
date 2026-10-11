@@ -170,7 +170,7 @@ func newGitHubOAuthTestEnv(t *testing.T) (*testEnv, *githubOAuthTestRuntime, *at
 		case slices.Contains(argv, "status"):
 			return 0, status.Load().(string), nil
 		case slices.Contains(argv, "list"):
-			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+			return 0, "aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t1\tsigning\n", nil
 		default:
 			return 0, "", nil
 		}
