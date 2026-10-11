@@ -11,8 +11,12 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 const task = 'read the files'
 // What a compiler prints: a path, a line and a message. seedRepo commits README.md.
-const agent = `printf '%s\\r\\n' 'README.md:1: heading' 'missing.md:3: gone'
-while :; do sleep 1; done`
+// Redrawn each second so output printed before the terminal attached is not the only copy.
+const agent = `while :; do
+  printf '\\033[2J\\033[H'
+  printf '%s\\r\\n' 'README.md:1: heading' 'missing.md:3: gone'
+  sleep 1
+done`
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
