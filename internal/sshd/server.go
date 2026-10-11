@@ -179,7 +179,8 @@ type Server struct {
 	workspaceLocks   map[domain.WorkspaceID]*sync.RWMutex
 
 	// environmentMu makes workspace.environment.set's read, merge and write
-	// of the workspace row and its secret file one step.
+	// of the workspace row and its secret file one step, also for
+	// workspace.environment.get.
 	environmentMu sync.Mutex
 
 	mu    sync.Mutex

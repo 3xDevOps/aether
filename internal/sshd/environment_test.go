@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -190,6 +191,37 @@ func TestWorkspaceEnvironmentSetThatHalfFails(t *testing.T) {
 	want := []protocol.WorkspaceVariable{{Name: "NODE_ENV", Value: "test"}, {Name: "NPM_TOKEN", Secret: true}}
 	if perr != nil || !slices.Equal(got.Variables, want) || !strings.Contains(got.Warning, "timeline note was not recorded: event log unavailable") {
 		t.Fatalf("set with the timeline note refused = %+v, %+v, want the change saved and a warning", got, perr)
+	}
+}
+
+func TestWorkspaceEnvironmentSetWaitsForALaunchReadingIt(t *testing.T) {
+	secrets := secretstore.New(t.TempDir())
+	e := newTestEnv(t, func(cfg *Config) { cfg.Secrets = secrets })
+	params, err := json.Marshal(protocol.WorkspaceEnvironmentSetParams{
+		WorkspaceID: string(e.ws.ID),
+		Set:         []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "npm-token-7c2e91", Secret: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secrets.RLock()
+	saved := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.workspaceEnvironmentSet(context.Background(), e.member.ID, params)
+		saved <- perr
+	}()
+	select {
+	case perr := <-saved:
+		t.Fatalf("set returned while a launch was reading the environment: %+v", perr)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if kept, err := secrets.Get(e.ws.ID); err != nil || len(kept) != 0 {
+		t.Fatalf("secrets written under the launch's read = %d, %v", len(kept), err)
+	}
+	secrets.RUnlock()
+	if perr := <-saved; perr != nil {
+		t.Fatalf("set after the launch read: %+v", perr)
 	}
 }
 

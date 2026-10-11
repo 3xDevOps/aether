@@ -91,12 +91,22 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	var setupScript string
 	var secrets map[string]string
 	if ws != nil {
-		setupScript = ws.Environment.SetupPolicy.Script
 		if s.cfg.Secrets != nil {
-			if secrets, err = s.cfg.Secrets.Get(ws.ID); err != nil {
-				return nil, fmt.Errorf("scheduler: read workspace secrets: %w", err)
+			// The caller read ws some time ago. The row is read again with
+			// the secret file, under the lock workspace.environment.set
+			// writes both under, so a variable changing between plain and
+			// secret is never missing from both.
+			s.cfg.Secrets.RLock()
+			ws, err = s.cfg.Store.GetWorkspace(ctx, ws.ID)
+			if err == nil {
+				secrets, err = s.cfg.Secrets.Get(ws.ID)
+			}
+			s.cfg.Secrets.RUnlock()
+			if err != nil {
+				return nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
 			}
 		}
+		setupScript = ws.Environment.SetupPolicy.Script
 	}
 	env, err := explicitEnvironment(profile, ws, secrets)
 	if err != nil {

@@ -53,6 +53,8 @@ func (s *Server) workspaceEnvironmentGet(ctx context.Context, _ domain.MemberID,
 		return nil, perr
 	}
 	id := domain.WorkspaceID(p.WorkspaceID)
+	s.environmentMu.Lock()
+	defer s.environmentMu.Unlock()
 	ws, err := s.cfg.Store.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, rpcError(err)
@@ -145,6 +147,10 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 	ws.Environment.Variables = variables
 
 	if s.cfg.Secrets != nil {
+		// A launch reads the row and the secret file under this lock, so it
+		// gets both from before this change or both from after it.
+		s.cfg.Secrets.Lock()
+		defer s.cfg.Secrets.Unlock()
 		err = s.cfg.Secrets.Put(id, secrets)
 	}
 	if err == nil {

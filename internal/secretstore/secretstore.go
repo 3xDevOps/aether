@@ -9,11 +9,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
+// Store's lock orders a change to a workspace's environment, which is its
+// row in aether.db and its secret file, against a launch reading both. Get,
+// Put and Delete do not take it.
 type Store struct {
+	sync.RWMutex
 	dir string
 }
 
