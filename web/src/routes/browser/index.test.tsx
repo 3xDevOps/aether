@@ -44,7 +44,7 @@ beforeEach(() => {
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-const address = () => screen.getByRole('textbox', { name: 'Address' }) as HTMLInputElement
+const address = () => screen.getByRole('combobox', { name: 'Address' }) as HTMLInputElement
 const ready = () => screen.findByLabelText('Shared browser page')
 function submit(typed: string) {
   act(() => address().focus())

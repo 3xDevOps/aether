@@ -97,7 +97,7 @@ export async function openBrowserPane(page: Page, fixture: BrowserFixture): Prom
 }
 
 export function addressBar(page: Page): Locator {
-  return page.getByRole('textbox', { name: 'Address', exact: true })
+  return page.getByRole('combobox', { name: 'Address', exact: true })
 }
 
 export function remotePage(page: Page): Locator {

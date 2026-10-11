@@ -19,6 +19,7 @@ import { useStore } from '@/store'
 import { isTerminal } from '@/store/runs'
 import { normalizeAddress } from './address'
 import { AddressBar } from './address-bar'
+import { OpenAPage, PortsControl, usePorts } from './ports'
 import { BrowserSurface, type BrowserSurfaceHandle } from './surface'
 import { paneViewport, viewportPresets } from './viewport'
 
@@ -227,6 +228,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   }, [runID, controlSession, release])
 
   const ended = run ? isTerminal(run.status) : false
+  const ports = usePorts(runID, !ended)
   useEffect(() => {
     alive.current = true
     void refresh()
@@ -346,6 +348,12 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     if (document.activeElement !== address.current) return
     address.current?.blur()
     if (!window.matchMedia?.(coarsePointer).matches) requestAnimationFrame(() => surfaceHandle.current?.focus())
+  }
+  // A port picked in the pane goes the way of an address typed and entered:
+  // the field takes focus and hands it to the page once the port is open.
+  const openPort = (typed: string) => {
+    if (!window.matchMedia?.(coarsePointer).matches) address.current?.focus()
+    void go(typed).then((opened) => { if (opened) focusPage() })
   }
   const navigate = (direction: 'back' | 'forward' | 'reload') => {
     if (!page) return
@@ -498,13 +506,14 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   )
 
   return <div data-browser className="flex h-full min-h-0 min-w-0 flex-col">
-    <div role="toolbar" aria-label="Browser" className="@container flex shrink-0 flex-wrap items-center gap-1 border-b border-seam bg-chrome px-2 py-1">
+    <div role="toolbar" aria-label="Browser" className="@container relative flex shrink-0 flex-wrap items-center gap-1 border-b border-seam bg-chrome px-2 py-1">
       <Button variant="ghost" size="icon" label="Back" hint={`Back (${shortcutLabel('browser-back')})`} aria-disabled={!page || undefined} onClick={() => navigate('back')}><ArrowLeft /></Button>
       <Button variant="ghost" size="icon" label="Forward" hint={`Forward (${shortcutLabel('browser-forward')})`} aria-disabled={!page || undefined} onClick={() => navigate('forward')}><ArrowRight /></Button>
       <Button variant="ghost" size="icon" label={loading ? 'Loading' : 'Reload'} hint={loading ? 'Loading' : `Reload (${shortcutLabel('browser-reload')})`} aria-disabled={!page || loading || undefined} onClick={() => navigate('reload')}>
         {loading ? <Spinner className="size-4" /> : <RotateCw />}
       </Button>
-      <AddressBar url={page && page.url !== 'about:blank' ? page.url : ''} going={going} disabled={!status?.available} input={address} onSubmit={go} onOpened={focusPage} />
+      <AddressBar url={page && page.url !== 'about:blank' ? page.url : ''} going={going} disabled={!status?.available} ports={page ? ports?.list ?? [] : []} input={address} onSubmit={go} onOpened={focusPage} />
+      {!compact && <PortsControl runID={runID} ports={ports} available={Boolean(status?.available)} onOpen={openPort} />}
       <Button variant="ghost" size="icon" label="Keyboard" className="hidden coarse:inline-flex" aria-disabled={!page || undefined} onClick={() => surfaceHandle.current?.focus()}><Keyboard /></Button>
       {!compact && (
         <Menu>
@@ -593,9 +602,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
           ) : loading || status.state === 'creating' ? (
             <EmptyState title={<span className="inline-flex items-center gap-2"><Spinner />{stateTitles.creating}</span>}>The first page takes longer: the server is starting a browser beside the run.</EmptyState>
           ) : status.available ? (
-            <EmptyState title="Open a page">
-              Type an address above and press Enter. This browser runs on the server beside the run, so <span className="font-code">localhost:3000</span> is the run’s own app, not your machine.
-            </EmptyState>
+            <OpenAPage runID={runID} ports={ports} onOpen={openPort} />
           ) : (
             <EmptyState
               title={stateTitles[status.state] ?? 'Browser unavailable'}
