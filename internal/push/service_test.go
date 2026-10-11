@@ -373,7 +373,8 @@ func TestAHandedOffRunNotifiesOnlyItsNewOwner(t *testing.T) {
 }
 
 // The owner comes back to a dashboard while a slow push service holds their
-// first device: the rest wait until the owner has left it alone again.
+// first device: the rest wait until the owner has left it alone again, and
+// the first is not sent the same need twice.
 func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -389,9 +390,9 @@ func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
 	close(slow.release)
 	phone.expectNone(t, testQuiet/2)
 
-	slow.expect(t, idle)
 	phone.expect(t, idle)
 	phone.expectNone(t, testQuiet)
+	slow.expectNone(t, testQuiet)
 }
 
 // A paused run waits on nobody; resumed, it needs its owner again.

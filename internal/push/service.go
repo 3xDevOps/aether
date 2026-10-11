@@ -195,12 +195,14 @@ func (s *Service) changed(ctx context.Context, id domain.RunID) {
 
 // watch follows one run from the event that brought it up until it needs
 // nothing. Every notification for a run replaces the last one on a device,
-// so this goroutine alone decides and sends them, one device at a time: none
+// so this goroutine alone decides and sends them, one device at a turn: none
 // overtakes another, and each is decided from the run as it stands when it
-// is sent. A need counts as announced once every device was offered it; a
-// delivery cut short is decided again.
+// is sent.
 func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct{}) {
 	announced := map[string]bool{}
+	// offered is every need a device was sent, as {need, endpoint}, so one
+	// that was interrupted goes on with the devices still without it.
+	offered := map[[2]string]bool{}
 	for {
 		run, n := s.read(ctx, id)
 		if n == nil {
@@ -208,15 +210,16 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 				return
 			}
 			clear(announced)
+			clear(offered)
 		}
 		var free <-chan time.Time
 		if n != nil && !announced[n.key] {
 			if wait := time.Until(s.freeAt(run.MemberID)); wait > 0 {
 				free = time.After(wait)
-			} else if s.deliver(ctx, run, n) {
-				announced[n.key] = true
-			} else {
+			} else if s.offer(ctx, run, n, offered) {
 				continue
+			} else {
+				announced[n.key] = true
 			}
 		}
 		select {
@@ -239,35 +242,32 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 	return true
 }
 
-// deliver offers n to every device of the run's owner and reports whether
-// it got that far. The run is read again before each device after the
-// first, and delivery stops once the need has cleared or changed, the run
-// has another owner, or its owner is back at a dashboard.
-func (s *Service) deliver(ctx context.Context, run *domain.Run, n *need) bool {
+// offer sends n to the next device of the run's owner that has not had it,
+// and reports whether there was one.
+func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]bool) bool {
 	payload, err := json.Marshal(notification{Title: runTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
-		return true
+		return false
 	}
 	subs, err := s.store.ListPushSubscriptions(ctx, run.MemberID)
 	if err != nil {
 		slog.Warn("push: list subscriptions", "member", run.MemberID, "error", err)
-		return true
+		return false
 	}
 	digest := sha256.Sum256([]byte(run.ID))
-	topic := b64.EncodeToString(digest[:])[:32]
-	for i, sub := range subs {
-		if i > 0 {
-			_, standing := s.read(ctx, run.ID)
-			if standing == nil || standing.key != n.key || time.Until(s.freeAt(run.MemberID)) > 0 {
-				return false
-			}
+	for _, sub := range subs {
+		device := [2]string{n.key, sub.Endpoint}
+		if offered[device] {
+			continue
 		}
-		if err := s.send(ctx, sub, payload, topic); err != nil {
+		offered[device] = true
+		if err := s.send(ctx, sub, payload, b64.EncodeToString(digest[:])[:32]); err != nil {
 			slog.Warn("push: notification not delivered", "member", run.MemberID, "error", err)
 		}
+		return true
 	}
-	return true
+	return false
 }
 
 // read is the run as it stands and what it needs of its owner, if anything.
