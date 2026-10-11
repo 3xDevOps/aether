@@ -330,7 +330,7 @@ function main() {
     // exactly the shape the dashboard writes it: a link in agent output
     // reaches this function too, and an editor scheme can carry far more
     // than "open this run's checkout".
-    const editorLink = /^(?:(?:vscode|cursor):\/\/vscode-remote\/ssh-remote\+|zed:\/\/ssh\/)[a-z0-9-]+\.aether\/workspace$/
+    const editorLink = /^(?:(?:vscode|cursor):\/\/vscode-remote\/ssh-remote\+|zed:\/\/ssh\/)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.aether\/workspace$/
     const openExternalURL = (target) => {
       try {
         const protocol = new URL(target).protocol

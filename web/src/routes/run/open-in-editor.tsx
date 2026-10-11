@@ -11,9 +11,16 @@ import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
-/** The ssh host `aether ssh-config` gives every run; internal/cli names the suffix. */
-export function runHost(runID: string): string {
-  return `${runID}.aether`
+/** A run id as a host name carries it: one lowercase DNS label, the grammar internal/cli accepts. */
+const runHostLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+
+/**
+ * The ssh host `aether ssh-config` gives every run; internal/cli names the
+ * suffix. Null for an id that is not a host label: it would be read as syntax
+ * by an editor link or a shell.
+ */
+export function runHost(runID: string): string | null {
+  return runHostLabel.test(runID) ? `${runID}.aether` : null
 }
 
 /** A run's checkout inside its container. */
@@ -39,10 +46,10 @@ export function useOpenInEditor(run: RunRecord): { item: ExtraItem | null; dialo
   const returnTo = useRef<HTMLElement | null>(null)
 
   const live = run.status === 'running' || run.status === 'needs-attention'
-  if (phone || !live || !allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })) {
+  const host = runHost(run.id)
+  if (phone || !live || !host || !allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })) {
     return { item: null, dialog: null }
   }
-  const host = runHost(run.id)
   const item: ExtraItem = {
     id: 'open-in-editor',
     label: 'Open in editor…',
