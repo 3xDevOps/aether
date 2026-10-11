@@ -1,6 +1,7 @@
 package gitengine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -748,7 +749,7 @@ func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
-	files, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
+	files, truncated, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
 	if err != nil {
 		w.warnSnapshot(err)
 		return
@@ -780,7 +781,7 @@ func (w *diffWatch) snapshot() {
 		}
 		attempted = true
 		return publish(events.RunDiffPayload{
-			Files: files, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
+			Files: files, Truncated: truncated, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
 		})
 	})
 	// Acknowledgement cleanup can fail after both the event and ref pair
@@ -797,7 +798,7 @@ func (w *diffWatch) snapshot() {
 		w.lastEvent = time.Now()
 		if !attempted {
 			payload := events.RunDiffPayload{
-				Files: files, HistoryGap: true,
+				Files: files, Truncated: truncated, HistoryGap: true,
 				SnapshotError: "Snapshot history unavailable; current change statistics remain live.",
 			}
 			if errors.Is(treeErr, ErrSnapshotStorageLimit) {
@@ -869,18 +870,27 @@ func (w *diffWatch) warnTree(err error) {
 		"run", string(w.run), "error", err)
 }
 
+// errCountBudget refuses an untracked file the stat set has no budget left
+// to read.
+var errCountBudget = errors.New("gitengine: untracked content exceeds the stat set's read budget")
+
 // diffStats builds the snapshot stat set: numstat against base for tracked
 // work (committed and uncommitted) plus untracked files at their line
 // counts. Both listings use -z (NUL-separated, unquoted) so non-ASCII
 // paths survive verbatim, and --no-renames so a rename reports its real
 // old and new paths rather than a munged "old => new". Never mutates the
 // index. Sorted by path.
-func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) ([]events.FileDiffStat, error) {
+//
+// Every changed path is listed, because the overlap index reads them. What
+// is bounded is the untracked content read to count lines: at most
+// MaxSnapshotInputBytes, the most a snapshot would stage. truncated reports
+// a file left unread at zero, which makes the totals a floor.
+func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) (files []events.FileDiffStat, truncated bool, err error) {
 	numstat, err := e.gitCheckout(ctx, run, checkout, "diff", "--numstat", "--no-renames", "-z", base)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	files := make([]events.FileDiffStat, 0, 8)
+	files = make([]events.FileDiffStat, 0, 8)
 	for record := range strings.SplitSeq(numstat, "\x00") {
 		parts := strings.SplitN(record, "\t", 3)
 		if len(parts) != 3 {
@@ -892,27 +902,31 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 	}
 	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	checkoutRoot, err := os.OpenRoot(checkout)
 	if err != nil {
-		return nil, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
+		return nil, false, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
 	}
 	defer func() { _ = checkoutRoot.Close() }()
+	budget := int64(MaxSnapshotInputBytes)
 	for path := range strings.SplitSeq(untracked, "\x00") {
 		if path == "" {
 			continue
 		}
-		lines, err := countLines(ctx, checkoutRoot, path)
-		if err != nil {
+		lines, read, err := countLines(ctx, checkoutRoot, path, budget)
+		if errors.Is(err, errCountBudget) {
+			truncated = true
+		} else if err != nil {
 			continue
 		}
+		budget -= read
 		files = append(files, events.FileDiffStat{Path: path, Additions: lines})
 	}
 	slices.SortFunc(files, func(a, b events.FileDiffStat) int {
 		return strings.Compare(a.Path, b.Path)
 	})
-	return files, nil
+	return files, truncated, nil
 }
 
 // countBytesCap bounds how much of a single untracked file a snapshot will
@@ -921,56 +935,54 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 const countBytesCap = 8 << 20
 
 // countLines counts the lines in an untracked path (a trailing partial line
-// counts). A symlink counts as one line (git's view of its content) and is
-// never followed - the target may be a FIFO or device that would block the
-// watch loop forever. Only regular files are read, capped at countBytesCap.
-func countLines(ctx context.Context, root *os.Root, path string) (int, error) {
+// counts) and reports how many bytes it read to do so. A symlink counts as
+// one line (git's view of its content) and is never followed - the target
+// may be a FIFO or device that would block the watch loop forever. Only
+// regular files are read, capped at countBytesCap, and one whose read would
+// not fit in budget is refused unread with errCountBudget.
+func countLines(ctx context.Context, root *os.Root, path string, budget int64) (lines int, read int64, err error) {
 	fi, err := root.Lstat(path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if fi.Mode()&fs.ModeSymlink != 0 {
-		return 1, nil
+		return 1, 0, nil
 	}
 	if !fi.Mode().IsRegular() {
-		return 0, fmt.Errorf("gitengine: not a regular file: %s", path)
+		return 0, 0, fmt.Errorf("gitengine: not a regular file: %s", path)
+	}
+	need := min(fi.Size(), countBytesCap)
+	if need > budget {
+		return 0, 0, errCountBudget
 	}
 	f, err := rootfs.Open(root, path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = f.Close() }()
 	var (
 		buf    [32 * 1024]byte
-		count  int
-		total  int
 		endsNL = true
-		empty  = true
 	)
-	for total < countBytesCap {
+	for read < need {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
-		n, err := f.Read(buf[:])
+		n, err := f.Read(buf[:min(int64(len(buf)), need-read)])
 		if n > 0 {
-			empty = false
-			total += n
-			for _, b := range buf[:n] {
-				if b == '\n' {
-					count++
-				}
-			}
+			read += int64(n)
+			lines += bytes.Count(buf[:n], []byte{'\n'})
 			endsNL = buf[n-1] == '\n'
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	}
-	if !empty && !endsNL {
-		count++
+	if !endsNL {
+		lines++
 	}
-	return count, nil
+	return lines, read, nil
 }

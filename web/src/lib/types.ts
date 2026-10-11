@@ -838,6 +838,9 @@ export interface FileDiffStat {
 
 export interface RunDiffPayload {
   files: FileDiffStat[]
+  /** The run holds more untracked content than a stat set reads: every
+   * changed path is in `files`, but the counts sum to a floor. */
+  truncated?: boolean
   /** The git tree of the whole worktree at this snapshot. */
   tree?: string
   /** The previous snapshot's tree, or the fork-point tree for the first one.

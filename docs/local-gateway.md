@@ -991,6 +991,11 @@ so nothing under the checkout's `.git` - not even the loose objects staging
 hashes - is ever written, and the scratch files are deleted once the patch is
 rendered.
 
+A `run.diff` stat set lists every changed path but reads at most 128 MiB of
+untracked content to count lines. Past that the event carries
+`truncated:true`: the files left unread count zero and the totals are a
+floor.
+
 `from` and `to` render one interval instead. Both take a snapshot tree id off
 a `run.diff` event - its `parent_tree` and its `tree` - and the answer is the
 diff between those two trees, which is what the run changed in that interval.
