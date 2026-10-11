@@ -70,11 +70,11 @@ function describe(element) {
     let alone = true;
     let steps = 0;
     for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
-      if (++steps > 200) return '';
+      if (++steps > 5000) return '';
       if (sibling.localName === node.localName) index++;
     }
     for (let sibling = node.nextElementSibling; sibling && alone; sibling = sibling.nextElementSibling) {
-      if (++steps > 200) return '';
+      if (++steps > 5000) return '';
       if (sibling.localName === node.localName) alone = false;
     }
     return index > 1 || !alone ? `:nth-of-type(${index})` : '';
