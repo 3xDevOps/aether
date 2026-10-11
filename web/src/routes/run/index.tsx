@@ -75,7 +75,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const agentName = agentDisplayNames(agents)[run.harness] ?? run.harness
   const agentEntry = agents?.find((entry) => entry.name === run.harness)
   const switchable = agentEntry?.switchable === true
-  const shells = useRunShells(run.id)
+  const shells = useRunShells(run.id, view === 'terminal')
   const room = useRunRoom(run, agent.roomControl)
 
   const detailsOpen = inline ? detailsPreference : overlayDetails

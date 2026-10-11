@@ -47,8 +47,12 @@ type runTerminalSet struct {
 }
 
 type runTerminal struct {
-	ID             string               `json:"id"`
-	Incarnation    string               `json:"incarnation"`
+	ID          string `json:"id"`
+	Incarnation string `json:"incarnation"`
+	// Records written before these two fields existed count as a person's
+	// and as the oldest.
+	StartedByAgent bool                 `json:"started_by_agent,omitempty"`
+	StartedAt      time.Time            `json:"started_at,omitzero"`
 	Identity       runtime.ExecIdentity `json:"identity"`
 	Cols           uint                 `json:"cols"`
 	Rows           uint                 `json:"rows"`
@@ -130,7 +134,7 @@ func (s *Scheduler) loadRunTerminalsLocked(ctx context.Context, run domain.RunID
 		if err = json.Unmarshal(data, set); err != nil {
 			return nil, fmt.Errorf("decode terminal registry: %w", err)
 		}
-		if set.Version != 1 || set.RunID != run || len(set.Terminals) > 4 || set.Terminals == nil {
+		if set.Version != 1 || set.RunID != run || len(set.Terminals) > 2*maxRunShells || set.Terminals == nil {
 			return nil, fmt.Errorf("invalid terminal registry")
 		}
 		for id, terminal := range set.Terminals {
@@ -237,27 +241,59 @@ func terminalDescription(terminal *runTerminal) protocol.DevTerminal {
 	case terminal.Unavailable == "" && terminal.State.Running:
 		process.State = "running"
 	}
+	startedBy := control.PrincipalMember
+	if terminal.StartedByAgent {
+		startedBy = control.PrincipalRunAgent
+	}
 	return protocol.DevTerminal{TerminalID: terminal.ID, Incarnation: terminal.Incarnation, Name: terminal.ID,
-		Cols: terminal.Cols, Rows: terminal.Rows, Process: process}
+		StartedBy: string(startedBy), Cols: terminal.Cols, Rows: terminal.Rows, Process: process}
 }
 
-func (s *Scheduler) startRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, live LiveRun, params protocol.DevTerminalStartParams) (*runTerminal, error) {
+func terminalEnded(terminal *runTerminal) bool {
+	return terminal.State.Exited && (terminal.State.ExitCode != nil || terminal.ContainerEnded)
+}
+
+// admitRunTerminalLocked holds one starter to maxRunShells running terminals
+// and as many records. It returns the starter's oldest ended terminal when a
+// new one needs its place. replaced is a record the new terminal supersedes.
+func (s *Scheduler) admitRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, byAgent bool, replaced *runTerminal) (*runTerminal, error) {
+	running, kept := 0, 0
+	var oldest *runTerminal
+	for _, terminal := range set.Terminals {
+		if terminal.StartedByAgent != byAgent || terminal == replaced {
+			continue
+		}
+		if err := s.refreshRunTerminalLocked(ctx, run, set, terminal); err != nil {
+			return nil, err
+		}
+		kept++
+		if !terminalEnded(terminal) {
+			running++
+			continue
+		}
+		if oldest == nil || terminal.StartedAt.Before(oldest.StartedAt) ||
+			(terminal.StartedAt.Equal(oldest.StartedAt) && terminal.ID < oldest.ID) {
+			oldest = terminal
+		}
+	}
+	if running >= maxRunShells {
+		starter := "people have"
+		if byAgent {
+			starter = "the agent has"
+		}
+		return nil, fmt.Errorf("%w: %s %d shells running in this run; stop one to start another", ErrRunShellTabLimit, starter, maxRunShells)
+	}
+	if kept < maxRunShells {
+		return nil, nil
+	}
+	return oldest, nil
+}
+
+func (s *Scheduler) startRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, live LiveRun, params protocol.DevTerminalStartParams, byAgent bool) (*runTerminal, error) {
 	if err := s.DevelopmentTerminalsAvailable(); err != nil {
 		return nil, err
 	}
-	if params.Name == "" {
-		for n := 1; n <= 4; n++ {
-			candidate := fmt.Sprintf("tab-%d", n)
-			if set.Terminals[candidate] == nil {
-				params.Name = candidate
-				break
-			}
-		}
-		if params.Name == "" {
-			return nil, ErrRunShellTabLimit
-		}
-	}
-	if !runShellTabName.MatchString(params.Name) {
+	if params.Name != "" && !runShellTabName.MatchString(params.Name) {
 		return nil, ErrInvalidRunShellTab
 	}
 	if params.Cols == 0 {
@@ -274,11 +310,28 @@ func (s *Scheduler) startRunTerminalLocked(ctx context.Context, run domain.RunID
 		if err := s.refreshRunTerminalLocked(ctx, run, set, old); err != nil {
 			return nil, err
 		}
-		if !old.State.Exited || (old.State.ExitCode == nil && !old.ContainerEnded) {
+		if !terminalEnded(old) {
 			return nil, fmt.Errorf("terminal %q already exists; stop its exact incarnation before replacing it", params.Name)
 		}
-	} else if len(set.Terminals) >= 4 {
-		return nil, ErrRunShellTabLimit
+	}
+	var displaced *runTerminal
+	if old == nil || old.StartedByAgent != byAgent {
+		var err error
+		if displaced, err = s.admitRunTerminalLocked(ctx, run, set, byAgent, old); err != nil {
+			return nil, err
+		}
+	}
+	for n := 1; params.Name == ""; n++ {
+		candidate := fmt.Sprintf("tab-%d", n)
+		if current := set.Terminals[candidate]; current == nil || current == displaced {
+			params.Name = candidate
+		}
+	}
+	superseded := make([]*runTerminal, 0, 2)
+	for _, ended := range []*runTerminal{old, displaced} {
+		if ended != nil {
+			superseded = append(superseded, ended)
+		}
 	}
 	argv := params.Command
 	if len(argv) == 0 {
@@ -313,17 +366,20 @@ func (s *Scheduler) startRunTerminalLocked(ctx context.Context, run domain.RunID
 	if err != nil {
 		return nil, fmt.Errorf("start owned terminal: %w", err)
 	}
-	terminal := &runTerminal{ID: params.Name, Incarnation: incarnation, Identity: execution.Identity(), Exec: execution,
+	terminal := &runTerminal{ID: params.Name, Incarnation: incarnation, StartedByAgent: byAgent, StartedAt: s.cfg.Now().UTC(),
+		Identity: execution.Identity(), Exec: execution,
 		Cols: params.Cols, Rows: params.Rows, State: runtime.ExecState{Running: true, Attached: true}}
 	if terminal.Identity.ContainerID == "" || terminal.Identity.ExecID == "" || terminal.Identity.CreationKey == "" || terminal.Identity.ClaimToken == "" {
 		return nil, errors.Join(fmt.Errorf("runtime returned incomplete terminal ownership"), cleanupUnpublishedTerminal(execution))
 	}
+	for _, ended := range superseded {
+		delete(set.Terminals, ended.ID)
+	}
 	set.Terminals[params.Name] = terminal
 	if err = s.persistRunTerminalsLocked(run, set); err != nil {
-		if old == nil {
-			delete(set.Terminals, params.Name)
-		} else {
-			set.Terminals[params.Name] = old
+		delete(set.Terminals, params.Name)
+		for _, ended := range superseded {
+			set.Terminals[ended.ID] = ended
 		}
 		return nil, errors.Join(err, cleanupUnpublishedTerminal(execution))
 	}
@@ -331,10 +387,10 @@ func (s *Scheduler) startRunTerminalLocked(ctx context.Context, run domain.RunID
 	s.runShellReservationMu.Lock()
 	delete(s.runShellReservations, string(key))
 	s.runShellReservationMu.Unlock()
-	if old != nil {
-		_ = s.cfg.PTY.StopSession(ctx, key)
-		if old.Exec != nil {
-			_ = old.Exec.Detach()
+	for _, ended := range superseded {
+		_ = s.cfg.PTY.StopSession(ctx, ptyhost.RunShellSession(run, ended.ID))
+		if ended.Exec != nil {
+			_ = ended.Exec.Detach()
 		}
 	}
 	host := s.cfg.PTY.(DevelopmentPTYHost)
@@ -714,7 +770,7 @@ func (s *Scheduler) DevelopmentTerminal(ctx context.Context, run domain.RunID, p
 		if err = authorize(); err != nil {
 			return nil, err
 		}
-		terminal, err := s.startRunTerminalLocked(ctx, run, set, live, params)
+		terminal, err := s.startRunTerminalLocked(ctx, run, set, live, params, principal.Kind == control.PrincipalRunAgent)
 		if err != nil {
 			return nil, err
 		}

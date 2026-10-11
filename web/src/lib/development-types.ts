@@ -75,6 +75,7 @@ export interface DevTerminal {
   terminal_id: string
   incarnation: string
   name: string
+  started_by: 'run_agent' | 'member'
   cols: number
   rows: number
   process: DevProcessState
