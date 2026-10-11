@@ -531,8 +531,10 @@ func (c *runSSHConn) stopExec(exec runtime.ManagedExec) {
 func stopRunSSHExec(exec runtime.ManagedExec) error {
 	ctx, cancel := context.WithTimeout(context.Background(), runSSHStopTimeout)
 	defer cancel()
-	// A container that is already gone took the execution with it.
-	if _, err := exec.Stop(ctx, runSSHStopGrace); err != nil && !errors.Is(err, runtime.ErrExecUnavailable) {
+	// A container that is gone took the execution with it. Nothing else
+	// short of a stop that landed counts: an execution the runtime could
+	// not reach, a daemon error included, may still be running.
+	if _, err := exec.Stop(ctx, runSSHStopGrace); err != nil && !errors.Is(err, runtime.ErrNotFound) {
 		return err
 	}
 	return nil

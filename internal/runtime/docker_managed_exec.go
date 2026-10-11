@@ -15,6 +15,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/devexec"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
 )
 
@@ -147,6 +148,11 @@ func (e *dockerManagedExec) Attachment() Attachment {
 
 func (e *dockerManagedExec) inspect(ctx context.Context) (client.ExecInspectResult, error) {
 	info, err := e.docker.cli.ExecInspect(ctx, e.identity.ExecID, client.ExecInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		// Docker forgets an execution only with its container, so this one
+		// answer proves it is gone. Any other failure proves nothing.
+		return info, fmt.Errorf("%w: inspect execution: %w: %w", ErrExecUnavailable, ErrNotFound, err)
+	}
 	if err != nil {
 		return info, fmt.Errorf("%w: inspect execution: %w", ErrExecUnavailable, err)
 	}

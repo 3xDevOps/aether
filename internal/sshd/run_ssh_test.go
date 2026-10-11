@@ -42,6 +42,9 @@ type runSSHTestService struct {
 	// transient is how many more checks refusal answers before it clears.
 	transient int
 	started   []scheduler.RunExec
+	// execs are killed when the test ends, so a stop the server never
+	// delivered fails the test at once instead of waiting out the command.
+	execs []*localExec
 	// stopped counts stops that landed; stopErr refuses them, as a paused
 	// container does, and refusedStops counts those.
 	stopped      int
@@ -68,6 +71,13 @@ func installRunSSHTestService(t *testing.T, e *testEnv) *runSSHTestService {
 	installDevelopmentTestService(e)
 	svc := &runSSHTestService{dir: t.TempDir()}
 	e.srv.cfg.Services.RunSSH = svc
+	t.Cleanup(func() {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		for _, exec := range svc.execs {
+			exec.kill()
+		}
+	})
 	return svc
 }
 
@@ -171,6 +181,10 @@ func (e *localExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStat
 	if err := e.svc.stopErr; err != nil {
 		e.svc.refusedStops++
 		e.svc.mu.Unlock()
+		// A container that is gone took its processes with it.
+		if errors.Is(err, runtime.ErrNotFound) {
+			e.kill()
+		}
 		return runtime.ExitStatus{}, err
 	}
 	e.svc.stopped++
@@ -221,6 +235,9 @@ func (f *runSSHTestService) process(spec scheduler.RunExec) (runtime.ManagedExec
 	_ = errW.Close()
 	e := &localExec{svc: f, stdin: stdin, stdout: outR, stderr: errR, done: make(chan struct{}), resized: make(chan [2]uint, 8)}
 	e.kill = func() { _ = cmd.Process.Kill() }
+	f.mu.Lock()
+	f.execs = append(f.execs, e)
+	f.mu.Unlock()
 	go func() {
 		_ = cmd.Wait()
 		e.code = cmd.ProcessState.ExitCode()
@@ -695,6 +712,54 @@ func TestRunSSHDisconnectStopsItsProcesses(t *testing.T) {
 	eventually(t, "the command to start", func() bool { return len(svc.starts()) == 1 })
 	_ = client.Close()
 	eventually(t, "the session's process to be stopped", func() bool { return svc.stops() == 1 })
+}
+
+// A stop the runtime could not carry out, a daemon error included, leaves
+// the process running, so it is tried again. Only a container that is gone
+// has nothing left to stop.
+func TestRunSSHRetriesAStopThatDidNotLand(t *testing.T) {
+	for name, tc := range map[string]struct {
+		stopErr error
+		retried bool
+	}{
+		"the execution could not be reached": {fmt.Errorf("%w: inspect execution: connection refused", runtime.ErrExecUnavailable), true},
+		"the container is gone":              {fmt.Errorf("%w: inspect execution: %w", runtime.ErrExecUnavailable, runtime.ErrNotFound), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 10 * time.Millisecond })
+			svc := installRunSSHTestService(t, e)
+			client := mustDialRunSSH(t, e, e.signer)
+			sess, err := client.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = sess.Start("sleep 300"); err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, "the command to start", func() bool { return len(svc.starts()) == 1 })
+			svc.mu.Lock()
+			svc.stopErr = tc.stopErr
+			svc.mu.Unlock()
+			_ = client.Close()
+			refused := func() int {
+				svc.mu.Lock()
+				defer svc.mu.Unlock()
+				return svc.refusedStops
+			}
+			eventually(t, "the stop that did not land", func() bool { return refused() >= 1 })
+			if !tc.retried {
+				time.Sleep(200 * time.Millisecond)
+				if got := refused(); got != 1 {
+					t.Fatalf("a container that is gone was asked to stop %d times, want once", got)
+				}
+				return
+			}
+			svc.mu.Lock()
+			svc.stopErr = nil
+			svc.mu.Unlock()
+			eventually(t, "the retried stop to land", func() bool { return svc.stops() == 1 })
+		})
+	}
 }
 
 func TestRunSSHStartRefusalReachesTheClient(t *testing.T) {

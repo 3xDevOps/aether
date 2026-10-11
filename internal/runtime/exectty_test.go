@@ -3,8 +3,11 @@ package runtime
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -204,5 +207,46 @@ func TestLosslessExecKeepsStderrAndTerminalOutput(t *testing.T) {
 				t.Fatalf("read %d bytes (%v), want %d", n, err, total)
 			}
 		})
+	}
+}
+
+// Only Docker's own "no such execution" proves an execution is gone. A
+// caller that must stop one may give up on that answer and on no other.
+func TestManagedExecStopSeparatesGoneFromUnreachable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		gone   bool
+	}{
+		"docker has no such execution": {http.StatusNotFound, true},
+		"docker failed to answer":      {http.StatusInternalServerError, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, `{"message":"exec lookup"}`)
+			}))
+			defer api.Close()
+			cli, err := client.New(client.WithHost("tcp://"+api.Listener.Addr().String()), client.WithAPIVersion("1.51"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cli.Close() }()
+			execution := &dockerManagedExec{docker: &Docker{cli: cli}, identity: ExecIdentity{ContainerID: "container", ExecID: "exec"}}
+			_, err = execution.Stop(t.Context(), time.Second)
+			if !errors.Is(err, ErrExecUnavailable) || errors.Is(err, ErrNotFound) != tc.gone {
+				t.Fatalf("Stop = %v, want it unavailable and gone=%v", err, tc.gone)
+			}
+		})
+	}
+	// An unreachable daemon proves nothing either.
+	cli, err := client.New(client.WithHost("unix://"+t.TempDir()+"/absent.sock"), client.WithAPIVersion("1.51"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cli.Close() }()
+	execution := &dockerManagedExec{docker: &Docker{cli: cli}, identity: ExecIdentity{ContainerID: "container", ExecID: "exec"}}
+	if _, err = execution.Stop(t.Context(), time.Second); !errors.Is(err, ErrExecUnavailable) || errors.Is(err, ErrNotFound) {
+		t.Fatalf("Stop without a daemon = %v, want it unavailable and not gone", err)
 	}
 }

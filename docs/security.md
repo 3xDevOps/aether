@@ -1020,7 +1020,11 @@ one.
   and X11 are refused.
 - **A session owns its processes, for as long as the server runs.** When a
   session ends, its connection drops, or its authorization is withdrawn,
-  everything it started is stopped. A frozen container refuses that stop,
+  everything it started is stopped. A stop that does not land is tried
+  again, five times, and only a container Docker reports gone counts as
+  nothing left to stop; after the last failure the server logs
+  `sshd: ssh execution left running` and the process stays. A frozen
+  container refuses that stop,
   so for a paused run, and for a closed run whose container is kept, the
   server holds the stop and delivers it when the run resumes or is
   relaunched. The pending stop lives only in the server's memory. A restart
