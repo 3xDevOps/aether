@@ -965,6 +965,18 @@ func TestWriteTransactionsWaitForTheWriteLock(t *testing.T) {
 	}
 }
 
+func TestCommitsDoNotHoldTheWriteLockAcrossFsync(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	var mode int
+	if err := db.db.QueryRow(`PRAGMA synchronous`).Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA synchronous: %v", err)
+	}
+	if mode != 1 {
+		t.Fatalf("synchronous = %d, want 1 (NORMAL)", mode)
+	}
+}
+
 func TestUpdateRunStatus(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
