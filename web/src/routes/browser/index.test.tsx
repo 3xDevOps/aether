@@ -102,6 +102,26 @@ describe('the first page', () => {
     expect(open).toHaveBeenCalledTimes(1)
   })
 
+  it('gives the lease back when the first page opens after focus moved elsewhere', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    const first = Promise.withResolvers<{ page: DevBrowserPage; control: { control_session_id: string; control_generation: number } }>()
+    const open = vi.spyOn(api, 'devBrowserOpen').mockReturnValue(first.promise)
+    render(<BrowserView runID="run_1" />)
+    await screen.findByRole('heading', { name: 'Open a page' })
+    submit('localhost:3000')
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    act(() => composer.focus())
+    const session = open.mock.calls[0][0].control_session_id
+    vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: true, running: true, state: 'running', session_id: page.session_id })
+    vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page], selected_page_id: page.page_id })
+    await act(async () => { first.resolve({ page, control: { control_session_id: session, control_generation: 1 } }) })
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith({ run_id: 'run_1', surface, control_session_id: session, control_generation: 1 }))
+    await ready()
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    expect(document.activeElement).toBe(composer)
+    composer.remove()
+  })
+
   it('shows why the server cannot run a browser', async () => {
     vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: false, running: false, state: 'unavailable', reason: 'browser: image is not present on this server' })
     render(<BrowserView runID="run_1" />)
@@ -226,6 +246,64 @@ describe('control', () => {
     view.unmount()
   })
 
+  it('finishes an action whose lease arrives after focus moved elsewhere, then gives the lease back', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    const taking = Promise.withResolvers<DevControlAcquireResult>()
+    vi.mocked(api.devControlAcquire).mockReturnValueOnce(taking.promise)
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(api.devControlAcquire).toHaveBeenCalled())
+    const session = vi.mocked(api.devControlAcquire).mock.calls[0][0].control_session_id
+    act(() => composer.focus())
+    await act(async () => {
+      taking.resolve({ surface, controller: { kind: 'member', control_session_id: session, control_generation: 11, connected: true, acquired_at: '2026-09-26T00:00:00Z' } })
+    })
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith({ run_id: 'run_1', surface, control_session_id: session, control_generation: 11 }))
+    expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ direction: 'reload', control_generation: 11 }))
+    expect(vi.mocked(api.devBrowserNavigate).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.devControlRelease).mock.invocationCallOrder[0])
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    composer.remove()
+  })
+
+  it('gives straight back a lease that no action is waiting for when it arrives after focus moved elsewhere', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    const taking = Promise.withResolvers<DevControlAcquireResult>()
+    vi.mocked(api.devControlAcquire).mockReturnValueOnce(taking.promise)
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    fireEvent.click((await menu('Viewport')).getByRole('menuitemradio', { name: /Phone/ }))
+    await waitFor(() => expect(api.devControlAcquire).toHaveBeenCalled())
+    const session = vi.mocked(api.devControlAcquire).mock.calls[0][0].control_session_id
+    act(() => composer.focus())
+    await act(async () => {
+      taking.resolve({ surface, controller: { kind: 'member', control_session_id: session, control_generation: 11, connected: true, acquired_at: '2026-09-26T00:00:00Z' } })
+    })
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith({ run_id: 'run_1', surface, control_session_id: session, control_generation: 11 }))
+    expect(useStore.getState().browserPresets).toEqual({})
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    composer.remove()
+  })
+
+  it('keeps the lease of an action that a press or a wheel in the Browser came before, with the keyboard elsewhere', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    render(<BrowserView runID="run_1" />)
+    const canvas = await ready()
+    act(() => composer.focus())
+    for (const use of ['pointerdown', 'wheel']) {
+      fireEvent.keyDown(composer, { key: 'a' })
+      await waitFor(() => expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull())
+      vi.mocked(api.devControlRelease).mockClear()
+      fireEvent(canvas, new Event(use, { bubbles: true }))
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+      await screen.findByRole('img', { name: 'You are driving' })
+      await screen.findByRole('button', { name: 'Reload' })
+      expect(api.devControlRelease).not.toHaveBeenCalled()
+      expect(screen.getByRole('img', { name: 'You are driving' })).toBeDefined()
+    }
+    composer.remove()
+  })
+
   it('offers Release control only while driving', async () => {
     render(<BrowserView runID="run_1" />)
     await ready()
@@ -320,6 +398,18 @@ describe('the address bar', () => {
     act(() => useStore.getState().requestBrowser('run_1', 'http://127.0.0.1:5173/'))
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ direction: 'url', url: 'http://127.0.0.1:5173/' })))
     expect(useStore.getState().browserRequests).toEqual({})
+  })
+
+  it('gives the lease back after a terminal link opens while the keyboard stays in the terminal', async () => {
+    const terminal = document.body.appendChild(document.createElement('textarea'))
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    act(() => terminal.focus())
+    act(() => useStore.getState().requestBrowser('run_1', 'http://127.0.0.1:5173/'))
+    await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ direction: 'url', url: 'http://127.0.0.1:5173/', control_generation: 7 })))
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith(expect.objectContaining({ control_generation: 7 })))
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    terminal.remove()
   })
 })
 

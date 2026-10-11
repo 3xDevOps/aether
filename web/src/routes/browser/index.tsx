@@ -105,6 +105,9 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   const reading = useRef(false)
   const mutation = useRef(0)
   const focused = useRef(!document.hidden)
+  // True from focus or a key landing elsewhere in the dashboard until the
+  // Browser is used again.
+  const away = useRef(false)
   const held = useRef<Lease | null>(null)
   const acquiring = useRef<Promise<DevControlFence | null> | null>(null)
   const queued = useRef<{ typed: string; settle: (opened: boolean) => void } | null>(null)
@@ -155,19 +158,29 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     const focus = () => { focused.current = !document.hidden }
     const visibility = () => { if (document.hidden) blur(); else focus() }
     const elsewhere = (event: Event) => {
-      if (event.target instanceof Element && !event.target.closest('[data-browser], [role="menu"], [role="dialog"], [role="alertdialog"]')) void release()
+      if (!(event.target instanceof Element) || event.target.closest('[data-browser], [role="menu"], [role="dialog"], [role="alertdialog"]')) return
+      away.current = true
+      void release()
     }
+    // A wheel or a touch on the page moves no focus, and neither does a
+    // click on a button in Safari.
+    const back = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest('[data-browser]')) away.current = false
+    }
+    const uses = ['focusin', 'pointerdown', 'wheel']
     window.addEventListener('blur', blur)
     window.addEventListener('focus', focus)
     document.addEventListener('visibilitychange', visibility)
     document.addEventListener('focusin', elsewhere)
     document.addEventListener('keydown', elsewhere)
+    for (const type of uses) document.addEventListener(type, back, { capture: true, passive: true })
     return () => {
       window.removeEventListener('blur', blur)
       window.removeEventListener('focus', focus)
       document.removeEventListener('visibilitychange', visibility)
       document.removeEventListener('focusin', elsewhere)
       document.removeEventListener('keydown', elsewhere)
+      for (const type of uses) document.removeEventListener(type, back, true)
       focused.current = false
       alive.current = false
       void release()
@@ -226,7 +239,8 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       const result = await api.devControlAcquire({ run_id: runID, surface: given, control_session_id: controlSession, expected_generation: expected, takeover })
       if (!result.controller) return null
       const next = { surface: given, fence: fenceOf(result.controller) }
-      if (!alive.current || !focused.current) {
+      // Away, only an action still in flight has a use for the lease.
+      if (!alive.current || !focused.current || (away.current && !inFlight.current)) {
         await release(next)
         return null
       }
@@ -261,6 +275,8 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     catch (cause) { if (alive.current) setNotice({ tone: 'failed', text: message(cause) }) }
     finally {
       mutation.current++
+      // An action that outlasted its user's stay gives the lease back.
+      if (away.current) await release()
       inFlight.current = false
       if (alive.current) {
         setPending(null)

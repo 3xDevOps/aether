@@ -2345,10 +2345,15 @@ while the Browser is what its user is working in:
   the view or the dashboard being left, and focus or a key press landing in
   another part of the dashboard, such as the composer beside a docked
   Browser. A menu or a dialog does not count, since it may be the Browser's
-  own. Nothing is shown as blocked on return; the next interaction takes the
-  lease again when it is free. A wheel over a window that is not focused
-  takes nothing. The release is sent `keepalive`, so it survives the tab
-  closing.
+  own. An action still running when focus or a key lands elsewhere in the
+  dashboard, such as the first page opening, finishes and then gives its
+  lease back; so does a terminal link opened in a docked Browser while the
+  keyboard stays in the terminal. A press on the page whose lease arrives
+  after that is dropped with the lease. A press, a touch or a wheel in the
+  Browser is a return to it, though none of them moves focus. Nothing is
+  shown as blocked on return; the next interaction takes the lease again
+  when it is free. A wheel over a window that is not focused takes nothing.
+  The release is sent `keepalive`, so it survives the tab closing.
 
 A reload starts a new tab-local control identity. A lease the old one still
 holds reads "You are driving in another tab".
