@@ -352,8 +352,9 @@ npm ci
 The server runs the script once in each new run's container, after the
 container starts and before the agent's process does:
 
-- **How:** `/bin/sh -ec '<script>'`. It is POSIX `sh`, it stops at the first
-  command that fails, and it is not a login shell.
+- **How:** `/bin/sh -ec '<script>'`, with standard error sent to standard
+  output. It is POSIX `sh`, it stops at the first command that fails, and it
+  is not a login shell.
 - **Where:** `/workspace`, the run's checkout.
 - **As:** the container's user: root in the standard image, otherwise the
   user the image or the agent sets.
@@ -375,11 +376,11 @@ npm error code E401
 ```
 
 The run is listed as failed with `provisioning: start container: runtime:
-setup script exited 1` as its reason. The script's output, its last 16 KiB,
-goes only to whoever launched: `aether run` prints it and the dashboard's
-launch dialog shows it. It is not stored with the run. The server log has
-the same output. In both, the exact value of each secret is replaced with
-`***`.
+setup script exited 1` as its reason. The script's output, the last 16 KiB
+of both streams in the order they were printed, goes only to whoever
+launched: `aether run` prints it and the dashboard's launch dialog shows it.
+It is not stored with the run. The server log has the same output. In both,
+the exact value of each secret is replaced with `***`.
 
 ### Variables
 

@@ -377,7 +377,10 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	if code == 0 {
 		return nil // setup already completed for this container
 	}
-	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", script}, workDir)
+	// Docker delivers stdout and stderr without keeping their order, so the
+	// script's stderr joins its stdout inside the container: the end of the
+	// transcript is then where the script failed.
+	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", "exec 2>&1; " + script}, workDir)
 	output = setupOutput(output, cut, secrets)
 	if err != nil {
 		slog.Error("runtime: setup script execution failed", "container", id, "working_dir", workDir, "script", script, "output", output, "error", err)

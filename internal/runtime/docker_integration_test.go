@@ -371,7 +371,7 @@ func TestDockerSetupOutputPastTheBuffer(t *testing.T) {
 		t.Fatalf("Start() error = %v, want a SetupError with exit 9", err)
 	}
 	if !strings.HasPrefix(setup.Output, "[earlier output omitted]\n") || !strings.Contains(setup.Output, "line 19999 of") ||
-		!strings.Contains(setup.Output, "the real error") || len(setup.Output) > setupOutputLimit+64 {
+		!strings.HasSuffix(setup.Output, "the real error\n") || len(setup.Output) > setupOutputLimit+64 {
 		t.Errorf("setup output is %d bytes ending %q, want the end of the transcript", len(setup.Output), setup.Output[max(0, len(setup.Output)-160):])
 	}
 }
