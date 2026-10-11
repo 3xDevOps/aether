@@ -3342,6 +3342,10 @@ section scrolls into view once it has loaded.
   read-only, **Replace** swaps the dots for an empty field and **Keep
   current** puts them back. Ticking **Secret** on a plain variable masks the
   field and saves it as one; a saved secret cannot be made plain, only removed.
+  A value with line breaks, whether loaded, imported or pasted into the
+  one-line field, is edited in a multi-line field that does not wrap. As a
+  secret it shows the dots and **Replace** instead, since that field cannot
+  mask.
 - **Import .env…** (`components/workspace-environment-import.tsx`) takes
   pasted `NAME=VALUE` lines or a chosen file, parsed by `lib/dotenv.ts`, the
   format `aether workspace env import` reads. It lists each name as **New** or

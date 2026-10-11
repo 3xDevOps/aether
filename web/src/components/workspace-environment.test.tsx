@@ -108,6 +108,46 @@ describe('workspace environment', () => {
     }))
   })
 
+  it('keeps the line breaks of a value, which a one-line field would drop', async () => {
+    const client = mount({
+      workspaceEnvironment: vi.fn(async () => ({ ...saved, variables: [{ name: 'BANNER', value: 'first\nsecond' }] })),
+      workspaceEnvironmentSet: vi.fn(async () => saved),
+    })
+
+    const banner = await screen.findByLabelText('Value of BANNER')
+    expect(banner.tagName).toBe('TEXTAREA')
+    fireEvent.change(banner, { target: { value: 'first\nsecond!' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import .env…' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Import .env' }))
+    fireEvent.change(dialog.getByRole('textbox', { name: 'NAME=VALUE lines' }), { target: { value: 'DEPLOY_KEY="line one\\nline two"' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Add 1 variable' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // A secret cannot be masked in a multi-line field, so it is shown hidden.
+    expect(within(rowOf('DEPLOY_KEY')).getByLabelText('Value of DEPLOY_KEY, hidden')).toHaveProperty('readOnly', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add variable' }))
+    const added = within(screen.getAllByRole('listitem').at(-1)!)
+    fireEvent.change(added.getByRole('textbox', { name: 'Name' }), { target: { value: 'SSH_KEY' } })
+    fireEvent.click(added.getByRole('checkbox', { name: 'Secret' }))
+    const paste = (text: string) => fireEvent.paste(added.getByLabelText('Value of SSH_KEY'), { clipboardData: { getData: () => text } })
+    // The field takes one line as it always did; only a paste it would flatten is handled.
+    expect(paste('one-line-token\n')).toBe(true)
+    expect(paste('BEGIN\r\nkey\r\nEND\r\n')).toBe(false)
+    expect(added.getByLabelText('Value of SSH_KEY, hidden')).toBeDefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      set: [
+        { name: 'BANNER', value: 'first\nsecond!' },
+        { name: 'DEPLOY_KEY', value: 'line one\nline two', secret: true },
+        { name: 'SSH_KEY', value: 'BEGIN\nkey\nEND\n', secret: true },
+      ],
+      unset: [],
+    }))
+  })
+
   it('says when a save took effect and its timeline note did not', async () => {
     const warning = 'the change is saved, but its timeline note was not recorded: database is locked'
     mount({ workspaceEnvironmentSet: vi.fn(async () => ({ ...saved, setup_script: 'make deps', warning })) })

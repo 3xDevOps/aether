@@ -1,7 +1,7 @@
 // The patch `save` sends mirrors protocol.WorkspaceEnvironmentSetParams: only
 // what changed, so a secret this page cannot read is kept by not naming it.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { X } from '@/components/icons'
 import { WorkspaceEnvironmentImport } from '@/components/workspace-environment-import'
@@ -39,13 +39,16 @@ interface Row {
   from?: WorkspaceVariable
   /** A saved secret whose value stays as the server has it. */
   kept: boolean
+  /** The value arrived with a line break, which a one-line field would drop. */
+  lines: boolean
 }
 
 let rowIDs = 0
 
 function savedRow(variable: WorkspaceVariable): Row {
   const secret = variable.secret === true
-  return { id: ++rowIDs, name: variable.name, value: variable.value ?? '', secret, from: variable, kept: secret }
+  const value = variable.value ?? ''
+  return { id: ++rowIDs, name: variable.name, value, secret, from: variable, kept: secret, lines: value.includes('\n') }
 }
 
 const untouched = (row: Row) => !row.from && row.name === '' && row.value === ''
@@ -164,7 +167,7 @@ function ReadOnly({ environment }: { environment: WorkspaceEnvironment }) {
                     <Code>{variable.name}</Code>
                     {variable.secret
                       ? <Badge>Secret</Badge>
-                      : <span className="min-w-0 font-code text-ui-sm break-all text-muted">{variable.value}</span>}
+                      : <span className="min-w-0 font-code text-ui-sm break-all whitespace-pre-wrap text-muted">{variable.value}</span>}
                   </li>
                 ))}
               </ul>
@@ -202,7 +205,7 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   const edit = (id: number, next: Partial<Row>) => setRows((all) => all.map((row) => (row.id === id ? { ...row, ...next } : row)))
 
   const add = () => {
-    const row: Row = { id: ++rowIDs, name: '', value: '', secret: false, kept: false }
+    const row: Row = { id: ++rowIDs, name: '', value: '', secret: false, kept: false, lines: false }
     focusNext.current = { id: row.id, field: 'name' }
     setRows((all) => [...all, row])
   }
@@ -212,10 +215,11 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
       const next = [...all]
       for (const { name, value } of incoming) {
         const at = next.findIndex((row) => row.name === name)
-        if (at < 0) next.push({ id: ++rowIDs, name, value, secret, kept: false })
+        const imported = { name, value, secret, kept: false, lines: value.includes('\n') }
+        if (at < 0) next.push({ id: ++rowIDs, ...imported })
         // A saved secret imported as plain is a new plain variable of that name.
-        else if (next[at].from?.secret && !secret) next[at] = { id: next[at].id, name, value, secret, kept: false }
-        else next[at] = { ...next[at], value, secret, kept: false }
+        else if (next[at].from?.secret && !secret) next[at] = { id: next[at].id, ...imported }
+        else next[at] = { ...next[at], ...imported }
       }
       return next
     })
@@ -284,9 +288,13 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
                     problem={checked ? wrong.get(row.id) : undefined}
                     disabled={busy}
                     onEdit={(next) => edit(row.id, next)}
+                    onPasteLines={(value) => {
+                      focusNext.current = { id: row.id, field: 'value' }
+                      edit(row.id, { value, lines: true })
+                    }}
                     onReplace={() => {
                       focusNext.current = { id: row.id, field: 'value' }
-                      edit(row.id, { kept: false, value: '' })
+                      edit(row.id, { kept: false, value: '', lines: false })
                     }}
                     onRemove={() => setRows((all) => all.filter((other) => other.id !== row.id))}
                   />
@@ -325,17 +333,32 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   )
 }
 
-function VariableRow({ row, problem, disabled, onEdit, onReplace, onRemove }: {
+function VariableRow({ row, problem, disabled, onEdit, onPasteLines, onReplace, onRemove }: {
   row: Row
   problem?: Problem
   disabled: boolean
   onEdit: (next: Partial<Row>) => void
+  /** The value after a paste that holds a line break, which the one-line field would drop. */
+  onPasteLines: (value: string) => void
   onReplace: () => void
   onRemove: () => void
 }) {
   const named = row.name || 'this variable'
   const savedSecret = row.from?.secret === true
   const problemID = `workspace-variable-${row.id}-problem`
+  const field = {
+    'aria-label': `Value of ${named}`,
+    'data-field': 'value',
+    'aria-invalid': problem?.field === 'value' ? true : undefined,
+    'aria-describedby': problem?.field === 'value' ? problemID : undefined,
+    className: 'font-code text-ui-sm',
+    spellCheck: false,
+    autoCapitalize: 'off',
+    autoCorrect: 'off',
+    value: row.value,
+    disabled,
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onEdit({ value: event.target.value }),
+  }
   return (
     <li data-row={row.id} className="flex min-w-0 flex-col gap-1">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_5rem] items-center gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_5rem_auto]">
@@ -354,33 +377,34 @@ function VariableRow({ row, problem, disabled, onEdit, onReplace, onRemove }: {
           disabled={disabled}
           onChange={(event) => onEdit({ name: event.target.value })}
         />
-        {row.kept
+        {row.kept || (row.secret && row.lines)
           ? (
               <div className="flex min-w-0 items-center gap-2">
                 <Input aria-label={`Value of ${named}, hidden`} className="font-code text-ui-sm" value="••••••••" readOnly disabled={disabled} />
-                <Button size="sm" variant="secondary" disabled={disabled} onClick={onReplace}>Replace</Button>
+                <Button data-field="value" size="sm" variant="secondary" disabled={disabled} onClick={onReplace}>Replace</Button>
               </div>
             )
           : (
               <div className="flex min-w-0 items-center gap-2">
-                <Input
-                  aria-label={`Value of ${named}`}
-                  data-field="value"
-                  aria-invalid={problem?.field === 'value' ? true : undefined}
-                  aria-describedby={problem?.field === 'value' ? problemID : undefined}
-                  className="font-code text-ui-sm"
-                  placeholder={savedSecret ? 'New value' : 'value'}
-                  type={row.secret ? 'password' : 'text'}
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  value={row.value}
-                  disabled={disabled}
-                  onChange={(event) => onEdit({ value: event.target.value })}
-                />
+                {row.lines
+                  ? <Textarea {...field} wrap="off" rows={Math.min(8, row.value.split('\n').length)} />
+                  : (
+                      <Input
+                        {...field}
+                        placeholder={savedSecret ? 'New value' : 'value'}
+                        type={row.secret ? 'password' : 'text'}
+                        autoComplete="off"
+                        onPaste={(event) => {
+                          const pasted = event.clipboardData.getData('text').replace(/\r\n/g, '\n')
+                          if (!pasted.trimEnd().includes('\n')) return
+                          event.preventDefault()
+                          const { selectionStart, selectionEnd } = event.currentTarget
+                          onPasteLines(row.value.slice(0, selectionStart ?? row.value.length) + pasted + row.value.slice(selectionEnd ?? row.value.length))
+                        }}
+                      />
+                    )}
                 {savedSecret && (
-                  <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onEdit({ kept: true, value: '' })}>Keep current</Button>
+                  <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onEdit({ kept: true, value: '', lines: false })}>Keep current</Button>
                 )}
               </div>
             )}
@@ -388,7 +412,7 @@ function VariableRow({ row, problem, disabled, onEdit, onReplace, onRemove }: {
           ? <span><Badge>Secret</Badge></span>
           : (
               <label className="flex items-center gap-1.5 text-ui text-text">
-                <Checkbox checked={row.secret} disabled={disabled} onCheckedChange={(next) => onEdit({ secret: next === true })} />
+                <Checkbox checked={row.secret} disabled={disabled} onCheckedChange={(next) => onEdit({ secret: next === true, lines: row.value.includes('\n') })} />
                 Secret
               </label>
             )}
