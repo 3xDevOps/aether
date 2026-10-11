@@ -466,15 +466,13 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// tail is the last limit bytes written, and whether more was written.
-func (w *tailWriter) tail() (string, bool) {
+func (w *tailWriter) tail() (kept string, cut bool) {
 	over := max(0, len(w.buf)-w.limit)
 	return string(w.buf[over:]), w.cut || over > 0
 }
 
-// execCombined is Exec for the setup script: stdout and stderr as one
-// transcript in arrival order, of which the last execOutputLimit bytes are
-// kept however much the script prints. cut reports that more was printed.
+// execCombined is Exec for the setup script, which may print without limit:
+// one transcript, of which the last execOutputLimit bytes are kept.
 func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir string) (code int, output string, cut bool, err error) {
 	kept := &tailWriter{limit: execOutputLimit}
 	code, err = d.exec(ctx, id, cmd, workDir, func(r io.Reader) error {
@@ -494,8 +492,6 @@ func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) 
 	return code, stdout, stderr, err
 }
 
-// exec runs cmd in the container, hands its multiplexed output to read, and
-// returns its exit code.
 func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir string, read func(io.Reader) error) (int, error) {
 	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
 		Cmd:          cmd,

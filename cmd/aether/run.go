@@ -84,8 +84,6 @@ func launchParams(workspace, task, agent, mode, account, cachedBase string) prot
 	}
 }
 
-// setupOutput is what the workspace setup script printed, when err is a
-// launch that script stopped.
 func setupOutput(err error) string {
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || len(rpcErr.Data) == 0 {

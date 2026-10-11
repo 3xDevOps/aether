@@ -66,8 +66,6 @@ func (s *Server) workspaceEnvironmentGet(ctx context.Context, _ domain.MemberID,
 	return environmentResult(ws, secrets), nil
 }
 
-// workspaceEnvironmentSet applies one change to a workspace's setup script
-// and variables (admin only; the guard has already checked WorkspaceAdmin).
 // The timeline note names what changed and never a value.
 func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.WorkspaceEnvironmentSetParams](params)

@@ -34,7 +34,7 @@ func (s *Store) path(id domain.WorkspaceID) (string, error) {
 	return filepath.Join(s.dir, name+".json"), nil
 }
 
-// Get returns the workspace's secrets by variable name, empty when it has none.
+// Get returns an empty map for a workspace with no secrets.
 func (s *Store) Get(id domain.WorkspaceID) (map[string]string, error) {
 	path, err := s.path(id)
 	if err != nil {
@@ -54,7 +54,7 @@ func (s *Store) Get(id domain.WorkspaceID) (map[string]string, error) {
 	return secrets, nil
 }
 
-// Put replaces the workspace's secrets; an empty map removes the file.
+// Put removes the file when secrets is empty.
 func (s *Store) Put(id domain.WorkspaceID, secrets map[string]string) error {
 	if len(secrets) == 0 {
 		return s.Delete(id)
@@ -108,7 +108,7 @@ func (s *Store) syncDir() error {
 	return nil
 }
 
-// Delete removes the workspace's secrets; having none is not an error.
+// Delete does not fail for a workspace with no secrets.
 func (s *Store) Delete(id domain.WorkspaceID) error {
 	path, err := s.path(id)
 	if err != nil {

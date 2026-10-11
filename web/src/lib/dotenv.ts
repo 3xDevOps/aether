@@ -10,7 +10,6 @@ export interface DotenvResult {
 
 const escapes: Record<string, string> = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\"': '"', '\\\\': '\\' }
 
-/** Where the quote `raw` opens with is closed, or -1. Inside double quotes a backslash escapes the next character. */
 function closingQuote(raw: string): number {
   for (let i = 1; i < raw.length; i++) {
     if (raw[0] === '"' && raw[i] === '\\') i++

@@ -68,7 +68,6 @@ func workspaceEnvList(args []string) error {
 	})
 }
 
-// changeWorkspaceEnv sends one change and prints the variables it leaves.
 func changeWorkspaceEnv(workspace string, change protocol.WorkspaceEnvironmentSetParams) error {
 	return withControl(func(c *protocol.Client) error {
 		ws, err := resolveMirrorWorkspace(c, workspace, false)
@@ -94,9 +93,7 @@ func sendWorkspaceEnv(c *protocol.Client, ws protocol.Workspace, change protocol
 	return printMirrorWarning(os.Stdout, res.Warning)
 }
 
-// parseWorkspaceEnvSet returns the plain variables to set, or the one name
-// whose secret value is still to be read from stdin.
-func parseWorkspaceEnvSet(args []string) (workspace string, variables []protocol.WorkspaceVariable, secret string, err error) {
+func parseWorkspaceEnvSet(args []string) (workspace string, plain []protocol.WorkspaceVariable, secretName string, err error) {
 	fs, named := workspaceEnvFlags("workspace env set")
 	asSecret := fs.Bool("secret", false, "store the variable as a secret; its value is read from stdin")
 	if parseErr := fs.Parse(args); parseErr != nil || fs.NArg() == 0 {
@@ -114,13 +111,11 @@ func parseWorkspaceEnvSet(args []string) (workspace string, variables []protocol
 		if !ok || name == "" {
 			return "", nil, "", errors.New(workspaceEnvSetUsage)
 		}
-		variables = append(variables, protocol.WorkspaceVariable{Name: name, Value: value})
+		plain = append(plain, protocol.WorkspaceVariable{Name: name, Value: value})
 	}
-	return *named, variables, "", nil
+	return *named, plain, "", nil
 }
 
-// readSecretValue prompts without echo on a terminal, and otherwise takes
-// stdin whole, less the newline a shell pipeline adds.
 func readSecretValue(name string, stdin io.Reader) (string, error) {
 	var raw []byte
 	var err error
@@ -134,6 +129,7 @@ func readSecretValue(name string, stdin io.Reader) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read the value of %s from stdin: %w", name, err)
 	}
+	// A shell pipeline ends the value with a newline that is not part of it.
 	value := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
 	if value == "" {
 		return "", fmt.Errorf("the value of %s on stdin is empty", name)
@@ -299,12 +295,8 @@ func printWorkspaceVariables(w io.Writer, ws protocol.Workspace, res protocol.Wo
 	return nil
 }
 
-// parseDotenv reads NAME=VALUE lines: blank lines and # comments are skipped,
-// a leading "export " is dropped, and a value may be wrapped in single quotes
-// (kept as written) or double quotes (\n, \r, \t, \" and \\ are unescaped),
-// with a # comment after either. A later line replaces an earlier one of the
-// same name. badLines numbers the lines that are none of that.
-// web/src/lib/dotenv.ts reads the same format for the dashboard.
+// web/src/lib/dotenv.ts reads the same format for the dashboard: a change to
+// one is a change to both.
 func parseDotenv(text string) (variables []protocol.WorkspaceVariable, badLines []int) {
 	index := map[string]int{}
 	for i, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
@@ -348,8 +340,6 @@ func dotenvValue(value string) string {
 	return value
 }
 
-// closingQuote is where the quote that value opens with is closed, or -1.
-// Inside double quotes a backslash escapes the byte after it.
 func closingQuote(value string) int {
 	for i := 1; i < len(value); i++ {
 		switch {
