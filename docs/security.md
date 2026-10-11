@@ -1011,19 +1011,33 @@ one.
   `localhost` and loopback addresses only, and the connection is dialed by a
   process inside the run's network namespace
   (`aether-internal dev-exec forward`), never by the server. It cannot reach
-  the host's loopback or another container. Remote forwarding, agent
-  forwarding and X11 are refused.
-- **A session owns its processes.** When a session ends, its connection
-  drops, or its authorization is withdrawn, everything it started is
-  stopped; in a paused container, as soon as the run resumes. A server that
-  is killed instead of shut down stops nothing: a session's processes then
-  run until they exit or the run's container stops.
+  the host's loopback or another run. The run's Chromium companion
+  ([Remote development](#remote-development-and-browser-isolation)) shares
+  that network namespace, so a forward reaches a loopback port the companion
+  listens on exactly as a process in the run does; Chromium itself is driven
+  through a pipe and listens on none. Remote forwarding, agent forwarding
+  and X11 are refused.
+- **A session owns its processes, for as long as the server runs.** When a
+  session ends, its connection drops, or its authorization is withdrawn,
+  everything it started is stopped. A frozen container refuses that stop,
+  so for a paused run, and for a closed run whose container is kept, the
+  server holds the stop and delivers it when the run resumes or is
+  relaunched. The pending stop lives only in the server's memory. A restart
+  while it is still owed, whether a shutdown, a self-update or a kill,
+  forgets it: those processes thaw with the container, owned by nobody, and
+  run until they exit or the container stops, even if the member who
+  started them has since lost access. A shutdown stops the sessions of a
+  running container before it exits; a killed server stops nothing in any
+  container. Only destroying the container, **Free container…** on a
+  finished run, is certain to end them.
 - **Bounded.** A run takes 16 SSH connections, at most 8 of them from one
   member, so no member can keep the others out; a connection takes 10
   sessions and 64 forwarded connections. Every process runs inside the
   run's container, under its CPU, memory and process limits. Output is
   never dropped: the server holds at most 256 KiB of each stream a client
-  has not read, and past that the command blocks.
+  has not read, and past that the command blocks. An open SSH connection
+  holds a scheduled server update back as an attached terminal does
+  ([install.md](install.md#upgrading)), one into a paused run included.
 - **Not recorded.** An SSH session has no transcript and no control lease.
   Teammates see that a member connected, not what they did.
 - **The member's `ssh` needs OpenSSH 9.6 or a build patched for
@@ -1035,6 +1049,18 @@ one.
   `%h`, which on those clients leaves a quote character in the name as the
   only way through. `aether ssh --stdio` itself refuses a host that is not
   a run id plus `.aether` before it reads the link or dials anything.
+
+**An editor trusts the machine it attaches to.** An editor attached over
+SSH runs its own server on the remote and acts on what that server sends
+back. Here the remote is a run's container, and the agent in that run
+controls everything in it. The Remote - SSH extension's own Security Note
+says to connect only to remotes you trust, because a compromised remote
+could use the connection to execute code on your local machine; Cursor and
+Zed attach the same way. So opening a run in your editor extends your
+computer's trust to that run's agent and to whatever it has installed or
+fetched. Attach to runs whose task and repository you would run on your own
+machine, and use `ssh` or a run shell for the rest: a plain `ssh` session
+gives the container a terminal and nothing more.
 
 The desktop app lets one kind of link leave its window besides `http` and
 `https`: the **Open in editor…** links, matched in full as

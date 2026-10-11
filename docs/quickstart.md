@@ -841,7 +841,10 @@ You can connect to a run you could open a shell in: your own, or a
 teammate's when you may control it and they have shared their agent account
 with you. Any other attempt is refused with the server's reason. The editor
 downloads its remote server into the run's home directory on first
-connection. [terminal.md](terminal.md#ssh-and-editors) has the details.
+connection. An attached editor trusts its remote, and this remote is a
+container an agent controls, so attach only to runs you would run on your
+own computer; see [security.md](security.md#ssh-into-a-run).
+[terminal.md](terminal.md#ssh-and-editors) has the details.
 
 ## 8. Review and publish the result
 
