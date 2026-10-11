@@ -1006,7 +1006,8 @@ one.
   stopped; in a paused container, as soon as the run resumes. A server that
   is killed instead of shut down stops nothing: a session's processes then
   run until they exit or the run's container stops.
-- **Bounded.** A run takes 16 SSH connections; a connection takes 10
+- **Bounded.** A run takes 16 SSH connections, at most 8 of them from one
+  member, so no member can keep the others out; a connection takes 10
   sessions and 64 forwarded connections. Every process runs inside the
   run's container, under its CPU, memory and process limits. Output is
   never dropped: the server holds at most 256 KiB of each stream a client

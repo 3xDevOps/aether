@@ -201,7 +201,7 @@ type Server struct {
 	acpViewers      map[domain.RunID]int
 
 	// runSSHConns counts each run's open SSH connections by member, for the
-	// per-run cap (see claimRunSSH).
+	// caps claimRunSSH applies.
 	runSSHMu    sync.Mutex
 	runSSHConns map[domain.RunID]map[domain.MemberID]int
 }

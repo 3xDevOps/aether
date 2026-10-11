@@ -822,12 +822,28 @@ func TestRunSSHBoundsSessionsForwardsAndConnections(t *testing.T) {
 		t.Fatalf("forward past the cap = %v, want a resource shortage", err)
 	}
 
-	for i := 1; i < maxRunSSHConns; i++ {
+	// One member cannot take every slot: a teammate still gets in after the
+	// owner has hit their own cap, until the run's is reached.
+	for i := 1; i < maxRunSSHMemberConns; i++ {
 		mustDialRunSSH(t, e, e.signer)
 	}
 	if nested, ack := dialRunSSH(t, e.dial(t), string(e.run.ID)); nested != nil || ack.Code != protocol.CodeConflict ||
+		!strings.Contains(ack.Error, "you already have 8 SSH connections open to run "+string(e.run.ID)) {
+		t.Fatalf("connection past the member's cap = %d %q", ack.Code, ack.Error)
+	}
+	bo, boMember := addMember(t, e, "Bo", domain.RoleCollaborator, false)
+	cy, cyMember := addMember(t, e, "Cy", domain.RoleCollaborator, false)
+	for _, teammate := range []*domain.Member{boMember, cyMember} {
+		if err = e.store.ShareAccount(t.Context(), e.member.ID, teammate.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range maxRunSSHConns - maxRunSSHMemberConns {
+		mustDialRunSSH(t, e, bo)
+	}
+	if nested, ack := dialRunSSH(t, e.dialWithTest(t, cy), string(e.run.ID)); nested != nil || ack.Code != protocol.CodeConflict ||
 		!strings.Contains(ack.Error, "already has 16 SSH connections open") {
-		t.Fatalf("connection past the cap = %d %q", ack.Code, ack.Error)
+		t.Fatalf("connection past the run's cap = %d %q", ack.Code, ack.Error)
 	}
 }
 

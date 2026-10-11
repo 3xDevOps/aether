@@ -33,6 +33,9 @@ import (
 
 const (
 	maxRunSSHConns = 16
+	// maxRunSSHMemberConns leaves room for a teammate whatever one member
+	// opens: an editor, a few terminals and a file transfer fit in it.
+	maxRunSSHMemberConns = 8
 	// maxRunSSHSessions is OpenSSH's own MaxSessions default.
 	maxRunSSHSessions = 10
 	maxRunSSHForwards = 64
@@ -163,12 +166,16 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 	}
 }
 
-// claimRunSSH counts one SSH connection to run against the per-run cap.
-// first reports that member had none open, which is when the connection is
-// stamped on the timeline.
+// claimRunSSH counts one SSH connection to run against the run's cap and
+// against the member's share of it. first reports that member had none open,
+// which is when the connection is stamped on the timeline.
 func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID) (release func(), first bool, err error) {
 	s.runSSHMu.Lock()
 	defer s.runSSHMu.Unlock()
+	if s.runSSHConns[run][member] >= maxRunSSHMemberConns {
+		return nil, false, &protocol.Error{Code: protocol.CodeConflict,
+			Message: fmt.Sprintf("you already have %d SSH connections open to run %s, the most one member takes", maxRunSSHMemberConns, run)}
+	}
 	open := 0
 	for _, n := range s.runSSHConns[run] {
 		open += n

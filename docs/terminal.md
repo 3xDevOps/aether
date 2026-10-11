@@ -534,8 +534,8 @@ container. The connection stays open and carries on when the run resumes;
 until then a new session or forward is refused. A session dropped while the
 run is paused is stopped when it resumes.
 
-One run takes 16 SSH connections at a time. One connection takes 10 sessions
-and 64 forwarded connections.
+One run takes 16 SSH connections at a time, at most 8 of them from one
+member. One connection takes 10 sessions and 64 forwarded connections.
 
 ### Who can connect
 
@@ -558,7 +558,8 @@ A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 | `aether: ssh into <run-id>: permission denied: run is protected: only its owner or an admin may steer` | The run is protected and is not yours. The other steer refusals read the same way. |
 | `aether: ssh into <run-id>: permission denied: member <member-id> has not shared their account with you` | The run uses that member's agent account. |
 | `aether: ssh into <run-id>: scheduler: the run has no live environment: the run is paused` | Resume the run. A finished run names its status and says its container is gone. |
-| `aether: ssh into <run-id>: run <run-id> already has 16 SSH connections open, the most one run takes` | Close one. |
+| `aether: ssh into <run-id>: you already have 8 SSH connections open to run <run-id>, the most one member takes` | Close one of yours. |
+| `aether: ssh into <run-id>: run <run-id> already has 16 SSH connections open, the most one run takes` | Close one, or ask a teammate to. |
 | `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | The host is not a run id plus `.aether`. Nothing was sent to the server. |
 | `aether: not linked; run aether link <addr>` | This computer's CLI has no server yet. |
 | `ssh: Could not resolve hostname <run-id>.aether` | `aether ssh-config` has not been run here. |
