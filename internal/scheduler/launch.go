@@ -187,6 +187,9 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 // LaunchWithOptions captures the base before the run row is created, so a
 // failed capture leaves no durable or in-memory run state.
 func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	if err := domain.ValidModel(opts.Model); err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
 	lock := s.workspaceLock(workspace)
 	lock.RLock()
 	defer lock.RUnlock()
@@ -216,7 +219,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			requested := &domain.Run{
 				ID: opts.AssignedRunID, WorkspaceID: workspace,
 				MemberID: member, AccountMemberID: account, Task: task,
-				Harness: harness, Mode: mode,
+				Harness: harness, Mode: mode, Model: opts.Model,
 			}
 			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
 				return nil, errors.New("scheduler: reserved run does not match launch request")
@@ -269,6 +272,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Task:            task,
 		Harness:         harness,
 		Mode:            mode,
+		Model:           opts.Model,
 		ACP:             acp,
 		Status:          domain.RunQueued,
 		BaseCommit:      base.Commit,

@@ -37,8 +37,8 @@ type capturedLauncher struct {
 	templates.Launcher
 }
 
-func (l capturedLauncher) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	run, err := l.Launcher.Launch(ctx, workspace, member, account, task, harness, mode)
+func (l capturedLauncher) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	run, err := l.Launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	if run != nil {
 		run.BaseCommit = "0123456789abcdef0123456789abcdef01234567"
 		run.BaseBranch = "main"
@@ -54,7 +54,7 @@ func templateEnv(t *testing.T, clock *testClock) *testEnv {
 		svc, err := templates.New(templates.Config{
 			Store:    c.Store,
 			Bus:      c.Bus,
-			Runs:     capturedLauncher{Launcher: c.Runs},
+			Runs:     capturedLauncher{Launcher: c.Runs.(templates.Launcher)},
 			Interval: 10 * time.Millisecond,
 			Now:      clock.Now,
 		})

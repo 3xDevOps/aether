@@ -509,7 +509,7 @@ func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunc
 	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
-func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, _ string) error {
 	l.calls++
 	l.validated = append(l.validated, [2]domain.MemberID{member, account})
 	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {

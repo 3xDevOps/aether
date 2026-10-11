@@ -87,6 +87,19 @@ func TestLaunchModeValid(t *testing.T) {
 	}
 }
 
+func TestValidModel(t *testing.T) {
+	for _, model := range []string{"", "opus", "openai/gpt-5-codex", "sonnet:high"} {
+		if err := ValidModel(model); err != nil {
+			t.Errorf("ValidModel(%q) = %v, want nil", model, err)
+		}
+	}
+	for _, model := range []string{"x y", "opus\n", "-m", strings.Repeat("a", 129), "op\x00us"} {
+		if err := ValidModel(model); err == nil {
+			t.Errorf("ValidModel(%q) = nil, want an error", model)
+		}
+	}
+}
+
 func TestRoleValid(t *testing.T) {
 	if !RoleViewer.Valid() || !RoleCollaborator.Valid() || !RoleAdmin.Valid() {
 		t.Error("defined roles must be valid")

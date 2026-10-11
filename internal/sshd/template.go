@@ -89,6 +89,7 @@ func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params jso
 		Task:        p.Task,
 		Harness:     p.Harness,
 		Mode:        domain.LaunchMode(p.Mode),
+		Model:       p.Model,
 		Params:      p.Params,
 		BudgetUSD:   p.BudgetUSD,
 	}
@@ -240,6 +241,7 @@ func templateWire(t *store.Template) protocol.Template {
 		Task:        t.Task,
 		Harness:     t.Harness,
 		Mode:        string(t.Mode),
+		Model:       t.Model,
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),

@@ -818,6 +818,21 @@ func TestLaunchValidation(t *testing.T) {
 	}
 }
 
+func TestLaunchStoresTheRunModel(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	if _, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI, domain.LaunchOptions{Model: "-x"}); err == nil || !strings.Contains(err.Error(), `model "-x" must be a single argument`) {
+		t.Fatalf("launch with a flag-shaped model = %v", err)
+	}
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "t", "fake", domain.LaunchTUI, domain.LaunchOptions{Model: "opus"})
+	if err != nil {
+		t.Fatalf("LaunchWithOptions: %v", err)
+	}
+	if stored, err := e.db.GetRun(t.Context(), run.ID); err != nil || stored.Model != "opus" {
+		t.Fatalf("stored run = %+v, %v, want model opus", stored, err)
+	}
+}
+
 func TestLaunchCapturesAndPinsBaseProvenance(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1522,11 +1537,11 @@ func TestCustomHarnessDefinition(t *testing.T) {
 func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "legacy", domain.LaunchTUI)
+	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "legacy", domain.LaunchTUI, "")
 	if want := `scheduler: unknown harness "legacy"; register it with: aether agent add legacy`; err == nil || err.Error() != want {
 		t.Fatalf("validate an unknown harness = %v, want %q", err, want)
 	}
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchTUI); err != nil {
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchTUI, ""); err != nil {
 		t.Fatalf("validate claude tui: %v", err)
 	}
 }

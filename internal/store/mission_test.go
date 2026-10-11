@@ -81,6 +81,42 @@ func TestMissionAttemptReservationIsIdempotent(t *testing.T) {
 	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
 		t.Fatalf("semantic replay conflict = %v", reserveErr)
 	}
+	if _, _, reserveErr := db.ReserveAttempt(context.Background(), &domain.AttemptReservation{
+		MissionID: mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision,
+		DispatchKey: admittedKey, Harness: "claude", Mode: domain.LaunchHeadless, Model: "opus",
+		IntegratorGeneration: mission.IntegratorGeneration,
+	}); !errors.Is(reserveErr, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay with another model = %v, want a conflict", reserveErr)
+	}
+}
+
+func TestMissionModelSeparatesChoicesAndBindsTheCreateReceipt(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	newMission := func(integratorModel string) *domain.Mission {
+		return &domain.Mission{
+			WorkspaceID: workspace.ID, Objective: "ship", AccountableHumanID: member.ID,
+			Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Model: integratorModel},
+			ExecutionChoices: []domain.MissionExecutionChoice{
+				{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Model: "opus"},
+				{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI, Model: "sonnet"},
+			},
+			IdempotencyKey: "models",
+		}
+	}
+	m := newMission("opus")
+	if err := db.CreateMission(ctx, m); err != nil {
+		t.Fatalf("create with choices differing only in model: %v", err)
+	}
+	got, err := db.GetMission(ctx, m.ID)
+	if err != nil || got.Integrator.Model != "opus" || len(got.ExecutionChoices) != 2 || got.ExecutionChoices[1].Model != "sonnet" {
+		t.Fatalf("stored mission = %+v, %v", got, err)
+	}
+	if err := db.CreateMission(ctx, newMission("sonnet")); !errors.Is(err, ErrMissionIdempotencyConflict) {
+		t.Fatalf("replay with another integrator model = %v, want a conflict", err)
+	}
 }
 
 // TestListAttemptsHasNoCap: a mission's attempt count is the integrator's to

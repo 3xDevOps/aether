@@ -129,7 +129,7 @@ func recordMutationReceipt(tx *sql.Tx, ctx context.Context, missionID domain.Mis
 }
 
 func missionChoiceValid(c domain.MissionExecutionChoice) bool {
-	return c.AccountMemberID != "" && c.Harness != "" && c.Mode.Valid()
+	return c.AccountMemberID != "" && c.Harness != "" && c.Mode.Valid() && domain.ValidModel(c.Model) == nil
 }
 
 func validateMission(m *domain.Mission) error {
@@ -139,12 +139,15 @@ func validateMission(m *domain.Mission) error {
 	if m.Integrator.AccountMemberID == "" || m.Integrator.Harness == "" || !m.Integrator.Mode.Valid() {
 		return errors.New("store: mission integrator choice is invalid")
 	}
+	if err := domain.ValidModel(m.Integrator.Model); err != nil {
+		return fmt.Errorf("store: mission integrator: %w", err)
+	}
 	seen := make(map[string]bool, len(m.ExecutionChoices))
 	for _, c := range m.ExecutionChoices {
 		if !missionChoiceValid(c) {
 			return errors.New("store: mission execution choice is invalid")
 		}
-		key := string(c.AccountMemberID) + "\x00" + c.Harness + "\x00" + string(c.Mode)
+		key := string(c.AccountMemberID) + "\x00" + c.Harness + "\x00" + string(c.Mode) + "\x00" + c.Model
 		if seen[key] {
 			return errors.New("store: duplicate mission execution choice")
 		}
@@ -162,7 +165,8 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	current_integrator_run_id, integrator_authorizing_human_id, integrator_run_owner_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
-	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at, change_seq, change_kinds`
+	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at, change_seq, change_kinds,
+	integrator_model`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
@@ -175,7 +179,8 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 		&m.Integrator.AccountMemberID, &m.Integrator.Harness, &mode, &choices,
 		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
-		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt, &m.ChangeSeq, &changes); err != nil {
+		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt, &m.ChangeSeq, &changes,
+		&m.Integrator.Model); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
@@ -216,10 +221,10 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	var receiptMission domain.MissionID
 	var receiptObjective string
-	var receiptAccount, receiptIntAccount, receiptHarness, receiptMode, receiptChoices string
-	receiptErr := d.db.QueryRowContext(ctx, `SELECT mission_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, execution_choices FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, m.WorkspaceID, m.IdempotencyKey).Scan(&receiptMission, &receiptObjective, &receiptAccount, &receiptIntAccount, &receiptHarness, &receiptMode, &receiptChoices)
+	var receiptAccount, receiptIntAccount, receiptHarness, receiptMode, receiptModel, receiptChoices string
+	receiptErr := d.db.QueryRowContext(ctx, `SELECT mission_id, objective, accountable_human_id, integrator_account_member_id, integrator_harness, integrator_mode, integrator_model, execution_choices FROM mission_create_receipts WHERE workspace_id=? AND idempotency_key=?`, m.WorkspaceID, m.IdempotencyKey).Scan(&receiptMission, &receiptObjective, &receiptAccount, &receiptIntAccount, &receiptHarness, &receiptMode, &receiptModel, &receiptChoices)
 	if receiptErr == nil {
-		if receiptObjective != m.Objective || receiptAccount != string(m.AccountableHumanID) || receiptIntAccount != string(m.Integrator.AccountMemberID) || receiptHarness != m.Integrator.Harness || receiptMode != string(m.Integrator.Mode) || receiptChoices != choices {
+		if receiptObjective != m.Objective || receiptAccount != string(m.AccountableHumanID) || receiptIntAccount != string(m.Integrator.AccountMemberID) || receiptHarness != m.Integrator.Harness || receiptMode != string(m.Integrator.Mode) || receiptModel != m.Integrator.Model || receiptChoices != choices {
 			return ErrMissionIdempotencyConflict
 		}
 		existing, getErr := d.GetMission(ctx, receiptMission)
@@ -268,16 +273,16 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}')`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}', ?)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, runID,
 		authorizingHumanID, runOwnerID, generation, m.AcceptedSetVersion,
-		domain.MissionPhasePlanning, m.IdempotencyKey, n, n)
+		domain.MissionPhasePlanning, m.IdempotencyKey, n, n, m.Integrator.Model)
 	if err != nil {
 		return fmt.Errorf("store: create mission: %w", mapConstraint(err, ErrNotFound))
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_create_receipts (workspace_id,idempotency_key,mission_id,objective,accountable_human_id,integrator_account_member_id,integrator_harness,integrator_mode,execution_choices,initial_run_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, m.WorkspaceID, m.IdempotencyKey, id, m.Objective, m.AccountableHumanID, m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode, choices, runID, n); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO mission_create_receipts (workspace_id,idempotency_key,mission_id,objective,accountable_human_id,integrator_account_member_id,integrator_harness,integrator_mode,integrator_model,execution_choices,initial_run_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, m.WorkspaceID, m.IdempotencyKey, id, m.Objective, m.AccountableHumanID, m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode, m.Integrator.Model, choices, runID, n); err != nil {
 		return fmt.Errorf("store: create mission receipt: %w", mapConstraint(err, ErrConflict))
 	}
 	if err := tx.Commit(); err != nil {
@@ -420,6 +425,9 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	if id == "" || choice.AccountMemberID == "" || choice.Harness == "" || !choice.Mode.Valid() || key == "" || strings.ContainsAny(key, "\r\n\x00") || len(key) > 256 || expected == 0 {
 		return nil, errors.New("store: replace integrator: invalid request")
 	}
+	if err := domain.ValidModel(choice.Model); err != nil {
+		return nil, fmt.Errorf("store: replace integrator: %w", err)
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: replace integrator: begin: %w", err)
@@ -430,10 +438,10 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 		return nil, err
 	}
 	var receiptGen uint64
-	var receiptRun, receiptAccount, receiptHarness, receiptMode, receiptAuthorizing, receiptOwner string
-	err = tx.QueryRowContext(ctx, `SELECT generation, run_id, account_member_id, harness, mode, authorizing_human_id, run_owner_id FROM mission_integrator_replacements WHERE mission_id = ? AND idempotency_key = ?`, id, key).Scan(&receiptGen, &receiptRun, &receiptAccount, &receiptHarness, &receiptMode, &receiptAuthorizing, &receiptOwner)
+	var receiptRun, receiptAccount, receiptHarness, receiptMode, receiptModel, receiptAuthorizing, receiptOwner string
+	err = tx.QueryRowContext(ctx, `SELECT generation, run_id, account_member_id, harness, mode, model, authorizing_human_id, run_owner_id FROM mission_integrator_replacements WHERE mission_id = ? AND idempotency_key = ?`, id, key).Scan(&receiptGen, &receiptRun, &receiptAccount, &receiptHarness, &receiptMode, &receiptModel, &receiptAuthorizing, &receiptOwner)
 	if err == nil {
-		if receiptAccount != string(choice.AccountMemberID) || receiptHarness != choice.Harness || receiptMode != string(choice.Mode) || receiptAuthorizing != string(authorizingHumanID) || receiptOwner != string(runOwnerID) {
+		if receiptAccount != string(choice.AccountMemberID) || receiptHarness != choice.Harness || receiptMode != string(choice.Mode) || receiptModel != choice.Model || receiptAuthorizing != string(authorizingHumanID) || receiptOwner != string(runOwnerID) {
 			return nil, ErrMissionIdempotencyConflict
 		}
 		m.CurrentIntegratorRunID, m.IntegratorAuthorizingHumanID, m.IntegratorRunOwnerID, m.IntegratorGeneration = domain.RunID(receiptRun), authorizingHumanID, runOwnerID, receiptGen
@@ -456,10 +464,10 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 	generation := m.IntegratorGeneration + 1
 	now := missionNow(time.Time{})
 	n, _ := encodeTime(now)
-	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, integrator_run_launched = 0, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, `UPDATE missions SET integrator_account_member_id = ?, integrator_harness = ?, integrator_mode = ?, integrator_model = ?, current_integrator_run_id = ?, integrator_authorizing_human_id = ?, integrator_run_owner_id = ?, integrator_generation = ?, integrator_launch_error = '', integrator_launch_error_at = NULL, integrator_run_launched = 0, updated_at = ? WHERE id = ?`, choice.AccountMemberID, choice.Harness, choice.Mode, choice.Model, newRun, authorizingHumanID, runOwnerID, generation, n, id); execErr != nil {
 		return nil, fmt.Errorf("store: replace integrator: %w", execErr)
 	}
-	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
+	if _, execErr := tx.ExecContext(ctx, `INSERT INTO mission_integrator_replacements (mission_id, idempotency_key, account_member_id, harness, mode, model, generation, run_id, authorizing_human_id, run_owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, key, choice.AccountMemberID, choice.Harness, choice.Mode, choice.Model, generation, newRun, authorizingHumanID, runOwnerID, n); execErr != nil {
 		return nil, fmt.Errorf("store: replace integrator receipt: %w", mapConstraint(execErr, ErrConflict))
 	}
 	if commitErr := tx.Commit(); commitErr != nil {

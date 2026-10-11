@@ -116,14 +116,15 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 		Task:         req.Task,
 		Harness:      req.Harness,
 		Mode:         req.Mode,
+		Model:        req.Model,
 	})
 }
 
-func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
+func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
 	if l.runs == nil {
 		return errors.New("mission: scheduler unavailable")
 	}
-	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode)
+	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode, model)
 }
 
 func (l schedulerLauncher) CancelMission(ctx context.Context, run domain.RunID) error {

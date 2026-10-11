@@ -1579,6 +1579,16 @@ CREATE TABLE push_subscriptions (
 );
 CREATE INDEX idx_push_subscriptions_member ON push_subscriptions(member_id);
 `,
+	// v59: the agent model a run, attempt, template or integrator launches
+	// with; empty keeps the agent's default.
+	`
+ALTER TABLE runs ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_attempts ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE missions ADD COLUMN integrator_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_create_receipts ADD COLUMN integrator_model TEXT NOT NULL DEFAULT '';
+ALTER TABLE mission_integrator_replacements ADD COLUMN model TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
