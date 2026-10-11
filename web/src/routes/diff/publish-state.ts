@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import { sendToAgent } from '@/lib/send-to-agent'
 import type {
   FileRead, Run, RunGitCommitResult, RunGitDiffResult, RunGitExpected, RunGitPushResult,
-  RunGitPushTarget, RunGitStatusResult, RunPRCreateResult, RunPRFeedbackResult,
-  RunPRStatusResult, RunPRTarget,
+  RunGitPushTarget, RunGitStatusResult, RunPRCreateResult, RunPRStatusResult, RunPRTarget,
 } from '@/lib/types'
+import { refreshPullRequest, trackPullRequest } from '@/routes/diff/publish-pr'
+import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 
-export type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create' | 'feedback' | 'send'
+export type PublishAction = 'status' | 'review' | 'commit' | 'push' | 'discover' | 'create'
 
 export interface UntrackedPreview {
   path: string
@@ -24,11 +24,15 @@ interface PRReview {
   result: RunPRStatusResult
 }
 
-/** Every mutation names the branch and HEAD the member reviewed; the server
- * refuses it when the checkout moved, so each refresh drops the attestations. */
+const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
+
+/** Every mutation names the branch and HEAD on screen; the server refuses it
+ * when the checkout moved. Destinations start as the checkout's own and stay
+ * that way, following each refresh, until the member edits them. */
 export function usePublish(run: Run, client: Api, open: boolean) {
   const caps = useCapability()
   const self = useSelf()
+  const workspace = useStore((s) => s.workspaces[run.workspace_id])
   const [status, setStatus] = useState<RunGitStatusResult | null>(null)
   const [statusReady, setStatusReady] = useState(false)
   const [untracked, setUntracked] = useState<UntrackedPreview[]>([])
@@ -38,27 +42,29 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const [commitMessage, setCommitMessage] = useState('')
   const [commit, setCommit] = useState<RunGitCommitResult | null>(null)
   const [push, setPush] = useState<RunGitPushResult | null>(null)
-  const [pushTarget, setPushTarget] = useState<RunGitPushTarget>({ remote: '', repository: '', head_branch: '' })
-  const [pushReviewed, setPushReviewed] = useState(false)
-  const [target, setTarget] = useState<RunPRTarget>({ repository: '', base_branch: '', head_repository: '', head_branch: '' })
+  const [source, setSource] = useState<string>()
+  const [pushEdit, setPushEdit] = useState<RunGitPushTarget | null>(null)
+  const [targetEdit, setTargetEdit] = useState<RunPRTarget | null>(null)
   const [prReview, setPRReview] = useState<PRReview | null>(null)
-  const [prReviewed, setPRReviewed] = useState(false)
+  const [discoverable, setDiscoverable] = useState(false)
   const [creation, setCreation] = useState<RunPRCreateResult | null>(null)
   const [uncertain, setUncertain] = useState(false)
-  const [title, setTitle] = useState('')
+  const [titleEdit, setTitle] = useState<string | null>(null)
   const [body, setBody] = useState('')
   const [draft, setDraft] = useState(false)
-  const [feedback, setFeedback] = useState<RunPRFeedbackResult | null>(null)
-  const [feedbackSelected, setFeedbackSelected] = useState<string[]>([])
-  const [feedbackReceipt, setFeedbackReceipt] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [action, setAction] = useState<PublishAction | null>(null)
+  const busy = action !== null
   const [errors, setErrors] = useState<Partial<Record<PublishAction, string>>>({})
   const mounted = useRef(true)
   const operation = useRef(false)
   const requested = useRef(false)
   const canWrite = self.role === 'admin' || self.role === 'collaborator'
   const expected = statusReady && status && !status.error ? { branch: status.branch, head: status.head } : null
-  const targetComplete = Object.values(target).every((value) => value.trim() !== '')
+  const pushTarget = pushEdit ?? (status ? defaultPushTarget(status, workspace?.origin) : noPush)
+  const target = targetEdit ?? defaultPRTarget(pushTarget, run.base_branch || workspace?.base_branch || '', source)
+  const targetComplete = completeTarget(target)
+  // A run that has committed nothing still has its base's subject at HEAD.
+  const title = titleEdit ?? (status && status.head !== run.base_commit ? status.head_subject ?? '' : '')
   const currentPRReview = prReview && expected && prReview.expected.branch === expected.branch && prReview.expected.head === expected.head &&
     JSON.stringify(prReview.target) === JSON.stringify(target) ? prReview : null
 
@@ -73,10 +79,17 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     void perform('status', refreshStatus)
   }, [open])
 
+  const discovers = open && discoverable && !busy && !uncertain && !!expected && targetComplete && !!status?.identity && caps.hasMethod('run.pr.status')
+  useEffect(() => {
+    if (!discovers) return
+    setDiscoverable(false)
+    void perform('discover', discoverPR)
+  }, [discovers])
+
   async function perform(action: PublishAction, fn: () => Promise<void>) {
     if (operation.current) return
     operation.current = true
-    setBusy(true)
+    setAction(action)
     setErrors((all) => ({ ...all, [action]: undefined }))
     try {
       await fn()
@@ -84,20 +97,24 @@ export function usePublish(run: Run, client: Api, open: boolean) {
       if (mounted.current) setErrors((all) => ({ ...all, [action]: message(cause) }))
     } finally {
       operation.current = false
-      if (mounted.current) setBusy(false)
+      if (mounted.current) setAction(null)
     }
   }
 
   async function refreshStatus() {
     setStatusReady(false)
     setReviewed(null)
-    setPushReviewed(false)
-    setPRReviewed(false)
     setPRReview(null)
-    const next = await client.runGitStatus({ run_id: run.id })
+    const [next, mirror] = await Promise.all([
+      client.runGitStatus({ run_id: run.id }),
+      // Without the source, the pull request defaults to the repository pushed to.
+      client.workspaceMirrorStatus(run.workspace_id).then((result) => result.source_url, () => undefined),
+    ])
     if (!mounted.current) return
     setStatus(next)
+    setSource(mirror)
     setStatusReady(true)
+    setDiscoverable(true)
     setPaths((selected) => selected.filter((path) => (next.changes ?? []).some((change) => change.path === path)))
     setPatches(null)
     setUntracked([])
@@ -154,27 +171,27 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   }
 
   async function pushBranch() {
-    if (!expected || !pushReviewed) return
-    setPushReviewed(false)
+    if (!expected) return
     setStatusReady(false)
     const result = await client.runGitPush({ run_id: run.id, expected, target: pushTarget })
     setPush(result)
+    if (result.pushed) void refreshPullRequest(run, client)
     await refreshStatus()
   }
 
   async function discoverPR() {
     if (!expected) return
-    setPRReviewed(false)
     setPRReview(null)
     const result = await client.runPRStatus({ run_id: run.id, expected, target })
     if (!mounted.current) return
     setPRReview({ target: { ...target }, expected, result })
-    if (result.pull_request && !result.error) setUncertain(false)
+    if (!result.pull_request || result.error) return
+    setUncertain(false)
+    void trackPullRequest(run, target, client)
   }
 
   async function createPR() {
-    if (!currentPRReview || !prReviewed || uncertain) return
-    setPRReviewed(false)
+    if (!currentPRReview || uncertain) return
     // A lost response can follow a successful GitHub mutation. Only an exact
     // read-only discovery is offered until that PR has been found.
     setUncertain(true)
@@ -189,51 +206,31 @@ export function usePublish(run: Run, client: Api, open: boolean) {
         identity: result.identity, account_member_id: result.account_member_id,
         pull_request: result.pull_request, output: result.output, error: result.error, actual: result.actual,
       } })
+      void trackPullRequest(run, currentPRReview.target, client)
     }
   }
 
-  async function refreshFeedback() {
-    setFeedback(null)
-    setFeedbackSelected([])
-    setFeedbackReceipt(null)
-    if (expected) setFeedback(await client.runPRFeedback({ run_id: run.id, expected, target, limit: 100 }))
-  }
-
-  function toggleFeedback(key: string) {
-    setFeedbackSelected((current) => current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key])
-  }
-
-  async function sendFeedback(body: string) {
-    const sent = await sendToAgent(run, body, undefined, client)
-    if (!mounted.current) return
-    setFeedbackReceipt(sent.state)
-    setFeedbackSelected([])
-  }
-
+  // An edit waits for Discover: looking a target up on every keystroke would not.
   function changeTarget(key: keyof RunPRTarget, value: string) {
-    setTarget((current) => ({ ...current, [key]: value }))
+    setTargetEdit({ ...target, [key]: value })
+    setDiscoverable(false)
     setPRReview(null)
-    setPRReviewed(false)
-    setFeedback(null)
-    setFeedbackSelected([])
-    setFeedbackReceipt(null)
     setCreation(null)
   }
 
   function changePushTarget(next: RunGitPushTarget) {
-    setPushTarget(next)
-    setPushReviewed(false)
+    setPushEdit(next)
+    setDiscoverable(false)
   }
 
   return {
-    run, caps, canWrite, busy, errors, perform,
+    run, caps, canWrite, busy, action, errors, perform,
     status, statusReady, expected, refreshStatus,
     paths, selectPath, patches, untracked, reviewed, reviewPaths,
     commitMessage, setCommitMessage, commit, commitPaths,
-    pushTarget, changePushTarget, pushReviewed, setPushReviewed, push, pushBranch,
+    pushTarget, changePushTarget, push, pushBranch,
     target, targetComplete, changeTarget, currentPRReview, discoverPR, uncertain,
-    title, setTitle, body, setBody, draft, setDraft, prReviewed, setPRReviewed, creation, createPR,
-    feedback, refreshFeedback, feedbackSelected, toggleFeedback, feedbackReceipt, sendFeedback,
+    title, setTitle, body, setBody, draft, setDraft, creation, createPR,
   }
 }
 

@@ -1,40 +1,42 @@
 import { useId } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Code } from '@/components/ui/code'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
-import { PRFeedback } from '@/routes/diff/publish-feedback'
 import { Actual, Attest, Diagnostics, Heading, InlineError, Outcome } from '@/routes/diff/publish-parts'
 import type { Publish } from '@/routes/diff/publish-state'
 
+/** Each button sits under one sentence saying exactly what it will do, from
+ * the fields above it: that sentence is what the member confirms. */
 export function PushStep({ p }: { p: Publish }) {
   const ids = useId()
   const status = p.status
   if (!status) return null
-  const { pushTarget: push } = p
+  const { pushTarget: push, target } = p
   const urls = status.remotes?.find((remote) => remote.name === push.remote)?.push_urls ?? []
-  const pr = p.currentPRReview?.result.pull_request
-  const prNext = !!p.currentPRReview
+  const pushReady = Object.values(push).every((value) => value.trim())
+  const found = p.currentPRReview
+  const pr = found?.result.pull_request
+  const identity = found?.result.identity || status.identity
+  const createNext = !!p.push?.pushed && !pr
   return (
     <div className="grid min-w-0 gap-4">
       <section aria-labelledby={`${ids}-push`} className="grid min-w-0 gap-3">
-        <div className="grid gap-0.5">
-          <Heading id={`${ids}-push`}>Push branch</Heading>
-          <p className="text-ui-sm text-muted">
-            Select a configured remote's exact writable push URL. This never changes checkout Origin, the mirror source or its
-            accepted base. Configure additional remotes using native Git in the run terminal.
-          </p>
-        </div>
+        <Heading id={`${ids}-push`}>Push branch</Heading>
         <fieldset disabled={p.busy} className="grid min-w-0 gap-3 sm:grid-cols-3">
           <div className="grid min-w-0 gap-1">
             <Label htmlFor={`${ids}-remote`}>Push remote</Label>
             <Select
               value={push.remote}
-              onValueChange={(remote) => p.changePushTarget({ ...push, remote, repository: '' })}
+              onValueChange={(remote) => {
+                const next = status.remotes?.find((entry) => entry.name === remote)?.push_urls ?? []
+                p.changePushTarget({ ...push, remote, repository: next.length === 1 ? next[0]! : '' })
+              }}
             >
               <SelectTrigger id={`${ids}-remote`}>
                 <SelectValue placeholder="Choose remote" />
@@ -67,16 +69,25 @@ export function PushStep({ p }: { p: Publish }) {
             <Input value={push.head_branch} onChange={(event) => p.changePushTarget({ ...push, head_branch: event.target.value })} />
           </FormField>
         </fieldset>
-        <Attest checked={p.pushReviewed} disabled={p.busy || !p.expected} onChange={p.setPushReviewed}>
-          I reviewed the run account, branch, HEAD and exact push destination above.
-        </Attest>
+        <p className="text-ui-sm text-muted">
+          {pushReady && p.expected ? (
+            <>
+              Pushes commit <Code>{p.expected.head.slice(0, 8)}</Code> to <Code>{push.repository}</Code> as branch{' '}
+              <Code>{push.head_branch}</Code>. Never a force push.
+            </>
+          ) : push.remote ? (
+            'Choose the exact URL and branch to push to.'
+          ) : (
+            'This workspace sets no checkout Origin, so nothing is chosen for you. Pick a remote, or add one with git in the run’s terminal.'
+          )}
+        </p>
         <div className="grid justify-items-start gap-1">
           <Button
-            variant={prNext ? 'secondary' : 'primary'}
-            disabled={p.busy || !p.canWrite || !p.caps.hasMethod('run.git.push') || !p.expected || !p.pushReviewed || !Object.values(push).every((value) => value.trim())}
+            variant={createNext ? 'secondary' : 'primary'}
+            disabled={p.busy || !p.canWrite || !p.caps.hasMethod('run.git.push') || !p.expected || !pushReady}
             onClick={() => void p.perform('push', p.pushBranch)}
           >
-            Push reviewed branch
+            Push branch
           </Button>
           <InlineError>{p.errors.push}</InlineError>
         </div>
@@ -94,50 +105,46 @@ export function PushStep({ p }: { p: Publish }) {
       </section>
       <Separator />
       <section aria-labelledby={`${ids}-pr`} className="grid min-w-0 gap-3">
-        <div className="grid gap-0.5">
-          <Heading id={`${ids}-pr`}>GitHub pull request</Heading>
-          <p className="text-ui-sm text-muted">
-            PR repository/base and fork head are independent of the push remote. Enter owner/name, not a clone URL. Discover the
-            exact existing PR before creating one. No merge, force push or branch switch is performed here.
-          </p>
-        </div>
+        <Heading id={`${ids}-pr`}>GitHub pull request</Heading>
         <fieldset disabled={p.busy || p.uncertain} className="grid min-w-0 gap-3 sm:grid-cols-2">
           <FormField label="PR repository (owner/name)">
-            <Input value={p.target.repository} onChange={(event) => p.changeTarget('repository', event.target.value)} />
+            <Input value={target.repository} onChange={(event) => p.changeTarget('repository', event.target.value)} />
           </FormField>
           <FormField label="PR base branch">
-            <Input value={p.target.base_branch} onChange={(event) => p.changeTarget('base_branch', event.target.value)} />
+            <Input value={target.base_branch} onChange={(event) => p.changeTarget('base_branch', event.target.value)} />
           </FormField>
           <FormField label="PR head repository (owner/name)">
-            <Input value={p.target.head_repository} onChange={(event) => p.changeTarget('head_repository', event.target.value)} />
+            <Input value={target.head_repository} onChange={(event) => p.changeTarget('head_repository', event.target.value)} />
           </FormField>
           <FormField label="PR head branch">
-            <Input value={p.target.head_branch} onChange={(event) => p.changeTarget('head_branch', event.target.value)} />
+            <Input value={target.head_branch} onChange={(event) => p.changeTarget('head_branch', event.target.value)} />
           </FormField>
         </fieldset>
-        <div className="grid justify-items-start gap-1">
-          <Button
-            variant="secondary"
-            disabled={p.busy || !p.expected || !p.targetComplete || !p.caps.hasMethod('run.pr.status')}
-            onClick={() => void p.perform('discover', p.discoverPR)}
-          >
-            {p.uncertain ? 'Reconcile PR read-only' : 'Discover existing PR'}
-          </Button>
-          <InlineError>{p.errors.discover}</InlineError>
-        </div>
         {p.uncertain && (
           <Callout tone="needs-you" role="alert">
             Creation outcome is uncertain. Keep this exact target and reconcile read-only; creation will not be retried.
           </Callout>
         )}
-        {p.currentPRReview && (
+        {(!found || p.uncertain) && (
+          <div className="grid justify-items-start gap-1">
+            {p.action === 'discover' && !p.uncertain ? (
+              <p role="status" className="text-ui-sm text-muted">Looking for an existing pull request…</p>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={p.busy || !p.expected || !p.targetComplete || !p.caps.hasMethod('run.pr.status')}
+                onClick={() => void p.perform('discover', p.discoverPR)}
+              >
+                {p.uncertain ? 'Reconcile PR read-only' : 'Discover existing PR'}
+              </Button>
+            )}
+            <InlineError>{p.errors.discover}</InlineError>
+          </div>
+        )}
+        {found && (
           <Outcome label="Discovered pull request">
-            <p className="break-all">
-              Reviewed GitHub identity: <strong>{p.currentPRReview.result.identity || 'Unavailable'}</strong> · Agent account:{' '}
-              {p.currentPRReview.result.account_member_id}
-            </p>
-            <Actual actual={p.currentPRReview.result.actual} />
-            <Diagnostics output={p.currentPRReview.result.output} error={p.currentPRReview.result.error} />
+            <Actual actual={found.result.actual} />
+            <Diagnostics output={found.result.output} error={found.result.error} />
             {pr ? (
               <div className="grid gap-0.5 break-all">
                 <a className="text-accent underline-offset-2 hover:underline" href={pr.url} target="_blank" rel="noreferrer">
@@ -147,10 +154,10 @@ export function PushStep({ p }: { p: Publish }) {
                   {pr.state}
                   {pr.draft ? ' · Draft' : ''} · {pr.head_repository}:{pr.head_branch} → {pr.repository}:{pr.base_branch}
                 </p>
-                <p className="font-code">PR head: {pr.head_oid}</p>
+                <p className="text-muted">Its checks and review comments are under #{pr.number} in the run’s header.</p>
               </div>
             ) : (
-              !p.currentPRReview.result.error && <p>No existing PR for this exact repository, base and head.</p>
+              !found.result.error && <p>No existing PR for this exact repository, base and head.</p>
             )}
           </Outcome>
         )}
@@ -165,23 +172,23 @@ export function PushStep({ p }: { p: Publish }) {
             <Attest checked={p.draft} disabled={p.busy} onChange={p.setDraft}>
               Draft PR
             </Attest>
-            <Attest
-              checked={p.prReviewed}
-              disabled={p.busy || !p.currentPRReview || !!p.currentPRReview.result.error || !p.currentPRReview.result.identity}
-              onChange={p.setPRReviewed}
-            >
-              I reviewed this GitHub identity and the exact PR repository, base, fork and head.
-            </Attest>
+            {p.targetComplete && (
+              <p className="text-ui-sm text-muted">
+                Opens a pull request into <Code>{target.repository}:{target.base_branch}</Code> from{' '}
+                <Code>{target.head_repository}:{target.head_branch}</Code>
+                {identity ? <> as <strong className="font-medium text-text">{identity}</strong></> : null}. It is not merged from here.
+              </p>
+            )}
             <div className="grid justify-items-start gap-1">
               <Button
-                variant={prNext ? 'primary' : 'secondary'}
+                variant={createNext ? 'primary' : 'secondary'}
                 disabled={
-                  p.busy || !p.canWrite || !p.caps.hasMethod('run.pr.create') || p.uncertain || !p.currentPRReview ||
-                  !!p.currentPRReview.result.error || !p.prReviewed || !p.title.trim()
+                  p.busy || !p.canWrite || !p.caps.hasMethod('run.pr.create') || p.uncertain || !found || !!found.result.error ||
+                  !found.result.identity || !p.title.trim()
                 }
                 onClick={() => void p.perform('create', p.createPR)}
               >
-                Create reviewed PR
+                Create pull request
               </Button>
               <InlineError>{p.errors.create}</InlineError>
             </div>
@@ -196,17 +203,6 @@ export function PushStep({ p }: { p: Publish }) {
             <Diagnostics output={p.creation.output} error={p.creation.error} />
           </Outcome>
         )}
-        <div className="grid justify-items-start gap-1">
-          <Button
-            variant="secondary"
-            disabled={p.busy || !p.expected || !p.targetComplete || !p.caps.hasMethod('run.pr.feedback')}
-            onClick={() => void p.perform('feedback', p.refreshFeedback)}
-          >
-            Refresh PR feedback
-          </Button>
-          <InlineError>{p.errors.feedback}</InlineError>
-        </div>
-        {p.feedback && <PRFeedback p={p} feedback={p.feedback} />}
       </section>
     </div>
   )

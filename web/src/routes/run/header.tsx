@@ -20,6 +20,7 @@ import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useModeSwitch } from '@/routes/run/mode-switch'
+import { RunPullRequest } from '@/routes/run/pull-request'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -227,6 +228,7 @@ export function RunHeader({
       {!composing && (
         <div className="flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch views={views} />
+          <RunPullRequest run={run} agent={agent} agentName={agentName} />
         </div>
       )}
       {modeSwitch.dialog}

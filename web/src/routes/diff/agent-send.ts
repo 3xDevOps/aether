@@ -1,0 +1,68 @@
+import { useRef } from 'react'
+import { canReopenRun } from '@/lib/commands'
+import { allowed } from '@/lib/permissions'
+import { sendToAgent } from '@/lib/send-to-agent'
+import type { RoomMessage } from '@/lib/types'
+import { modeLabel } from '@/routes/run/agent-name'
+import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
+import { composerBlock } from '@/routes/run/composer-state'
+import { useStore } from '@/store'
+import { useCapability, useSelf } from '@/store/hooks'
+import type { RunRecord } from '@/store/runs'
+
+/** The Session composer's rules for a message another surface sends to the run's agent. */
+export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
+  const self = useSelf()
+  const cap = useCapability()
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
+  const control = useImplicitControl(run, agent)
+  const held = useRef(agent.roomControl)
+  held.current = agent.roomControl
+
+  const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
+  const blocked = run.switching
+    ? `Switching to ${modeLabel[run.switching] ?? run.switching}…`
+    : run.acp && run.mode === 'headless'
+      ? 'Background runs take no input.'
+      : composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
+
+  return {
+    /** Why nothing can be sent, in the composer's words, or null. */
+    blocked,
+    /** What to say beside the button: the block, or that the message will wait for the controller. */
+    note: blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.'),
+    /** Runs `act` once this tab controls the run when its owner can take control, at once otherwise. */
+    dispatch: (act: () => void) => (control.canAct ? control.withControl(act) : act()),
+    /** Posts `body` with the control lease this tab holds at that moment. */
+    post: (body: string): Promise<RoomMessage> => {
+      const lease = held.current?.has_control && held.current.control_generation > 0
+        ? { control_session_id: held.current.control_session_id, control_generation: held.current.control_generation }
+        : undefined
+      return sendToAgent(run, body, lease)
+    },
+  }
+}
+
+/** Why a send that the server answered did not reach the agent. */
+export function refusal(sent: RoomMessage): string {
+  if (sent.state === 'uncertain') return 'Delivery uncertain: the message may have reached the agent. Check the session before sending again.'
+  return `Not sent: ${sent.failure?.message ?? sent.state}.`
+}
+
+/** What became of a sent message; `what` counts what it carried, as in "2 comments". */
+export function receipt(sent: RoomMessage, what: string, agentName: string): { text: string; tone?: 'done' | 'failed' } {
+  switch (sent.state) {
+    case 'queued':
+      return { text: `${what} queued for ${agentName}. Delivers in 45 s unless the controller decides sooner.` }
+    case 'not_sent':
+      return { text: `${agentName} did not get your ${what}: ${sent.failure?.message ?? 'not sent'}. The text is in the session.`, tone: 'failed' }
+    case 'uncertain':
+      return { text: `Your ${what} may not have reached ${agentName}. The text is in the session.`, tone: 'failed' }
+    case 'denied':
+      return { text: `The controller declined your ${what}. The text is in the session.`, tone: 'failed' }
+    case 'cancelled':
+      return { text: `Delivery of your ${what} was cancelled. The text is in the session.`, tone: 'failed' }
+    default:
+      return { text: `Sent ${what} to ${agentName}${sent.agent_delivery === 'queued' ? ', queued behind its current turn' : ''}.`, tone: 'done' }
+  }
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -20,7 +20,11 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
   useHeaderPrimary(true)
   const [open, setOpen] = useState(false)
   const p = usePublish(run, client, open)
-  const [step, setStep] = useState('commit')
+  const [chosen, setStep] = useState<string>()
+  // Nothing left to commit when the first status arrives: open on the push.
+  const first = useRef<string>(undefined)
+  if (p.status) first.current ??= p.status.changes?.length ? 'commit' : 'push'
+  const step = chosen ?? first.current
   const wrapping = useStore((s) => s.diffWrap)
   const coarse = useMediaQuery(coarsePointer)
   return (
@@ -36,6 +40,9 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
           </DialogDescription>
         </DialogHeader>
         <Checkout p={p} />
+        {!p.canWrite && (
+          <p className="text-ui-sm text-muted">You can read this checkout. Committing, pushing and opening a pull request need the collaborator role.</p>
+        )}
         {p.status && (
           <Tabs value={step} onValueChange={setStep} className="grid min-w-0 gap-3">
             <TabsList look="segmented" className="justify-self-start">
