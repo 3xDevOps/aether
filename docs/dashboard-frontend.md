@@ -2399,6 +2399,8 @@ lease; redundant moves for the same contact are coalesced. A changed frame
 identity, expired input or changed authority discards pending input with a
 visible message. Failed mutations are not retried or replayed. While a toolbar
 action or a viewport change is in flight, input is dropped without a message.
+A press still held when a toolbar action starts is released first, because
+its release could not follow an action that changes the page.
 Native hardware-bound login flows and identity providers which reject
 automated Chromium remain limitations; use test accounts rather than
 importing a personal browser profile.

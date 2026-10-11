@@ -661,6 +661,7 @@ describe('closing and resetting', () => {
     const confirm = within(dialog).getByRole('button', { name: 'Close page' })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
+    await waitFor(() => expect(close).toHaveBeenCalled())
     expect(close).toHaveBeenCalledTimes(1)
     expect(close).toHaveBeenCalledWith({
       run_id: 'run_1', session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision,

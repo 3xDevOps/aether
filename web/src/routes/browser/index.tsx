@@ -275,8 +275,10 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     setPending(kind)
     setNotice(null)
     mutation.current++
-    try { await operation() }
-    catch (cause) { if (alive.current) setNotice({ tone: 'failed', text: message(cause) }) }
+    try {
+      await surfaceHandle.current?.lift()
+      await operation()
+    } catch (cause) { if (alive.current) setNotice({ tone: 'failed', text: message(cause) }) }
     finally {
       mutation.current++
       // An action that outlasted its user's stay gives the lease back.

@@ -200,6 +200,40 @@ it('reconnects a dropped stream by itself, keeps the painted frame and takes no 
   view.unmount()
 })
 
+it('releases a press the page still holds when asked to lift it, and sends nothing for its late release', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 844 } as DOMRect)
+  const handle = createRef<BrowserSurfaceHandle>()
+  const view = render(<BrowserSurface {...surfaceProps()} ref={handle} />)
+  await stream(frame())
+  await painted()
+  await act(async () => { await handle.current!.lift() })
+  expect(api.devBrowserAction).not.toHaveBeenCalled()
+  fireEvent.pointerDown(canvas(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 40, clientY: 50, shiftKey: true })
+  await act(async () => { await handle.current!.lift() })
+  expect(vi.mocked(api.devBrowserAction).mock.calls.map(([request]) => [request.action, request.phase, request.key ?? request.button])).toEqual([
+    ['key', 'down', 'Shift'], ['pointer', 'down', 'left'], ['pointer', 'up', 'left'], ['key', 'up', 'Shift'],
+  ])
+  fireEvent.pointerUp(canvas(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 40, clientY: 50 })
+  await act(async () => {})
+  expect(api.devBrowserAction).toHaveBeenCalledTimes(4)
+  view.unmount()
+})
+
+it('cancels held touches once when asked to lift them', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 844 } as DOMRect)
+  const handle = createRef<BrowserSurfaceHandle>()
+  const view = render(<BrowserSurface {...surfaceProps()} ref={handle} />)
+  await stream(frame())
+  await painted()
+  fireEvent.pointerDown(canvas(), { pointerId: 1, pointerType: 'touch', clientX: 40, clientY: 50 })
+  fireEvent.pointerDown(canvas(), { pointerId: 2, pointerType: 'touch', clientX: 80, clientY: 90 })
+  await act(async () => { await handle.current!.lift() })
+  expect(vi.mocked(api.devBrowserAction).mock.calls.map(([request]) => [request.action, request.phase, request.touch_id])).toEqual([
+    ['touch', 'down', 1], ['touch', 'down', 2], ['touch', 'cancel', 1],
+  ])
+  view.unmount()
+})
+
 it('shows the server’s refusal with Retry once reconnecting keeps failing', async () => {
   vi.useFakeTimers()
   const view = render(<BrowserSurface {...surfaceProps()} />)

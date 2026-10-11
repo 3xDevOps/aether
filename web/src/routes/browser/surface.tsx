@@ -15,6 +15,9 @@ export interface BrowserSurfaceHandle {
   /** False while input is queued or was sent in the last half second, a
    * pointer is down, or text is being composed. */
   idle: () => boolean
+  /** Releases every press the page still holds, and resolves once sent. An
+   * action that changes the page would leave a later release undeliverable. */
+  lift: () => Promise<void>
 }
 
 interface BrowserSurfaceProps {
@@ -55,6 +58,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const displayed = useRef<DevBrowserFrameMetadata | null>(null)
   const queue = useRef<PendingInput[]>([])
   const sending = useRef(false)
+  const drained = useRef(Promise.resolve())
   const active = useRef(true)
   const inputEpoch = useRef(0)
   const sendInput = useRef<(input: BrowserInput) => void>(() => {})
@@ -86,6 +90,19 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   useImperativeHandle(props.ref, () => ({
     focus: () => keyboard.current?.focus({ preventScroll: true }),
     idle: () => !sending.current && queue.current.length === 0 && pointers.current.size === 0 && !composing.current && performance.now() - lastInput.current > 500,
+    lift: async () => {
+      const held = [...pointers.current.values()]
+      if (!held.length) return
+      pointers.current.clear()
+      // Chromium touchCancel cancels every active contact.
+      const touch = held.find((gesture) => gesture.kind === 'touch')
+      if (touch) sendInput.current({ action: 'touch', phase: 'cancel', touch_id: touch.touchID, ...touch.point })
+      for (const gesture of held) {
+        if (gesture.kind !== 'touch') sendInput.current({ action: 'pointer', phase: 'up', button: gesture.button, click_count: gesture.clickCount, ...gesture.point })
+        for (const key of gesture.modifiers) sendInput.current({ action: 'key', phase: 'up', key })
+      }
+      await drained.current
+    },
   }), [])
   useEffect(() => {
     // Input queued while a free lease is being taken belongs to that lease.
@@ -234,7 +251,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     }
     if (sending.current) return
     sending.current = true
-    void (async () => {
+    drained.current = (async () => {
       try {
         while (active.current && queue.current.length) {
           let control = current.current.control
