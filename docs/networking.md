@@ -349,7 +349,8 @@ teammate's question, a queued message and the swarm rows do not notify.
   the pointer, typing and scrolling count as using it. A notification is sent
   once you have left every dashboard alone for a minute, if the run still
   needs you.
-- `aether handoff` moves a run's notifications to its new owner.
+- `aether handoff` moves a run's notifications to its new owner, who is told
+  what the run needs at that moment.
 
 It needs:
 

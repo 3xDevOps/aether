@@ -225,10 +225,13 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	want.Body = "Blocked: need the staging API key"
 	phone.expect(t, want)
 
-	// A handoff moves the notifications with the run.
+	// A handoff moves the notifications with the run, starting with what it
+	// needs as it changes hands.
 	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
 		t.Fatalf("TransferRun: %v", err)
 	}
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
+	bobs.expect(t, want)
 	h.status(run, domain.RunRunning, "agent resumed")
 	h.status(run, domain.RunNeedsAttention, "agent idle")
 	want.Body = "Waiting for your reply"
@@ -342,6 +345,53 @@ func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
 	phone.expect(t, idle)
 	phone.expectNone(t, testQuiet)
 	slow.expectNone(t, testQuiet)
+}
+
+// A handoff commits while the former owner's first device is still being
+// sent to: their other devices get nothing more, and the new owner is told
+// what the run needs.
+func TestAHandedOffRunNotifiesOnlyItsNewOwner(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	slow, phone, bobs := h.subscribe(h.ada), h.subscribe(h.ada), h.subscribe(h.bob)
+	slow.slow.Store(true)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	slow.expect(t, idle)
+	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
+		t.Fatalf("TransferRun: %v", err)
+	}
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
+	slow.slow.Store(false)
+	close(slow.release)
+
+	phone.expectNone(t, testQuiet)
+	bobs.expect(t, idle)
+	bobs.expectNone(t, testQuiet)
+}
+
+// The owner comes back to a dashboard while a slow push service holds their
+// first device: the rest wait until the owner has left it alone again.
+func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
+	slow.slow.Store(true)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	slow.expect(t, idle)
+	h.svc.Active(h.ada.ID)
+	slow.slow.Store(false)
+	close(slow.release)
+	phone.expectNone(t, testQuiet/2)
+
+	slow.expect(t, idle)
+	phone.expect(t, idle)
+	phone.expectNone(t, testQuiet)
 }
 
 // A paused run waits on nobody; resumed, it needs its owner again.
