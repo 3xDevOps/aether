@@ -444,7 +444,9 @@ func setupOutput(output string, cut bool, secrets []string) string {
 	return strings.ToValidUTF8(output, "\uFFFD")
 }
 
-// tailWriter keeps the last limit bytes written to it.
+// tailWriter keeps the last limit bytes written to it. The buffer grows to
+// twice that before it is compacted, so a script printing line by line does
+// not cost a copy of the whole buffer per line.
 type tailWriter struct {
 	limit int
 	buf   []byte
@@ -453,23 +455,30 @@ type tailWriter struct {
 
 func (w *tailWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
-	if over := len(w.buf) - w.limit; over > 0 {
-		w.buf = w.buf[:copy(w.buf, w.buf[over:])]
+	if len(w.buf) > 2*w.limit {
+		w.buf = w.buf[:copy(w.buf, w.buf[len(w.buf)-w.limit:])]
 		w.cut = true
 	}
 	return len(p), nil
+}
+
+// tail is the last limit bytes written, and whether more was written.
+func (w *tailWriter) tail() (string, bool) {
+	over := max(0, len(w.buf)-w.limit)
+	return string(w.buf[over:]), w.cut || over > 0
 }
 
 // execCombined is Exec for the setup script: stdout and stderr as one
 // transcript in arrival order, of which the last execOutputLimit bytes are
 // kept however much the script prints. cut reports that more was printed.
 func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir string) (code int, output string, cut bool, err error) {
-	tail := &tailWriter{limit: execOutputLimit}
+	kept := &tailWriter{limit: execOutputLimit}
 	code, err = d.exec(ctx, id, cmd, workDir, func(r io.Reader) error {
-		_, copyErr := stdcopy.StdCopy(tail, tail, r)
+		_, copyErr := stdcopy.StdCopy(kept, kept, r)
 		return copyErr
 	})
-	return code, string(tail.buf), tail.cut, err
+	output, cut = kept.tail()
+	return code, output, cut, err
 }
 
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
