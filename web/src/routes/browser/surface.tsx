@@ -124,6 +124,10 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       failed = true
       latest = null
       parked = null
+      // The page can change under a frame that no longer updates, so input
+      // waits for the next one.
+      clearInput()
+      displayed.current = null
       setLive(false)
       const delay = retryDelays[failures.current++]
       if (delay === undefined) setFailure(text)
