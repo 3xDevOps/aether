@@ -132,6 +132,9 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     held.current = next
     setLease(next)
   }
+  // A lease is kept while the window has focus and the Browser is in use, or
+  // an action that began there is still running.
+  const wanted = () => alive.current && focused.current && (!away.current || inFlight.current)
 
   const release = useCallback(async (given: Lease | null = held.current) => {
     if (!given) return
@@ -161,7 +164,8 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     const elsewhere = (event: Event) => {
       if (!(event.target instanceof Element) || event.target.closest('[data-browser], [role="menu"], [role="dialog"], [role="alertdialog"]')) return
       away.current = true
-      void release()
+      // An action still running keeps the lease it works under until it ends.
+      if (!inFlight.current) void release()
     }
     // A wheel or a touch on the page moves no focus, and neither does a
     // click on a button in Safari.
@@ -211,7 +215,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       if (arrived.length) setUnseen((previous) => [...previous, ...arrived])
       const holder = ownership?.controller ?? null
       const mine = session && holder?.control_session_id === controlSession ? { surface: session, fence: fenceOf(holder) } : null
-      if (mine && !focused.current) void release(mine)
+      if (mine && !wanted()) void release(mine)
       else {
         setController(holder)
         held.current = mine
@@ -240,8 +244,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       const result = await api.devControlAcquire({ run_id: runID, surface: given, control_session_id: controlSession, expected_generation: expected, takeover })
       if (!result.controller) return null
       const next = { surface: given, fence: fenceOf(result.controller) }
-      // Away, only an action still in flight has a use for the lease.
-      if (!alive.current || !focused.current || (away.current && !inFlight.current)) {
+      if (!wanted()) {
         await release(next)
         return null
       }
@@ -301,7 +304,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     if (!taken) return false
     const result = await api.devBrowserOpen({ run_id: runID, session_id: session, ...taken, url, width: now.target?.width, height: now.target?.height })
     const next = { surface: browserSurface(result.page.session_id), fence: fenceOf(result.control) }
-    if (!alive.current || !focused.current) {
+    if (!wanted()) {
       await release(next)
       return true
     }
@@ -374,7 +377,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     void perform(async () => {
       let opened = false
       try { opened = await openPage('') }
-      finally { (opened ? address : menuTrigger).current?.focus() }
+      finally { if (!away.current) (opened ? address : menuTrigger).current?.focus() }
     }, 'load')
   }
 
@@ -386,7 +389,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     if (!alive.current) return
     if (taken && session && action === 'reset') setConfirmation({ action, target: { run_id: runID, session_id: session, ...taken } })
     else if (taken && now.page && now.status?.running) setConfirmation({ action: 'close', target: { run_id: runID, session_id: now.page.session_id, page_id: now.page.page_id, page_revision: now.page.page_revision, ...taken } })
-    else menuTrigger.current?.focus()
+    else if (!away.current) menuTrigger.current?.focus()
   }
   const confirmationCurrent = Boolean(confirmation && fence
     && status?.session_id === confirmation.target.session_id

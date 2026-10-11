@@ -304,6 +304,21 @@ describe('control', () => {
     composer.remove()
   })
 
+  it('releases again, on the next status read, a lease whose release failed while focus is elsewhere', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await screen.findByRole('img', { name: 'You are driving' })
+    vi.mocked(api.devControlRelease).mockRejectedValueOnce(new Error('dev.control.release: connection lost'))
+    act(() => composer.focus())
+    expect((await screen.findByRole('alert')).textContent).toBe('dev.control.release: connection lost')
+    await act(async () => { poll() })
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    composer.remove()
+  })
+
   it('offers Release control only while driving', async () => {
     render(<BrowserView runID="run_1" />)
     await ready()
@@ -550,6 +565,28 @@ describe('pages', () => {
     await waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ session_id: page.session_id, url: '', control_generation: 7 })))
     await waitFor(() => expect(document.activeElement).toBe(address()))
     expect(address().value).toBe('')
+  })
+
+  it('gives the lease back and leaves the keyboard where it went when a new page opens after focus moved elsewhere', async () => {
+    const composer = document.body.appendChild(document.createElement('textarea'))
+    const blank = { ...page, page_id: 'page-3', url: 'about:blank', title: '' }
+    const opening = Promise.withResolvers<{ page: DevBrowserPage; control: { control_session_id: string; control_generation: number } }>()
+    const open = vi.spyOn(api, 'devBrowserOpen').mockReturnValue(opening.promise)
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name: 'New page' }))
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
+    const session = open.mock.calls[0][0].control_session_id
+    act(() => composer.focus())
+    expect(api.devControlRelease).not.toHaveBeenCalled()
+    vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page, blank], selected_page_id: blank.page_id })
+    await act(async () => { opening.resolve({ page: blank, control: { control_session_id: session, control_generation: 8 } }) })
+    await waitFor(() => expect(api.devControlRelease).toHaveBeenCalledWith({ run_id: 'run_1', surface, control_session_id: session, control_generation: 8 }))
+    expect(api.devControlRelease).toHaveBeenCalledTimes(1)
+    await screen.findByRole('tablist', { name: 'Pages' })
+    expect(document.activeElement).toBe(composer)
+    expect(screen.queryByRole('img', { name: 'You are driving' })).toBeNull()
+    composer.remove()
   })
 })
 
