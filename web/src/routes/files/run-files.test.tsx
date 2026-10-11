@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Markdown } from '@/components/ui/markdown'
 import { OutputTail } from '@/components/ui/session-blocks'
 import { api } from '@/lib/api'
@@ -75,6 +75,28 @@ describe('a run’s Files view', () => {
     act(() => openInFiles('run_1', { path: 'src/app.ts', line: 1, column: 0 }))
     render(<RunFiles run={run()} shown client={checkout()} />)
     await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe('one'))
+  })
+
+  it('returns to the file a run had selected after another run opened one', async () => {
+    const client = checkout()
+    act(() => openInFiles('run_1', { path: 'README.md' }))
+    const { unmount } = render(<RunFiles run={run()} shown client={client} />)
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    act(() => openInFiles('run_1', { path: 'src/app.ts' }))
+    await screen.findByRole('textbox', { name: 'Edit src/app.ts' })
+    fireEvent.click(await within(screen.getByRole('complementary', { name: 'Files' })).findByRole('button', { name: 'README.md' }))
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    unmount()
+
+    const other = run({ id: 'run_2' })
+    act(() => useStore.getState().setRuns([run(), other]))
+    act(() => openInFiles('run_2', { path: 'src/app.ts' }))
+    render(<RunFiles run={other} shown client={client} />)
+    await screen.findByRole('textbox', { name: 'Edit src/app.ts' })
+    cleanup()
+
+    render(<RunFiles run={run()} shown client={client} />)
+    expect(await screen.findByRole('textbox', { name: 'Edit README.md' })).toBeDefined()
   })
 
   it('says a file the member may not change is read-only', async () => {

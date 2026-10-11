@@ -25,6 +25,7 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
   const fileTabs = useStore((s) => s.fileTabs)
   const activeFileKey = useStore((s) => s.activeFileKey)
   const openFileTab = useStore((s) => s.openFileTab)
+  const setActiveFileKey = useStore((s) => s.setActiveFileKey)
   const mobile = useIsMobile()
   const [pane, size] = useElementSize<HTMLDivElement>()
   const [mode, setMode] = useState<ViewerMode>('file')
@@ -37,8 +38,8 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     [run.workspace_id, run.id, label],
   )
   const tabs = fileTabs.filter((tab) => tab.kind === 'workspace' && tab.runID === run.id).map(fileTabToSelection)
-  const selected = tabs.find((tab) => sourceKey(tab, tab.path) === activeFileKey) ?? tabs.find((tab) => sourceKey(tab, tab.path) === lastSelected.get(run.id))
-  const selection = selected ?? tabs.at(-1) ?? null
+  const holds = (key: string | null | undefined) => tabs.find((tab) => sourceKey(tab, tab.path) === key)
+  const selection = holds(activeFileKey) ?? holds(lastSelected.get(run.id)) ?? tabs.at(-1) ?? null
 
   const open = (path: string, target: FileTarget | null) => {
     const key = sourceKey(source, path)
@@ -71,7 +72,11 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     </div>
   )
   const key = selection && sourceKey(selection, selection.path)
-  if (key) lastSelected.set(run.id, key)
+  useEffect(() => {
+    if (!key) return
+    lastSelected.set(run.id, key)
+    setActiveFileKey(key)
+  }, [key, run.id, setActiveFileKey])
   const narrow = mobile || (size.width > 0 && size.width < besideWidth)
   const editor = selection && (
     <FileEditor
