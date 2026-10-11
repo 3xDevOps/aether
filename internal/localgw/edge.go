@@ -2,6 +2,7 @@ package localgw
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -124,9 +125,32 @@ func chooseEdge(edgeURL string) (*edgeclient.Client, *protocol.Error) {
 func edgeError(err error) *protocol.Error {
 	var refused *edgeclient.RefusedError
 	if errors.Is(err, edgeclient.ErrNotSignedIn) || (errors.As(err, &refused) && refused.Status < http.StatusInternalServerError) {
-		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: refusalData(err)}
+}
+
+// refusalData is the error data {"refusal": <edgeproto.Refused>} of a
+// failure on the edge path, nil for any other. A server's refusal comes
+// before the edge's when a direct and an edge attempt both failed.
+func refusalData(err error) json.RawMessage {
+	var (
+		refused     *edgeproto.Refused
+		edgeRefused *edgeclient.RefusedError
+	)
+	switch {
+	case errors.As(err, &refused):
+	case errors.As(err, &edgeRefused):
+		refused = edgeproto.RefusedBy(edgeproto.Refusal(edgeRefused.Message))
+	case errors.Is(err, edgeclient.ErrNotSignedIn):
+		refused = &edgeproto.Refused{Kind: edgeproto.RefusedNotSignedIn}
+	default:
+		return nil
+	}
+	raw, _ := json.Marshal(struct {
+		Refusal *edgeproto.Refused `json:"refusal"`
+	}{refused})
+	return raw
 }
 
 // localEdgeLogin starts a device sign-in, as aether login does, and
@@ -334,7 +358,7 @@ func (g *Gateway) localEdgeClaim(_ *http.Request, body []byte) (any, *protocol.E
 func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) {
 	result, err := cli.Link(opts, g.local.snapshot())
 	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
 	if perr := g.adoptLink(result); perr != nil {
 		return nil, perr

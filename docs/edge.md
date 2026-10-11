@@ -455,7 +455,9 @@ invited to.
 
 When the server refuses this device, because it is pending or was
 registered under `account` and the server now requires approval, the
-command fails with the server's own message, line by line:
+command fails with the server's refusal. The server sends it as the SSH
+authentication banner: a first line `aether-refusal/1 <JSON>` with the
+refusal's kind and fields, then the text the command prints:
 
 ```
 device "dana-laptop", signed in as github account dana, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
@@ -465,6 +467,8 @@ or on the server:
 ```
 
 `aether link` and `aether edge-ssh` (git) print it; the sync daemon logs it.
+A banner without that first line, from an older server, is printed line by
+line after `server said:`.
 
 Every relayed connection names, in its SSH user name, the account this
 device signed in as, `github:<user id>`. The device's SSH signature

@@ -418,6 +418,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	sshCfg.EdgeAccess = cfg.EdgeAccess
+	// The name the edge agent announces; an unreadable one leaves refusals
+	// unnamed.
+	sshCfg.Name, _ = os.Hostname()
 	if err = s.buildServices(Deps{
 		Config:     cfg,
 		DataDir:    cfg.DataDir,

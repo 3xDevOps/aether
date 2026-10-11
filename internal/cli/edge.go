@@ -76,8 +76,14 @@ func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, erro
 		// The edge admits a device that the direct path refuses until it is
 		// approved, under account access; the refusal's approval demand
 		// would repeat on every command and git operation.
-		var refused *refusalError
-		if errors.As(directErr, &refused) {
+		var (
+			refused    *refusalError
+			structured *edgeproto.Refused
+		)
+		switch {
+		case errors.As(directErr, &structured):
+			directErr = fmt.Errorf("%s refused this device: %s", cfg.Addr, structured.Kind)
+		case errors.As(directErr, &refused):
 			directErr = refused.err
 		}
 		fmt.Fprintf(os.Stderr, "aether: %v\naether: reached server %s through %s instead\n", directErr, cfg.ServerID, cfg.EdgeURL)
@@ -200,16 +206,24 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 }
 
 // pinnedHandshake runs the SSH handshake over nc, accepting only a host
-// key pin accepts, and closes nc when it fails. What the server said in
-// authentication banners is part of the error, line by line, because it
-// holds the commands that fix a refusal, such as approving a device.
+// key pin accepts, and closes nc when it fails. A structured refusal in an
+// authentication banner is the error itself, an *edgeproto.Refused. An
+// older server's prose banner is part of the error, line by line, because
+// it holds the commands that fix a refusal, such as approving a device.
 func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh.HostKeyCallback) (*ssh.Client, error) {
-	var said []string
+	var (
+		said    []string
+		refused *edgeproto.Refused
+	)
 	conf := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: pin,
 		BannerCallback: func(message string) error {
+			if r, ok := edgeproto.ParseRefusedBanner(message); ok {
+				refused = r
+				return nil
+			}
 			said = append(said, bannerLines(message)...)
 			return nil
 		},
@@ -221,6 +235,9 @@ func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh
 	cc, chans, reqs, err := ssh.NewClientConn(nc, where, conf)
 	if err != nil {
 		_ = nc.Close()
+		if refused != nil {
+			return nil, refused
+		}
 		err = fmt.Errorf("ssh handshake with %s: %w", where, err)
 		if len(said) > 0 {
 			err = &refusalError{err: err, said: said}

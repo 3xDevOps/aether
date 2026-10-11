@@ -1385,7 +1385,13 @@ does, with the same files in the config directory:
   `-32002`. An edge that cannot be reached or answers `5xx` answers
   `-32004`. `edge.link` and `edge.claim` answer `-32002` for any failure of
   the SSH connection, with what the server said, such as a wrong claim code
-  or a device waiting for approval.
+  or a device waiting for approval. A refusal on the edge path, by the
+  server, the edge, or this machine holding no sign-in, also carries
+  `data: {"refusal": {"kind": "device-pending", ...}}` with the kind and
+  fields of `Refused` in `internal/edge/proto/refused.go`; so does the
+  `-32004` `server unreachable: ...` answer of `/api/v1/*` and of the
+  `/ws/events` subscribe refusal when the gateway's connection to the
+  server fails that way.
 
 The member's devices and edge invitations are control-channel methods, so
 the dashboard calls them through `POST /api/v1/<method>` like any other:

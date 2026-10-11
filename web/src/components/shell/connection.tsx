@@ -31,6 +31,7 @@ export const unreachableLabel: Record<UnreachableKind, string> = {
   'not-member': 'not a member of this server - ask an admin to invite you again',
   'device-revoked': 'this device was revoked on the server',
   'device-pending': 'this device is waiting for approval - approve its code from another device or on the server',
+  'server-refused': 'the server refused this device',
   refused: 'the gateway refused this device - it is not identified as a member',
   identity: 'the server cannot identify this device - check tailscaled on the server host',
 }

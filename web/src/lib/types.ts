@@ -1132,6 +1132,57 @@ export interface EdgeHostKey {
   fingerprint: string
 }
 
+/** A refusal on the edge path, as internal/edge/proto's Refused carries
+ * it in the local gateway's error data. Fields beyond `kind` depend on it. */
+export interface EdgeRefusal {
+  kind:
+    | 'device-pending'
+    | 'device-revoked'
+    | 'not-member'
+    | 'too-many-waiting'
+    | 'key-of-another-account'
+    | 'account-mismatch'
+    | 'grant-key-mismatch'
+    | 'claim-user-missing'
+    | 'claim-account-mismatch'
+    | 'claim-wrong'
+    | 'claim-expired'
+    | 'claim-exhausted'
+    | 'claimed'
+    | 'claim-member-gone'
+    | 'claim-member-not-admin'
+    | 'claim-account-of-another-member'
+    | 'claim-device-revoked'
+    | 'claim-failed'
+    | 'not-signed-in'
+    | 'token-revoked'
+    | 'server-not-connected'
+    | 'unknown-server'
+    | 'too-many-attempts'
+    | 'connection-limit'
+    | 'server-blocked'
+    | 'account-blocked'
+    | 'identity-stale'
+    | 'edge-refused'
+  server?: string
+  device?: string
+  fingerprint?: string
+  account?: string
+  member_id?: string
+  member_name?: string
+  role?: string
+  bound_member?: string
+  invitation?: string
+  waiting?: number
+  registered?: boolean
+  direct?: boolean
+  approval_code?: string
+  user?: string
+  principal?: string
+  refusal?: string
+  detail?: string
+}
+
 /** edge.link and edge.claim: the link just saved. */
 export interface EdgeLinkResult {
   server_id: string

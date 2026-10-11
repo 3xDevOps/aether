@@ -19,6 +19,7 @@ import type {
   DiskUsage,
   EdgeHostKey,
   EdgeLinkResult,
+  EdgeRefusal,
   EdgeLogin,
   EdgeServer,
   EdgeStatus,
@@ -243,12 +244,16 @@ async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: 
   return result
 }
 
+/** A JSON-RPC error's data. The local gateway sets `refusal` on every
+ * failure on the edge path; other fields belong to the method. */
+export type ApiErrorData = { refusal?: EdgeRefusal } & Record<string, unknown>
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly code?: number,
-    readonly data?: unknown,
+    readonly data?: ApiErrorData,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -368,10 +373,10 @@ export interface LocalForwardStatusResult {
 // Failures carry the JSON-RPC error object: {"error":{"code":-32001,...}}.
 async function failure(
   res: Response,
-): Promise<{ message: string; code?: number; data?: unknown }> {
+): Promise<{ message: string; code?: number; data?: ApiErrorData }> {
   try {
     const body = (await res.json()) as {
-      error?: { code?: unknown; message?: unknown; data?: unknown }
+      error?: { code?: unknown; message?: unknown; data?: ApiErrorData }
     }
     if (body.error) {
       return {

@@ -7,6 +7,7 @@ import { redirectRoute } from '@/lib/url-state'
 import type {
   CoordMessageAckedPayload,
   CoordMessagePayload,
+  EdgeRefusal,
   Event,
   GatewayCapabilities,
   GitBranchPayload,
@@ -36,13 +37,14 @@ import { serverUpdateApplying, type UnreachableKind } from '@/store/server'
 
 /**
  * The local gateway reports a dead transport as 503 with the failing hop in the
- * message ("network unreachable: ..." or "server unreachable: ..."). A fetch
- * TypeError means the origin serving this page is gone.
+ * message ("network unreachable: ..." or "server unreachable: ..."), and a
+ * refusal on the edge path in `data.refusal`. A fetch TypeError means the
+ * origin serving this page is gone.
  */
 function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | null {
   if (err instanceof ApiError && err.status === 503) {
     if (err.message.includes('network unreachable')) return 'network'
-    if (err.message.includes('server unreachable')) return edgeHop(err.message, store) ?? 'server'
+    if (err.message.includes('server unreachable')) return edgeHop(err.message, err.data?.refusal, store) ?? 'server'
   }
   if (err instanceof TypeError) {
     // An unknown gateway is the desktop one: it is the only surface that can
@@ -52,20 +54,45 @@ function classifyUnreachable(err: unknown, store: RootStore): UnreachableKind | 
   return null
 }
 
-/** Null when the link is not through an edge or the error matches none of these. */
-function edgeHop(detail: string, store: RootStore): UnreachableKind | null {
+/** The hop each refusal on the edge path names. */
+const refusalHop: Record<EdgeRefusal['kind'], UnreachableKind> = {
+  'device-pending': 'device-pending',
+  'device-revoked': 'device-revoked',
+  'claim-device-revoked': 'device-revoked',
+  'not-member': 'not-member',
+  'not-signed-in': 'signed-out',
+  'token-revoked': 'signed-out',
+  'server-not-connected': 'edge-server',
+  'unknown-server': 'edge-refused',
+  'too-many-attempts': 'edge-refused',
+  'connection-limit': 'edge-refused',
+  'server-blocked': 'edge-refused',
+  'account-blocked': 'edge-refused',
+  'identity-stale': 'edge-refused',
+  'edge-refused': 'edge-refused',
+  'too-many-waiting': 'server-refused',
+  'key-of-another-account': 'server-refused',
+  'account-mismatch': 'server-refused',
+  'grant-key-mismatch': 'server-refused',
+  'claim-user-missing': 'server-refused',
+  'claim-account-mismatch': 'server-refused',
+  'claim-wrong': 'server-refused',
+  'claim-expired': 'server-refused',
+  'claim-exhausted': 'server-refused',
+  claimed: 'server-refused',
+  'claim-member-gone': 'server-refused',
+  'claim-member-not-admin': 'server-refused',
+  'claim-account-of-another-member': 'server-refused',
+  'claim-failed': 'server-refused',
+}
+
+/** Null when nothing on the edge path refused and the edge was reachable. */
+function edgeHop(detail: string, refusal: EdgeRefusal | undefined, store: RootStore): UnreachableKind | null {
+  if (refusal) return refusalHop[refusal.kind] ?? null
+  // An edge that never answered refused nothing; the client's error names
+  // its host.
   const edge = store.getState().linkStatus?.edge_url
-  if (!edge) return null
-  if (detail.includes('server is not connected to the edge')) return 'edge-server'
-  if (detail.includes('device token revoked') || detail.includes('not signed in')) {
-    return 'signed-out'
-  }
-  if (detail.includes('was revoked on this server')) return 'device-revoked'
-  if (detail.includes('is waiting for approval')) return 'device-pending'
-  // The edge's refusal and the server's SSH banner word it the same way.
-  if (detail.includes('not a member of this server')) return 'not-member'
-  if (detail.includes(`${edgeHost(edge)} refused: `)) return 'edge-refused'
-  if (detail.includes(`${edgeHost(edge)}: `)) return 'edge'
+  if (edge && detail.includes(`${edgeHost(edge)}: `)) return 'edge'
   return null
 }
 
@@ -879,9 +906,9 @@ export function connect(store: RootStore, client: Api = api): () => void {
         }
         subscribed = true
       },
-      onUnreachable: (kind, detail) => {
+      onUnreachable: (kind, detail, refusal) => {
         const s = store.getState()
-        s.setUnreachable(kind === 'server' ? edgeHop(detail, store) ?? kind : kind)
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind)
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)

@@ -743,13 +743,15 @@ Removal also repairs the selection and open route before any refresh awaits.
   reason. A fetch that got no answer at all is `gateway` only on the desktop
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
-  process to blame and no wifi advice to give. A local gateway linked through
-  an edge classifies the client's own error text: `edge` (the edge did not
-  answer), `edge-server` (the server is not connected to it), `signed-out`
-  (no valid device token; gives the `aether login --edge` command),
-  `device-revoked` and `device-pending`. `src/store/edge-sync.test.ts` pins
-  the wording those classes match, so a change in `internal/edge/client` or
-  the sshd banners fails there. The capabilities probe records
+  process to blame and no wifi advice to give. A refusal on the edge path
+  arrives as `data.refusal` on the gateway's `503`, and its `kind` picks the
+  class: `edge-server` (the server is not connected to the edge),
+  `edge-refused`, `signed-out` (no valid device token; gives the
+  `aether login --edge` command), `not-member`, `device-revoked`,
+  `device-pending`, and `server-refused` for the server's other refusals.
+  An edge that did not answer refused nothing; on a link through an edge,
+  an error naming its host is `edge`. `src/store/edge-sync.test.ts` pins
+  the class of each kind. The capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
   "Technical details" disclosure, and the page suppresses the toast that

@@ -165,6 +165,17 @@ function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
     }
   }
 
+  if (kind === 'server-refused') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Refused by the server',
+      title: 'Your server refused this computer',
+      description:
+        "The server answered and refused this computer's device key. The details below carry the server's reason and, where there is one, the command that resolves it.",
+      action: 'Retry connection',
+    }
+  }
+
   if (kind === 'server') {
     return {
       icon: ServerOff,

@@ -251,29 +251,36 @@ func TestDialLinkedReportsDirectFailureWhenEdgeAnswers(t *testing.T) {
 // until it is approved; the approval demand is noise on every command
 // then, and the whole refusal when the edge fails too.
 func TestDialLinkedKeepsDirectRefusalBannerForFailure(t *testing.T) {
-	w := newEdgeWorld(t)
-	approval := "device \"laptop\" is not approved. Approve it:\n  aether device approve ABCD-EFGH\n"
-	addr := (&edgeWorld{host: w.host, device: w.device, refusal: approval}).listen(t)
-	edge := w.edge(t, "")
-	w.signIn(t, edge.URL)
-	stderr := captureStderr(t)
-	conn, err := Dial(Config{Addr: addr, EdgeURL: edge.URL, ServerID: w.serverID()})
-	out := stderr()
-	if err != nil {
-		t.Fatalf("Dial with the address refusing the device: %v", err)
-	}
-	_ = conn.Close()
-	if !strings.Contains(out, addr) || !strings.Contains(out, "through "+edge.URL) {
-		t.Fatalf("stderr %q lacks the address or the edge", out)
-	}
-	if strings.Contains(out, "aether device approve") {
-		t.Fatalf("stderr %q repeats the refusal banner though the edge admitted the device", out)
-	}
+	for name, approval := range map[string]string{
+		"structured": (&edgeproto.Refused{Kind: edgeproto.RefusedDevicePending, Device: "laptop", Account: "github account octo",
+			Registered: true, Direct: true, ApprovalCode: "ABCD-EFGH"}).Banner(),
+		"older server": "device \"laptop\" is not approved. Approve it:\n  aether device approve ABCD-EFGH\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newEdgeWorld(t)
+			addr := (&edgeWorld{host: w.host, device: w.device, refusal: approval}).listen(t)
+			edge := w.edge(t, "")
+			w.signIn(t, edge.URL)
+			stderr := captureStderr(t)
+			conn, err := Dial(Config{Addr: addr, EdgeURL: edge.URL, ServerID: w.serverID()})
+			out := stderr()
+			if err != nil {
+				t.Fatalf("Dial with the address refusing the device: %v", err)
+			}
+			_ = conn.Close()
+			if !strings.Contains(out, addr) || !strings.Contains(out, "through "+edge.URL) {
+				t.Fatalf("stderr %q lacks the address or the edge", out)
+			}
+			if strings.Contains(out, "aether device approve") {
+				t.Fatalf("stderr %q repeats the refusal banner though the edge admitted the device", out)
+			}
 
-	down := w.edge(t, edgeproto.RefusalNotConnected)
-	_, err = Dial(Config{Addr: addr, EdgeURL: down.URL, ServerID: w.serverID()})
-	if err == nil || !strings.Contains(err.Error(), "aether device approve ABCD-EFGH") {
-		t.Fatalf("Dial with both paths refused = %v, want the server's banner", err)
+			down := w.edge(t, edgeproto.RefusalNotConnected)
+			_, err = Dial(Config{Addr: addr, EdgeURL: down.URL, ServerID: w.serverID()})
+			if err == nil || !strings.Contains(err.Error(), "aether device approve ABCD-EFGH") {
+				t.Fatalf("Dial with both paths refused = %v, want the server's banner", err)
+			}
+		})
 	}
 }
 

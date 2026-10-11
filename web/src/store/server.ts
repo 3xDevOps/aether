@@ -19,13 +19,14 @@ import type { SliceCreator } from '@/store/slice'
  * `tailnet`: the same silence on a phone, where the server itself serves the
  * page over the tailnet, so the hop that died is the tailnet or the host.
  * `server`: the gateway answers but its SSH backend cannot reach
- * aether-server (it reports 503 "server unreachable: ..."). The next seven
- * are that failure on a link through an edge, told apart by the client's
- * own error: `edge` could not be reached, `edge-server` said the server is
- * not connected to it, `edge-refused` refused it for another reason,
+ * aether-server (it reports 503 "server unreachable: ..."). The next eight
+ * are that failure on the edge path, told apart by the refusal's kind:
+ * `edge` could not be reached, `edge-server` said the server is not
+ * connected to it, `edge-refused` refused it for another reason,
  * `signed-out` has no valid sign-in for this machine, `not-member` means
- * the edge or the server no longer counts the account as a member, and the
- * server refused this device as `device-revoked` or `device-pending`. */
+ * the edge or the server no longer counts the account as a member, the
+ * server refused this device as `device-revoked` or `device-pending`, or
+ * for another reason as `server-refused`. */
 export type UnreachableKind =
   | 'network'
   | 'gateway'
@@ -38,6 +39,7 @@ export type UnreachableKind =
   | 'not-member'
   | 'device-revoked'
   | 'device-pending'
+  | 'server-refused'
   | 'refused'
   | 'identity'
 
