@@ -11,6 +11,7 @@ func TestParseForwardArgs(t *testing.T) {
 		wantErr             bool
 	}{
 		{name: "default local", args: []string{"run_1", "1455"}, wantTarget: "run:run_1", wantPort: 1455, wantLocal: 1455},
+		{name: "prefixed run", args: []string{"run:run_1", "1455"}, wantTarget: "run:run_1", wantPort: 1455, wantLocal: 1455},
 		{name: "terminal", args: []string{"terminal", "1455"}, wantTarget: "terminal", wantPort: 1455, wantLocal: 1455},
 		{name: "local after positionals", args: []string{"run_1", "1455", "--local", "2455"}, wantTarget: "run:run_1", wantPort: 1455, wantLocal: 2455},
 		{name: "local before positionals", args: []string{"--local", "2455", "run_1", "1455"}, wantTarget: "run:run_1", wantPort: 1455, wantLocal: 2455},

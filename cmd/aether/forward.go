@@ -90,7 +90,7 @@ func parseForwardArgs(args []string) (string, int, int, error) {
 	}
 	target := positional[0]
 	if target != cli.TerminalForwardTarget {
-		target = cli.RunForwardTarget(target)
+		target = cli.RunForwardTarget(strings.TrimPrefix(target, "run:"))
 	}
 	return target, port, localPort, nil
 }
