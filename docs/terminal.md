@@ -487,6 +487,11 @@ names the `aether` binary by path, so run `aether ssh-config` again after
 moving it. `aether ssh [ssh options] <run-id> [command]` passes the same
 options to `ssh` itself and needs no configuration.
 
+`aether ssh-config` refuses a home directory whose path contains `"`, `%`,
+`${`, `*`, `?`, `[` or `\`, with
+`cli: an ssh config cannot name "<path>": ssh reads " % ${ * ? [ and \ in a path as syntax`.
+No escaping of those works on every OpenSSH.
+
 The host name is the run id plus `.aether`, for example
 `run-gejd5cbk74.aether`. It reaches the server your CLI is linked to, the
 default link, over the connection every other command uses: a tailnet, an

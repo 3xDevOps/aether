@@ -122,6 +122,21 @@ func TestInstallSSHConfigWritesThroughASymlink(t *testing.T) {
 	}
 }
 
+// A % in a path is a token to ssh, and no escape for it works in both
+// UserKnownHostsFile and Include on every OpenSSH.
+func TestInstallSSHConfigRefusesAHomeSSHCannotName(t *testing.T) {
+	home := filepath.Join(testhome.Isolate(t), "50% off")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if _, err := InstallSSHConfig(); err == nil || !strings.Contains(err.Error(), "an ssh config cannot name") ||
+		!strings.Contains(err.Error(), "50% off") {
+		t.Fatalf("install under %s = %v, want the path refused by name", home, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh")); !os.IsNotExist(err) {
+		t.Fatalf("a refused install wrote into %s: %v", home, err)
+	}
+}
+
 func TestTrustRunHostKeyRecordsEachKeyOnce(t *testing.T) {
 	home := testhome.Isolate(t)
 	keyLine := func() string {

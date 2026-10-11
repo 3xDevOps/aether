@@ -70,6 +70,10 @@ func RunSSHOptions() ([]SSHOption, error) {
 	if err != nil {
 		return nil, err
 	}
+	knownHosts, err := sshConfigPath(filepath.Join(dir, runKnownHostsFile))
+	if err != nil {
+		return nil, err
+	}
 	command := shellquote.Quote(exe)
 	if runtime.GOOS == "windows" {
 		command = `"` + exe + `"`
@@ -82,7 +86,7 @@ func RunSSHOptions() ([]SSHOption, error) {
 		{"HostName", "%h"},
 		// %% is a literal percent sign to ssh.
 		{"ProxyCommand", strings.ReplaceAll(command, "%", "%%") + " ssh --stdio %h"},
-		{"UserKnownHostsFile", sshConfigPath(filepath.Join(dir, runKnownHostsFile))},
+		{"UserKnownHostsFile", knownHosts},
 		{"HostKeyAlias", runHostKeyAlias},
 		{"StrictHostKeyChecking", "yes"},
 	}, nil
@@ -97,9 +101,15 @@ func sshDir() (string, error) {
 }
 
 // sshConfigPath writes a path as one ssh_config argument. ssh on Windows
-// takes forward slashes, which need no escaping inside the quotes.
-func sshConfigPath(path string) string {
-	return `"` + filepath.ToSlash(path) + `"`
+// takes forward slashes, which need no escaping inside the quotes. A path
+// holding a character ssh expands or globs is refused: how to escape one
+// differs between OpenSSH versions and between Include and other keywords.
+func sshConfigPath(path string) (string, error) {
+	path = filepath.ToSlash(path)
+	if strings.ContainsAny(path, "\"%*?[\\\r\n") || strings.Contains(path, "${") {
+		return "", fmt.Errorf("cli: an ssh config cannot name %q: ssh reads \" %% ${ * ? [ and \\ in a path as syntax", path)
+	}
+	return `"` + path + `"`, nil
 }
 
 // SSHConfigResult is what InstallSSHConfig wrote.
@@ -134,10 +144,14 @@ func InstallSSHConfig() (SSHConfigResult, error) {
 		hosts.WriteString("  " + o.Key + " " + o.Value + "\n")
 	}
 	out := SSHConfigResult{Hosts: filepath.Join(dir, runHostsFile), Config: filepath.Join(dir, "config")}
+	hostsPath, err := sshConfigPath(out.Hosts)
+	if err != nil {
+		return SSHConfigResult{}, err
+	}
 	if err = os.WriteFile(out.Hosts, []byte(hosts.String()), 0o600); err != nil {
 		return SSHConfigResult{}, fmt.Errorf("cli: write %s: %w", out.Hosts, err)
 	}
-	include := "Include " + sshConfigPath(out.Hosts)
+	include := "Include " + hostsPath
 	existing, err := os.ReadFile(out.Config)
 	if err != nil && !os.IsNotExist(err) {
 		return SSHConfigResult{}, fmt.Errorf("cli: read %s: %w", out.Config, err)
