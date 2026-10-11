@@ -8,7 +8,7 @@ import { python } from '@codemirror/lang-python'
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { openSearchPanel, searchKeymap } from '@codemirror/search'
-import { EditorState, StateEffect, StateField } from '@codemirror/state'
+import { EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import {
   Decoration,
   drawSelection,
@@ -173,7 +173,8 @@ export function EditableDocument({
     const current = editor.state.doc.toString()
     if (current === content) return
     // Only the span that differs is replaced, so a file reread while it is
-    // open keeps the caret and the marked line where they were.
+    // open keeps the caret and the marked line where they were. It stays out
+    // of history: Undo must not take back what the agent wrote.
     let from = 0
     while (from < current.length && from < content.length && current[from] === content[from]) from++
     let to = current.length
@@ -183,7 +184,7 @@ export function EditableDocument({
       end--
     }
     syncing.current = true
-    editor.dispatch({ changes: { from, to, insert: content.slice(from, end) } })
+    editor.dispatch({ changes: { from, to, insert: content.slice(from, end) }, annotations: Transaction.addToHistory.of(false) })
     syncing.current = false
   }, [content])
 

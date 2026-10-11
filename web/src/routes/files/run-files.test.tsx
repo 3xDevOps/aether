@@ -139,6 +139,10 @@ describe('a run’s Files view', () => {
     expect(screen.getByRole('textbox', { name: 'Edit README.md' })).toBe(editor)
     await waitFor(() => expect(editor.textContent).toContain('zero'))
     expect(document.querySelector('.cm-marked-line')?.textContent).toBe('two')
+
+    fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', keyCode: 90, ctrlKey: true })
+    expect(editor.textContent).toContain('zero')
+    expect(useStore.getState().drafts[key]).toBeUndefined()
   })
 
   it.each([
