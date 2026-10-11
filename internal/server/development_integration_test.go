@@ -126,6 +126,13 @@ func TestIntegrationHeadlessDevelopmentBroker(t *testing.T) {
 		t.Fatalf("real click did not change DOM: %+v", observed)
 	}
 	page.PageRevision = observed.Page.PageRevision
+	var inspected protocol.DevBrowserInspectResult
+	if err := ctrl.Call(protocol.MethodDevBrowserInspect, protocol.DevBrowserInspectParams{DevBrowserPageTarget: page, ViewportID: observed.Page.ViewportID, X: 20, Y: 18}, &inspected); err != nil {
+		t.Fatal(err)
+	}
+	if element := inspected.Element; element == nil || element.Tag != "button" || element.Text != "Confirmed" || element.Selector != "button" || element.Bounds.Width <= 0 {
+		t.Fatalf("real companion inspected %+v", element)
+	}
 	var screenshot protocol.DevBrowserScreenshotResult
 	if err := ctrl.Call(protocol.MethodDevBrowserScreenshot, protocol.DevBrowserScreenshotParams{DevBrowserPageTarget: page}, &screenshot); err != nil {
 		t.Fatal(err)

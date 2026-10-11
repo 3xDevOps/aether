@@ -980,6 +980,7 @@ zero and no `session_id`; the broker creates the companion and acquires its
 surface. Retain returned `page` and `control`. Later page mutations use the
 session/page/revision plus controller fence; coordinate input also uses the
 observed viewport identity. Use `browser snapshot` for semantic nodes,
+`browser inspect` for the element at a viewport point,
 `browser console`/`network` for diagnostics and `browser screenshot` for an
 image artifact. See [the complete commands and bootstrap contract](coordination.md#development-terminals-browser-and-captures).
 

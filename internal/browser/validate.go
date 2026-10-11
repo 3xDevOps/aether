@@ -112,7 +112,7 @@ func (r Request) Validate() error {
 		if !bounded(len(r.Key), 1, 100) || (r.Action != "" && r.Action != "press" && r.Action != "down" && r.Action != "up") {
 			return invalid("invalid keyboard input")
 		}
-	case "pointer", "scroll", "touch":
+	case "pointer", "scroll", "touch", "inspect":
 		if !identity(r.ViewportID) || !finite(r.X) || !finite(r.Y) || r.X < 0 || r.Y < 0 || r.X >= 2560 || r.Y >= 1600 {
 			return invalid("current viewport and bounded input coordinates are required")
 		}

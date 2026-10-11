@@ -543,7 +543,7 @@ thin typed CLI command:
 | Command family | Subcommands |
 | --- | --- |
 | `terminal` | `list`, `start`, `output`, `screen`, `screenshot`, `input`, `resize`, `wait`, `stop` |
-| `browser` | `status`, `open`, `pages`, `navigate`, `snapshot`, `action`, `screenshot`, `viewport`, `wait`, `console`, `network`, `reset`, `close` |
+| `browser` | `status`, `open`, `pages`, `navigate`, `snapshot`, `inspect`, `action`, `screenshot`, `viewport`, `wait`, `console`, `network`, `reset`, `close` |
 | `control` | `status`, `acquire`, `release` |
 | `artifact` | `list`, `get`, `delete`, `retain` |
 
@@ -619,6 +619,22 @@ also carry `control_session_id` and `control_generation`. Coordinate actions
 use the observed `viewport_id`; semantic actions use revision-scoped node IDs
 from `snapshot`. Re-observe after navigation/DOM/viewport changes. `reset` is
 explicit, invalidates old identities, and requires a new control acquisition.
+
+`inspect` describes the element under one viewport point. It takes
+`session_id`, `page_id`, `page_revision`, the observed `viewport_id`, and `x`
+and `y` in that viewport, and returns `element`: its `tag`, `role`, accessible
+`name`, visible `text`, a `selector` that matches it alone, a fixed set of
+`attributes`, `bounds` in viewport coordinates, `html` trimmed to 2000
+characters, 14 computed `styles`, `scroll_x` and `scroll_y` (the page's scroll
+position when it was read) and `frame_url` when it is inside a frame.
+`component` and `source` (`file:line:column`) are present only when the page
+exposes them: a development build of React names its components, and React 18
+and earlier also record where each element was written. `element` is absent
+when nothing is under the point. Like `snapshot`, `inspect` is a read: it
+needs no control lease, moves no pointer and dispatches no event, so a person
+can inspect a page the agent is driving. It never returns a form control's
+value, drops `value`, `srcdoc` and event-handler attributes from `html`, and replaces an
+attribute value that looks like a credential with `[redacted]`.
 `console` records only `error` and `warning` messages, uncaught page errors and
 dismissed dialogs; `network` records only failed requests and responses with
 status 400 or above. Neither records `console.log` output or successful
@@ -639,7 +655,10 @@ between pages. Re-observe and retry with the current values. A `terminal
 start` past the limit above has the same code. Malformed
 parameters, an unknown browser action, or an invalid surface or control
 session are refused with `-32602` (exit 2), and an unavailable or timed-out
-browser companion with `-32004` (exit 4).
+browser companion with `-32004` (exit 4). A companion created from a browser
+image older than the server refuses `inspect` with `-32601`; see
+[install.md](install.md#headless-browser-companion) for how a run gets a
+current one.
 
 Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image

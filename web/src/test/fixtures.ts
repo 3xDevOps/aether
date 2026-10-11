@@ -493,6 +493,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     devBrowserOpen: vi.fn<Api['devBrowserOpen']>(async () => needsOverride('devBrowserOpen')),
     devBrowserNavigate: vi.fn<Api['devBrowserNavigate']>(async () => needsOverride('devBrowserNavigate')),
     devBrowserSnapshot: vi.fn<Api['devBrowserSnapshot']>(async () => needsOverride('devBrowserSnapshot')),
+    devBrowserInspect: vi.fn<Api['devBrowserInspect']>(async () => needsOverride('devBrowserInspect')),
     devBrowserAction: vi.fn<Api['devBrowserAction']>(async () => needsOverride('devBrowserAction')),
     devBrowserScreenshot: vi.fn<Api['devBrowserScreenshot']>(async () => needsOverride('devBrowserScreenshot')),
     devBrowserViewport: vi.fn<Api['devBrowserViewport']>(async () => needsOverride('devBrowserViewport')),

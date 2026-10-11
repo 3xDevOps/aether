@@ -137,7 +137,7 @@ func (s *Scheduler) Capabilities(ctx context.Context, id domain.RunID) ([]string
 		capabilities = append(capabilities, protocol.MethodDevTerminalList, protocol.MethodDevTerminalStart, protocol.MethodDevTerminalOutput, protocol.MethodDevTerminalScreen, protocol.MethodDevTerminalInput, protocol.MethodDevTerminalResize, protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop)
 	}
 	if browserAvailable {
-		capabilities = append(capabilities, protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserPages, protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserAction, protocol.MethodDevBrowserScreenshot, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserWait, protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset, protocol.MethodDevBrowserClose, protocol.MethodDevArtifactList, protocol.MethodDevArtifactGet, protocol.MethodDevArtifactDelete)
+		capabilities = append(capabilities, protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserPages, protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserAction, protocol.MethodDevBrowserScreenshot, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserWait, protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset, protocol.MethodDevBrowserClose, protocol.MethodDevArtifactList, protocol.MethodDevArtifactGet, protocol.MethodDevArtifactDelete)
 		if terminals {
 			capabilities = append(capabilities, protocol.MethodDevTerminalScreenshot)
 		}
@@ -178,6 +178,8 @@ func DevelopmentErrorCode(err error) int {
 		return protocol.CodeConflict
 	case errors.Is(err, control.ErrInvalid), errors.Is(err, control.ErrInvalidSession):
 		return protocol.CodeInvalidParams
+	case errors.Is(err, ErrBrowserInspectUnsupported):
+		return protocol.CodeMethodNotFound
 	case errors.As(err, &browserErr):
 		switch browserErr.Code {
 		case "invalid_request":

@@ -658,7 +658,7 @@ func isDevelopmentMethod(method string) bool {
 		protocol.MethodDevTerminalScreenshot, protocol.MethodDevTerminalInput,
 		protocol.MethodDevTerminalResize, protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop,
 		protocol.MethodDevBrowserStatus, protocol.MethodDevBrowserOpen, protocol.MethodDevBrowserPages,
-		protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserAction,
+		protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserSnapshot, protocol.MethodDevBrowserInspect, protocol.MethodDevBrowserAction,
 		protocol.MethodDevBrowserScreenshot, protocol.MethodDevBrowserViewport, protocol.MethodDevBrowserWait,
 		protocol.MethodDevBrowserConsole, protocol.MethodDevBrowserNetwork, protocol.MethodDevBrowserReset,
 		protocol.MethodDevBrowserClose, protocol.MethodDevControlStatus, protocol.MethodDevControlAcquire,

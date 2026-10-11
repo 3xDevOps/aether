@@ -2409,6 +2409,12 @@ dev.browser.status: scheduler: the run has no live environment: the run is provi
   field and the empty pane list the ports there.
 - **Keyboard**, on a coarse pointer only: it opens the phone's keyboard for
   the page, which a tap on the page deliberately does not.
+- **Annotate**, a toggle; see Annotate below. A phone's row has no room for
+  one more button, so there Annotate starts from **Browser actions**, and
+  while it is on its toggle takes the place of **Keyboard**.
+- **Console and network**, a toggle that counts the rows not yet seen; see
+  Console and network below. In a pane narrower than 480px it is in **Browser
+  actions**, and that button carries a dot instead of the count.
 - **Viewport**, a menu: **Fit the pane**, **Desktop** 1280 × 800, **Tablet**
   820 × 1180, **Phone** 390 × 844. In a pane narrower than 480px the same
   choices head the **Browser actions** menu instead.
@@ -2608,12 +2614,100 @@ the mutation; that includes the lease released by a window blur. Cancel
 restores focus to **Browser actions**, and raw failures remain readable in
 the confirmation. Closing the run owns stopping the companion itself.
 
+**Annotate.** A person points at what is wrong instead of describing it.
+While **Annotate** is on (`annotate.tsx`), the pointer picks elements and
+sends the page nothing. Moving it outlines the element under it with a label
+such as `button#save 120 × 36`; a click, or a tap on a phone, opens a card
+beside that element. The card names the element, shows where it comes from
+(`src/components/SaveButton.tsx:12:5` when the page exposes it, its selector
+otherwise) and takes the comment. **Comment** pins a numbered marker;
+**Cancel**, or Escape in an empty card, drops it. A marker opens its note to
+read, edit or delete. Leaving the mode, by the toggle, its shortcut or `Esc`,
+keeps what an open card holds.
+
+The outline is drawn beside the canvas from the bounds `dev.browser.inspect`
+returns, one read at a time and at most ten a second, so it can trail the
+pointer by a frame. Nothing is injected into the page. Inspection is a read:
+it needs no control lease, so a page the agent is driving can be annotated
+without taking over, and annotating never takes the lease. The wheel still
+scrolls the page; keys do not reach it. Markers show while Annotate is on and
+the Browser shows the page they were made on at the same viewport size, and
+they follow the page's scroll. Picking needs a pointer; a screenshot note and
+the console rows below do not.
+
+A server without the method, or a run whose browser companion is older than
+the server, cannot annotate. The toggle is dimmed, and its tooltip and a
+notice give the reason in the server's words:
+
+```
+dev.browser.inspect: this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion: browser: invalid_request: Unknown browser operation
+```
+
 **Screenshot** calls the real capture API at its own recorded boundary, not
 a canvas copy or the last received frame, and needs no lease. It creates a
-private transient capture. **Captures…** in the run's **More** menu is where
-a member inspects it and chooses to retain it (see
-[Captures and candidate review](#captures-and-candidate-review)). Taking a
-screenshot does not publish or retain anything.
+private transient capture and a note for it, with its card open: words for
+the agent are optional, **Keep as evidence…** opens **Captures** (see
+[Captures and candidate review](#captures-and-candidate-review)), where a
+member inspects and retains it, and **Remove** takes it out of the message
+while the capture stays in the run. Taking a screenshot does not publish or
+retain anything.
+
+**Send to agent.** Once there is a confirmed note, a screenshot or a ticked
+row, a bar under the toolbar (`feedback-bar.tsx`) counts them, "2 annotations,
+1 screenshot, 1 failed request", beside **Discard** and **Send to agent**. It
+is the Changes view's review bar for a page: one message, sent under the
+Session composer's rules (`useAgentSend`), with delivery reported the same
+way. A refused send leaves everything in place under the server's reason.
+Sending first uploads each annotated element's picture through
+`terminal.image`, which returns a path inside the run. The picture is cut in
+the dashboard from the frame that was on the canvas when the element was
+picked, with 12 pixels around it. A gateway without `terminal.image` sends the
+notes without pictures. The message (`feedbackMessage` in `feedback.ts`)
+gives the page URL and viewport, then for each note what the person wrote
+followed by what the page says:
+
+````
+Feedback from the page in this run's browser: 1 annotation, 1 failed request.
+Each screenshot path is an image file inside the run; open it to see what I saw.
+Page: http://localhost:3000/settings (viewport 1280x800)
+
+1. button "Save changes"
+The label is cut off at this width.
+- Screenshot: /home/aether/.aether/terminal-images/image-4f2c.png
+- Selector: button#save
+- Source: src/components/SaveButton.tsx:12:5
+- Component: App > Toolbar > SaveButton
+- Role: button
+- Name: Save changes
+- Text: Save
+- Attributes: id="save" class="btn primary"
+- Bounds: x 40, y 30, 120 x 36
+- Styles: display: block; position: absolute; width: 120px; ...
+```html
+<button id="save" class="btn primary">Save</button>
+```
+
+Failed requests (http://localhost:3000/settings):
+- 12:01:04Z GET http://localhost:3000/api/user 500
+````
+
+A line is left out when the page has nothing for it: `Source` needs a
+development build of React 18 or earlier, `Component` any development build
+of React. HTML is trimmed to 1200 characters. No form control's value is in
+the message; see `inspect` in
+[coordination.md](coordination.md#development-terminals-browser-and-captures).
+A screenshot note names the capture's own path in the run. One message
+carries at most 20 notes. What waits to be sent is kept per run while the
+dashboard stays open, across view switches.
+
+**Console and network.** The strip under the page (`logs.tsx`) stands in for
+developer tools, which a streamed browser cannot offer. It lists what the
+server has recorded for the selected page, read every two seconds while the
+Browser is shown: console errors and warnings, uncaught errors, and requests
+that failed or answered 400 or above. `console.log` output and requests that
+succeeded are not recorded, and the empty strip says so. The toggle counts
+the rows that arrived while the strip was closed. Ticking rows, or the
+header's box for all of them, adds them to the bar above.
 
 `web/e2e/development-browser/` adds real-server Playwright scenarios using the
 existing server/SSH-gateway harness, a Node 22.14.0 app process bound only to
@@ -2622,7 +2716,8 @@ the address bar, invalid credentials, cookie-backed sign-in/logout, module
 hot replacement without logout, desktop/phone input, native Chromium
 composition, multiple touch contacts, same-page run-principal actions,
 popups, fit-to-pane and presets, silent acquisition, watch/takeover and stale
-control/viewport rejection. The app container publishes no host port.
+control/viewport rejection, and annotating an element of a page the agent is
+driving, with a failed request, into one message. The app container publishes no host port.
 Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
 image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
 deterministic harness only holds the run alive: these are not proof of an
@@ -4232,6 +4327,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘R` / `Ctrl+R` | browser | Reload the page |
 | `⌘[` / `Alt+←` | browser | Go back |
 | `⌘]` / `Alt+→` | browser | Go forward |
+| `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
 | `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
 | `1` to `4` | request | Pick that option of the focused Session request |
@@ -4241,8 +4337,10 @@ pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
 The scopes are `global`, `run`, `browser`, `card`, `request` and `composer`;
 `card` is the board's `a`/`r`/`o` on the focused card, `request` the option
 digits on a focused Session request, `composer` the send keys while the
-Session composer has focus and `browser` the four keys of a run's Browser
-while it is on screen. When a key matches in two live scopes, the
+Session composer has focus and `browser` the keys of a run's Browser
+while it is on screen. `Esc` is the run's, to leave it, and the table gives a
+key to one binding; while a page is being annotated the Browser answers
+`Esc` itself first and stops annotating instead. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's

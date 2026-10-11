@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { KeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react'
+import type { KeyboardEvent, PointerEvent as ReactPointerEvent, Ref, RefObject } from 'react'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Spinner } from '@/components/ui/spinner'
@@ -7,6 +7,7 @@ import { api, browserStreamURL } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { DevBrowserActionParams, DevBrowserFrameMetadata, DevBrowserPage, DevControlFence, DevStreamResponse } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { decodeBrowserFrame, framePoint, sameFrameTarget, type BrowserFrame } from './frames'
 
 export interface BrowserSurfaceHandle {
@@ -18,6 +19,21 @@ export interface BrowserSurfaceHandle {
   /** Releases every press the page still holds, and resolves once sent. An
    * action that changes the page would leave a later release undeliverable. */
   lift: () => Promise<void>
+  /** The frame on screen, or null while none can be trusted. */
+  frame: () => DevBrowserFrameMetadata | null
+  /** A copy of the pixels on screen, which later frames do not change. */
+  snapshot: () => HTMLCanvasElement | null
+}
+
+/** What the pointer does while the page is being annotated. Every call reads
+ * the page and sends it nothing, so none needs the control lease. */
+export interface BrowserPick {
+  /** The pointer rests on a viewport point, or has left the page. */
+  hover: (point: { x: number; y: number } | null) => void
+  /** A click or a tap on a viewport point. */
+  select: (point: { x: number; y: number }) => void
+  /** A frame was painted. */
+  frame: (frame: DevBrowserFrameMetadata) => void
 }
 
 interface BrowserSurfaceProps {
@@ -30,6 +46,8 @@ interface BrowserSurfaceProps {
   acquire: () => Promise<DevControlFence | null>
   /** The toolbar is changing the page; input is dropped until it is done. */
   paused: boolean
+  /** While set, the pointer picks elements for it instead of driving the page. */
+  pick?: RefObject<BrowserPick | null>
   onBlocked: () => void
   onError: (error: string) => void
   /** A painted frame is of a newer revision than `page`. */
@@ -70,6 +88,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const compositionFrame = useRef<DevBrowserFrameMetadata | null>(null)
   const pointers = useRef(new Map<number, PointerGesture>())
   const lastClick = useRef({ time: 0, x: 0, y: 0, button: -1, count: 0 })
+  const picking = useRef<{ id: number; x: number; y: number } | null>(null)
   const controlled = useRef(false)
   const lastInput = useRef(-Infinity)
   const failures = useRef(0)
@@ -108,6 +127,16 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       pointers.current.clear()
       letGo(held)
       await drained.current
+    },
+    frame: () => (fresh.current ? displayed.current : null),
+    snapshot: () => {
+      const shown = canvas.current
+      if (!shown || !displayed.current || !fresh.current) return null
+      const copy = document.createElement('canvas')
+      copy.width = shown.width
+      copy.height = shown.height
+      copy.getContext('2d')?.drawImage(shown, 0, 0)
+      return copy
     },
   }), [])
   useEffect(() => {
@@ -188,6 +217,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
             context.drawImage(bitmap, 0, 0, element.width, element.height)
             displayed.current = frame.metadata
             fresh.current = true
+            current.current.pick?.current?.frame(frame.metadata)
             failures.current = 0
             setLive(true)
             if (frame.metadata.page_revision > observed.page_revision) current.current.onNavigated()
@@ -243,6 +273,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const send = (input: BrowserInput) => {
     const frame = displayed.current
     if (!frame || !fresh.current || !active.current || current.current.paused || failure) return
+    // While the pointer picks, the wheel is the only input the page is sent.
+    if (current.current.pick && input.action !== 'scroll') return
     const observed = current.current.page
     if (frame.page_revision < observed.page_revision || (frame.page_revision === observed.page_revision && frame.viewport_id !== observed.viewport_id)) {
       current.current.onError('Input discarded: wait for the current page frame.')
@@ -351,6 +383,22 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   }
   const onPointer = (event: ReactPointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up' | 'cancel') => {
     if (!displayed.current || !fresh.current) return
+    if (props.pick) {
+      const point = framePoint(displayed.current, event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
+      if (phase === 'down') {
+        // The press must not hand the keyboard to the page.
+        event.preventDefault()
+        picking.current = point && event.button === 0 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null
+      } else if (phase === 'move') {
+        if (event.pointerType !== 'touch') props.pick.current?.hover(point)
+      } else {
+        // A press that moved was a drag or a scroll attempt, not a pick.
+        const pressed = picking.current
+        picking.current = null
+        if (phase === 'up' && point && pressed?.id === event.pointerId && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 10) props.pick.current?.select(point)
+      }
+      return
+    }
     if (props.paused) {
       // A press that was down when the pause began is forgotten here, so its
       // late release is not sent on its own; the next press starts clean.
@@ -415,7 +463,8 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
 
   return <div className="relative h-full min-h-0 min-w-0 overflow-hidden bg-chrome focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-accent">
     <canvas ref={canvas} aria-label="Shared browser page" aria-busy={!live} tabIndex={watching ? -1 : 0}
-      className="h-full w-full touch-none object-scale-down outline-none"
+      className={cn('h-full w-full touch-none object-scale-down outline-none', props.pick && 'cursor-crosshair')}
+      onPointerLeave={() => props.pick?.current?.hover(null)}
       onFocus={() => keyboard.current?.focus({ preventScroll: true })}
       onKeyDown={onKey} onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => onPointer(event, 'down')} onPointerMove={(event) => onPointer(event, 'move')}
