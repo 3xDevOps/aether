@@ -40,6 +40,7 @@ func init() {
 	registerDevelopment[protocol.DevBrowserPagesParams](protocol.MethodDevBrowserPages)
 	registerDevelopment[protocol.DevBrowserNavigateParams](protocol.MethodDevBrowserNavigate)
 	registerDevelopment[protocol.DevBrowserSnapshotParams](protocol.MethodDevBrowserSnapshot)
+	registerDevelopment[protocol.DevBrowserInspectParams](protocol.MethodDevBrowserInspect)
 	registerDevelopment[protocol.DevBrowserActionParams](protocol.MethodDevBrowserAction)
 	registerDevelopment[protocol.DevBrowserScreenshotParams](protocol.MethodDevBrowserScreenshot)
 	registerDevelopment[protocol.DevBrowserViewportParams](protocol.MethodDevBrowserViewport)

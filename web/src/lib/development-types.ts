@@ -326,6 +326,44 @@ export interface DevBrowserSnapshotResult {
   truncated: boolean
 }
 
+/** `x` and `y` are viewport coordinates of the frame that carried `viewport_id`. */
+export interface DevBrowserInspectParams extends DevBrowserPageTarget {
+  viewport_id: string
+  x: number
+  y: number
+}
+
+export interface DevBrowserRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** What the page has under a point. It never carries a form control's value. */
+export interface DevBrowserElement {
+  tag: string
+  role?: string
+  name?: string
+  text?: string
+  selector: string
+  attributes?: Record<string, string>
+  /** In viewport coordinates, also for an element inside a frame. */
+  bounds: DevBrowserRect
+  html?: string
+  styles?: Record<string, string>
+  /** Present only when the page's framework exposes them. */
+  component?: string
+  source?: string
+  frame_url?: string
+}
+
+export interface DevBrowserInspectResult {
+  page: DevBrowserPage
+  /** Absent when nothing is under the point. */
+  element?: DevBrowserElement
+}
+
 export interface DevBrowserActionParams extends DevBrowserPageTarget, DevControlFence {
   action: 'click' | 'fill' | 'select_option' | 'key' | 'scroll' | 'text' | 'pointer' | 'touch' | 'select'
   node_id?: string

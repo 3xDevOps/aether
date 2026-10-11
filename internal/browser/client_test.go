@@ -69,6 +69,8 @@ func TestTypedOperationLimits(t *testing.T) {
 		{"unbounded-timeout", func(r *Request) { r.Operation = "reload"; r.TimeoutMS = 30001 }},
 		{"oversized-snapshot", func(r *Request) { r.Operation = "snapshot"; r.MaxNodes = 129 }},
 		{"stale-node-identity", func(r *Request) { r.Operation = "click" }},
+		{"inspect-without-viewport", func(r *Request) { r.Operation = "inspect"; r.ViewportID = "" }},
+		{"inspect-outside-viewport", func(r *Request) { r.Operation = "inspect"; r.X = 2560 }},
 		{"nonfinite-scroll", func(r *Request) { r.Operation = "scroll"; r.DeltaY = math.Inf(1) }},
 		{"empty-success-condition", func(r *Request) { r.Operation = "wait"; r.Condition = "text" }},
 		{"file-url", func(r *Request) { r.Operation = "navigate"; r.URL = "file:///etc/passwd" }},
@@ -95,6 +97,11 @@ func TestTypedOperationLimits(t *testing.T) {
 	request.Operation, request.MaxNodes, request.MaxChars = "snapshot", 128, 8192
 	if err := request.Validate(); err != nil {
 		t.Fatalf("rejected supported snapshot boundary: %v", err)
+	}
+	request = base
+	request.Operation, request.X, request.Y = "inspect", 2559, 1599
+	if err := request.Validate(); err != nil {
+		t.Fatalf("rejected inspection at the viewport's far corner: %v", err)
 	}
 	request = base
 	request.Operation, request.Condition, request.Text, request.TimeoutMS = "wait", "text", "ready", 30000

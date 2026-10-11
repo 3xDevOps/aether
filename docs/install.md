@@ -971,6 +971,16 @@ restart; a persisted config value still takes precedence. Explicit
 option follows the default. An existing config remains operator-owned across
 upgrades; use `config show` to inspect the effective value.
 
+A companion keeps the image it was created from until its run stops. After
+a server upgrade, or after `make browser-image` on a development build, a run
+whose browser was already open still has the old companion: stop the run and
+reopen it, and the next browser open creates a companion from the configured
+image. A persisted `browser-image` or `AETHER_BROWSER_IMAGE` pins the image
+across upgrades, so move the pin to the new version yourself. An operation
+the old companion lacks is refused by name, for example `this run's browser
+companion predates dev.browser.inspect`; nothing else about that browser
+changes.
+
 Merely starting a run does not allocate Chromium. Opening its browser or
 rendering a terminal PNG lazily reserves an additional 1 CPU and 1 GiB of
 memory **plus** a private 256 MiB `/dev/shm`; leave that capacity alongside

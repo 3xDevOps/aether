@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
+import { inspectPoint } from './inspect.mjs';
 
 export const limits = Object.freeze({ request: 2 * 1024 * 1024, image: 8 * 1024 * 1024, frame: 2 * 1024 * 1024, pages: 16, nodes: 128, snapshotChars: 8192, chars: 32000, logs: 100, timeout: 10000, operationTimeout: 30000 });
 export class BrowserError extends Error {
@@ -15,7 +16,7 @@ export function boundedInteger(value, fallback, min, max) {
 }
 const short = (value, max = 2048) => String(value ?? '').slice(0, max);
 const hotInputOperations = new Set(['pointer', 'key', 'touch', 'text', 'scroll']);
-const pointerPreservingOperations = new Set(['pointer', 'snapshot', 'wait', 'console', 'network']);
+const pointerPreservingOperations = new Set(['pointer', 'snapshot', 'inspect', 'wait', 'console', 'network']);
 const delay = (ms, signal) => new Promise((resolve, reject) => {
   const abort = () => { clearTimeout(timer); reject(signal.reason); };
   const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
@@ -322,6 +323,14 @@ export class BrowserSession {
       case 'forward': await page.goForward({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'reload': await page.reload({ ...options, waitUntil: 'domcontentloaded' }); break;
       case 'snapshot': return this.snapshot(state, request, signal);
+      case 'inspect': {
+        this.viewport(state, request);
+        const revision = state.revision;
+        // A hung page must not hold the command queue, which input shares, for the full read timeout.
+        const element = await inspectPoint(page, request.x, request.y, (promise) => boundedRead(promise, 3000));
+        requireValue(revision === state.revision, 'Page navigated during inspection; retry', 'stale_target');
+        return { page: this.metadata(state), element };
+      }
       case 'click': {
         requireValue(!request.button || ['left', 'right', 'middle'].includes(request.button), 'Invalid pointer button');
         const button = request.button || 'left';

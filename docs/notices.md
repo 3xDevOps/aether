@@ -106,6 +106,7 @@ The separately distributed `aether-browser` image includes:
 | FFmpeg | Playwright revision 1011, installed alongside Chromium by Playwright | [FFmpeg license terms](https://ffmpeg.org/legal.html); the [Linux distribution archive](https://cdn.playwright.dev/dbazure/download/playwright/builds/ffmpeg/1011/ffmpeg-linux.zip) carries `COPYING.LGPLv2.1`, retained under `/opt/playwright/ffmpeg-1011/` |
 | xterm.js | 6.0.0, pinned in the same package lock | [MIT](https://github.com/xtermjs/xterm.js/blob/6.0.0/LICENSE) |
 | JetBrains Mono NFM regular and bold | The same WOFF2 assets used by the dashboard, copied from `web/public/fonts/` | [SIL OFL 1.1](../web/public/fonts/LICENSE-jetbrains-mono-nfm.txt), copied into `/opt/aether-browser/fonts/` |
+| Element description in [`images/browser/inspect.mjs`](../images/browser/inspect.mjs) | Selector, React component and redaction logic adapted from [Orca](https://github.com/stablyai/orca) `src/main/browser/grab-guest-*.ts` at commit `81867c8e` | [MIT](https://github.com/stablyai/orca/blob/81867c8ea044e220f78316e41b0a3fa11e5d4680/LICENSE), Copyright (c) 2026 Lovecast Inc.; the notice is at the top of that file and ships in the image |
 
 Playwright's pinned
 [Debian dependency list](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/server/registry/nativeDeps.ts)

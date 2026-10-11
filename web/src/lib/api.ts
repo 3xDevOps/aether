@@ -125,6 +125,8 @@ import type {
   DevBrowserCloseResult,
   DevBrowserConsoleParams,
   DevBrowserConsoleResult,
+  DevBrowserInspectParams,
+  DevBrowserInspectResult,
   DevBrowserNavigateParams,
   DevBrowserNavigateResult,
   DevBrowserNetworkParams,
@@ -472,6 +474,10 @@ export const api = {
     call<DevBrowserNavigateResult>('dev.browser.navigate', params),
   devBrowserSnapshot: (params: DevBrowserSnapshotParams) =>
     call<DevBrowserSnapshotResult>('dev.browser.snapshot', params),
+  /** Reads the element under a point. It needs no control of the Browser.
+   * A companion older than the server answers -32601 with the reason. */
+  devBrowserInspect: (params: DevBrowserInspectParams) =>
+    call<DevBrowserInspectResult>('dev.browser.inspect', params),
   devBrowserAction: (params: DevBrowserActionParams) =>
     call<DevBrowserActionResult>('dev.browser.action', params),
   devBrowserScreenshot: (params: DevBrowserScreenshotParams) =>

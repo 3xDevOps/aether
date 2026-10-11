@@ -332,3 +332,74 @@ test('host authority cleanup releases native held input without clearing another
   assert.equal(await native.evaluate(() => events.findLast((event) => event.type === 'touchend').touches), 0);
   assert.deepEqual(await native.evaluate(() => [document.cookie, localStorage.getItem('held-test')]), ['held-test=present', 'present']);
 });
+
+test('inspect describes the element under a point without touching the page or returning form values', { timeout: 120000 }, async (t) => {
+  const { session, origin, call } = await liveCompanion(t, `<!doctype html><title>Inspect fixture</title>
+    <style>body{margin:0;font:14px sans-serif}button,ul,form,iframe,#host,#many{position:absolute;margin:0;padding:0}li{height:20px;list-style:none}</style>
+    <button id="save" class="btn primary css-1x2y3z" aria-label="Save changes" style="left:40px;top:30px;width:120px;height:36px;color:rgb(255,255,255);background-color:rgb(37,99,235);border:0" onclick="window.clicks=(window.clicks||0)+1">Save</button>
+    <ul style="left:40px;top:100px;width:200px"><li>One</li><li>Two</li><li>Three</li></ul>
+    <form id="login" data-api-key="key-abc123" style="left:40px;top:200px;width:300px;height:120px">
+      <input type="hidden" name="csrf_token" value="csrf-abc123">
+      <input id="pass" type="password" value="hunter2-attribute" style="position:absolute;left:10px;top:10px;width:150px;height:20px">
+      <textarea id="notes" style="position:absolute;left:10px;top:50px;width:150px;height:40px">typed-secret-note</textarea>
+    </form>
+    <iframe style="left:400px;top:50px;width:200px;height:100px;border:4px solid black" srcdoc='<body style="margin:0"><a href="/docs?access_token=tok123" style="position:absolute;left:10px;top:20px;width:80px;height:20px">Docs</a>'></iframe>
+    <div id="host" style="left:400px;top:300px;width:100px;height:40px"></div>
+    <div id="many" style="left:400px;top:400px;width:100px;height:40px;padding-left:20px;overflow:hidden"></div>
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button class="inner" style="width:100px;height:40px;border:0">Shadow</button>';
+      document.getElementById('many').innerHTML = '<p>row with some text</p>'.repeat(5000);
+      function App() {} function Toolbar() {} function SaveButton() {}
+      document.getElementById('save')['__reactFiber$fixture'] = { type: 'button', _debugSource: { fileName: 'webpack-internal:///./src/components/SaveButton.tsx', lineNumber: 12, columnNumber: 5 }, return: { type: SaveButton, return: { type: Toolbar, return: { type: App, return: null } } } };
+      window.seen = [];
+      for (const type of ['mousemove', 'mouseover', 'pointerdown', 'click', 'focusin', 'scroll']) document.addEventListener(type, () => window.seen.push(type), true);
+    </script>`);
+  let { page } = await call('/command', { operation: 'open', url: origin, width: 800, height: 600 });
+  const native = session.pages.get(page.page_id).page;
+  await native.waitForLoadState('load');
+  await native.locator('#pass').evaluate((input) => { input.value = 'hunter2-typed'; });
+  const before = await native.evaluate(() => document.documentElement.outerHTML);
+  const inspect = async (x, y) => (await call('/command', { ...page, operation: 'inspect', x, y })).element;
+
+  const save = await inspect(45, 34);
+  assert.deepEqual([save.tag, save.role, save.name, save.text, save.selector], ['button', 'button', 'Save changes', 'Save', 'button#save']);
+  assert.deepEqual(save.bounds, { x: 40, y: 30, width: 120, height: 36 });
+  assert.deepEqual(save.attributes, { id: 'save', class: 'btn primary css-1x2y3z', 'aria-label': 'Save changes' });
+  assert.match(save.html, /^<button id="save" class="btn primary css-1x2y3z" aria-label="Save changes" style="[^"]+">Save<\/button>$/);
+  assert.equal(save.styles['background-color'], 'rgb(37, 99, 235)');
+  assert.equal(save.styles.width, '120px');
+  assert.deepEqual([save.component, save.source, save.frame_url], ['App > Toolbar > SaveButton', 'src/components/SaveButton.tsx:12:5', '']);
+
+  const second = await inspect(50, 130);
+  assert.equal(second.text, 'Two');
+  assert.deepEqual(await native.evaluate((selector) => [...document.querySelectorAll(selector)].map((element) => element.textContent), second.selector), ['Two'], 'the selector names that element alone');
+
+  const form = await inspect(300, 310);
+  const password = await inspect(60, 220);
+  const notes = await inspect(60, 270);
+  assert.deepEqual([form.tag, password.attributes.type, notes.tag], ['form', 'password', 'textarea']);
+  assert.match(form.html, /^<form id="login" data-api-key="\[redacted\]" style="[^"]+"><input type="hidden" name="csrf_token"><input id="pass" type="password" style=/);
+  for (const secret of ['key-abc123', 'csrf-abc123', 'hunter2', 'typed-secret-note']) assert.ok(!JSON.stringify([form, password, notes]).includes(secret), `${secret} left the page`);
+
+  const framed = await inspect(419, 79);
+  assert.deepEqual([framed.tag, framed.role, framed.text, framed.frame_url, framed.attributes.href], ['a', 'link', 'Docs', 'about:srcdoc', '[redacted]']);
+  assert.deepEqual(framed.bounds, { x: 414, y: 74, width: 80, height: 20 }, 'bounds are in the page viewport, not the frame');
+  assert.deepEqual((await inspect(450, 320)).selector, 'button.inner', 'an open shadow root is entered');
+
+  const many = await inspect(405, 420);
+  assert.equal(many.selector, 'div#many');
+  assert.ok(many.html.length <= 2001 && many.html.endsWith('…') && many.text.length <= 301, 'a large element is described within the budget');
+
+  assert.deepEqual(await native.evaluate(() => [window.seen, document.activeElement.localName, document.documentElement.outerHTML]), [[], 'body', before], 'inspection dispatched nothing and changed nothing');
+  await call('/command', { ...page, operation: 'pointer', action: 'move', x: 60, y: 48 });
+  await inspect(60, 48);
+  await call('/command', { ...page, operation: 'pointer', action: 'down', x: 60, y: 48 });
+  await call('/command', { ...page, operation: 'pointer', action: 'up', x: 60, y: 48 });
+  assert.equal(await native.evaluate(() => window.seen.filter((type) => type === 'mousemove').length), 1, 'inspection keeps the driver\'s pointer position');
+
+  await assert.rejects(inspect(800, 10), { code: 'invalid_request' });
+  await assert.rejects(call('/command', { ...page, operation: 'inspect', viewport_id: 'stale', x: 45, y: 34 }), { code: 'stale_viewport' });
+  const old = page;
+  ({ page } = await call('/command', { ...page, operation: 'navigate', url: `${origin}/next` }));
+  await assert.rejects(call('/command', { ...old, operation: 'inspect', x: 45, y: 34 }), { code: 'stale_target' });
+});
