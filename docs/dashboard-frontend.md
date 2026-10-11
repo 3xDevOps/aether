@@ -2381,9 +2381,10 @@ metadata and 2 MiB image maximum). The view keeps one pending compressed image
 and one decode, closes decoded bitmaps after painting, and never builds an
 image history. A stream that closes or is refused reconnects by itself after
 0.5, 1, 2, 4 and 8 seconds, with the last frame still on screen and the lease
-untouched. Until a fresh frame is painted the page takes no input and drops
-what was queued, since the real page may have changed under the frame that
-stopped updating. When the sixth attempt fails the pane shows **The page stream
+untouched. A press the page still held is released and what was queued is
+dropped; until a fresh frame is painted the page takes no input, since the
+real page may have changed under the frame that stopped updating. When the
+sixth attempt fails the pane shows **The page stream
 stopped**, the server's last refusal or the socket's close reason, and
 **Retry**.
 

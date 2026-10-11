@@ -59,6 +59,9 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
   const queue = useRef<PendingInput[]>([])
   const sending = useRef(false)
   const drained = useRef(Promise.resolve())
+  // False from a stream failure until the next frame is painted: the page
+  // can change under a frame that no longer updates.
+  const fresh = useRef(false)
   const active = useRef(true)
   const inputEpoch = useRef(0)
   const sendInput = useRef<(input: BrowserInput) => void>(() => {})
@@ -87,6 +90,15 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       keyboard.current.setSelectionRange(1, 1)
     }
   }, [])
+  const letGo = (held: PointerGesture[]) => {
+    // Chromium touchCancel cancels every active contact.
+    const touch = held.find((gesture) => gesture.kind === 'touch')
+    if (touch) sendInput.current({ action: 'touch', phase: 'cancel', touch_id: touch.touchID, ...touch.point })
+    for (const gesture of held) {
+      if (gesture.kind !== 'touch') sendInput.current({ action: 'pointer', phase: 'up', button: gesture.button, click_count: gesture.clickCount, ...gesture.point })
+      for (const key of gesture.modifiers) sendInput.current({ action: 'key', phase: 'up', key })
+    }
+  }
   useImperativeHandle(props.ref, () => ({
     focus: () => keyboard.current?.focus({ preventScroll: true }),
     idle: () => !sending.current && queue.current.length === 0 && pointers.current.size === 0 && !composing.current && performance.now() - lastInput.current > 500,
@@ -94,13 +106,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       const held = [...pointers.current.values()]
       if (!held.length) return
       pointers.current.clear()
-      // Chromium touchCancel cancels every active contact.
-      const touch = held.find((gesture) => gesture.kind === 'touch')
-      if (touch) sendInput.current({ action: 'touch', phase: 'cancel', touch_id: touch.touchID, ...touch.point })
-      for (const gesture of held) {
-        if (gesture.kind !== 'touch') sendInput.current({ action: 'pointer', phase: 'up', button: gesture.button, click_count: gesture.clickCount, ...gesture.point })
-        for (const key of gesture.modifiers) sendInput.current({ action: 'key', phase: 'up', key })
-      }
+      letGo(held)
       await drained.current
     },
   }), [])
@@ -141,10 +147,12 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
       failed = true
       latest = null
       parked = null
-      // The page can change under a frame that no longer updates, so input
-      // waits for the next one.
+      // What was queued is dropped, a press still held is released, and
+      // nothing more is taken until the next frame.
+      const held = [...pointers.current.values()]
       clearInput()
-      displayed.current = null
+      letGo(held)
+      fresh.current = false
       setLive(false)
       const delay = retryDelays[failures.current++]
       if (delay === undefined) setFailure(text)
@@ -179,6 +187,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
             element.height = frame.metadata.height
             context.drawImage(bitmap, 0, 0, element.width, element.height)
             displayed.current = frame.metadata
+            fresh.current = true
             failures.current = 0
             setLive(true)
             if (frame.metadata.page_revision > observed.page_revision) current.current.onNavigated()
@@ -233,7 +242,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
 
   const send = (input: BrowserInput) => {
     const frame = displayed.current
-    if (!frame || !active.current || current.current.paused || failure) return
+    if (!frame || !fresh.current || !active.current || current.current.paused || failure) return
     const observed = current.current.page
     if (frame.page_revision < observed.page_revision || (frame.page_revision === observed.page_revision && frame.viewport_id !== observed.viewport_id)) {
       current.current.onError('Input discarded: wait for the current page frame.')
@@ -341,7 +350,7 @@ export function BrowserSurface(props: BrowserSurfaceProps) {
     send({ action: 'key', key: event.key === ' ' ? 'Space' : event.key, modifiers: [event.altKey && 'Alt', event.ctrlKey && 'Control', event.metaKey && 'Meta', event.shiftKey && 'Shift'].filter((value): value is string => Boolean(value)) })
   }
   const onPointer = (event: ReactPointerEvent<HTMLCanvasElement>, phase: 'down' | 'move' | 'up' | 'cancel') => {
-    if (!displayed.current) return
+    if (!displayed.current || !fresh.current) return
     if (props.paused) {
       // A press that was down when the pause began is forgotten here, so its
       // late release is not sent on its own; the next press starts clean.

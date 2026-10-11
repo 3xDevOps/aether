@@ -170,11 +170,15 @@ it('is not idle, so the viewport is left alone, while text is being composed', a
   view.unmount()
 })
 
-it('reconnects a dropped stream by itself, keeps the painted frame and takes no input until a fresh one', async () => {
+it('reconnects a dropped stream by itself, keeps the painted frame, lets go of a held press and takes no input until a fresh frame', async () => {
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 390, height: 844 } as DOMRect)
   const props = surfaceProps()
   const view = render(<BrowserSurface {...props} />)
   await stream(frame())
   await painted()
+  const sent = () => vi.mocked(api.devBrowserAction).mock.calls.map(([request]) => [request.action, request.phase ?? request.key])
+  fireEvent.pointerDown(canvas(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 40, clientY: 50 })
+  await waitFor(() => expect(sent()).toEqual([['pointer', 'down']]))
   vi.useFakeTimers()
   act(() => StubSocket.last().onclose?.({ code: 1006 }))
   expect(canvas().width).toBe(390)
@@ -183,19 +187,20 @@ it('reconnects a dropped stream by itself, keeps the painted frame and takes no 
   act(() => { vi.advanceTimersByTime(500) })
   expect(StubSocket.opened).toHaveLength(2)
   vi.useRealTimers()
-  // The page may have changed under the frame that stopped updating.
+  // The press the page still held is released; the page may have changed
+  // under the frame that stopped updating, so nothing new is sent.
   const input = screen.getByRole('textbox', { name: 'Remote browser keyboard' })
   fireEvent.keyDown(input, { key: 'a' })
-  fireEvent.pointerDown(canvas(), { pointerId: 1, clientX: 40, clientY: 50 })
+  fireEvent.pointerUp(canvas(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 40, clientY: 50 })
+  fireEvent.pointerDown(canvas(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 60, clientY: 70 })
   fireEvent.wheel(canvas(), { clientX: 10, clientY: 10, deltaY: 120 })
   await act(async () => {})
-  expect(api.devBrowserAction).not.toHaveBeenCalled()
+  expect(sent()).toEqual([['pointer', 'down'], ['pointer', 'up']])
   await stream(frame(page, 2))
   await painted()
   expect(JSON.parse(StubSocket.last().sent[0]!)).toMatchObject({ page_id: 'page-1', page_revision: 3 })
   fireEvent.keyDown(input, { key: 'b' })
-  await waitFor(() => expect(api.devBrowserAction).toHaveBeenCalledTimes(1))
-  expect(api.devBrowserAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'key', key: 'b' }))
+  await waitFor(() => expect(sent()).toEqual([['pointer', 'down'], ['pointer', 'up'], ['key', 'b']]))
   expect(props.onError).not.toHaveBeenCalled()
   view.unmount()
 })
