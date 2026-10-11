@@ -981,8 +981,9 @@ one.
   whichever door they came in by. Starting a shell, a command or a file
   transfer over SSH commits the hold a writable shell tab commits, after
   the admission above and before the process starts: the integrator's input
-  to that worker is refused until a person chooses **Release control** on
-  the swarm page. A session whose hold cannot be recorded does not start.
+  to that worker is refused until a person releases the hold, the way a
+  shell tab's is released ([terminal.md](terminal.md#swarm-workers)). A
+  session whose hold cannot be recorded does not start.
   Port forwarding alone takes no hold, and disconnecting releases none. The
   server says so when the connection opens, and `aether ssh --stdio` prints
   it on stderr; the **Open in editor…** dialog says it before that.

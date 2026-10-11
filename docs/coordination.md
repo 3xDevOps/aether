@@ -269,7 +269,7 @@ A shell, a command or a file transfer over SSH into a worker
 ([terminal.md](terminal.md#swarm-workers)) commits the same hold before its
 process starts, and a session whose hold cannot be recorded does not start.
 Port forwarding alone commits nothing. Closing the SSH connection does not
-clear the hold either: **Release control** on the swarm page does.
+clear the hold either; it is released as any other takeover hold is.
 
 Native integrations also honor the owning session's Stop/abort and cancel
 stale helper results on shutdown or session replacement. They do not override

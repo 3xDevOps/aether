@@ -569,11 +569,12 @@ A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 
 Working in a swarm worker over SSH takes control of it, as **Take control**
 on its terminal does. Every shell, command or file transfer you start there
-sets the worker's takeover hold: its integrator cannot steer it until
-someone chooses **Release control** on the swarm page
-([coordination.md](coordination.md#delivery-acknowledgement-and-retries)).
-Port forwarding alone sets nothing. Disconnecting does not release the hold,
-and releasing it ends no session that is still open.
+sets the worker's durable hold described under
+[Run control](#run-control): its integrator cannot
+steer it until the hold is released, with **Release control** on the
+worker's task in the swarm page or **Release** on the worker's own
+terminal. Port forwarding alone sets nothing. Disconnecting does not
+release the hold, and releasing it ends no session that is still open.
 
 You are told when you connect. `ssh` prints this line, from
 `aether ssh --stdio`, before the session starts:
