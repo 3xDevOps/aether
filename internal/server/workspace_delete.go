@@ -42,11 +42,11 @@ func (d *workspaceDeletion) Delete(ctx context.Context, workspace domain.Workspa
 			if err := d.mirrors.PurgeWorkspace(ctx, workspace); err != nil {
 				return fmt.Errorf("workspace.delete: remove mirror: %w", err)
 			}
-			if err := d.secrets.Delete(workspace); err != nil {
-				return fmt.Errorf("workspace.delete: %w", err)
-			}
 			if err := d.git.RemoveWorkspaceRepo(ctx, workspace); err != nil {
 				return err
+			}
+			if err := d.secrets.Delete(workspace); err != nil {
+				return fmt.Errorf("workspace.delete: %w", err)
 			}
 			if err := d.store.DeleteWorkspace(ctx, workspace); err != nil {
 				return err
