@@ -150,6 +150,8 @@ import type {
   DevControlReleaseResult,
   DevControlStatusParams,
   DevControlStatusResult,
+  DevPortListParams,
+  DevPortListResult,
   DevTerminalInputParams,
   DevTerminalInputResult,
   DevTerminalListParams,
@@ -500,6 +502,8 @@ export const api = {
     call<DevArtifactDeleteResult>('dev.artifact.delete', params),
   devArtifactRetain: (params: DevArtifactRetainParams) =>
     call<DevArtifactRetainResult>('dev.artifact.retain', params),
+  devPortList: (params: DevPortListParams) =>
+    call<DevPortListResult>('dev.port.list', params),
   devArtifactDownload: (params: DevArtifactDownloadRequest, signal?: AbortSignal) =>
     downloadArtifact(params, signal),
   missionCreate: (params: {

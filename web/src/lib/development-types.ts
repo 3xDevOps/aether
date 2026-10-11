@@ -495,6 +495,21 @@ export interface DevArtifactRetainResult {
   packet_id: string
 }
 
+export type DevPortListParams = DevRunParams
+
+/** One TCP port a process in the run listens on. */
+export interface DevPort {
+  port: number
+  /** What it is bound to: 0.0.0.0 or :: for every interface, 127.0.0.1 or ::1 for the run alone. */
+  address: string
+  /** The owner's executable name; absent when the run's user cannot see the owner. */
+  process?: string
+}
+
+export interface DevPortListResult {
+  ports: DevPort[]
+}
+
 export type DevBrowserStreamRequest = DevBrowserPageTarget
 
 export interface DevArtifactDownloadRequest extends DevArtifactGetParams {
