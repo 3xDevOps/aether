@@ -494,7 +494,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       <Button variant="ghost" size="icon" label={loading ? 'Loading' : 'Reload'} hint={loading ? 'Loading' : `Reload (${shortcutLabel('browser-reload')})`} aria-disabled={!page || loading || undefined} onClick={() => navigate('reload')}>
         {loading ? <Spinner className="size-4" /> : <RotateCw />}
       </Button>
-      <AddressBar url={going || (page && page.url !== 'about:blank' ? page.url : '')} disabled={!status?.available} input={address} onSubmit={go} onOpened={focusPage} />
+      <AddressBar url={page && page.url !== 'about:blank' ? page.url : ''} going={going} disabled={!status?.available} input={address} onSubmit={go} onOpened={focusPage} />
       <Button variant="ghost" size="icon" label="Keyboard" className="hidden coarse:inline-flex" aria-disabled={!page || undefined} onClick={() => surfaceHandle.current?.focus()}><Keyboard /></Button>
       {!compact && (
         <Menu>

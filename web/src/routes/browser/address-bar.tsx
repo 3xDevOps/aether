@@ -6,8 +6,11 @@ import { Input } from '@/components/ui/input'
 /** Shows the page's address until someone types; what they type then stays
  * until it is submitted, dropped with Escape, or the page moves on while the
  * field is not focused. */
-export function AddressBar({ url, disabled, input, onSubmit, onOpened }: {
+export function AddressBar({ url, going, disabled, input, onSubmit, onOpened }: {
+  /** The page's address. */
   url: string
+  /** The address being opened, shown in its place until it is open or refused. */
+  going: string
   disabled: boolean
   input: RefObject<HTMLInputElement | null>
   /** Resolves true once the address was opened. */
@@ -20,6 +23,7 @@ export function AddressBar({ url, disabled, input, onSubmit, onOpened }: {
   typing.current = draft
   const focused = useRef(false)
   const pressedIn = useRef(false)
+  const shown = going || url
   useEffect(() => {
     if (!focused.current) setDraft(null)
   }, [url])
@@ -28,7 +32,7 @@ export function AddressBar({ url, disabled, input, onSubmit, onOpened }: {
       className="min-w-24 flex-1"
       onSubmit={(event) => {
         event.preventDefault()
-        const typed = draft ?? url
+        const typed = draft ?? shown
         void onSubmit(typed).then((opened) => {
           // An address typed since then stays, and keeps the keyboard.
           if (!opened || (typing.current !== null && typing.current !== typed)) return
@@ -47,7 +51,7 @@ export function AddressBar({ url, disabled, input, onSubmit, onOpened }: {
         autoCorrect="off"
         spellCheck={false}
         placeholder="localhost:3000"
-        value={draft ?? url}
+        value={draft ?? shown}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
         onFocus={(event) => {

@@ -375,6 +375,20 @@ describe('the address bar', () => {
     expect(address().value).toBe('second.test')
   })
 
+  it('keeps a refused address when focus left the field while it was loading', async () => {
+    const first = Promise.withResolvers<{ page: DevBrowserPage }>()
+    vi.mocked(api.devBrowserNavigate).mockReturnValueOnce(first.promise)
+    render(<BrowserView runID="run_1" />)
+    await ready()
+    submit('localhost:9999')
+    await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledTimes(1))
+    act(() => screen.getByRole('button', { name: 'Back' }).focus())
+    await act(async () => { first.reject(new Error('dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:9999/')) })
+    expect((await screen.findByRole('alert')).textContent).toContain('ERR_CONNECTION_REFUSED')
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)) })
+    expect(address().value).toBe('localhost:9999')
+  })
+
   it('leaves focus where it went while a navigation was loading', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage }>()
     vi.mocked(api.devBrowserNavigate).mockReturnValueOnce(first.promise)
