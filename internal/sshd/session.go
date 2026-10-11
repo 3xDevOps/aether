@@ -114,6 +114,8 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				handler = func() { s.serveDevelopmentArtifact(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemSync:
 				handler = func() { s.serveSync(ctx, member, ch) }
+			case protocol.SubsystemRunSSH:
+				handler = func() { s.serveRunSSH(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			}
 			if handler == nil {
 				reply(req, false)

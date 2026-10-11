@@ -1003,9 +1003,134 @@ exclude arbitrary live-agent filesystem writers. A stale or failed save leaves
 the browser draft available. Repeat imports do not replace open editor buffers;
 **Reload from server** explicitly discards a draft and reads remote content.
 
+## SSH into a run
+
+`ssh <run-id>.aether` ([terminal.md](terminal.md#ssh-and-editors)) gives a
+member a shell, file transfer and port forwarding in a run's container. It
+is a second door into the place a run shell already reaches, not a wider
+one.
+
+- **Admission is the run shell's.** The `aether-run-ssh` subsystem asks
+  exactly what a writable shell tab asks (`developmentAuthority` in
+  `internal/sshd`, then the scheduler's development authorization): current
+  membership, **Steer** on the run, access to the run's backing account, and
+  a `running` or `needs-attention` run that is not paused. The check runs
+  again for every session and every forwarded connection, and every three
+  seconds for the connection as a whole, which is closed once the member
+  fails it or the run has finished or is being closed. It fails closed: a
+  check that cannot complete, such as a store error, closes the connection
+  when it happens three times in a row. A pause closes nothing: the
+  connection's processes are frozen with the container, and it starts
+  nothing new until the run resumes. A refusal carries the server's reason.
+  Each connection a member opens to a run they have no other SSH connection
+  to is stamped on the workspace timeline under that member, and refused
+  when the timeline cannot record it.
+- **A session in a swarm worker takes its hold.** A person working in a
+  worker's checkout is the intervention the swarm takeover hold exists for
+  ([coordination.md](coordination.md#delivery-acknowledgement-and-retries)),
+  whichever door they came in by. Starting a shell, a command or a file
+  transfer over SSH commits the hold a writable shell tab commits, after
+  the admission above and before the process starts: the integrator's input
+  to that worker is refused until a person releases the hold, the way a
+  shell tab's is released ([terminal.md](terminal.md#swarm-workers)). A
+  session whose hold cannot be recorded does not start.
+  Port forwarding alone takes no hold, and disconnecting releases none. The
+  server says so when the connection opens, and `aether ssh --stdio` prints
+  it on stderr; the **Open in editor…** dialog says it before that.
+- **The run asks for no second credential.** The member is authenticated by
+  the connection the `aether` CLI makes: tailnet identity, SSH key or edge
+  device ([networking.md](networking.md)). The SSH connection the member's
+  `ssh` client speaks is nested inside one channel of it and is reachable no
+  other way, so it accepts any user name and no key. It presents the
+  server's own host key, and the server names that key when it admits the
+  connection. The CLI accepts the name only if it is the key it verified on
+  its own connection, then writes it to `~/.ssh/aether_known_hosts`, which
+  is why `ssh` can check it strictly without ever prompting.
+- **No sshd, no port and no key in the container.** The server speaks the
+  SSH protocol itself and starts each session as an owned execution in the
+  container, the way run shells start. Nothing listens for it in the
+  container or on the host.
+- **The server picks the container.** It resolves the run id to its
+  supervised container after authorization; a client names no container,
+  path, user or host. A session runs as that container's user with its
+  filesystem, network, home and credentials, so what
+  [Remote development](#remote-development-and-browser-isolation) says of a
+  run shell holds here: it is not a restricted sandbox, and it is not a way
+  out of one. There is no path to a shell on the server host, to another
+  run, or to a container the member could not open a shell in.
+- **Forwarding stays in the run.** `ssh -L`, `-D` and `-W` are accepted for
+  `localhost` and loopback addresses only, and the connection is dialed by a
+  process inside the run's network namespace
+  (`aether-internal dev-exec forward`), never by the server. It cannot reach
+  the host's loopback or another run. The run's Chromium companion
+  ([Remote development](#remote-development-and-browser-isolation)) shares
+  that network namespace, so a forward reaches a loopback port the companion
+  listens on exactly as a process in the run does; Chromium itself is driven
+  through a pipe and listens on none. Remote forwarding, agent forwarding
+  and X11 are refused.
+- **A session owns its processes, for as long as the server runs.** When a
+  session ends, its connection drops, or its authorization is withdrawn,
+  everything it started is stopped. A stop that does not land is tried
+  again, five times, and only a container Docker reports gone counts as
+  nothing left to stop; after the last failure the server logs
+  `sshd: ssh execution left running` and the process stays. A frozen
+  container refuses that stop, so for a paused run, and for a closed run
+  whose container is kept, the server holds the stop and delivers it when
+  the run resumes or is relaunched. The pending stop lives only in the
+  server's memory. A restart while it is still owed, whether a shutdown, a
+  self-update or a kill,
+  forgets it: those processes thaw with the container, owned by nobody, and
+  run until they exit or the container stops, even if the member who started
+  them has since lost access. A shutdown waits for the stop of every open
+  session in a running container to finish before it exits, and one that
+  failed then is among the stops the restart forgets; a killed server stops
+  nothing in any container. Only destroying the container, **Free
+  container…** on a finished run, is certain to end them.
+- **Bounded.** A run takes 16 SSH connections, at most 8 of them from one
+  member, so no member can keep the others out; a connection takes 10
+  sessions and 64 forwarded connections. Every process runs inside the
+  run's container, under its CPU, memory and process limits. Output is
+  never dropped: the server holds at most 256 KiB of each stream a client
+  has not read, and past that the command blocks. An open SSH connection
+  holds a scheduled server update back as an attached terminal does
+  ([install.md](install.md#upgrading)), one into a paused run included.
+- **Not recorded.** An SSH session has no transcript and no control lease.
+  Teammates see that a member connected, not what they did.
+- **The member's `ssh` needs OpenSSH 9.6 or a build patched for
+  CVE-2023-51385.** `ssh` runs the `ProxyCommand` through the member's
+  shell with the host name substituted in, and before that fix it
+  substituted any name. On such a client a crafted `*.aether` host name,
+  from a link or a git submodule URL, can run a command on the member's
+  computer, as with any `ProxyCommand` that names `%h`. The block quotes
+  `%h`, which on those clients leaves a quote character in the name as the
+  only way through. `aether ssh --stdio` itself refuses a host that is not
+  a run id plus `.aether` before it reads the link or dials anything.
+
+**An editor trusts the machine it attaches to.** An editor attached over
+SSH runs its own server on the remote and acts on what that server sends
+back. Here the remote is a run's container, and the agent in that run
+controls everything in it. The Remote - SSH extension's own Security Note
+says to connect only to remotes you trust, because a compromised remote
+could use the connection to execute code on your local machine; Cursor and
+Zed attach the same way. So opening a run in your editor extends your
+computer's trust to that run's agent and to whatever it has installed or
+fetched. Attach to runs whose task and repository you would run on your own
+machine, and use `ssh` or a run shell for the rest: a plain `ssh` session
+gives the container a terminal and nothing more.
+
+The desktop app lets one kind of link leave its window besides `http` and
+`https`: the **Open in editor…** links, matched in full as
+`vscode://vscode-remote/ssh-remote+<run-id>.aether/workspace`, the same
+under `cursor://`, and `zed://ssh/<run-id>.aether/workspace`. Links in agent
+output pass through the same filter, so the worst such a link does is open
+an editor on a run the member can already connect to. Every other use of
+those schemes is dropped.
+
 ## SSH port forwarding
 
-Port forwarding is limited to direct-tcpip channels whose destination is
+`aether forward` and the dashboard's OAuth forwards open channels on the
+CLI's own connection, not through `ssh`. There, port forwarding is limited
+to direct-tcpip channels whose destination is
 `run:<run-id>` or exactly `terminal`. Run targets require the Steer capability
 for the authenticated member; the terminal target resolves that member's own
 live environment container and requires current membership. The server

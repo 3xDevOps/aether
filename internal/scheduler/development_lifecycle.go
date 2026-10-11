@@ -32,6 +32,11 @@ func (s *Scheduler) developmentClosedPath(id domain.RunID) string {
 	sum := sha256.Sum256([]byte(id))
 	return filepath.Join(s.cfg.StateDir, "development-closed", hex.EncodeToString(sum[:16]))
 }
+
+// ErrDevelopmentClosed refuses a new surface in the container of a run that
+// is being closed.
+var ErrDevelopmentClosed = errors.New("development environment was closed; explicitly relaunch the run before starting new surfaces")
+
 func (s *Scheduler) checkDevelopmentOpen(id domain.RunID, cid containerruntime.ID) error {
 	data, err := os.ReadFile(s.developmentClosedPath(id))
 	if errors.Is(err, os.ErrNotExist) {
@@ -41,7 +46,7 @@ func (s *Scheduler) checkDevelopmentOpen(id domain.RunID, cid containerruntime.I
 		return err
 	}
 	if string(data) == string(cid) {
-		return errors.New("development environment was closed; explicitly relaunch the run before starting new surfaces")
+		return ErrDevelopmentClosed
 	}
 	return nil
 }

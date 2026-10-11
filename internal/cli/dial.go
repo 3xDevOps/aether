@@ -27,6 +27,9 @@ var dialAgent = platformDialAgent
 type Conn struct {
 	client *ssh.Client
 	cfg    Config
+	// hostKey is the key the handshake checked against known_hosts. A link
+	// with a server id records none: it accepts only the key deriving the id.
+	hostKey ssh.PublicKey
 }
 
 // Dial connects to cfg.Addr as cfg.User (default aether) with the key
@@ -68,12 +71,16 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	var hostKey ssh.PublicKey
 	conf := &ssh.ClientConfig{
-		User:            user,
-		Auth:            auth.Methods(),
-		HostKeyCallback: cb,
-		BannerCallback:  auth.Banner,
-		Timeout:         dialTimeout,
+		User: user,
+		Auth: auth.Methods(),
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			hostKey = key
+			return cb(hostname, remote, key)
+		},
+		BannerCallback: auth.Banner,
+		Timeout:        dialTimeout,
 	}
 	nc, err := (&net.Dialer{Timeout: dialTimeout}).Dial("tcp", cfg.Addr)
 	if err != nil {
@@ -84,7 +91,7 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 		_ = nc.Close()
 		return nil, auth.Explain(fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err))
 	}
-	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg}, nil
+	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg, hostKey: hostKey}, nil
 }
 
 // Close tears down the SSH connection.

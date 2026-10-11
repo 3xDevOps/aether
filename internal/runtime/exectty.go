@@ -13,7 +13,8 @@ import (
 
 // execAttachment: with a TTY, stdout carries the merged raw stream and
 // stderr is empty; without one, Docker multiplexes both and they are
-// demuxed here. stdout is lossless because it carries a protocol stream.
+// demuxed here. A pipe's stdout is lossless because it carries a protocol
+// stream; with lossless set, every stream is.
 type execAttachment struct {
 	cli  *client.Client
 	id   string
@@ -26,7 +27,12 @@ type execAttachment struct {
 	closeOnce sync.Once
 }
 
-func newExecAttachment(cli *client.Client, id string, tty bool, resp client.HijackedResponse) *execAttachment {
+// losslessExecBuffer is how much one stream of a lossless execution holds
+// before its command blocks. It only passes bytes along, and a caller may
+// hold many such streams open without reading them.
+const losslessExecBuffer = 256 << 10
+
+func newExecAttachment(cli *client.Client, id string, tty, lossless bool, resp client.HijackedResponse) *execAttachment {
 	a := &execAttachment{
 		cli:    cli,
 		id:     id,
@@ -36,8 +42,12 @@ func newExecAttachment(cli *client.Client, id string, tty bool, resp client.Hija
 		stderr: newStreamBuffer(),
 		done:   make(chan struct{}),
 	}
-	if !tty {
+	if !tty || lossless {
 		a.stdout = newLosslessStreamBuffer()
+	}
+	if lossless {
+		a.stderr = newLosslessStreamBuffer()
+		a.stdout.limit, a.stderr.limit = losslessExecBuffer, losslessExecBuffer
 	}
 	go func() {
 		var err error

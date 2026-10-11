@@ -3,8 +3,11 @@ package runtime
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +18,7 @@ import (
 
 func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close() })
 	go func() {
 		_, _ = io.WriteString(writer, "final command output\n")
@@ -46,7 +49,7 @@ func TestExecAttachmentEOFPreservesFinalOutput(t *testing.T) {
 func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 	reader, writer := net.Pipe()
 	defer func() { _ = writer.Close() }()
-	attachment := newExecAttachment(nil, "exec", true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", true, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	readDone := make(chan error, 1)
 	go func() {
 		_, err := io.ReadAll(attachment.Stdout())
@@ -72,7 +75,7 @@ func TestExecAttachmentConcurrentCloseUnblocksRead(t *testing.T) {
 
 func TestExecAttachmentPublishesDeviceCodeBeforeEOF(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "oauth-exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "oauth-exec", false, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close(); _ = writer.Close() })
 	const code = "! First copy your one-time code: ABCD-1234"
 	const url = "Open this URL to continue in your web browser: https://github.com/login/device"
@@ -137,7 +140,7 @@ func TestExecAttachmentPublishesDeviceCodeBeforeEOF(t *testing.T) {
 
 func TestPipeExecStdoutIsLossless(t *testing.T) {
 	reader, writer := net.Pipe()
-	attachment := newExecAttachment(nil, "exec", false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+	attachment := newExecAttachment(nil, "exec", false, false, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
 	t.Cleanup(func() { _ = attachment.Close() })
 	const total = maxStreamBuffer + 3<<20
 	go func() {
@@ -157,5 +160,93 @@ func TestPipeExecStdoutIsLossless(t *testing.T) {
 	n, err := io.Copy(io.Discard, attachment.Stdout())
 	if err != nil || n != total {
 		t.Fatalf("read %d bytes (%v), want %d", n, err, total)
+	}
+}
+
+func TestLosslessExecKeepsStderrAndTerminalOutput(t *testing.T) {
+	const total = maxStreamBuffer + 3<<20
+	for name, tc := range map[string]struct {
+		tty    bool
+		stream func(*execAttachment) io.Reader
+	}{
+		"pipe stderr": {false, (*execAttachment).Stderr},
+		"terminal":    {true, (*execAttachment).Stdout},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader, writer := net.Pipe()
+			attachment := newExecAttachment(nil, "exec", tc.tty, true, client.HijackedResponse{Conn: reader, Reader: bufio.NewReader(reader)})
+			t.Cleanup(func() { _ = attachment.Close() })
+			go func() {
+				// A terminal's stream is raw; a pipe's stderr arrives
+				// in Docker frames of stream 2.
+				chunk := make([]byte, 32<<10)
+				if !tc.tty {
+					chunk = make([]byte, 8+32<<10)
+					chunk[0] = byte(stdcopy.Stderr)
+					binary.BigEndian.PutUint32(chunk[4:8], 32<<10)
+				}
+				for sent := 0; sent < total; sent += 32 << 10 {
+					if _, err := writer.Write(chunk); err != nil {
+						return
+					}
+				}
+				_ = writer.Close()
+			}()
+			time.Sleep(200 * time.Millisecond)
+			// Unread, the stream holds its small cap and one more
+			// write, not the megabytes a lossy stream retains.
+			held := tc.stream(attachment).(*streamBuffer)
+			held.mu.Lock()
+			buffered := held.buf.Len()
+			held.mu.Unlock()
+			if buffered > losslessExecBuffer+64<<10 {
+				t.Fatalf("an unread lossless stream holds %d bytes, want about %d", buffered, losslessExecBuffer)
+			}
+			n, err := io.Copy(io.Discard, held)
+			if err != nil || n != total {
+				t.Fatalf("read %d bytes (%v), want %d", n, err, total)
+			}
+		})
+	}
+}
+
+// Only Docker's own "no such execution" proves an execution is gone. A
+// caller that must stop one may give up on that answer and on no other.
+func TestManagedExecStopSeparatesGoneFromUnreachable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		gone   bool
+	}{
+		"docker has no such execution": {http.StatusNotFound, true},
+		"docker failed to answer":      {http.StatusInternalServerError, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, `{"message":"exec lookup"}`)
+			}))
+			defer api.Close()
+			cli, err := client.New(client.WithHost("tcp://"+api.Listener.Addr().String()), client.WithAPIVersion("1.51"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = cli.Close() }()
+			execution := &dockerManagedExec{docker: &Docker{cli: cli}, identity: ExecIdentity{ContainerID: "container", ExecID: "exec"}}
+			_, err = execution.Stop(t.Context(), time.Second)
+			if !errors.Is(err, ErrExecUnavailable) || errors.Is(err, ErrNotFound) != tc.gone {
+				t.Fatalf("Stop = %v, want it unavailable and gone=%v", err, tc.gone)
+			}
+		})
+	}
+	// An unreachable daemon proves nothing either.
+	cli, err := client.New(client.WithHost("unix://"+t.TempDir()+"/absent.sock"), client.WithAPIVersion("1.51"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cli.Close() }()
+	execution := &dockerManagedExec{docker: &Docker{cli: cli}, identity: ExecIdentity{ContainerID: "container", ExecID: "exec"}}
+	if _, err = execution.Stop(t.Context(), time.Second); !errors.Is(err, ErrExecUnavailable) || errors.Is(err, ErrNotFound) {
+		t.Fatalf("Stop without a daemon = %v, want it unavailable and not gone", err)
 	}
 }

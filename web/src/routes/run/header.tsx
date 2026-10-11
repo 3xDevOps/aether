@@ -20,6 +20,7 @@ import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useModeSwitch } from '@/routes/run/mode-switch'
+import { useOpenInEditor } from '@/routes/run/open-in-editor'
 import { useRunPullRequest } from '@/routes/run/pull-request'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
@@ -184,6 +185,7 @@ export function RunHeader({
   const primary = usePrimaryAction(run, view, agent, nav)
   const modeSwitch = useModeSwitch(run, agent, agentEntry)
   const pullRequest = useRunPullRequest(run, agent, agentName)
+  const editor = useOpenInEditor(run)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -218,6 +220,7 @@ export function RunHeader({
               compact={mobile}
               extra={[
                 ...(modeSwitch.item ? [modeSwitch.item] : []),
+                ...(editor.item ? [editor.item] : []),
                 { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
                 { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
               ]}
@@ -234,6 +237,7 @@ export function RunHeader({
       )}
       {modeSwitch.dialog}
       {pullRequest.panel}
+      {editor.dialog}
       {!mobile && <ConnectionLine className="border-b border-seam px-4 py-1" />}
     </>
   )

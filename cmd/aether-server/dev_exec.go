@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,8 +14,14 @@ import (
 // devExec is an internal entrypoint of the staged binary, including when its
 // basename is aether-internal. It is not a public agent-selected run API.
 func devExec(args []string) int {
+	if len(args) == 1 && args[0] == devexec.Forward {
+		return served(devexec.ServeForward(devexec.Stream{Reader: os.Stdin, Writer: os.Stdout, Closer: stdio{}}))
+	}
+	if len(args) == 1 && args[0] == devexec.SFTP {
+		return served(devexec.ServeSFTP(stdio{}))
+	}
 	if len(args) < 2 {
-		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run|run-pipe <key> <claim> <argv...> or control <key> <exec-id> <claim> <action> [grace-ms]")
+		_, _ = fmt.Fprintln(os.Stderr, "dev-exec: expected run|run-pipe <key> <claim> <argv...>, control <key> <exec-id> <claim> <action> [grace-ms], forward or sftp")
 		return 125
 	}
 	switch args[0] {
@@ -57,3 +64,17 @@ func devExec(args []string) int {
 		return 125
 	}
 }
+
+func served(err error) int {
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "dev-exec:", err)
+		return 1
+	}
+	return 0
+}
+
+type stdio struct{}
+
+func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+func (stdio) Close() error                { return errors.Join(os.Stdin.Close(), os.Stdout.Close()) }

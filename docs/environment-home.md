@@ -22,6 +22,9 @@ The home is the member's durable environment:
 - The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
   the signing settings
+- The remote server an editor installs when it attaches to a run over SSH
+  (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it is
+  downloaded once; see [terminal.md](terminal.md#editors)
 
 Files outside the home live in the container layer. **Save environment** on the
 **Environment** page turns that layer into your member image so later runs get it; see

@@ -208,6 +208,11 @@ type Server struct {
 	takeovers       takeoverCoordinator
 	acpViewersMu    sync.Mutex
 	acpViewers      map[domain.RunID]int
+
+	// runSSHConns counts each run's open SSH connections by member, for the
+	// caps claimRunSSH applies.
+	runSSHMu    sync.Mutex
+	runSSHConns map[domain.RunID]map[domain.MemberID]int
 }
 
 // New builds a server, loading (or generating) the host key.
@@ -263,6 +268,7 @@ func New(cfg Config) (*Server, error) {
 		syncChannels:     make(map[domain.MemberID]int),
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
+		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
 		baseCtx:          context.Background(),
 	}
 	sc := &ssh.ServerConfig{PublicKeyCallback: s.authenticate}
