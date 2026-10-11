@@ -1,0 +1,31 @@
+   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394913480 1 0000000000000000 100 0 0 10 0                 
+   1: 00000000:1F40 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394918734 1 0000000000000000 100 0 0 10 0                 
+   2: 0100007F:2328 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394913483 1 0000000000000000 100 0 0 10 0                 
+   0: 00000000000000000000000000000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394913481 1 0000000000000000 100 0 0 10 0
+   1: 0000000000000000FFFF00000100007F:1B58 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394913482 1 0000000000000000 100 0 0 10 0
+   2: 00000000000000000000000001000000:1435 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 394919106 1 0000000000000000 100 0 0 10 0
+
+lrwxrwxrwx 1 root root  0 Oct 11 03:02 /proc/1/exe -> /usr/sbin/docker-init
+lrwxrwxrwx 1 root root  0 Oct 11 00:25 /proc/255317/exe -> /usr/local/bin/aether-internal
+lrwxrwxrwx 1 root root  0 Oct 11 00:25 /proc/255347/exe -> /usr/local/share/fnm/node-versions/v24.20.0/installation/bin/node
+lrwxrwxrwx 1 root root  0 Oct 11 03:02 /proc/468468/exe -> /usr/bin/python3.12
+lrwxrwxrwx 1 root root  0 Oct 11 03:02 /proc/468469/exe -> /usr/local/share/fnm/node-versions/v24.20.0/installation/bin/node
+lrwxrwxrwx 1 root root  0 Oct 11 03:02 /proc/468470/exe -> /usr/bin/python3.12
+lrwxrwxrwx 1 root root  0 Oct 11 03:02 /proc/468477/exe -> /usr/bin/python3.12
+/proc/1/fd:
+/proc/255317/fd:
+/proc/255347/fd:
+/proc/468468/fd:
+lrwx------ 1 root root 64 Oct 11 03:02 3 -> socket:[394913480]
+lrwx------ 1 root root 64 Oct 11 03:02 4 -> socket:[394913481]
+lrwx------ 1 root root 64 Oct 11 03:02 5 -> socket:[394913482]
+lrwx------ 1 root root 64 Oct 11 03:02 6 -> socket:[394913483]
+/proc/468469/fd:
+lrwx------ 1 root root 64 Oct 11 03:02 18 -> socket:[394919106]
+/proc/468470/fd:
+lrwx------ 1 root root 64 Oct 11 03:02 3 -> socket:[394918734]
+/proc/468477/fd:
+lrwx------ 1 root root 64 Oct 11 03:02 3 -> socket:[394913480]
+lrwx------ 1 root root 64 Oct 11 03:02 4 -> socket:[394913481]
+lrwx------ 1 root root 64 Oct 11 03:02 5 -> socket:[394913482]
+lrwx------ 1 root root 64 Oct 11 03:02 6 -> socket:[394913483]

@@ -103,6 +103,11 @@ test('real shared login, HMR, popups, watcher takeover and stale authority', asy
       await addressBar(watchPage).press('Enter')
       await fixture.waitText('Signed out')
       await expect(watcherDriving).toBeVisible()
+      // The app's port is listed without anyone typing it, and picking it navigates there.
+      await watchPage.getByRole('button', { name: /^Ports, \d+ listening$/ }).click()
+      await watchPage.getByRole('button', { name: 'Open localhost:31873', exact: true }).click()
+      await expect(addressBar(watchPage)).toHaveValue('http://localhost:31873/')
+      await fixture.waitText('Signed out')
     } finally { await watcher.close() }
   } finally { await fixture.stop() }
 })

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -17,18 +16,25 @@ import {
 } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
+import { runOnly, runOnlyReason } from '@/lib/ports'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 export function ForwardDialog() {
   const returnFocus = useReturnFocus()
   const target = useStore((s) => s.paletteForwardTarget)
   const close = useStore((s) => s.closePaletteDialog)
-  const [port, setPort] = useState('1455')
+  const cap = useCapability()
+  const [port, setPort] = useState('')
   const [forwards, setForwards] = useState<LocalForwardStatusResult['forwards']>([])
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [stopping, setStopping] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [silent, setSilent] = useState<number | null>(null)
+
+  const runID = target?.startsWith('run:') ? target.slice('run:'.length) : null
+  const place = runID ? 'the run' : 'your environment'
 
   const refresh = async () => {
     if (!target) return
@@ -53,10 +59,7 @@ export function ForwardDialog() {
         setForwards(result.forwards.filter((forward) => forward.target === target))
       })
       .catch((err) => {
-        if (!live) return
-        const detail = `Forward status failed: ${errorSentence(err)}`
-        setError(detail)
-        toast.error(detail)
+        if (live) setError(`Forward status failed: ${errorSentence(err)}`)
       })
       .finally(() => {
         if (live) setLoading(false)
@@ -70,21 +73,24 @@ export function ForwardDialog() {
     if (!target) return
     const value = Number(port)
     if (!Number.isInteger(value) || value < 1 || value > 65535) {
-      const detail = 'Port must be between 1 and 65535'
-      setError(detail)
-      toast.error(detail)
+      setError('Port must be between 1 and 65535')
       return
     }
     setStarting(true)
     setError(null)
+    setSilent(null)
     try {
+      if (runID && cap.hasMethod('dev.port.list')) {
+        const { ports } = await api.devPortList({ run_id: runID })
+        const listening = ports.find((item) => item.port === value)
+        if (listening && runOnly(listening)) throw new Error(runOnlyReason(listening))
+        if (!listening) setSilent(value)
+      }
       await api.localForwardStart(target, value)
       await refresh()
-      toast.success('Port forwarding started')
     } catch (err) {
-      const detail = `Forward failed: ${errorSentence(err)}`
-      setError(detail)
-      toast.error(detail)
+      setSilent(null)
+      setError(`Forward failed: ${errorSentence(err)}`)
     } finally {
       setStarting(false)
     }
@@ -97,11 +103,8 @@ export function ForwardDialog() {
     try {
       await api.localForwardStop(target, forwardPort)
       await refresh()
-      toast.success('Port forwarding stopped')
     } catch (err) {
-      const detail = `Stop failed: ${errorSentence(err)}`
-      setError(detail)
-      toast.error(detail)
+      setError(`Stop failed: ${errorSentence(err)}`)
     } finally {
       setStopping(null)
     }
@@ -112,13 +115,10 @@ export function ForwardDialog() {
       <DialogContent {...returnFocus} className="max-h-[calc(100dvh-2rem)] max-w-[min(520px,calc(100%-2rem))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="min-w-0 border-b px-3 py-3 pr-10 sm:px-4">
           <DialogTitle>
-            {target?.startsWith('run:')
-              ? 'Forward a port from this run'
-              : 'Forward a port from your environment'}
+            {runID ? 'Forward a port from this run' : 'Forward a port from your environment'}
           </DialogTitle>
           <DialogDescription>
-            Makes a port inside the agent&apos;s machine reachable at localhost on this computer.
-            This is needed for browser logins like codex login (port 1455).
+            Opens the same port on this computer and carries its connections to {place}, until you stop it or quit Aether.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -144,7 +144,7 @@ export function ForwardDialog() {
               onChange={(event) => setPort(event.target.value)}
             />
             <p id="forward-port-help" className="text-ui-sm leading-4 text-muted">
-              Choose the port exposed by the agent. Localhost uses the same port.
+              A forward reaches a server listening on 0.0.0.0, not one bound to 127.0.0.1.
             </p>
           </div>
           {error && (
@@ -152,12 +152,17 @@ export function ForwardDialog() {
               {error}
             </p>
           )}
-          <div className="space-y-1.5" aria-label="Active forwards">
-            <p className="text-ui-sm font-medium text-muted">Active forwards</p>
+          {silent !== null && (
+            <p role="status" className="text-ui-sm text-muted">
+              Nothing in the run is listening on port {silent} yet. Its link works once something does.
+            </p>
+          )}
+          <div className="space-y-1.5" aria-label="Forwarded ports">
+            <p className="text-ui-sm font-medium text-muted">Forwarded ports</p>
             {loading ? (
               <p className="text-ui text-muted">Loading forwards…</p>
             ) : forwards.length === 0 ? (
-              <p className="text-ui text-muted">No active forwards</p>
+              <p className="text-ui text-muted">None yet</p>
             ) : (
               <div className="divide-y divide-seam/70 border-y border-seam/70">
                 {forwards.map((forward) => (
@@ -166,9 +171,16 @@ export function ForwardDialog() {
                     className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-2 py-2"
                   >
                     <span className="min-w-0 flex-1 break-words text-ui">
-                      <span className="font-medium">Port {forward.port}</span>{' '}
+                      <a
+                        href={`http://localhost:${forward.local_port}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-code text-accent underline-offset-2 hover:underline"
+                      >
+                        localhost:{forward.local_port}
+                      </a>{' '}
                       <span className="text-muted">
-                        localhost:{forward.local_port} ({forward.conns} connections)
+                        {forward.conns === 1 ? '1 connection' : `${forward.conns} connections`}
                       </span>
                     </span>
                     <Button
@@ -188,14 +200,14 @@ export function ForwardDialog() {
         </form>
         <DialogFooter className="border-t px-3 py-3 sm:px-4">
           <Button variant="secondary" onClick={close}>
-            Cancel
+            Close
           </Button>
           <Button
             type="submit"
             form="forward-port"
             disabled={starting || !target}
           >
-            {starting ? 'Starting…' : 'Start'}
+            {starting ? 'Forwarding…' : 'Forward'}
           </Button>
         </DialogFooter>
       </DialogContent>

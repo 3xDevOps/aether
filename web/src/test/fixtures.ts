@@ -509,6 +509,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     devArtifactGet: vi.fn<Api['devArtifactGet']>(async () => needsOverride('devArtifactGet')),
     devArtifactDelete: vi.fn<Api['devArtifactDelete']>(async () => needsOverride('devArtifactDelete')),
     devArtifactRetain: vi.fn<Api['devArtifactRetain']>(async () => needsOverride('devArtifactRetain')),
+    devPortList: vi.fn<Api['devPortList']>(async () => ({ ports: [] })),
     devArtifactDownload: vi.fn<Api['devArtifactDownload']>(async () => needsOverride('devArtifactDownload')),
     runDelete: vi.fn(async () => ({})),
     runPause: vi.fn(async () => ({})),

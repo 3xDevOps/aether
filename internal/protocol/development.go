@@ -41,6 +41,7 @@ const (
 	MethodDevArtifactGet        = "dev.artifact.get"
 	MethodDevArtifactDelete     = "dev.artifact.delete"
 	MethodDevArtifactRetain     = "dev.artifact.retain"
+	MethodDevPortList           = "dev.port.list"
 
 	MaxDevParamsBytes       = 48 << 10
 	MaxDevResultBytes       = 48 << 10
@@ -730,4 +731,20 @@ type DevArtifactRetainParams struct {
 
 type DevArtifactRetainResult struct {
 	PacketID string `json:"packet_id"`
+}
+
+type DevPortListParams struct{ DevRunParams }
+
+// DevPort is one TCP port a process in the run's network namespace listens
+// on. Address is what it is bound to: 0.0.0.0 or :: for every interface,
+// 127.0.0.1 or ::1 for the run alone. Process is the owner's executable name,
+// absent when the run's user cannot see the owner.
+type DevPort struct {
+	Port    int    `json:"port"`
+	Address string `json:"address"`
+	Process string `json:"process,omitempty"`
+}
+
+type DevPortListResult struct {
+	Ports []DevPort `json:"ports"`
 }

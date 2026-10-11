@@ -286,6 +286,8 @@ func (s *Scheduler) CallDevelopment(ctx context.Context, id domain.RunID, p cont
 		result, err = s.retainDevelopmentArtifacts(ctx, id, p, raw, auth)
 	case strings.HasPrefix(method, "dev.artifact."):
 		result, err = s.developmentArtifact(id, method, raw, auth)
+	case method == protocol.MethodDevPortList:
+		result, err = s.developmentPorts(ctx, id, raw)
 	default:
 		return nil, errors.New("unknown development method")
 	}

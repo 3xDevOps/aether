@@ -547,6 +547,9 @@ thin typed CLI command:
 | `control` | `status`, `acquire`, `release` |
 | `artifact` | `list`, `get`, `delete`, `retain` |
 
+`dev.port.list`, which the dashboard's Browser reads, is a member method
+only. A run is inside its own network namespace and has no command for it.
+
 All use `aether-internal <family> <subcommand> [--params-file FILE|-] [--json]`.
 Omitting `--params-file` sends `{}`; use this for `terminal list`, `browser
 status`, and unfiltered `artifact list`. Other operations need the fields in
