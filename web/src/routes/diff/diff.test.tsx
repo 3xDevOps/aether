@@ -212,17 +212,14 @@ test('a patch of many medium files mounts only the files near the screen', () =>
   expect(screen.queryAllByText(/^\+row /).length).toBeLessThan(1500)
 })
 
-test('a file path opens that file in Files on the run checkout', () => {
+test('a file path opens that file in the run’s Files view', () => {
   seed(ready)
   useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
   renderDiff()
 
   fireEvent.click(screen.getByRole('button', { name: 'notes.md' }))
 
-  const { route, fileTabs, activeFileKey } = useStore.getState()
-  expect(route.name).toBe('files')
-  expect(fileTabs.at(-1)).toMatchObject({ kind: 'workspace', workspaceID: active.workspace_id, runID: active.id, path: 'notes.md' })
-  expect(activeFileKey).toBe(fileTabs.at(-1)!.key)
+  expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: active.id, view: 'files', file: 'notes.md' } })
   expect(screen.queryByRole('button', { name: 'db/schema.sql' })).toBeNull()
 })
 

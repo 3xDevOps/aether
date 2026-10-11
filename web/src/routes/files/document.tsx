@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { javascript } from '@codemirror/lang-javascript'
@@ -8,8 +8,9 @@ import { python } from '@codemirror/lang-python'
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { openSearchPanel, searchKeymap } from '@codemirror/search'
-import { EditorState } from '@codemirror/state'
+import { EditorState, StateEffect, StateField } from '@codemirror/state'
 import {
+  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -26,6 +27,7 @@ import { message } from '@/lib/format'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { FilePatch } from '@/routes/diff/patch-view'
 import { parsePatch } from '@/routes/diff/parse'
+import type { FileTarget } from '@/routes/files/paths'
 import { sourceKey, type WorkspaceSource } from '@/routes/files/sources'
 import { useStore } from '@/store'
 
@@ -52,6 +54,7 @@ const editorTheme = EditorView.theme({
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--text-muted)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
   '.cm-activeLine': { backgroundColor: 'var(--hover)' },
+  '.cm-line.cm-marked-line': { backgroundColor: 'var(--selection)' },
   '.cm-panels': { backgroundColor: 'var(--chrome)', color: 'var(--text)', borderColor: 'var(--seam)' },
   '@media (pointer: coarse)': {
     '.cm-panels': { maxHeight: '60%', overflowY: 'auto' },
@@ -64,6 +67,20 @@ const editorTheme = EditorView.theme({
     '.cm-panels .cm-panel.cm-search input[type=checkbox]': { width: '18px', height: '18px' },
     '.cm-panels .cm-panel.cm-search button[name=close]': { position: 'static', order: '-1', minWidth: '44px', minHeight: '44px' },
   },
+})
+
+const markAt = StateEffect.define<number>()
+const lineMark = Decoration.line({ class: 'cm-marked-line' })
+
+/** The start of the line a link opened the file at. It follows edits. */
+const markedLine = StateField.define<number | null>({
+  create: () => null,
+  update(at, transaction) {
+    for (const effect of transaction.effects) if (effect.is(markAt)) return effect.value
+    return at === null ? null : transaction.newDoc.lineAt(transaction.changes.mapPos(at)).from
+  },
+  provide: (field) =>
+    EditorView.decorations.from(field, (at) => (at === null ? Decoration.none : Decoration.set(lineMark.range(at)))),
 })
 
 function languageFor(path: string) {
@@ -89,6 +106,7 @@ export function EditableDocument({
   document,
   draft,
   canEdit,
+  reveal,
   onChange,
   onSave,
 }: {
@@ -96,11 +114,14 @@ export function EditableDocument({
   document?: { content: string; truncated: boolean; binary: boolean; loading?: boolean }
   draft?: { content: string }
   canEdit: boolean
+  /** The line to scroll to and mark. A new object asks again for the same line. */
+  reveal?: FileTarget | null
   onChange: (content: string) => void
   onSave: () => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
+  const [mounted, setMounted] = useState<EditorView | null>(null)
   const syncing = useRef(false)
   const saveRef = useRef(onSave)
   saveRef.current = onSave
@@ -124,6 +145,7 @@ export function EditableDocument({
           languageFor(path),
           keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab, { key: 'Mod-s', run: () => { saveRef.current(); return true } }]),
           highlightActiveLine(),
+          markedLine,
           EditorView.editable.of(canEdit),
           EditorState.readOnly.of(!canEdit),
           editorTheme,
@@ -136,20 +158,45 @@ export function EditableDocument({
     })
     view.current = editor
     editorCommands.view = editor
+    setMounted(editor)
     return () => {
       if (editorCommands.view === editor) editorCommands.view = null
       editor.destroy()
       view.current = null
+      setMounted(null)
     }
   }, [canEdit, document?.binary, document?.loading, document?.truncated, onChange, path])
 
   useEffect(() => {
     const editor = view.current
-    if (!editor || editor.state.doc.toString() === content) return
+    if (!editor) return
+    const current = editor.state.doc.toString()
+    if (current === content) return
+    // Only the span that differs is replaced, so a file reread while it is
+    // open keeps the caret and the marked line where they were.
+    let from = 0
+    while (from < current.length && from < content.length && current[from] === content[from]) from++
+    let to = current.length
+    let end = content.length
+    while (to > from && end > from && current[to - 1] === content[end - 1]) {
+      to--
+      end--
+    }
     syncing.current = true
-    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } })
+    editor.dispatch({ changes: { from, to, insert: content.slice(from, end) } })
     syncing.current = false
   }, [content])
+
+  useEffect(() => {
+    if (!mounted || !reveal?.line) return
+    const { doc } = mounted.state
+    const line = doc.line(Math.min(reveal.line, doc.lines))
+    const anchor = Math.min(line.from + (reveal.column ?? 1) - 1, line.to)
+    mounted.dispatch({
+      selection: { anchor },
+      effects: [markAt.of(line.from), EditorView.scrollIntoView(anchor, { y: 'center' })],
+    })
+  }, [mounted, reveal])
 
   if (!document || document.loading) return <Notice>Loading file…</Notice>
   if (document.binary) return <Notice>Binary files cannot be edited.</Notice>

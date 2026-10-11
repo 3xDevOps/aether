@@ -12,6 +12,7 @@ import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
 import { inputHint } from '@/lib/run-requests'
+import { PathText } from '@/routes/files/path-link'
 import type { RunNavigation } from '@/routes/run/header'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { AnsweredText } from '@/routes/run/session-requests'
@@ -120,7 +121,7 @@ function EntryDetail({ runID, entry }: { runID: string; entry: WorkItem }) {
   }, [missing, runID, entry.seq])
   return (
     <WorkDetail>
-      {entry.command && <code className="font-code text-ui-sm break-all text-text">$ {entry.command}</code>}
+      {entry.command && <code className="font-code text-ui-sm break-all text-text">$ <PathText>{entry.command}</PathText></code>}
       {entry.output && <OutputTail output={entry.output} exitCode={entry.exitCode} />}
       {entry.diffs?.map((diff) => <DiffBlock key={diff.path} path={diff.path} patch={diff.patch} />)}
       {missing && !error && <p className="text-ui-sm text-muted">Loading the full output…</p>}

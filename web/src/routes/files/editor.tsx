@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FolderTree, Search, X } from '@/components/icons'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -7,8 +8,10 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { DiffDocument, EditableDocument, editorCommands } from '@/routes/files/document'
+import type { FileTarget } from '@/routes/files/paths'
 import { isBaseBranch, type SelectFile, type Selection, sourceKey, sourceLabel } from '@/routes/files/sources'
 import { useStore } from '@/store'
+import type { FileDocumentState } from '@/store/files'
 import { useHeaderPrimary } from '@/store/hooks'
 
 export type ViewerMode = 'file' | 'diff'
@@ -21,6 +24,8 @@ export function FileEditor({
   onSelect,
   onClose,
   onBrowse,
+  reveal,
+  shown = true,
   client,
   epoch,
 }: {
@@ -31,13 +36,23 @@ export function FileEditor({
   onSelect: SelectFile
   onClose: (selection: Selection) => void
   onBrowse?: () => void
+  reveal?: FileTarget | null
+  /** False while the editor stays mounted behind another view. */
+  shown?: boolean
   client: Api
   epoch: number
 }) {
   const key = sourceKey(selection, selection.path)
   const identityEpoch = useStore((s) => s.identityEpoch)
-  useHeaderPrimary(true)
-  const document = useStore((s) => s.documents[key])
+  useHeaderPrimary(shown)
+  const stored = useStore((s) => s.documents[key])
+  // A file is reread whenever its run's checkout changes, a save included.
+  // What was read before stays up meanwhile, so the editor is not rebuilt
+  // under the reader.
+  const read = useRef<{ key: string; document: FileDocumentState } | null>(null)
+  if (stored && !stored.loading && !stored.error) read.current = { key, document: stored }
+  const previous = read.current?.key === key ? read.current.document : undefined
+  const document = !stored || stored.loading ? previous ?? stored : stored
   const draft = useStore((s) => s.drafts[key])
   const drafts = useStore((s) => s.drafts)
   const setDocument = useStore((s) => s.setDocument)
@@ -52,8 +67,8 @@ export function FileEditor({
   const loaded = useRef<Record<string, number>>({})
   const request = useRef<Record<string, number>>({})
   const reloadDiscard = useRef<Record<string, number>>({})
-  const documentPresent = Boolean(document)
-  const documentLoading = document?.loading ?? false
+  const documentPresent = Boolean(stored)
+  const documentLoading = stored?.loading ?? false
   const selectedHarness = selection.kind === 'config' ? selection.harness : undefined
   const selectedWorkspaceID = selection.kind === 'workspace' ? selection.workspaceID : undefined
   const selectedRunID = selection.kind === 'workspace' ? selection.runID : undefined
@@ -66,7 +81,9 @@ export function FileEditor({
     request.current[key] = requestID
     const current = selection
     const requestEpoch = identityEpoch
-    setDocument(key, { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: true, error: undefined })
+    const blank = { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false }
+    // A draft started during a reread is still based on what was read before.
+    setDocument(key, { ...(read.current?.key === key ? read.current.document : blank), loading: true, error: undefined })
     const pending = useStore.getState().documents[key]
     const stale = () =>
       request.current[key] !== requestID ||
@@ -86,7 +103,7 @@ export function FileEditor({
       })
       .catch((err) => {
         if (stale()) return
-        setDocument(key, { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: false, error: message(err) })
+        setDocument(key, { ...blank, loading: false, error: message(err) })
       })
   }, [clearDraft, client, documentLoading, documentPresent, epoch, identityEpoch, key, mode, reload, selectedHarness, selectedRunID, selectedWorkspaceID, selection.kind, selection.path, setDocument])
 
@@ -126,7 +143,8 @@ export function FileEditor({
   const base = isBaseBranch(selection)
   const branch = base ? (selection.branch ?? 'branch') : ''
   const error = draft?.error ?? document?.error
-  const canEdit = Boolean(document && !document.loading && document.writable && !document.binary && !document.truncated)
+  const text = Boolean(document && !document.loading && !document.error && !document.binary && !document.truncated)
+  const canEdit = text && document!.writable
   const unsaved = Boolean(draft && draft.content !== draft.baseContent)
   const canSave = canEdit && unsaved && !draft?.saving
   const primary = () => (base ? setCommitting(true) : void save())
@@ -152,9 +170,13 @@ export function FileEditor({
             <Search />
             <span className="max-sm:hidden">Find</span>
           </Button>
-          <Button size="sm" disabled={!canSave} onClick={primary}>
-            {draft?.saving ? (base ? 'Committing…' : 'Saving…') : base ? `Commit to ${branch}…` : 'Save'}
-          </Button>
+          {text && !canEdit ? (
+            <Badge title="You can read this file but not change it.">Read-only</Badge>
+          ) : (
+            <Button size="sm" disabled={!canSave} onClick={primary}>
+              {draft?.saving ? (base ? 'Committing…' : 'Saving…') : base ? `Commit to ${branch}…` : 'Save'}
+            </Button>
+          )}
         </div>
         <div className="flex min-w-0 items-center gap-2 px-3 coarse:px-2">
           <Tabs value={key} onValueChange={(value) => {
@@ -230,7 +252,7 @@ export function FileEditor({
       )}
       {mode === 'diff' && runFile && selection.kind === 'workspace'
         ? <DiffDocument client={client} selection={selection} epoch={epoch} />
-        : !document?.error && <EditableDocument path={selection.path} document={document} draft={draft} canEdit={canEdit} onChange={handleDraftChange} onSave={keySave} />}
+        : !document?.error && <EditableDocument path={selection.path} document={document} draft={draft} canEdit={canEdit} reveal={reveal} onChange={handleDraftChange} onSave={keySave} />}
       {committing && (
         <CommitDialog
           branch={branch}

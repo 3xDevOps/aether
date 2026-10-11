@@ -1,5 +1,5 @@
 import { act, render, waitFor } from '@testing-library/react'
-import { Terminal } from '@xterm/xterm'
+import { type ILink, Terminal } from '@xterm/xterm'
 import { api } from '@/lib/api'
 import type { DevTerminal } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
@@ -69,6 +69,33 @@ it('opens a run-local link from the agent terminal in the run’s Browser and no
   activate(terminal, 'http://localhost:3000/app')
   expect(opened).toHaveBeenCalledTimes(1)
   expect(useStore.getState().route.params.view).toBe('browser')
+  view.unmount()
+})
+
+it('links a path a run terminal printed once it is a file in the checkout, and opens it in Files at its line', async () => {
+  const listings: Record<string, { name: string; kind: 'file' | 'dir'; size: number }[]> = {
+    '': [{ name: 'src', kind: 'dir', size: 0 }],
+    src: [{ name: 'app.ts', kind: 'file', size: 1 }],
+  }
+  vi.spyOn(api, 'filesTree').mockImplementation(async ({ path }) => ({ entries: listings[path] ?? [] }))
+  vi.spyOn(api, 'filesRead').mockResolvedValue({ content: 'one\n', truncated: false, binary: false, size: 4, revision: 'r1', writable: true })
+  const links = vi.spyOn(Terminal.prototype, 'registerLinkProvider')
+  const View = lookupRoute('run')!
+  useStore.setState({ route: { name: 'run', params: { runId: 'run_1', view: 'terminal' } } })
+  const view = render(<View params={{ runId: 'run_1', view: 'terminal' }} />)
+  await waitFor(() => expect(links).toHaveBeenCalled())
+  const terminal = links.mock.contexts[0] as Terminal
+  // The second row is the wrapped end of an 80-column line.
+  await new Promise<void>((done) => terminal.write(`${'x'.repeat(70)} src/app.ts:12:3: error and src/gone.ts:1\r\n`, done))
+
+  const found = await Promise.all(links.mock.calls.map(([provider]) =>
+    new Promise<ILink[] | undefined>((reply) => provider.provideLinks(2, reply))))
+  const [link, ...others] = found.flatMap((reply) => reply ?? [])
+  expect(others).toEqual([])
+  expect(link).toMatchObject({ text: 'src/app.ts:12:3', range: { start: { x: 72, y: 1 }, end: { x: 6, y: 2 } } })
+
+  act(() => link!.activate(new MouseEvent('click'), link!.text))
+  expect(useStore.getState().route.params).toEqual({ runId: 'run_1', view: 'files', file: 'src/app.ts', line: '12', column: '3' })
   view.unmount()
 })
 

@@ -8,6 +8,7 @@ import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
 import { runLabel } from '@/lib/status'
+import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -387,7 +388,9 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
               onFocus={() => setFocused(index)}
               className={cn('mx-auto w-full max-w-[736px] px-4', rowGap(item), index === count - 1 && 'pb-4', index === 0 && 'pt-4')}
             >
-              <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
+              <RunFileLinks run={run}>
+                <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
+              </RunFileLinks>
             </div>
           )}
         </VList>
