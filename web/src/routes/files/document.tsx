@@ -191,7 +191,7 @@ export function EditableDocument({
     if (!mounted || !reveal?.line) return
     const { doc } = mounted.state
     const line = doc.line(Math.min(reveal.line, doc.lines))
-    const anchor = Math.min(line.from + (reveal.column ?? 1) - 1, line.to)
+    const anchor = Math.min(line.from + Math.max(reveal.column ?? 1, 1) - 1, line.to)
     mounted.dispatch({
       selection: { anchor },
       effects: [markAt.of(line.from), EditorView.scrollIntoView(anchor, { y: 'center' })],

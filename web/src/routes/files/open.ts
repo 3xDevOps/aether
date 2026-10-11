@@ -13,7 +13,6 @@ export function hasFiles(run: Run, cap: Capability): boolean {
   return cap.hasMethod('files.tree') && isLiveRun(run)
 }
 
-/** Opens a file of a run's checkout in that run's Files view, at the line it names. */
 export function openInFiles(runID: string, target: FileTarget) {
   useStore.getState().navigate('run', {
     runId: runID,

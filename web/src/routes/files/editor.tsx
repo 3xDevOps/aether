@@ -146,7 +146,7 @@ export function FileEditor({
   const text = Boolean(document && !document.loading && !document.error && !document.binary && !document.truncated)
   const canEdit = text && document!.writable
   const unsaved = Boolean(draft && draft.content !== draft.baseContent)
-  const canSave = canEdit && unsaved && !draft?.saving
+  const canSave = canEdit && unsaved && !draft?.saving && !documentLoading
   const primary = () => (base ? setCommitting(true) : void save())
   const keySave = () => {
     if (canSave) primary()

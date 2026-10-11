@@ -71,6 +71,12 @@ describe('a run’s Files view', () => {
     expect(document.querySelectorAll('.cm-marked-line')).toHaveLength(1)
   })
 
+  it('opens a file named at column zero on the first line', async () => {
+    act(() => openInFiles('run_1', { path: 'src/app.ts', line: 1, column: 0 }))
+    render(<RunFiles run={run()} shown client={checkout()} />)
+    await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe('one'))
+  })
+
   it('says a file the member may not change is read-only', async () => {
     act(() => openInFiles('run_1', { path: 'README.md' }))
     render(<RunFiles run={run()} shown client={checkout(false)} />)

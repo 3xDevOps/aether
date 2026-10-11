@@ -10,8 +10,6 @@ type Checkout = Pick<Run, 'id' | 'workspace_id'>
 
 const CheckoutContext = createContext<Checkout | null>(null)
 
-/** Inside it, text that names a file in this run's checkout opens that file
- * in the run's Files view. */
 export function RunFileLinks({ run, children }: { run: Run; children: ReactNode }) {
   const linked = hasFiles(run, useCapability())
   const checkout = useMemo(
@@ -58,7 +56,6 @@ export function FileLink({ target, explicit = false, children }: { target: FileT
   )
 }
 
-/** Text with each path it names as a FileLink. */
 export function PathText({ children }: { children: string }) {
   const linked = useContext(CheckoutContext) !== null
   const matches = useMemo(() => (linked ? findPaths(children) : []), [linked, children])

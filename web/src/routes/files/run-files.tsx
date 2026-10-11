@@ -16,7 +16,9 @@ import { useStore } from '@/store'
 /** Below this the tree and an editor do not both fit in the pane. */
 const besideWidth = 640
 
-/** One run's checkout: its tree and the editor, as a view of the run page. */
+/** Each run's open file, since activeFileKey is shared by every run's tabs. */
+const lastSelected = new Map<string, string>()
+
 export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolean; client?: Api }) {
   const route = useStore((s) => s.route)
   const filesEpoch = useStore((s) => s.filesEpoch)
@@ -35,7 +37,8 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     [run.workspace_id, run.id, label],
   )
   const tabs = fileTabs.filter((tab) => tab.kind === 'workspace' && tab.runID === run.id).map(fileTabToSelection)
-  const selection = tabs.find((tab) => sourceKey(tab, tab.path) === activeFileKey) ?? tabs.at(-1) ?? null
+  const selected = tabs.find((tab) => sourceKey(tab, tab.path) === activeFileKey) ?? tabs.find((tab) => sourceKey(tab, tab.path) === lastSelected.get(run.id))
+  const selection = selected ?? tabs.at(-1) ?? null
 
   const open = (path: string, target: FileTarget | null) => {
     const key = sourceKey(source, path)
@@ -68,6 +71,7 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     </div>
   )
   const key = selection && sourceKey(selection, selection.path)
+  if (key) lastSelected.set(run.id, key)
   const narrow = mobile || (size.width > 0 && size.width < besideWidth)
   const editor = selection && (
     <FileEditor
