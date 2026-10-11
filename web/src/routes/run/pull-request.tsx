@@ -10,9 +10,8 @@ import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
-/** `short` is what a narrow header keeps of `text` beside the dot. An answer
- * that failed part-way or stopped at its limit may be missing checks, so it
- * can report a failure it saw but never that all of them passed. */
+/** `short` is what a narrow header keeps of `text`. An answer that failed part-way or stopped at its
+ * limit may be missing checks, so it can report a failure it saw but never that all of them passed. */
 function summarize(pr: RunPullRequest, feedback: RunPRFeedbackResult): { tone: Tone; text: string; short?: string } {
   if (pr.state === 'merged') return { tone: 'done', text: 'Merged' }
   if (pr.state === 'closed') return { tone: 'neutral', text: 'Closed' }
@@ -26,14 +25,10 @@ function summarize(pr: RunPullRequest, feedback: RunPRFeedbackResult): { tone: T
 }
 
 /**
- * The run's pull request once it has one. `status` is its number, linking to
- * GitHub, and the state of its checks; `panel` is the checks and review
- * comments that state opens. They are separate because the row `status` sits
- * in leaves the header while the composer has focus on a phone, and a send
- * waiting for control in `panel` has to outlive it.
- *
- * Both are read through the run's container, so a run that is no longer live
- * keeps the link and drops the state nothing can refresh.
+ * `status` and `panel` are separate because the row `status` sits in leaves the header while the
+ * composer has focus on a phone, and a send waiting for control in `panel` has to outlive it.
+ * Both are read through the run's container, so a run that is no longer live keeps the link and
+ * drops the state nothing can refresh.
  */
 export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentName: string): { status: React.ReactNode; panel: React.ReactNode } {
   const caps = useCapability()

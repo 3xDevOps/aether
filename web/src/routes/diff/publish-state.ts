@@ -223,9 +223,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     if (currentPRReview && !uncertain) await create(currentPRReview)
   }
 
-  /** Pushes, then opens the pull request only if the push landed. Each half
-   * keeps its own outcome and error, so a push that worked stays reported
-   * whatever the pull request did. */
+  /** Each half keeps its own outcome and error: a push that landed stays reported whatever the pull request did. */
   async function pushAndOpen() {
     const review = currentPRReview
     if (!expected || !review || uncertain) return

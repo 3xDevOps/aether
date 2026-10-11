@@ -13,7 +13,7 @@ import { stateLabel } from '@/routes/diff/publish-pr'
 import type { Publish } from '@/routes/diff/publish-state'
 import { githubRepository } from '@/routes/diff/publish-target'
 
-/** What keeps the push from being a sentence the member can confirm. */
+/** Why no push sentence can be written, which also holds the push back. */
 function undetermined(p: Publish): string | null {
   const push = p.pushTarget
   if (!p.status?.remotes?.length) return 'This checkout has no remote. Add one with git in the run’s terminal, then refresh the status.'
@@ -23,11 +23,7 @@ function undetermined(p: Publish): string | null {
   return null
 }
 
-/** The destination is two sentences built from the fields behind **Change
- * destination**; nothing is pushed or opened without the sentence naming
- * where on screen. The fields open by themselves only when a sentence
- * cannot be written or the destination refused. Each outcome sits under the
- * sentence it answers. */
+/** Nothing is pushed or opened unless the sentence naming its destination is on screen. */
 export function PushStep({ p }: { p: Publish }) {
   const ids = useId()
   const status = p.status

@@ -1,6 +1,5 @@
 import type { RunGitPushTarget, RunGitStatusResult, RunPRTarget } from '@/lib/types'
 
-/** `owner/name` of a github.com remote URL, or '' for anything else. */
 export function githubRepository(url: string | undefined): string {
   return url?.match(/^(?:https:\/\/(?:[^@/]+@)?github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1] ?? ''
 }
@@ -21,11 +20,7 @@ export function defaultPushTarget(status: RunGitStatusResult, workspaceOrigin: s
   }
 }
 
-/**
- * The pull request a push to `push` leads to: from that GitHub repository
- * and branch into `base` of the repository the workspace's source came from,
- * which for a fork is its upstream.
- */
+/** `source` is where the workspace's code came from, which for a fork Origin is its upstream. */
 export function defaultPRTarget(push: RunGitPushTarget, base: string, source: string | undefined): RunPRTarget {
   const head = githubRepository(push.repository)
   if (!head) return { repository: '', base_branch: '', head_repository: '', head_branch: '' }

@@ -79,7 +79,6 @@ func (s *Service) Status(ctx context.Context, run Execution) (Status, error) {
 	return state, nil
 }
 
-// Subject is the first line of a commit's message.
 func (s *Service) Subject(ctx context.Context, run Execution, commit string) (string, error) {
 	if !validOID(commit) {
 		return "", errors.New("runrepo: commit must be a full object ID")

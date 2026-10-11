@@ -64,8 +64,6 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
   )
 }
 
-/** One line for what both steps act on and as whom. The full HEAD, the
- * account's id and the upstream sit behind the push step's destination. */
 function Checkout({ p }: { p: Publish }) {
   const status = p.status
   return (

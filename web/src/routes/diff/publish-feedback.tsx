@@ -34,14 +34,12 @@ function checkSummary(checks: RunPRCheck[]): string {
 interface Comment {
   key: string
   author: string
-  /** The file and lines an inline comment is on. */
   lines?: string
-  /** A review's verdict. */
   verdict?: string
   at: string
   body: string
   url?: string
-  /** What the agent is sent in place of the row. */
+  /** What the agent is sent. */
   text: string
 }
 
@@ -65,7 +63,6 @@ function commentsOf(feedback: RunPRFeedbackResult): Comment[] {
   ].sort((a, b) => a.at.localeCompare(b.at))
 }
 
-/** GitHub's `CHANGES_REQUESTED` and `timed_out`, as words. */
 function words(state: string): string {
   return state.toLowerCase().replaceAll('_', ' ')
 }
@@ -74,8 +71,6 @@ function checkText(check: RunPRCheck): string {
   return `Failing check: ${check.name}\nConclusion: ${check.conclusion || check.status}${check.url ? `\n${check.url}` : ''}`
 }
 
-/** The run's pull request as GitHub reports it: its checks and its review
- * comments, each failing check and each comment one click from the agent. */
 export function PRFeedback({
   run,
   agent,
@@ -254,7 +249,6 @@ export function PRFeedback({
   )
 }
 
-/** One row's way to the agent: the button, then what became of the message. */
 function Sender({
   run,
   agentName,
