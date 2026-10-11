@@ -418,20 +418,24 @@ func secretEnvValues(label string, env []string) []string {
 	return values
 }
 
+const secretMask = "***"
+
 // setupOutput masks exact secret values, longest first so a secret holding
 // another is masked whole, then keeps the last setupOutputLimit bytes. cut
 // says output already lost its beginning, which may have split a secret: the
-// span that could hold its remainder is dropped.
+// span that could hold its remainder is dropped. That span is measured after
+// masking, where a shorter secret inside the remainder can have grown it to
+// len(secretMask) times its length.
 func setupOutput(output string, cut bool, secrets []string) string {
 	if len(secrets) > 0 {
 		slices.SortFunc(secrets, func(a, b string) int { return len(b) - len(a) })
 		pairs := make([]string, 0, 2*len(secrets))
 		for _, secret := range secrets {
-			pairs = append(pairs, secret, "***")
+			pairs = append(pairs, secret, secretMask)
 		}
 		output = strings.NewReplacer(pairs...).Replace(output)
 		if cut {
-			output = output[min(len(secrets[0]), len(output)):]
+			output = output[min(len(secretMask)*len(secrets[0]), len(output)):]
 		}
 	}
 	if cut || len(output) > setupOutputLimit {

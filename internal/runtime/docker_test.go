@@ -306,14 +306,19 @@ func TestSetupOutputKeepsTheEnd(t *testing.T) {
 	}
 
 	// A secret the cut split in two does not survive as its second half.
-	half := &tailWriter{limit: 36}
-	_, _ = half.Write([]byte("token secret-value\npadding line one\nlast line\n"))
+	half := &tailWriter{limit: 71}
+	_, _ = half.Write([]byte("token secret-value\n" + strings.Repeat("padding line\n", 4) + "last line\n"))
 	text, cut := half.tail()
 	if !cut || !strings.HasPrefix(text, "et-value\n") {
 		t.Fatalf("tail = %q, cut %v, want it to start inside the secret", text, cut)
 	}
 	if got := setupOutput(text, cut, []string{"secret-value"}); strings.Contains(got, "value") || !strings.HasSuffix(got, "last line\n") {
 		t.Errorf("setupOutput after a cut inside the secret = %q", got)
+	}
+	// Nor when a shorter secret, masked inside that second half, makes it longer.
+	grown := "qqqqqq\nZ9\n" + strings.Repeat("padding line\n", 4) + "last line\n"
+	if got := setupOutput(grown, true, []string{"q", "qqqqqqqq\nZ9"}); strings.Contains(got, "Z9") || !strings.HasSuffix(got, "last line\n") {
+		t.Errorf("setupOutput after a cut inside a secret that holds another = %q", got)
 	}
 }
 
