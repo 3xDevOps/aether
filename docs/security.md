@@ -1024,17 +1024,18 @@ one.
   again, five times, and only a container Docker reports gone counts as
   nothing left to stop; after the last failure the server logs
   `sshd: ssh execution left running` and the process stays. A frozen
-  container refuses that stop,
-  so for a paused run, and for a closed run whose container is kept, the
-  server holds the stop and delivers it when the run resumes or is
-  relaunched. The pending stop lives only in the server's memory. A restart
-  while it is still owed, whether a shutdown, a self-update or a kill,
+  container refuses that stop, so for a paused run, and for a closed run
+  whose container is kept, the server holds the stop and delivers it when
+  the run resumes or is relaunched. The pending stop lives only in the
+  server's memory. A restart while it is still owed, whether a shutdown, a
+  self-update or a kill,
   forgets it: those processes thaw with the container, owned by nobody, and
-  run until they exit or the container stops, even if the member who
-  started them has since lost access. A shutdown stops the sessions of a
-  running container before it exits; a killed server stops nothing in any
-  container. Only destroying the container, **Free container…** on a
-  finished run, is certain to end them.
+  run until they exit or the container stops, even if the member who started
+  them has since lost access. A shutdown waits for the stop of every open
+  session in a running container to finish before it exits, and one that
+  failed then is among the stops the restart forgets; a killed server stops
+  nothing in any container. Only destroying the container, **Free
+  container…** on a finished run, is certain to end them.
 - **Bounded.** A run takes 16 SSH connections, at most 8 of them from one
   member, so no member can keep the others out; a connection takes 10
   sessions and 64 forwarded connections. Every process runs inside the

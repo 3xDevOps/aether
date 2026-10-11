@@ -48,6 +48,10 @@ type runSSHTestService struct {
 	// helperScript replaces the helper entry points with a shell script, as
 	// a container whose staged binary lacks them answers.
 	helperScript string
+	// stopGate, when set, holds every stop until it is closed; stopping
+	// counts the stops that have begun.
+	stopGate chan struct{}
+	stopping int
 	// stopped counts stops that landed; stopErr refuses them, as a paused
 	// container does, and refusedStops counts those.
 	stopped      int
@@ -186,6 +190,17 @@ func (e *localExec) Wait(ctx context.Context) (runtime.ExitStatus, error) {
 }
 
 func (e *localExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus, error) {
+	e.svc.mu.Lock()
+	e.svc.stopping++
+	gate := e.svc.stopGate
+	e.svc.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return runtime.ExitStatus{}, ctx.Err()
+		}
+	}
 	e.svc.mu.Lock()
 	if err := e.svc.stopErr; err != nil {
 		e.svc.refusedStops++
@@ -768,6 +783,54 @@ func TestRunSSHRetriesAStopThatDidNotLand(t *testing.T) {
 			svc.mu.Unlock()
 			eventually(t, "the retried stop to land", func() bool { return svc.stops() == 1 })
 		})
+	}
+}
+
+// A shutdown that returns while a session's stop is still in flight lets the
+// restart that follows cut the stop short, and the process outlives it.
+func TestRunSSHShutdownWaitsForASessionsStop(t *testing.T) {
+	e := newTestEnv(t, nil)
+	svc := installRunSSHTestService(t, e)
+	client := mustDialRunSSH(t, e, e.signer)
+	sess, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A command still writing to both streams: once the client is gone the
+	// server can forward neither, so the session's streams are finished
+	// with while its process runs on.
+	if err = sess.Start("while :; do echo out; echo err >&2; sleep 0.01; done"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the command to start", func() bool { return len(svc.starts()) == 1 })
+	gate := make(chan struct{})
+	svc.mu.Lock()
+	svc.stopGate = gate
+	svc.mu.Unlock()
+
+	closed := make(chan struct{})
+	go func() {
+		_ = e.srv.Close()
+		close(closed)
+	}()
+	eventually(t, "the session's stop to begin", func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		return svc.stopping == 1
+	})
+	select {
+	case <-closed:
+		t.Fatal("the server finished shutting down while a session's process was still being stopped")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(gate)
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the shutdown did not finish once the stop had landed")
+	}
+	if got := svc.stops(); got != 1 {
+		t.Fatalf("stops landed by the end of the shutdown = %d, want 1", got)
 	}
 }
 

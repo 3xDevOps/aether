@@ -471,7 +471,11 @@ func runSSHDimension(n, fallback uint32) uint {
 // execution instead: the client is gone or may no longer be here.
 func (c *runSSHConn) pump(ctx context.Context, ch ssh.Channel, exec runtime.ManagedExec, tty bool) {
 	att := exec.Attachment()
-	stop := context.AfterFunc(ctx, func() { c.stopExec(exec) })
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(stopped)
+		c.stopExec(exec)
+	})
 	go func() {
 		stdin := att.Stdin()
 		_, _ = io.Copy(stdin, ch)
@@ -486,6 +490,10 @@ func (c *runSSHConn) pump(ctx context.Context, ch ssh.Channel, exec runtime.Mana
 	output.Go(func() { _, _ = io.Copy(ch.Stderr(), att.Stderr()) })
 	output.Wait()
 	if !stop() {
+		// The streams can end before the stop has landed, when the client
+		// is gone and nothing can be forwarded. Returning now would let a
+		// shutdown finish, and a restart cut the stop short.
+		<-stopped
 		return
 	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runSSHStopTimeout)
