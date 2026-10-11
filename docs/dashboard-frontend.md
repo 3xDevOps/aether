@@ -1516,8 +1516,12 @@ package names (`run.mode.switch: scheduler: `) and keeps the server's
 sentence.
 
 The view switch is a segmented `tablist` named "Run views" with manual
-activation, on its own 32px row under the header at every width. On a phone
-with the composer focused the header keeps only the title line.
+activation, on its own 32px row under the header at every width. When the
+row is too narrow for every tab, as on a phone whose run has a pull request,
+the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
+sight as the view or the room changes, and the right edge fades while more
+tabs lie past it. On a phone with the composer focused the header keeps only
+the title line.
 
 A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
@@ -4409,7 +4413,7 @@ find are Ctrl on every platform, because that is what xterm binds; see
 [terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run view switch is a Radix `Tabs`
-(`TabsList look="segmented"`) whose panels are the four views, so Radix wires
+(`TabsList look="segmented"`) whose panels are the run's views, so Radix wires
 `aria-controls` and the `tabpanel`s. The terminal strip in the run toolbar
 (`TerminalTabs` in `routes/run/shells.tsx`, named "Terminals") and the
 Environment dock (`components/dock.tsx`) carry `role="tablist"`,
