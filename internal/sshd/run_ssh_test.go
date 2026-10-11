@@ -786,6 +786,41 @@ func TestRunSSHRetriesAStopThatDidNotLand(t *testing.T) {
 	}
 }
 
+// goneChannel is a session channel whose client has left: nothing more can be
+// written to it or read from it.
+type goneChannel struct{ ssh.Channel }
+
+func (goneChannel) Read([]byte) (int, error)                       { return 0, io.EOF }
+func (goneChannel) Write([]byte) (int, error)                      { return 0, io.EOF }
+func (g goneChannel) Stderr() io.ReadWriter                        { return g }
+func (goneChannel) SendRequest(string, bool, []byte) (bool, error) { return false, io.EOF }
+
+// A client can close its session while the command is still writing, and the
+// writes fail before anything cancels the session. Nothing else would stop
+// the command then.
+func TestRunSSHStopsACommandItCanNoLongerForward(t *testing.T) {
+	e := newTestEnv(t, nil)
+	svc := installRunSSHTestService(t, e)
+	exec, err := svc.process(scheduler.RunExec{Argv: []string{"/bin/sh", "-c", "while :; do echo out; echo err >&2; sleep 0.01; done"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &runSSHConn{s: e.srv, run: e.run.ID}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.pump(t.Context(), goneChannel{}, exec, false)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the session kept waiting on a command whose output it could not forward")
+	}
+	if got := svc.stops(); got != 1 {
+		t.Fatalf("stops after the output could not be forwarded = %d, want 1", got)
+	}
+}
+
 // A shutdown that returns while a session's stop is still in flight lets the
 // restart that follows cut the stop short, and the process outlives it.
 func TestRunSSHShutdownWaitsForASessionsStop(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -467,15 +468,15 @@ func runSSHDimension(n, fallback uint32) uint {
 }
 
 // pump wires one owned execution to its session channel and reports its
-// exit status once its output has drained. A cancelled ctx stops the
-// execution instead: the client is gone or may no longer be here.
+// exit status once its output has drained. The execution is stopped instead
+// when ctx is cancelled or its output can no longer be forwarded: either way
+// the client is gone or may no longer be here. pump returns only once that
+// stop has finished, so a shutdown cannot outrun it.
 func (c *runSSHConn) pump(ctx context.Context, ch ssh.Channel, exec runtime.ManagedExec, tty bool) {
 	att := exec.Attachment()
-	stopped := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		defer close(stopped)
-		c.stopExec(exec)
-	})
+	// One stop, whoever asks first; a later caller waits for it to finish.
+	stop := sync.OnceFunc(func() { c.stopExec(exec) })
+	disarm := context.AfterFunc(ctx, stop)
 	go func() {
 		stdin := att.Stdin()
 		_, _ = io.Copy(stdin, ch)
@@ -485,25 +486,36 @@ func (c *runSSHConn) pump(ctx context.Context, ch ssh.Channel, exec runtime.Mana
 			_ = stdin.Close()
 		}
 	}()
-	var output sync.WaitGroup
-	output.Go(func() { _, _ = io.Copy(ch, att.Stdout()) })
-	output.Go(func() { _, _ = io.Copy(ch.Stderr(), att.Stderr()) })
+	var (
+		output sync.WaitGroup
+		cut    atomic.Bool
+	)
+	forward := func(dst io.Writer, src io.Reader) {
+		if _, err := io.Copy(dst, src); err != nil {
+			cut.Store(true)
+		}
+	}
+	output.Go(func() { forward(ch, att.Stdout()) })
+	output.Go(func() { forward(ch.Stderr(), att.Stderr()) })
 	output.Wait()
-	if !stop() {
-		// The streams can end before the stop has landed, when the client
-		// is gone and nothing can be forwarded. Returning now would let a
-		// shutdown finish, and a restart cut the stop short.
-		<-stopped
-		return
+	// Output that ended on its own is a command that ended. A client that
+	// closes its session mid-output fails the writes before anything
+	// cancels ctx, and the command would otherwise run on.
+	if !cut.Load() && ctx.Err() == nil {
+		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runSSHStopTimeout)
+		status, err := exec.Wait(waitCtx)
+		cancel()
+		// No status is sent for an execution whose end cannot be read, so
+		// the client reports a lost session rather than a success.
+		if err == nil {
+			sendExitStatus(ch, status.Code)
+			if disarm() {
+				_ = exec.Detach()
+				return
+			}
+		}
 	}
-	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runSSHStopTimeout)
-	defer cancel()
-	// No status is sent for an execution whose end cannot be read, so the
-	// client reports a lost session rather than a success.
-	if status, err := exec.Wait(waitCtx); err == nil {
-		sendExitStatus(ch, status.Code)
-	}
-	_ = exec.Detach()
+	stop()
 }
 
 // stopExec ends an execution and everything it started, then releases its
