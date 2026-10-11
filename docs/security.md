@@ -401,11 +401,12 @@ name, not by value.
 
 **Setup script output.** When the script fails, the launcher gets the end of
 what it printed and the server log gets the same text; the run's status
-reason, which every member reads, gets only the exit code. In that text
-every exact occurrence of a secret's value is replaced with `***`. A value
-the script transforms first - encodes or splits -
-is not recognized and is not masked, and nothing masks what the agent
-prints later.
+reason, which every member reads, gets only the exit code. A candidate
+verification whose setup script fails records the first 8 KiB of that text
+as its error, which every member reads. In that text every exact occurrence
+of a secret's value is replaced with `***`. A value the script transforms
+first - encodes or splits - is not recognized and is not masked, and nothing
+masks what the agent or a verification command prints later.
 
 ## Remote development and browser isolation
 
