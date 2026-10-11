@@ -39,9 +39,13 @@ func TestInstallSSHConfigIncludesItsOwnFileAndLeavesTheRestAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	proxyHost := "'%h'"
+	if runtime.GOOS == "windows" {
+		proxyHost = `"%h"`
+	}
 	for _, want := range []string{
 		"\nHost *.aether\n  HostName %h\n  ProxyCommand ",
-		" ssh --stdio %h\n",
+		" ssh --stdio " + proxyHost + "\n",
 		"\n  UserKnownHostsFile \"" + filepath.ToSlash(filepath.Join(home, ".ssh", "aether_known_hosts")) + "\"\n",
 		"\n  HostKeyAlias aether\n",
 		"\n  StrictHostKeyChecking yes\n",
@@ -138,6 +142,24 @@ func TestInstallSSHConfigRefusesAHomeSSHCannotName(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".ssh")); !os.IsNotExist(err) {
 		t.Fatalf("a refused install wrote into %s: %v", home, err)
+	}
+}
+
+func TestRunHostIDAcceptsOnlyARunID(t *testing.T) {
+	for _, host := range []string{"run-gejd5cbk74", "run-gejd5cbk74.aether", "01j9z3k8q0000000000000000a.aether"} {
+		if id, err := RunHostID(host); err != nil || id != strings.TrimSuffix(host, ".aether") {
+			t.Errorf("RunHostID(%q) = %q %v", host, id, err)
+		}
+	}
+	for _, host := range []string{
+		"", ".aether", "$(touch pwned).aether", "`id`.aether", "a;b.aether", "a b.aether", "a'b.aether", `a"b.aether`,
+		"a|b.aether", "a&b.aether", "a>b.aether", "a\nb.aether", "*.aether", "../etc.aether", "a/b.aether", "a%h.aether",
+		"-oProxyCommand=id.aether", "-run.aether", "run-.aether", "Run-ABC.aether", "run_1.aether", "run.other.aether",
+		"run-gejd5cbk74.aether.aether", strings.Repeat("a", 64) + ".aether",
+	} {
+		if id, err := RunHostID(host); err == nil {
+			t.Errorf("RunHostID(%q) = %q, want it refused", host, id)
+		}
 	}
 }
 

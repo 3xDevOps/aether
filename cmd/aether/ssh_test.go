@@ -28,7 +28,7 @@ func TestSSHArgvPutsTheRunOptionsAheadOfTheCallers(t *testing.T) {
 	if !slices.Equal(argv, want) {
 		t.Fatalf("argv = %q\nwant   %q", argv, want)
 	}
-	if argv[1] != "HostName=%h" || !strings.HasSuffix(argv[3], " ssh --stdio %h") {
+	if argv[1] != "HostName=%h" || !strings.Contains(argv[3], " ssh --stdio ") || !strings.Contains(argv[3], "%h") {
 		t.Fatalf("leading options = %q, want the host name pinned and this binary as the ProxyCommand", argv[:4])
 	}
 
@@ -45,5 +45,21 @@ func TestSSHStdioNeedsALink(t *testing.T) {
 	testhome.Isolate(t)
 	if err := runSSH([]string{"--stdio", "run-gejd5cbk74.aether"}); !errors.Is(err, cli.ErrNotLinked) {
 		t.Fatalf("ssh --stdio without a link = %v, want %v", err, cli.ErrNotLinked)
+	}
+}
+
+// ssh passes on whatever host name a link or a repository gave it, so a name
+// that is not a run's is refused before the link is read or anything dialed.
+func TestSSHRefusesAHostThatIsNotARun(t *testing.T) {
+	testhome.Isolate(t)
+	for _, host := range []string{"$(touch pwned).aether", "a'; touch pwned; '.aether", "-oProxyCommand=id.aether", "*.aether", "run.other.aether"} {
+		for name, err := range map[string]error{
+			"ssh --stdio": runSSH([]string{"--stdio", host}),
+			"ssh":         runSSH([]string{"--", host, "true"}),
+		} {
+			if err == nil || errors.Is(err, cli.ErrNotLinked) || !strings.Contains(err.Error(), "does not name a run") {
+				t.Errorf("aether %s %q = %v, want the host refused as no run", name, host, err)
+			}
+		}
 	}
 }

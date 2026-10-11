@@ -474,7 +474,7 @@ the command again rewrites it.
 ```
 Host *.aether
   HostName %h
-  ProxyCommand /usr/local/bin/aether ssh --stdio %h
+  ProxyCommand /usr/local/bin/aether ssh --stdio '%h'
   UserKnownHostsFile "/home/you/.ssh/aether_known_hosts"
   HostKeyAlias aether
   StrictHostKeyChecking yes
@@ -486,6 +486,13 @@ The only change to `~/.ssh/config` is the `Include` line, placed first so a
 names the `aether` binary by path, so run `aether ssh-config` again after
 moving it. `aether ssh [ssh options] <run-id> [command]` passes the same
 options to `ssh` itself and needs no configuration.
+
+Use OpenSSH 9.6 or later on your computer, or an older build your
+distribution has patched for CVE-2023-51385; `ssh -V` prints the version.
+`ssh` runs a `ProxyCommand` through your shell, and before that fix it put
+any host name into the command unchecked, so a crafted `*.aether` name in a
+link or a git submodule URL could run a command on your computer. See
+[security.md](security.md#ssh-into-a-run).
 
 `aether ssh-config` refuses a home directory whose path contains `"`, `%`,
 `${`, `*`, `?`, `[` or `\`, with
@@ -551,6 +558,7 @@ A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 | `aether: ssh into <run-id>: permission denied: member <member-id> has not shared their account with you` | The run uses that member's agent account. |
 | `aether: ssh into <run-id>: scheduler: the run has no live environment: the run is paused` | Resume the run. A finished run names its status and says its container is gone. |
 | `aether: ssh into <run-id>: run <run-id> already has 16 SSH connections open, the most one run takes` | Close one. |
+| `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | The host is not a run id plus `.aether`. Nothing was sent to the server. |
 | `aether: not linked; run aether link <addr>` | This computer's CLI has no server yet. |
 | `ssh: Could not resolve hostname <run-id>.aether` | `aether ssh-config` has not been run here. |
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -23,6 +24,21 @@ import (
 // run-0123456789.aether. A run id is already a valid lowercase host label,
 // so the name survives editors' host pickers and deep links unchanged.
 const RunHostSuffix = ".aether"
+
+// runHostLabel is a run id as a host name carries it: one lowercase DNS
+// label. Every id the server generates is one, and a label holds nothing a
+// shell, ssh or an editor link reads as syntax.
+var runHostLabel = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// RunHostID returns the run id that host names: a run id, or a run's host
+// name in full.
+func RunHostID(host string) (string, error) {
+	id := strings.TrimSuffix(host, RunHostSuffix)
+	if !runHostLabel.MatchString(id) {
+		return "", fmt.Errorf("%q does not name a run: a run id holds only lowercase letters, digits and hyphens", host)
+	}
+	return id, nil
+}
 
 // runHostKeyAlias is the one known_hosts name every run host checks its key
 // under. Runs share the server's host key, so there is one entry per server
@@ -93,9 +109,12 @@ func RunSSHOptions() ([]SSHOption, error) {
 	if err != nil {
 		return nil, err
 	}
-	command := shellquote.Quote(exe)
+	// ssh hands the ProxyCommand to a shell with %h already substituted,
+	// and before OpenSSH 9.6 it substituted any host name (CVE-2023-51385).
+	// Quoted, only a quote character in the name is still syntax there.
+	command, host := shellquote.Quote(exe), "'%h'"
 	if runtime.GOOS == "windows" {
-		command = `"` + exe + `"`
+		command, host = `"`+exe+`"`, `"%h"`
 	}
 	return []SSHOption{
 		// %h is the host name ssh was given until a HostName replaces it.
@@ -104,7 +123,7 @@ func RunSSHOptions() ([]SSHOption, error) {
 		// too, but only from OpenSSH 8.1 on.
 		{"HostName", "%h"},
 		// %% is a literal percent sign to ssh.
-		{"ProxyCommand", strings.ReplaceAll(command, "%", "%%") + " ssh --stdio %h"},
+		{"ProxyCommand", strings.ReplaceAll(command, "%", "%%") + " ssh --stdio " + host},
 		{"UserKnownHostsFile", knownHosts},
 		{"HostKeyAlias", runHostKeyAlias},
 		{"StrictHostKeyChecking", "yes"},

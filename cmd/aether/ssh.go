@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 )
@@ -60,6 +59,10 @@ func sshArgv(args []string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w\n%s", err, sshUsage)
 	}
+	run, err := cli.RunHostID(parsed.Host)
+	if err != nil {
+		return nil, err
+	}
 	options, err := cli.RunSSHOptions()
 	if err != nil {
 		return nil, err
@@ -69,7 +72,7 @@ func sshArgv(args []string) ([]string, error) {
 		argv = append(argv, "-o", o.Key+"="+o.Value)
 	}
 	argv = append(argv, parsed.Options...)
-	argv = append(argv, strings.TrimSuffix(parsed.Host, cli.RunHostSuffix)+cli.RunHostSuffix)
+	argv = append(argv, run+cli.RunHostSuffix)
 	if parsed.Command != "" {
 		argv = append(argv, parsed.Command)
 	}
@@ -80,7 +83,12 @@ func sshArgv(args []string) ([]string, error) {
 // the run's SSH server. Whatever it prints goes to stderr, which ssh passes
 // through, so a refusal reaches the person with the server's own reason.
 func sshStdio(host string) error {
-	run := strings.TrimSuffix(host, cli.RunHostSuffix)
+	// ssh hands over whatever host name it was given, and that name may come
+	// from a link or a repository rather than from the person.
+	run, err := cli.RunHostID(host)
+	if err != nil {
+		return err
+	}
 	cfg, err := cli.Load()
 	if err != nil {
 		return err

@@ -1011,6 +1011,15 @@ one.
   has not read, and past that the command blocks.
 - **Not recorded.** An SSH session has no transcript and no control lease.
   Teammates see that a member connected, not what they did.
+- **The member's `ssh` needs OpenSSH 9.6 or a build patched for
+  CVE-2023-51385.** `ssh` runs the `ProxyCommand` through the member's
+  shell with the host name substituted in, and before that fix it
+  substituted any name. On such a client a crafted `*.aether` host name,
+  from a link or a git submodule URL, can run a command on the member's
+  computer, as with any `ProxyCommand` that names `%h`. The block quotes
+  `%h`, which on those clients leaves a quote character in the name as the
+  only way through. `aether ssh --stdio` itself refuses a host that is not
+  a run id plus `.aether` before it reads the link or dials anything.
 
 The desktop app lets one kind of link leave its window besides `http` and
 `https`: the **Open in editor…** links, matched in full as
