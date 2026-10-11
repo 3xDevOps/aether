@@ -88,6 +88,18 @@ func (s *Store) Put(id domain.WorkspaceID, secrets map[string]string) error {
 		_ = os.Remove(tmp.Name())
 		return fmt.Errorf("secretstore: write workspace %s: %w", id, err)
 	}
+	return s.syncDir()
+}
+
+// syncDir makes a rename or removal in the directory survive a power loss.
+func (s *Store) syncDir() error {
+	dir, err := os.Open(s.dir)
+	if err != nil {
+		return fmt.Errorf("secretstore: sync directory: %w", err)
+	}
+	if err = errors.Join(dir.Sync(), dir.Close()); err != nil {
+		return fmt.Errorf("secretstore: sync directory: %w", err)
+	}
 	return nil
 }
 
@@ -97,8 +109,12 @@ func (s *Store) Delete(id domain.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	err = os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("secretstore: remove workspace %s: %w", id, err)
 	}
-	return nil
+	return s.syncDir()
 }
