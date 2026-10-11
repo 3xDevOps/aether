@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { api } from '@/lib/api'
 import type { DevBrowserPage, DevController, DevPort } from '@/lib/types'
 import { BrowserView } from '@/routes/browser'
+import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
 import { run, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -17,6 +18,12 @@ const local = { gateway: 'local', methods: ['*'], ws: ['events'], local: ['forwa
 const hosted = { gateway: 'server', methods: ['*'], ws: ['events'] }
 let controller: DevController | null
 let poll: () => void
+
+const shared = {
+  agent: { localControl: true, roomControl: { has_control: true, control_session_id: 'ctl', control_generation: 3 }, steerable: true, controlUnavailable: false } as AgentTerminal,
+  agentName: 'Claude',
+  onCaptures: () => {},
+}
 
 beforeEach(() => {
   StubSocket.install()
@@ -58,7 +65,7 @@ const listed = () => screen.findByRole('button', { name: 'Open localhost:5173, n
 
 describe('before a page is open', () => {
   it('lists the run’s listening ports and opens the one picked', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     const first = await listed()
     expect(screen.getByRole('button', { name: 'Open localhost:8000, python3.12' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Ports, 2 listening' })).toBeDefined()
@@ -70,7 +77,7 @@ describe('before a page is open', () => {
   })
 
   it('offers nothing under the address field, which the pane already lists', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     act(() => address().focus())
     expect(screen.queryByRole('listbox')).toBeNull()
@@ -78,28 +85,28 @@ describe('before a page is open', () => {
 
   it('says that nothing is listening and what to do', async () => {
     vi.mocked(api.devPortList).mockResolvedValue({ ports: [] })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByText(/^Nothing in this run is listening on a port yet\. Start a server in the Terminal, or ask the agent to, and it appears here\./)).toBeDefined()
     expect(screen.getByRole('button', { name: 'Ports' })).toBeDefined()
   })
 
   it('shows why the ports could not be read', async () => {
     vi.mocked(api.devPortList).mockRejectedValue(new Error('dev.port.list: read the run’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect((await screen.findByRole('alert')).textContent).toBe('dev.port.list: read the run’s listening ports: exit 1: grep: /proc/net/tcp: Permission denied')
     expect(screen.getByRole('heading', { name: 'Open a page' })).toBeDefined()
   })
 
   it('reads nothing from a server that cannot list ports', async () => {
     useStore.setState({ capabilities: { gateway: 'server', methods: ['dev.browser.status'], ws: [] } })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByText(/^Type an address above and press Enter\./)).toBeDefined()
     expect(screen.queryByRole('button', { name: /^Ports/ })).toBeNull()
     expect(api.devPortList).not.toHaveBeenCalled()
   })
 
   it('reads the ports again every three seconds, but not while the tab is hidden', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     const reads = vi.mocked(api.devPortList).mock.calls.length
     vi.mocked(api.devPortList).mockResolvedValue({ ports: [served] })
@@ -114,7 +121,7 @@ describe('before a page is open', () => {
 
 describe('opening a port on this computer', () => {
   it('forwards it through the local gateway and links what is forwarded', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     fireEvent.click(screen.getByRole('button', { name: 'Open 8000 on this computer' }))
     const link = await screen.findByRole('link', { name: 'localhost:8000' })
@@ -125,7 +132,7 @@ describe('opening a port on this computer', () => {
   })
 
   it('names the address of a port only the run can reach instead of forwarding it', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     fireEvent.click(screen.getByRole('button', { name: 'Open 5173 on this computer' }))
     expect(screen.getByRole('status').textContent).toBe('Port 5173 is bound to ::1 inside the run, so only the run can reach it. Start the server on 0.0.0.0 to open it on this computer.')
@@ -135,7 +142,7 @@ describe('opening a port on this computer', () => {
 
   it('keeps the gateway’s refusal', async () => {
     vi.mocked(api.localForwardStart).mockRejectedValue(new Error('localops: listen on 127.0.0.1:8000: bind: address already in use'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     fireEvent.click(screen.getByRole('button', { name: 'Open 8000 on this computer' }))
     expect((await screen.findByRole('alert')).textContent).toBe('localops: listen on 127.0.0.1:8000: bind: address already in use')
@@ -145,7 +152,7 @@ describe('opening a port on this computer', () => {
     useStore.setState({ capabilities: hosted })
     const writeText = vi.fn(async () => {})
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await listed()
     fireEvent.click(screen.getByRole('button', { name: 'Open 8000 on your own computer' }))
     expect(screen.getByRole('status').textContent).toContain('aether forward run_1 8000')
@@ -159,7 +166,7 @@ describe('with a page open', () => {
   beforeEach(showPage)
 
   it('offers the ports under the focused address field and navigates to the one chosen', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByLabelText('Shared browser page')
     await screen.findByRole('button', { name: 'Ports, 2 listening' })
     act(() => address().focus())
@@ -174,7 +181,7 @@ describe('with a page open', () => {
   })
 
   it('narrows the offers to what is typed and drops them with Escape', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByRole('button', { name: 'Ports, 2 listening' })
     act(() => address().focus())
     fireEvent.change(address(), { target: { value: 'localhost:80' } })
@@ -189,7 +196,7 @@ describe('with a page open', () => {
   })
 
   it('navigates to a port pressed in the offers without taking focus from the field', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByRole('button', { name: 'Ports, 2 listening' })
     act(() => address().focus())
     const offer = screen.getByRole('option', { name: /localhost:5173/ })
@@ -198,7 +205,7 @@ describe('with a page open', () => {
   })
 
   it('lists them behind the toolbar’s count and navigates to the one picked', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Ports, 2 listening' }))
     const list = await screen.findByRole('dialog')
     expect(list.hasAttribute('data-browser')).toBe(true)
