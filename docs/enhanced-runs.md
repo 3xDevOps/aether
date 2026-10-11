@@ -107,7 +107,8 @@ Consecutive tool calls fold into one line ("Read 2 files, ran 1 command and
 edited 1 file"); click it for one
 line per call with its duration, and click a call for the command, the end of
 its output or its diff. The agent's plan, the files a turn changed (each opens
-**Changes**), notices and a **Finished** line per turn sit in between, and
+**Changes** at that file), notices and a **Finished** line per turn sit in
+between, and
 messages between agents show inline (**Hide agent messages**, above the
 timeline, turns them off). While a turn runs, one moving line says what the
 agent is doing now; while it waits on you it reads "Waiting for your

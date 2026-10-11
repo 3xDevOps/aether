@@ -285,6 +285,10 @@ or **Cancelled**. **Sent** means the PTY write was accepted, not that the
 agent read or answered it. Retries reuse the message identity, so they never
 create a second request.
 
+**Send to agent** in the **Changes** view sends your comments on the diff as
+one such message, under the same rules: at once with the lease, after 45
+seconds without it.
+
 A reported task outcome leaves an interactive run open: send a follow-up
 here or type into its native terminal without reopening. **Close** ends the
 session. When the viewer cannot message the agent, the composer instead

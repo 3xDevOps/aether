@@ -61,7 +61,8 @@ export interface RowContext {
   ownerID: string
   hasAgentTerminal: boolean
   openTerminal: () => void
-  go: RunNavigation['go']
+  /** Opens the Changes view at one file. */
+  openChange: (path: string) => void
   reveal: RunNavigation['reveal']
 }
 
@@ -192,7 +193,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
     case 'plan':
       return <PlanCard entries={row.entries} />
     case 'changed-files':
-      return <ChangedFiles files={row.files} onOpen={() => ctx.go('changes')} />
+      return <ChangedFiles files={row.files} onOpen={ctx.openChange} />
     case 'answered':
       return (
         <EventRow tone={row.request.status === 'cancelled' ? 'neutral' : 'done'} trailing={<RelativeTime at={row.at} />}>

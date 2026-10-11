@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { sendToAgent } from '@/lib/send-to-agent'
 import type {
   FileRead, Run, RunGitCommitResult, RunGitDiffResult, RunGitExpected, RunGitPushResult,
   RunGitPushTarget, RunGitStatusResult, RunPRCreateResult, RunPRFeedbackResult,
@@ -50,7 +51,6 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const [feedback, setFeedback] = useState<RunPRFeedbackResult | null>(null)
   const [feedbackSelected, setFeedbackSelected] = useState<string[]>([])
   const [feedbackReceipt, setFeedbackReceipt] = useState<string | null>(null)
-  const pendingSend = useRef<{ body: string; key: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<PublishAction, string>>>({})
   const mounted = useRef(true)
@@ -204,14 +204,9 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   }
 
   async function sendFeedback(body: string) {
-    // The same message resends under the same key, so a lost response cannot post it twice.
-    const action = pendingSend.current?.body === body ? pendingSend.current : { body, key: crypto.randomUUID() }
-    pendingSend.current = action
-    const result = await client.runRoomPost({ workspace_id: run.workspace_id, run_id: run.id, kind: 'steer_request', body, idempotency_key: action.key })
-    pendingSend.current = null
-    useStore.getState().upsertRoomMessage(result.message)
+    const sent = await sendToAgent(run, body, undefined, client)
     if (!mounted.current) return
-    setFeedbackReceipt(result.receipt ?? result.message.state)
+    setFeedbackReceipt(sent.state)
     setFeedbackSelected([])
   }
 

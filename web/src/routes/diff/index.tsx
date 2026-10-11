@@ -5,13 +5,18 @@ import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { CommentCard } from '@/routes/diff/comment-card'
 import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
+import { useReview } from '@/routes/diff/review'
+import { ReviewBar } from '@/routes/diff/review-bar'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
 import { isLiveRun } from '@/routes/files/sources'
 import { openInFiles } from '@/routes/files/open'
+import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { initialDiff, intervalKey, type DiffSnapshot, type IntervalPatch } from '@/store/diff'
@@ -24,12 +29,14 @@ function collapsedByDefault(file: PatchFile): boolean {
 
 /** A snapshot shows the diff between its parent tree and its tree, not a filter
  * over the current diff; a snapshot with no recorded tree is not selectable. */
-export function ChangesView({ runID }: { runID: string }) {
+export function ChangesView({ runID, agent, agentName }: { runID: string; agent: AgentTerminal; agentName: string }) {
   const caps = useCapability()
   const run = useStore((s) => s.runs[runID])
+  const route = useStore((s) => s.route)
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
   // Keep the chosen interval even when newer snapshots move it out of the menu.
   const [snapshot, setSnapshot] = useState<DiffSnapshot | null>(null)
+  const [asked, setAsked] = useState<string | null>(null)
   const wrapping = useStore((s) => s.diffWrap)
   const setWrapping = useStore((s) => s.setDiffWrap)
   const coarse = useMediaQuery(coarsePointer)
@@ -51,6 +58,8 @@ export function ChangesView({ runID }: { runID: string }) {
   const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
   const truncated = snapshot ? (interval?.truncated ?? false) : state.truncated
   const historyNotice = snapshot ?? state.snapshots.find((entry) => entry.historyGap || entry.snapshotError)
+  const scope = snapshot && hasTree(snapshot) ? intervalKey(snapshot.parentTree!, snapshot.tree!) : ''
+  const review = useMemo(() => ({ runID, scope }), [runID, scope])
 
   const toggle = useCallback((path: string, next: boolean) => setCollapsed((all) => ({ ...all, [path]: next })), [])
   const open = useCallback((path: string) => {
@@ -65,6 +74,20 @@ export function ChangesView({ runID }: { runID: string }) {
       else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
     })
   }, [files, virtual, ids])
+
+  // A link to one file names it in the route; it is opened in the current
+  // diff once that diff has it.
+  useEffect(() => {
+    if (!isRunRoute(route, runID) || route.params.view !== 'changes' || !route.params.file) return
+    setSnapshot(null)
+    setAsked(route.params.file)
+  }, [route, runID])
+  useEffect(() => {
+    if (!asked || snapshot) return
+    if (cumulative.some((file) => file.path === asked)) jump(asked)
+    else if (state.status === 'loading') return
+    setAsked(null)
+  }, [asked, snapshot, cumulative, state.status, jump])
 
   if (!run) return <MissingRun />
 
@@ -81,6 +104,7 @@ export function ChangesView({ runID }: { runID: string }) {
       collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
       onCollapsedChange={toggle}
       onOpen={canOpen && openable(file) ? open : undefined}
+      review={review}
     />
   )
   return (
@@ -101,6 +125,8 @@ export function ChangesView({ runID }: { runID: string }) {
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
         publishable={!state.recorded && cumulative.length > 0}
       />
+      <ReviewBar run={run} agent={agent} agentName={agentName} files={files} scope={scope} />
+      {(files.length > 0 || (!loading && !failed)) && <Unplaced runID={runID} files={files} scope={scope} />}
       {!snapshot && state.recorded && (
         <Callout tone="neutral" role="status" className="m-2 shrink-0">
           Checkout removed. Showing the last recorded changes.
@@ -144,6 +170,20 @@ export function ChangesView({ runID }: { runID: string }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** Comments on a file this diff no longer has. They stay, with their quote, until sent or deleted. */
+function Unplaced({ runID, files, scope }: { runID: string; files: PatchFile[]; scope: string }) {
+  const { comments } = useReview(runID)
+  const gone = comments.filter((comment) => comment.scope === scope && !files.some((file) => file.path === comment.path))
+  if (gone.length === 0) return null
+  return (
+    <section aria-label="Outdated comments" className="flex max-h-[40%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-seam bg-chrome p-2">
+      {gone.map((comment) => (
+        <CommentCard key={comment.id} runID={runID} comment={comment} lines={comment.lines} outdated />
+      ))}
+    </section>
   )
 }
 

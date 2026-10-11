@@ -158,6 +158,19 @@ describe('the Enhanced session view', () => {
     expect(within(log).getByText('Exit code 0')).toBeDefined()
   })
 
+  it('opens the Changes view at the file a Changed files row names', async () => {
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4 }, [
+      item('turn_start', 1),
+      say(1, 'user', 'Round the totals'),
+      tool(1, 'e1', 'edit', 'Edit src/billing.js', 'completed', { diffs: [{ path: 'src/billing.js', patch: '--- a/src/billing.js\n+++ b/src/billing.js\n@@ -1 +1 @@\n-a\n+b\n' }] }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    await userEvent.click(await within(log).findByRole('button', { name: /^src\/billing\.js/ }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes', file: 'src/billing.js' } })
+  })
+
   it('keeps live Enhanced output and approvals usable after a retained-prefix replay reset', async () => {
     open()
     const session = acpSocket().open({

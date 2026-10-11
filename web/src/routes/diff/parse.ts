@@ -11,6 +11,8 @@ export interface PatchLine {
   new?: number
 }
 
+export const linePrefix: Record<LineKind, string> = { add: '+', del: '-', hunk: '', meta: '', context: ' ' }
+
 export type FileStatus = 'added' | 'deleted' | 'modified' | 'binary'
 
 export interface PatchFile {

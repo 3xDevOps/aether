@@ -805,6 +805,15 @@ watching sees who sent it.
 
 ## 8. Review and publish the result
 
+### Comment on the diff
+
+Open the run's **Changes** view. Point at a line and click the **+** beside
+its number, write what should change and click **Comment**. Drag across the
+numbers, or Shift-click a second line, to comment on a range. Comments wait
+in a bar under the toolbar until **Send to agent** delivers all of them as one
+message, each with its `path:line`, the quoted diff lines and your text. They
+stay in this browser tab until you send them.
+
 ### Remote-only: commit, push and open a PR
 
 Open the run's **Changes** view and click **Publish…**. The dialog runs
