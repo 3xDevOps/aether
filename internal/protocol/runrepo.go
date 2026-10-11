@@ -77,8 +77,10 @@ type RunGitUpstream struct {
 }
 
 type RunGitStatusResult struct {
-	Branch          string               `json:"branch"`
-	Head            string               `json:"head"`
+	Branch string `json:"branch"`
+	Head   string `json:"head"`
+	// HeadSubject is the first line of HEAD's commit message.
+	HeadSubject     string               `json:"head_subject,omitempty"`
 	Detached        bool                 `json:"detached"`
 	Unborn          bool                 `json:"unborn"`
 	Changes         []RunGitChange       `json:"changes"`
