@@ -420,10 +420,12 @@ aether workspace env import --plain .env
 
 The file holds `NAME=VALUE` lines. Blank lines and `#` comments are skipped,
 a leading `export ` is dropped, single quotes keep a value as written and
-double quotes unescape `\n`, `\r`, `\t`, `\"` and `\\`. A later line
-replaces an earlier one of the same name. The dashboard's **Import .env…**
-reads the same format and lists what each line adds or replaces before
-anything is saved.
+double quotes unescape `\n`, `\r`, `\t`, `\"` and `\\`, which is how a
+value with line breaks is written. A `#` after a closing quote, or after a
+space in an unquoted value, starts a comment. A later line replaces an
+earlier one of the same name. The dashboard's **Import .env…** reads the
+same format and lists what each line adds or replaces before anything is
+saved.
 
 A secret is hidden from the settings, not from a run. It is an ordinary
 environment variable inside the container, so the agent can read it and so

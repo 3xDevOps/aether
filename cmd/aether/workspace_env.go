@@ -299,10 +299,10 @@ func printWorkspaceVariables(w io.Writer, ws protocol.Workspace, res protocol.Wo
 
 // parseDotenv reads NAME=VALUE lines: blank lines and # comments are skipped,
 // a leading "export " is dropped, and a value may be wrapped in single quotes
-// (kept as written) or double quotes (\n, \r, \t, \" and \\ are unescaped).
-// A later line replaces an earlier one of the same name. badLines numbers
-// the lines that are none of that. web/src/lib/dotenv.ts reads the same
-// format for the dashboard.
+// (kept as written) or double quotes (\n, \r, \t, \" and \\ are unescaped),
+// with a # comment after either. A later line replaces an earlier one of the
+// same name. badLines numbers the lines that are none of that.
+// web/src/lib/dotenv.ts reads the same format for the dashboard.
 func parseDotenv(text string) (variables []protocol.WorkspaceVariable, badLines []int) {
 	index := map[string]int{}
 	for i, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
@@ -330,17 +330,32 @@ func parseDotenv(text string) (variables []protocol.WorkspaceVariable, badLines 
 var dotenvEscapes = strings.NewReplacer(`\n`, "\n", `\r`, "\r", `\t`, "\t", `\"`, `"`, `\\`, `\`)
 
 func dotenvValue(value string) string {
-	if len(value) >= 2 {
-		quote, last := value[0], value[len(value)-1]
-		if quote == '\'' && last == '\'' {
-			return value[1 : len(value)-1]
-		}
-		if quote == '"' && last == '"' {
-			return dotenvEscapes.Replace(value[1 : len(value)-1])
+	if value != "" && (value[0] == '"' || value[0] == '\'') {
+		if end := closingQuote(value); end > 0 {
+			if rest := strings.TrimSpace(value[end+1:]); rest == "" || rest[0] == '#' {
+				if value[0] == '"' {
+					return dotenvEscapes.Replace(value[1:end])
+				}
+				return value[1:end]
+			}
 		}
 	}
 	if i := strings.Index(value, " #"); i >= 0 {
 		value = strings.TrimSpace(value[:i])
 	}
 	return value
+}
+
+// closingQuote is where the quote that value opens with is closed, or -1.
+// Inside double quotes a backslash escapes the byte after it.
+func closingQuote(value string) int {
+	for i := 1; i < len(value); i++ {
+		switch {
+		case value[0] == '"' && value[i] == '\\':
+			i++
+		case value[i] == value[0]:
+			return i
+		}
+	}
+	return -1
 }

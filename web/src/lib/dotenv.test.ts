@@ -12,6 +12,9 @@ describe('parseDotenv', () => {
       'DOUBLE="two\\nlines and a \\"quote\\""',
       "SINGLE='kept $as \\n written'",
       'COMMENTED=value # trailing comment',
+      'QUOTED_COMMENT="abc # kept" # dropped',
+      "SINGLE_COMMENT='x'#y",
+      'OPEN_QUOTE="never closed',
       'HASH=abc#def',
       'URL=https://example.test/?a=b',
       'EMPTY=',
@@ -29,11 +32,14 @@ describe('parseDotenv', () => {
         { name: 'DOUBLE', value: 'two\nlines and a "quote"' },
         { name: 'SINGLE', value: 'kept $as \\n written' },
         { name: 'COMMENTED', value: 'value' },
+        { name: 'QUOTED_COMMENT', value: 'abc # kept' },
+        { name: 'SINGLE_COMMENT', value: 'x' },
+        { name: 'OPEN_QUOTE', value: '"never closed' },
         { name: 'HASH', value: 'abc#def' },
         { name: 'URL', value: 'https://example.test/?a=b' },
         { name: 'EMPTY', value: '' },
       ],
-      badLines: [13, 14, 15],
+      badLines: [16, 17, 18],
     })
   })
 })

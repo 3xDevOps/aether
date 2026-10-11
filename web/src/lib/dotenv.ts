@@ -10,12 +10,22 @@ export interface DotenvResult {
 
 const escapes: Record<string, string> = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\"': '"', '\\\\': '\\' }
 
+/** Where the quote `raw` opens with is closed, or -1. Inside double quotes a backslash escapes the next character. */
+function closingQuote(raw: string): number {
+  for (let i = 1; i < raw.length; i++) {
+    if (raw[0] === '"' && raw[i] === '\\') i++
+    else if (raw[i] === raw[0]) return i
+  }
+  return -1
+}
+
 function value(raw: string): string {
-  if (raw.length >= 2) {
-    const quote = raw[0]
-    if (quote === raw[raw.length - 1]) {
-      if (quote === "'") return raw.slice(1, -1)
-      if (quote === '"') return raw.slice(1, -1).replace(/\\[nrt"\\]/g, (escape) => escapes[escape])
+  if (raw[0] === '"' || raw[0] === "'") {
+    const end = closingQuote(raw)
+    const rest = raw.slice(end + 1).trim()
+    if (end > 0 && (rest === '' || rest[0] === '#')) {
+      const inner = raw.slice(1, end)
+      return raw[0] === '"' ? inner.replace(/\\[nrt"\\]/g, (escape) => escapes[escape]) : inner
     }
   }
   const comment = raw.indexOf(' #')

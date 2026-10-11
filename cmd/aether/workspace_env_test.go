@@ -97,6 +97,9 @@ func TestParseDotenv(t *testing.T) {
 		`DOUBLE="two\nlines and a \"quote\""`,
 		`SINGLE='kept $as \n written'`,
 		"COMMENTED=value # trailing comment",
+		`QUOTED_COMMENT="abc # kept" # dropped`,
+		`SINGLE_COMMENT='x'#y`,
+		`OPEN_QUOTE="never closed`,
 		"HASH=abc#def",
 		"URL=https://example.test/?a=b",
 		"EMPTY=",
@@ -113,6 +116,9 @@ func TestParseDotenv(t *testing.T) {
 		{Name: "DOUBLE", Value: "two\nlines and a \"quote\""},
 		{Name: "SINGLE", Value: `kept $as \n written`},
 		{Name: "COMMENTED", Value: "value"},
+		{Name: "QUOTED_COMMENT", Value: "abc # kept"},
+		{Name: "SINGLE_COMMENT", Value: "x"},
+		{Name: "OPEN_QUOTE", Value: `"never closed`},
 		{Name: "HASH", Value: "abc#def"},
 		{Name: "URL", Value: "https://example.test/?a=b"},
 		{Name: "EMPTY"},
@@ -120,8 +126,8 @@ func TestParseDotenv(t *testing.T) {
 	if !slices.Equal(variables, want) {
 		t.Errorf("variables = %+v\nwant %+v", variables, want)
 	}
-	if !slices.Equal(badLines, []int{13, 14, 15}) {
-		t.Errorf("badLines = %v, want [13 14 15]", badLines)
+	if !slices.Equal(badLines, []int{16, 17, 18}) {
+		t.Errorf("badLines = %v, want [16 17 18]", badLines)
 	}
 }
 
