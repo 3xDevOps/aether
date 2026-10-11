@@ -263,17 +263,74 @@ function main() {
   })
   ipcMain.handle('window:is-maximized', (event) => senderWindow(event)?.isMaximized() ?? false)
 
-  // The folder picker behind the onboarding wizard's Repository step. Modal
-  // to the asking window - a sheet on macOS - so it cannot be lost behind
-  // it. An empty string means the user cancelled, and only that: a window
-  // that could not be resolved is a real failure and rejects, so the step
-  // shows what went wrong rather than a button that does nothing.
+  // KDE's portal backend shows nothing for the x11: parent handle Chromium sends
+  // when Electron draws on X11 under Wayland, which it does unless the user sets
+  // an ozone platform, so KDE under Wayland asks without a parent. Chromium
+  // reports a failed portal as a cancel and a hung one never settles, so window
+  // focus is the only sign a chooser opened.
+  const chooserTail =
+    'Electron asks xdg-desktop-portal for the chooser when the portal offers one (version 4 or newer), kdialog on KDE when installed, and GTK otherwise; run the app from a terminal to see any error Electron prints'
+
   ipcMain.handle('dialog:choose-folder', async (event) => {
     const target = senderWindow(event)
     if (!target) throw new Error('no window asked for the folder dialog')
-    const { canceled, filePaths } = await dialog.showOpenDialog(target, {
-      title: 'Choose repository folder',
-      properties: ['openDirectory'],
+    const options = { title: 'Choose repository folder', properties: ['openDirectory'] }
+    if (process.platform !== 'linux') {
+      const { canceled, filePaths } = await dialog.showOpenDialog(target, options)
+      return canceled ? '' : filePaths[0]
+    }
+    const kdeWayland =
+      process.env.WAYLAND_DISPLAY &&
+      (process.env.XDG_CURRENT_DESKTOP ?? '').split(':').includes('KDE')
+    const { canceled, filePaths } = await new Promise((resolve, reject) => {
+      const focused = target.isFocused()
+      let blurred = !focused
+      let timedOut = false
+      let timer
+      const done = () => {
+        clearTimeout(timer)
+        target.removeListener('blur', onBlur)
+        target.removeListener('focus', onFocus)
+      }
+      const arm = () => {
+        timer = setTimeout(() => {
+          done()
+          timedOut = true
+          reject(new Error('the window held focus for the last 10s, so no chooser seems to have opened. ' + chooserTail))
+        }, 10_000)
+      }
+      const onBlur = () => {
+        blurred = true
+        clearTimeout(timer)
+      }
+      const onFocus = () => {
+        clearTimeout(timer)
+        arm()
+      }
+      target.on('blur', onBlur)
+      target.on('focus', onFocus)
+      if (focused) arm()
+      const shown = kdeWayland
+        ? dialog.showOpenDialog(options)
+        : dialog.showOpenDialog(target, options)
+      shown.then(
+        (result) => {
+          done()
+          if (timedOut) {
+            if (!result.canceled && !target.isDestroyed()) {
+              target.webContents.send('dialog:folder-chosen', result.filePaths[0])
+            }
+          } else if (result.canceled && !blurred) {
+            reject(new Error('the folder chooser closed without opening: the window kept focus throughout. ' + chooserTail))
+          } else {
+            resolve(result)
+          }
+        },
+        (err) => {
+          done()
+          if (!timedOut) reject(err)
+        },
+      )
     })
     return canceled ? '' : filePaths[0]
   })

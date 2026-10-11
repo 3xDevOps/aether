@@ -527,14 +527,31 @@ desktop bridge, so its header has neither drag regions nor window controls.
 
 The bridge carries one more thing the SPA cannot do for itself:
 `window.aetherDesktop.chooseFolder()` opens the shell's native directory
-dialog, parented to the asking window - a sheet on macOS, modal to the window
-on Windows; a Linux portal chooser runs out of process and is neither, which
-is why the caller disables its button while one is open - and resolves to the
-chosen absolute path, or `""` when it was cancelled. A window it cannot
-resolve rejects with `no window asked for the folder dialog` instead, so a
-caller can say what went wrong. It is optional on the type for the same
-reason `shellVersion` exists: a shell built by an older `aether gui build`
-does not have it.
+dialog and resolves to the chosen absolute path, or `""` when it was
+cancelled. On macOS the dialog is a sheet on the asking window; on Windows it
+is modal to it. On Linux Electron asks xdg-desktop-portal when the portal
+offers a file chooser of version 4 or newer, kdialog on KDE when it is
+installed, and GTK otherwise. A portal or kdialog chooser runs out of process,
+which is why the caller disables its button while one is open; the GTK
+fallback runs in process. On KDE under Wayland (`WAYLAND_DISPLAY` set and
+`KDE` in `XDG_CURRENT_DESKTOP`) the shell asks without a parent window:
+Electron draws on X11 there unless the user sets an ozone platform, and KDE's
+portal backend shows nothing for an `x11:` handle. On Linux Electron reports a
+failed portal as a cancel and a hung one never answers, so the shell takes the
+window losing focus as the sign a chooser opened. A 10s timer runs only while
+the window has focus: from the call if the window is focused then, and from
+every regained focus; it stops when the window loses focus. When it fires the
+call rejects with a message starting `the window held focus for the last 10s`.
+A dialog that closes cancelled while the window had focus at the call and
+never lost it rejects with one starting
+`the folder chooser closed without opening:`. A folder picked after the 10s
+rejection arrives through `window.aetherDesktop.onFolderChosen`; the
+Repository step applies the first such pick, unless the field was edited,
+**Use a different repository** was clicked, the step was left or reset, a
+link is in flight or a clone is connected. A window the shell cannot resolve
+rejects with `no window asked for the folder dialog`.
+Both properties are optional on the type for the same reason `shellVersion`
+exists: a shell built by an older `aether gui build` lacks them.
 
 ### Launch splash
 
@@ -4020,14 +4037,16 @@ offers folders `link.status` already knows: the current clone and named
 profiles as a `datalist`. In the desktop shell it also gets a **Choose
 folder** button, which opens the native directory dialog through
 `window.aetherDesktop.chooseFolder`, writes the answer into the field and
-clears any error the last attempt left; cancelling leaves both alone, a
-dialog that fails puts the shell's own error under the form, and the whole
-path form waits while a dialog is open, because a chooser that is not modal
-to the window leaves it live and a late answer would land on top of whatever
-was typed or submitted meanwhile. That wait is the step's own state, so
-leaving the step and coming back is the way out of a chooser that died
-without answering. Typing stays the fallback, because a browser tab has no
-dialog and a shell built by an older `aether gui build` has no method.
+clears any error the last attempt left; cancelling leaves both alone, a dialog
+that fails puts the shell's own error under the form, and the whole path form
+waits while a dialog is open, because a chooser that is not modal to the
+window leaves it live. On Linux the shell gives up once the window has held
+focus for 10s and puts its error under the form; a folder picked after that
+fills the field unless it was edited or the step moved on since (see the
+bridge paragraph above). On a shell built before that, leaving the step and
+coming back is the way out of a chooser that died without answering. Typing
+stays the fallback, because a browser tab has no dialog and a shell built by
+an older `aether gui build` has no method.
 
 The step adds the `aether` remote (`link.repo`) and then seeds the workspace:
 where the local gateway serves `repo.push` it shows a **Push now** button.
