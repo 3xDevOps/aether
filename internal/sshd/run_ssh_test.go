@@ -889,6 +889,28 @@ func TestRunSSHTimelineNamesWhoConnected(t *testing.T) {
 	}
 }
 
+// A connection nobody can be shown is not admitted: the note is the only
+// record teammates get that a member was in the container.
+func TestRunSSHRefusesAConnectionTheTimelineCannotRecord(t *testing.T) {
+	e := newTestEnv(t, nil)
+	svc := installRunSSHTestService(t, e)
+	e.srv.cfg.Bus = &failingPublishBus{Bus: e.bus, failAt: 1, err: errors.New("event log unavailable")}
+
+	nested, ack := dialRunSSH(t, e.dial(t), string(e.run.ID))
+	if nested != nil || ack.Code != protocol.CodeInternal ||
+		ack.Error != "record the ssh connection on the timeline: event log unavailable" {
+		t.Fatalf("unrecorded connection = %d %q, want it refused with the cause", ack.Code, ack.Error)
+	}
+	e.srv.runSSHMu.Lock()
+	counted := len(e.srv.runSSHConns)
+	e.srv.runSSHMu.Unlock()
+	if counted != 0 || len(svc.starts()) != 0 {
+		t.Fatalf("a refused connection left %d counted and started %+v", counted, svc.starts())
+	}
+	// The next attempt is recorded and admitted.
+	mustDialRunSSH(t, e, e.signer)
+}
+
 func TestRunSSHSFTP(t *testing.T) {
 	e := newTestEnv(t, nil)
 	svc := installRunSSHTestService(t, e)

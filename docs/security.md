@@ -973,7 +973,8 @@ one.
   connection's processes are frozen with the container, and it starts
   nothing new until the run resumes. A refusal carries the server's reason.
   Each connection a member opens to a run they have no other SSH connection
-  to is stamped on the workspace timeline under that member.
+  to is stamped on the workspace timeline under that member, and refused
+  when the timeline cannot record it.
 - **The run asks for no second credential.** The member is authenticated by
   the connection the `aether` CLI makes: tailnet identity, SSH key or edge
   device ([networking.md](networking.md)). The SSH connection the member's

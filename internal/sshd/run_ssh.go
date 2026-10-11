@@ -115,20 +115,20 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 		refuse(err)
 		return
 	}
-	release, first, err := s.claimRunSSH(run.ID, member)
+	release, err := s.claimRunSSH(run.ID, member, func() error {
+		if _, perr := s.cfg.Bus.Publish(ctx, events.Event{
+			WorkspaceID: run.WorkspaceID, RunID: run.ID, ActorID: member,
+			Payload: events.TimelinePayload{Kind: events.TimelineNote, Message: "connected over SSH"},
+		}); perr != nil {
+			return fmt.Errorf("record the ssh connection on the timeline: %w", perr)
+		}
+		return nil
+	})
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer release()
-	if first {
-		if _, perr := s.cfg.Bus.Publish(ctx, events.Event{
-			WorkspaceID: run.WorkspaceID, RunID: run.ID, ActorID: member,
-			Payload: events.TimelinePayload{Kind: events.TimelineNote, Message: "connected over SSH"},
-		}); perr != nil {
-			slog.Warn("sshd: record ssh connection", "run", run.ID, "member", member, "error", perr)
-		}
-	}
 	hostKey := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(s.hostKey.PublicKey())))
 	if err = writeJSONLine(ch, protocol.RunSSHResponse{OK: true, HostKey: hostKey}); err != nil {
 		return
@@ -167,13 +167,15 @@ func (s *Server) serveRunSSH(ctx context.Context, member domain.MemberID, ch sub
 }
 
 // claimRunSSH counts one SSH connection to run against the run's cap and
-// against the member's share of it. first reports that member had none open,
-// which is when the connection is stamped on the timeline.
-func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID) (release func(), first bool, err error) {
+// against the member's share of it. A member with none open is recorded
+// first, and refused when that fails. record runs under the lock, so a second
+// connection of theirs cannot be admitted while the first one's note is still
+// being written and may yet fail.
+func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID, record func() error) (release func(), err error) {
 	s.runSSHMu.Lock()
 	defer s.runSSHMu.Unlock()
 	if s.runSSHConns[run][member] >= maxRunSSHMemberConns {
-		return nil, false, &protocol.Error{Code: protocol.CodeConflict,
+		return nil, &protocol.Error{Code: protocol.CodeConflict,
 			Message: fmt.Sprintf("you already have %d SSH connections open to run %s, the most one member takes", maxRunSSHMemberConns, run)}
 	}
 	open := 0
@@ -181,13 +183,17 @@ func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID) (release 
 		open += n
 	}
 	if open >= maxRunSSHConns {
-		return nil, false, &protocol.Error{Code: protocol.CodeConflict,
+		return nil, &protocol.Error{Code: protocol.CodeConflict,
 			Message: fmt.Sprintf("run %s already has %d SSH connections open, the most one run takes", run, maxRunSSHConns)}
+	}
+	if s.runSSHConns[run][member] == 0 {
+		if err = record(); err != nil {
+			return nil, err
+		}
 	}
 	if s.runSSHConns[run] == nil {
 		s.runSSHConns[run] = make(map[domain.MemberID]int)
 	}
-	first = s.runSSHConns[run][member] == 0
 	s.runSSHConns[run][member]++
 	return func() {
 		s.runSSHMu.Lock()
@@ -199,7 +205,7 @@ func (s *Server) claimRunSSH(run domain.RunID, member domain.MemberID) (release 
 		if len(s.runSSHConns[run]) == 0 {
 			delete(s.runSSHConns, run)
 		}
-	}, first, nil
+	}, nil
 }
 
 // runSSHConn is one nested SSH connection into a run.

@@ -547,7 +547,8 @@ three seconds and closes the connection once the member may no longer open
 it or the run has finished. When the check itself cannot complete three
 times in a row, the connection is closed too. Each
 time a member connects to a run they have no other SSH connection to,
-**Activity** shows **Connected over SSH** beside their avatar.
+**Activity** shows **Connected over SSH** beside their avatar. A connection
+that cannot be recorded there is refused.
 
 A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 `Connection closed by UNKNOWN port 65535`:
