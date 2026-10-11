@@ -543,8 +543,9 @@ Exactly who can open a writable run shell: a member with `steer` on the run
 ([teams.md](teams.md#roles)) who owns the run's agent account or has been
 given it ([Account sharing](security.md#account-sharing)), while the run is
 `running` or `needs-attention` and not paused. The server checks again every
-few seconds and closes the connection once the member may no longer open it
-or the run has finished. Each
+three seconds and closes the connection once the member may no longer open
+it or the run has finished. When the check itself cannot complete three
+times in a row, the connection is closed too. Each
 time a member connects to a run they have no other SSH connection to,
 **Activity** shows **Connected over SSH** beside their avatar.
 

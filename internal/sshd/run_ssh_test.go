@@ -28,6 +28,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // runSSHTestService stands in for the run's container: commands run as
@@ -38,7 +39,9 @@ type runSSHTestService struct {
 
 	mu      sync.Mutex
 	refusal error
-	started []scheduler.RunExec
+	// transient is how many more checks refusal answers before it clears.
+	transient int
+	started   []scheduler.RunExec
 	// stopped counts stops that landed; stopErr refuses them, as a paused
 	// container does, and refusedStops counts those.
 	stopped      int
@@ -71,7 +74,20 @@ func installRunSSHTestService(t *testing.T, e *testEnv) *runSSHTestService {
 func (f *runSSHTestService) refuse(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.refusal = err
+	f.refusal, f.transient = err, 0
+}
+
+// refuseNext answers the next n checks with err, then admits again.
+func (f *runSSHTestService) refuseNext(err error, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refusal, f.transient = err, n
+}
+
+func (f *runSSHTestService) refusing() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.refusal != nil
 }
 
 func (f *runSSHTestService) starts() []scheduler.RunExec {
@@ -95,7 +111,13 @@ func (f *runSSHTestService) CheckRunExec(_ context.Context, _ domain.RunID, p co
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.refusal
+	err := f.refusal
+	if f.transient > 0 {
+		if f.transient--; f.transient == 0 {
+			f.refusal = nil
+		}
+	}
+	return err
 }
 
 func (f *runSSHTestService) StartRunExec(ctx context.Context, run domain.RunID, p control.Principal, spec scheduler.RunExec, authorize func() error) (runtime.ManagedExec, error) {
@@ -509,8 +531,22 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 				t.Fatal(err)
 			}
 		},
+		"member demoted": func(t *testing.T, e *testEnv, _ *runSSHTestService, bo *domain.Member) {
+			bo.Role = domain.RoleViewer
+			if err := e.store.UpdateMember(t.Context(), bo); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"member removed": func(t *testing.T, e *testEnv, _ *runSSHTestService, bo *domain.Member) {
+			if err := e.store.DeleteMember(t.Context(), bo.ID); err != nil {
+				t.Fatal(err)
+			}
+		},
 		"run finished": func(_ *testing.T, _ *testEnv, svc *runSSHTestService, _ *domain.Member) {
 			svc.refuse(fmt.Errorf("%w: the run is completed and its container is gone", scheduler.ErrNoLiveEnvironment))
+		},
+		"run closing": func(_ *testing.T, _ *testEnv, svc *runSSHTestService, _ *domain.Member) {
+			svc.refuse(scheduler.ErrDevelopmentClosed)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -542,16 +578,69 @@ func TestRunSSHEndsWhenAuthorizationOrTheRunGoes(t *testing.T) {
 	}
 }
 
-func TestRunSSHSurvivesACheckThatCannotComplete(t *testing.T) {
+// The connection-wide check is a snapshot between ticks, so every new session
+// and forward asks again on its own.
+func TestRunSSHRefusesANewChannelOnceAuthorizationIsWithdrawn(t *testing.T) {
+	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = time.Hour })
+	svc := installRunSSHTestService(t, e)
+	signer, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
+	if err := e.store.ShareAccount(t.Context(), e.member.ID, bo.ID); err != nil {
+		t.Fatal(err)
+	}
+	client := mustDialRunSSH(t, e, signer)
+	port := listenLoopback(t, "")
+	if err := e.store.RevokeAccountShare(t.Context(), e.member.ID, bo.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	const reason = "has not shared their account with you"
+	if stdout, stderr, status := runOverSSH(t, client, "echo reached", ""); status != 255 || stdout != "" || !strings.Contains(stderr, reason) {
+		t.Fatalf("session after the share was withdrawn = stdout %q stderr %q status %d", stdout, stderr, status)
+	}
+	_, err := client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	var refused *ssh.OpenChannelError
+	if !errors.As(err, &refused) || refused.Reason != ssh.Prohibited || !strings.Contains(refused.Message, reason) {
+		t.Fatalf("forward after the share was withdrawn = %v, want it prohibited with the reason", err)
+	}
+	if started := svc.starts(); len(started) != 0 {
+		t.Fatalf("a withdrawn member started %+v", started)
+	}
+}
+
+func TestRunSSHFailsClosedWhenItsCheckCannotComplete(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) { c.revalidateInterval = 10 * time.Millisecond })
 	svc := installRunSSHTestService(t, e)
 	client := mustDialRunSSH(t, e, e.signer)
-	svc.refuse(errors.New("run lifecycle changed; retry"))
-	time.Sleep(100 * time.Millisecond)
-	svc.refuse(nil)
+	sess, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = sess.Start("sleep 300"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the command to start", func() bool { return len(svc.starts()) == 1 })
+
+	// A check that fails to complete fewer times in a row than the limit
+	// ends nothing: a store read racing a status change does that.
+	svc.refuseNext(errors.New("run lifecycle changed; retry"), runSSHUnconfirmedChecks-1)
+	eventually(t, "the checks that could not complete", func() bool { return !svc.refusing() })
 	if stdout, _, status := runOverSSH(t, client, "echo still here", ""); status != 0 || stdout != "still here\n" {
 		t.Fatalf("after a transient check failure: %q status %d", stdout, status)
 	}
+
+	// One that keeps failing is no answer either way, so the connection
+	// closes: here the store itself is gone.
+	closed := make(chan error, 1)
+	go func() { closed <- client.Wait() }()
+	if err = e.store.(*store.DB).Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the connection stayed open while its authorization could not be read")
+	}
+	eventually(t, "the session's process to be stopped", func() bool { return svc.stops() == 1 })
 }
 
 func TestRunSSHPauseKeepsTheConnectionAndStopsItsProcessesOnResume(t *testing.T) {

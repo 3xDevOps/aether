@@ -965,13 +965,15 @@ one.
   `internal/sshd`, then the scheduler's development authorization): current
   membership, **Steer** on the run, access to the run's backing account, and
   a `running` or `needs-attention` run that is not paused. The check runs
-  again for every session and every forwarded connection, and every few
+  again for every session and every forwarded connection, and every three
   seconds for the connection as a whole, which is closed once the member
-  fails it or the run has finished. A pause closes nothing: the connection's
-  processes are frozen with the container, and it starts nothing new until
-  the run resumes. A refusal carries the server's reason. Each connection a member opens to a
-  run they have no other SSH connection to is stamped on the workspace
-  timeline under that member.
+  fails it or the run has finished or is being closed. It fails closed: a
+  check that cannot complete, such as a store error, closes the connection
+  when it happens three times in a row. A pause closes nothing: the
+  connection's processes are frozen with the container, and it starts
+  nothing new until the run resumes. A refusal carries the server's reason.
+  Each connection a member opens to a run they have no other SSH connection
+  to is stamped on the workspace timeline under that member.
 - **The run asks for no second credential.** The member is authenticated by
   the connection the `aether` CLI makes: tailnet identity, SSH key or edge
   device ([networking.md](networking.md)). The SSH connection the member's

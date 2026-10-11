@@ -39,6 +39,10 @@ const (
 	maxRunSSHEnv      = 32
 	maxRunSSHEnvBytes = 1024
 
+	// runSSHUnconfirmedChecks is how many re-checks in a row may fail to
+	// complete before the connection is closed as if it had been refused.
+	runSSHUnconfirmedChecks = 3
+
 	runSSHStopGrace    = 2 * time.Second
 	runSSHStopTimeout  = 30 * time.Second
 	runSSHStopRetries  = 5
@@ -246,34 +250,43 @@ func (c *runSSHConn) close() {
 
 // revalidate ends the connection once the member may no longer open it or
 // the run has no container left. The admission is a snapshot; without this
-// a member who loses Steer keeps a shell until they disconnect.
+// a member who loses Steer keeps a shell until they disconnect. It fails
+// closed: a check that keeps failing to complete ends the connection too. A
+// pause ends nothing, and is only reported once the member is authorized:
+// the connection's processes are frozen with the container and cannot be
+// stopped until it resumes, when they carry on.
 func (c *runSSHConn) revalidate(ctx context.Context, nested ssh.Conn) {
 	ticker := time.NewTicker(c.s.cfg.revalidateInterval)
 	defer ticker.Stop()
+	unconfirmed := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := c.svc.CheckRunExec(ctx, c.run, c.principal, c.authorize); runSSHRevoked(err) {
-				_ = nested.Close()
-				return
+			err := c.svc.CheckRunExec(ctx, c.run, c.principal, c.authorize)
+			if err == nil || errors.Is(err, scheduler.ErrRunPaused) {
+				unconfirmed = 0
+				continue
 			}
+			if !runSSHRevoked(err) {
+				if unconfirmed++; unconfirmed < runSSHUnconfirmedChecks {
+					continue
+				}
+			}
+			_ = nested.Close()
+			return
 		}
 	}
 }
 
-// runSSHRevoked separates an answer that ends a connection from a check that
-// could not complete, such as a store read during a status change. A pause
-// ends nothing: the connection's processes are frozen with the container
-// and cannot be stopped until it resumes, when they carry on.
+// runSSHRevoked separates an answer that ends a connection at once from a
+// check that could not complete, such as a store read during a status
+// change.
 func runSSHRevoked(err error) bool {
-	if errors.Is(err, scheduler.ErrRunPaused) {
-		return false
-	}
 	return errors.Is(err, permissions.ErrDenied) || errors.Is(err, errMemberRemoved) ||
 		errors.Is(err, errMemberPending) || errors.Is(err, store.ErrNotFound) ||
-		errors.Is(err, scheduler.ErrNoLiveEnvironment)
+		errors.Is(err, scheduler.ErrNoLiveEnvironment) || errors.Is(err, scheduler.ErrDevelopmentClosed)
 }
 
 func (c *runSSHConn) session(ctx context.Context, nc ssh.NewChannel) {
