@@ -279,3 +279,49 @@ it('keeps uncertain PR creation read-only with its exact target, across closing 
   expect(client.runGitStatus).toHaveBeenCalledTimes(1)
   expect(client.runPRCreate).toHaveBeenCalledTimes(1)
 })
+
+it('keeps following the checkout in every field the member did not edit', async () => {
+  useStore.setState({ workspaces: { [workspace.id]: { ...workspace, origin } } })
+  const mine = 'https://github.com/mine/project.git'
+  const remotes = [...committed.remotes!, { name: 'mine', fetch_urls: [mine], push_urls: [mine] }]
+  const client = fakeApi({
+    runGitStatus: vi.fn().mockResolvedValueOnce({ ...committed, remotes }).mockResolvedValue({ ...committed, remotes, branch: 'feat/next', head: 'b'.repeat(40) }),
+    runPRStatus: vi.fn(async () => none),
+  })
+  renderOpen(client)
+  fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
+  await pickOption(screen.getByRole('combobox', { name: 'Push remote' }), 'mine')
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Writable push URL' }).textContent).toBe(mine))
+  expect(screen.getByLabelText('Push head branch')).toHaveProperty('value', status.branch)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }))
+  await waitFor(() => expect(screen.getByLabelText('Push head branch')).toHaveProperty('value', 'feat/next'))
+  expect(screen.getByRole('combobox', { name: 'Push remote' }).textContent).toBe('mine')
+  expect(screen.getByLabelText('PR head repository (owner/name)')).toHaveProperty('value', 'mine/project')
+  expect(screen.getByLabelText('PR head branch')).toHaveProperty('value', 'feat/next')
+})
+
+it('reconciles the exact target of an uncertain creation, whatever the push fields say afterwards', async () => {
+  useStore.setState({ workspaces: { [workspace.id]: { ...workspace, origin } } })
+  const client = fakeApi({
+    runGitStatus: vi.fn(async () => committed),
+    runGitPush: vi.fn(async () => pushedTo({ remote: 'origin', repository: origin, head_branch: status.branch })),
+    runPRStatus: vi.fn(async () => none),
+    runPRCreate: vi.fn(async () => { throw new Error('connection lost after request') }),
+  })
+  renderOpen(client)
+  const action = await screen.findByRole('button', { name: 'Push and open pull request' })
+  await waitFor(() => expect(action).toHaveProperty('disabled', false))
+  fireEvent.click(action)
+
+  const reconcile = await screen.findByRole('button', { name: 'Reconcile PR read-only' })
+  await waitFor(() => expect(reconcile).toHaveProperty('disabled', false))
+  expect(screen.getByRole('region', { name: 'Push outcome' }).textContent).toContain('Pushed: yes')
+  fireEvent.change(screen.getByLabelText('Push head branch'), { target: { value: 'elsewhere' } })
+  expect(screen.getByLabelText('PR head branch')).toHaveProperty('value', status.branch)
+  fireEvent.click(reconcile)
+  await waitFor(() => expect(client.runPRStatus).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(client.runPRStatus).mock.lastCall![0].target).toEqual({
+    repository: 'fork/project', base_branch: 'main', head_repository: 'fork/project', head_branch: status.branch,
+  })
+})

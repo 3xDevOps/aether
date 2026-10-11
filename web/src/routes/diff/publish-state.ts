@@ -27,8 +27,8 @@ interface PRReview {
 const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
 
 /** Every mutation names the branch and HEAD on screen; the server refuses it
- * when the checkout moved. Destinations start as the checkout's own and stay
- * that way, following each refresh, until the member edits them. */
+ * when the checkout moved. Each destination field starts as the checkout's
+ * own and follows every refresh until the member edits that field. */
 export function usePublish(run: Run, client: Api, open: boolean) {
   const caps = useCapability()
   const self = useSelf()
@@ -43,12 +43,14 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const [commit, setCommit] = useState<RunGitCommitResult | null>(null)
   const [push, setPush] = useState<RunGitPushResult | null>(null)
   const [source, setSource] = useState<string>()
-  const [pushEdit, setPushEdit] = useState<RunGitPushTarget | null>(null)
-  const [targetEdit, setTargetEdit] = useState<RunPRTarget | null>(null)
+  const [pushEdit, setPushEdit] = useState<Partial<RunGitPushTarget>>({})
+  const [targetEdit, setTargetEdit] = useState<Partial<RunPRTarget>>({})
   const [prReview, setPRReview] = useState<PRReview | null>(null)
   const [discoverable, setDiscoverable] = useState(false)
   const [creation, setCreation] = useState<RunPRCreateResult | null>(null)
-  const [uncertain, setUncertain] = useState(false)
+  // The exact target of a creation whose outcome is unknown. Until it is found, nothing else is looked up.
+  const [unsettled, setUnsettled] = useState<RunPRTarget | null>(null)
+  const uncertain = unsettled !== null
   const [titleEdit, setTitle] = useState<string | null>(null)
   const [body, setBody] = useState('')
   const [draft, setDraft] = useState(false)
@@ -60,8 +62,8 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const requested = useRef(false)
   const canWrite = self.role === 'admin' || self.role === 'collaborator'
   const expected = statusReady && status && !status.error ? { branch: status.branch, head: status.head } : null
-  const pushTarget = pushEdit ?? (status ? defaultPushTarget(status, workspace?.origin) : noPush)
-  const target = targetEdit ?? defaultPRTarget(pushTarget, run.base_branch || workspace?.base_branch || '', source)
+  const pushTarget = { ...(status ? defaultPushTarget(status, workspace?.origin) : noPush), ...pushEdit }
+  const target = unsettled ?? { ...defaultPRTarget(pushTarget, run.base_branch || workspace?.base_branch || '', source), ...targetEdit }
   const targetComplete = completeTarget(target)
   // A run that has committed nothing still has its base's subject at HEAD.
   const title = titleEdit ?? (status && status.head !== run.base_commit ? status.head_subject ?? '' : '')
@@ -188,25 +190,26 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     if (!mounted.current) return
     setPRReview({ target: { ...target }, expected, result })
     if (!result.pull_request || result.error) return
-    setUncertain(false)
+    setUnsettled(null)
     void follow(target)
   }
 
   // Only a destination the member chose is pinned: the checkout's own is found again as the checkout moves.
   function follow(found: RunPRTarget) {
-    return pushEdit || targetEdit ? trackPullRequest(run, found, client) : refreshPullRequest(run, client)
+    const chosen = Object.keys(pushEdit).length + Object.keys(targetEdit).length > 0
+    return chosen ? trackPullRequest(run, found, client) : refreshPullRequest(run, client)
   }
 
   async function create(review: PRReview) {
     // A lost response can follow a successful GitHub mutation. Only an exact
     // read-only discovery is offered until that PR has been found.
-    setUncertain(true)
+    setUnsettled(review.target)
     const result = await client.runPRCreate({
       run_id: run.id, expected: review.expected, target: review.target,
       expected_login: review.result.identity, title, body, draft,
     })
     setCreation(result)
-    setUncertain(result.creation_uncertain)
+    setUnsettled(result.creation_uncertain ? review.target : null)
     if (result.pull_request) {
       setPRReview({ ...review, result: {
         identity: result.identity, account_member_id: result.account_member_id,
@@ -234,16 +237,17 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     await refreshStatus()
   }
 
-  // An edit waits for Discover: looking a target up on every keystroke would not.
+  // Only the fields a member edited stop following the checkout. An edit
+  // waits for Discover: looking a target up on every keystroke would not.
   function changeTarget(key: keyof RunPRTarget, value: string) {
-    setTargetEdit({ ...target, [key]: value })
+    setTargetEdit((edit) => ({ ...edit, [key]: value }))
     setDiscoverable(false)
     setPRReview(null)
     setCreation(null)
   }
 
-  function changePushTarget(next: RunGitPushTarget) {
-    setPushEdit(next)
+  function changePushTarget(edit: Partial<RunGitPushTarget>) {
+    setPushEdit((all) => ({ ...all, ...edit }))
     setDiscoverable(false)
   }
 

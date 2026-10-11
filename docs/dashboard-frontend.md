@@ -2220,7 +2220,10 @@ both what it renders and the overlap set the conflict chips read.
   diff hunk. The server returns no log for a check, so none is sent; the
   link is what the agent reads it from. The row then shows the receipt, "Sent
   1 check to Claude Code." with **Open the session**, or the server's error
-  with the button still there. GitHub's own error, when the read fails,
+  with the button still there. One send is out at a time: the other rows'
+  buttons are disabled from the click until the server answers, including
+  while the owner's tab is taking control, and a send whose control never
+  arrives says so and frees them. GitHub's own error, when the read fails,
   shows above the lists with the last answer kept under it.
 - **Comments follow their lines.** Unsent comments sit in their own Zustand
   store in `review.ts`, keyed by run, for the reason composer drafts do. They

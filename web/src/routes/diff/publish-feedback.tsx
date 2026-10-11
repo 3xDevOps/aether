@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import { receipt, refusal, useAgentSend } from '@/routes/diff/agent-send'
 import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
 import { checkState, countChecks, refreshPullRequest, stateLabel, type CheckState, type TrackedPR } from '@/routes/diff/publish-pr'
-import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { implicitControlWindowMs, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
@@ -107,23 +107,31 @@ export function PRFeedback({
   const comments = commentsOf(feedback)
   const sendable = comments.length > 0 || pending.some((check) => checkState(check) === 'failing')
 
-  const send = (key: string, text: string) => agentSend.dispatch(() => {
+  // The row is reserved before control is asked for: a second click meanwhile
+  // would replace the send that is waiting for it.
+  const send = (key: string, text: string) => {
     if (inFlight.current) return
     inFlight.current = true
     setSending(key)
-    setFailed((all) => ({ ...all, [key]: '' }))
-    const body = `GitHub feedback on ${pr.repository}#${pr.number} (${pr.url}), ${pr.head_repository}:${pr.head_branch} → ${pr.base_branch}, head ${pr.head_oid}:\n\n${text}`
-    void agentSend.post(body).then(
-      (posted) => {
-        if (posted.state === 'sent' || posted.state === 'queued') setSent((all) => ({ ...all, [key]: posted }))
-        else setFailed((all) => ({ ...all, [key]: refusal(posted) }))
-      },
-      (cause) => setFailed((all) => ({ ...all, [key]: message(cause) })),
-    ).finally(() => {
+    const settle = (error = '') => {
       inFlight.current = false
       setSending(null)
+      setFailed((all) => ({ ...all, [key]: error }))
+    }
+    const dropped = window.setTimeout(() => settle('Control of the run did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
+    const body = `GitHub feedback on ${pr.repository}#${pr.number} (${pr.url}), ${pr.head_repository}:${pr.head_branch} → ${pr.base_branch}, head ${pr.head_oid}:\n\n${text}`
+    agentSend.dispatch(() => {
+      clearTimeout(dropped)
+      void agentSend.post(body).then(
+        (posted) => {
+          if (posted.state !== 'sent' && posted.state !== 'queued') return settle(refusal(posted))
+          setSent((all) => ({ ...all, [key]: posted }))
+          settle()
+        },
+        (cause) => settle(message(cause)),
+      )
     })
-  })
+  }
   const sender = (key: string, what: string, text: string) => (
     <Sender
       run={run}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { api } from '@/lib/api'
 import type { RunGitStatusResult, RunPRCheck, RunPRFeedbackResult, RunPullRequest as PullRequest } from '@/lib/types'
 import { refreshPullRequest } from '@/routes/diff/publish-pr'
@@ -163,4 +163,32 @@ it('reads owner/name from the GitHub remote forms git accepts, and from nothing 
     'git@github.com:acme/app.git', 'ssh://git@github.com/acme/app',
   ].map(githubRepository)).toEqual(Array(5).fill('acme/app'))
   expect(['https://gitlab.com/acme/app.git', '/srv/aether/app.git', 'https://github.com/acme', undefined].map(githubRepository)).toEqual(['', '', '', ''])
+})
+
+it('reserves a send while control is on its way, and frees the rows when it never arrives', async () => {
+  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ checks: [lint, { ...lint, name: 'test' }] }))
+  const waiting = { ...agent, localControl: false, roomControl: undefined, session: { takeControl: vi.fn() } } as unknown as AgentTerminal
+  const record = toRecord(run({ id: 'run_pr_control' }))
+  useStore.setState({ runs: { [record.id]: record } })
+  const view = render(<RunPullRequest run={record} agent={waiting} agentName="Claude Code" />)
+  fireEvent.click(await screen.findByRole('button', { name: '2 failing' }))
+  const panel = within(await screen.findByRole('dialog'))
+
+  vi.useFakeTimers()
+  try {
+    const [first, second] = panel.getAllByRole('button', { name: 'Send to agent' })
+    fireEvent.click(first)
+    expect(waiting.session.takeControl).toHaveBeenCalledTimes(1)
+    expect(second).toHaveProperty('disabled', true)
+    act(() => void vi.advanceTimersByTime(10_500))
+    expect(panel.getByRole('alert').textContent).toBe('Control of the run did not arrive, so nothing was sent.')
+    expect(api.runRoomPost).not.toHaveBeenCalled()
+
+    fireEvent.click(panel.getAllByRole('button', { name: 'Send to agent' })[1])
+    view.rerender(<RunPullRequest run={record} agent={agent} agentName="Claude Code" />)
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
+  } finally {
+    vi.useRealTimers()
+  }
+  expect(vi.mocked(api.runRoomPost).mock.calls.map(([request]) => request.body.split('\n')[2])).toEqual(['Failing check: test'])
 })

@@ -141,7 +141,7 @@ export function PushStep({ p }: { p: Publish }) {
                     value={push.remote}
                     onValueChange={(remote) => {
                       const next = status.remotes?.find((entry) => entry.name === remote)?.push_urls ?? []
-                      p.changePushTarget({ ...push, remote, repository: next.length === 1 ? next[0]! : '' })
+                      p.changePushTarget({ remote, repository: next.length === 1 ? next[0]! : '' })
                     }}
                   >
                     <SelectTrigger id={`${ids}-remote`} className="min-w-0">
@@ -158,7 +158,7 @@ export function PushStep({ p }: { p: Publish }) {
                 </div>
                 <div className="grid min-w-0 gap-1">
                   <Label htmlFor={`${ids}-url`}>Writable push URL</Label>
-                  <Select value={push.repository} onValueChange={(repository) => p.changePushTarget({ ...push, repository })}>
+                  <Select value={push.repository} onValueChange={(repository) => p.changePushTarget({ repository })}>
                     <SelectTrigger id={`${ids}-url`} className="min-w-0" disabled={!urls.length}>
                       <SelectValue placeholder="Choose exact URL" />
                     </SelectTrigger>
@@ -172,7 +172,7 @@ export function PushStep({ p }: { p: Publish }) {
                   </Select>
                 </div>
                 <FormField label="Push head branch">
-                  <Input value={push.head_branch} onChange={(event) => p.changePushTarget({ ...push, head_branch: event.target.value })} />
+                  <Input value={push.head_branch} onChange={(event) => p.changePushTarget({ head_branch: event.target.value })} />
                 </FormField>
               </fieldset>
               <fieldset aria-label="GitHub pull request" disabled={p.busy || p.uncertain} className="grid min-w-0 gap-3 sm:grid-cols-2">

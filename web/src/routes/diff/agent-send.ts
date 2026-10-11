@@ -33,7 +33,8 @@ export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
     waits: !control.canAct,
     /** What to say beside the button: the block, or that the message will wait for the controller. */
     note: blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.'),
-    /** Runs `act` once this tab controls the run when its owner can take control, at once otherwise. */
+    /** Runs `act` once this tab controls the run when its owner can take control, at once otherwise.
+     * Control that has not arrived within `implicitControlWindowMs` drops `act` unrun. */
     dispatch: (act: () => void) => (control.canAct ? control.withControl(act) : act()),
     /** Posts `body` with the control lease this tab holds at that moment. */
     post: (body: string): Promise<RoomMessage> => {

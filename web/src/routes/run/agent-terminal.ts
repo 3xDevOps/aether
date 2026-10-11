@@ -170,7 +170,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
 
 export type AgentTerminal = ReturnType<typeof useAgentTerminal>
 
-const implicitControlWindowMs = 10_000
+export const implicitControlWindowMs = 10_000
 
 export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const self = useSelf()
