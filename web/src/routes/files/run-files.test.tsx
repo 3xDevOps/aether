@@ -204,6 +204,23 @@ describe('paths in a run’s Session', () => {
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['/workspace/src/app.ts:2:4'])
   })
 
+  it('opens a file the agent just wrote on the first tap, though a listing from before it is still on its way', async () => {
+    let before!: (listing: { entries: FileTreeEntry[] }) => void
+    const asked = vi.spyOn(api, 'filesTree').mockImplementation(async ({ path }) => {
+      if (path !== 'src') return filesTree({ path })
+      if (asked.mock.calls.filter(([request]) => request.path === 'src').length > 1) return { entries: [file('app.ts'), file('new.ts')] }
+      return new Promise((resolve) => { before = resolve })
+    })
+    session('Wrote src/new.ts.')
+    fireEvent.pointerEnter(screen.getByText('src/new.ts'))
+    await waitFor(() => expect(before).toBeDefined())
+
+    act(() => useStore.getState().invalidateRun('run_1'))
+    fireEvent.click(screen.getByText('src/new.ts'))
+    await waitFor(() => expect(useStore.getState().route.params).toMatchObject({ view: 'files', file: 'src/new.ts' }))
+    before({ entries: [file('app.ts')] })
+  })
+
   it('opens a Markdown link to a repository path in Files, and leaves a web link alone', () => {
     const asked = vi.spyOn(api, 'filesTree').mockImplementation(filesTree)
     session('[app](src/app.ts#L4) and [docs](https://example.com/docs)')

@@ -46,9 +46,11 @@ function listing(run: Checkout, dir: string, client: Api): Promise<FileTreeEntry
   const known = listed(state.trees, run, dir)
   if (known) return Promise.resolve(known)
   const key = filesKey(run.workspace_id, run.id, dir)
-  let request = requests.get(key)
+  const epoch = state.filesEpoch
+  // A request from before the checkout changed answers for the old checkout.
+  const pending = `${epoch}:${key}`
+  let request = requests.get(pending)
   if (!request) {
-    const epoch = state.filesEpoch
     request = client
       .filesTree({ workspace_id: run.workspace_id, run_id: run.id, path: dir })
       .then(({ entries }) => {
@@ -56,8 +58,8 @@ function listing(run: Checkout, dir: string, client: Api): Promise<FileTreeEntry
         if (now.filesEpoch === epoch) now.setTree(key, { entries, loading: false, error: undefined })
         return entries
       })
-      .finally(() => requests.delete(key))
-    requests.set(key, request)
+      .finally(() => requests.delete(pending))
+    requests.set(pending, request)
   }
   return request
 }
