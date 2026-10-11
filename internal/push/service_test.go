@@ -410,8 +410,12 @@ func TestTestSendsNowAndReturnsTheRealError(t *testing.T) {
 	if want := "push: the push service did not take the notification: " + host + " answered 403 Forbidden: unsubscribed"; !errors.Is(err, ErrDelivery) || err.Error() != want {
 		t.Fatalf("Test against a refusing push service = %v, want %q", err, want)
 	}
-	phone.service.Close()
-	err = h.svc.Test(h.ctx, h.ada.ID, phone.endpoint())
+	// A device nothing was sent to yet, so no open connection can carry the
+	// request and it has to dial.
+	unreachable := h.subscribe(h.ada)
+	unreachable.service.Close()
+	host = strings.TrimPrefix(unreachable.service.URL, "https://")
+	err = h.svc.Test(h.ctx, h.ada.ID, unreachable.endpoint())
 	if !errors.Is(err, ErrDelivery) || !strings.Contains(err.Error(), host+": dial tcp") {
 		t.Fatalf("Test against an unreachable push service = %v, want the dial error", err)
 	}
