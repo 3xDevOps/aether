@@ -72,6 +72,14 @@ export const keybindings = [
   // The platform's own history keys: on macOS Alt and an arrow moves a caret by a word.
   { id: 'browser-back', keys: mac ? '$mod+[' : 'Alt+ArrowLeft', scope: 'browser', label: 'Go back', when: inBrowser },
   { id: 'browser-forward', keys: mac ? '$mod+]' : 'Alt+ArrowRight', scope: 'browser', label: 'Go forward', when: inBrowser },
+  {
+    id: 'browser-annotate',
+    keys: '$mod+Shift+C',
+    scope: 'browser',
+    label: 'Annotate the page for the agent',
+    // A terminal keeps it: there it copies the selection.
+    when: (event) => inBrowser(event) || !keyboardBusy(event),
+  },
   { id: 'composer-send', keys: '$mod+Enter', scope: 'composer', label: 'Send the message, or steer the running turn' },
   { id: 'composer-queue', keys: '$mod+Shift+Enter', scope: 'composer', label: 'Queue the message for after this turn' },
   { id: 'request-option-1', keys: '1', scope: 'request', label: 'Pick option 1 of the focused request' },

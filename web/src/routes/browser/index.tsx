@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Bot, Columns2, Ellipsis, Keyboard, MonitorSmartphone, MousePointer2, RotateCw, X } from '@/components/icons'
+import { ArrowLeft, ArrowRight, Bot, Bug, Columns2, Ellipsis, Keyboard, MessageSquarePlus, MonitorSmartphone, MousePointer2, RotateCw, X } from '@/components/icons'
 import { MissingRun } from '@/components/missing-run'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Avatar } from '@/components/ui/avatar'
@@ -9,18 +9,24 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, 
 import { Spinner } from '@/components/ui/spinner'
 import { api, ApiError } from '@/lib/api'
 import { message } from '@/lib/format'
-import { coarsePointer, useDelayed, useElementSize } from '@/lib/hooks'
+import { coarsePointer, useDelayed, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
-import { onTabListKeyDown } from '@/lib/keys'
+import { keyboardBusy, onTabListKeyDown } from '@/lib/keys'
 import type { DevBrowserCloseParams, DevBrowserPage, DevBrowserResetParams, DevBrowserStatusResult, DevController, DevControlFence, DevSurface } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { codeConflict } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import { isTerminal } from '@/store/runs'
 import { normalizeAddress } from './address'
 import { AddressBar } from './address-bar'
+import { AnnotateLayer } from './annotate'
+import { addNote, closeNotes } from './feedback'
+import { FeedbackBar } from './feedback-bar'
+import { LogStrip, useBrowserLogs } from './logs'
 import { OpenAPage, PortsControl, usePorts } from './ports'
-import { BrowserSurface, type BrowserSurfaceHandle } from './surface'
+import { BrowserSurface, type BrowserPick, type BrowserSurfaceHandle } from './surface'
 import { paneViewport, viewportPresets } from './viewport'
 
 // A tab-local identity survives pane detach but is never cloned through
@@ -68,13 +74,24 @@ function pageLabel(page: DevBrowserPage): string {
   return page.url && page.url !== 'about:blank' ? page.url.replace(/^https?:\/\//, '') : 'New page'
 }
 
-export function BrowserView({ runID, split }: { runID: string; split?: BrowserSplit }) {
-  const identity = useStore((state) => state.identityKey)
-  return <BrowserRoute key={`${identity}:${runID}`} runID={runID} split={split} />
+interface BrowserViewProps {
+  runID: string
+  split?: BrowserSplit
+  /** Whom notes on the page are sent to, under the Session composer's rules. */
+  agent: AgentTerminal
+  agentName: string
+  onCaptures: (opener: HTMLElement | null) => void
 }
 
-function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit }) {
+export function BrowserView(props: BrowserViewProps) {
+  const identity = useStore((state) => state.identityKey)
+  return <BrowserRoute key={`${identity}:${props.runID}`} {...props} />
+}
+
+function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserViewProps) {
   const run = useStore((state) => state.runs[runID])
+  const cap = useCapability()
+  const coarse = useMediaQuery(coarsePointer)
   const members = useStore((state) => state.members)
   const self = useStore((state) => state.info?.member.id)
   const preset = useStore((state) => state.browserPresets[runID])
@@ -95,6 +112,13 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   const [notice, setNotice] = useState<Notice | null>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
   const [focusedTab, setFocusedTab] = useState(0)
+  const [annotating, setAnnotating] = useState(false)
+  // Why this browser session cannot inspect, in its server's words.
+  const [refused, setRefused] = useState<{ session: string; reason: string } | null>(null)
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [seenLog, setSeenLog] = useState(0)
+  const pick = useRef<BrowserPick>(null)
+  const annotateToggle = useRef<HTMLButtonElement>(null)
   const [paneRef, pane] = useElementSize<HTMLDivElement>()
   const address = useRef<HTMLInputElement>(null)
   const surfaceHandle = useRef<BrowserSurfaceHandle>(null)
@@ -128,6 +152,12 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
         : `${members[other.member_id ?? '']?.display_name ?? 'Another member'} is driving`
   const latest = useRef({ surface, other, driver, page, status, target })
   latest.current = { surface, other, driver, page, status, target }
+  const logs = useBrowserLogs(runID, page)
+  const newestLog = logs.entries.at(-1)?.sequence ?? 0
+  const unseenLogs = logsOpen ? 0 : logs.entries.filter((entry) => entry.sequence > seenLog).length
+  const unannotatable = !cap.hasMethod('dev.browser.inspect')
+    ? 'This server does not serve dev.browser.inspect, so a page cannot be annotated. Update aether-server.'
+    : refused && refused.session === status?.session_id ? refused.reason : ''
 
   const hold = (next: Lease | null) => {
     held.current = next
@@ -239,6 +269,13 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     setUnseen((previous) => (previous.includes(selected) ? previous.filter((id) => id !== selected) : previous))
   }, [selected])
   useEffect(() => setFocusedTab(selectedTab), [selectedTab])
+  const paged = page !== null
+  useEffect(() => {
+    if (!paged) setAnnotating(false)
+  }, [paged])
+  useEffect(() => {
+    if (logsOpen) setSeenLog(newestLog)
+  }, [logsOpen, newestLog])
 
   const acquire = async (given: DevSurface, takeover: boolean, expected: number): Promise<DevControlFence | null> => {
     mutation.current++
@@ -376,9 +413,22 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
   const screenshot = () => {
     if (!page) return
     void perform(async () => {
-      await api.devBrowserScreenshot({ run_id: runID, session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision })
-      setNotice({ tone: 'info', text: 'Screenshot saved. Open Captures from More to keep it; nothing has been published.' })
+      const { artifact } = await api.devBrowserScreenshot({ run_id: runID, session_id: page.session_id, page_id: page.page_id, page_revision: page.page_revision })
+      // Its card is where it gets words, goes to the agent, or is kept as evidence.
+      addNote(runID, { kind: 'screenshot', id: artifact.id, body: '', page: { url: page.url, width: artifact.width, height: artifact.height }, artifact })
+      setAnnotating(true)
     })
+  }
+  const annotate = (on: boolean) => {
+    if (on && unannotatable) setNotice({ tone: 'failed', text: unannotatable })
+    if (on && (!page || unannotatable)) return
+    // Leaving keeps what an open card holds and drops one left empty.
+    if (!on) closeNotes(runID)
+    // A press the page still holds could not be released once the pointer picks.
+    else void surfaceHandle.current?.lift()
+    setAnnotating(on)
+    // The keyboard leaves the page with the pointer: a key typed while picking is not for the app.
+    if (on) annotateToggle.current?.focus()
   }
 
   const newPage = () => {
@@ -485,12 +535,31 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     'browser-reload': chord(() => navigate('reload')),
     'browser-back': chord(() => navigate('back')),
     'browser-forward': chord(() => navigate('forward')),
+    'browser-annotate': chord(() => annotate(!annotating)),
   })
+  // Escape leaves a run, and the table gives a key to one binding. While a
+  // page is annotated this answers it first, wherever in the run focus is;
+  // a card, a menu or a dialog keeps its own Escape.
+  useEffect(() => {
+    if (!annotating) return
+    const leave = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || keyboardBusy(event)) return
+      event.preventDefault()
+      annotate(false)
+    }
+    window.addEventListener('keydown', leave, true)
+    return () => window.removeEventListener('keydown', leave, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [annotating])
 
   const waiting = useDelayed(!status && !readError)
   if (!run) return <MissingRun />
   const loading = pending === 'load'
   const compact = pane.width > 0 && pane.width < compactBelow
+  // A phone's row has no room for one more 44px button: Annotate starts from
+  // Browser actions there, and while it is on its toggle takes the place of
+  // Keyboard, which a page being annotated has no use for.
+  const tight = compact && coarse
   const shownNotice = confirmation ? null : notice ?? (status && readError ? { tone: 'failed' as const, text: readError } : null)
   const ViewportIcon = chosen?.Icon ?? MonitorSmartphone
   const viewportItems = (
@@ -514,7 +583,18 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
       </Button>
       <AddressBar url={page && page.url !== 'about:blank' ? page.url : ''} going={going} disabled={!status?.available} ports={page ? ports?.list ?? [] : []} input={address} onSubmit={go} onOpened={focusPage} />
       {!compact && <PortsControl runID={runID} ports={ports} available={Boolean(status?.available)} onOpen={openPort} />}
-      <Button variant="ghost" size="icon" label="Keyboard" className="hidden coarse:inline-flex" aria-disabled={!page || undefined} onClick={() => surfaceHandle.current?.focus()}><Keyboard /></Button>
+      {!(tight && annotating) && <Button variant="ghost" size="icon" label="Keyboard" className="hidden coarse:inline-flex" aria-disabled={!page || undefined} onClick={() => surfaceHandle.current?.focus()}><Keyboard /></Button>}
+      {(!tight || annotating) && (
+        <Button ref={annotateToggle} variant={annotating ? 'secondary' : 'ghost'} size="icon" label="Annotate" hint={unannotatable || `Annotate for the agent (${shortcutLabel('browser-annotate')})`}
+          aria-pressed={annotating} aria-disabled={!page || (unannotatable !== '' && !annotating) || undefined} onClick={() => annotate(!annotating)}><MessageSquarePlus /></Button>
+      )}
+      {!compact && (
+        <Button variant={logsOpen ? 'secondary' : 'ghost'} size="icon" label="Console and network" hint={unseenLogs ? `Console and network: ${unseenLogs} new` : 'Console and network'}
+          aria-pressed={logsOpen} aria-disabled={!page || undefined} className="relative" onClick={() => { if (page) setLogsOpen(!logsOpen) }}>
+          <Bug />
+          {unseenLogs > 0 && <span aria-hidden className="absolute -top-1 -right-1 min-w-4 rounded-full bg-state-failed px-1 text-ui-xs leading-4 font-medium text-on-failed tabular-nums">{unseenLogs}</span>}
+        </Button>
+      )}
       {!compact && (
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" label="Viewport"><ViewportIcon /></Button></MenuTrigger>
@@ -525,7 +605,12 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
         <Button variant="ghost" size="icon" label={split.beside ? 'Show the Browser as a tab' : `Show beside ${split.view}`} onClick={split.toggle}><Columns2 /></Button>
       )}
       <Menu>
-        <MenuTrigger asChild><Button ref={menuTrigger} variant="ghost" size="icon" label="Browser actions"><Ellipsis /></Button></MenuTrigger>
+        <MenuTrigger asChild>
+          <Button ref={menuTrigger} variant="ghost" size="icon" label="Browser actions" className="relative">
+            <Ellipsis />
+            {compact && unseenLogs > 0 && <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-state-failed" />}
+          </Button>
+        </MenuTrigger>
         <MenuContent
           align="end"
           onCloseAutoFocus={(event) => {
@@ -539,8 +624,10 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
             {viewportItems}
             <MenuSeparator />
           </>}
+          {tight && !annotating && <MenuItem disabled={!page} onSelect={() => annotate(true)}>Annotate</MenuItem>}
           <MenuItem disabled={!status?.available} onSelect={newPage}>New page</MenuItem>
           <MenuItem disabled={!page} onSelect={screenshot}>Screenshot</MenuItem>
+          {compact && <MenuItem disabled={!page} onSelect={() => setLogsOpen(!logsOpen)}>{logsOpen ? 'Hide console and network' : unseenLogs ? `Console and network (${unseenLogs} new)` : 'Console and network'}</MenuItem>}
           {lease && <MenuItem onSelect={() => void release()}>Release control</MenuItem>}
           <MenuSeparator />
           <MenuItem disabled={!page} onSelect={() => { leavingMenu.current = true; void ask('close') }}>Close page…</MenuItem>
@@ -563,6 +650,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
         </div>
       )}
     </div>
+    <FeedbackBar run={run} agent={agent} agentName={agentName} />
     {pages.length > 1 && (
       <div role="tablist" aria-label="Pages" className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-seam bg-chrome px-2 py-0.5">
         {pages.map((item, index) => {
@@ -590,7 +678,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
     <div ref={paneRef} className="relative min-h-0 min-w-0 flex-1">
       {page ? (
         <BrowserSurface key={`${page.session_id}:${page.page_id}`} ref={surfaceHandle} runID={runID} page={page} control={fence}
-          free={!other} acquire={ensureControl} paused={pending !== null || resizing}
+          free={!other} acquire={ensureControl} paused={pending !== null || resizing} pick={annotating && !unannotatable ? pick : undefined}
           onBlocked={() => setNotice({ tone: 'info', text: `${driver}. Take over to use the page.` })}
           onError={(text) => { setNotice({ tone: 'failed', text }); void refresh() }}
           onNavigated={() => void refresh()} onPage={updatePage} />
@@ -613,6 +701,15 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
           )}
         </div>
       )}
+      {annotating && page && (
+        <AnnotateLayer key={`notes:${page.session_id}:${page.page_id}`} ref={pick} runID={runID} page={page} surface={surfaceHandle} picking={!unannotatable}
+          onUnavailable={(reason) => {
+            setRefused({ session: page.session_id, reason })
+            annotate(false)
+            setNotice({ tone: 'failed', text: reason })
+          }}
+          onNotice={(text) => setNotice({ tone: 'info', text })} onCaptures={onCaptures} />
+      )}
       {shownNotice && (
         <div role={shownNotice.tone === 'failed' ? 'alert' : 'status'} className={cn('absolute inset-x-2 top-2 flex items-start gap-2 rounded-panel border border-seam bg-raised px-3 py-1.5 text-ui shadow-overlay', shownNotice.tone === 'failed' ? 'text-state-failed' : 'text-text')}>
           <span className="min-w-0 flex-1 break-words">{shownNotice.text}</span>
@@ -620,6 +717,7 @@ function BrowserRoute({ runID, split }: { runID: string; split?: BrowserSplit })
         </div>
       )}
     </div>
+    {logsOpen && page && <LogStrip runID={runID} logs={logs} onClose={() => setLogsOpen(false)} />}
     <AlertDialog open={confirmation !== null} onOpenChange={(open) => { if (!open && !inFlight.current) setConfirmation(null) }}>
       <AlertDialogContent onCloseAutoFocus={(event) => { event.preventDefault(); menuTrigger.current?.focus() }}>
         <AlertDialogHeader>

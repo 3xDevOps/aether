@@ -96,9 +96,17 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   useEffect(() => {
     if (browserRequest !== undefined && browser && !docked) go('browser')
   }, [browserRequest, browser, docked, go])
+  const openDialog = (kind: 'captures' | 'events') => (opener: HTMLElement | null) => {
+    returnTo.current = opener
+    setDialog(kind)
+  }
+  const openCaptures = openDialog('captures')
   const browserView = (
     <BrowserView
       runID={run.id}
+      agent={agent}
+      agentName={agentName}
+      onCaptures={openCaptures}
       split={splittable ? {
         beside: docked,
         view: runViewLabel[defaultView(run)],
@@ -157,11 +165,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     } : undefined,
   })
 
-  const openDialog = (kind: 'captures' | 'events') => (opener: HTMLElement | null) => {
-    returnTo.current = opener
-    setDialog(kind)
-  }
-  const openCaptures = openDialog('captures')
   const details = (inset: boolean) => (
     <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
   )

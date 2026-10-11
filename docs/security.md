@@ -446,6 +446,15 @@ control is admitted. A cleanup failure fences new control rather than handing
 the next controller potentially held input. A disconnected observer is not a
 controller release.
 
+Inspecting the element under a point (`dev.browser.inspect`, the Browser's
+**Annotate**) is a read like a frame or a snapshot: it needs Steer, takes no
+writer lease and dispatches nothing to the page. What it returns excludes
+every form control's value, whether typed or set in markup, and replaces an
+attribute value that looks like a credential with `[redacted]`; visible page
+text, URLs and the picture of the element are not redacted. A member chooses
+what to send: nothing reaches the agent until **Send to agent**, and what is
+sent is ordinary run history afterwards.
+
 This is shared-input ownership, **not a restricted execution sandbox**.
 An app terminal executes in the live run container, under the run owner's
 ordinary home and credentials, the selected account's agent login, and the
@@ -864,8 +873,9 @@ directory explicitly chosen through the browser picker, not arbitrary paths.
 
 `terminal.image` accepts image bytes, not a client path. The dashboard sends
 only the bytes in a user-selected browser `File` (including an actual image
-`File` from native paste); a text clipboard value that happens to be a local
-path remains text. There is no RPC that asks the server to read an arbitrary
+`File` from native paste), or the picture of a page element a member
+annotated in a run's Browser, cut from the frame on their screen; a text
+clipboard value that happens to be a local path remains text. There is no RPC that asks the server to read an arbitrary
 client path. In a terminal, the upload action inserts the returned shell-quoted
 path without pressing Enter or running a command.
 

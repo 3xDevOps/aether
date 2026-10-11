@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { api } from '@/lib/api'
 import type { DevBrowserCloseResult, DevBrowserPage, DevControlAcquireResult, DevController } from '@/lib/types'
 import { BrowserView } from '@/routes/browser'
+import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
 import { run, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -13,6 +14,11 @@ let poll: () => void
 const page: DevBrowserPage = {
   session_id: 'browser-1', page_id: 'page-1', page_revision: 3, viewport_id: 'viewport-1',
   width: 1280, height: 800, url: 'http://localhost:3000/', title: 'App',
+}
+const shared = {
+  agent: { localControl: true, roomControl: { has_control: true, control_session_id: 'ctl', control_generation: 3 }, steerable: true, controlUnavailable: false } as AgentTerminal,
+  agentName: 'Claude',
+  onCaptures: () => {},
 }
 const peer: DevController = { kind: 'member', member_id: 'peer', control_session_id: 'peer-tab', control_generation: 9, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
 
@@ -40,6 +46,8 @@ beforeEach(() => {
     return { surface, controller }
   })
   vi.spyOn(api, 'devControlRelease').mockImplementation(async () => { controller = null; return { released: true } })
+  vi.spyOn(api, 'devBrowserConsole').mockResolvedValue({ entries: [], next: 0, missing_cursor: false, truncated: false })
+  vi.spyOn(api, 'devBrowserNetwork').mockResolvedValue({ entries: [], next: 0, missing_cursor: false, truncated: false })
   vi.spyOn(api, 'devBrowserNavigate').mockImplementation(async (params) => ({ page: { ...page, url: params.url ?? page.url, page_revision: page.page_revision + 1 } }))
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -70,7 +78,7 @@ describe('the first page', () => {
       controller = { kind: 'member', control_session_id: target.control_session_id, control_generation: 1, connected: true, acquired_at: '2026-09-26T00:00:00Z' }
       return { page, control: controller }
     })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByRole('heading', { name: 'Open a page' })).toBeDefined()
     await waitFor(() => expect(document.activeElement).toBe(address()))
     expect(api.devBrowserOpen).not.toHaveBeenCalled()
@@ -86,7 +94,7 @@ describe('the first page', () => {
   it('navigates to an address entered while the first page was still opening', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage; control: { control_session_id: string; control_generation: number } }>()
     const open = vi.spyOn(api, 'devBrowserOpen').mockReturnValue(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByRole('heading', { name: 'Open a page' })
     submit('localhost:3000')
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
@@ -106,7 +114,7 @@ describe('the first page', () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
     const first = Promise.withResolvers<{ page: DevBrowserPage; control: { control_session_id: string; control_generation: number } }>()
     const open = vi.spyOn(api, 'devBrowserOpen').mockReturnValue(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByRole('heading', { name: 'Open a page' })
     submit('localhost:3000')
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
@@ -124,7 +132,7 @@ describe('the first page', () => {
 
   it('shows why the server cannot run a browser', async () => {
     vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: false, running: false, state: 'unavailable', reason: 'browser: image is not present on this server' })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByRole('heading', { name: 'Browser unavailable' })).toBeDefined()
     expect(screen.getByRole('alert').textContent).toBe('browser: image is not present on this server')
     expect(address().disabled).toBe(true)
@@ -132,14 +140,14 @@ describe('the first page', () => {
 
   it('shows a status read that fails', async () => {
     vi.mocked(api.devBrowserStatus).mockRejectedValue(new Error('dev.browser.status: scheduler: the run has no live environment'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect((await screen.findByRole('alert')).textContent).toBe('dev.browser.status: scheduler: the run has no live environment')
   })
 })
 
 describe('control', () => {
   it('takes a free lease for a toolbar action without asking', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     expect(screen.queryByRole('button', { name: /Take control|Take over/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
@@ -152,7 +160,7 @@ describe('control', () => {
 
   it('names the driver, blocks without taking over, and takes over when asked', async () => {
     controller = peer
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByText('Pat is driving')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     submit('localhost:8080')
@@ -167,12 +175,12 @@ describe('control', () => {
 
   it('says the agent is driving', async () => {
     controller = { ...peer, kind: 'run_agent', member_id: undefined, run_id: 'run_1' }
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     expect(await screen.findByText('The agent is driving')).toBeDefined()
   })
 
   it('gives the lease up on window blur and takes it back with the next action', async () => {
-    const view = render(<BrowserView runID="run_1" />)
+    const view = render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await screen.findByRole('img', { name: 'You are driving' })
@@ -195,7 +203,7 @@ describe('control', () => {
 
   it('gives the lease up when focus or a key lands elsewhere in the dashboard, but not in its own menu', async () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await screen.findByRole('img', { name: 'You are driving' })
@@ -219,7 +227,7 @@ describe('control', () => {
   it('does not release another controller when a denied watcher loses focus or detaches', async () => {
     controller = peer
     vi.mocked(api.devControlAcquire).mockRejectedValue(new Error('Control is held by another member'))
-    const view = render(<BrowserView runID="run_1" />)
+    const view = render(<BrowserView {...shared} runID="run_1" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Take over' }))
     expect((await screen.findByRole('alert')).textContent).toBe('Control is held by another member')
     fireEvent.blur(window)
@@ -231,7 +239,7 @@ describe('control', () => {
     let finish!: (value: DevControlAcquireResult) => void
     const pending = new Promise<DevControlAcquireResult>((resolve) => { finish = resolve })
     vi.mocked(api.devControlAcquire).mockReturnValueOnce(pending)
-    const view = render(<BrowserView runID="run_1" />)
+    const view = render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(api.devControlAcquire).toHaveBeenCalled())
@@ -250,7 +258,7 @@ describe('control', () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
     const taking = Promise.withResolvers<DevControlAcquireResult>()
     vi.mocked(api.devControlAcquire).mockReturnValueOnce(taking.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(api.devControlAcquire).toHaveBeenCalled())
@@ -270,7 +278,7 @@ describe('control', () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
     const taking = Promise.withResolvers<DevControlAcquireResult>()
     vi.mocked(api.devControlAcquire).mockReturnValueOnce(taking.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Viewport')).getByRole('menuitemradio', { name: /Phone/ }))
     await waitFor(() => expect(api.devControlAcquire).toHaveBeenCalled())
@@ -287,7 +295,7 @@ describe('control', () => {
 
   it('keeps the lease of an action that a press or a wheel in the Browser came before, with the keyboard elsewhere', async () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     const canvas = await ready()
     act(() => composer.focus())
     for (const use of ['pointerdown', 'wheel']) {
@@ -306,7 +314,7 @@ describe('control', () => {
 
   it('releases again, on the next status read, a lease whose release failed while focus is elsewhere', async () => {
     const composer = document.body.appendChild(document.createElement('textarea'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await screen.findByRole('img', { name: 'You are driving' })
@@ -320,7 +328,7 @@ describe('control', () => {
   })
 
   it('offers Release control only while driving', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     expect((await menu('Browser actions')).queryByRole('menuitem', { name: 'Release control' })).toBeNull()
     await userEvent.keyboard('{Escape}')
@@ -335,7 +343,7 @@ describe('control', () => {
 describe('the address bar', () => {
   it('shows the server’s error for a failed navigation and keeps what was typed', async () => {
     vi.mocked(api.devBrowserNavigate).mockRejectedValue(new Error('dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:9999/'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     submit('localhost:9999')
     expect((await screen.findByRole('alert')).textContent).toBe('dev.browser.navigate: browser: page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:9999/')
@@ -346,7 +354,7 @@ describe('the address bar', () => {
   })
 
   it('keeps what is being typed when the page’s address changes, and shows the new one after', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     expect(address().value).toBe('http://localhost:3000/')
     act(() => address().focus())
@@ -361,7 +369,7 @@ describe('the address bar', () => {
   it('acts on Enter pressed while another navigation is in flight, once it ends', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage }>()
     vi.mocked(api.devBrowserNavigate).mockReturnValueOnce(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     submit('slow.test')
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledTimes(1))
@@ -378,7 +386,7 @@ describe('the address bar', () => {
     vi.mocked(api.devBrowserNavigate)
       .mockReturnValueOnce(first.promise)
       .mockRejectedValueOnce(new Error('dev.browser.navigate: browser: page.goto: net::ERR_NAME_NOT_RESOLVED'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     submit('first.test')
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledTimes(1))
@@ -393,7 +401,7 @@ describe('the address bar', () => {
   it('keeps a refused address when focus left the field while it was loading', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage }>()
     vi.mocked(api.devBrowserNavigate).mockReturnValueOnce(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     submit('localhost:9999')
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledTimes(1))
@@ -407,7 +415,7 @@ describe('the address bar', () => {
   it('leaves focus where it went while a navigation was loading', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage }>()
     vi.mocked(api.devBrowserNavigate).mockReturnValueOnce(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     submit('slow.test')
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledTimes(1))
@@ -422,7 +430,7 @@ describe('the address bar', () => {
   })
 
   it('opens an address handed over by a terminal link', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     act(() => useStore.getState().requestBrowser('run_1', 'http://127.0.0.1:5173/'))
     await waitFor(() => expect(api.devBrowserNavigate).toHaveBeenCalledWith(expect.objectContaining({ direction: 'url', url: 'http://127.0.0.1:5173/' })))
@@ -431,7 +439,7 @@ describe('the address bar', () => {
 
   it('gives the lease back after a terminal link opens while the keyboard stays in the terminal', async () => {
     const terminal = document.body.appendChild(document.createElement('textarea'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     act(() => terminal.focus())
     act(() => useStore.getState().requestBrowser('run_1', 'http://127.0.0.1:5173/'))
@@ -444,7 +452,7 @@ describe('the address bar', () => {
 
 describe('shortcuts', () => {
   it('puts the keyboard in the address bar when asked from outside', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     act(() => useStore.getState().requestBrowser('run_1', ''))
     expect(document.activeElement).toBe(address())
@@ -453,7 +461,7 @@ describe('shortcuts', () => {
   })
 
   it('keeps a key it acted on from the page', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     const canvas = await ready()
     const press = new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, bubbles: true, cancelable: true })
     const forwarded = vi.fn()
@@ -465,7 +473,7 @@ describe('shortcuts', () => {
   })
 
   it('reloads and walks history only with the Browser focused', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     const canvas = await ready()
     fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true })
     expect(api.devControlAcquire).not.toHaveBeenCalled()
@@ -492,7 +500,7 @@ describe('the viewport', () => {
   })
 
   it('leaves a page nobody drives at its size, then follows the pane once driven', async () => {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)) })
     expect(api.devBrowserViewport).not.toHaveBeenCalled()
@@ -503,7 +511,7 @@ describe('the viewport', () => {
   })
 
   it('applies a preset from the toolbar and keeps it for the run', async () => {
-    const view = render(<BrowserView runID="run_1" />)
+    const view = render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Viewport')).getByRole('menuitemradio', { name: /Phone/ }))
     await waitFor(() => expect(api.devBrowserViewport).toHaveBeenCalledWith(expect.objectContaining({ width: 390, height: 844 })))
@@ -514,7 +522,7 @@ describe('the viewport', () => {
   it('waits for a viewport change to finish before starting the next', async () => {
     const first = Promise.withResolvers<{ page: DevBrowserPage }>()
     vi.mocked(api.devBrowserViewport).mockReturnValueOnce(first.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(api.devBrowserViewport).toHaveBeenCalledTimes(1))
@@ -530,7 +538,7 @@ describe('the viewport', () => {
     vi.mocked(api.devBrowserStatus).mockResolvedValue({ available: true, running: false, state: 'not_started' })
     vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [] })
     const open = vi.spyOn(api, 'devBrowserOpen').mockRejectedValue(new Error('stop here'))
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await screen.findByRole('heading', { name: 'Open a page' })
     submit('example.com')
     await waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://example.com', width: 900, height: 600 })))
@@ -542,7 +550,7 @@ describe('pages', () => {
 
   it('shows no strip for one page, then marks a page that opened by itself', async () => {
     const action = vi.spyOn(api, 'devBrowserAction').mockResolvedValue({ page: popup })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     expect(screen.queryByRole('tablist', { name: 'Pages' })).toBeNull()
     vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page, popup], selected_page_id: page.page_id })
@@ -559,7 +567,7 @@ describe('pages', () => {
       vi.mocked(api.devBrowserPages).mockResolvedValue({ pages: [page, blank], selected_page_id: blank.page_id })
       return { page: blank, control: { control_session_id: target.control_session_id, control_generation: target.control_generation } }
     })
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name: 'New page' }))
     await waitFor(() => expect(open).toHaveBeenCalledWith(expect.objectContaining({ session_id: page.session_id, url: '', control_generation: 7 })))
@@ -572,7 +580,7 @@ describe('pages', () => {
     const blank = { ...page, page_id: 'page-3', url: 'about:blank', title: '' }
     const opening = Promise.withResolvers<{ page: DevBrowserPage; control: { control_session_id: string; control_generation: number } }>()
     const open = vi.spyOn(api, 'devBrowserOpen').mockReturnValue(opening.promise)
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name: 'New page' }))
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1))
@@ -592,7 +600,7 @@ describe('pages', () => {
 
 describe('closing and resetting', () => {
   async function openConfirmation(action: 'Close page…' | 'Reset session…') {
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name: action }))
     return screen.findByRole('alertdialog')
@@ -678,7 +686,7 @@ describe('closing and resetting', () => {
     const screenshot = vi.spyOn(api, 'devBrowserScreenshot').mockRejectedValue(new Error('Capture quota reached'))
     const close = vi.spyOn(api, 'devBrowserClose')
     const reset = vi.spyOn(api, 'devBrowserReset')
-    render(<BrowserView runID="run_1" />)
+    render(<BrowserView {...shared} runID="run_1" />)
     await ready()
     for (const name of ['Close page…', 'Reset session…']) {
       fireEvent.click((await menu('Browser actions')).getByRole('menuitem', { name }))
