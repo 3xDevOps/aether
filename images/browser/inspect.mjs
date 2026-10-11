@@ -150,6 +150,20 @@ function describe(element) {
   }
 
   const rect = element.getBoundingClientRect();
+  // A point maps into a frame by an offset alone only when nothing scales,
+  // turns or mirrors the frame: not its own style and not an ancestor's.
+  let transformed = false;
+  if (['iframe', 'frame'].includes(tag)) {
+    transformed = Math.abs(rect.width - element.offsetWidth) > 1 || Math.abs(rect.height - element.offsetHeight) > 1;
+    for (let node = element, depth = 0; node && !transformed; node = node.assignedSlot || node.parentElement || node.getRootNode().host, depth++) {
+      const style = getComputedStyle(node);
+      const matrix = new DOMMatrixReadOnly(style.transform);
+      transformed = depth === 64
+        || !(matrix.is2D && matrix.a === 1 && matrix.b === 0 && matrix.c === 0 && matrix.d === 1)
+        || [style.rotate, style.scale, style.offsetPath].some((value) => value && value !== 'none')
+        || Number(style.zoom || 1) !== 1;
+    }
+  }
   return {
     tag,
     role: element.getAttribute('role') || implicit[tag] || '',
@@ -163,8 +177,7 @@ function describe(element) {
     component: components.join(' > '),
     source,
     inset: { x: rect.x + element.clientLeft, y: rect.y + element.clientTop },
-    // A frame drawn at another size or turned cannot map a point into itself by an offset alone.
-    transformed: ['iframe', 'frame'].includes(tag) && (Math.abs(rect.width - element.offsetWidth) > 1 || Math.abs(rect.height - element.offsetHeight) > 1),
+    transformed,
   };
 }
 
@@ -173,8 +186,9 @@ const finite = (value) => (Number.isFinite(value) ? value : 0);
 const strings = (value, entries, max) => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).slice(0, entries).map(([key, text]) => [short(key, 64), short(text, max)]));
 
 // Returns the element under a viewport point, following same-page frames that
-// are not scaled or turned, or null when nothing is there. The page computed the description, so every
-// field is bounded again here before it leaves the companion.
+// are not scaled, turned or mirrored, or null when nothing is there. The page
+// computed the description, so every field is bounded again here before it
+// leaves the companion.
 export async function inspectPoint(page, x, y, read) {
   let frame = page.mainFrame();
   let left = 0;
