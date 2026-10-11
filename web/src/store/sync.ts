@@ -510,6 +510,7 @@ export async function applyEvent(
       store.getState().noteDiffSnapshot(ev.run_id, {
         time: ev.time,
         files: p.files ?? [],
+        truncated: p.truncated,
         tree: p.tree,
         parentTree: p.parent_tree,
         historyGap: p.history_gap,
