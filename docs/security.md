@@ -768,6 +768,31 @@ identify its callers.
   ping it would keep holding a PTY client whose geometry clamps every other
   viewer.
 
+### Push notifications
+
+A member's push subscription names a URL the server will post to
+([networking.md](networking.md#notifications)), and it arrives from that
+member's browser, so the server treats it as untrusted:
+
+- Only an `https` endpoint with a valid P-256 key and a 16-byte secret is
+  stored, and a member holds at most 16.
+- The server connects only to public addresses. Loopback, private,
+  link-local and carrier-grade NAT addresses, which cover the server's own
+  host, its LAN and the tailnet, are refused when the connection is dialed,
+  after DNS has answered. Proxy settings are ignored so that this check sees
+  the real peer.
+- A member can test, replace and remove only their own subscriptions.
+  `push.test` returns the push service's status and the first 512 bytes of
+  its answer, to that member alone.
+
+The payload is encrypted to the browser (RFC 8291) and the request is signed
+with the server's VAPID key, `<data-dir>/push/vapid_key.pem`, mode `0600`.
+That key identifies the server to the push services and grants nothing on the
+server itself. No dependency was added for this: it is the Go standard
+library's ECDH, HKDF, AES-GCM and ECDSA, checked against the example message
+in RFC 8291. The worker the dashboard registers, `/sw.js`, has no `fetch`
+handler, so it never sees a request or a response.
+
 ### Browser configuration imports
 
 The shared Configuration importer prepares user-selected file metadata only

@@ -177,7 +177,7 @@ function main() {
       gatewayURL = msg.url
       gatewayOrigin = new URL(msg.url).origin
       respawns = 0 // a healthy start resets the backoff budget
-      notify.start(msg.addr, msg.url, () => focusWindow())
+      notify.start(msg.addr, msg.url, showRun)
       openWindow()
     })
 
@@ -395,6 +395,25 @@ function main() {
       pendingRunId = id
       openWindow()
     }
+  }
+
+  // Opens a run in the page as it stands. The dashboard keeps its route in
+  // the address and follows popstate, and a reload would discard a message
+  // the user has typed and not sent. A page that is not the dashboard, such
+  // as a load that failed, is loaded at the run instead.
+  function showRun(id) {
+    if (!win || win.isDestroyed()) {
+      pendingRunId = id
+      openWindow()
+      return
+    }
+    const address = JSON.stringify('?run=' + encodeURIComponent(id))
+    win.webContents
+      .executeJavaScript(`history.pushState(null, '', ${address}); dispatchEvent(new PopStateEvent('popstate'))`)
+      .catch(() => {
+        if (win && !win.isDestroyed()) win.loadURL(gatewayURL + '&run=' + encodeURIComponent(id))
+      })
+    focusWindow()
   }
 
   app.setAsDefaultProtocolClient('aether')

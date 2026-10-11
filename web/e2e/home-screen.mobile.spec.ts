@@ -64,6 +64,12 @@ test('a phone is served everything it needs to install the dashboard', async ({
   await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', apple)
   expect((await page.request.get(origin + apple)).status()).toBe(200)
 
+  // A browser registers the worker that shows push notifications only when
+  // it arrives as a script.
+  const worker = await page.request.get(origin + '/sw.js')
+  expect(worker.status()).toBe(200)
+  expect(worker.headers()['content-type']).toContain('javascript')
+
   // The shell draws its own top bar, so nothing is lost when the browser's
   // chrome goes: everything stays reachable and nothing overflows.
   const bar = page.getByRole('banner')

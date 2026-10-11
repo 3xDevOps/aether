@@ -849,6 +849,13 @@ export const api = {
     call<{ run: Run }>('run.relaunch', { run_id: runID }).then((r) => r.run),
   runSeen: (runID: string) =>
     call<{ run: Run }>('run.seen', { run_id: runID }).then((r) => r.run),
+  /** The server's push key, and whether the browser behind `endpoint` is subscribed. */
+  pushStatus: (endpoint?: string) =>
+    call<{ public_key: string; subscribed: boolean }>('push.status', endpoint ? { endpoint } : {}),
+  pushSubscribe: (subscription: PushSubscriptionJSON) => call<unknown>('push.subscribe', subscription),
+  pushUnsubscribe: (endpoint: string) => call<unknown>('push.unsubscribe', { endpoint }),
+  pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
+  pushActive: () => call<unknown>('push.active'),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the fork point; with one, `base` is the `from` tree.
   runPatch: (runID: string, range?: { from: string; to: string }) =>

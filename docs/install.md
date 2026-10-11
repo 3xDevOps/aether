@@ -685,8 +685,11 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 ## Desktop app
 
 Optional: an Electron shell that launches `aether gui` for you and shows the
-dashboard in its own frameless window, with desktop notifications, a
-needs-attention badge, and `aether://run/<id>` deep links. It is the same SPA
+dashboard in its own frameless window, with a notification that names a run
+when it needs attention and opens it when clicked, a needs-attention badge,
+and `aether://run/<id>` deep links. The notification shows only while the app
+is open; a phone gets one through the server-hosted dashboard
+([networking.md](networking.md#notifications)). It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
 release publishes it; the CLI builds it for you, and needs nothing installed
 first. The Windows installer builds it by default; on Linux and macOS,
@@ -824,7 +827,10 @@ and sends is in [privacy.md](privacy.md); the licences it ships under are in
 
 The app holds no logic and no credential. It is a WebView locked to one HTTPS
 origin, so identity stays the phone's own tailnet login, resolved by the server
-on every request ([networking.md](networking.md#the-dashboard)). Two things
+on every request ([networking.md](networking.md#the-dashboard)). A WebView
+cannot receive push notifications, so the app shows none: for those, install
+the dashboard from Chrome instead
+([networking.md](networking.md#notifications)). Two things
 have to be true first: the server has `web-port` set, and the phone is signed
 in to the same tailnet. The app does not use the edge in this release: it
 works over a tailnet exactly as before, whatever the server's `edge-url`
@@ -1193,7 +1199,7 @@ fails with:
 swarms need conflict coordination; the server was started with --conflict-coordination=false: scheduler: coordination is unavailable
 ```
 
-Three things happen on the first start and never need attention again:
+Four things happen on the first start and never need attention again:
 
 1. **The SSH host key** is generated into `<data-dir>/ssh/host_ed25519_key`
    (by setup already, when the edge is on). Clients record its fingerprint on
@@ -1206,6 +1212,9 @@ Three things happen on the first start and never need attention again:
    that uses the claim code. There is no other account creation step.
 3. **The SQLite store and the git repo root** are created under the data
    directory.
+4. **The push key** is generated into `<data-dir>/push/vapid_key.pem`. It
+   signs [notifications](networking.md#notifications), and every device's
+   subscription is bound to it.
 
 Options live in `/etc/aether/server.conf`, not in `ExecStart`. The file is
 operator-owned, so binary updates and unit reinstalls never rewrite it, and
@@ -1328,6 +1337,7 @@ automatic.
 | --- | --- |
 | `aether.db` | SQLite: members, workspaces, runs, event log, and profile metadata. |
 | `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
+| `push/` | The key that signs [push notifications](networking.md#notifications). Without it every device has to turn notifications off and on again. |
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
