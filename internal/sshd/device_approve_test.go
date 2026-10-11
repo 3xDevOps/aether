@@ -71,8 +71,8 @@ func TestApproveDeviceByID(t *testing.T) {
 	}
 
 	for _, want := range []events.MemberDevicePayload{
-		{DeviceID: waiting.ID, Status: domain.DevicePending, InvitationID: waiting.Invitation},
-		{DeviceID: waiting.ID, Status: domain.DeviceApproved, MemberID: m.ID},
+		{DeviceID: waiting.ID, Status: domain.DevicePending},
+		{DeviceID: waiting.ID, Status: domain.DeviceApproved},
 	} {
 		select {
 		case ev := <-sub.Events():

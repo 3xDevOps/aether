@@ -29,6 +29,9 @@ type EdgeOwner interface {
 	Origin() string
 	// Connected reports whether the control connection to the edge is up.
 	Connected() bool
+	// EdgeState is the edge's last reported state for this server,
+	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+	EdgeState() string
 }
 
 // SetEdgeOwner connects the edge agent that records ownership. Call it

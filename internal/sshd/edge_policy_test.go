@@ -420,11 +420,15 @@ type fakeEdgeOwner struct {
 	err    error
 	// owner is what Owner returns; nil is a server without one.
 	owner *edgeproto.Account
+	// state is what EdgeState returns; empty is an edge that has not
+	// answered.
+	state string
 }
 
 func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, nil }
 func (f *fakeEdgeOwner) Origin() string                     { return "https://edge.example" }
 func (f *fakeEdgeOwner) Connected() bool                    { return true }
+func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 	f.mu.Lock()

@@ -362,7 +362,12 @@ function ServerPicker({
             onSubmit={(e) => {
               e.preventDefault()
               const claim = parseClaim(code)
-              void link(() => client.localEdgeClaim(claim.code, claim.edge ?? edge))
+              const claimHost = claim.edge && linkHost(claim.edge)
+              if (claimHost && claimHost !== edgeHost(edge)) {
+                setError(`This link names ${claimHost}, but this device is signed in to ${edgeHost(edge)}. Sign in to ${claimHost} first.`)
+                return
+              }
+              void link(() => client.localEdgeClaim(claim.code, edge))
             }}
           >
             <FormField
@@ -380,6 +385,14 @@ function ServerPicker({
       </Collapsible>
     </div>
   )
+}
+
+function linkHost(edge: string): string {
+  try {
+    return new URL(edge).host
+  } catch {
+    return edge
+  }
 }
 
 /** The id comes from the edge, so only comparing it with the admin's rules

@@ -250,7 +250,7 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 	if invitation != "" {
 		s.notifyDirectory()
 	}
-	s.publishDevice(ctx, member, dev)
+	s.publishDevice(ctx, member, dev.ID, dev.Status)
 	slog.Info("sshd: device approved", "actor", member, "member", dev.Member, "device", dev.ID, "invitation", invitation)
 	return protocol.MemberDeviceResult{Device: deviceToWire(dev)}, nil
 }
@@ -314,7 +314,7 @@ func (s *Server) memberDeviceRevoke(ctx context.Context, member domain.MemberID,
 	if dev, err = ids.GetDevice(ctx, dev.ID); err != nil {
 		return nil, rpcError(err)
 	}
-	s.publishDevice(ctx, member, dev)
+	s.publishDevice(ctx, member, dev.ID, dev.Status)
 	slog.Info("sshd: device revoked", "actor", member, "member", dev.Member, "device", dev.ID)
 	return protocol.MemberDeviceResult{Device: deviceToWire(dev)}, nil
 }
@@ -342,7 +342,7 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberInvitationCreate, false); perr != nil {
 		return nil, perr
 	}
-	if perr := s.requireEdgeOwner(protocol.MethodMemberInvitationCreate); perr != nil {
+	if perr := s.requireEdgeClaimed(protocol.MethodMemberInvitationCreate); perr != nil {
 		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()
@@ -375,7 +375,7 @@ func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID,
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, false); perr != nil {
 		return nil, perr
 	}
-	if perr := s.requireEdgeOwner(protocol.MethodMemberIdentityLink); perr != nil {
+	if perr := s.requireEdgeClaimed(protocol.MethodMemberIdentityLink); perr != nil {
 		return nil, perr
 	}
 	ids, perr := s.rpcIdentityStore()
@@ -471,7 +471,7 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		s.publishDevice(ctx, member, dev)
+		s.publishDevice(ctx, member, dev.ID, dev.Status)
 		out.Revoked = append(out.Revoked, deviceToWire(dev))
 	}
 	slog.Info("sshd: edge identity removed", "actor", member, "member", target,
@@ -560,7 +560,7 @@ func (s *Server) memberInvitationRevoke(ctx context.Context, member domain.Membe
 	for _, d := range devs {
 		if d.Invitation == inv.ID {
 			d.Status = domain.DeviceRevoked
-			s.publishDevice(ctx, member, d)
+			s.publishDevice(ctx, member, d.ID, d.Status)
 		}
 	}
 	slog.Info("sshd: invitation revoked", "actor", member, "invitation", inv.ID)

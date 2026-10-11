@@ -72,13 +72,15 @@ As found in the code:
 
    The sidebar's Needs you count includes them.
 4. **The server reports its edge.** A new `server.edge` control method
-   returns the edge URL, server id, access policy, owner account or none,
-   and whether it is connected. `aether invite` prints the server id from
-   it; the dashboard's new Settings › Remote access section shows it.
+   returns the edge URL, server id, access policy, the owner's provider
+   and login or none, whether it is connected, and whether the edge last
+   reported it claimed. `aether invite` prints the server id from it; the
+   dashboard's new Settings › Remote access section shows it.
    `member.invitation.create` and `member.identity.link` refuse on a server
-   whose edge is on and has no owner, because the edge relays nothing and
-   keeps no directory for it, and name **Connect my GitHub account** and
-   `aether edge connect`.
+   the edge has not recorded, because the edge relays nothing and keeps no
+   directory for it, and name **Connect my GitHub account** and
+   `aether edge connect`. An ownerless server the edge has recorded keeps
+   relaying for its members and accepts both.
 5. **Connect my GitHub account.** A new admin-only control method,
    `server.edge.claimcode`, accepted only from an approved device, member
    SSH key or tailnet identity, mints a claim code bound to the caller's
@@ -134,9 +136,9 @@ As found in the code:
    approver: the device's member is the only admin and has no approved
    device. `aether device approve` also accepts a device id.
 10. **The edge store does not change.** An ownerless server that was once
-    claimed keeps its row and directory. A never-claimed server is claimed
-    by its admin through decision 5 before anyone is invited; decision 4
-    refuses earlier.
+    claimed keeps its row and directory and keeps relaying for its members.
+    A server the edge has not recorded is claimed by its admin through
+    decision 5 before anyone is invited; decision 4 refuses earlier.
 
 ## 3. Flows
 
@@ -241,7 +243,7 @@ Rows added to or changed in "Who must fail for access to be gained" and
 | Package or file | Change |
 | --- | --- |
 | `internal/edge/proto` | Structured refusal type and its prose renderer; `join:` user name builder and parser beside `ClaimUser`; join and claim link builders |
-| `internal/sshd` | Structured banners; `server.edge`; `server.edge.claimcode`; `member.device.approve` by id; join secret check; `member.device` event; owner check in `member.invitation.create` and `member.identity.link` |
+| `internal/sshd` | Structured banners; `server.edge`; `server.edge.claimcode`; `member.device.approve` by id; join secret check; `member.device` event; claimed check in `member.invitation.create` and `member.identity.link` |
 | `internal/protocol` | `server.edge`, `server.edge.claimcode` methods and types; `member.device.list` member and role for pending devices; optional `code` on approve |
 | `internal/store` | Migration adding `secret_hash` to `identity_invitations` |
 | `internal/edge/agent` | Claim code for an admin issued from an RPC |
@@ -282,7 +284,7 @@ Greptile's PR review.
 
 | Phase | Contents |
 | --- | --- |
-| 1 | This plan; invite prints the server id and refuses without an owner; `claim-code` refusal; structured refusals; pending-device cards; pasted claim link; signing-key fix |
+| 1 | This plan; invite prints the server id and refuses on a server the edge has not recorded; `claim-code` refusal; structured refusals; pending-device cards; pasted claim link; signing-key fix |
 | 2 | Join secret and link; join and claim pages; `aether://join`; the waiting state; Connect my GitHub account and `aether edge connect` |
 | 3 | Own-device one-click approval; claim link from setup; code only on fallback paths; docs pass |
 

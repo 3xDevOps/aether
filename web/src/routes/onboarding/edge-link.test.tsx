@@ -311,9 +311,8 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeClaim).toHaveBeenCalledWith('abcdefgh-example', edge)
   })
 
-  it('claims through the edge a pasted claim link names', async () => {
+  it('claims with the code a pasted claim link carries', async () => {
     seed()
-    const other = 'https://edge.other.test'
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => unlinked),
       localEdgeStatus: vi.fn(async () => signedIn),
@@ -324,12 +323,36 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `${other}/claim/${serverID}#secret` },
+      target: { value: `${edge}/claim/${serverID}#secret` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect(await screen.findByText(/^Linked to/)).toBeDefined()
-    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-secret`, other)
+    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-secret`, edge)
+  })
+
+  it('refuses a pasted claim link that names another edge', async () => {
+    seed()
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+      localEdgeClaim: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
+    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+      target: { value: `https://edge.other.test/claim/${serverID}#secret` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
+
+    expect(
+      await screen.findByText(
+        'This link names edge.other.test, but this device is signed in to edge.example.test. Sign in to edge.other.test first.',
+      ),
+    ).toBeDefined()
+    expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 
   it('makes the person choose the edge when signed in to more than one', async () => {

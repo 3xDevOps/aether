@@ -8,10 +8,8 @@ import "github.com/3xDevOps/Aether/internal/domain"
 const TypeMemberDevice Type = "member.device"
 
 type MemberDevicePayload struct {
-	DeviceID     domain.DeviceID     `json:"device_id"`
-	Status       domain.DeviceStatus `json:"status"`
-	MemberID     domain.MemberID     `json:"member_id,omitempty"`
-	InvitationID domain.InvitationID `json:"invitation_id,omitempty"`
+	DeviceID domain.DeviceID     `json:"device_id"`
+	Status   domain.DeviceStatus `json:"status"`
 }
 
 func (MemberDevicePayload) EventType() Type { return TypeMemberDevice }

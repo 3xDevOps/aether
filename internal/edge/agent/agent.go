@@ -97,6 +97,9 @@ type Agent struct {
 	seen   map[string]time.Time
 	// live is the enrolled control connection, nil between connections.
 	live *session
+	// edgeState is the edge's last reported state for this server,
+	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+	edgeState string
 }
 
 // New checks cfg and returns an agent that has not dialed yet.

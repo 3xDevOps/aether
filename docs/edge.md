@@ -317,10 +317,13 @@ the server has members, so a claim without --admin would be refused; name the ad
 ```
 
 Any other claim on such a server is refused with `server is already
-claimed`, so a claim never makes a new admin there. While the edge is on
-and the server has no owner, `aether invite --github|--email` and `aether
-member link` are refused with `this server has no owner at its edge, so
-the edge relays nothing for it and keeps no directory`: claim it first.
+claimed`, so a claim never makes a new admin there. While the edge has
+not recorded the server, `aether invite --github|--email` and `aether
+member link` are refused with `the edge has not recorded this server yet,
+so it relays nothing for it and keeps no directory`: claim it first. An
+ownerless server the edge has recorded keeps relaying, and accepts both
+([Transfer and the ownerless
+state](#transfer-and-the-ownerless-state)).
 
 The edge records the owner only when the server reports the claim on its
 own control connection, within 60 seconds of the claim connection opening,

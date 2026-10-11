@@ -33,6 +33,7 @@ func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func
 			slog.Warn("edge: refused claim", "conn", grant.ConnID, "error", err)
 			return err
 		}
+		a.setEdgeState(edgeproto.StateClaimed)
 		slog.Info("edge: server claimed", "conn", grant.ConnID,
 			"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 		return nil
@@ -76,6 +77,14 @@ func (a *Agent) Connected() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.live != nil
+}
+
+// EdgeState is the edge's last reported state for this server,
+// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+func (a *Agent) EdgeState() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.edgeState
 }
 
 // transfer reports owner as the new owner and waits for the edge's answer

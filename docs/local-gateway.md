@@ -1405,8 +1405,9 @@ optional and, when given, must name that device),
 `member.identity.remove`
 (`{"member_id":"...","provider":"github","subject":"..."}`),
 `server.owner.transfer` (`{"member_id":"..."}`) and `server.edge`, which
-any member calls for the edge URL, server id, access policy, owner account
-or `null`, and whether the server is connected. Their shapes are in
+any member calls for the edge URL, server id, access policy, the owner's
+provider and login or `null`, whether the server is connected, and whether
+the edge last reported it claimed. Their shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`,
 and [edge.md](edge.md) describes what each does.
 

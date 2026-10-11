@@ -113,8 +113,9 @@ That account then connects through the edge as the same member. Under
 `approved-devices` its first connection binds nothing: the device waits on
 the link, and the admin approves it from this SSH key or tailnet connection
 with `aether device approve <code>`, which binds the account. While the
-edge is on and the server has no owner there, linking and inviting are
-refused until it is claimed ([edge.md](edge.md#server-id-and-claiming)). Only admins can link: nothing proves the caller holds the account
+edge has not recorded the server, linking and inviting are refused until
+it is claimed ([edge.md](edge.md#server-id-and-claiming)); an ownerless
+server the edge has recorded keeps relaying and accepts both. Only admins can link: nothing proves the caller holds the account
 they name. Any other member is invited by an admin with `aether invite
 --github` or `--email`, which creates a new member for that account.
 

@@ -798,7 +798,8 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 }
 
 // Any member reads the server's edge, and it carries only what `aether
-// servers` shows: no claim code, token or key.
+// servers` shows: no claim code, token or key, and of the owner only the
+// provider and login.
 func TestServerEdge(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -811,25 +812,26 @@ func TestServerEdge(t *testing.T) {
 		off != (protocol.ServerEdgeResult{ServerID: id, AccessPolicy: string(edgeproto.PolicyApprovedDevices)}) {
 		t.Fatalf("server.edge with the edge off = %+v, %v", off, err)
 	}
-	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo, state: edgeproto.StateClaimed})
 	var raw map[string]any
 	if err := bob.Call(protocol.MethodServerEdge, struct{}{}, &raw); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]any{"edge_url": "https://edge.example", "server_id": id, "access_policy": "approved-devices", "connected": true,
-		"owner": map[string]any{"provider": "github", "subject": octo.Subject, "login": "octo", "email": ""}}
+		"claimed": true, "owner": map[string]any{"provider": "github", "login": "octo"}}
 	if fmt.Sprint(raw) != fmt.Sprint(want) {
 		t.Fatalf("server.edge = %v, want %v", raw, want)
 	}
 }
 
-// With the edge on and no owner there, invitations and links are refused
-// before anything is stored; with an owner they are made.
-func TestInvitationsNeedAnEdgeOwner(t *testing.T) {
+// While the edge reports the server unclaimed, invitations and links are
+// refused before anything is stored. A claimed server without an owner
+// keeps relaying for its members, so they are made there.
+func TestUnclaimedServerRefusesInvitationsAndOwnerlessOneDoesNot(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	admin := controlClient(t, e)
-	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{state: edgeproto.StateUnclaimed})
 	calls := map[string]any{
 		protocol.MethodMemberInvitationCreate: protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"},
 		protocol.MethodMemberIdentityLink:     protocol.MemberIdentityLinkParams{Login: "octo-alt"},
@@ -837,17 +839,17 @@ func TestInvitationsNeedAnEdgeOwner(t *testing.T) {
 	var pe *protocol.Error
 	for method, params := range calls {
 		if err := admin.Call(method, params, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState ||
-			!strings.HasPrefix(pe.Message, method+": this server has no owner at its edge") || !strings.Contains(pe.Message, "aether edge connect") {
-			t.Fatalf("%s without an edge owner = %v, want CodeInvalidState", method, err)
+			!strings.HasPrefix(pe.Message, method+": the edge has not recorded this server yet") || !strings.Contains(pe.Message, "aether edge connect") {
+			t.Fatalf("%s on an unclaimed server = %v, want CodeInvalidState", method, err)
 		}
 	}
 	if invs, _ := identities(t, e).ListInvitations(context.Background()); len(invs) != 0 {
 		t.Fatalf("refused calls stored %+v", invs)
 	}
-	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{state: edgeproto.StateClaimed})
 	for method, params := range calls {
 		if err := admin.Call(method, params, nil); err != nil {
-			t.Fatalf("%s with an edge owner: %v", method, err)
+			t.Fatalf("%s on an ownerless claimed server: %v", method, err)
 		}
 	}
 }

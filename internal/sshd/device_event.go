@@ -10,16 +10,16 @@ import (
 
 // The device change is already stored, so a failed publish is logged, not
 // returned.
-func (s *Server) publishDevice(ctx context.Context, actor domain.MemberID, dev *domain.Device) {
+func (s *Server) publishDevice(ctx context.Context, actor domain.MemberID, id domain.DeviceID, status domain.DeviceStatus) {
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
-		slog.Warn("sshd: list workspaces for member.device", "device", dev.ID, "error", err)
+		slog.Warn("sshd: list workspaces for member.device", "device", id, "error", err)
 		return
 	}
-	payload := events.MemberDevicePayload{DeviceID: dev.ID, Status: dev.Status, MemberID: dev.Member, InvitationID: dev.Invitation}
+	payload := events.MemberDevicePayload{DeviceID: id, Status: status}
 	for _, ws := range workspaces {
 		if _, perr := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: ws.ID, ActorID: actor, Payload: payload}); perr != nil {
-			slog.Warn("sshd: publish member.device", "device", dev.ID, "workspace", ws.ID, "error", perr)
+			slog.Warn("sshd: publish member.device", "device", id, "workspace", ws.ID, "error", perr)
 		}
 	}
 }
