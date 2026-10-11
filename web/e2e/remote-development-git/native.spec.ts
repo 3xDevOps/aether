@@ -75,6 +75,9 @@ test('selected paths preserve unrelated staging, report index failure, and retai
   }
 
   await page.getByRole('tab', { name: '2 · Push and pull request' }).click()
+  // The fields open by themselves only when no destination could be chosen.
+  const change = page.getByRole('button', { name: 'Change destination' })
+  if ((await change.getAttribute('aria-expanded')) !== 'true') await change.click()
   await page.getByRole('combobox', { name: 'Push remote', exact: true }).click()
   await page.getByRole('option', { name: 'writable', exact: true }).click()
   // A remote with one push URL names it, and the branch starts as the checkout's own.
@@ -90,14 +93,15 @@ test('selected paths preserve unrelated staging, report index failure, and retai
 
   // No GitHub credentials are installed by this scenario. The actual native
   // gh failure is visible and cannot erase the successful native push.
-  const pr = page.getByRole('region', { name: 'GitHub pull request' })
+  const pr = page.getByRole('group', { name: 'GitHub pull request' })
   await pr.getByLabel('PR repository (owner/name)', { exact: true }).fill('upstream/repository')
   await pr.getByLabel('PR base branch', { exact: true }).fill('main')
   await pr.getByLabel('PR head repository (owner/name)', { exact: true }).fill('fork-owner/repository')
   await pr.getByLabel('PR head branch', { exact: true }).fill('reviewed-native')
-  await pr.getByRole('button', { name: 'Discover existing PR' }).click()
-  await expect(pr.getByRole('alert')).toBeVisible()
-  await expect(pr.getByRole('button', { name: 'Create pull request' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Discover existing PR' }).click()
+  // The push outcome under the first sentence carries no alert; the lookup's failure is the only one.
+  await expect(page.getByRole('region', { name: 'Destination' }).getByRole('alert')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open pull request', exact: true })).toBeDisabled()
   await expect(push).toContainText('Pushed: yes')
   const { workspace: unchanged } = await admin.api.rpc<{ workspace: Workspace }>('workspace.get', { workspace_id: workspace.id })
   expect(unchanged.origin ?? '').toBe(workspace.origin ?? '')
@@ -107,7 +111,7 @@ test('selected paths preserve unrelated staging, report index failure, and retai
   // changing the reviewed local branch or forcing the remote backwards.
   const remoteCommit = await exec('docker', ['exec', container, 'git', '--git-dir=/tmp/published.git', '-c', 'user.name=Remote E2E', '-c', 'user.email=remote-e2e@example.invalid', 'commit-tree', `${status.head}^{tree}`, '-p', status.head, '-m', 'independent remote advance'])
   await exec('docker', ['exec', container, 'git', '--git-dir=/tmp/published.git', 'update-ref', 'refs/heads/reviewed-native', remoteCommit.stdout.trim(), status.head])
-  await page.getByRole('button', { name: 'Push branch' }).click()
+  await page.getByRole('button', { name: 'Push only' }).click()
   await expect(push).toContainText('Pushed: no')
   await expect(push.getByRole('alert')).toBeVisible()
   const stillRemote = await exec('docker', ['exec', container, 'git', '--git-dir=/tmp/published.git', 'rev-parse', 'refs/heads/reviewed-native'])

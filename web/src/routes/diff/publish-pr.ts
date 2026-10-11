@@ -28,8 +28,9 @@ useStore.subscribe((state, previous) => {
 async function read(run: Run, client: Api): Promise<Partial<TrackedPR>> {
   const { chosen, asked } = usePullRequests.getState()[run.id] ?? none
   const ask = async (next: NonNullable<TrackedPR['asked']>) => client.runPRFeedback({ run_id: run.id, ...next, limit: 100 })
+  // A failed read that found no pull request says nothing about the one on screen; a partial one carries its own error.
   const answer = (next: TrackedPR['asked'], feedback: RunPRFeedbackResult): Partial<TrackedPR> =>
-    feedback.error ? { asked: next, error: feedback.error } : { asked: next, feedback, error: undefined }
+    feedback.error && !feedback.pull_request ? { asked: next, error: feedback.error } : { asked: next, feedback, error: undefined }
   if (asked) {
     const feedback = await ask(asked)
     // A moved checkout may be on another branch, which is another pull request.

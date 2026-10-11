@@ -67,6 +67,8 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   const title = titleEdit ?? (status && status.head !== run.base_commit ? status.head_subject ?? '' : '')
   const currentPRReview = prReview && expected && prReview.expected.branch === expected.branch && prReview.expected.head === expected.head &&
     JSON.stringify(prReview.target) === JSON.stringify(target) ? prReview : null
+  /** This dialog already pushed the HEAD on screen to the destination on screen. */
+  const pushed = !!push?.pushed && push.head === expected?.head && JSON.stringify(push.target) === JSON.stringify(pushTarget)
 
   useEffect(() => {
     mounted.current = true
@@ -195,24 +197,41 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     return pushEdit || targetEdit ? trackPullRequest(run, found, client) : refreshPullRequest(run, client)
   }
 
-  async function createPR() {
-    if (!currentPRReview || uncertain) return
+  async function create(review: PRReview) {
     // A lost response can follow a successful GitHub mutation. Only an exact
     // read-only discovery is offered until that PR has been found.
     setUncertain(true)
     const result = await client.runPRCreate({
-      run_id: run.id, expected: currentPRReview.expected, target: currentPRReview.target,
-      expected_login: currentPRReview.result.identity, title, body, draft,
+      run_id: run.id, expected: review.expected, target: review.target,
+      expected_login: review.result.identity, title, body, draft,
     })
     setCreation(result)
     setUncertain(result.creation_uncertain)
     if (result.pull_request) {
-      setPRReview({ ...currentPRReview, result: {
+      setPRReview({ ...review, result: {
         identity: result.identity, account_member_id: result.account_member_id,
         pull_request: result.pull_request, output: result.output, error: result.error, actual: result.actual,
       } })
-      void follow(currentPRReview.target)
+      void follow(review.target)
     }
+  }
+
+  async function createPR() {
+    if (currentPRReview && !uncertain) await create(currentPRReview)
+  }
+
+  /** Pushes, then opens the pull request only if the push landed. Each half
+   * keeps its own outcome and error, so a push that worked stays reported
+   * whatever the pull request did. */
+  async function pushAndOpen() {
+    const review = currentPRReview
+    if (!expected || !review || uncertain) return
+    setStatusReady(false)
+    setErrors((all) => ({ ...all, create: undefined }))
+    const result = await client.runGitPush({ run_id: run.id, expected, target: pushTarget })
+    setPush(result)
+    if (result.pushed) await create(review).catch((cause: unknown) => setErrors((all) => ({ ...all, create: message(cause) })))
+    await refreshStatus()
   }
 
   // An edit waits for Discover: looking a target up on every keystroke would not.
@@ -233,7 +252,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     status, statusReady, expected, refreshStatus,
     paths, selectPath, patches, untracked, reviewed, reviewPaths,
     commitMessage, setCommitMessage, commit, commitPaths,
-    pushTarget, changePushTarget, push, pushBranch,
+    pushTarget, changePushTarget, push, pushed, pushBranch, pushAndOpen,
     target, targetComplete, changeTarget, currentPRReview, discoverPR, uncertain,
     title, setTitle, body, setBody, draft, setDraft, creation, createPR,
   }

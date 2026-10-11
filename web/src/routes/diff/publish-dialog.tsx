@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react'
-import type * as React from 'react'
+import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
-import type { Run, RunGitStatusResult } from '@/lib/types'
+import type { Run } from '@/lib/types'
+import { cn } from '@/lib/utils'
 import { CommitStep } from '@/routes/diff/publish-commit'
 import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
 import { PushStep } from '@/routes/diff/publish-push'
@@ -63,14 +64,24 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
   )
 }
 
+/** One line for what both steps act on and as whom. The full HEAD, the
+ * account's id and the upstream sit behind the push step's destination. */
 function Checkout({ p }: { p: Publish }) {
   const status = p.status
   return (
-    <section aria-label="Run checkout" className="grid min-w-0 gap-2 rounded-panel border border-seam bg-chrome p-3">
-      <div className="flex min-w-0 flex-col items-start justify-between gap-3 sm:flex-row">
-        {status ? <Facts status={status} /> : <p className="text-ui text-muted">{p.errors.status ? 'Native Git status is unavailable.' : 'Loading native Git status…'}</p>}
-        <Button variant="secondary" size="sm" disabled={p.busy} onClick={() => void p.perform('status', p.refreshStatus)}>
-          Refresh status
+    <section aria-label="Run checkout" className="grid min-w-0 gap-1">
+      <div className="flex min-w-0 items-center gap-2 text-ui-sm text-muted">
+        {status ? (
+          <p className="min-w-0 flex-1 break-words">
+            <span className="font-code text-text">{status.branch || '(detached)'}</span> at{' '}
+            <span className="font-code text-text" title={status.head}>{status.head.slice(0, 8) || '(unborn)'}</span> · as{' '}
+            {status.account_name || status.account_member_id} · GitHub <span className="text-text">{status.identity || 'login unavailable'}</span>
+          </p>
+        ) : (
+          <p className="min-w-0 flex-1">{p.errors.status ? 'Native Git status is unavailable.' : 'Loading native Git status…'}</p>
+        )}
+        <Button variant="ghost" size="icon-sm" label="Refresh status" disabled={p.busy} onClick={() => void p.perform('status', p.refreshStatus)}>
+          <RefreshCw className={cn(p.action === 'status' && 'animate-spin motion-reduce:animate-none')} />
         </Button>
       </div>
       <InlineError>{p.errors.status}</InlineError>
@@ -91,28 +102,5 @@ function Checkout({ p }: { p: Publish }) {
       )}
       {status && <Diagnostics output={status.output} error={status.error} />}
     </section>
-  )
-}
-
-function Facts({ status }: { status: RunGitStatusResult }) {
-  return (
-    <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-ui-sm">
-      <Fact term="Branch" code>{status.branch || '(detached)'}</Fact>
-      <Fact term="HEAD" code>{status.head || '(unborn)'}</Fact>
-      <Fact term="Agent account">
-        {status.account_name || status.account_member_id} <span className="font-code text-muted">{status.account_member_id}</span>
-      </Fact>
-      <Fact term="GitHub identity">{status.identity || 'Unavailable'}</Fact>
-      {status.upstream && <Fact term="Upstream" code>{status.upstream.remote}/{status.upstream.branch}</Fact>}
-    </dl>
-  )
-}
-
-function Fact({ term, code, children }: { term: string; code?: boolean; children: React.ReactNode }) {
-  return (
-    <>
-      <dt className="text-muted">{term}</dt>
-      <dd className={code ? 'font-code break-all text-text' : 'break-words text-text'}>{children}</dd>
-    </>
   )
 }

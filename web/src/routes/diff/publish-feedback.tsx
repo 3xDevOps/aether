@@ -22,7 +22,7 @@ const order: CheckState[] = ['failing', 'running', 'passing']
 const checkTone: Record<CheckState, Tone> = { failing: 'failed', running: 'working', passing: 'done' }
 const checkWord: Record<CheckState, string> = { failing: 'Failing', running: 'Running', passing: 'Passed' }
 
-export function checkSummary(checks: RunPRCheck[]): string {
+function checkSummary(checks: RunPRCheck[]): string {
   const counts = countChecks(checks)
   return [
     counts.failing && `${counts.failing} failing`,
@@ -105,6 +105,7 @@ export function PRFeedback({
   const passing = checks.filter((check) => checkState(check) === 'passing')
   const pending = checks.filter((check) => checkState(check) !== 'passing')
   const comments = commentsOf(feedback)
+  const sendable = comments.length > 0 || pending.some((check) => checkState(check) === 'failing')
 
   const send = (key: string, text: string) => agentSend.dispatch(() => {
     if (inFlight.current) return
@@ -141,7 +142,7 @@ export function PRFeedback({
   )
   const row = (check: RunPRCheck) => {
     const state = checkState(check)
-    const key = `check:${check.name}:${check.url ?? ''}`
+    const key = `check:${pr.head_oid}:${check.name}:${check.url ?? ''}`
     return (
       <li key={key} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5">
         <StatusDot tone={checkTone[state]} label={checkWord[state]} />
@@ -175,7 +176,7 @@ export function PRFeedback({
         {feedback.truncated && (
           <p role="alert" className="text-ui-sm text-state-needs-you">GitHub returned more than is shown here. Open the pull request for the rest.</p>
         )}
-        {(pending.some((check) => checkState(check) === 'failing') || comments.length > 0) && (agentSend.blocked ?? agentSend.waits) && (
+        {sendable && (agentSend.blocked ?? agentSend.waits) && (
           <p className="text-ui-sm text-muted">
             {agentSend.blocked ?? 'What you send from here reaches the agent in 45 s unless the run’s controller decides sooner.'}
           </p>
@@ -198,8 +199,7 @@ export function PRFeedback({
             </Button>
           </div>
           {checks.length === 0 && <p className="text-muted">No check has reported on <span className="font-code">{pr.head_oid.slice(0, 8)}</span> yet.</p>}
-          {pending.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{pending.map(row)}</ul>}
-          {pending.length === 0 && passing.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{passing.map(row)}</ul>}
+          {checks.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{(pending.length ? pending : passing).map(row)}</ul>}
           {pending.length > 0 && passing.length > 0 && (
             <Collapsible>
               <CollapsibleTrigger>

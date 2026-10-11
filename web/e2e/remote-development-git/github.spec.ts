@@ -81,8 +81,17 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
   const evidence: Record<string, unknown> = { baseRepository, headRepository, baseBranch, branches, runID: run.id }
   const targetFor = (branch: string) => ({ repository: baseRepository!, base_branch: baseBranch, head_repository: headRepository!, head_branch: branch })
   const nativeGH = async (args: string[]) => exec('docker', ['exec', '-w', '/workspace', container, ghPath, ...args])
-  const pr = page.getByRole('region', { name: 'GitHub pull request' })
+  // The sentences, the fields behind Change destination and both outcomes.
+  const pr = page.getByRole('region', { name: 'Destination' })
+  const openPR = page.getByRole('button', { name: 'Open pull request', exact: true })
+  // The push is the filled button once a pull request exists, the secondary one before.
+  const pushOnly = page.getByRole('button', { name: /^Push (branch|only)$/ })
+  const showFields = async () => {
+    const change = page.getByRole('button', { name: 'Change destination' })
+    if ((await change.getAttribute('aria-expanded')) !== 'true') await change.click()
+  }
   const selectPR = async (branch: string, base = baseBranch, head = headRepository!) => {
+    await showFields()
     await pr.getByLabel('PR repository (owner/name)', { exact: true }).fill(baseRepository!)
     await pr.getByLabel('PR base branch', { exact: true }).fill(base)
     await pr.getByLabel('PR head repository (owner/name)', { exact: true }).fill(head)
@@ -92,10 +101,10 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     if (await discover.isVisible()) await discover.click()
   }
   const createPR = async (branch: string) => {
-    await pr.getByLabel('PR title', { exact: true }).fill(`Aether E2E ${branch}`)
-    await pr.getByRole('textbox', { name: 'PR description', exact: true }).fill(description)
-    await pr.getByRole('checkbox', { name: 'Draft PR', exact: true }).check()
-    await pr.getByRole('button', { name: 'Create pull request' }).click()
+    await page.getByLabel('PR title', { exact: true }).fill(`Aether E2E ${branch}`)
+    await page.getByRole('textbox', { name: 'PR description', exact: true }).fill(description)
+    await page.getByRole('checkbox', { name: 'Draft PR', exact: true }).check()
+    await openPR.click()
   }
   try {
     await page.getByRole('tab', { name: 'Changes', exact: true }).click()
@@ -113,12 +122,13 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     evidence.selectedCommitPaths = committed.stdout.trim()
     evidence.preservedStagedPath = staged.stdout.trim()
     await page.getByRole('tab', { name: '2 · Push and pull request' }).click()
+    await showFields()
     await page.getByRole('combobox', { name: 'Push remote', exact: true }).click()
     await page.getByRole('option', { name: 'origin', exact: true }).click()
     await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).click()
     await page.getByRole('option', { name: `https://github.com/${headRepository}.git`, exact: true }).click()
     await page.getByLabel('Push head branch', { exact: true }).fill(headBranch)
-    await page.getByRole('button', { name: 'Push branch' }).click()
+    await pushOnly.click()
     await expect(page.getByRole('region', { name: 'Push outcome' })).toContainText('Pushed: yes')
     await selectPR(headBranch)
     await expect(pr).toContainText('No existing PR for this exact repository, base and head.')
@@ -131,7 +141,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     expect(found.pull_request).toMatchObject({ ...target, head_oid: status.head })
     const prNumber = found.pull_request!.number
     evidence.publishedPR = found.pull_request
-    await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
+    await expect(openPR).toHaveCount(0)
     const selectedFeedback = `selected-feedback-${headBranch}`
     const omittedFeedback = `not-selected-${headBranch}`
     for (const comment of [selectedFeedback, omittedFeedback]) {
@@ -183,7 +193,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await nativeGH(['pr', 'create', '--repo', baseRepository!, '--base', baseBranch, '--head', `${headRepository!.split('/')[0]}:${directBranch}`, '--title', `Aether E2E ${directBranch}`, '--body', description, '--draft'])
     await selectPR(directBranch)
     await expect(pr.getByRole('link', { name: `Aether E2E ${directBranch}`, exact: false })).toBeVisible()
-    await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
+    await expect(openPR).toHaveCount(0)
     const direct = await admin.api.rpc<RunPRStatusResult>('run.pr.status', { run_id: run.id, expected, target: targetFor(directBranch) })
     expect(direct.error).toBeFalsy()
     expect(direct.pull_request).toMatchObject({ ...targetFor(directBranch), head_oid: status.head })
@@ -212,7 +222,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
       const outcome = pr.getByRole('region', { name: 'PR creation outcome' })
       await expect(outcome).toContainText('Created: no · Reconciled: yes')
       await expect(outcome).toContainText('successful real GitHub POST response discarded')
-      await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
+      await expect(openPR).toHaveCount(0)
       await page.screenshot({ path: test.info().outputPath('real-post-response-loss-reconciled.png'), fullPage: true })
     } finally {
       rmSync(ghWrapper, { force: true })
@@ -231,8 +241,9 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     const rejectedBranch = branches[3]
     const advanced = await exec('docker', ['exec', '-w', '/workspace', container, 'git', 'commit-tree', `${status.head}^{tree}`, '-p', status.head, '-m', 'Independent disposable remote advance'])
     await exec('docker', ['exec', '-w', '/workspace', container, 'git', 'push', 'origin', `${advanced.stdout.trim()}:refs/heads/${rejectedBranch}`])
+    await showFields()
     await page.getByLabel('Push head branch', { exact: true }).fill(rejectedBranch)
-    await page.getByRole('button', { name: 'Push branch' }).click()
+    await pushOnly.click()
     const push = page.getByRole('region', { name: 'Push outcome' })
     await expect(push).toContainText('Pushed: no')
     await expect(push).toContainText('non-fast-forward')
@@ -246,8 +257,9 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     rmSync(credentialPath, { force: true })
     await page.getByRole('button', { name: 'Refresh status' }).click()
     await selectPR(headBranch)
-    await expect(pr.getByRole('alert')).toBeVisible()
-    await expect(pr.getByRole('button', { name: 'Create pull request' })).toBeDisabled()
+    // The rejected push above keeps its alert; the lookup without a credential adds the second.
+    await expect(pr.getByRole('alert')).toHaveCount(2)
+    await expect(page.getByRole('button', { name: 'Push and open pull request' })).toBeDisabled()
     const withoutCredential = await admin.api.rpc<RunGitStatusResult>('run.git.status', { run_id: run.id })
     expect(withoutCredential.identity).toBeFalsy()
     expect(withoutCredential.identity_error).toBeTruthy()

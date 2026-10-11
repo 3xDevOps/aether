@@ -2251,20 +2251,38 @@ both what it renders and the overlap set the conflict chips read.
   dashboard - has no repository for those commands to run in.
 - **Publish is two steps.** **Publish…** appears with `run.git.status` once
   the diff has a file, and opens `publish-dialog.tsx`, a bottom sheet on a
-  phone. The run checkout's branch, HEAD, agent account, GitHub identity and
-  upstream, when the branch has one, sit above both steps, with **Refresh
-  status**. **1 · Commit** selects changed paths, reviews their worktree and
-  staged diffs and untracked contents, and runs **Commit selected**. **2 ·
-  Push and pull request** runs **Push branch**, then **Create pull request**.
-  The dialog opens on step 2 when the first status has nothing to commit.
-  Each RPC's error shows under the button that sent it. The dialog's state
-  lives in `publish-state.ts` and stays mounted while the run is open, because
-  the Changes view stays mounted after its first visit, so a typed message
-  and a PR creation whose outcome is uncertain survive switching steps,
-  closing the dialog and switching views.
-- **Publish fills in where.** Every destination starts filled in from what
-  the checkout and the workspace already say (`publish-target.ts`), follows
-  each status refresh, and stops following once the member edits it. The push
+  phone. One line above both steps names what they act on and as whom,
+  "`aether/run-1` at `4f9c2a7d` · as Ada Lovelace · GitHub ada-l", with
+  **Refresh status** beside it and the status's own errors under it. **1 ·
+  Commit** selects changed paths, reviews their worktree and staged diffs and
+  untracked contents, and runs **Commit selected**. **2 · Push and pull
+  request** is where the dialog opens when the first status has nothing to
+  commit. The dialog's state lives in `publish-state.ts` and stays mounted
+  while the run is open, because the Changes view stays mounted after its
+  first visit, so a typed message and a PR creation whose outcome is
+  uncertain survive switching steps, closing the dialog and switching views.
+- **The destination is two sentences.** Step 2 (`publish-push.tsx`) says
+  where the work goes instead of asking: "Pushes commit `4f9c2a7d` to
+  `https://github.com/acme/app.git` as branch `aether/run-1`. Never a force
+  push." and "Opens a pull request into `acme/app:main` from
+  `ada/app:aether/run-1` as **ada-l**. It is not merged from here." Under
+  them sit only what the member writes, **PR title**, **PR description** and
+  **Draft PR**, and the buttons. A pull request the branch already has
+  replaces the second sentence with its number, title and state, linking to
+  GitHub, and the title fields go. A push to anything but GitHub says no
+  pull request is filled in.
+- **Change destination holds the fields.** The seven fields the sentences
+  are built from, the push remote, its URL and branch and the pull request's
+  repository, base, head repository and head branch, sit behind one
+  disclosure with **Discover existing PR**, the full HEAD, the agent
+  account's id and the branch's upstream. It opens by itself only when a
+  sentence cannot be written or a destination refused: no checkout Origin, a
+  remote with several push URLs, a detached HEAD, a refused push, a failed
+  lookup or a failed creation. The reason is on screen with it, in place of
+  the sentence or in the outcome under it.
+- **Defaults come from the checkout.** Every field starts from what the
+  checkout and the workspace already say (`publish-target.ts`), follows each
+  status refresh, and stops following once the member edits it. The push
   remote is the branch's upstream, else `origin` when the workspace has a
   checkout Origin; without one `origin` is the server's own repository, so
   nothing is chosen. The push URL is the remote's, when it has exactly one,
@@ -2272,25 +2290,29 @@ both what it renders and the overlap set the conflict chips read.
   is that push when its URL is a github.com repository, its base branch is
   the run's, and its repository is the one the workspace's source mirror
   reads (`workspace.mirror.status`), which for a fork Origin is the
-  upstream; without a GitHub mirror it is the head repository. The title
-  is HEAD's subject (`head_subject`) once the run has a commit of its own. A
-  push to anything but GitHub leaves the pull request fields empty.
-- **Publish confirms with a sentence, not a checkbox.** Above each button
-  one sentence built from the fields says what it will do: "Pushes commit
-  `4f9c2a7d` to `https://github.com/acme/app.git` as branch
-  `aether/run-1`. Never a force push." and "Opens a pull request into
-  `acme/app:main` from `ada/app:aether/run-1` as **ada-l**." The server holds
-  the fences: every mutation names the branch and HEAD on screen and is
-  refused when the checkout moved, a push is refused unless the remote still
-  has exactly that URL, and a creation is refused when the GitHub login is no
-  longer the one shown. The dialog looks for an existing pull request by
-  itself (`run.pr.status`) after every status read, which follows opening
-  the dialog, **Refresh status**, a commit and a push, provided GitHub is
-  logged in and the target is complete. Editing a destination field stops
-  that until **Discover existing PR** is pressed, so a half-typed target is
-  never looked up; **Create pull request** stays disabled until a lookup of
-  the exact target on screen has answered. An existing pull request replaces
-  the title and description fields.
+  upstream; without a GitHub mirror it is the head repository. The title is
+  HEAD's subject (`head_subject`) once the run has a commit of its own.
+- **One button publishes, and says how far it got.** With no pull request
+  yet the filled button is **Push and open pull request**: it pushes, and
+  only if the push landed opens the pull request. Each half reports under
+  its own sentence, **Push outcome** and **PR creation outcome**, with the
+  server's error and output, so a push that landed stays "Pushed: yes"
+  whatever the pull request did. After such a partial result the filled
+  button is **Open pull request**, which only creates. **Push only** sits
+  beside both. A branch with a pull request, or a push that leads to none,
+  has **Push branch** alone. An uncertain creation leaves **Reconcile PR
+  read-only**, which looks the exact target up and never creates.
+- **The server holds the fences.** Nothing is pushed or opened unless its
+  sentence is on screen, and every mutation names the branch and HEAD in
+  that sentence: the server refuses it when the checkout moved, refuses a
+  push unless the remote still has exactly that URL, and refuses a creation
+  when the GitHub login is no longer the one shown. The dialog looks for an
+  existing pull request by itself (`run.pr.status`) after every status read,
+  which follows opening the dialog, **Refresh status**, a commit and a push,
+  provided GitHub is logged in and the target is complete. Editing a field
+  stops that until **Discover existing PR** is pressed, so a half-typed
+  target is never looked up, and a pull request can be opened only after a
+  lookup of the exact target on screen has answered.
 - **Conflict chips write their list out for a finger.** The overlapping file
   names live in the chip's tooltip, which a touch screen cannot open, so on a
   coarse pointer the same list is rendered as visible text beside the chip.

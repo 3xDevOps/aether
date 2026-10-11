@@ -823,8 +823,8 @@ native Git and `gh` in the run's checkout as the run's account. **Land**,
 candidate review and the interval menu stay in the Changes view: a GitHub PR
 is not an internal candidate proposal.
 
-1. Inspect the checkout facts at the top: **Branch**, **HEAD**, **Agent
-   account** and **GitHub identity** (or its real authentication error).
+1. Read the line at the top: the checkout's branch, its commit, the agent
+   account and the GitHub login, or that login's real authentication error.
    Connect GitHub in that account's environment first; mirror deploy keys do
    not provide push credentials.
 2. With nothing left to commit, the dialog opens on step 2: skip to step 4.
@@ -839,37 +839,38 @@ is not an internal candidate proposal.
    failed: inspect the checkout instead of repeating the commit. A branch/HEAD
    mismatch requires **Refresh status** and a fresh review. Then click
    **Continue to push**.
-4. **2 · Push and pull request** arrives filled in. Under **Push branch**,
-   **Push remote** is the branch's upstream or the workspace's checkout
-   Origin, **Writable push URL** is that remote's, and **Push head branch**
-   is the checkout's branch. Read the sentence above the button, which names
-   the commit, the URL and the branch, then click **Push branch**. A
-   workspace without a checkout Origin has nothing chosen: pick a remote, or
-   add one using native Git in the run terminal first. Push is non-force and
-   does not switch branches or change workspace Origin, source mirror or
-   accepted base.
-5. Under **GitHub pull request**, **PR head repository (owner/name)** and
-   **PR head branch** are what you push, **PR base branch** is the run's
-   base, and **PR repository (owner/name)** is the repository the workspace's
-   source came from. For a fork Origin that is the upstream; neither choice
-   reconfigures the mirror or Origin. The dialog has already looked for a
-   pull request with that exact head and base, including one the agent
-   created using native `gh`, and shows it or says there is none. After
-   changing a field, click **Discover existing PR** to look again.
-6. If no PR exists, **PR title** holds the last commit's subject. Edit it,
-   add a **PR description**, optionally check **Draft PR**, read the sentence
-   above the button, which names the target and the GitHub identity, and
-   click **Create pull request**. If creation is uncertain, use **Reconcile
-   PR read-only** rather than repeating creation. A PR failure never erases a
-   successful **Pushed: yes** outcome.
+4. **2 · Push and pull request** says where the work goes in two sentences:
+   the commit, the push URL and the branch, then the pull request's target
+   and the GitHub login it is opened as. The push goes to the branch's
+   upstream or the workspace's checkout Origin. The pull request goes from
+   that repository and branch into the run's base branch of the repository
+   the workspace's source came from, which for a fork Origin is the upstream.
+   Neither choice reconfigures the mirror or Origin.
+5. Check **PR title**, which holds the last commit's subject, add a **PR
+   description**, optionally check **Draft PR**, and click **Push and open
+   pull request**. It pushes, without force and without switching branches,
+   then opens the pull request. If the branch already has a pull request,
+   including one the agent created using native `gh`, the dialog shows it
+   and the button is **Push branch**.
+6. Read the outcomes under the sentences. **Pushed: yes** stays whatever the
+   pull request did; if the pull request failed, its real error is under the
+   second sentence and the button becomes **Open pull request**. If creation
+   is uncertain, use **Reconcile PR read-only** rather than repeating it.
 
-Every field stays editable. The server refuses a push or a creation when the
-branch, HEAD, push URL or GitHub login is no longer the one on screen, and
-says what it found instead. No automatic merge, force push, branch switch or
-mutation retry is performed. GitHub discovery, creation and feedback need a
-working native `gh`, network access, and the run's GitHub login's permissions
-on the explicit upstream/fork: the `gh` login in the home the run's container
-mounts: its launcher's, also on a shared agent account and after a handoff.
+To publish somewhere else, open **Change destination**: the push remote, its
+URL and branch, and the pull request's repository, base and head. It opens by
+itself when nothing could be chosen, for example in a workspace without a
+checkout Origin, or when a destination refused. After changing a pull request
+field, click **Discover existing PR** to look that exact target up. **Push
+only** pushes without opening a pull request.
+
+The server refuses a push or a creation when the branch, HEAD, push URL or
+GitHub login is no longer the one on screen, and says what it found instead.
+No automatic merge, force push, branch switch or mutation retry is performed.
+GitHub discovery, creation and feedback need a working native `gh`, network
+access, and the run's GitHub login's permissions on the explicit upstream/fork:
+the `gh` login in the home the run's container mounts: its launcher's, also on
+a shared agent account and after a handoff.
 Review and merge on GitHub according to your repository's policy.
 
 ### Follow the pull request from the run

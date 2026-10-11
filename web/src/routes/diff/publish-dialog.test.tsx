@@ -44,7 +44,7 @@ async function reviewSelected() {
   fireEvent.click(screen.getByRole('button', { name: 'Review selected paths' }))
 }
 
-it('shows the checkout facts above both steps and commits only what was reviewed', async () => {
+it('names the checkout and the account above both steps and commits only what was reviewed', async () => {
   const client = fakeApi({
     runGitStatus: vi.fn(async () => status),
     runGitDiff: vi.fn(async () => reviewedState),
@@ -52,10 +52,9 @@ it('shows the checkout facts above both steps and commits only what was reviewed
   })
   renderOpen(client)
 
-  const checkout = within(await screen.findByRole('region', { name: 'Run checkout' }))
-  expect(await checkout.findByText('aether/reviewed')).toBeTruthy()
-  expect(checkout.getByText('a'.repeat(40))).toBeTruthy()
-  expect(checkout.getByText('reviewed-login')).toBeTruthy()
+  const checkout = await screen.findByRole('region', { name: 'Run checkout' })
+  await within(checkout).findByText('aether/reviewed')
+  expect(checkout.textContent).toBe('aether/reviewed at aaaaaaaa · as Run account · GitHub reviewed-login')
   expect(screen.getByRole('tab', { name: '1 · Commit' }).getAttribute('aria-selected')).toBe('true')
 
   await reviewSelected()
@@ -119,75 +118,101 @@ it('invalidates an earlier reviewed commit boundary even when status refresh fai
   expect(screen.getByRole('button', { name: 'Commit selected' })).toHaveProperty('disabled', true)
 })
 
-it('opens on the push with every destination filled in, and opens the pull request in two clicks', async () => {
+const none = { identity: status.identity, account_member_id: status.account_member_id, pull_request: null, output }
+const pushedTo = (target: { remote: string; repository: string; head_branch: string }) => ({ pushed: true, head: status.head, target, output })
+
+function destination() {
+  return screen.getByRole('region', { name: 'Destination' })
+}
+
+it('opens on the push as two sentences, and one click pushes and opens the pull request', async () => {
   useStore.setState({ workspaces: { [workspace.id]: { ...workspace, origin } } })
   const target = { repository: 'upstream/project', base_branch: 'main', head_repository: 'fork/project', head_branch: status.branch }
+  const push = { remote: 'origin', repository: origin, head_branch: status.branch }
   const client = fakeApi({
     runGitStatus: vi.fn(async () => committed),
     workspaceMirrorStatus: vi.fn(async () => ({ enabled: true, source_url: 'https://github.com/upstream/project.git' })),
-    runGitPush: vi.fn(async () => ({ pushed: true, head: status.head, target: { remote: 'origin', repository: origin, head_branch: status.branch }, output })),
-    runPRStatus: vi.fn(async () => ({ identity: status.identity, account_member_id: status.account_member_id, pull_request: null, output })),
-    runPRCreate: vi.fn(async () => ({
-      identity: status.identity, account_member_id: status.account_member_id, pull_request: pullRequest,
-      created: true, reconciled: false, creation_uncertain: false, output,
-    })),
+    runGitPush: vi.fn(async () => pushedTo(push)),
+    runPRStatus: vi.fn().mockResolvedValueOnce(none).mockResolvedValue({ ...none, pull_request: pullRequest }),
+    runPRCreate: vi.fn(async () => ({ ...none, pull_request: pullRequest, created: true, reconciled: false, creation_uncertain: false })),
   })
   renderOpen(client)
 
-  const pr = within(await screen.findByRole('region', { name: 'GitHub pull request' }))
+  const action = await screen.findByRole('button', { name: 'Push and open pull request' })
   expect(screen.getByRole('tab', { name: '2 · Push and pull request' }).getAttribute('aria-selected')).toBe('true')
-  expect(screen.getByRole('combobox', { name: 'Push remote' }).textContent).toBe('origin')
-  expect(screen.getByRole('combobox', { name: 'Writable push URL' }).textContent).toBe(origin)
-  expect(screen.getByLabelText('Push head branch')).toHaveProperty('value', status.branch)
-  expect(pr.getByLabelText('PR repository (owner/name)')).toHaveProperty('value', 'upstream/project')
-  expect(pr.getByLabelText('PR base branch')).toHaveProperty('value', 'main')
-  expect(pr.getByLabelText('PR head repository (owner/name)')).toHaveProperty('value', 'fork/project')
-  expect(pr.getByLabelText('PR head branch')).toHaveProperty('value', status.branch)
-  expect(pr.getByLabelText('PR title')).toHaveProperty('value', 'fix the flaky scheduler test')
-  expect(await pr.findByText('No existing PR for this exact repository, base and head.')).toBeTruthy()
+  await waitFor(() => expect(action).toHaveProperty('disabled', false))
   expect(client.runPRStatus).toHaveBeenCalledWith({ run_id: run().id, expected: { branch: status.branch, head: status.head }, target })
-
-  const push = screen.getByRole('button', { name: 'Push branch' })
-  expect(push.parentElement!.previousElementSibling!.textContent).toBe(`Pushes commit aaaaaaaa to ${origin} as branch ${status.branch}. Never a force push.`)
-  fireEvent.click(push)
-  expect(await screen.findByRole('region', { name: 'Push outcome' })).toHaveProperty('textContent', expect.stringContaining('Pushed: yes'))
-  expect(client.runGitPush).toHaveBeenCalledWith({
-    run_id: run().id, expected: { branch: status.branch, head: status.head }, target: { remote: 'origin', repository: origin, head_branch: status.branch },
-  })
-
-  const create = pr.getByRole('button', { name: 'Create pull request' })
-  await waitFor(() => expect(create).toHaveProperty('disabled', false))
-  expect(create.parentElement!.previousElementSibling!.textContent).toBe(
-    `Opens a pull request into upstream/project:main from fork/project:${status.branch} as reviewed-login. It is not merged from here.`,
+  expect(destination().textContent).toBe(
+    `Pushes commit aaaaaaaa to ${origin} as branch ${status.branch}. Never a force push.` +
+    `Opens a pull request into upstream/project:main from fork/project:${status.branch} as reviewed-login. It is not merged from here.` +
+    'Change destination',
   )
-  fireEvent.click(create)
-  expect(await pr.findByRole('link', { name: '#7: fix the flaky scheduler test' })).toHaveProperty('href', pullRequest.url)
+  expect(screen.queryByLabelText('Push head branch')).toBeNull()
+  expect(screen.getByLabelText('PR title')).toHaveProperty('value', 'fix the flaky scheduler test')
+
+  fireEvent.click(action)
+  expect(await screen.findByRole('link', { name: '#7: fix the flaky scheduler test' })).toHaveProperty('href', pullRequest.url)
+  expect(client.runGitPush).toHaveBeenCalledWith({ run_id: run().id, expected: { branch: status.branch, head: status.head }, target: push })
   expect(client.runPRCreate).toHaveBeenCalledWith({
     run_id: run().id, expected: { branch: status.branch, head: status.head }, target,
     expected_login: 'reviewed-login', title: 'fix the flaky scheduler test', body: '', draft: false,
   })
-  expect(pr.queryByRole('button', { name: 'Create pull request' })).toBeNull()
+  expect(screen.getByRole('region', { name: 'Push outcome' }).textContent).toContain('Pushed: yes')
+  expect(screen.getByRole('region', { name: 'PR creation outcome' }).textContent).toContain('Created: yes')
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Push branch' })).toHaveProperty('disabled', false))
+  expect(screen.queryByLabelText('PR title')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Push only' })).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Change destination' }))
+  expect(screen.getByRole('combobox', { name: 'Push remote' }).textContent).toBe('origin')
+  expect(screen.getByRole('combobox', { name: 'Writable push URL' }).textContent).toBe(origin)
+  expect(screen.getByLabelText('Push head branch')).toHaveProperty('value', status.branch)
+  const fields = within(screen.getByRole('group', { name: 'GitHub pull request' }))
+  expect(['PR repository (owner/name)', 'PR base branch', 'PR head repository (owner/name)', 'PR head branch'].map((label) => (fields.getByLabelText(label) as HTMLInputElement).value))
+    .toEqual(Object.values(target))
 })
 
-it('shows the pull request a run already has in place of the form to create one', async () => {
+it('keeps a push that landed on screen when the pull request then fails, and offers only the pull request next', async () => {
   useStore.setState({ workspaces: { [workspace.id]: { ...workspace, origin } } })
+  const refusal = 'runrepo: gh exited 1: gh: Validation Failed (HTTP 422)'
   const client = fakeApi({
     runGitStatus: vi.fn(async () => committed),
-    runPRStatus: vi.fn(async () => ({
-      identity: status.identity, account_member_id: status.account_member_id, output,
-      pull_request: { ...pullRequest, repository: 'fork/project', url: 'https://github.com/fork/project/pull/7' },
+    runGitPush: vi.fn(async () => pushedTo({ remote: 'origin', repository: origin, head_branch: status.branch })),
+    runPRStatus: vi.fn(async () => none),
+    runPRCreate: vi.fn(async () => ({
+      ...none, created: false, reconciled: false, creation_uncertain: false, error: refusal, output: { exit_code: 1, stderr: 'gh: Validation Failed (HTTP 422)', truncated: false },
     })),
   })
   renderOpen(client)
+  const action = await screen.findByRole('button', { name: 'Push and open pull request' })
+  await waitFor(() => expect(action).toHaveProperty('disabled', false))
+  fireEvent.click(action)
 
-  const pr = within(await screen.findByRole('region', { name: 'GitHub pull request' }))
-  expect(await pr.findByRole('link', { name: '#7: fix the flaky scheduler test' })).toBeTruthy()
-  expect(pr.getByLabelText('PR repository (owner/name)')).toHaveProperty('value', 'fork/project')
-  expect(pr.queryByLabelText('PR title')).toBeNull()
-  expect(pr.queryByRole('button', { name: 'Create pull request' })).toBeNull()
+  const outcome = await screen.findByRole('region', { name: 'PR creation outcome' })
+  expect(outcome.textContent).toContain('Created: no')
+  expect(within(outcome).getByText(refusal).getAttribute('role')).toBe('alert')
+  expect(screen.getByRole('region', { name: 'Push outcome' }).textContent).toContain('Pushed: yes')
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Open pull request' })).toHaveProperty('disabled', false))
+  expect(screen.queryByRole('button', { name: 'Push and open pull request' })).toBeNull()
+  expect(client.runGitPush).toHaveBeenCalledTimes(1)
 })
 
-it('chooses no destination for a workspace without an Origin, and pushes only to the exact URL picked', async () => {
+it('shows the pull request a run already has in place of the fields to open one', async () => {
+  useStore.setState({ workspaces: { [workspace.id]: { ...workspace, origin } } })
+  const client = fakeApi({
+    runGitStatus: vi.fn(async () => committed),
+    runPRStatus: vi.fn(async () => ({ ...none, pull_request: { ...pullRequest, repository: 'fork/project', url: 'https://github.com/fork/project/pull/7' } })),
+  })
+  renderOpen(client)
+
+  expect(await screen.findByRole('link', { name: '#7: fix the flaky scheduler test' })).toBeTruthy()
+  expect(destination().textContent).toContain(`Open · fork/project:${status.branch} → fork/project:main. Its checks and review comments are under #7 in the run’s header.`)
+  expect(screen.queryByLabelText('PR title')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Push branch' })).toHaveProperty('disabled', false)
+  expect(screen.queryByRole('button', { name: 'Open pull request' })).toBeNull()
+})
+
+it('opens the fields with the reason when no destination is known, and pushes only to the exact URL picked', async () => {
   const server = '/srv/aether/project.git'
   const client = fakeApi({
     runGitStatus: vi.fn(async () => ({ ...status, remotes: [...status.remotes!, { name: 'origin', fetch_urls: [server], push_urls: [server] }] })),
@@ -197,45 +222,45 @@ it('chooses no destination for a workspace without an Origin, and pushes only to
   await screen.findByRole('checkbox', { name: 'Select selected.txt' })
   step('2 · Push and pull request')
 
-  const push = screen.getByRole('button', { name: 'Push branch' })
-  expect(push).toHaveProperty('disabled', true)
-  expect(push.parentElement!.previousElementSibling!.textContent).toContain('This workspace sets no checkout Origin')
+  expect(destination().textContent).toContain('This workspace sets no checkout Origin, so no destination is chosen for you.')
+  expect(screen.getByRole('button', { name: 'Push branch' })).toHaveProperty('disabled', true)
   await pickOption(screen.getByRole('combobox', { name: 'Push remote' }), 'fork')
   await waitFor(() => expect(screen.getByRole('combobox', { name: 'Writable push URL' }).textContent).toBe('https://github.com/fork/project.git'))
   fireEvent.change(screen.getByLabelText('Push head branch'), { target: { value: 'reviewed' } })
+  expect(destination().textContent).toContain('Pushes commit aaaaaaaa to https://github.com/fork/project.git as branch reviewed. Never a force push.')
+  const push = screen.getByRole('button', { name: 'Push only' })
   await waitFor(() => expect(push).toHaveProperty('disabled', false))
   fireEvent.click(push)
 
   const refused = await screen.findByText('run.git.push: remote rejected (protected branch hook declined)')
-  expect(push.parentElement!.contains(refused)).toBe(true)
+  expect(refused.getAttribute('role')).toBe('alert')
   expect(client.runGitPush).toHaveBeenCalledWith({
     run_id: run().id, expected: { branch: status.branch, head: status.head },
     target: { remote: 'fork', repository: 'https://github.com/fork/project.git', head_branch: 'reviewed' },
   })
+  expect(screen.getByLabelText('Push head branch')).toHaveProperty('value', 'reviewed')
   expect(client.runPRStatus).not.toHaveBeenCalled()
 })
 
 it('keeps uncertain PR creation read-only with its exact target, across closing the dialog', async () => {
   const client = fakeApi({
     runGitStatus: vi.fn(async () => status),
-    runPRStatus: vi.fn(async () => ({ identity: status.identity, account_member_id: status.account_member_id, pull_request: null, output })),
+    runPRStatus: vi.fn(async () => none),
     runPRCreate: vi.fn(async () => { throw new Error('connection lost after request') }),
   })
   renderOpen(client)
   await screen.findByRole('checkbox', { name: 'Select selected.txt' })
   step('2 · Push and pull request')
-  const pr = within(screen.getByRole('region', { name: 'GitHub pull request' }))
   for (const [label, value] of [['PR repository (owner/name)', 'upstream/project'], ['PR base branch', 'main'], ['PR head repository (owner/name)', 'fork/project'], ['PR head branch', 'reviewed']]) {
-    fireEvent.change(pr.getByLabelText(label), { target: { value } })
+    fireEvent.change(screen.getByLabelText(label), { target: { value } })
   }
   expect(client.runPRStatus).not.toHaveBeenCalled()
-  fireEvent.click(pr.getByRole('button', { name: 'Discover existing PR' }))
-  fireEvent.change(pr.getByLabelText('PR title'), { target: { value: 'reviewed change' } })
-  const create = pr.getByRole('button', { name: 'Create pull request' })
+  fireEvent.click(screen.getByRole('button', { name: 'Discover existing PR' }))
+  fireEvent.change(await screen.findByLabelText('PR title'), { target: { value: 'reviewed change' } })
+  const create = screen.getByRole('button', { name: 'Open pull request' })
   await waitFor(() => expect(create).toHaveProperty('disabled', false))
   fireEvent.click(create)
-  const failure = await screen.findByText('connection lost after request')
-  expect(create.parentElement!.contains(failure)).toBe(true)
+  expect((await screen.findByText('connection lost after request')).getAttribute('role')).toBe('alert')
 
   fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -244,13 +269,13 @@ it('keeps uncertain PR creation read-only with its exact target, across closing 
   fireEvent.click(opener)
   step('2 · Push and pull request')
 
-  const again = within(await screen.findByRole('region', { name: 'GitHub pull request' }))
-  expect(again.getByLabelText('PR head repository (owner/name)').closest('fieldset')).toHaveProperty('disabled', true)
-  expect(again.getByRole('button', { name: 'Create pull request' })).toHaveProperty('disabled', true)
-  fireEvent.click(again.getByRole('button', { name: 'Reconcile PR read-only' }))
-  await waitFor(() => expect(again.getByRole('button', { name: 'Reconcile PR read-only' })).toHaveProperty('disabled', false))
-  expect(again.getByRole('button', { name: 'Create pull request' })).toHaveProperty('disabled', true)
-  expect(again.getByLabelText('PR head branch')).toHaveProperty('value', 'reviewed')
+  const reconcile = await screen.findByRole('button', { name: 'Reconcile PR read-only' })
+  expect(screen.getByLabelText('PR head repository (owner/name)').closest('fieldset')).toHaveProperty('disabled', true)
+  expect(screen.queryByRole('button', { name: 'Open pull request' })).toBeNull()
+  fireEvent.click(reconcile)
+  await waitFor(() => expect(client.runPRStatus).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Reconcile PR read-only' })).toHaveProperty('disabled', false))
+  expect(screen.getByLabelText('PR head branch')).toHaveProperty('value', 'reviewed')
   expect(client.runGitStatus).toHaveBeenCalledTimes(1)
   expect(client.runPRCreate).toHaveBeenCalledTimes(1)
 })
