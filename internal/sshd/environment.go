@@ -145,13 +145,15 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 	ws.Environment.Variables = variables
 
 	if s.cfg.Secrets != nil {
-		if err := s.cfg.Secrets.Put(id, secrets); err != nil {
-			return nil, rpcError(err)
-		}
+		err = s.cfg.Secrets.Put(id, secrets)
 	}
-	if err := s.cfg.Store.SetWorkspaceEnvironment(ctx, id, ws.Environment); err != nil {
+	if err == nil {
+		err = s.cfg.Store.SetWorkspaceEnvironment(ctx, id, ws.Environment)
+	}
+	if err != nil {
 		// The secret file goes back to what it was: a secret that was turning
-		// plain would otherwise be gone from both places.
+		// plain would otherwise be gone from both places. A Put that failed may
+		// already have replaced the file.
 		if s.cfg.Secrets != nil {
 			if restoreErr := s.cfg.Secrets.Put(id, saved); restoreErr != nil {
 				err = errors.Join(err, fmt.Errorf("restore the workspace's secrets: %w", restoreErr))
