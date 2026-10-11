@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext, useMemo } from 'react'
+import { createContext, type ReactNode, useContext, useMemo, useRef } from 'react'
 import type { Run } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { hasFiles, isListedFile, isRunFile, openInFiles } from '@/routes/files/open'
@@ -29,7 +29,12 @@ export function RunFileLinks({ run, children }: { run: Run; children: ReactNode 
  */
 export function FileLink({ target, explicit = false, children }: { target: FileTarget; explicit?: boolean; children: ReactNode }) {
   const run = useContext(CheckoutContext)
-  const file = useStore((s) => explicit || (run !== null && isListedFile(s.trees, run, target.path)))
+  const listed = useStore((s) => run !== null && isListedFile(s.trees, run, target.path))
+  // A change to the checkout drops its listings. A path that was a file stays
+  // a link rather than losing its underline under the pointer.
+  const known = useRef<string | null>(null)
+  if (listed) known.current = target.path
+  const file = explicit || known.current === target.path
   if (!run) return children
   const open = () => {
     // Dragging across a path selects it; only a plain click opens it.

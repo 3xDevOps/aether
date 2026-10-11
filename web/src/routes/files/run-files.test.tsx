@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Markdown } from '@/components/ui/markdown'
 import { OutputTail } from '@/components/ui/session-blocks'
 import { api } from '@/lib/api'
+import type { FileTreeEntry } from '@/lib/types'
 import { openInFiles } from '@/routes/files/open'
 import { RunFileLinks } from '@/routes/files/path-link'
 import { RunFiles } from '@/routes/files/run-files'
@@ -10,10 +11,10 @@ import { filesKey } from '@/store/files'
 import { fakeApi, run, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
-const file = (name: string) => ({ name, kind: 'file' as const, size: 1 })
-const dir = (name: string) => ({ name, kind: 'dir' as const, size: 0 })
+const file = (name: string): FileTreeEntry => ({ name, kind: 'file', size: 1 })
+const dir = (name: string): FileTreeEntry => ({ name, kind: 'dir', size: 0 })
 
-const listings: Record<string, ReturnType<typeof file>[] | ReturnType<typeof dir>[]> = {
+const listings: Record<string, FileTreeEntry[]> = {
   '': [dir('src'), file('README.md')],
   src: [file('app.ts')],
 }
@@ -56,12 +57,14 @@ describe('a run’s Files view', () => {
     expect(useStore.getState().route.name).toBe('run')
   })
 
-  it('opens the file a link names and marks its line, again when the link is followed again', async () => {
+  it('opens the file a link names, shows it in the tree and marks its line, again when the link is followed again', async () => {
     const client = checkout()
     act(() => openInFiles('run_1', { path: 'src/app.ts', line: 3 }))
     render(<RunFiles run={run()} shown client={client} />)
     await screen.findByRole('textbox', { name: 'Edit src/app.ts' })
     await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe('three'))
+    const row = await within(screen.getByRole('complementary', { name: 'Files' })).findByRole('button', { name: 'app.ts' })
+    expect(row.getAttribute('aria-current')).toBe('true')
 
     act(() => openInFiles('run_1', { path: 'src/app.ts', line: 99 }))
     await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe(''))
@@ -135,6 +138,9 @@ describe('paths in a run’s Session', () => {
     await waitFor(() => expect(asked).toHaveBeenCalledTimes(2))
     expect(asked).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', path: '' })
     expect(asked).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', path: 'src' })
+    expect(screen.getAllByRole('link')).toEqual([link])
+    // The agent's next edit drops the listing; the link the reader is on stays.
+    act(() => useStore.getState().invalidateRun('run_1'))
     expect(screen.getAllByRole('link')).toEqual([link])
 
     fireEvent.click(link)

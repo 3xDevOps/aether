@@ -169,6 +169,13 @@ describe('the Files view', () => {
     expect(editor.isConnected).toBe(true)
     expect(editor.closest('[inert]')).not.toBeNull()
   })
+
+  it('leaves the session’s control strip off, where no lease is used', () => {
+    const view = open({ mode: 'acp' }, 'session')
+    expect(screen.getByRole('group', { name: 'Multiplayer controls' })).toBeDefined()
+    view.rerender(rerouted('files'))
+    expect(screen.queryByRole('group', { name: 'Multiplayer controls' })).toBeNull()
+  })
 })
 
 describe('the Browser view', () => {

@@ -18,9 +18,17 @@ type Expansion = { open: (key: string, fallback: boolean) => boolean; toggle: (k
 
 const ExpansionContext = createContext<Expansion>({ open: (_, fallback) => fallback, toggle: () => {} })
 
-/** Keeps folder expansion across the phone sheet remounting the tree. */
-export function TreeExpansion({ children }: { children: ReactNode }) {
+/** Keeps folder expansion across the phone sheet remounting the tree, and
+ * opens the folders above `reveal`, a file that was opened from outside it. */
+export function TreeExpansion({ reveal, children }: { reveal?: Selection | null; children: ReactNode }) {
   const [state, setState] = useState<Record<string, boolean>>({})
+  const revealed = reveal ? sourceKey(reveal, reveal.path) : null
+  useEffect(() => {
+    if (!reveal) return
+    const folders = reveal.path.split('/').slice(0, -1)
+    const above = folders.map((_, depth) => sourceKey(reveal, folders.slice(0, depth + 1).join('/')))
+    setState((s) => ({ ...s, ...Object.fromEntries([sourceKey(reveal, ''), ...above].map((key) => [key, true])) }))
+  }, [revealed])
   const value: Expansion = {
     open: (key, fallback) => state[key] ?? fallback,
     toggle: (key, fallback) => setState((s) => ({ ...s, [key]: !(s[key] ?? fallback) })),
@@ -131,6 +139,8 @@ export function touchedPaths(runID: string): Set<string> {
 
 const noPaths = new Set<string>()
 
+const scrollToRow = (row: HTMLElement | null) => row?.scrollIntoView({ block: 'nearest' })
+
 export function TreeDirectory({
   source,
   path,
@@ -228,6 +238,7 @@ export function TreeDirectory({
             return (
               <ListRow
                 key={childPath}
+                ref={isSelected ? scrollToRow : undefined}
                 selected={isSelected}
                 style={indent(depth + 1)}
                 onClick={() => onSelect(source, childPath)}

@@ -88,7 +88,7 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
   )
 
   return (
-    <TreeExpansion>
+    <TreeExpansion reveal={selection}>
       <div ref={pane} className="flex h-full min-h-0 min-w-0 flex-col bg-canvas">
         <FilesPane narrow={narrow} tree={tree} editor={editor} browsing={browsing} onBrowsing={setBrowsing} />
       </div>
