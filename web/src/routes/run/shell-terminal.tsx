@@ -531,6 +531,9 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
     writeGeneration.current++
     writeRequested.current[activeControlKey] = false
     controlHeld.current[activeControlKey] = false
+    // Keys still waiting on a redraw must not arrive under a later lease.
+    pendingInput.current = ''
+    setTypedFor(null)
     setControlState({ key: activeControlKey, held: false })
     try {
       await api.devControlRelease({

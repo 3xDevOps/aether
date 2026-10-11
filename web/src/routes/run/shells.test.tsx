@@ -151,6 +151,39 @@ it('keeps what is typed while the control change redraws the shell', async () =>
   view.unmount()
 })
 
+it('discards keys still waiting on the redraw when control is released', async () => {
+  const view = render(<Shells />)
+  await attach()
+  await type(view, 'a')
+  const redraw = (socket: StubSocket, write: boolean) => act(() => {
+    socket.onopen?.()
+    socket.onmessage?.({ data: JSON.stringify({
+      ok: true, cols: 73, rows: 19, replay: 6, terminal_id: process.terminal_id, incarnation: process.incarnation,
+      server_owned_responder: true, has_control: write, control_generation: 7,
+    }) })
+  })
+  const screenBytes = new TextEncoder().encode('screen').buffer
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+  const socket = StubSocket.last()
+  redraw(socket, true)
+  await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(1))
+  fireEvent.paste(view.container.querySelector('.xterm-helper-textarea')!, { clipboardData: { getData: () => 'bc' } })
+  fireEvent.click(await screen.findByRole('button', { name: 'Release' }))
+  await waitFor(() => expect(api.devControlRelease).toHaveBeenCalled())
+  act(() => socket.onmessage?.({ data: screenBytes }))
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(3))
+  const mirror = StubSocket.last()
+  redraw(mirror, false)
+  expect(screen.getByRole('status', { name: 'Restoring terminal history' })).toBeTruthy()
+  act(() => mirror.onmessage?.({ data: screenBytes }))
+  await type(view, 'd')
+  await waitFor(() => expect(StubSocket.opened).toHaveLength(4))
+  await attach(true)
+  await waitFor(() => expect(api.devTerminalInput).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(api.devTerminalInput).mock.calls.map(([params]) => params.text)).toEqual(['a', 'd'])
+  view.unmount()
+})
+
 it('keeps the terminal on screen and typing when the server redraws it in full instead', async () => {
   const view = render(<Shells />)
   await attach()
