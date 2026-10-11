@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -278,21 +279,50 @@ func (e *Engine) checkoutHeadSource(ctx context.Context, run domain.RunID, check
 	return head, store, nil
 }
 
+// attributeSource names the tree Git reads .gitattributes from: the fork
+// point of the run that owns workTree, or the empty tree when workTree is
+// not a run checkout. Provisioning materialized the checkout under the fork
+// point's attributes, so reading it back without them makes every eol=crlf
+// file look rewritten. The agent-writable copies in the worktree are never
+// consulted, and no driver an attribute could name is configured here.
+func (e *Engine) attributeSource(ctx context.Context, workTree, gitDir, objects string) (string, error) {
+	if run, err := e.checkoutRunID(workTree); err == nil {
+		if meta, metaErr := e.readRunMeta(run); metaErr == nil {
+			env := append(gitEnv(), "GIT_OBJECT_DIRECTORY="+objects)
+			if tree, treeErr := e.gitIn(ctx, gitDir, env, "rev-parse", "--verify", "--quiet", meta.Base+"^{tree}"); treeErr == nil {
+				return tree, nil
+			}
+		}
+	}
+	tree, err := e.git(ctx, gitDir, "hash-object", "-t", "tree", os.DevNull)
+	if err != nil {
+		return "", fmt.Errorf("gitengine: determine empty attribute tree: %w", err)
+	}
+	return tree, nil
+}
+
 // gitWorktree runs Git against an explicit, server-owned GIT_DIR and a
 // caller-selected index. Its environment and command-line controls make the
 // worktree a data source only: checkout-local config, attributes, hooks,
 // fsmonitor, filters, external diff, textconv, pagers, and inherited Git
 // command variables cannot influence the process.
 func (e *Engine) gitWorktree(ctx context.Context, workTree, gitDir, index string, limit int, args ...string) (string, bool, error) {
+	return e.gitWorktreeObjects(ctx, workTree, gitDir, index, filepath.Join(gitDir, "objects"), limit, args...)
+}
+
+// gitWorktreeObjects is gitWorktree writing to a caller-selected object
+// database, for the one caller whose objects must outlive the scratch
+// directory.
+func (e *Engine) gitWorktreeObjects(ctx context.Context, workTree, gitDir, index, objects string, limit int, args ...string) (string, bool, error) {
 	if err := e.ensureScratchGitDir(ctx, gitDir, workTree); err != nil {
 		return "", false, err
 	}
 	if err := e.syncCheckoutExclude(workTree, gitDir); err != nil {
 		return "", false, err
 	}
-	emptyTree, err := e.git(ctx, gitDir, "hash-object", "-t", "tree", os.DevNull)
+	attributes, err := e.attributeSource(ctx, workTree, gitDir, objects)
 	if err != nil {
-		return "", false, fmt.Errorf("gitengine: determine empty attribute tree: %w", err)
+		return "", false, err
 	}
 	argv := []string{
 		"--git-dir", gitDir,
@@ -306,12 +336,33 @@ func (e *Engine) gitWorktree(ctx context.Context, workTree, gitDir, index string
 	if len(args) > 0 && args[0] == "diff" {
 		args = append([]string{"diff", "--no-ext-diff"}, args[1:]...)
 	}
+	// The two commands that walk the worktree for untracked files leave
+	// linked worktrees out by pathspec, which no ignore rule in the
+	// checkout can negate.
+	if len(args) > 0 && (args[0] == "add" || args[0] == "ls-files") {
+		worktrees, worktreesErr := e.linkedWorktreeDirs(workTree)
+		if worktreesErr != nil {
+			return "", false, worktreesErr
+		}
+		if len(worktrees) > 0 {
+			args = slices.Clone(args)
+			if !slices.Contains(args, "--") {
+				args = append(args, "--")
+			}
+			if args[len(args)-1] == "--" {
+				args = append(args, ":(top)")
+			}
+			for _, dir := range worktrees {
+				args = append(args, ":(top,exclude,literal)"+dir)
+			}
+		}
+	}
 	argv = append(argv, args...)
 	cmd := exec.CommandContext(ctx, e.cfg.GitPath, argv...)
 	cmd.Env = append(gitEnv(),
 		"GIT_INDEX_FILE="+index,
-		"GIT_OBJECT_DIRECTORY="+filepath.Join(gitDir, "objects"),
-		"GIT_ATTR_SOURCE="+emptyTree,
+		"GIT_OBJECT_DIRECTORY="+objects,
+		"GIT_ATTR_SOURCE="+attributes,
 		"GIT_PAGER=cat",
 		"PAGER=cat",
 		"GIT_EDITOR=/bin/false",

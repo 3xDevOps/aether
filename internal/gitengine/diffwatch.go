@@ -417,6 +417,14 @@ func (w *diffWatch) loadIgnoreState(ctx context.Context) error {
 		item = filepath.ToSlash(filepath.Clean(item))
 		ignoredDirs[item] = struct{}{}
 	}
+	// Both listings leave linked worktrees out, so they are pruned here.
+	worktrees, err := w.e.linkedWorktreeDirs(w.checkout)
+	if err != nil {
+		return err
+	}
+	for _, dir := range worktrees {
+		ignoredDirs[dir] = struct{}{}
+	}
 	w.visibleFiles = visibleFiles
 	w.visibleDirs = visibleDirs
 	w.gitIgnoredDirs = ignoredDirs

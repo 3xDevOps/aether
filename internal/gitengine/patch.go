@@ -201,8 +201,8 @@ func (e *Engine) snapshotPatch(ctx context.Context, store, from, to string, maxB
 			return Patch{}, resolveErr
 		}
 	}
-	// Match live staging's attribute isolation: a captured .gitattributes
-	// must not change how history is rendered.
+	// Stored trees need no conversion, and a captured .gitattributes must
+	// not change how history is rendered.
 	emptyTree, err := e.git(ctx, store, "hash-object", "-t", "tree", os.DevNull)
 	if err != nil {
 		return Patch{}, err

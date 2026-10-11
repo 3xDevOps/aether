@@ -991,6 +991,15 @@ so nothing under the checkout's `.git` - not even the loose objects staging
 hashes - is ever written, and the scratch files are deleted once the patch is
 rendered.
 
+Every server read of a checkout - stats, patch, snapshot, evidence, and the
+staging behind an `aether:` or `wip:` commit - uses the server's own Git
+configuration and the `.gitattributes` of the fork point, never the copies in
+the worktree. A file the fork point declares `eol=crlf` is therefore compared
+after the same line-ending conversion that checked it out. A linked worktree
+(`git worktree add`) inside the checkout is another checkout of the
+repository, not a change: its directory is left out of all of them and of
+`files.tree`, whatever the checkout's ignore rules say.
+
 A `run.diff` stat set lists every changed path but reads at most 128 MiB of
 untracked content to count lines. Past that the event carries
 `truncated:true`: the files left unread count zero and the totals are a
