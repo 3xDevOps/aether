@@ -26,6 +26,8 @@ vi.mock('@xterm/xterm', () => {
 
     loadAddon() {}
 
+    registerLinkProvider() {}
+
     open(host: HTMLElement) {
       this.input = document.createElement('textarea')
       this.input.setAttribute('aria-label', 'Terminal input')

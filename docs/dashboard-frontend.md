@@ -559,7 +559,7 @@ its end, exposing the shell or the raw connection error and window controls.
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
-`?run=<id>`, with `&view=session|terminal|changes|browser` (an old
+`?run=<id>`, with `&view=session|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`); any other
 view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
 the name is the route's, so Activity is `?page=timeline`, and Devices is
@@ -1402,25 +1402,30 @@ a client-side base refresh before trying again.
 ## Run view
 
 `src/routes/run/` is the one `run` route. Its params are `runId` and an
-optional `view` (`session`, `terminal`, `changes`, `browser`), written to the
-address as `?run=<id>&view=<view>`; the old `?view=diff` reads as `changes`.
+optional `view` (`session`, `terminal`, `changes`, `files`, `browser`),
+written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
+as `changes`.
 Every way into a run navigates to `run`: board card, sidebar row, run list,
 palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Browser is in the list for every run that has not
-finished, on a gateway that serves `dev.browser.status` (`hasBrowser` in
-`src/routes/browser/open.ts`); no browser has to be running, and opening the
-view starts none. `isRunRoute` in `views.ts` keeps a sidebar row lit across
-views.
+Terminal otherwise. Files is in the list while the run still has its
+checkout, on a gateway that serves `files.tree` (`hasFiles` in
+`src/routes/files/open.ts`): every run the Files tree lists, a completed one
+that is not yet merged or abandoned included. Browser is in the list for
+every run that has not finished, on a gateway that serves
+`dev.browser.status` (`hasBrowser` in `src/routes/browser/open.ts`); no
+browser has to be running, and opening the view starts none. `isRunRoute` in
+`views.ts` keeps a sidebar row lit across views.
 
 The frame (header, view switch, Details) stays mounted while the view
 changes; `CenterView` remounts it only for another run, identity or event
-epoch. Session, Terminal and Changes mount on first visit and stay mounted,
-laid out but `invisible` and `inert`: xterm hidden with `display: none`
-measures zero and would resize the shared PTY, and a Publish draft (commit
-message, an uncertain pull request) must survive a view switch. Browser
+epoch. Session, Terminal, Changes and Files mount on first visit and stay
+mounted, laid out but `invisible` and `inert`: xterm hidden with
+`display: none` measures zero and would resize the shared PTY, a Publish
+draft (commit message, an uncertain pull request) must survive a view switch,
+and an open file keeps its scroll position, caret and undo history. Browser
 mounts only while shown, so a hidden Browser streams no screencast.
 
 The Browser can also sit beside the other three views instead of being a tab:
@@ -1511,8 +1516,12 @@ package names (`run.mode.switch: scheduler: `) and keeps the server's
 sentence.
 
 The view switch is a segmented `tablist` named "Run views" with manual
-activation, on its own 32px row under the header at every width. On a phone
-with the composer focused the header keeps only the title line.
+activation, on its own 32px row under the header at every width. When the
+row is too narrow for every tab, as on a phone whose run has a pull request,
+the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
+sight as the view or the room changes, and the right edge fades while more
+tabs lie past it. On a phone with the composer focused the header keeps only
+the title line.
 
 A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
@@ -1545,8 +1554,9 @@ Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx
 below the view switch at frame level, so Session, Terminal and Changes share
 one control surface. The Browser view leaves it out: it is about who controls
 the agent's session, and the page has a lease of its own
-([Browser view](#browser-view)). With the Browser docked beside another view
-the strip is back, above both. It shows the controller and every watcher
+([Browser view](#browser-view)). The Files view leaves it out too: reading
+and saving a file uses no lease. With the Browser docked beside Session,
+Terminal or Changes the strip is back, above both. It shows the controller and every watcher
 with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for five seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
@@ -1689,6 +1699,14 @@ One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
+
+A path the agent names opens that file in the run's
+[Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
+and inline code, in a `work` entry's command and output tail, and in a
+`DiffBlock`'s caption. A Markdown link whose target is a repository path
+opens there as well, where it used to open a dead address in a new tab.
+Fenced code blocks, a person's own messages and the entry labels, which
+toggle their detail, are left as text.
 
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
@@ -2191,11 +2209,10 @@ both what it renders and the overlap set the conflict chips read.
   near the screen, so a large diff costs the rows on screen rather than one
   DOM node per line. Lines carry old and new line numbers, which `parse.ts`
   reads from the hunk headers.
-- **The path opens the file.** Clicking a file's path opens it in Files on
-  the run's checkout (`routes/files/open.ts`): a Files tab for that run and
-  path, then the Files route. It needs `files.tree` and a run the Files tree
-  still lists. Binary files and files the current diff shows as deleted have
-  no link.
+- **The path opens the file.** Clicking a file's path opens it in the run's
+  [Files view](#files-in-a-run) (`openInFiles` in `routes/files/open.ts`),
+  without leaving the run. It needs a run that has a Files view. Binary files
+  and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
   `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
   file and scrolls to it once the diff has it. Each row of the Session view's
@@ -2598,7 +2615,8 @@ of the page for a keyboard user, since Tab goes to the page.
 run's agent terminal and shells. An `http(s)` link to `localhost`,
 `127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the run
 frame shows the Browser unless it is already docked, and the Browser opens
-the address as if it had been typed. Every other link opens in a new tab as
+the address as if it had been typed. A path in the run's checkout opens in
+its [Files view](#files-in-a-run). Every other link opens in a new tab as
 before, and an OAuth callback link is still intercepted first. The
 address-bar shortcut uses the same record with an empty address.
 
@@ -3235,7 +3253,9 @@ own persistent configuration roots from `config.roots`. `files.tree`,
 available through both the local SSH-backed gateway and the server-hosted
 WhoIs gateway. Directory requests are lazy and cached in
 `src/store/files.ts`; file content comes from `files.read` or `config.read`.
-A live run's file can switch from **File** to **Changes vs base**.
+A live run's file can switch from **File** to **Changes vs base**. The same
+tree and editor are a view of each run, scoped to that run's checkout: see
+[Files in a run](#files-in-a-run).
 
 The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts** and the member's configuration roots under **Agent
@@ -3255,9 +3275,10 @@ the dialog open with the error); live-run files show **Save**, changing the
 run's uncommitted checkout; configuration files show **Save**, changing only
 the authenticated member's persistent home. Base writes need the push
 permission, run writes the steer permission, and config reads and writes are
-always for the calling member and need the launch permission. A new
-configuration file accepts nested relative paths and refuses to overwrite an
-existing file.
+always for the calling member and need the launch permission. A text file
+the member may read but not change shows **Read-only** in place of the
+action. A new configuration file accepts nested relative paths and refuses to
+overwrite an existing file.
 
 Saves are explicit (**Save**, **Commit to <branch>…**, or Ctrl/Cmd-S, which
 opens the same commit dialog for a base file); there is no autosave or
@@ -3276,6 +3297,64 @@ imports and Files edits do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
+
+A `run.diff` event drops every listing and document cached for that run,
+because its checkout changed; a save into a run's checkout causes one too.
+The tree and the editor keep what they last read until the reread lands
+(`TreeDirectory`, `FileEditor`), and `EditableDocument` then replaces only
+the span that differs, so an open folder does not blink and the caret, the
+scroll position and the marked line stay where they were. A draft started
+during the reread is still based on the revision that was on screen.
+
+### Files in a run
+
+`RunFiles` (`run-files.tsx`) is the run page's Files view: that run's
+checkout under its branch name, with the tree, the editor, the tabs and the
+phone layout of the Files route (`FilesPane`, `closeTab` in `pane.tsx`). Its
+tabs are the open files of that run; they are the same tabs the Files route
+shows under **Run checkouts**. The base branch and agent configuration stay
+on the Files route. The pane is measured: below 640px, with the Browser
+docked beside it for instance, it shows the tree until a file is open and
+then the editor with **Browse**, as a phone does.
+
+`openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
+from outside the tree. It navigates to the run route with `view: 'files'`,
+`file` and, when named, `line` and `column`; those three are not written to
+the address. The view opens the file, opens the folders above it in the tree
+and scrolls its row into view (`TreeExpansion reveal`), and the editor puts
+the caret at the line and column, scrolls the line to the middle and marks
+it with the selection colour. The mark follows edits and stays until another
+line is opened. Following the same link again is a new navigation, so it
+shows the line again. A line past the end of the file marks the last line.
+A file the checkout does not have opens with the server's `files.read` error.
+
+Three things call it: a file's header in the Changes view, a path in the
+Session view and a path in one of the run's terminals.
+
+`findPaths` (`paths.ts`) reads what could name a file: `path`, `path:line`,
+`path:line:col` and `path#L12`, relative to the repository, with a leading
+`./`, or under `/workspace/`, where every run's checkout is mounted. A lone
+word counts only with an extension or a line (`go.mod`, `Makefile:12`).
+URLs, absolute paths outside `/workspace`, `..` and `.git` segments are not
+paths.
+
+A path is a link only when it is a file in the checkout, and the dashboard
+does not ask the server about text that is merely on screen. `isRunFile`
+answers from the directory listings in `src/store/files.ts`, the cache the
+tree fills, and reads at most two it lacks: the repository root, which rules
+out prose such as "and/or" with no request of its own, and the file's
+directory. The Session view asks when the pointer reaches a path or a finger
+taps it (`FileLink` in `path-link.tsx`); a terminal asks for the line under
+the pointer (`findRunFiles`, through `useXterm`'s `findLinks`, which joins a
+wrapped line before it is searched). Each listing is fetched once however
+many paths wait on it, so every path in a directory becomes a link together,
+and a path that became a link stays one while it is on screen. A path
+that is not a file is never styled and does nothing when clicked. Until a
+path's directory has been listed it has no link style and cannot be reached
+with Tab; the tree is the keyboard's way to any file.
+
+There is no file finder: `files.tree` lists one directory, and nothing lists
+a whole checkout.
 
 ## Templates
 
@@ -4432,7 +4511,7 @@ find are Ctrl on every platform, because that is what xterm binds; see
 [terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run view switch is a Radix `Tabs`
-(`TabsList look="segmented"`) whose panels are the four views, so Radix wires
+(`TabsList look="segmented"`) whose panels are the run's views, so Radix wires
 `aria-controls` and the `tabpanel`s. The terminal strip in the run toolbar
 (`TerminalTabs` in `routes/run/shells.tsx`, named "Terminals") and the
 Environment dock (`components/dock.tsx`) carry `role="tablist"`,
@@ -4661,8 +4740,12 @@ covers input queued across acquiring a lease, watching, wheel input, stream
 reconnection and its failure; `address.test.ts` covers the
 scheme rules; `ports.test.tsx` covers the port list in the empty pane, the
 toolbar and the address field, its polling, and opening a port on this
-computer or showing the command for it; and `src/routes/run/frame.test.tsx` covers when Browser is
-offered, the docked layout and run-local terminal links.
+computer or showing the command for it; and `src/routes/run/frame.test.tsx`
+covers when Browser and Files are offered, the docked layout and run-local
+terminal links.
+`src/routes/files/run-files.test.tsx` covers the run's Files view and path
+links in the Session view, `paths.test.ts` what reads as a path, and
+`src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
 `src/routes/settings/notifications.test.tsx` covers every state of the
 Notifications row, `src/lib/push.test.ts` the browser side behind it

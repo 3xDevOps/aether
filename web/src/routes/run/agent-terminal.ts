@@ -10,6 +10,7 @@ import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { openOAuthLink, remoteOAuthInstructions } from '@/lib/oauth-forward'
 import type { RunStatus } from '@/lib/types'
 import { openRunLink } from '@/routes/browser/open'
+import { findRunFiles } from '@/routes/files/open'
 import type { TakeoverAction } from '@/routes/terminal/attach'
 import { getHistoryCache } from '@/routes/terminal/history-cache'
 import { useRunTerminalSession } from '@/routes/terminal/session'
@@ -71,6 +72,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
     onData: (data) => sendRef.current(data),
     onBeforeDispose: (terminal) => beforeDispose.current?.(terminal),
     onResize: (cols, rows) => resizeRef.current(cols, rows),
+    findLinks: (line) => findRunFiles(runID, line),
     onLink: (uri) => {
       if (!capability.hasLocal('forward.start')) {
         const remote = remoteOAuthInstructions(`run:${runID}`, uri)

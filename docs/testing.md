@@ -1196,6 +1196,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `run-attach-retry` | The terminal tab while it waits out a missing PTY session: sockets that drop and then a `-32004`, the shape a server restart makes, and the tab reports the wait rather than painting itself offline |
 | `run-deep-link` | The gateway's own tokened URL with `&run=<id>` appended, which is what both shells load for an `aether://run/<id>` link: the run opens on hydration with the token gone and `?run=<id>` kept, a reload reopens it, Settings pushes `?page=settings`, back returns to the run, and Escape leaves for the Board with a bare address |
 | `run-evidence.spec.ts` | Retained finish evidence after run cleanup through **More > Captures…**: retained Summary/Patch/Transcript bytes and source availability, controls reachable on a short desktop, and close/Escape returning focus to More |
+| `run-files` | A run whose agent prints `README.md:1: heading` and `missing.md:3: gone`: the first path is a link that opens the run's Files view on that file with line 1 marked and its tree row selected; an edit saved there reaches the checkout through `files.read`; the editor is the same element after the reread that save causes and after a trip to Changes, whose file header opens Files again; and the second path, which is no file, leaves the terminal up when clicked |
 | `run-provisioning` | Opening a run while its container is still being built: the terminal tab waits behind "Starting the run's container" instead of showing the gateway's refusal as a dead terminal, and attaches by itself once the run turns running |
 | `run-room.spec.ts` | Two members on separate gateways share notes in Details, send moderated messages from the Session composer (the controller denies one and approves another from Details > Needs you; the sender's rows read the countdown, then Denied and Sent), see a reported native question as "Question: answer in the terminal" for the owner and "Waiting for" the owner for the other member, and transfer occupied control. Details is a 320px panel beside the terminal, not an overlay: header and toolbar controls stay hit-testable, and `Mod+.` hiding it widens the PTY, showing it narrows it again. More supports keyboard dismissal and focus return. The scenario attaches `desktop-run-details` and `desktop-run-observer` screenshots |
 | `run-session` | An Enhanced run's Session view against acpmock; see [The real-agent smoke tests](#the-real-agent-smoke-tests) |
@@ -1213,7 +1214,7 @@ evidence that they have been executed or passed on a particular checkout.
 `development-terminal/shared-terminal.spec.ts`, `keyboard-focus`,
 `onboarding-agents`, `onboarding-first-run`'s launch
 scenario, `remote-development-git/github.spec.ts`, `run-attach-retry`,
-`run-deep-link`, `run-evidence.spec.ts`, `run-provisioning`,
+`run-deep-link`, `run-evidence.spec.ts`, `run-files`, `run-provisioning`,
 `run-room.spec.ts`, `run-session`, `run-switch`, `templates`,
 `terminal-geometry`, `terminal-images`, `terminal-streaming` and
 `terminal-tools` need a reachable Docker daemon and skip without one.
@@ -1245,6 +1246,14 @@ duplicating the browser smoke path:
   install failure, and the login wording.
 - `web/src/store/files.test.ts` covers drafts surviving live-run cache
   invalidation and newer typing surviving an in-flight save.
+- `web/src/routes/files/run-files.test.tsx` covers a run's Files view (its
+  tree, opening at a marked line, read-only, the reread that keeps the
+  editor and the tree, the narrow layouts) and path links in the Session
+  view: nothing asked until a path is pointed at or tapped, the two listings
+  that answer, a path that is no file, a Markdown link to a repository path
+  and a run whose checkout is gone. `paths.test.ts` covers what reads as a
+  path, and `web/src/routes/run/terminal-links.test.tsx` a path link in a
+  terminal, across a wrapped line.
 - `web/e2e/onboarding-configuration.spec.ts` covers the browser import and
   config read/write path; `web/e2e/files-browser.mobile.spec.ts` covers the
   narrow viewport tree/viewer round trip.

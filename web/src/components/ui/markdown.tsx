@@ -10,10 +10,13 @@ import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
 import { yaml } from '@codemirror/legacy-modes/mode/yaml'
 import { classHighlighter, highlightCode } from '@lezer/highlight'
+import type { Element, ElementContent, Root } from 'hast'
 import { lexer } from 'marked'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Code, CodeBlock } from '@/components/ui/code'
+import { FileLink } from '@/routes/files/path-link'
+import { findPaths, parsePath } from '@/routes/files/paths'
 
 const stream = (mode: Parameters<typeof StreamLanguage.define>[0]) => () => StreamLanguage.define(mode)
 
@@ -83,13 +86,39 @@ const components: Components = {
       </CodeBlock>
     )
   },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">{children}</a>
-  ),
+  a: ({ href, children }) => {
+    const file = href ? parsePath(href) : null
+    if (file) return <FileLink target={file} explicit>{children}</FileLink>
+    return <a href={href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">{children}</a>
+  },
+  data: ({ value, children }) => <FileLink target={parsePath(String(value))!}>{children}</FileLink>,
 }
 
+/** Wraps each path that prose or inline code names in a `data` element, which
+ * renders as a FileLink. Links and code blocks keep their text. */
+function markPaths(parent: Root | Element) {
+  parent.children = parent.children.flatMap((child): ElementContent[] => {
+    if (child.type === 'element' && child.tagName !== 'a' && child.tagName !== 'pre') markPaths(child)
+    if (child.type !== 'text') return [child as ElementContent]
+    const out: ElementContent[] = []
+    let at = 0
+    for (const match of findPaths(child.value)) {
+      const path = child.value.slice(match.start, match.end)
+      out.push(
+        { type: 'text', value: child.value.slice(at, match.start) },
+        { type: 'element', tagName: 'data', properties: { value: path }, children: [{ type: 'text', value: path }] },
+      )
+      at = match.end
+    }
+    out.push({ type: 'text', value: child.value.slice(at) })
+    return out
+  })
+}
+
+const rehypePaths = () => markPaths
+
 const Block = memo(function Block({ source }: { source: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{source}</ReactMarkdown>
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypePaths]} components={components}>{source}</ReactMarkdown>
 })
 
 export function Markdown({ text }: { text: string }) {

@@ -810,8 +810,9 @@ In the dashboard, the sidebar holds the workspace switcher, **New run**, your
 runs, and the pages: **Board**, **Swarms**, **Activity**, **Files**,
 **Environment**, **Agents** and **Templates**. The **Board** groups runs into
 **Needs you**, **Working** and **Finished**. A run opens on **Session**
-(Enhanced) or **Terminal** (Standard), with **Changes** and **Browser** beside
-them, and a **Details** panel holding **Needs you** and **Notes**. Watching is
+(Enhanced) or **Terminal** (Standard), with **Changes**, **Files** and
+**Browser** beside them, and a **Details** panel holding **Needs you** and
+**Notes**. Watching is
 read-only by default; typing into a run needs the `steer` capability, which as
 the owner you have.
 
@@ -833,6 +834,14 @@ aether forward <run-id> 5173
 
 A forward reaches a server listening on `0.0.0.0`, not one bound to
 `127.0.0.1`; the Browser view reaches both.
+
+**Files** is the run's checkout: a tree and an editor, where **Save** writes
+your edit into the checkout the agent works in. A file's path in **Changes**
+opens it there. So does a path the agent names in **Session** or prints in
+the terminal, such as `web/src/app.ts:42`, at that line: point at the path
+and click it once it is underlined. Only a path that is a file in the
+checkout becomes a link. The **Files** page in the sidebar keeps the base
+branch and your agent configuration.
 
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.

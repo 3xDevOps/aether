@@ -1,21 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Callout } from '@/components/ui/callout'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { EmptyState } from '@/components/ui/empty-state'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
 import type { ConfigRoot } from '@/lib/types'
 import { FileEditor, type ViewerMode } from '@/routes/files/editor'
+import { closeTab, FilesPane } from '@/routes/files/pane'
 import {
   type ConfigSource,
   type FileSource,
   fileTabFromSource,
   fileTabToSelection,
   isLiveRun,
-  type Selection,
   sourceKey,
 } from '@/routes/files/sources'
 import { FileTree, NewConfigFile, TreeExpansion } from '@/routes/files/tree'
@@ -31,7 +29,6 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   const fileTabs = useStore((s) => s.fileTabs)
   const activeFileKey = useStore((s) => s.activeFileKey)
   const openFileTab = useStore((s) => s.openFileTab)
-  const closeFileTab = useStore((s) => s.closeFileTab)
   const setActiveFileKey = useStore((s) => s.setActiveFileKey)
   const capabilities = useCapability()
   const mobile = useIsMobile()
@@ -80,22 +77,6 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
     setBrowsing(false)
   }
 
-  const closeTab = (tab: Selection) => {
-    const key = sourceKey(tab, tab.path)
-    const state = useStore.getState()
-    const draft = state.drafts[key]
-    const dirty = Boolean(draft && (draft.content !== draft.baseContent || draft.saving))
-    if (dirty && !window.confirm(`Discard unsaved changes to ${tab.path}?`)) return
-    if (dirty) state.clearDraft(key)
-    const index = state.fileTabs.findIndex((item) => item.key === key)
-    const wasActive = state.activeFileKey === key
-    closeFileTab(key)
-    if (!wasActive) return
-    const remaining = state.fileTabs.filter((item) => item.key !== key)
-    setActiveFileKey(remaining[Math.min(index, remaining.length - 1)]?.key ?? null)
-    setMode('file')
-  }
-
   const canBrowseWorkspaces = capabilities.hasMethod('files.tree')
   const canBrowseConfig = capabilities.hasMethod('config.roots')
   if (!canBrowseWorkspaces && !canBrowseConfig) return null
@@ -137,7 +118,9 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
       mode={mode}
       onMode={setMode}
       onSelect={select}
-      onClose={closeTab}
+      onClose={(tab) => {
+        if (closeTab(tab, tabs)) setMode('file')
+      }}
       onBrowse={mobile ? () => setBrowsing(true) : undefined}
       client={client}
       epoch={filesEpoch}
@@ -148,28 +131,7 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
     <TreeExpansion>
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <ViewHeader title="Files" />
-        {mobile ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            {editor ?? <aside aria-label="Files" className="min-h-0 flex-1 overflow-y-auto">{tree}</aside>}
-            <Dialog open={browsing && Boolean(selection)} onOpenChange={setBrowsing}>
-              <DialogContent variant="side" side="left" aria-describedby={undefined} className="w-[min(320px,85vw)]">
-                <div className="flex h-11 shrink-0 items-center border-b border-seam px-4">
-                  <DialogTitle>Files</DialogTitle>
-                </div>
-                <aside aria-label="Files" className="min-h-0 flex-1 overflow-y-auto">{tree}</aside>
-              </DialogContent>
-            </Dialog>
-          </div>
-        ) : (
-          <div className="flex min-h-0 min-w-0 flex-1">
-            <aside aria-label="Files" className="w-[280px] shrink-0 overflow-y-auto border-r border-seam bg-chrome">{tree}</aside>
-            {editor ?? (
-              <div className="flex min-w-0 flex-1 items-center justify-center">
-                <EmptyState title="No file open">Pick a file in the tree to read or edit it.</EmptyState>
-              </div>
-            )}
-          </div>
-        )}
+        <FilesPane narrow={mobile} tree={tree} editor={editor} browsing={browsing} onBrowsing={setBrowsing} />
       </div>
     </TreeExpansion>
   )

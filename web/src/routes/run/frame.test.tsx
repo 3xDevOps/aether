@@ -4,6 +4,7 @@ import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
 import { openRunLink } from '@/routes/browser/open'
+import { openInFiles } from '@/routes/files/open'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import { useStore } from '@/store'
@@ -130,6 +131,50 @@ describe('run frame', () => {
     fireEvent.keyDown(window, { key: '[' })
     fireEvent.keyDown(window, { key: '[' })
     expect(useStore.getState().route.params.view).toBe('session')
+  })
+})
+
+describe('the Files view', () => {
+  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+
+  it('sits between Changes and Browser, and stays for a finished run that still has its checkout', () => {
+    const live = open()
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Terminal', 'Changes', 'Files', 'Browser'])
+    live.unmount()
+    open({ status: 'completed' })
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Terminal', 'Changes', 'Files'])
+  })
+
+  it('is not offered once the checkout is gone or by a gateway that cannot list files', () => {
+    const merged = open({ status: 'merged' }, 'files')
+    expect(views().queryByRole('tab', { name: 'Files' })).toBeNull()
+    expect(views().getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected')).toBe('true')
+    merged.unmount()
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events', 'attach'] } })
+    open()
+    expect(views().queryByRole('tab', { name: 'Files' })).toBeNull()
+  })
+
+  it('opens a file a link names without leaving the run, and keeps its editor behind the other views', async () => {
+    vi.mocked(api.filesRead).mockResolvedValue({ content: 'one\ntwo\n', truncated: false, binary: false, size: 8, revision: 'r1', writable: true })
+    const view = open({}, 'session')
+    const View = lookupRoute('run')!
+    act(() => openInFiles('run_1', { path: 'notes.md', line: 2 }))
+    view.rerender(<View params={useStore.getState().route.params} />)
+    expect(views().getByRole('tab', { name: 'Files' }).getAttribute('aria-selected')).toBe('true')
+    const editor = await screen.findByRole('textbox', { name: 'Edit notes.md' })
+    await waitFor(() => expect(document.querySelector('.cm-marked-line')?.textContent).toBe('two'))
+
+    view.rerender(rerouted('session'))
+    expect(editor.isConnected).toBe(true)
+    expect(editor.closest('[inert]')).not.toBeNull()
+  })
+
+  it('leaves the session’s control strip off, where no lease is used', () => {
+    const view = open({ mode: 'acp' }, 'session')
+    expect(screen.getByRole('group', { name: 'Multiplayer controls' })).toBeDefined()
+    view.rerender(rerouted('files'))
+    expect(screen.queryByRole('group', { name: 'Multiplayer controls' })).toBeNull()
   })
 })
 

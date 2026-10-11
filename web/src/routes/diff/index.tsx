@@ -13,8 +13,7 @@ import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
 import { useReview } from '@/routes/diff/review'
 import { ReviewBar } from '@/routes/diff/review-bar'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
-import { isLiveRun } from '@/routes/files/sources'
-import { openInFiles } from '@/routes/files/open'
+import { hasFiles, openInFiles } from '@/routes/files/open'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -63,8 +62,8 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
 
   const toggle = useCallback((path: string, next: boolean) => setCollapsed((all) => ({ ...all, [path]: next })), [])
   const open = useCallback((path: string) => {
-    if (run) openInFiles(run, path)
-  }, [run])
+    openInFiles(runID, { path })
+  }, [runID])
   const jump = useCallback((path: string) => {
     setCurrent(path)
     setCollapsed((all) => ({ ...all, [path]: false }))
@@ -91,7 +90,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
 
   if (!run) return <MissingRun />
 
-  const canOpen = caps.hasMethod('files.tree') && isLiveRun(run)
+  const canOpen = hasFiles(run, caps)
   const openable = (file: PatchFile) =>
     file.status !== 'deleted' && file.status !== 'binary' && cumulative.find((entry) => entry.path === file.path)?.status !== 'deleted'
   const patchAt = (file: PatchFile, index: number) => (

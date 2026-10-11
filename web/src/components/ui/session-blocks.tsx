@@ -3,6 +3,7 @@ import type * as React from 'react'
 import { CircleCheck, Circle, CircleDot, ListTodo } from '@/components/icons'
 import { cn, focusRingInset } from '@/lib/utils'
 import { parsePatch } from '@/routes/diff/parse'
+import { PathText } from '@/routes/files/path-link'
 
 const planFold = 20
 
@@ -62,7 +63,7 @@ export function DiffBlock({ path, patch }: { path: string; patch: string }) {
   return (
     <figure data-slot="diff-block" className="overflow-hidden rounded-control border border-seam">
       <figcaption className="flex min-w-0 items-center gap-2 border-b border-seam bg-chrome px-2 py-0.5 text-ui-sm">
-        <span className="min-w-0 flex-1 truncate font-code text-text">{file.path}</span>
+        <span className="min-w-0 flex-1 truncate font-code text-text"><PathText>{file.path}</PathText></span>
         <span className="shrink-0 font-code text-diff-add">+{file.additions}</span>
         <span className="shrink-0 font-code text-diff-del">−{file.deletions}</span>
       </figcaption>
@@ -86,7 +87,7 @@ export function OutputTail({ output, exitCode }: { output: string; exitCode?: nu
     <figure data-slot="output-tail" className="flex flex-col gap-0.5 text-ui-sm">
       <pre className="max-h-64 overflow-auto rounded-control border border-seam bg-chrome px-2 py-1 font-code whitespace-pre text-text">
         {cut && <span className="block text-muted">… {lines.length - tailLines} earlier lines</span>}
-        {lines.slice(-tailLines).join('\n')}
+        <PathText>{lines.slice(-tailLines).join('\n')}</PathText>
       </pre>
       {exitCode !== undefined && (
         <figcaption className={cn('tabular-nums', exitCode === 0 ? 'text-muted' : 'text-state-failed')}>Exit code {exitCode}</figcaption>
