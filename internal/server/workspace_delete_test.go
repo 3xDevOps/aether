@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -222,6 +223,48 @@ func TestWorkspaceDeleteCleanupFailureRetainsRetryableWorkspace(t *testing.T) {
 	}
 	if err := callWorkspaceDeletion(t, s, member.ID, ws.ID); err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+}
+
+func TestWorkspaceDeleteThatLeavesTheRowKeepsItsSecrets(t *testing.T) {
+	t.Parallel()
+	s, root, member, ws := newWorkspaceDeletionServer(t)
+	params, err := json.Marshal(protocol.WorkspaceEnvironmentSetParams{
+		WorkspaceID: string(ws.ID),
+		Set:         []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "token", Secret: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := s.ssh.Local(member.ID).Call(t.Context(), protocol.MethodWorkspaceEnvironmentSet, params); perr != nil {
+		t.Fatal(perr)
+	}
+	fault, err := sql.Open("sqlite", filepath.Join(root, "aether.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fault.Close() })
+	if _, err = fault.ExecContext(t.Context(), `CREATE TRIGGER keep_workspace BEFORE DELETE ON workspaces BEGIN SELECT RAISE(ABORT, 'injected: the row stays'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	if perr := callWorkspaceDeletion(t, s, member.ID, ws.ID); perr == nil || !strings.Contains(perr.Message, "the row stays") {
+		t.Fatalf("deletion with the row refused = %v", perr)
+	}
+	secretFile := filepath.Join(root, "workspace-secrets", string(ws.ID)+".json")
+	file, err := os.ReadFile(secretFile)
+	if err != nil || !strings.Contains(string(file), "token") {
+		t.Fatalf("secret file after the failed deletion = %q, %v, want the secret kept", file, err)
+	}
+
+	if _, err = fault.ExecContext(t.Context(), `DROP TRIGGER keep_workspace`); err != nil {
+		t.Fatal(err)
+	}
+	if perr := callWorkspaceDeletion(t, s, member.ID, ws.ID); perr != nil {
+		t.Fatalf("retry: %v", perr)
+	}
+	if _, err = os.Stat(secretFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("secret file after the deletion: %v", err)
 	}
 }
 

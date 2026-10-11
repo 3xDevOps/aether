@@ -45,10 +45,17 @@ func (d *workspaceDeletion) Delete(ctx context.Context, workspace domain.Workspa
 			if err := d.git.RemoveWorkspaceRepo(ctx, workspace); err != nil {
 				return err
 			}
+			// The file never outlives the row, so it goes first; a row that
+			// then stays gets it back. An unreadable file has nothing to put
+			// back and does not stop the deletion.
+			secrets, _ := d.secrets.Get(workspace)
 			if err := d.secrets.Delete(workspace); err != nil {
 				return fmt.Errorf("workspace.delete: %w", err)
 			}
 			if err := d.store.DeleteWorkspace(ctx, workspace); err != nil {
+				if restoreErr := d.secrets.Put(workspace, secrets); restoreErr != nil {
+					err = errors.Join(err, fmt.Errorf("workspace.delete: restore the workspace's secrets: %w", restoreErr))
+				}
 				return err
 			}
 			if _, err := d.bus.Publish(ctx, events.Event{
