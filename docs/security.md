@@ -977,9 +977,10 @@ one.
   device ([networking.md](networking.md)). The SSH connection the member's
   `ssh` client speaks is nested inside one channel of it and is reachable no
   other way, so it accepts any user name and no key. It presents the
-  server's own host key. The CLI has verified that key on its own
-  connection and writes it to `~/.ssh/aether_known_hosts`, which is why
-  `ssh` can check it strictly without ever prompting.
+  server's own host key, and the server names that key when it admits the
+  connection. The CLI accepts the name only if it is the key it verified on
+  its own connection, then writes it to `~/.ssh/aether_known_hosts`, which
+  is why `ssh` can check it strictly without ever prompting.
 - **No sshd, no port and no key in the container.** The server speaks the
   SSH protocol itself and starts each session as an owned execution in the
   container, the way run shells start. Nothing listens for it in the

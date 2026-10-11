@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
@@ -37,22 +38,40 @@ const (
 var errSubsystemRefused = errors.New("request refused")
 
 // RunSSH opens the SSH transport into a run's container. The stream carries
-// the SSH protocol to a server that presents hostKey, an authorized_keys
-// line. A refusal is the server's own reason.
-func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, string, error) {
+// the SSH protocol to a server that presents hostKey, which is the key this
+// connection verified and nothing else. A refusal is the server's own reason.
+func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, ssh.PublicKey, error) {
 	var ack protocol.RunSSHResponse
 	out, err := c.openStream(protocol.SubsystemRunSSH, nil, protocol.RunSSHRequest{RunID: runID}, "ssh", &ack)
 	if errors.Is(err, errSubsystemRefused) {
-		return nil, "", errors.New("the server does not support ssh into a run; update aether-server")
+		return nil, nil, errors.New("the server does not support ssh into a run; update aether-server")
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, "", errors.New(ack.Error)
+		return nil, nil, errors.New(ack.Error)
 	}
-	return out, ack.HostKey, nil
+	hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(ack.HostKey))
+	if err != nil {
+		_ = out.Close()
+		return nil, nil, fmt.Errorf("cli: the server sent an unreadable host key: %w", err)
+	}
+	if !c.verified(hostKey) {
+		_ = out.Close()
+		return nil, nil, fmt.Errorf("cli: the server named %s as the run's host key, which is not the key this link verified", ssh.FingerprintSHA256(hostKey))
+	}
+	return out, hostKey, nil
+}
+
+// verified reports whether key is the host key this connection checked in
+// its own handshake. A link with a server id pins the key that derives it.
+func (c *Conn) verified(key ssh.PublicKey) bool {
+	if c.cfg.ServerID != "" {
+		return edgeproto.HostKeyMatches(key, c.cfg.ServerID)
+	}
+	return c.hostKey != nil && bytes.Equal(key.Marshal(), c.hostKey.Marshal())
 }
 
 // SSHOption is one ssh_config keyword and its value.
@@ -200,14 +219,10 @@ func replaceFile(path string, content []byte) error {
 }
 
 // TrustRunHostKey records the host key a run's SSH server presents in the
-// known_hosts file RunSSHOptions names. The key arrived over a connection
-// whose own host key the CLI already verified, so ssh can check it strictly
-// without ever prompting.
-func TrustRunHostKey(authorizedKey string) error {
-	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(authorizedKey))
-	if err != nil {
-		return fmt.Errorf("cli: the server sent an unreadable host key: %w", err)
-	}
+// known_hosts file RunSSHOptions names. RunSSH returns only the key the CLI
+// verified on its own connection, so ssh can check it strictly without ever
+// prompting.
+func TrustRunHostKey(key ssh.PublicKey) error {
 	dir, err := sshDir()
 	if err != nil {
 		return err

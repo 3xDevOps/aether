@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bufio"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -137,17 +141,19 @@ func TestInstallSSHConfigRefusesAHomeSSHCannotName(t *testing.T) {
 	}
 }
 
+func newHostKey(t *testing.T) ssh.Signer {
+	t.Helper()
+	signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}
+
 func TestTrustRunHostKeyRecordsEachKeyOnce(t *testing.T) {
 	home := testhome.Isolate(t)
-	keyLine := func() string {
-		signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
-	}
-	one, two := keyLine(), keyLine()
-	for _, key := range []string{one, one, two} {
+	one, two := newHostKey(t).PublicKey(), newHostKey(t).PublicKey()
+	for _, key := range []ssh.PublicKey{one, one, two} {
 		if err := TrustRunHostKey(key); err != nil {
 			t.Fatal(err)
 		}
@@ -156,10 +162,90 @@ func TestTrustRunHostKeyRecordsEachKeyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(known) != "aether "+one+"\naether "+two+"\n" {
+	if string(known) != "aether "+string(ssh.MarshalAuthorizedKey(one))+"aether "+string(ssh.MarshalAuthorizedKey(two)) {
 		t.Fatalf("known hosts:\n%s", known)
 	}
-	if err = TrustRunHostKey("not a key"); err == nil {
-		t.Fatal("an unreadable host key was recorded")
+}
+
+// serveRunSSHAck is a server that admits anyone and answers the run-ssh
+// subsystem with a host key line of its choosing.
+func serveRunSSHAck(t *testing.T, host ssh.Signer, ackKey string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(host)
+	go func() {
+		raw, aerr := listener.Accept()
+		if aerr != nil {
+			return
+		}
+		conn, chans, reqs, serr := ssh.NewServerConn(raw, config)
+		if serr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		go ssh.DiscardRequests(reqs)
+		for nc := range chans {
+			ch, requests, cerr := nc.Accept()
+			if cerr != nil {
+				return
+			}
+			for req := range requests {
+				if req.Type != "subsystem" {
+					_ = req.Reply(false, nil)
+					continue
+				}
+				_ = req.Reply(true, nil)
+				if _, rerr := protocol.ReadLine(bufio.NewReader(ch)); rerr != nil {
+					return
+				}
+				ack, _ := json.Marshal(protocol.RunSSHResponse{OK: true, HostKey: ackKey})
+				_, _ = ch.Write(append(ack, '\n'))
+			}
+		}
+	}()
+	return listener.Addr().String()
+}
+
+func TestRunSSHAcceptsOnlyTheHostKeyTheLinkVerified(t *testing.T) {
+	disableAgent(t)
+	host, other := newHostKey(t), newHostKey(t)
+	line := func(s ssh.Signer) string { return string(ssh.MarshalAuthorizedKey(s.PublicKey())) }
+	for name, tc := range map[string]struct {
+		ack  string
+		want string
+	}{
+		"the server's own key": {line(host), ""},
+		"another key":          {line(other), "not the key this link verified"},
+		"no key":               {"not a key", "unreadable host key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			conn, err := Dial(Config{
+				Addr: serveRunSSHAck(t, host, tc.ack), Key: filepath.Join(dir, "missing-key"), KnownHosts: filepath.Join(dir, "known_hosts"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			stream, key, err := conn.RunSSH("run-gejd5cbk74")
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("RunSSH = %v, want an error naming %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = stream.Close() }()
+			if string(key.Marshal()) != string(host.PublicKey().Marshal()) {
+				t.Fatalf("RunSSH returned %s, want the server's key", ssh.FingerprintSHA256(key))
+			}
+		})
 	}
 }
