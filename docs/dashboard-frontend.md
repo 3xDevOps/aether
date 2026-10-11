@@ -1487,6 +1487,31 @@ The view switch is a segmented `tablist` named "Run views" with manual
 activation, on its own 32px row under the header at every width. On a phone
 with the composer focused the header keeps only the title line.
 
+A run with a pull request shows it at the right end of that row
+(`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
+state of its checks as a button, **2 failing**, **Checks running**, **Checks
+passed** or **No checks**, and **Merged** or **Closed** once it is. Failing
+wins over running, and running over passed. An answer that failed part-way,
+or stopped at its limit of 100 checks, may be missing some: it still reports
+a failure it saw, and otherwise reads **Checks incomplete**, never passed. A
+row under 480px wide keeps the dot and the failing count. The panel is
+mounted beside the header, not in that row, so a send waiting for control
+survives the row leaving while the composer has focus on a phone. The server stores no pull request, so the
+dashboard reads it (`routes/diff/publish-pr.ts`): `run.pr.feedback` for the
+pull request from the checkout's branch on its GitHub remote into the run's
+base branch, the same target the Publish dialog fills in, or one a member
+typed into that dialog and found or opened a pull request at. It asks once
+when the run page opens, every 60
+seconds while the page is visible and after each push or creation in the
+dialog, and re-reads `run.git.status` only when the answer says the branch or
+HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
+check state exists only while the run is `running` or `needs-attention`: a
+run that leaves those states keeps the link and drops the state, and a page
+loaded after that shows neither. The board and sidebar show no pull request.
+See
+[Changes view and Publish](#changes-view-and-publish) for the panel the button
+opens.
+
 ### Multiplayer controls
 
 Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx`)
@@ -2190,14 +2215,37 @@ both what it renders and the overlap set the conflict chips read.
   so the composer's rules in [Run control](terminal.md#run-control) apply
   unchanged. A send the server has not answered keeps its idempotency key by
   run and text until it is answered or another member signs in: the same text
-  sent again is delivered once, whatever went to the run in between. The review bar passes the
-  lease and, for the owner of a run nobody controls, takes it first
-  (`useImplicitControl`); anyone else's review waits 45 seconds for the
-  controller, and the bar says so. **Send to agent** is disabled, with the
-  composer's own sentence beside it, for a finished, starting or switching
-  run, a Background run, a protected run and a member who may not message the
-  agent. The Publish dialog's PR feedback uses the same function without a
-  lease.
+  sent again is delivered once, whatever went to the run in between.
+  `useAgentSend` (`agent-send.ts`) wraps it for the review bar and the pull
+  request panel: it passes the lease and, for the owner of a run nobody
+  controls, takes it first (`useImplicitControl`); anyone else's message
+  waits 45 seconds for the controller, and both surfaces say so. **Send to
+  agent** is disabled, with the composer's own sentence beside it, for a
+  finished, starting or switching run, a Background run, a protected run and
+  a member who may not message the agent. Both surfaces word their receipts
+  with the same `receipt` function.
+- **A pull request's feedback is one click from the agent.** The check state
+  in the run header ([Header](#header)) opens `publish-feedback.tsx`, a
+  dialog that is a bottom sheet on a phone: the pull request's title linking
+  to GitHub, its state and target, then **Checks** and **Review comments**
+  from the last `run.pr.feedback` answer, with **Refresh** to ask again.
+  Failing checks come first, then running ones, each named with its
+  conclusion and linking to its page on GitHub; passed checks fold into "7
+  passed" under them, and are listed outright when no other check is.
+  Comments are the pull request's
+  conversation, its inline review comments with their `path:line`, and
+  reviews that approve, request changes or carry text, oldest first. Each
+  failing check and each comment has **Send to agent**, which sends one
+  message: the pull request, its target and head, then the check's name,
+  conclusion and link, or the comment with its author, lines, commit and
+  diff hunk. The server returns no log for a check, so none is sent; the
+  link is what the agent reads it from. The row then shows the receipt, "Sent
+  1 check to Claude Code." with **Open the session**, or the server's error
+  with the button still there. One send is out at a time: the other rows'
+  buttons are disabled from the click until the server answers, including
+  while the owner's tab is taking control, and a send whose control never
+  arrives says so and frees them. GitHub's own error, when the read fails,
+  shows above the lists with the last answer kept under it.
 - **Comments follow their lines.** Unsent comments sit in their own Zustand
   store in `review.ts`, keyed by run, for the reason composer drafts do. They
   survive switching views, opening another page and every diff refresh, and
@@ -2227,20 +2275,68 @@ both what it renders and the overlap set the conflict chips read.
   dashboard - has no repository for those commands to run in.
 - **Publish is two steps.** **Publish…** appears with `run.git.status` once
   the diff has a file, and opens `publish-dialog.tsx`, a bottom sheet on a
-  phone. The run checkout's branch, HEAD, agent account, GitHub identity and
-  upstream sit above both steps, with **Refresh status**. **1 · Commit**
-  selects changed paths, reviews their worktree and staged diffs and untracked
-  contents, and runs **Commit selected**. **2 · Push and pull request** picks
-  a remote and its exact push URL and runs **Push reviewed branch**, then
-  discovers or creates the pull request and sends checked PR feedback to the
-  agent as a message. Every mutation names the branch and HEAD that were
-  reviewed and needs its attestation checkbox; a refresh clears them. Each
-  RPC's error shows under the button that sent it. The dialog's state lives in
-  `publish-state.ts` and stays mounted while the run is open, because the
-  Changes view stays mounted after its first visit, so a typed message, a PR
-  creation whose outcome is uncertain, and checked PR feedback with its
-  pending send survive switching steps, closing the dialog and switching
-  views. A resend after a lost response reuses the same idempotency key.
+  phone. One line above both steps names what they act on and as whom,
+  "`aether/run-1` at `4f9c2a7d` · as Ada Lovelace · GitHub ada-l", with
+  **Refresh status** beside it and the status's own errors under it. **1 ·
+  Commit** selects changed paths, reviews their worktree and staged diffs and
+  untracked contents, and runs **Commit selected**. **2 · Push and pull
+  request** is where the dialog opens when the first status has nothing to
+  commit. The dialog's state lives in `publish-state.ts` and stays mounted
+  while the run is open, because the Changes view stays mounted after its
+  first visit, so a typed message and a PR creation whose outcome is
+  uncertain survive switching steps, closing the dialog and switching views.
+- **The destination is two sentences.** Step 2 (`publish-push.tsx`) says
+  where the work goes instead of asking: "Pushes commit `4f9c2a7d` to
+  `https://github.com/acme/app.git` as branch `aether/run-1`. Never a force
+  push." and "Opens a pull request into `acme/app:main` from
+  `ada/app:aether/run-1` as **ada-l**. It is not merged from here." Under
+  them sit only what the member writes, **PR title**, **PR description** and
+  **Draft PR**, and the buttons. A pull request the branch already has
+  replaces the second sentence with its number, title and state, linking to
+  GitHub, and the title fields go. A push to anything but GitHub says no
+  pull request is filled in.
+- **Change destination holds the fields.** The seven fields the sentences
+  are built from, the push remote, its URL and branch and the pull request's
+  repository, base, head repository and head branch, sit behind one
+  disclosure with **Discover existing PR**, the full HEAD, the agent
+  account's id and the branch's upstream. It opens by itself only when a
+  sentence cannot be written or a destination refused: no checkout Origin, a
+  remote with several push URLs, a detached HEAD, a refused push, a failed
+  lookup or a failed creation. The reason is on screen with it, in place of
+  the sentence or in the outcome under it.
+- **Defaults come from the checkout.** Every field starts from what the
+  checkout and the workspace already say (`publish-target.ts`), follows each
+  status refresh, and stops following once the member edits it. The push
+  remote is the branch's upstream, else `origin` when the workspace has a
+  checkout Origin; without one `origin` is the server's own repository, so
+  nothing is chosen. The push URL is the remote's, when it has exactly one,
+  and the branch is the upstream's or the checkout's. The pull request's head
+  is that push when its URL is a github.com repository, its base branch is
+  the run's, and its repository is the one the workspace's source mirror
+  reads (`workspace.mirror.status`), which for a fork Origin is the
+  upstream; without a GitHub mirror it is the head repository. The title is
+  HEAD's subject (`head_subject`) once the run has a commit of its own.
+- **One button publishes, and says how far it got.** With no pull request
+  yet the filled button is **Push and open pull request**: it pushes, and
+  only if the push landed opens the pull request. Each half reports under
+  its own sentence, **Push outcome** and **PR creation outcome**, with the
+  server's error and output, so a push that landed stays "Pushed: yes"
+  whatever the pull request did. After such a partial result the filled
+  button is **Open pull request**, which only creates. **Push only** sits
+  beside both. A branch with a pull request, or a push that leads to none,
+  has **Push branch** alone. An uncertain creation leaves **Reconcile PR
+  read-only**, which looks the exact target up and never creates.
+- **The server holds the fences.** Nothing is pushed or opened unless its
+  sentence is on screen, and every mutation names the branch and HEAD in
+  that sentence: the server refuses it when the checkout moved, refuses a
+  push unless the remote still has exactly that URL, and refuses a creation
+  when the GitHub login is no longer the one shown. The dialog looks for an
+  existing pull request by itself (`run.pr.status`) after every status read,
+  which follows opening the dialog, **Refresh status**, a commit and a push,
+  provided GitHub is logged in and the target is complete. Editing a field
+  stops that until **Discover existing PR** is pressed, so a half-typed
+  target is never looked up, and a pull request can be opened only after a
+  lookup of the exact target on screen has answered.
 - **Conflict chips write their list out for a finger.** The overlapping file
   names live in the chip's tooltip, which a touch screen cannot open, so on a
   coarse pointer the same list is rendered as visible text beside the chip.

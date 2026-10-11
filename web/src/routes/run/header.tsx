@@ -20,6 +20,7 @@ import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useModeSwitch } from '@/routes/run/mode-switch'
+import { useRunPullRequest } from '@/routes/run/pull-request'
 import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -182,6 +183,7 @@ export function RunHeader({
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const primary = usePrimaryAction(run, view, agent, nav)
   const modeSwitch = useModeSwitch(run, agent, agentEntry)
+  const pullRequest = useRunPullRequest(run, agent, agentName)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -225,11 +227,13 @@ export function RunHeader({
       />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
       {!composing && (
-        <div className="flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
+        <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch views={views} />
+          {pullRequest.status}
         </div>
       )}
       {modeSwitch.dialog}
+      {pullRequest.panel}
       {!mobile && <ConnectionLine className="border-b border-seam px-4 py-1" />}
     </>
   )

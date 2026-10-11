@@ -79,6 +79,15 @@ func (s *Service) Status(ctx context.Context, run Execution) (Status, error) {
 	return state, nil
 }
 
+func (s *Service) Subject(ctx context.Context, run Execution, commit string) (string, error) {
+	if !validOID(commit) {
+		return "", errors.New("runrepo: commit must be a full object ID")
+	}
+	out, err := s.git(ctx, run, false, "log", "-1", "--format=%s", commit)
+	text, err := complete(out, err)
+	return strings.TrimSpace(text), err
+}
+
 // Remotes reads the checkout's actual URLs and configured upstream. None is
 // inferred from the workspace mirror or silently selected for publication.
 func (s *Service) Remotes(ctx context.Context, run Execution, branch string) ([]protocol.RunGitRemote, *protocol.RunGitUpstream, error) {

@@ -79,6 +79,7 @@ type RunGitUpstream struct {
 type RunGitStatusResult struct {
 	Branch          string               `json:"branch"`
 	Head            string               `json:"head"`
+	HeadSubject     string               `json:"head_subject,omitempty"`
 	Detached        bool                 `json:"detached"`
 	Unborn          bool                 `json:"unborn"`
 	Changes         []RunGitChange       `json:"changes"`

@@ -15,6 +15,7 @@ import {
   Folder as LucideFolder,
   FolderGit2 as LucideFolderGit2,
   GitBranch as LucideGitBranch,
+  GitPullRequest as LucideGitPullRequest,
   History as LucideHistory,
   Keyboard as LucideKeyboard,
   ListTodo as LucideListTodo,
@@ -153,6 +154,7 @@ export const Ellipsis = icon(LucideEllipsis)
 export const FileText = icon(LucideFileText)
 export const FolderGit2 = icon(LucideFolderGit2)
 export const GitBranch = icon(LucideGitBranch)
+export const GitPullRequest = icon(LucideGitPullRequest)
 export const History = icon(LucideHistory)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)

@@ -829,52 +829,69 @@ native Git and `gh` in the run's checkout as the run's account. **Land**,
 candidate review and the interval menu stay in the Changes view: a GitHub PR
 is not an internal candidate proposal.
 
-1. Inspect the checkout facts at the top: **Branch**, **HEAD**, **Agent
-   account**, **GitHub identity** (or its real authentication error) and
-   **Upstream**. Connect GitHub in that account's environment first; mirror
-   deploy keys do not provide push credentials.
-2. Check exact paths, then click **Review selected paths**. The view shows
-   worktree and staged diffs separately, with content previews for selected
-   untracked files. Enter a **Commit message** and click **Commit
+1. Read the line at the top: the checkout's branch, its commit, the agent
+   account and the GitHub login, or that login's real authentication error.
+   Connect GitHub in that account's environment first; mirror deploy keys do
+   not provide push credentials.
+2. With nothing left to commit, the dialog opens on step 2: skip to step 4.
+   Otherwise check exact paths, then click **Review selected paths**. The view
+   shows worktree and staged diffs separately, with content previews for
+   selected untracked files. Enter a **Commit message** and click **Commit
    selected**. This commits those paths' current worktree contents, not only
    their staged hunks; unselected staged paths are preserved. Native identity
    and signing apply, but commit hooks do not run.
 3. Inspect **Commit outcome** and native diagnostics. **Committed: yes** with
    **Index updated: no** means the commit exists but index reconciliation
    failed: inspect the checkout instead of repeating the commit. A branch/HEAD
-   mismatch requires **Refresh status** and a fresh review.
-4. Switch to **2 · Push and pull request**. Under **Push branch**, choose
-   **Push remote**, its exact **Writable push URL**, and **Push head
-   branch**. Check the account/branch/HEAD/destination review box, then
-   **Push reviewed branch**. Add any missing fork remote using
-   native Git in the run terminal first. Push is non-force and does not switch
-   branches or change workspace Origin, source mirror or accepted base.
-5. Under **GitHub pull request**, explicitly enter **PR repository
-   (owner/name)** and **PR base branch**, separately from **PR head repository
-   (owner/name)** and **PR head branch**. For a fork, the PR repository is the
-   upstream and the head repository is your fork; neither choice reconfigures
-   the mirror or Origin. Click **Discover existing PR** to find that exact
-   head/base, including PRs created using native `gh`.
-6. If no PR exists, review the returned GitHub identity and exact target, enter
-   **PR title** / **PR description**, optionally check **Draft PR**, check the
-   identity/target review box, and click **Create reviewed PR**. If creation is
-   uncertain, use **Reconcile PR read-only** rather than repeating creation.
-   A PR failure never erases a successful **Pushed: yes** outcome.
-7. Click **Refresh PR feedback** for typed checks, comments, reviews and inline
-   feedback (including file/line and commit context). Check only the feedback
-   you want to send, then **Send selected feedback to the agent**. This creates
-   a normal moderated message; its receipt is not proof of delivery unless it
-   says sent. **Open the session** shows the durable message and its delivery
-   state.
+   mismatch requires **Refresh status** and a fresh review. Then click
+   **Continue to push**.
+4. **2 · Push and pull request** says where the work goes in two sentences:
+   the commit, the push URL and the branch, then the pull request's target
+   and the GitHub login it is opened as. The push goes to the branch's
+   upstream or the workspace's checkout Origin. The pull request goes from
+   that repository and branch into the run's base branch of the repository
+   the workspace's source came from, which for a fork Origin is the upstream.
+   Neither choice reconfigures the mirror or Origin.
+5. Check **PR title**, which holds the last commit's subject, add a **PR
+   description**, optionally check **Draft PR**, and click **Push and open
+   pull request**. It pushes, without force and without switching branches,
+   then opens the pull request. If the branch already has a pull request,
+   including one the agent created using native `gh`, the dialog shows it
+   and the button is **Push branch**.
+6. Read the outcomes under the sentences. **Pushed: yes** stays whatever the
+   pull request did; if the pull request failed, its real error is under the
+   second sentence and the button becomes **Open pull request**. If creation
+   is uncertain, use **Reconcile PR read-only** rather than repeating it.
 
-Native status is read when the Publish dialog first opens and after explicit
-actions; GitHub discovery and feedback refresh are explicit. No background PR watcher, automatic
-merge, force push, branch switch or automatic mutation retry is performed.
+To publish somewhere else, open **Change destination**: the push remote, its
+URL and branch, and the pull request's repository, base and head. It opens by
+itself when nothing could be chosen, for example in a workspace without a
+checkout Origin, or when a destination refused. After changing a pull request
+field, click **Discover existing PR** to look that exact target up. **Push
+only** pushes without opening a pull request.
+
+The server refuses a push or a creation when the branch, HEAD, push URL or
+GitHub login is no longer the one on screen, and says what it found instead.
+No automatic merge, force push, branch switch or mutation retry is performed.
 GitHub discovery, creation and feedback need a working native `gh`, network
 access, and the run's GitHub login's permissions on the explicit upstream/fork:
 the `gh` login in the home the run's container mounts: its launcher's, also on
 a shared agent account and after a handoff.
 Review and merge on GitHub according to your repository's policy.
+
+### Follow the pull request from the run
+
+Once the run's branch has a pull request, whoever opened it, the run page
+shows it at the right of the view switch: `#412` opens it on GitHub, and
+beside it is the state of its checks, such as **2 failing** or **Checks
+passed**. Aether reads this from GitHub every minute while the run is live
+and its page is visible.
+
+Click the check state for the checks and review comments. A failing check or
+a comment has **Send to agent**, which sends the agent one message with the
+check's name, conclusion and link, or the comment with its file and lines.
+It is a normal moderated message: the row says whether it was sent or
+queued, and **Open the session** shows it in the conversation.
 
 ### Optional: pull into a local clone
 

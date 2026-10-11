@@ -161,6 +161,9 @@ func (s *Server) runGitStatus(ctx context.Context, member domain.MemberID, raw j
 	}
 	state, err := call.native.Status(ctx, call.execution)
 	result := protocol.RunGitStatusResult{Branch: state.Branch, Head: state.Head, Detached: state.Detached, Unborn: state.Unborn, Changes: state.Changes, AccountMemberID: string(call.account), AccountName: call.accountName, Remotes: []protocol.RunGitRemote{}}
+	if err == nil && !state.Unborn {
+		result.HeadSubject, err = call.native.Subject(ctx, call.execution, state.Head)
+	}
 	if err == nil {
 		result.Remotes, result.Upstream, err = call.native.Remotes(ctx, call.execution, state.Branch)
 	}

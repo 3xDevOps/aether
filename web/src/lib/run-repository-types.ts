@@ -61,6 +61,8 @@ export interface RunGitUpstream {
 export interface RunGitStatusResult {
   branch: string
   head: string
+  /** First line of HEAD's commit message; absent on an unborn branch and on older servers. */
+  head_subject?: string
   detached: boolean
   unborn: boolean
   changes: RunGitChange[] | null
