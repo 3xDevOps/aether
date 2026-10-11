@@ -1477,8 +1477,12 @@ A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
 state of its checks as a button, **2 failing**, **Checks running**, **Checks
 passed** or **No checks**, and **Merged** or **Closed** once it is. Failing
-wins over running, and running over passed. A row under 480px wide keeps the
-dot and the failing count. The server stores no pull request, so the
+wins over running, and running over passed. An answer that failed part-way,
+or stopped at its limit of 100 checks, may be missing some: it still reports
+a failure it saw, and otherwise reads **Checks incomplete**, never passed. A
+row under 480px wide keeps the dot and the failing count. The panel is
+mounted beside the header, not in that row, so a send waiting for control
+survives the row leaving while the composer has focus on a phone. The server stores no pull request, so the
 dashboard reads it (`routes/diff/publish-pr.ts`): `run.pr.feedback` for the
 pull request from the checkout's branch on its GitHub remote into the run's
 base branch, the same target the Publish dialog fills in, or one a member

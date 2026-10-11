@@ -17,6 +17,9 @@ export interface TrackedPR {
   error?: string
 }
 
+/** How many entries of each kind one answer may carry; an answer that reaches it may have left some out. */
+export const feedbackLimit = 100
+
 const none: TrackedPR = {}
 const usePullRequests = create<Record<string, TrackedPR>>(() => ({}))
 const revisions = new Map<string, number>()
@@ -27,7 +30,7 @@ useStore.subscribe((state, previous) => {
 
 async function read(run: Run, client: Api): Promise<Partial<TrackedPR>> {
   const { chosen, asked } = usePullRequests.getState()[run.id] ?? none
-  const ask = async (next: NonNullable<TrackedPR['asked']>) => client.runPRFeedback({ run_id: run.id, ...next, limit: 100 })
+  const ask = async (next: NonNullable<TrackedPR['asked']>) => client.runPRFeedback({ run_id: run.id, ...next, limit: feedbackLimit })
   // A failed read that found no pull request says nothing about the one on screen; a partial one carries its own error.
   const answer = (next: TrackedPR['asked'], feedback: RunPRFeedbackResult): Partial<TrackedPR> =>
     feedback.error && !feedback.pull_request ? { asked: next, error: feedback.error } : { asked: next, feedback, error: undefined }

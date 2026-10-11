@@ -4,7 +4,7 @@ import type { RunGitStatusResult, RunPRCheck, RunPRFeedbackResult, RunPullReques
 import { refreshPullRequest } from '@/routes/diff/publish-pr'
 import { githubRepository } from '@/routes/diff/publish-target'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
-import { RunPullRequest } from '@/routes/run/pull-request'
+import { useRunPullRequest } from '@/routes/run/pull-request'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { bob, run, serverInfo, workspace } from '@/test/fixtures'
@@ -41,11 +41,17 @@ const agent = {
   controlUnavailable: false,
 } as AgentTerminal
 
+/** Without `row` it is the header on a phone while the composer has focus: the view-switch row is gone. */
+function Element({ record, agent: terminal = agent, row = true }: { record: ReturnType<typeof toRecord>; agent?: AgentTerminal; row?: boolean }) {
+  const pullRequest = useRunPullRequest(record, terminal, 'Claude Code')
+  return <>{row && pullRequest.status}{pullRequest.panel}</>
+}
+
 let sequence = 0
 function renderFor(over: Parameters<typeof run>[0] = {}) {
   const record = toRecord(run({ id: `run_pr_${++sequence}`, ...over }))
   useStore.setState({ runs: { [record.id]: record } })
-  render(<RunPullRequest run={record} agent={agent} agentName="Claude Code" />)
+  render(<Element record={record} />)
   return record
 }
 
@@ -99,12 +105,18 @@ it('shows the pull request with its failing checks, and sends one check or one c
   expect(vi.mocked(api.runRoomPost).mock.calls[1][0].body).toContain('Inline review by bob: upload.go:42 (RIGHT)\nCap the retries.')
 })
 
-it.each([
-  [[{ name: 'build', status: 'queued' }, { name: 'docs', status: 'completed', conclusion: 'success' }], 'Checks running'],
-  [[{ name: 'docs', status: 'completed', conclusion: 'skipped' }], 'Checks passed'],
-  [[], 'No checks'],
-])('summarises checks %#', async (checks, label) => {
-  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ checks }))
+const docs: RunPRCheck = { name: 'docs', status: 'completed', conclusion: 'success' }
+
+it.each<[Partial<RunPRFeedbackResult>, string]>([
+  [{ checks: [{ name: 'build', status: 'queued' }, docs] }, 'Checks running'],
+  [{ checks: [{ name: 'docs', status: 'completed', conclusion: 'skipped' }] }, 'Checks passed'],
+  [{ checks: [] }, 'No checks'],
+  [{ checks: [docs], truncated: true }, 'Checks passed'],
+  [{ checks: [docs], error: 'runrepo: gh exited 1: HTTP 502' }, 'Checks incomplete'],
+  [{ checks: Array<RunPRCheck>(100).fill(docs), truncated: true }, 'Checks incomplete'],
+  [{ checks: [docs, lint], error: 'runrepo: gh exited 1: HTTP 502' }, '1 failing'],
+])('summarises checks %#', async (over, label) => {
+  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback(over))
   renderFor()
   expect(await screen.findByRole('button', { name: label })).toBeTruthy()
 })
@@ -170,7 +182,7 @@ it('reserves a send while control is on its way, and frees the rows when it neve
   const waiting = { ...agent, localControl: false, roomControl: undefined, session: { takeControl: vi.fn() } } as unknown as AgentTerminal
   const record = toRecord(run({ id: 'run_pr_control' }))
   useStore.setState({ runs: { [record.id]: record } })
-  const view = render(<RunPullRequest run={record} agent={waiting} agentName="Claude Code" />)
+  const view = render(<Element record={record} agent={waiting} />)
   fireEvent.click(await screen.findByRole('button', { name: '2 failing' }))
   const panel = within(await screen.findByRole('dialog'))
 
@@ -185,7 +197,7 @@ it('reserves a send while control is on its way, and frees the rows when it neve
     expect(api.runRoomPost).not.toHaveBeenCalled()
 
     fireEvent.click(panel.getAllByRole('button', { name: 'Send to agent' })[1])
-    view.rerender(<RunPullRequest run={record} agent={agent} agentName="Claude Code" />)
+    view.rerender(<Element record={record} row={false} />)
     await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
   } finally {
     vi.useRealTimers()
