@@ -16,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestWorkspaceEnvironment(t *testing.T) {
@@ -145,6 +146,42 @@ func TestWorkspaceEnvironmentRefusals(t *testing.T) {
 	err := admin.Call(protocol.MethodWorkspaceEnvironmentGet, protocol.WorkspaceEnvironmentGetParams{WorkspaceID: "ws_missing"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
 		t.Errorf("unknown workspace = %v, want CodeNotFound", err)
+	}
+}
+
+type refusingEnvironmentStore struct {
+	store.Store
+	err error
+}
+
+func (s refusingEnvironmentStore) SetWorkspaceEnvironment(context.Context, domain.WorkspaceID, domain.WorkspaceEnvironment) error {
+	return s.err
+}
+
+func TestWorkspaceEnvironmentSetThatHalfFails(t *testing.T) {
+	const secret = "npm-token-7c2e91"
+	secrets := secretstore.New(filepath.Join(t.TempDir(), "workspace-secrets"))
+	e := newTestEnv(t, func(cfg *Config) { cfg.Secrets = secrets })
+	set := func(variable protocol.WorkspaceVariable) (protocol.WorkspaceEnvironmentResult, *protocol.Error) {
+		params, err := json.Marshal(protocol.WorkspaceEnvironmentSetParams{WorkspaceID: string(e.ws.ID), Set: []protocol.WorkspaceVariable{variable}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, perr := e.srv.workspaceEnvironmentSet(context.Background(), e.member.ID, params)
+		got, _ := result.(protocol.WorkspaceEnvironmentResult)
+		return got, perr
+	}
+	if _, perr := set(protocol.WorkspaceVariable{Name: "NPM_TOKEN", Value: secret, Secret: true}); perr != nil {
+		t.Fatalf("set the secret: %+v", perr)
+	}
+
+	// A secret turning plain leaves the secret file before the row has it.
+	e.srv.cfg.Store = refusingEnvironmentStore{Store: e.store, err: errors.New("database is locked")}
+	if _, perr := set(protocol.WorkspaceVariable{Name: "NPM_TOKEN", Value: "now-plain"}); perr == nil || !strings.Contains(perr.Message, "database is locked") {
+		t.Fatalf("set with the row update refused = %+v, want the store's error", perr)
+	}
+	if kept, err := secrets.Get(e.ws.ID); err != nil || kept["NPM_TOKEN"] != secret {
+		t.Fatalf("secrets after the refused save = %v, %v, want NPM_TOKEN as it was", kept, err)
 	}
 }
 

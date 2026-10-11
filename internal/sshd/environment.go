@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -102,6 +103,7 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	saved := maps.Clone(secrets)
 	variables := maps.Clone(ws.Environment.Variables)
 	if variables == nil {
 		variables = map[string]string{}
@@ -142,14 +144,19 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 	}
 	ws.Environment.Variables = variables
 
-	// Secrets first: a variable that turned secret is then in both places,
-	// never in neither, if the row update fails.
 	if s.cfg.Secrets != nil {
 		if err := s.cfg.Secrets.Put(id, secrets); err != nil {
 			return nil, rpcError(err)
 		}
 	}
 	if err := s.cfg.Store.SetWorkspaceEnvironment(ctx, id, ws.Environment); err != nil {
+		// The secret file goes back to what it was: a secret that was turning
+		// plain would otherwise be gone from both places.
+		if s.cfg.Secrets != nil {
+			if restoreErr := s.cfg.Secrets.Put(id, saved); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore the workspace's secrets: %w", restoreErr))
+			}
+		}
 		return nil, rpcError(err)
 	}
 	if len(changes) > 0 {
