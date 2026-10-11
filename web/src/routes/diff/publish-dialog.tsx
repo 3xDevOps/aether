@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
+import { Code } from '@/components/ui/code'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Api } from '@/lib/api'
@@ -79,7 +80,15 @@ function Checkout({ p }: { p: Publish }) {
           whether an earlier action succeeded.
         </p>
       )}
-      {status?.identity_error && <InlineError>{status.identity_error}</InlineError>}
+      {status?.identity_error && (
+        <>
+          <InlineError>{status.identity_error}</InlineError>
+          <p className="text-ui-sm text-muted">
+            A pull request is opened with this account’s GitHub login. Run <Code>gh auth login</Code> in the run’s terminal, then refresh the
+            status.
+          </p>
+        </>
+      )}
       {status && <Diagnostics output={status.output} error={status.error} />}
     </section>
   )
@@ -94,7 +103,7 @@ function Facts({ status }: { status: RunGitStatusResult }) {
         {status.account_name || status.account_member_id} <span className="font-code text-muted">{status.account_member_id}</span>
       </Fact>
       <Fact term="GitHub identity">{status.identity || 'Unavailable'}</Fact>
-      <Fact term="Upstream" code>{status.upstream ? `${status.upstream.remote}/${status.upstream.branch}` : 'None'}</Fact>
+      {status.upstream && <Fact term="Upstream" code>{status.upstream.remote}/{status.upstream.branch}</Fact>}
     </dl>
   )
 }

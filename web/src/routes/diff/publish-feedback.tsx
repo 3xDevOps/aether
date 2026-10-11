@@ -11,7 +11,7 @@ import type { RoomMessage, RunPRCheck, RunPRFeedbackResult } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { receipt, refusal, useAgentSend } from '@/routes/diff/agent-send'
 import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
-import { checkState, countChecks, refreshPullRequest, type CheckState, type TrackedPR } from '@/routes/diff/publish-pr'
+import { checkState, countChecks, refreshPullRequest, stateLabel, type CheckState, type TrackedPR } from '@/routes/diff/publish-pr'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
@@ -34,8 +34,10 @@ export function checkSummary(checks: RunPRCheck[]): string {
 interface Comment {
   key: string
   author: string
-  /** What the comment is attached to: a file and line, or a review verdict. */
-  about?: string
+  /** The file and lines an inline comment is on. */
+  lines?: string
+  /** A review's verdict. */
+  verdict?: string
   at: string
   body: string
   url?: string
@@ -46,13 +48,13 @@ interface Comment {
 function commentsOf(feedback: RunPRFeedbackResult): Comment[] {
   return [
     ...(feedback.reviews ?? []).filter((review) => review.body || review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED').map((review) => ({
-      key: `review:${review.id}`, author: review.author, about: review.state.toLowerCase().replaceAll('_', ' '), at: review.submitted_at, body: review.body,
+      key: `review:${review.id}`, author: review.author, verdict: words(review.state), at: review.submitted_at, body: review.body,
       text: `Review by ${review.author}: ${review.state} · ${review.submitted_at}\n${review.body}`,
     })),
     ...(feedback.review_comments ?? []).map((comment) => {
       const lines = `${comment.path}:${comment.start_line ? `${comment.start_line}–` : ''}${comment.line ?? comment.original_line ?? '?'}`
       return {
-        key: `inline:${comment.id}`, author: comment.author, about: lines, at: comment.created_at, body: comment.body, url: comment.url,
+        key: `inline:${comment.id}`, author: comment.author, lines, at: comment.created_at, body: comment.body, url: comment.url,
         text: `Inline review by ${comment.author}: ${lines} (${comment.side ?? 'unknown side'})\n${comment.body}\nCreated: ${comment.created_at}\nCommit: ${comment.commit_oid}${comment.original_line ? `\nOriginal line: ${comment.original_line}` : ''}${comment.in_reply_to_id ? `\nReply to: ${comment.in_reply_to_id}` : ''}${comment.diff_hunk ? `\n${comment.diff_hunk}` : ''}\n${comment.url}`,
       }
     }),
@@ -61,6 +63,11 @@ function commentsOf(feedback: RunPRFeedbackResult): Comment[] {
       text: `Comment by ${comment.author} · ${comment.created_at}\n${comment.body}\n${comment.url}`,
     })),
   ].sort((a, b) => a.at.localeCompare(b.at))
+}
+
+/** GitHub's `CHANGES_REQUESTED` and `timed_out`, as words. */
+function words(state: string): string {
+  return state.toLowerCase().replaceAll('_', ' ')
 }
 
 function checkText(check: RunPRCheck): string {
@@ -140,7 +147,7 @@ export function PRFeedback({
         <StatusDot tone={checkTone[state]} label={checkWord[state]} />
         <span className="min-w-0 flex-1 basis-40 break-words">
           {check.url ? <a className="text-text underline-offset-2 hover:underline" href={check.url} target="_blank" rel="noreferrer">{check.name}</a> : check.name}
-          <span className="text-muted"> · {(check.conclusion || check.status).toLowerCase().replaceAll('_', ' ')}</span>
+          <span className="text-muted"> · {words(check.conclusion || check.status)}</span>
         </span>
         {state === 'failing' && sender(key, '1 check', checkText(check))}
       </li>
@@ -158,7 +165,7 @@ export function PRFeedback({
               <ExternalLink aria-hidden className="size-3 shrink-0 self-center" />
             </a>
             <span className="block text-ui-sm">
-              {pr.draft ? 'Draft · ' : ''}{pr.state} · <span className="font-code">{pr.head_repository}:{pr.head_branch}</span> into{' '}
+              {stateLabel(pr)} · <span className="font-code">{pr.head_repository}:{pr.head_branch}</span> into{' '}
               <span className="font-code">{pr.repository}:{pr.base_branch}</span>
             </span>
           </DialogDescription>
@@ -168,7 +175,11 @@ export function PRFeedback({
         {feedback.truncated && (
           <p role="alert" className="text-ui-sm text-state-needs-you">GitHub returned more than is shown here. Open the pull request for the rest.</p>
         )}
-        {agentSend.note && <p className="text-ui-sm text-muted">{agentSend.note}</p>}
+        {(pending.some((check) => checkState(check) === 'failing') || comments.length > 0) && (agentSend.blocked ?? agentSend.waits) && (
+          <p className="text-ui-sm text-muted">
+            {agentSend.blocked ?? 'What you send from here reaches the agent in 45 s unless the run’s controller decides sooner.'}
+          </p>
+        )}
         <section aria-label="Checks" className="grid min-w-0 gap-1.5 text-ui-sm">
           <div className="flex min-h-6 items-center gap-2">
             <SectionLabel as="h3">Checks</SectionLabel>
@@ -188,8 +199,9 @@ export function PRFeedback({
           </div>
           {checks.length === 0 && <p className="text-muted">No check has reported on <span className="font-code">{pr.head_oid.slice(0, 8)}</span> yet.</p>}
           {pending.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{pending.map(row)}</ul>}
-          {passing.length > 0 && (
-            <Collapsible defaultOpen={pending.length === 0}>
+          {pending.length === 0 && passing.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{passing.map(row)}</ul>}
+          {pending.length > 0 && passing.length > 0 && (
+            <Collapsible>
               <CollapsibleTrigger>
                 <span className="text-ui-sm text-muted">{passing.length} passed</span>
               </CollapsibleTrigger>
@@ -211,7 +223,8 @@ export function PRFeedback({
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="min-w-0 flex-1 basis-40 break-words">
                         <span className="font-medium text-text">{comment.author}</span>
-                        {comment.about && <span className="font-code text-muted"> {comment.about}</span>}
+                        {comment.verdict && <span className="text-muted"> {comment.verdict}</span>}
+                        {comment.lines && <span className="font-code text-muted"> {comment.lines}</span>}
                         <span className="text-muted"> · <RelativeTime at={comment.at} /></span>
                       </span>
                       {sender(comment.key, '1 comment', comment.text)}

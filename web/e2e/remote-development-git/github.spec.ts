@@ -87,14 +87,15 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await pr.getByLabel('PR base branch', { exact: true }).fill(base)
     await pr.getByLabel('PR head repository (owner/name)', { exact: true }).fill(head)
     await pr.getByLabel('PR head branch', { exact: true }).fill(branch)
-    await pr.getByRole('button', { name: 'Discover existing PR' }).click()
+    // A target the dialog already looked up keeps that answer and offers no button.
+    const discover = pr.getByRole('button', { name: 'Discover existing PR' })
+    if (await discover.isVisible()) await discover.click()
   }
   const createPR = async (branch: string) => {
     await pr.getByLabel('PR title', { exact: true }).fill(`Aether E2E ${branch}`)
     await pr.getByRole('textbox', { name: 'PR description', exact: true }).fill(description)
     await pr.getByRole('checkbox', { name: 'Draft PR', exact: true }).check()
-    await pr.getByRole('checkbox', { name: 'I reviewed this GitHub identity and the exact PR repository, base, fork and head.' }).check()
-    await pr.getByRole('button', { name: 'Create reviewed PR' }).click()
+    await pr.getByRole('button', { name: 'Create pull request' }).click()
   }
   try {
     await page.getByRole('tab', { name: 'Changes', exact: true }).click()
@@ -117,8 +118,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await page.getByRole('combobox', { name: 'Writable push URL', exact: true }).click()
     await page.getByRole('option', { name: `https://github.com/${headRepository}.git`, exact: true }).click()
     await page.getByLabel('Push head branch', { exact: true }).fill(headBranch)
-    await page.getByRole('checkbox', { name: 'I reviewed the run account, branch, HEAD and exact push destination above.' }).check()
-    await page.getByRole('button', { name: 'Push reviewed branch' }).click()
+    await page.getByRole('button', { name: 'Push branch' }).click()
     await expect(page.getByRole('region', { name: 'Push outcome' })).toContainText('Pushed: yes')
     await selectPR(headBranch)
     await expect(pr).toContainText('No existing PR for this exact repository, base and head.')
@@ -131,24 +131,28 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     expect(found.pull_request).toMatchObject({ ...target, head_oid: status.head })
     const prNumber = found.pull_request!.number
     evidence.publishedPR = found.pull_request
-    await pr.getByRole('button', { name: 'Discover existing PR' }).click()
-    await expect(pr.getByRole('button', { name: 'Create reviewed PR' })).toHaveCount(0)
+    await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
     const selectedFeedback = `selected-feedback-${headBranch}`
     const omittedFeedback = `not-selected-${headBranch}`
     for (const comment of [selectedFeedback, omittedFeedback]) {
       await exec('docker', ['exec', container, 'gh', 'api', '--hostname', 'github.com', '--method', 'POST', `repos/${baseRepository}/issues/${prNumber}/comments`, '-f', `body=${comment}`])
     }
-    await pr.getByRole('button', { name: 'Refresh PR feedback' }).click()
-    const feedback = pr.getByRole('region', { name: 'PR feedback' })
-    await feedback.locator('article').filter({ hasText: selectedFeedback }).getByRole('checkbox').check()
-    await feedback.getByRole('button', { name: 'Send selected feedback to the agent' }).click()
-    await expect(feedback.getByRole('status')).toContainText('Delivery:')
+    // The run's header carries the pull request; its checks and comments open from there.
+    await page.keyboard.press('Escape')
+    await page.getByRole('group', { name: 'Pull request' }).getByRole('button').click()
+    const feedback = page.getByRole('dialog', { name: `Pull request #${prNumber}` })
+    await feedback.getByRole('button', { name: 'Refresh' }).click()
+    const selected = feedback.locator('article').filter({ hasText: selectedFeedback })
+    await selected.getByRole('button', { name: 'Send to agent' }).click()
+    await expect(selected.getByRole('status')).toContainText('Open the session')
     const room = await admin.api.rpc<{ messages: RoomMessage[] }>('run.room.list', { workspace_id: workspaceID, run_id: run.id, limit: 100 })
     const posted = room.messages.find((entry) => entry.body.includes(selectedFeedback))!
     expect(posted.kind).toBe('steer_request')
     expect(posted.body).not.toContain(omittedFeedback)
     await page.screenshot({ path: test.info().outputPath('explicit-fork-pr-feedback.png'), fullPage: true })
     evidence.selectedFeedback = posted.body
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Publish…', exact: true }).click()
 
     // Exact lookup must not associate this PR with another base or fork.
     await selectPR(headBranch, `${headBranch}-missing-base`)
@@ -179,7 +183,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await nativeGH(['pr', 'create', '--repo', baseRepository!, '--base', baseBranch, '--head', `${headRepository!.split('/')[0]}:${directBranch}`, '--title', `Aether E2E ${directBranch}`, '--body', description, '--draft'])
     await selectPR(directBranch)
     await expect(pr.getByRole('link', { name: `Aether E2E ${directBranch}`, exact: false })).toBeVisible()
-    await expect(pr.getByRole('button', { name: 'Create reviewed PR' })).toHaveCount(0)
+    await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
     const direct = await admin.api.rpc<RunPRStatusResult>('run.pr.status', { run_id: run.id, expected, target: targetFor(directBranch) })
     expect(direct.error).toBeFalsy()
     expect(direct.pull_request).toMatchObject({ ...targetFor(directBranch), head_oid: status.head })
@@ -208,7 +212,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
       const outcome = pr.getByRole('region', { name: 'PR creation outcome' })
       await expect(outcome).toContainText('Created: no · Reconciled: yes')
       await expect(outcome).toContainText('successful real GitHub POST response discarded')
-      await expect(pr.getByRole('button', { name: 'Create reviewed PR' })).toHaveCount(0)
+      await expect(pr.getByRole('button', { name: 'Create pull request' })).toHaveCount(0)
       await page.screenshot({ path: test.info().outputPath('real-post-response-loss-reconciled.png'), fullPage: true })
     } finally {
       rmSync(ghWrapper, { force: true })
@@ -228,8 +232,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     const advanced = await exec('docker', ['exec', '-w', '/workspace', container, 'git', 'commit-tree', `${status.head}^{tree}`, '-p', status.head, '-m', 'Independent disposable remote advance'])
     await exec('docker', ['exec', '-w', '/workspace', container, 'git', 'push', 'origin', `${advanced.stdout.trim()}:refs/heads/${rejectedBranch}`])
     await page.getByLabel('Push head branch', { exact: true }).fill(rejectedBranch)
-    await page.getByRole('checkbox', { name: 'I reviewed the run account, branch, HEAD and exact push destination above.' }).check()
-    await page.getByRole('button', { name: 'Push reviewed branch' }).click()
+    await page.getByRole('button', { name: 'Push branch' }).click()
     const push = page.getByRole('region', { name: 'Push outcome' })
     await expect(push).toContainText('Pushed: no')
     await expect(push).toContainText('non-fast-forward')
@@ -244,7 +247,7 @@ test('publishes the reviewed fork head, discovers the exact PR, and sends only s
     await page.getByRole('button', { name: 'Refresh status' }).click()
     await selectPR(headBranch)
     await expect(pr.getByRole('alert')).toBeVisible()
-    await expect(pr.getByRole('button', { name: 'Create reviewed PR' })).toBeDisabled()
+    await expect(pr.getByRole('button', { name: 'Create pull request' })).toBeDisabled()
     const withoutCredential = await admin.api.rpc<RunGitStatusResult>('run.git.status', { run_id: run.id })
     expect(withoutCredential.identity).toBeFalsy()
     expect(withoutCredential.identity_error).toBeTruthy()

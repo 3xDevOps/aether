@@ -259,10 +259,11 @@ func TestDiffStatusAndBoundedOutput(t *testing.T) {
 	if !reflect.DeepEqual(state.Changes, want) {
 		t.Fatalf("changes: %+v", state.Changes)
 	}
-	if subject, err := s.Subject(context.Background(), run, state.Head); err != nil || subject != "initial" {
+	subject, err := s.Subject(context.Background(), run, state.Head)
+	if err != nil || subject != "initial" {
 		t.Fatalf("subject %q err=%v", subject, err)
 	}
-	if _, err := s.Subject(context.Background(), run, "--all"); err == nil {
+	if _, err = s.Subject(context.Background(), run, "--all"); err == nil {
 		t.Fatal("accepted a revision that is not an object ID")
 	}
 	diff, err := s.Diff(context.Background(), run, DiffRequest{Paths: []string{"selected"}})

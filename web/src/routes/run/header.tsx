@@ -226,7 +226,7 @@ export function RunHeader({
       />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
       {!composing && (
-        <div className="flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
+        <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch views={views} />
           <RunPullRequest run={run} agent={agent} agentName={agentName} />
         </div>

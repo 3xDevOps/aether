@@ -298,7 +298,9 @@ primitives retain their props, events, refs and accessibility contracts.
 The run header shows one primary action for the run's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
 existing gates and confirmations. The view switch (Session, Terminal,
-Changes, Browser) is a segmented tab list. Details is a 320px side panel at
+Changes, Browser) is a segmented tab list. A run with a pull request ends
+that row with its number as a muted link and its check state as a ghost
+button led by a `StatusDot`: failed, working, done or neutral. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
 never overlays the terminal on wide screens. Standard runs keep control in
 the terminal toolbar; Enhanced runs keep a compact **Multiplayer** strip

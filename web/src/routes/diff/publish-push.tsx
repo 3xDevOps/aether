@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { Actual, Attest, Diagnostics, Heading, InlineError, Outcome } from '@/routes/diff/publish-parts'
+import { stateLabel } from '@/routes/diff/publish-pr'
 import type { Publish } from '@/routes/diff/publish-state'
 
 /** Each button sits under one sentence saying exactly what it will do, from
@@ -28,7 +29,7 @@ export function PushStep({ p }: { p: Publish }) {
     <div className="grid min-w-0 gap-4">
       <section aria-labelledby={`${ids}-push`} className="grid min-w-0 gap-3">
         <Heading id={`${ids}-push`}>Push branch</Heading>
-        <fieldset disabled={p.busy} className="grid min-w-0 gap-3 sm:grid-cols-3">
+        <fieldset disabled={p.busy} className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,5fr)_minmax(0,4fr)]">
           <div className="grid min-w-0 gap-1">
             <Label htmlFor={`${ids}-remote`}>Push remote</Label>
             <Select
@@ -38,7 +39,7 @@ export function PushStep({ p }: { p: Publish }) {
                 p.changePushTarget({ ...push, remote, repository: next.length === 1 ? next[0]! : '' })
               }}
             >
-              <SelectTrigger id={`${ids}-remote`}>
+              <SelectTrigger id={`${ids}-remote`} className="min-w-0">
                 <SelectValue placeholder="Choose remote" />
               </SelectTrigger>
               <SelectContent>
@@ -53,7 +54,7 @@ export function PushStep({ p }: { p: Publish }) {
           <div className="grid min-w-0 gap-1">
             <Label htmlFor={`${ids}-url`}>Writable push URL</Label>
             <Select value={push.repository} onValueChange={(repository) => p.changePushTarget({ ...push, repository })}>
-              <SelectTrigger id={`${ids}-url`} disabled={!urls.length}>
+              <SelectTrigger id={`${ids}-url`} className="min-w-0" disabled={!urls.length}>
                 <SelectValue placeholder="Choose exact URL" />
               </SelectTrigger>
               <SelectContent>
@@ -151,8 +152,7 @@ export function PushStep({ p }: { p: Publish }) {
                   #{pr.number}: {pr.title}
                 </a>
                 <p>
-                  {pr.state}
-                  {pr.draft ? ' · Draft' : ''} · {pr.head_repository}:{pr.head_branch} → {pr.repository}:{pr.base_branch}
+                  {stateLabel(pr)} · {pr.head_repository}:{pr.head_branch} → {pr.repository}:{pr.base_branch}
                 </p>
                 <p className="text-muted">Its checks and review comments are under #{pr.number} in the run’s header.</p>
               </div>

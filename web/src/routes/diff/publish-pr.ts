@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { Run, RunGitExpected, RunPRCheck, RunPRFeedbackResult, RunPRTarget } from '@/lib/types'
+import type { Run, RunGitExpected, RunPRCheck, RunPRFeedbackResult, RunPRTarget, RunPullRequest } from '@/lib/types'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
 
@@ -101,4 +101,9 @@ export function countChecks(checks: RunPRCheck[]): Record<CheckState, number> {
   const counts = { failing: 0, running: 0, passing: 0 }
   for (const check of checks) counts[checkState(check)]++
   return counts
+}
+
+/** GitHub's `open`, `closed` or `merged` as a label, marking a draft. */
+export function stateLabel(pr: RunPullRequest): string {
+  return `${pr.draft ? 'Draft · ' : ''}${pr.state.charAt(0).toUpperCase()}${pr.state.slice(1)}`
 }

@@ -29,6 +29,8 @@ export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
   return {
     /** Why nothing can be sent, in the composer's words, or null. */
     blocked,
+    /** Without control of the run, a message waits 45 seconds for whoever has it. */
+    waits: !control.canAct,
     /** What to say beside the button: the block, or that the message will wait for the controller. */
     note: blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.'),
     /** Runs `act` once this tab controls the run when its owner can take control, at once otherwise. */
