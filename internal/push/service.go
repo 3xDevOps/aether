@@ -150,12 +150,13 @@ func New(cfg Config) (*Service, error) {
 	}, nil
 }
 
-// Start subscribes to the events that can change a run's need. ctx bounds
-// only the setup; the service runs until Close.
+// Start subscribes to the events that can change a run's need; a pause, a
+// resume and a handoff are timeline entries. ctx bounds only the setup; the
+// service runs until Close.
 func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
-		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval,
-		events.TypeRunOutcomeSeen, events.TypeRunDeleted,
+		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval, events.TypeRunOutcomeSeen,
+		events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
 	}}})
 	if err != nil {
 		return fmt.Errorf("push: subscribe: %w", err)

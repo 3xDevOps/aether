@@ -27,6 +27,7 @@ const testQuiet = 300 * time.Millisecond
 type fakeRuns struct {
 	mu     sync.Mutex
 	inputs map[domain.RunID][]domain.RunInputRequest
+	paused atomic.Bool
 }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
@@ -35,7 +36,7 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	return f.inputs[run]
 }
 
-func (f *fakeRuns) Paused(domain.RunID) bool { return false }
+func (f *fakeRuns) Paused(domain.RunID) bool { return f.paused.Load() }
 
 func (f *fakeRuns) set(run domain.RunID, inputs ...domain.RunInputRequest) {
 	f.mu.Lock()
@@ -341,6 +342,21 @@ func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
 	phone.expect(t, idle)
 	phone.expectNone(t, testQuiet)
 	slow.expectNone(t, testQuiet)
+}
+
+// A paused run waits on nobody; resumed, it needs its owner again.
+func TestAResumedRunIsAnnounced(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
+
+	h.runs.paused.Store(true)
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	phone.expectNone(t, testQuiet)
+	h.runs.paused.Store(false)
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineResume})
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Agent idle", Run: string(run.ID)})
 }
 
 func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {

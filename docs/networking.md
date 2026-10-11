@@ -335,9 +335,9 @@ A notification goes to a run's owner when the run starts needing them:
 These are the owner's **Needs you** reasons that depend on the run alone
 ([dashboard-frontend.md](dashboard-frontend.md#run-state)), with the same
 exceptions: a Background run does not notify for a question or an idle turn,
-and a swarm worker, whose integrator answers for it, notifies only when
-blocked. A teammate's question, a queued message and the swarm rows do not
-notify.
+a paused run does not notify for an idle turn until it is resumed, and a swarm
+worker, whose integrator answers for it, notifies only when blocked. A
+teammate's question, a queued message and the swarm rows do not notify.
 
 - The title is the run's title, or the first line of its task. Tapping the
   notification opens that run, in a dashboard window that is already open
