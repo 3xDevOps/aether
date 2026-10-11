@@ -12,7 +12,7 @@ import { alice, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 const shell: DevTerminal = {
-  terminal_id: 'shell-1', incarnation: 'process-1', name: 'Shell',
+  terminal_id: 'shell-1', incarnation: 'process-1', name: 'Shell', started_by: 'member',
   cols: 80, rows: 24, process: { state: 'running' },
 }
 const range = { start: { x: 0, y: 0 }, end: { x: 8, y: 0 } }
@@ -73,7 +73,7 @@ it('opens a run-local link from the agent terminal in the run’s Browser and no
 })
 
 function Shell() {
-  const shells = useRunShells('run_1')
+  const shells = useRunShells('run_1', true)
   return <ShellTerminal shells={shells} tabs={<TerminalTabs shells={shells} agent />} onCaptures={vi.fn()} />
 }
 
