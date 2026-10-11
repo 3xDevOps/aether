@@ -11,10 +11,12 @@ type RunSSHRequest struct {
 }
 
 // RunSSHResponse acknowledges or refuses a RunSSHRequest. HostKey is the
-// authorized_keys line of the key the nested SSH server presents.
+// authorized_keys line of the key the nested SSH server presents. Notice is
+// something the person connecting must be told; the client prints it.
 type RunSSHResponse struct {
 	OK      bool   `json:"ok"`
 	Error   string `json:"error,omitempty"`
 	Code    int    `json:"code,omitempty"`
 	HostKey string `json:"host_key,omitempty"`
+	Notice  string `json:"notice,omitempty"`
 }

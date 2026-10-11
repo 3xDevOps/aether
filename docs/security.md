@@ -975,6 +975,17 @@ one.
   Each connection a member opens to a run they have no other SSH connection
   to is stamped on the workspace timeline under that member, and refused
   when the timeline cannot record it.
+- **A session in a swarm worker takes its hold.** A person working in a
+  worker's checkout is the intervention the swarm takeover hold exists for
+  ([coordination.md](coordination.md#delivery-acknowledgement-and-retries)),
+  whichever door they came in by. Starting a shell, a command or a file
+  transfer over SSH commits the hold a writable shell tab commits, after
+  the admission above and before the process starts: the integrator's input
+  to that worker is refused until a person chooses **Release control** on
+  the swarm page. A session whose hold cannot be recorded does not start.
+  Port forwarding alone takes no hold, and disconnecting releases none. The
+  server says so when the connection opens, and `aether ssh --stdio` prints
+  it on stderr; the **Open in editor…** dialog says it before that.
 - **The run asks for no second credential.** The member is authenticated by
   the connection the `aether` CLI makes: tailnet identity, SSH key or edge
   device ([networking.md](networking.md)). The SSH connection the member's

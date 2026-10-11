@@ -4,6 +4,7 @@ import { CopyableCommand } from '@/components/copyable-command'
 import { ExternalLink } from '@/components/icons'
 import type { ExtraItem } from '@/components/run-actions'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { allowed } from '@/lib/permissions'
@@ -72,6 +73,11 @@ export function useOpenInEditor(run: RunRecord): { item: ExtraItem | null; dialo
           <DialogTitle>Open in editor</DialogTitle>
           <DialogDescription>Your editor connects to this run&apos;s container over SSH and opens its checkout.</DialogDescription>
         </DialogHeader>
+        {run.mission_role === 'worker' && (
+          <Callout tone="needs-you" title="Connecting takes control of this swarm worker">
+            A shell, command or file transfer over SSH stops the integrator from steering it until control is released on the swarm page.
+          </Callout>
+        )}
         <div className="flex flex-wrap gap-2">
           {editors.map((editor) => (
             <Button key={editor.name} variant="secondary" onClick={() => window.location.assign(editor.link(host))}>

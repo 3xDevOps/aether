@@ -889,6 +889,83 @@ func TestRunSSHTimelineNamesWhoConnected(t *testing.T) {
 	}
 }
 
+// A person working in a swarm worker's checkout is the intervention the
+// takeover hold exists for, whichever door they came in by.
+func TestRunSSHSessionTakesControlOfASwarmWorker(t *testing.T) {
+	e, db, mission := missionWorkerTestEnv(t)
+	svc := installRunSSHTestService(t, e)
+	authority := &failingInteractiveMissionControl{missionControlStoreAdapter: missionControlStoreAdapter{store: db, control: e.srv.cfg.Control}}
+	e.srv.cfg.Services.MissionControl = authority
+	ctx := t.Context()
+
+	client, ack := dialRunSSH(t, e.dial(t), string(e.run.ID))
+	if client == nil || ack.Notice != runSSHWorkerNotice {
+		t.Fatalf("connecting to a swarm worker = %+v, want it admitted and told what a session does", ack)
+	}
+	// Connecting and forwarding change nothing in the checkout, so the
+	// integrator keeps the worker.
+	conn, err := client.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(listenLoopback(t, ""))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if assignment, aerr := db.GetMissionWorkerAssignment(ctx, e.run.ID); !errors.Is(aerr, store.ErrNotFound) {
+		t.Fatalf("a forward alone took the hold: %+v %v", assignment, aerr)
+	}
+
+	// A hold that cannot be recorded starts nothing.
+	before := len(svc.starts())
+	authority.failTakeover.Store(true)
+	if _, stderr, status := runOverSSH(t, client, "echo unreachable", ""); status != 255 || !strings.Contains(stderr, "aether: takeover persistence failed") {
+		t.Fatalf("session without its hold = status %d stderr %q", status, stderr)
+	}
+	if started := svc.starts(); len(started) != before {
+		t.Fatalf("a session without its hold started %+v", started[before:])
+	}
+	authority.failTakeover.Store(false)
+
+	if stdout, stderr, status := runOverSSH(t, client, "echo held", ""); stdout != "held\n" || stderr != "" || status != 0 {
+		t.Fatalf("session in the worker = stdout %q stderr %q status %d", stdout, stderr, status)
+	}
+	held := func(when string) {
+		t.Helper()
+		assignment, aerr := db.GetMissionWorkerAssignment(ctx, e.run.ID)
+		if aerr != nil || !assignment.Active || assignment.MemberID != e.member.ID {
+			t.Fatalf("%s: hold = %+v %v, want it active under %s", when, assignment, aerr, e.member.ID)
+		}
+		aerr = authority.AdmitInput(ctx, mission.CurrentIntegratorRunID, e.run.ID, mission.IntegratorGeneration, func() error { return nil })
+		if !errors.Is(aerr, store.ErrMissionTakeover) {
+			t.Fatalf("%s: integrator input = %v, want %v", when, aerr, store.ErrMissionTakeover)
+		}
+	}
+	held("after a session started")
+
+	// Leaving releases nothing: a person does, from the swarm page.
+	_ = client.Close()
+	eventually(t, "the connection to be released", func() bool {
+		e.srv.runSSHMu.Lock()
+		defer e.srv.runSSHMu.Unlock()
+		return len(e.srv.runSSHConns) == 0
+	})
+	held("after the member disconnected")
+
+	// A run outside any swarm gets no notice and has no hold to take.
+	plain := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "on its own", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err = db.CreateRun(ctx, plain); err != nil {
+		t.Fatal(err)
+	}
+	other, ack := dialRunSSH(t, e.dial(t), string(plain.ID))
+	if other == nil || ack.Notice != "" {
+		t.Fatalf("connecting to a run outside the swarm = %+v, want it admitted with no notice", ack)
+	}
+	if stdout, _, status := runOverSSH(t, other, "echo free", ""); stdout != "free\n" || status != 0 {
+		t.Fatalf("session in a run outside the swarm = %q status %d", stdout, status)
+	}
+	if assignment, aerr := db.GetMissionWorkerAssignment(ctx, plain.ID); !errors.Is(aerr, store.ErrNotFound) {
+		t.Fatalf("a session in a run outside the swarm took a hold: %+v %v", assignment, aerr)
+	}
+}
+
 // A connection nobody can be shown is not admitted: the note is the only
 // record teammates get that a member was in the container.
 func TestRunSSHRefusesAConnectionTheTimelineCannotRecord(t *testing.T) {

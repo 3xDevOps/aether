@@ -78,6 +78,10 @@ func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, ssh.PublicKey, error) {
 		_ = out.Close()
 		return nil, nil, fmt.Errorf("cli: the server named %s as the run's host key, which is not the key this link verified", ssh.FingerprintSHA256(hostKey))
 	}
+	// ssh passes its ProxyCommand's stderr through to the person.
+	for _, line := range bannerLines(ack.Notice) {
+		fmt.Fprintf(os.Stderr, "aether: %s\n", line)
+	}
 	return out, hostKey, nil
 }
 

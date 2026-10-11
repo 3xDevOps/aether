@@ -265,6 +265,12 @@ previous lease and hold; readiness is restored or the stream fails closed.
 Disconnecting or letting the control lease expire does **not** clear the
 durable swarm hold, so it cannot silently re-enable native wake.
 
+A shell, a command or a file transfer over SSH into a worker
+([terminal.md](terminal.md#swarm-workers)) commits the same hold before its
+process starts, and a session whose hold cannot be recorded does not start.
+Port forwarding alone commits nothing. Closing the SSH connection does not
+clear the hold either: **Release control** on the swarm page does.
+
 Native integrations also honor the owning session's Stop/abort and cancel
 stale helper results on shutdown or session replacement. They do not override
 approval waits. See the agent-specific resume behavior before relying on

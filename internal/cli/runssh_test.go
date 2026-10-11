@@ -190,7 +190,7 @@ func TestTrustRunHostKeyRecordsEachKeyOnce(t *testing.T) {
 }
 
 // serveRunSSHAck is a server that admits anyone and answers the run-ssh
-// subsystem with a host key line of its choosing.
+// subsystem with a host key line of its choosing and a notice.
 func serveRunSSHAck(t *testing.T, host ssh.Signer, ackKey string) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -225,7 +225,7 @@ func serveRunSSHAck(t *testing.T, host ssh.Signer, ackKey string) string {
 				if _, rerr := protocol.ReadLine(bufio.NewReader(ch)); rerr != nil {
 					return
 				}
-				ack, _ := json.Marshal(protocol.RunSSHResponse{OK: true, HostKey: ackKey})
+				ack, _ := json.Marshal(protocol.RunSSHResponse{OK: true, HostKey: ackKey, Notice: "this run is a swarm worker\x1b[2J"})
 				_, _ = ch.Write(append(ack, '\n'))
 			}
 		}
@@ -254,10 +254,12 @@ func TestRunSSHAcceptsOnlyTheHostKeyTheLinkVerified(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = conn.Close() }()
+			stderr := captureStderr(t)
 			stream, key, err := conn.RunSSH("run-gejd5cbk74")
+			said := stderr()
 			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Fatalf("RunSSH = %v, want an error naming %q", err, tc.want)
+				if err == nil || !strings.Contains(err.Error(), tc.want) || said != "" {
+					t.Fatalf("RunSSH = %v, stderr %q, want an error naming %q and nothing printed", err, said, tc.want)
 				}
 				return
 			}
@@ -267,6 +269,11 @@ func TestRunSSHAcceptsOnlyTheHostKeyTheLinkVerified(t *testing.T) {
 			defer func() { _ = stream.Close() }()
 			if string(key.Marshal()) != string(host.PublicKey().Marshal()) {
 				t.Fatalf("RunSSH returned %s, want the server's key", ssh.FingerprintSHA256(key))
+			}
+			// The server's notice reaches the person, without the control
+			// characters that could drive their terminal.
+			if said != "aether: this run is a swarm worker?[2J\n" {
+				t.Fatalf("stderr = %q, want the server's notice", said)
 			}
 		})
 	}

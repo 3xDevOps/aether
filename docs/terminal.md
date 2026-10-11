@@ -565,6 +565,26 @@ A refusal comes from `aether ssh --stdio`, on stderr, before ssh's own
 | `aether: not linked; run aether link <addr>` | This computer's CLI has no server yet. |
 | `ssh: Could not resolve hostname <run-id>.aether` | `aether ssh-config` has not been run here. |
 
+### Swarm workers
+
+Working in a swarm worker over SSH takes control of it, as **Take control**
+on its terminal does. Every shell, command or file transfer you start there
+sets the worker's takeover hold: its integrator cannot steer it until
+someone chooses **Release control** on the swarm page
+([coordination.md](coordination.md#delivery-acknowledgement-and-retries)).
+Port forwarding alone sets nothing. Disconnecting does not release the hold,
+and releasing it ends no session that is still open.
+
+You are told when you connect. `ssh` prints this line, from
+`aether ssh --stdio`, before the session starts:
+
+```
+aether: this run is a swarm worker: a shell, command or file transfer here takes control of it, and its integrator cannot steer it until control is released on the swarm page
+```
+
+The **Open in editor…** dialog shows **Connecting takes control of this
+swarm worker** for such a run.
+
 ### Editors
 
 **Open in editor…** in a live run's **More** menu has a button per editor
