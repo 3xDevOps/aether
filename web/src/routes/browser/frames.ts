@@ -30,9 +30,10 @@ export function decodeBrowserFrame(data: ArrayBuffer): BrowserFrame {
 
 export interface FrameRect { left: number; top: number; width: number; height: number }
 
-/** Canvas CSS uses contain. Ignore letterboxing, then undo the screencast scale. */
+/** Canvas CSS uses scale-down: a frame is shrunk to fit and never enlarged.
+ * Ignore the margin around it, then undo the screencast scale. */
 export function framePoint(frame: DevBrowserFrameMetadata, rect: FrameRect, clientX: number, clientY: number): { x: number; y: number } | null {
-  const scale = Math.min(rect.width / frame.width, rect.height / frame.height)
+  const scale = Math.min(1, rect.width / frame.width, rect.height / frame.height)
   if (!(scale > 0)) return null
   const pixelX = (clientX - rect.left - (rect.width - frame.width * scale) / 2) / scale
   const pixelY = (clientY - rect.top - (rect.height - frame.height * scale) / 2) / scale

@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { matchKeybindingPress, parseKeybinding } from 'tinykeys'
 import { activeScopes, pushScope, type KeyScope } from '@/lib/key-scope'
-import { inModal, keyboardBusy } from '@/lib/keys'
+import { inModal, inOverlay, keyboardBusy } from '@/lib/keys'
 import { useStore } from '@/store'
 
 export interface Keybinding {
@@ -17,6 +17,12 @@ export interface Keybinding {
   /** A modified binding's own gate. Unmodified bindings always stand down
    * while a field, terminal or overlay has the keyboard. */
   when?: (event: KeyboardEvent) => boolean
+}
+
+const mac = parseKeybinding('$mod+a')[0]![0].includes('Meta')
+
+function inBrowser(event: KeyboardEvent): boolean {
+  return event.target instanceof HTMLElement && event.target.closest('[data-browser]') !== null
 }
 
 export const keybindings = [
@@ -54,6 +60,18 @@ export const keybindings = [
   },
   { id: 'focus-composer', keys: 'c', scope: 'run', label: 'Message the agent' },
   { id: 'leave-run', keys: 'Escape', scope: 'run', label: 'Leave a run for the board' },
+  {
+    id: 'browser-address',
+    keys: '$mod+L',
+    scope: 'browser',
+    label: 'Focus the address bar, from anywhere in the run',
+    // A terminal keeps it: Ctrl+L clears the screen.
+    when: (event) => !inOverlay(event.target),
+  },
+  { id: 'browser-reload', keys: '$mod+R', scope: 'browser', label: 'Reload the page', when: inBrowser },
+  // The platform's own history keys: on macOS Alt and an arrow moves a caret by a word.
+  { id: 'browser-back', keys: mac ? '$mod+[' : 'Alt+ArrowLeft', scope: 'browser', label: 'Go back', when: inBrowser },
+  { id: 'browser-forward', keys: mac ? '$mod+]' : 'Alt+ArrowRight', scope: 'browser', label: 'Go forward', when: inBrowser },
   { id: 'composer-send', keys: '$mod+Enter', scope: 'composer', label: 'Send the message, or steer the running turn' },
   { id: 'composer-queue', keys: '$mod+Shift+Enter', scope: 'composer', label: 'Queue the message for after this turn' },
   { id: 'request-option-1', keys: '1', scope: 'request', label: 'Pick option 1 of the focused request' },
@@ -76,7 +94,6 @@ type ScopeHandlers<S extends KeyScope> = Partial<
 const sequenceTimeout = 1500
 
 const presses = new Map(keybindings.map((binding) => [binding.id, parseKeybinding(binding.keys)]))
-const mac = parseKeybinding('$mod+a')[0]![0].includes('Meta')
 
 function pressesOf(binding: Keybinding) {
   return presses.get(binding.id as KeybindingID)!
@@ -95,7 +112,7 @@ export function isSingleKey(binding: Keybinding): boolean {
 }
 
 const modifierLabels: Record<string, string> = { Control: 'Ctrl', Meta: '⌘', Alt: 'Alt', Shift: 'Shift' }
-const keyLabels: Record<string, string> = { Escape: 'Esc', Enter: 'Enter' }
+const keyLabels: Record<string, string> = { Escape: 'Esc', Enter: 'Enter', ArrowLeft: '←', ArrowRight: '→' }
 
 /** A tinykeys string as this platform writes it: `⌘K` on macOS, `Ctrl+K`
  * elsewhere, `g then b` for a sequence. Optional modifiers are left out. */

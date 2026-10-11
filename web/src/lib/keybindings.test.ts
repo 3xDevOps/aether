@@ -46,6 +46,7 @@ describe('keybinding table', () => {
     expect(formatKeys('[Shift]+?')).toBe('?')
     expect(formatKeys('Escape')).toBe('Esc')
     expect(formatKeys('$mod+Enter')).toBe('Ctrl+Enter')
+    expect(formatKeys('Alt+ArrowLeft')).toBe('Alt+←')
   })
 
   it('counts character keys, not Escape or chords, as single-key shortcuts', () => {

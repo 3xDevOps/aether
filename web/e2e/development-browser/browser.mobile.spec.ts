@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures'
 import { dockerReachable } from '../harness/server'
-import { clickRemote, launchBrowserFixture, openBrowserPane, typeRemote } from './fixture'
+import { browserAction, clickRemote, launchBrowserFixture, openBrowserPane, remotePage, typeRemote } from './fixture'
 import { shareWithAgent, signInAndHotUpdate } from './scenarios'
 
 test.skip(!dockerReachable(), 'Real browser development requires a reachable Docker daemon')
@@ -10,19 +10,16 @@ test('phone operates the shared login with touch, soft keyboard and composition'
   try {
     await openBrowserPane(page, fixture)
     await signInAndHotUpdate(page, fixture, true)
-    await page.getByRole('button', { name: 'Restore browser controls', exact: true }).click()
-    await shareWithAgent(page, fixture)
+    await shareWithAgent(page, fixture, true)
+    // A phone is too narrow for two panes, so the Browser stays a tab.
+    await expect(page.getByRole('button', { name: /^Show beside/ })).toHaveCount(0)
     const beforeCancel = await fixture.currentPage()
-    await page.getByRole('button', { name: 'Page tools', exact: true }).click()
-    await page.getByRole('button', { name: 'Reset session', exact: true }).click()
+    await browserAction(page, 'Reset session…')
     const resetDialog = page.getByRole('alertdialog')
     await expect(resetDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()
     await resetDialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     expect((await fixture.currentPage()).session_id).toBe(beforeCancel.session_id)
     await fixture.waitText('Signed in as test@example.invalid')
-    const beforeExpansion = await fixture.currentPage()
-    await page.getByRole('button', { name: 'Expand browser', exact: true }).click()
-    expect(await fixture.currentPage()).toEqual(beforeExpansion)
     await clickRemote(page, 80, 445, true)
     await page.getByRole('button', { name: 'Keyboard', exact: true }).click()
     await page.keyboard.press('Control+a')
@@ -37,10 +34,10 @@ test('phone operates the shared login with touch, soft keyboard and composition'
       await driver.send('Input.insertText', { text: '日本語' })
       await fixture.waitText('Note: Phone café 日本語')
       await expect.poll(async () => (await fixture.snapshot()).nodes.find((node) => node.role === 'textbox' && node.name === 'Shared note')?.value).toBe('Phone café 日本語')
-      const contacts = await page.getByLabel('Shared browser page', { exact: true }).evaluate((node) => {
+      const contacts = await remotePage(page).evaluate((node) => {
         const canvas = node as HTMLCanvasElement
         const box = canvas.getBoundingClientRect()
-        const scale = Math.min(box.width / canvas.width, box.height / canvas.height)
+        const scale = Math.min(1, box.width / canvas.width, box.height / canvas.height)
         const left = box.left + (box.width - canvas.width * scale) / 2
         const top = box.top + (box.height - canvas.height * scale) / 2
         return [{ x: left + 60 * scale, y: top + 660 * scale, id: 1 }, { x: left + 180 * scale, y: top + 690 * scale, id: 2 }]

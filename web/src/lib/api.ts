@@ -268,7 +268,7 @@ function bearer(): string | null {
   return window.sessionStorage.getItem(tokenKey)
 }
 
-async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
+async function call<T>(method: string, params: unknown = {}, signal?: AbortSignal, keepalive = false): Promise<T> {
   const token = bearer()
   const res = await fetch(`${API_BASE}/${method}`, {
     method: 'POST',
@@ -278,6 +278,7 @@ async function call<T>(method: string, params: unknown = {}, signal?: AbortSigna
     },
     body: JSON.stringify(params),
     signal,
+    ...(keepalive ? { keepalive } : {}),
   })
   if (!res.ok) {
     const err = await failure(res)
@@ -487,8 +488,10 @@ export const api = {
     call<DevControlStatusResult>('dev.control.status', params),
   devControlAcquire: (params: DevControlAcquireParams) =>
     call<DevControlAcquireResult>('dev.control.acquire', params),
+  // Sent as a tab closes too: a lease whose release is cancelled with the
+  // page is held by nobody and keeps the agent out until someone takes over.
   devControlRelease: (params: DevControlReleaseParams) =>
-    call<DevControlReleaseResult>('dev.control.release', params),
+    call<DevControlReleaseResult>('dev.control.release', params, undefined, true),
   devArtifactList: (params: DevArtifactListParams) =>
     call<DevArtifactListResult>('dev.artifact.list', params),
   devArtifactGet: (params: DevArtifactGetParams) =>

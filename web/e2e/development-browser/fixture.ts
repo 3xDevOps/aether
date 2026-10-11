@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { copyFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { Aether, Member } from '../fixtures'
 import { expect } from '../fixtures'
 import { runContainer, removeContainers } from '../harness/docker'
@@ -11,7 +11,8 @@ import { waitFor } from '../harness/process'
 import type { DevBrowserPage, DevBrowserPagesResult, DevBrowserSnapshotResult, DevBrowserWaitResult } from '../../src/lib/types'
 
 const exec = promisify(execFile)
-export const appURL = 'http://127.0.0.1:31873'
+/** Typed without a scheme: the address bar adds `http://` for a loopback host. */
+export const appAddress = '127.0.0.1:31873'
 
 export interface BrowserFixture {
   member: Member
@@ -87,24 +88,54 @@ export async function launchBrowserFixture(aether: Aether): Promise<BrowserFixtu
   }
 }
 
+/** The Browser tab is there before any browser has started, with the address bar ready. */
 export async function openBrowserPane(page: Page, fixture: BrowserFixture): Promise<void> {
-  await page.goto(`${fixture.member.url}&run=${fixture.runID}&view=browser`)
-  await expect(page.getByRole('button', { name: 'Open http://localhost:3000', exact: true })).toBeEnabled()
+  await page.goto(`${fixture.member.url}&run=${fixture.runID}`)
+  await page.getByRole('tab', { name: 'Browser', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Open a page', exact: true })).toBeVisible()
+  await expect(addressBar(page)).toBeEnabled()
+}
+
+export function addressBar(page: Page): Locator {
+  return page.getByRole('textbox', { name: 'Address', exact: true })
+}
+
+export function remotePage(page: Page): Locator {
+  return page.getByLabel('Shared browser page', { exact: true })
+}
+
+/** The canvas is busy until a frame of the current stream has been painted. */
+export async function expectLive(page: Page): Promise<void> {
+  await expect(remotePage(page)).toHaveAttribute('aria-busy', 'false')
+}
+
+/** Picks a viewport from the toolbar, or from Browser actions in a narrow pane, and waits for its frames. */
+export async function chooseViewport(page: Page, name: 'Fit the pane' | 'Desktop' | 'Tablet' | 'Phone', width?: number): Promise<void> {
+  const toolbar = page.getByRole('button', { name: 'Viewport', exact: true })
+  await (await toolbar.count() ? toolbar : page.getByRole('button', { name: 'Browser actions', exact: true })).click()
+  await page.getByRole('menuitemradio', { name: new RegExp(`^${name}`) }).click()
+  if (width) await expect(remotePage(page)).toHaveAttribute('width', String(width))
+}
+
+export async function browserAction(page: Page, name: string): Promise<void> {
+  await page.getByRole('button', { name: 'Browser actions', exact: true }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
 /** Fixture layout coordinates are CSS pixels in the actual remote viewport. */
 export async function clickRemote(page: Page, x: number, y: number, touch = false, clickCount = 1): Promise<void> {
-  const canvas = page.getByLabel('Shared browser page', { exact: true })
-  await expect(page.getByText(/Live frame ·/)).toBeVisible()
+  const canvas = remotePage(page)
+  await expectLive(page)
   const geometry = await canvas.evaluate((element) => {
     const rect = element.getBoundingClientRect()
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, frameWidth: (element as HTMLCanvasElement).width, frameHeight: (element as HTMLCanvasElement).height }
   })
-  const scale = Math.min(geometry.width / geometry.frameWidth, geometry.height / geometry.frameHeight)
+  const scale = Math.min(1, geometry.width / geometry.frameWidth, geometry.height / geometry.frameHeight)
   const px = geometry.left + (geometry.width - geometry.frameWidth * scale) / 2 + x * scale
   const py = geometry.top + (geometry.height - geometry.frameHeight * scale) / 2 + y * scale
-  const controlled = await canvas.getAttribute('tabindex') === '0'
-  const completed = controlled ? page.waitForResponse((response) => {
+  // Focusable means this tab drives or nobody does, and then the press is sent.
+  const driven = await canvas.getAttribute('tabindex') === '0'
+  const completed = driven ? page.waitForResponse((response) => {
     if (!response.url().endsWith('/api/v1/dev.browser.action')) return false
     const input = response.request().postDataJSON()
     return input.action === (touch ? 'touch' : 'pointer') && input.phase === 'up' && (touch || input.click_count === clickCount)
