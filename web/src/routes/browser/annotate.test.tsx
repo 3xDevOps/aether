@@ -140,6 +140,20 @@ it('annotates an element of a page the agent is driving and sends it, without ta
   expect(complaints.mock.calls.filter(([text]) => String(text).includes('same key'))).toEqual([])
 })
 
+it('sends nothing to the run when the account changes while an image uploads', async () => {
+  await show()
+  await userEvent.click(annotate())
+  click(100, 50)
+  await userEvent.type(await screen.findByRole('textbox', { name: 'Note 1' }), 'The label is cut off.')
+  await userEvent.click(screen.getByRole('button', { name: 'Comment' }))
+  let finish: (value: { path: string }) => void = () => {}
+  vi.mocked(api.uploadTerminalImage).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+  await userEvent.click(within(bar()).getByRole('button', { name: 'Send to agent' }))
+  act(() => useStore.setState({ identityKey: 'someone-else' }))
+  await act(async () => { finish({ path: '/home/alice/.aether/terminal-images/a.png' }) })
+  expect(api.runRoomPost).not.toHaveBeenCalled()
+})
+
 it('sends a free page no key and no press while its pointer picks', async () => {
   vi.mocked(api.devControlStatus).mockResolvedValue({ surface, controller: null })
   render(<BrowserView {...shared} runID="run_1" />)

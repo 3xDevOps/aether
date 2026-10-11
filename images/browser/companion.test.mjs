@@ -347,6 +347,7 @@ test('inspect describes the element under a point without touching the page or r
     <div id="host" style="left:400px;top:300px;width:100px;height:40px"></div>
     <div id="many" style="left:400px;top:400px;width:100px;height:40px;padding-left:20px;overflow:hidden"></div>
     <div id="wrap" style="position:absolute;left:400px;top:500px;width:200px;height:60px"><iframe srcdoc='<input type="password" value="private-value">' style="width:50px;height:20px"></iframe></div>
+    <iframe id="scaled" style="left:400px;top:150px;width:100px;height:50px;border:0;transform:scale(2);transform-origin:0 0" srcdoc='<body style="margin:0"><a href="/x" style="position:absolute;left:10px;top:10px;width:40px;height:20px">Zoomed</a>'></iframe>
     <script>
       document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<button class="inner" style="width:100px;height:40px;border:0">Shadow</button>';
       document.getElementById('many').innerHTML = '<p>row with some text</p>'.repeat(5000);
@@ -385,6 +386,9 @@ test('inspect describes the element under a point without touching the page or r
   const wrap = await inspect(590, 550);
   assert.match(wrap.html, /^<div id="wrap" style="[^"]+"><iframe style="[^"]+"><\/iframe><\/div>$/);
   assert.ok(!JSON.stringify(wrap).includes('private-value'), 'a document embedded in srcdoc stays on the page');
+
+  const scaled = await inspect(430, 180);
+  assert.deepEqual([scaled.tag, scaled.bounds], ['iframe', { x: 400, y: 150, width: 200, height: 100 }], 'a scaled frame is described, not entered');
 
   const framed = await inspect(419, 79);
   assert.deepEqual([framed.tag, framed.role, framed.text, framed.frame_url, framed.attributes.href], ['a', 'link', 'Docs', 'about:srcdoc', '[redacted]']);

@@ -163,6 +163,8 @@ function describe(element) {
     component: components.join(' > '),
     source,
     inset: { x: rect.x + element.clientLeft, y: rect.y + element.clientTop },
+    // A frame drawn at another size or turned cannot map a point into itself by an offset alone.
+    transformed: ['iframe', 'frame'].includes(tag) && (Math.abs(rect.width - element.offsetWidth) > 1 || Math.abs(rect.height - element.offsetHeight) > 1),
   };
 }
 
@@ -170,8 +172,8 @@ const short = (value, max) => (typeof value === 'string' ? value.slice(0, max) :
 const finite = (value) => (Number.isFinite(value) ? value : 0);
 const strings = (value, entries, max) => Object.fromEntries(Object.entries(value && typeof value === 'object' ? value : {}).slice(0, entries).map(([key, text]) => [short(key, 64), short(text, max)]));
 
-// Returns the element under a viewport point, following same-page frames, or
-// null when nothing is there. The page computed the description, so every
+// Returns the element under a viewport point, following same-page frames that
+// are not scaled or turned, or null when nothing is there. The page computed the description, so every
 // field is bounded again here before it leaves the companion.
 export async function inspectPoint(page, x, y, read) {
   let frame = page.mainFrame();
@@ -182,7 +184,7 @@ export async function inspectPoint(page, x, y, read) {
     if (!handle) return null;
     try {
       const found = await read(handle.evaluate(describe));
-      const child = ['iframe', 'frame'].includes(found.tag) && depth < 3 ? await read(handle.contentFrame()) : null;
+      const child = ['iframe', 'frame'].includes(found.tag) && !found.transformed && depth < 3 ? await read(handle.contentFrame()) : null;
       if (child) {
         frame = child;
         left += finite(found.inset?.x);

@@ -47,6 +47,7 @@ export function FeedbackBar({ run, agent, agentName }: { run: RunRecord; agent: 
     const mark = ++sends
     patchFeedback(run.id, { sending: mark, error: undefined })
     // Feedback dropped meanwhile, by a sign-in or a deleted run, has a successor this must not write to.
+    const dropped = () => feedback(run.id).sending !== mark
     const settle = (patch: Partial<Feedback>) => {
       if (feedback(run.id).sending === mark) patchFeedback(run.id, { ...patch, sending: undefined })
     }
@@ -63,10 +64,12 @@ export function FeedbackBar({ run, agent, agentName }: { run: RunRecord; agent: 
         } catch (cause) {
           return settle({ error: `Image upload failed: ${message(cause)}` })
         }
+        if (dropped()) return
         // Kept on the note, so a send that is retried names the same file and stays one message.
         updateNote(run.id, note.id, { path })
         pictured.push({ ...note, path })
       }
+      if (dropped()) return
       const body = feedbackMessage(pictured, taken.logs)
       if (new TextEncoder().encode(body).length > maxMessageBytes) {
         return settle({ error: 'This is more than one message carries (64 KiB). Send fewer notes or rows at a time.' })
