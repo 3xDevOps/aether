@@ -47,10 +47,8 @@ type IdentityStore interface {
 	// invitation links an existing member, and makes the device that
 	// member's, approved by approver. The invitation must be unconsumed
 	// and unexpired at now, and the account no member's yet; the other
-	// devices waiting on it are deleted. invitation is the one the
-	// approver saw the device wait on: when the device waits on another
-	// by now it returns ErrDeviceMoved and approves nothing.
-	AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error)
+	// devices waiting on it are deleted.
+	AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error)
 	// BindIdentity binds identity to its existing Member; ErrConflict when
 	// the account is bound already.
 	BindIdentity(ctx context.Context, identity *domain.Identity) error
@@ -77,11 +75,14 @@ type IdentityStore interface {
 	// than MaxWaitingDevices may wait on it (ErrLimit). It first deletes the
 	// devices waiting on invitations expired at now.
 	RegisterInvitationDevice(ctx context.Context, d *domain.Device, now time.Time) error
-	// MoveInvitationDevice makes the device id, pending and no member's,
-	// wait on invitation instead of the one it waits on. It is ErrNotFound
-	// when the device no longer waits or invitation is not open at now,
-	// and ErrLimit when MaxWaitingDevices wait on invitation already.
-	MoveInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, now time.Time) error
+	// MoveInvitationDevice replaces the device id, pending and no
+	// member's, with a new pending device of the same key, account and
+	// label waiting on invitation, and returns it. The id is new so that
+	// an approval of the device as it was shown before finds nothing. It
+	// is ErrNotFound when the device no longer waits, invitation is not
+	// open at now or the account is a member's, and ErrLimit when
+	// MaxWaitingDevices wait on invitation already.
+	MoveInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, now time.Time) (*domain.Device, error)
 	GetDevice(ctx context.Context, id domain.DeviceID) (*domain.Device, error)
 	GetDeviceByCredential(ctx context.Context, credential string) (*domain.Device, error)
 	// GetDeviceByApprovalCode finds the device awaiting approval with
@@ -405,11 +406,7 @@ func (d *DB) AcceptInvitation(ctx context.Context, id domain.InvitationID, ident
 	return m, nil
 }
 
-// ErrDeviceMoved is the ErrConflict of approving a device that waits on
-// another invitation than the one its approver saw.
-var ErrDeviceMoved = fmt.Errorf("%w: the device waits on another invitation", ErrConflict)
-
-func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error) {
+func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: begin accept invitation device: %w", err)
@@ -424,9 +421,6 @@ func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, inv
 	}
 	if dev.Invitation == "" || dev.Status != domain.DevicePending {
 		return nil, fmt.Errorf("%w: device %s is not waiting on an invitation", ErrNotFound, id)
-	}
-	if dev.Invitation != invitation {
-		return nil, fmt.Errorf("device %s: %w", id, ErrDeviceMoved)
 	}
 	var bound bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM member_identities WHERE provider = ? AND subject = ?)`,

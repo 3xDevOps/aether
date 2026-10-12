@@ -259,6 +259,7 @@ Rows added to or changed in "Who must fail for access to be gained" and
 | Edge serves the join page | The fragment never reaches the edge over HTTP. A compromised edge's script could read it and then accept that invitation with its role | The same, and the result is a pending device an admin must approve. There is no claim page: a claim secret would give a compromised edge the server, so the claim link is the `aether://claim` deep link only |
 | Own-device approval | Not needed | One click from an approved device of the same member; a pending device completes no handshake, so it cannot approve itself (`TestApproveDeviceByID`) |
 | `server.edge.claimcode` | Answered only for an admin on an approved device, member SSH key or tailnet connection; a registered device gets no code (`TestServerEdgeClaimCode`) | The same; a pending device cannot connect at all (`TestAdminConnectsTheirAccount`). The bar matches `member.device.approve` |
+| A waiting device that presents another invitation's link | No device waits | Becomes a new device on that invitation; an approval of the earlier card approves nothing (`TestJoinByAnotherLinkMovesTheWaitingDevice`) |
 | Approval code | Unused | 40 bits; a code naming two waiting devices approves neither (`GetDeviceByApprovalCode`). Shown only when nobody can approve in the app (`TestApprovalCodeOnlyWithoutAnInAppApprover`) |
 
 ## 5. What changes where

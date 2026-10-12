@@ -473,17 +473,18 @@ func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, 
 		return errKeyOfAnotherAccount
 	}
 	if dev.Status == domain.DevicePending && dev.Invitation != inv.ID {
-		err = ids.MoveInvitationDevice(ctx, dev.ID, inv.ID, time.Now())
+		moved, err := ids.MoveInvitationDevice(ctx, dev.ID, inv.ID, time.Now())
 		if errors.Is(err, store.ErrLimit) {
 			return tooManyWaiting(err, account)
 		}
 		if err != nil {
 			return fmt.Errorf("sshd: invitation device: %w", err)
 		}
-		slog.Info("sshd: edge device moved to the invitation it joined with", "invitation", inv.ID, "was", dev.Invitation,
-			"device", dev.ID, "provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
-		dev.Invitation = inv.ID
-		s.publishDevice(ctx, "", dev.ID, dev.Status)
+		slog.Info("sshd: edge device replaced on the invitation it joined with", "invitation", inv.ID, "was", dev.Invitation,
+			"device", moved.ID, "replaced", dev.ID, "provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
+		s.publishDevice(ctx, "", dev.ID, domain.DeviceRevoked)
+		s.publishDevice(ctx, "", moved.ID, moved.Status)
+		dev = moved
 	}
 	return s.deviceRefusal(ctx, ids, dev, true)
 }

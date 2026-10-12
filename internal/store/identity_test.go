@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -500,7 +501,7 @@ func TestInvitationDevices(t *testing.T) {
 	if err := db.ApproveDevice(ctx, invitee.ID, admin.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ApproveDevice of an invitation device = %v, want ErrNotFound", err)
 	}
-	m, err := db.AcceptInvitationDevice(ctx, invitee.ID, inv.ID, admin.ID, edgeMember("octo"), now)
+	m, err := db.AcceptInvitationDevice(ctx, invitee.ID, admin.ID, edgeMember("octo"), now)
 	if err != nil || m.Role != domain.RoleAdmin {
 		t.Fatalf("AcceptInvitationDevice = %+v, %v", m, err)
 	}
@@ -514,7 +515,7 @@ func TestInvitationDevices(t *testing.T) {
 	if _, err = db.GetDevice(ctx, forged.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the other waiting device = %v, want deleted", err)
 	}
-	if _, err = db.AcceptInvitationDevice(ctx, forged.ID, inv.ID, admin.ID, edgeMember("x"), now); !errors.Is(err, ErrNotFound) {
+	if _, err = db.AcceptInvitationDevice(ctx, forged.ID, admin.ID, edgeMember("x"), now); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("accepting through a deleted device = %v", err)
 	}
 
@@ -536,7 +537,7 @@ func TestInvitationDevices(t *testing.T) {
 	if _, err = db.GetDeviceByApprovalCode(ctx, stale.ApprovalCode); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approval code of an expired invitation's device = %v, want ErrNotFound", err)
 	}
-	if _, err = db.AcceptInvitationDevice(ctx, stale.ID, expiring.ID, admin.ID, edgeMember("dana"), now); !errors.Is(err, ErrNotFound) {
+	if _, err = db.AcceptInvitationDevice(ctx, stale.ID, admin.ID, edgeMember("dana"), now); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("accepting an expired invitation = %v, want ErrNotFound", err)
 	}
 	other := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "erin", Role: domain.RoleViewer})
@@ -548,9 +549,9 @@ func TestInvitationDevices(t *testing.T) {
 	}
 }
 
-// An approval names the invitation its approver saw the device wait on.
-// Once the device has moved to another invitation that approval is a
-// conflict that creates nothing and leaves the device waiting.
+// A device that moves to another invitation is a new device there, so an
+// approval of the id its approver saw finds nothing, creates nothing and
+// leaves the new device waiting.
 func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -563,12 +564,16 @@ func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
 	if err := db.RegisterInvitationDevice(ctx, dev, now); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MoveInvitationDevice(ctx, dev.ID, joined.ID, now); err != nil {
+	moved, err := db.MoveInvitationDevice(ctx, dev.ID, joined.ID, now)
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := db.AcceptInvitationDevice(ctx, dev.ID, shown.ID, admin.ID, edgeMember("octo"), now)
-	if !errors.Is(err, ErrDeviceMoved) || !errors.Is(err, ErrConflict) {
-		t.Fatalf("approval naming the invitation the device left = %v, want ErrDeviceMoved", err)
+	if moved.ID == dev.ID || moved.Invitation != joined.ID || moved.Credential != dev.Credential ||
+		moved.Subject != dev.Subject || moved.Label != dev.Label || moved.ApprovalCode != dev.ApprovalCode {
+		t.Fatalf("moved device = %+v, want a new id for the same key, account and label on %s", moved, joined.ID)
+	}
+	if _, err = db.AcceptInvitationDevice(ctx, dev.ID, admin.ID, edgeMember("octo"), now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("approval of the device id before the move = %v, want ErrNotFound", err)
 	}
 	if members, _ := db.ListMembers(ctx); len(members) != 1 {
 		t.Fatalf("members after the refused approval = %d, want 1", len(members))
@@ -581,12 +586,23 @@ func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
 			t.Fatalf("invitation %s after the refused approval = %+v, %v; want open", inv.ID, got, gerr)
 		}
 	}
-	got, err := db.GetDevice(ctx, dev.ID)
-	if err != nil || got.Status != domain.DevicePending || got.Invitation != joined.ID || got.Member != "" {
-		t.Fatalf("device after the refused approval = %+v, %v; want pending on %s", got, err, joined.ID)
+	got, err := db.GetDeviceByCredential(ctx, dev.Credential)
+	if err != nil || got.ID != moved.ID || got.Status != domain.DevicePending || got.Invitation != joined.ID || got.Member != "" {
+		t.Fatalf("device after the refused approval = %+v, %v; want %s pending on %s", got, err, moved.ID, joined.ID)
 	}
-	if m, err := db.AcceptInvitationDevice(ctx, dev.ID, joined.ID, admin.ID, edgeMember("octo"), now); err != nil || m.Role != domain.RoleAdmin {
-		t.Fatalf("approval naming the invitation the device waits on = %+v, %v", m, err)
+	for i := range MaxWaitingDevices {
+		if err = db.RegisterInvitationDevice(ctx, invitationDevice(t, shown, strconv.Itoa(100+i)), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.MoveInvitationDevice(ctx, moved.ID, shown.ID, now); !errors.Is(err, ErrLimit) {
+		t.Fatalf("move to an invitation with %d waiting = %v, want ErrLimit", MaxWaitingDevices, err)
+	}
+	if got, err = db.GetDevice(ctx, moved.ID); err != nil || got.Invitation != joined.ID {
+		t.Fatalf("device after the refused move = %+v, %v; want it kept on %s", got, err, joined.ID)
+	}
+	if m, err := db.AcceptInvitationDevice(ctx, moved.ID, admin.ID, edgeMember("octo"), now); err != nil || m.Role != domain.RoleAdmin {
+		t.Fatalf("approval of the device the move created = %+v, %v", m, err)
 	}
 }
 

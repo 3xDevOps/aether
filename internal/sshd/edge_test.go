@@ -418,9 +418,9 @@ func TestJoinByLink(t *testing.T) {
 	}
 }
 
-// A device waiting on one invitation that joins with another's link waits
-// on that one from then on, so approving it gives the role of the
-// invitation the person opened.
+// A device waiting on one invitation that joins with another's link
+// becomes a new device on that one, so an approval of the device an admin
+// was shown before, by id or by code, approves nothing.
 func TestJoinByAnotherLinkMovesTheWaitingDevice(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyApprovedDevices))
@@ -428,7 +428,9 @@ func TestJoinByAnotherLinkMovesTheWaitingDevice(t *testing.T) {
 	first := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
 	second := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
 	signer := newSigner(t)
+	keyLine := edgeproto.DeviceKeyLine(signer.PublicKey())
 	var banner string
+	var waited []*domain.Device
 	for _, inv := range []*domain.Invitation{first, second} {
 		secret, _ := e.joinSecrets.Load(inv.ID)
 		user, err := edgeproto.JoinUser(string(inv.ID), secret.(string), edgeproto.AccountPrincipal(octo))
@@ -442,16 +444,36 @@ func TestJoinByAnotherLinkMovesTheWaitingDevice(t *testing.T) {
 			r.Invitation != string(inv.ID) || r.Role != string(inv.Role) {
 			t.Fatalf("join through %s (%s): banner %q", inv.ID, inv.Role, banner)
 		}
+		dev, err := identities(t, e).GetDeviceByCredential(ctx, keyLine)
+		if err != nil || dev.Invitation != inv.ID {
+			t.Fatalf("device after the join through %s = %+v, %v", inv.ID, dev, err)
+		}
+		waited = append(waited, dev)
 	}
-	shown, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(signer.PublicKey()))
-	if err != nil {
-		t.Fatal(err)
+	shown, moved := waited[0], waited[1]
+	if moved.ID == shown.ID || moved.ApprovalCode != shown.ApprovalCode {
+		t.Fatalf("device after the second join = %s code %s, want a new id and the code %s of %s",
+			moved.ID, moved.ApprovalCode, shown.ApprovalCode, shown.ID)
 	}
-	shown.Invitation = first.ID
-	var conflict *protocol.Error
-	if _, err = ApproveDevice(ctx, identities(t, e), e.store, shown, ""); !errors.As(err, &conflict) ||
-		conflict.Code != protocol.CodeConflict || !strings.Contains(conflict.Message, "now waits on another invitation; nothing was approved") {
-		t.Fatalf("approval through the invitation the device left = %v, want a conflict", err)
+	admin := controlClient(t, e)
+	var pe *protocol.Error
+	if err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{DeviceID: string(shown.ID)}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
+		t.Fatalf("approval of the device id shown before the move = %v, want not found", err)
+	}
+	if err := admin.Call(protocol.MethodMemberDeviceApprove,
+		protocol.MemberDeviceApproveParams{Code: shown.ApprovalCode, DeviceID: string(shown.ID)}, nil); !errors.As(err, &pe) ||
+		pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, "nothing was approved") {
+		t.Fatalf("approval by code of the device id shown before the move = %v, want a conflict", err)
+	}
+	if _, err := ApproveDevice(ctx, identities(t, e), e.store, shown, ""); !errors.Is(err, store.ErrNotFound) ||
+		!strings.Contains(err.Error(), "nothing was approved") {
+		t.Fatalf("console approval of the device read before the move = %v, want not found", err)
+	}
+	if m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member after the refused approvals = %+v, %v; want none", m, err)
+	}
+	if dev, err := identities(t, e).GetDevice(ctx, moved.ID); err != nil || dev.Status != domain.DevicePending {
+		t.Fatalf("device after the refused approvals = %+v, %v; want pending", dev, err)
 	}
 	approveAsAdmin(t, e, e.approvalCode(t, signer, banner))
 	m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject)

@@ -281,13 +281,12 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 // device waiting on an invitation is approved by accepting that invitation
 // for the account the device signed in as: it creates the invited member,
 // or binds the account to the member a link names, and uses the
-// invitation up. dev.Invitation is the invitation the approver was shown:
-// a device that joined with another invitation's link since is a conflict
-// and nothing is approved.
+// invitation up. A device that joined with another invitation's link since
+// dev was read has a new id, so dev is not found and nothing is approved.
 func ApproveDevice(ctx context.Context, ids store.IdentityStore, members MemberLister, dev *domain.Device, approver domain.MemberID) (*domain.Device, error) {
 	if dev.Invitation == "" {
 		if err := ids.ApproveDevice(ctx, dev.ID, approver); err != nil {
-			return nil, err
+			return nil, notApproved(dev, err)
 		}
 		return ids.GetDevice(ctx, dev.ID)
 	}
@@ -297,17 +296,20 @@ func ApproveDevice(ctx context.Context, ids store.IdentityStore, members MemberL
 	}
 	account := edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Email: dev.Email, Login: dev.Login, Name: dev.Name}
 	fresh := &domain.Member{DisplayName: displayNameOf(account), Color: attribution.NextColor(memberColorsOf(all))}
-	m, err := ids.AcceptInvitationDevice(ctx, dev.ID, dev.Invitation, approver, fresh, time.Now())
-	if errors.Is(err, store.ErrDeviceMoved) {
-		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-			"device %s now waits on another invitation; nothing was approved", dev.ID)}
-	}
+	m, err := ids.AcceptInvitationDevice(ctx, dev.ID, approver, fresh, time.Now())
 	if err != nil {
-		return nil, err
+		return nil, notApproved(dev, err)
 	}
 	slog.Info("sshd: invitation accepted by approving its device", "invitation", dev.Invitation, "member", m.ID,
 		"role", m.Role, "device", dev.ID, "approver", approver, "provider", dev.Provider, "subject", dev.Subject)
 	return ids.GetDevice(ctx, dev.ID)
+}
+
+func notApproved(dev *domain.Device, err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("device %s no longer waits for approval as it was shown; nothing was approved: %w", dev.ID, err)
+	}
+	return err
 }
 
 // MemberLister lists members; store.Store is one.
