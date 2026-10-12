@@ -164,26 +164,39 @@ func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
 }
 
 // A swarm worker is otherwise left running for CompleteMission; one whose
-// model was refused never got its task, so it ends and frees its slot.
-func TestBackgroundWorkerOverACPEndsWhenTheModelIsRefused(t *testing.T) {
+// agent never got its task ends and frees its slot.
+func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 	t.Parallel()
-	e, rt := newBackgroundEnv(t, enhancedAgent, true)
-	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
-	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-		WorkspaceID: e.ws.ID, RunID: "model-worker", Actor: e.member.ID,
-		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "say pong",
-		Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: "anthropic/claude-sonnet-4-5",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.waitStoreStatus(t, run.ID, domain.RunFailed)
-	waitFor(t, "the worker observed as retained", func() bool {
-		observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
-		return err == nil && observed.State == MissionRunRetained
-	})
-	if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
-		t.Fatal("the task ran on the agent's default model")
+	for name, tc := range map[string]struct {
+		task, model string
+		legacy      bool
+	}{
+		"model refused":  {task: "say pong", model: "anthropic/claude-sonnet-4-5", legacy: true},
+		"prompt refused": {task: acpmock.PromptRefuse},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, rt := newBackgroundEnv(t, enhancedAgent, true)
+			if tc.legacy {
+				rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+			}
+			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+				WorkspaceID: e.ws.ID, RunID: "unstarted-worker", Actor: e.member.ID,
+				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: tc.task,
+				Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: tc.model,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.waitStoreStatus(t, run.ID, domain.RunFailed)
+			waitFor(t, "the worker observed as retained", func() bool {
+				observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+				return err == nil && observed.State == MissionRunRetained
+			})
+			if tc.legacy && slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+				t.Fatal("the task ran on the agent's default model")
+			}
+		})
 	}
 }
 

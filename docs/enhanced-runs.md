@@ -580,7 +580,9 @@ like any background run: commit, publish, `completed` or `failed` with
 `agent exited; results committed` or `agent exited 1: <cause>`, the cause
 being the session's failure or stop reason. The notice in the item log
 carries the full error. A swarm worker keeps its container and parks
-at `needs-attention` instead, as its headless agent's exit does. A server
+at `needs-attention` instead, as its headless agent's exit does, unless the
+agent never got the task (the model or the prompt was refused): then it
+fails and its retained container frees its worker slot. A server
 restart mid-turn resumes the session and prompts the agent to continue
 where it stopped. Mail does not wake a background run.
 

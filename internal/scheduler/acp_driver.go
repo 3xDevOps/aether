@@ -430,7 +430,7 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 		}
 	}
 	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }
 
