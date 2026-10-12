@@ -1263,17 +1263,28 @@ loopback names of that address.
 ### Firewall
 
 Inbound, allow TCP 443 on IPv4 and IPv6, TCP 80 for certbot's HTTP-01
-challenge behind nginx, and your own administration access; refuse
-everything else. The metrics listener is loopback only, and so is
-`--proxy-listen` without `--trusted-proxies`. With `ufw`:
+challenge behind nginx, and SSH on TCP 22; refuse everything else. The
+metrics listener is loopback only, and so is `--proxy-listen` without
+`--trusted-proxies`. With `ufw`:
 
 ```sh
 sudo ufw default deny incoming
-sudo ufw allow from <admin-address> to any port 22 proto tcp
+sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw enable
 ```
+
+Never limit port 22 to a source address in `ufw`. That rule can only be
+changed from a shell on the host: when your address changes, SSH times out
+for you and for the provider's browser SSH, and the way back in is a
+rebuild from a snapshot unless the provider has an out-of-band console.
+Limit who reaches port 22 in the provider's firewall instead, such as an
+AWS security group or a Lightsail firewall, which you change from the
+provider's console without logging in. With port 22 open to every address,
+SSH must refuse passwords: `sudo sshd -T | grep passwordauthentication`
+prints `passwordauthentication no`. Before closing the session that ran
+`ufw enable`, open a second SSH connection to check port 22 still answers.
 
 Without a reverse proxy, leave port 80 closed.
 
@@ -1588,9 +1599,10 @@ only be verified on the live host.
    sudo apt-get install nginx certbot python3-certbot-nginx sqlite3 curl
    ```
 
-2. **Firewall** ([Firewall](#firewall)): 22 from `<admin-address>`, 80 and
-   443 from anywhere. On a host that already serves other sites, check the
-   rules it has with `sudo ufw status` and add only what is missing:
+2. **Firewall** ([Firewall](#firewall)): 22, 80 and 443 from anywhere in
+   `ufw`. Limit 22 to `<admin-address>` in the provider's firewall, never
+   in `ufw`. On a host that already serves other sites, check the rules it
+   has with `sudo ufw status` and add only what is missing:
    `ufw default deny incoming` cuts off every service the rules do not
    name.
 3. **Cloudflare DNS** for `onaether.dev`. Proxy status **DNS only** on
