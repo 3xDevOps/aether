@@ -14,6 +14,7 @@ import { parseClaim, parseJoin } from '@/lib/claim-link'
 import { edgeHost, message, providerName } from '@/lib/format'
 import { shellQuote } from '@/lib/shell'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeRefusal, EdgeServer } from '@/lib/types'
+import type { HandedLink } from '@/lib/url-state'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
@@ -186,24 +187,34 @@ function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn
 export function EdgeSignIn({
   client,
   claim,
-  onJoin,
+  onHand,
   onLinked,
 }: {
   client: Api
-  /** A claim link handed to the dashboard, filled into the claim form. */
+  /** A claim link handed to the dashboard, filled into the claim form. The
+   * edge it names is the only one signed in to. */
   claim?: string
-  /** Called with a join link pasted into the claim form. */
-  onJoin: (link: string) => void
+  /** Called with a join link, or a claim link naming another edge, pasted
+   * into the claim form. */
+  onHand: (link: HandedLink) => void
   onLinked: (result: EdgeLinkResult) => void
 }) {
-  const signIn = useEdgeSignIn(client)
+  const claimEdge = claim === undefined ? undefined : parseClaim(claim).edge
+  const signIn = useEdgeSignIn(client, claimEdge)
   const { phase, setPhase } = signIn
   const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
 
   return (
     <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
       <p className="text-text">
-        Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.
+        {claimEdge ? (
+          <>
+            Sign in to <span className="font-code">{linkHost(claimEdge)}</span>, the edge this claim link names, with
+            GitHub.
+          </>
+        ) : (
+          'Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.'
+        )}
       </p>
       <SignInProgress signIn={signIn} />
       {phase.name === 'signed-in' && (
@@ -220,7 +231,7 @@ export function EdgeSignIn({
           edge={picked.edge}
           account={picked.account}
           claim={claim}
-          onJoin={onJoin}
+          onHand={onHand}
           onLinked={onLinked}
         />
       )}
@@ -409,14 +420,14 @@ function ServerPicker({
   edge,
   account,
   claim,
-  onJoin,
+  onHand,
   onLinked,
 }: {
   client: Api
   edge: string
   account: EdgeAccount
   claim?: string
-  onJoin: (link: string) => void
+  onHand: (link: HandedLink) => void
   onLinked: (result: EdgeLinkResult) => void
 }) {
   const [servers, setServers] = useState<EdgeServer[] | null>(null)
@@ -541,13 +552,12 @@ function ServerPicker({
             onSubmit={(e) => {
               e.preventDefault()
               if (parseJoin(code)) {
-                onJoin(code.trim())
+                onHand({ kind: 'join', link: code.trim() })
                 return
               }
               const claim = parseClaim(code)
-              const claimHost = claim.edge && linkHost(claim.edge)
-              if (claimHost && claimHost !== edgeHost(edge)) {
-                setError(`This link names ${claimHost}, but this device is signed in to ${edgeHost(edge)}. Sign in to ${claimHost} first.`)
+              if (claim.edge && linkHost(claim.edge) !== edgeHost(edge)) {
+                onHand({ kind: 'claim', link: code.trim() })
                 return
               }
               void link(() => client.localEdgeClaim(claim.code, edge))

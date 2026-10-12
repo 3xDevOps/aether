@@ -378,8 +378,9 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 
-  it('refuses a pasted claim link that names another edge', async () => {
+  it('moves the sign-in to the edge a pasted claim link names', async () => {
     seed()
+    const other = 'https://edge.other.test'
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => unlinked),
       localEdgeStatus: vi.fn(async () => signedIn),
@@ -390,15 +391,12 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `aether://claim?edge=https%3A%2F%2Fedge.other.test&server=${serverID}#secret` },
+      target: { value: `aether://claim?edge=${encodeURIComponent(other)}&server=${serverID}#secret` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
-    expect(
-      await screen.findByText(
-        'This link names edge.other.test, but this device is signed in to edge.example.test. Sign in to edge.other.test first.',
-      ),
-    ).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(screen.getByText('edge.other.test')).toBeDefined()
     expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 
@@ -590,6 +588,35 @@ describe('a claim link handed to the dashboard', () => {
 
     const command = await screen.findByRole('region', { name: 'Link from a terminal' })
     expect(within(command).getByText(`aether link --claim ${serverID}-abcdefghijk23456 --edge ${custom}`)).toBeDefined()
+  })
+
+  it('signs in to the custom edge the link names and claims through it', async () => {
+    const custom = 'https://edge.custom.test:8443'
+    const claimLink = `aether://claim?edge=${encodeURIComponent(custom)}&server=${serverID}#abcdefghijk23456`
+    window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimLink)}`)
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    seed()
+    const customLogin = { ...pending, edge: custom, verification_uri: `${custom}/device` }
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi
+        .fn<() => Promise<EdgeStatus>>()
+        .mockResolvedValueOnce(signedIn)
+        .mockResolvedValue({ edges: [{ edge, account }, { edge: custom, account }], login: { ...customLogin, state: 'signed_in', account } }),
+      localEdgeLogin: vi.fn(async () => customLogin),
+      localEdgeServers: vi.fn(async () => ({ edge: custom, servers: [] })),
+      localEdgeClaim: vi.fn(async () => ({ ...linkResult, edge: custom })),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    const section = within(await screen.findByRole('region', { name: 'Sign in' }))
+    expect(section.getByText('edge.custom.test:8443')).toBeDefined()
+    fireEvent.click(await section.findByRole('button', { name: 'Sign in' }))
+    expect(client.localEdgeLogin).toHaveBeenCalledWith(custom)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Claim and link' }, { timeout: 4000 }))
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-abcdefghijk23456`, custom)
   })
 })
 

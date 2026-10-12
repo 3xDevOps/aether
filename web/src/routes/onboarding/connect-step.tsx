@@ -137,7 +137,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
         <EdgeSignIn
           client={client}
           claim={handed?.kind === 'claim' ? handed.link : undefined}
-          onJoin={(link) => setHanded({ kind: 'join', link })}
+          onHand={setHanded}
           onLinked={(result) => void linkedThroughEdge(result)}
         />
       )}
