@@ -202,6 +202,8 @@ A waiting device of an existing member is refused with:
 ```
 device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
   aether device approve <device id>
+or on the server:
+  sudo aether-server device review
 ```
 
 A device waiting on an invitation gets the same without `, or you do, from

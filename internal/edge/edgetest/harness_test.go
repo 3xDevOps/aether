@@ -957,12 +957,15 @@ func (s *serverNode) pendingCode(t *testing.T, what string, r *edgeproto.Refused
 		}
 		return r.ApprovalCode
 	}
-	if r.DeviceID == "" || !strings.HasSuffix(text, "aether device approve "+r.DeviceID) || strings.Contains(text, "sudo aether-server") {
-		t.Fatalf("%s: %v, want the device id to approve it by and no code", what, text)
+	if r.DeviceID == "" || !strings.Contains(text, "aether device approve "+r.DeviceID+"\n") {
+		t.Fatalf("%s: %v, want the device id to approve it by", what, text)
 	}
 	dev, err := s.console(t).GetDevice(context.Background(), domain.DeviceID(r.DeviceID))
 	if err != nil {
 		t.Fatalf("%s: device %s on the console: %v", what, r.DeviceID, err)
+	}
+	if dev.ApprovalCode == "" || strings.Contains(text, dev.ApprovalCode) {
+		t.Fatalf("%s: %v, want no approval code", what, text)
 	}
 	return dev.ApprovalCode
 }

@@ -149,7 +149,8 @@ func (r *Refused) Error() string {
 			if r.MemberID != "" {
 				who += ", or you do, from an approved device of yours"
 			}
-			return fmt.Sprintf("device %q, signed in as %s, %s. %s, or with:\n  aether device approve %s",
+			return fmt.Sprintf("device %q, signed in as %s, %s. %s, or with:\n  aether device approve %s\n"+
+				"or on the server:\n  sudo aether-server device review",
 				r.Device, r.Account, state, who, r.DeviceID)
 		}
 		who := "from an approved device, SSH key or tailnet connection of this account, or as an admin"

@@ -530,6 +530,8 @@ refusal's kind and fields, then the text the command prints:
 ```
 device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
   aether device approve <device id>
+or on the server:
+  sudo aether-server device review
 ```
 
 When the device admits as the server's only admin and that admin has no

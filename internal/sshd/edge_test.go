@@ -456,7 +456,7 @@ func (e *testEnv) approvalCode(t *testing.T, signer ssh.Signer, banner string) s
 	}
 	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(signer.PublicKey()))
 	if err != nil || string(dev.ID) != r.DeviceID || !strings.Contains(banner, "aether device approve "+r.DeviceID+"\n") ||
-		strings.Contains(banner, "sudo aether-server") {
+		dev.ApprovalCode == "" || strings.Contains(banner, dev.ApprovalCode) {
 		t.Fatalf("approval banner = %q for device %+v, %v", banner, dev, err)
 	}
 	return dev.ApprovalCode
