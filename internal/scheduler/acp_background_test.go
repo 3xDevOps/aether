@@ -200,6 +200,32 @@ func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 	}
 }
 
+// The wait prompt sends no update, so the cancel ends the turn before
+// Prompt's grace runs out: the session's acceptance must still count.
+func TestBackgroundWorkerOverACPParksWhenItsStartedTurnIsCancelled(t *testing.T) {
+	t.Parallel()
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "cancelled-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
+		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the turn", func() bool {
+		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	if err = e.sched.ACPCancel(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+	if err != nil || observed.State != MissionRunActive {
+		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
+	}
+}
+
 // A refused continuation is not an unstarted task: the worker keeps the
 // lifecycle of any failed turn and is left to CompleteMission.
 func TestBackgroundWorkerOverACPParksWhenItsResumeIsRefused(t *testing.T) {

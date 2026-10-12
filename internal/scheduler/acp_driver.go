@@ -438,14 +438,16 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 		r.untried = true
 	}
 	d.mu.Unlock()
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
-		return
+	// The session reports acceptance before the turn's end.
+	accepted := func(_ bool, err error) {
+		if err == nil && r != nil {
+			d.mu.Lock()
+			r.untried = false
+			d.mu.Unlock()
+		}
 	}
-	if r != nil {
-		d.mu.Lock()
-		r.untried = false
-		d.mu.Unlock()
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, accepted); err != nil {
+		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }
 
