@@ -1232,6 +1232,22 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		}
 		return
 	}
+	// A move to another account that the previous process left unrecorded:
+	// with no container of its own yet, the move never started its agent;
+	// with its container in the sidecar, the run runs on the new account.
+	if swap := sc.AccountSwap; swap != nil {
+		switch {
+		case sc.ContainerID == "":
+			s.recoverUnstarted(ctx, r)
+			return
+		case sc.ContainerID == swap.Container && !s.settleAccountSwap(ctx, r, swap):
+		default:
+			sc.AccountSwap = nil
+			if err := s.writeSidecar(sc); err != nil {
+				slog.Warn("scheduler: clear an interrupted account move", "run", r.ID, "error", err)
+			}
+		}
+	}
 	// The active row wins over a stale retained marker. An armed marker on an
 	// active row is never a reopened run's: Relaunch clears the arm first.
 	if sc.Retained || sc.RetainedUntil != nil {
@@ -1732,6 +1748,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		agentSessionID:      sc.AgentSessionID,
 		agentExec:           sc.AgentExec,
 		switchIntent:        sc.Switch,
+		accountSwap:         sc.AccountSwap,
 		done:                make(chan struct{}),
 	}
 }

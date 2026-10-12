@@ -114,6 +114,24 @@ func Measure(ctx context.Context, st store.Store, usage QuotaReader, launcher do
 	return measured, nil
 }
 
+// MeasureNext reads the usage Select decides on for a running run whose
+// vendor reported its current account's usage exhausted: current and every
+// account in used count as exhausted, so Select returns current when no
+// other candidate qualifies.
+func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launcher, current domain.MemberID, used []domain.MemberID, harness string, policy domain.AccountFallback) (Measured, error) {
+	if policy.Disabled || usage == nil {
+		return nil, nil
+	}
+	measured := Measured{current: 100}
+	for _, account := range used {
+		measured[account] = 100
+	}
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured); err != nil {
+		return nil, err
+	}
+	return measured, nil
+}
+
 // measureCandidates reads the usage of every candidate launcher may launch
 // on that measured has no figure for yet.
 func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured) error {

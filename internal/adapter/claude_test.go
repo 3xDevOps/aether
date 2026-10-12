@@ -83,6 +83,21 @@ func TestClaudeTTYFixture(t *testing.T) {
 	assertPayloads(t, consumeFixture(t, "testdata/claude_tty.jsonl", 7), fixturePayloads())
 }
 
+func TestClaudeUsageLimit(t *testing.T) {
+	refused := events.RunCostPayload{Metered: true}
+	for _, tc := range []struct {
+		fixture string
+		want    []events.Payload
+	}{
+		{"claude_usage_limit", []events.Payload{refused, events.RunUsageLimitPayload{Message: "You've hit your session limit · resets 3pm (UTC)"}}},
+		{"claude_rate_limited", []events.Payload{refused}},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			assertPayloads(t, consumeFixture(t, "testdata/"+tc.fixture+".jsonl", 0), tc.want)
+		})
+	}
+}
+
 func TestClaudeUnparseableLinesAreOpaque(t *testing.T) {
 	a, _ := ForHarness("claude")
 	for _, line := range []string{

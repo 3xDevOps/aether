@@ -78,7 +78,7 @@ function FallbackList({
             })}
           </ul>
           <p className="text-ui-sm text-muted">
-            If {owner}&apos;s usage is at 95% or more at launch, the run starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'}.
+            The run starts on {fallback.order ? 'the first ticked account, top to bottom, with usage left' : 'the account here with the most usage left'} if {owner}&apos;s usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.
           </p>
         </>
       )}

@@ -38,6 +38,7 @@ export type NeedsYouID =
   | 'control-hold'
   | 'enhanced-failure'
   | 'blocked'
+  | 'usage-limit'
   | 'turn-ended'
   | 'stopped'
   | 'unreviewed-finish'
@@ -229,6 +230,10 @@ export const enhancedReasonPrefixes = [
   'enhanced turn failed: ',
 ] as const
 const stalledPrefix = 'stalled:'
+// Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
+const usageLimitPrefix = 'Usage limit reached on '
+
+const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
 
 function enhancedFailure(run: RunRecord): string | undefined {
   const prefix = enhancedReasonPrefixes.find((p) => run.reason?.startsWith(p))
@@ -358,6 +363,16 @@ export const needsYouConditions: NeedsYouCondition[] = [
     action: () => terminalAction,
   }),
   condition({
+    id: 'usage-limit',
+    target: 'run',
+    background: true,
+    holds: (run) =>
+      usageLimited(run) && (run.status === 'needs-attention' || (run.status === 'failed' && run.finish_unopened === true)),
+    resolvers: (run) => [run.member_id],
+    reason: (run) => run.reason!,
+    action: () => openAction,
+  }),
+  condition({
     id: 'turn-ended',
     target: 'run',
     holds: (run, ctx) =>
@@ -367,6 +382,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(stalledPrefix) &&
       !run.reason?.startsWith(blockedPrefix) &&
+      !usageLimited(run) &&
       enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'reply', label: 'Reply' }),
@@ -380,6 +396,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       reportedOutcome(run) === undefined &&
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(blockedPrefix) &&
+      !usageLimited(run) &&
       enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'reply', label: 'Reply' }),

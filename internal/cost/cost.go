@@ -34,14 +34,21 @@ type Rollup struct {
 	CostUSD      float64 `json:"cost_usd"`
 }
 
-// Add folds one run's record into the rollup.
-func (r *Rollup) Add(c *store.RunCost) {
-	r.Runs++
+// Add folds one record into the rollup. A run that moved accounts has a
+// record per segment; only the counted one, its lowest, adds to the run
+// counts, while every metered record adds its usage.
+func (r *Rollup) Add(c *store.RunCost, counted bool) {
+	if counted {
+		r.Runs++
+		if c.Metered {
+			r.Metered++
+		} else {
+			r.Unmetered++
+		}
+	}
 	if !c.Metered {
-		r.Unmetered++
 		return
 	}
-	r.Metered++
 	r.InputTokens += c.InputTokens
 	r.OutputTokens += c.OutputTokens
 	r.CostUSD += c.CostUSD
@@ -77,20 +84,47 @@ type Report struct {
 	Runs      []*store.RunCost
 }
 
-// Roll aggregates a workspace's run records into a report. Members are
-// ordered by ID so the output is stable; records are returned in the
-// order given (the store lists them oldest first).
+// Roll aggregates a workspace's run records into a report: one row per
+// run, its segments' usage summed under the account it is on last. Members
+// are ordered by ID so the output is stable; runs keep the order of their
+// first record (the store lists them oldest first).
 func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
-	rep := Report{Workspace: workspace, Runs: records}
+	rep := Report{Workspace: workspace}
+	first := map[domain.RunID]int{}
+	for _, c := range records {
+		if seg, ok := first[c.RunID]; !ok || c.Segment < seg {
+			first[c.RunID] = c.Segment
+		}
+	}
+	runs := map[domain.RunID]*store.RunCost{}
 	byMember := map[domain.MemberID]*Rollup{}
 	for _, c := range records {
-		rep.Total.Add(c)
+		counted := c.Segment == first[c.RunID]
+		rep.Total.Add(c, counted)
 		m, ok := byMember[c.MemberID]
 		if !ok {
 			m = &Rollup{}
 			byMember[c.MemberID] = m
 		}
-		m.Add(c)
+		m.Add(c, counted)
+		run := runs[c.RunID]
+		if run == nil {
+			run = &store.RunCost{RunID: c.RunID, WorkspaceID: c.WorkspaceID, Segment: -1}
+			runs[c.RunID] = run
+			rep.Runs = append(rep.Runs, run)
+		}
+		run.Metered = run.Metered || c.Metered
+		if c.Metered {
+			run.InputTokens += c.InputTokens
+			run.OutputTokens += c.OutputTokens
+			run.CostUSD += c.CostUSD
+		}
+		if c.Segment > run.Segment {
+			run.Segment, run.MemberID = c.Segment, c.MemberID
+		}
+		if c.RecordedAt.After(run.RecordedAt) {
+			run.RecordedAt = c.RecordedAt
+		}
 	}
 	for member, roll := range byMember {
 		rep.Members = append(rep.Members, MemberRollup{Member: member, Rollup: *roll})

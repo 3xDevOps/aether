@@ -213,6 +213,7 @@ type Scheduler struct {
 	githubOAuthWG     sync.WaitGroup
 	acp               *acpDriver
 	itemLogs          acphost.ReadOnlyLogCache
+	usageFallback     *UsageFallback
 }
 
 // credentialUserReservation stops ownership changes to the member home and
@@ -357,6 +358,15 @@ type supervised struct {
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
+	// usageLimit is the agent's usage-limit message its headless output
+	// carried, accountSwap the move to another account in progress, and
+	// continuation the prompt the moved agent's session gets first.
+	usageLimit   string
+	accountSwap  *accountSwap
+	continuation string
+	// failReason replaces the exit code in the reason of a run finalize
+	// fails.
+	failReason string
 }
 
 type pendingRun struct {
@@ -553,6 +563,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
+	output, closeOutput := s.watchAgentOutput(ctx)
+	defer closeOutput()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute
@@ -572,6 +584,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
+		case e, ok := <-output:
+			if !ok {
+				output = nil
+				continue
+			}
+			s.applyAgentOutput(e)
 		case <-sweep.C:
 			s.checkStalls(ctx)
 			s.finishOverdueReports()
@@ -774,6 +792,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
 		profile.SwitchVerified = false
+		profile.HeadlessResumeArgs = nil
 	case inRegistry:
 		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
 	default:

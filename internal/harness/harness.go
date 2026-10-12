@@ -252,6 +252,10 @@ type Profile struct {
 	// ResumeArgs reopens a stored session, SessionPlaceholder being its id.
 	// Empty when the CLI cannot target one session.
 	ResumeArgs []string
+	// HeadlessResumeArgs continues a stored session as a headless run,
+	// SessionPlaceholder being its id and TaskPlaceholder the next prompt.
+	// Empty when Aether cannot continue the agent's headless run.
+	HeadlessResumeArgs []string
 	// SwitchVerified records that the live switch test (ACP_LIVE=1,
 	// switch_live_test.go) passed in both directions for this agent.
 	SwitchVerified bool
@@ -359,12 +363,14 @@ var profiles = map[string]Profile{
 		DisplayName: "Claude Code",
 		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
-		HeadlessArgs:     []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
-		ACPArgs:          []string{claudeACP.Binary},
-		ACPInstall:       claudeACP,
-		ACPMode:          "bypassPermissions",
-		ACPTitleLookup:   true,
-		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		ACPArgs:        []string{claudeACP.Binary},
+		ACPInstall:     claudeACP,
+		ACPMode:        "bypassPermissions",
+		ACPTitleLookup: true,
+		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		HeadlessResumeArgs: []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
+			"--resume", SessionPlaceholder, TaskPlaceholder},
 		ACPSessionShared: true,
 		SwitchVerified:   true,
 		EnvPassthrough:   []string{"ANTHROPIC_API_KEY"},

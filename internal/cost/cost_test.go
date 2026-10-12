@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -403,4 +404,81 @@ func TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList(t *testing.T) {
 	if bobRollup != wantBob {
 		t.Fatalf("bob rollup after delete = %+v, want unaffected %+v", bobRollup, wantBob)
 	}
+}
+
+// TestCostStaysWithTheAccountThatSpentIt: a run metered on Ada's account
+// moves to Grace's and is metered again. Each account keeps what it spent,
+// the run counts once, on the account it launched on, and lists as one row;
+// deleting the run keeps every figure.
+func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
+	ctx := context.Background()
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewInProc: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+	svc, err := New(Config{Store: db, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ws := &domain.Workspace{Name: "one"}
+	if err = db.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	ada := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@example", Role: domain.RoleCollaborator}
+	grace := &domain.Member{DisplayName: "Grace", TailnetLogin: "grace@example", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{ada, grace} {
+		if err = db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := &domain.Run{WorkspaceID: ws.ID, MemberID: ada.ID, Task: "task", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning}
+	if err = db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	meter := func(usd float64) {
+		svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunCostPayload{InputTokens: 100, OutputTokens: 10, CostUSD: usd, Metered: true}})
+	}
+	meter(2)
+	if _, err = db.SetRunAccount(ctx, run.ID, grace.ID, "usage limit", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	meter(3)
+	svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted}})
+
+	check := func(when string, listed int) {
+		t.Helper()
+		rep, reportErr := svc.Report(ctx, ws.ID)
+		if reportErr != nil {
+			t.Fatalf("%s: Report: %v", when, reportErr)
+		}
+		want := []MemberRollup{
+			{Member: ada.ID, Rollup: Rollup{Runs: 1, Metered: 1, InputTokens: 100, OutputTokens: 10, CostUSD: 2}},
+			{Member: grace.ID, Rollup: Rollup{InputTokens: 100, OutputTokens: 10, CostUSD: 3}},
+		}
+		if want[1].Member < want[0].Member {
+			want[0], want[1] = want[1], want[0]
+		}
+		if rep.Total != (Rollup{Runs: 1, Metered: 1, InputTokens: 200, OutputTokens: 20, CostUSD: 5}) || len(rep.Members) != 2 ||
+			rep.Members[0] != want[0] || rep.Members[1] != want[1] || len(rep.Runs) != listed {
+			t.Fatalf("%s: report total %+v members %+v runs %d", when, rep.Total, rep.Members, len(rep.Runs))
+		}
+		if listed == 1 && (rep.Runs[0].CostUSD != 5 || rep.Runs[0].MemberID != grace.ID) {
+			t.Fatalf("%s: run row %+v, want $5 on Grace's account", when, rep.Runs[0])
+		}
+		summary, sumErr := db.SummarizeRunCosts(ctx, ws.ID)
+		if sumErr != nil || summary != (store.RunCostSummary{Runs: 1, Metered: 1, InputTokens: 200, OutputTokens: 20, CostUSD: 5}) {
+			t.Fatalf("%s: summary %+v, %v", when, summary, sumErr)
+		}
+	}
+	check("live", 1)
+	if err = db.DeleteRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	check("deleted", 0)
 }

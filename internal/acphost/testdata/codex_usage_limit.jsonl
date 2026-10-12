@@ -1,0 +1,2 @@
+# synthesized fixture: codex-acp 2.1.1 session/prompt error for usageLimitExceeded (src/CodexEventHandler.ts); not recorded from a live limit. The apostrophe is U+2019 as Codex writes it.
+{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error","data":{"message":"You’ve hit your usage limit. Try again later.","codexErrorInfo":"usageLimitExceeded"}}}

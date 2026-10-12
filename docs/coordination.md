@@ -1082,18 +1082,23 @@ own `--idempotency-key` and the observed
 `--expected-integrator-generation`.
 
 Execution choices are matched as declared; [usage
-fallback](teams.md#usage-fallback) applies only when the worker's run
-launches. If the chosen account is exhausted, the run starts on another
+fallback](teams.md#usage-fallback) applies to the worker's run, never to
+the match. If the chosen account is exhausted, the run starts on another
 account the accountable human may use, under the fallback policy the swarm
 was created with (`fallback_account_member_ids`, `no_fallback`). The attempt
 keeps the declared account in `account_owner_id` and records the one its
-run uses in `launch_account_id`; a recovered launch reuses that account
-instead of choosing again, and a replayed dispatch key returns the attempt
-unchanged. When no account qualifies, the run starts on the declared
+run launched on in `launch_account_id`; a recovered launch reuses that
+account instead of choosing again, and a replayed dispatch key returns the
+attempt unchanged. When no account qualifies, the run starts on the declared
 account. The integrator's launch, its
 replacement and its recovery relaunch fall back the same way, within the
 accounts of the member who created the swarm or last replaced its
-integrator.
+integrator. An integrator or worker whose agent hits its usage limit mid-run
+moves to another account like any run, under the same policy, and keeps its
+attempt and integrator generation; `launch_account_id` does not change. A
+Background worker keeps its container after its agent exits, so it moves as
+soon as the signal is read, and parks at `needs-attention` when no account
+qualifies.
 
 A worker attempt remains `launching` while its run is queued or provisioning.
 Once the scheduler confirms `running` or `needs-attention`, the attempt is
@@ -1351,6 +1356,9 @@ running `/opt/aether/aether-server report <harness>` over the same run socket.
 It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
+A `waiting` report with `usage_limit: true` asks to move a Standard run to
+another account ([usage fallback](teams.md#usage-fallback)); see
+[status reporting](harnesses.md#status-reporting).
 
 After an interactive success or failure `coord.report`, the next `waiting`
 (idle) hook with no input request open makes the outcome reviewable without

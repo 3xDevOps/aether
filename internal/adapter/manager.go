@@ -54,7 +54,7 @@ func NewManager(bus events.Bus, runs RunLookup, pty OutputTap) *Manager {
 // the setup; the manager runs until Close.
 func (m *Manager) Start(ctx context.Context) error {
 	sub, err := m.bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeRunStatus}},
+		Filter: events.Filter{Types: []events.Type{events.TypeRunStatus, events.TypeRunAccount}},
 	})
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (m *Manager) scan(ctx context.Context) {
 	}
 	for _, r := range runs {
 		if r.Status == domain.RunRunning {
-			m.attach(r.WorkspaceID, r.ID)
+			m.attach(r.WorkspaceID, r.ID, false)
 		}
 	}
 }
@@ -116,20 +116,25 @@ func (m *Manager) loop() {
 			// recover it from the store.
 			m.scan(context.Background())
 		}
-		p, ok := e.Payload.(events.RunStatusPayload)
-		if !ok || p.To != domain.RunRunning {
-			continue
+		switch p := e.Payload.(type) {
+		case events.RunStatusPayload:
+			if p.To == domain.RunRunning {
+				m.attach(e.WorkspaceID, e.RunID, false)
+			}
+		case events.RunAccountPayload:
+			m.attach(e.WorkspaceID, e.RunID, true)
 		}
-		m.attach(e.WorkspaceID, e.RunID)
 	}
 }
 
 // attach taps a run entering running, once: a run cycling through
 // needs-attention and back keeps its original tap (the PTY session, and
-// with it the tap, lives across that transition).
-func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID) {
+// with it the tap, lives across that transition). A run that moved to
+// another account runs in a new container with a new PTY session, so
+// replace swaps the old session's tap for one on the new.
+func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace bool) {
 	m.mu.Lock()
-	if m.closed || m.active[run] != nil {
+	if m.closed || (m.active[run] != nil && !replace) {
 		m.mu.Unlock()
 		return
 	}
@@ -160,8 +165,12 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID) {
 		_ = tap.Close()
 		return
 	}
+	previous := m.active[run]
 	m.active[run] = tap
 	m.mu.Unlock()
+	if previous != nil {
+		_ = previous.Close()
+	}
 
 	m.wg.Add(1)
 	go m.pump(workspace, run, a, tap)
@@ -173,7 +182,9 @@ func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter
 	defer m.wg.Done()
 	defer func() {
 		m.mu.Lock()
-		delete(m.active, run)
+		if m.active[run] == tap {
+			delete(m.active, run)
+		}
 		m.mu.Unlock()
 		_ = tap.Close()
 	}()

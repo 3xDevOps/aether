@@ -63,6 +63,15 @@ func (p Profile) ResumeCommand(session string) []string {
 	return out
 }
 
+// HeadlessResumeCommand continues session as a headless run with prompt.
+func (p Profile) HeadlessResumeCommand(session, prompt string) []string {
+	out := make([]string, len(p.HeadlessResumeArgs))
+	for i, a := range p.HeadlessResumeArgs {
+		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
+	}
+	return Argv(out, prompt)
+}
+
 // InstallCommand is the shell command that installs the agent into the member home.
 func (p Profile) InstallCommand(enhanced bool) string {
 	if p.InstallScript == "" || !enhanced || p.ACPInstall == nil {

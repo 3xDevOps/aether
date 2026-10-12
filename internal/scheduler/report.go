@@ -23,6 +23,9 @@ import (
 // turn end with no pending input shows the reason, and only Working after
 // that park clears it. Background outcomes instead start their terminal finish.
 func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error {
+	if report.UsageLimit && s.continueTerminalRun(ctx, run, report) {
+		return nil
+	}
 	newSession, err := s.applyAgentReport(ctx, run, report)
 	if newSession != nil {
 		s.recordAgentSession(ctx, newSession)

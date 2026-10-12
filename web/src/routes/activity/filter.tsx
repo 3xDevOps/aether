@@ -20,6 +20,8 @@ const filterTypes: EventType[] = [
   'workspace.presence',
   'workspace.budget',
   'run.cost',
+  'run.usage_limit',
+  'run.account',
   'run.overlap',
   'coord.message',
   'git.branch',

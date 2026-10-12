@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -31,9 +32,9 @@ func TestRunCostMeteredWins(t *testing.T) {
 	if err := db.PutRunCost(ctx, unmetered); err != nil {
 		t.Fatalf("PutRunCost unmetered: %v", err)
 	}
-	got, err := db.GetRunCost(ctx, r.ID)
+	got, err := onlyRunCost(ctx, db, r.ID)
 	if err != nil {
-		t.Fatalf("GetRunCost: %v", err)
+		t.Fatalf("ListRunCosts: %v", err)
 	}
 	if got.Metered || got.CostUSD != 0 {
 		t.Fatalf("stored record = %+v, want unmetered and empty", got)
@@ -46,8 +47,8 @@ func TestRunCostMeteredWins(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutRunCost metered: %v", err)
 	}
-	if got, err = db.GetRunCost(ctx, r.ID); err != nil {
-		t.Fatalf("GetRunCost after metering: %v", err)
+	if got, err = onlyRunCost(ctx, db, r.ID); err != nil {
+		t.Fatalf("ListRunCosts after metering: %v", err)
 	}
 	if !got.Metered || got.CostUSD != 0.42 || got.InputTokens != 1200 {
 		t.Fatalf("record = %+v, want the metered numbers", got)
@@ -57,8 +58,8 @@ func TestRunCostMeteredWins(t *testing.T) {
 	if err = db.PutRunCost(ctx, &RunCost{RunID: r.ID, WorkspaceID: w.ID, MemberID: m.ID}); err != nil {
 		t.Fatalf("PutRunCost unmetered again: %v", err)
 	}
-	if got, err = db.GetRunCost(ctx, r.ID); err != nil {
-		t.Fatalf("GetRunCost after downgrade attempt: %v", err)
+	if got, err = onlyRunCost(ctx, db, r.ID); err != nil {
+		t.Fatalf("ListRunCosts after downgrade attempt: %v", err)
 	}
 	if !got.Metered || got.CostUSD != 0.42 {
 		t.Fatalf("record = %+v, want the metered numbers preserved", got)
@@ -71,12 +72,23 @@ func TestRunCostMeteredWins(t *testing.T) {
 	if len(list) != 1 || list[0].RunID != r.ID {
 		t.Fatalf("list = %+v, want one record for the run", list)
 	}
-	if _, err := db.GetRunCost(ctx, "run_missing"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetRunCost on missing run: %v, want ErrNotFound", err)
+	if missing, err := db.ListRunCosts(ctx, "run_missing"); err != nil || len(missing) != 0 {
+		t.Fatalf("ListRunCosts on missing run = %v, %v; want none", missing, err)
 	}
 	if err := db.PutRunCost(ctx, &RunCost{RunID: "run_missing", WorkspaceID: w.ID, MemberID: m.ID}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("PutRunCost for an unknown run: %v, want ErrNotFound", err)
 	}
+}
+
+func onlyRunCost(ctx context.Context, db *DB, run domain.RunID) (*RunCost, error) {
+	records, err := db.ListRunCosts(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) != 1 {
+		return nil, fmt.Errorf("%d records for %s, want 1", len(records), run)
+	}
+	return records[0], nil
 }
 
 // TestSummarizeRunCostsMatchesRollupSemantics covers the scalar history

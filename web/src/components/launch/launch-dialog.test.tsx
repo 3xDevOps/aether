@@ -257,7 +257,7 @@ describe('new run', () => {
       await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
       const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
       expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Bob (shared)', 'Vera (shared)', 'Carol (shared)'])
-      expect(screen.getByText("If Alice's usage is at 95% or more at launch, the run starts on the account here with the most usage left.")).toBeDefined()
+      expect(screen.getByText("The run starts on the account here with the most usage left if Alice's usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.")).toBeDefined()
 
       await userEvent.click(screen.getByRole('button', { name: 'Move Carol (shared) up' }))
       await userEvent.click(screen.getByRole('checkbox', { name: 'Bob (shared)' }))

@@ -417,6 +417,20 @@ adapter is frozen with its container; one that could not start while the
 container was paused starts on Resume. See
 [failure-handling.md](failure-handling.md#enhanced-runs).
 
+A turn that fails on the account's usage limit
+([signals](harnesses.md#usage-limit-signals)) does not park with
+`enhanced turn failed:`. The run moves to another account
+([teams.md](teams.md#usage-fallback)): its container is replaced by one on
+the new account, the log gets a **Continued on `<B>`'s account** notice
+("`<A>`'s usage ran out."), and the restored session is prompted with
+"Your previous turn stopped because `<A>`'s usage ran out. The run
+continues on `<B>`'s account. Continue the task where you stopped." The
+session must be restored there: one that cannot be parks the run with
+`enhanced session failed: <error>` instead of starting a new session. With
+no account to move to, the run parks at `needs-attention` with `Usage limit
+reached on <A>'s account; no fallback has usage left`; a Background run
+over ACP fails with that reason.
+
 ## Switching a running agent
 
 A running Standard or Enhanced run can move to the other mode in the same

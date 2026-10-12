@@ -1,0 +1,2 @@
+# synthesized fixture: codex-acp 2.1.1 session/prompt error shape with another codexErrorInfo; not recorded live.
+{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error","data":{"message":"Codex ran out of room in the model's context window.","codexErrorInfo":"contextWindowExceeded"}}}

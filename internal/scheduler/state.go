@@ -406,6 +406,7 @@ type sidecar struct {
 	AgentSessionID string                `json:"agent_session_id,omitempty"`
 	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
 	Switch         *switchIntent         `json:"switch,omitempty"`
+	AccountSwap    *accountSwap          `json:"account_swap,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -419,6 +420,11 @@ func (e *supervised) sidecar() sidecar {
 	} else {
 		pendingInputs = nil
 		inputPublishPending = false
+	}
+	var swap *accountSwap
+	if e.accountSwap != nil {
+		copied := *e.accountSwap
+		swap = &copied
 	}
 	var relaunchedAt, idleReportAt *time.Time
 	if t := e.relaunchedAt; !t.IsZero() {
@@ -465,6 +471,7 @@ func (e *supervised) sidecar() sidecar {
 		AgentSessionID:      e.agentSessionID,
 		AgentExec:           e.agentExec,
 		Switch:              e.switchIntent,
+		AccountSwap:         swap,
 	}
 }
 

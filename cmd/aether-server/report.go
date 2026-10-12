@@ -104,6 +104,7 @@ func report(args []string) {
 		Reason:       rep.Reason,
 		InputUpdates: rep.InputUpdates,
 		SessionID:    rep.SessionID,
+		UsageLimit:   rep.UsageLimit,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)

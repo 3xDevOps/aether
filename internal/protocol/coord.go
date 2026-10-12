@@ -290,6 +290,9 @@ type RunReportParams struct {
 	Reason       string                  `json:"reason,omitempty"`
 	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
 	SessionID    string                  `json:"session_id,omitempty"`
+	// UsageLimit marks an idle report whose turn stopped on the account's
+	// subscription usage limit; Reason is the agent's message for it.
+	UsageLimit bool `json:"usage_limit,omitempty"`
 }
 
 // RunReportResult is the result of run.report. It is empty: the caller is

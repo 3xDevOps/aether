@@ -19,6 +19,7 @@ import (
 type Store interface {
 	store.CostStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
+	ListRunAccountSegments(ctx context.Context, id domain.RunID) ([]*store.RunAccountSegment, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 }
 
@@ -186,9 +187,15 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 	s.mu.Unlock()
 }
 
-// record stores a metered result and re-evaluates the workspace's budget.
+// record stores a metered result in the run's current account segment and
+// re-evaluates the workspace's budget.
 func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCostPayload) {
 	r, err := s.store.GetRun(ctx, run)
+	if err != nil {
+		slog.Warn("cost: cannot attribute usage", "run", run, "error", err)
+		return
+	}
+	segments, err := s.store.ListRunAccountSegments(ctx, run)
 	if err != nil {
 		slog.Warn("cost: cannot attribute usage", "run", run, "error", err)
 		return
@@ -202,6 +209,9 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 		CostUSD:      p.CostUSD,
 		Metered:      true,
 	}
+	if len(segments) > 0 {
+		c.Segment = segments[len(segments)-1].Seq
+	}
 	if err := s.store.PutRunCost(ctx, c); err != nil {
 		slog.Warn("cost: record usage failed", "run", run, "error", err)
 		return
@@ -212,17 +222,18 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 // markUnmetered records a finished run nobody measured, and announces it
 // with the documented unmetered signal so consumers can tell "we did not
 // measure this" from "this cost nothing". A run that already has a record
-// - metered or not - is left alone.
+// - metered or not - is left alone. The marker is the run's first segment,
+// on the account it launched on, where the run is counted.
 func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 	if run == "" {
 		return
 	}
-	_, err := s.store.GetRunCost(ctx, run)
-	if err == nil {
+	records, err := s.store.ListRunCosts(ctx, run)
+	if err != nil {
+		slog.Warn("cost: read usage failed", "run", run, "error", err)
 		return
 	}
-	if !errors.Is(err, store.ErrNotFound) {
-		slog.Warn("cost: read usage failed", "run", run, "error", err)
+	if len(records) > 0 {
 		return
 	}
 	r, err := s.store.GetRun(ctx, run)
@@ -230,8 +241,17 @@ func (s *Service) markUnmetered(ctx context.Context, run domain.RunID) {
 		slog.Warn("cost: cannot attribute usage", "run", run, "error", err)
 		return
 	}
+	segments, err := s.store.ListRunAccountSegments(ctx, run)
+	if err != nil {
+		slog.Warn("cost: cannot attribute usage", "run", run, "error", err)
+		return
+	}
+	account := r.AccountMember()
+	if len(segments) > 0 {
+		account = segments[0].AccountMemberID
+	}
 	if err := s.store.PutRunCost(ctx, &store.RunCost{
-		RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: r.AccountMember(),
+		RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: account,
 	}); err != nil {
 		slog.Warn("cost: record unmetered run failed", "run", run, "error", err)
 		return

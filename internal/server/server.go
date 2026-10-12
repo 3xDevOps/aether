@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
@@ -443,6 +444,21 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
+	rooms := sshCfg.Services.Rooms
+	s.sched.UseUsageFallback(scheduler.UsageFallback{
+		Usage:           sshCfg.Services.Usage,
+		AuthorizationMu: authMu,
+		Note: func(ctx context.Context, run *domain.Run, body, key string) error {
+			if rooms == nil {
+				return errors.New("the room service is not configured")
+			}
+			_, postErr := rooms.Post(ctx, collab.MessageInput{
+				WorkspaceID: run.WorkspaceID, RunID: run.ID, ActorID: run.MemberID,
+				Kind: store.RoomMessageSystem, Body: body, IdempotencyKey: key,
+			})
+			return postErr
+		},
+	})
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
 	}

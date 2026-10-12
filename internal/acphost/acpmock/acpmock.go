@@ -32,6 +32,10 @@ const (
 	PromptAskForm = "ask form"
 	// PromptRefuse makes the agent refuse the prompt with authRequired.
 	PromptRefuse = "refuse"
+	// PromptUsageLimit makes the agent fail the prompt as Claude's adapter
+	// does when the account's usage limit is reached
+	// (acphost/testdata/claude_usage_limit.jsonl).
+	PromptUsageLimit = "hit the usage limit"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
@@ -259,6 +263,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptRefuse:
 		return nil, acp.NewAuthRequired(nil)
+	case PromptUsageLimit:
+		return nil, &acp.RequestError{Code: -32603, Message: "Internal error: You've hit your weekly limit · resets Oct 14, 9am (UTC)",
+			Data: map[string]any{"errorKind": "rate_limit"}}
 	case PromptAskForm:
 		res, err := acp.SendRequest[struct {
 			Action  string         `json:"action"`

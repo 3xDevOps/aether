@@ -123,7 +123,13 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
-	d.connect(ctx, entry, openNew)
+	d.s.mu.Lock()
+	how := openNew
+	if entry.continuation != "" {
+		how = openContinue
+	}
+	d.s.mu.Unlock()
+	d.connect(ctx, entry, how)
 	return nil
 }
 
@@ -240,6 +246,9 @@ const (
 	// openRestore starts a new session when the stored one cannot be restored.
 	openRestore
 	openSwitch
+	// openContinue restores the session in a container that replaced the
+	// run's, on another account, and sends it entry.continuation.
+	openContinue
 )
 
 func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen) {
@@ -269,6 +278,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 
 	d.s.mu.Lock()
 	paused, cid, coordDir, cachedSession, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.task
+	continuation := entry.continuation
 	oneShot := entry.launchMode == domain.LaunchHeadless
 	d.s.mu.Unlock()
 	if paused {
@@ -334,31 +344,18 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Cwd:            d.s.cfg.WorktreeMount,
 		MCPServers:     mcp,
 		SessionID:      sessionID,
-		RequireRestore: how == openSwitch,
+		RequireRestore: how == openSwitch || how == openContinue,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		TitleLookup:    titleLookup,
 		OnState: func(working bool, reason string, failed error) {
-			if oneShot && !working {
-				if reason != "" {
-					d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
-				}
+			if _, ok := acphost.UsageLimit(failed); ok {
+				// The move stops this session, which waits for this
+				// callback to return.
+				go d.usageLimit(entry, oneShot, reason, failed)
 				return
 			}
-			report := agentstatus.Report{State: agentstatus.Working}
-			switch {
-			case working:
-			case failed != nil:
-				// Not a turn end: a waiting outcome report must not finish
-				// the run on a turn that failed.
-				report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
-			default:
-				report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
-			}
-			d.report(runID, report)
-			if !working {
-				d.wakeIdle(runID)
-			}
+			d.turnState(entry, oneShot, working, reason, failed)
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})
@@ -390,6 +387,14 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		c.svc.EnhancedSessionOpened(ctx, runID)
 	}
 	switch {
+	case how == openContinue:
+		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(continuation)}, false, nil); err != nil {
+			if oneShot {
+				d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
+			} else {
+				slog.Warn("scheduler: send the continuation to the agent", "run", runID, "error", err)
+			}
+		}
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":
@@ -402,6 +407,49 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.wakeIdle(runID)
 	}
 	return nil
+}
+
+func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason string, failed error) {
+	if oneShot && !working {
+		if reason != "" {
+			d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
+		}
+		return
+	}
+	report := agentstatus.Report{State: agentstatus.Working}
+	switch {
+	case working:
+	case failed != nil:
+		// Not a turn end: a waiting outcome report must not finish the run
+		// on a turn that failed.
+		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
+	default:
+		report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
+	}
+	d.report(entry.runID, report)
+	if !working {
+		d.wakeIdle(entry.runID)
+	}
+}
+
+// usageLimit handles a turn that failed on the account's usage limit: the
+// run continues on another account, or stops with the reason why not.
+func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error) {
+	outcome, stopped := d.s.continueLiveRun(entry, false)
+	switch outcome {
+	case usageRefused:
+		d.turnState(entry, oneShot, false, reason, failed)
+	case usageNoFallback:
+		report := agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
+		if !oneShot {
+			d.report(entry.runID, report)
+			return
+		}
+		d.s.mu.Lock()
+		entry.failReason = stopped
+		d.s.mu.Unlock()
+		d.endOneShot(entry, false, report)
+	}
 }
 
 func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {

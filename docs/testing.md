@@ -22,6 +22,20 @@ Layers, per the design spec's testing strategy:
   `internal/fallback` owns usage-fallback selection against a stub quota
   reader and a real store: the 95% threshold, automatic and explicit order,
   unreadable usage, reset windows, a revoked share, and the empty pool.
+  The mid-run move is proven in `internal/scheduler/usage_fallback_test.go`
+  with the fake runtime and `acpmock`: an Enhanced turn failure, a headless
+  Claude exit and a Standard `StopFailure` report each continue on the shared
+  account in a new container that resumes the session, an Enhanced run with
+  nowhere to go parks with the no-fallback reason, and
+  `TestRestartSettlesAnInterruptedAccountMove` restarts mid-move. The
+  signals are pinned against vendor-shaped fixtures and their near misses:
+  `TestUsageLimitFromPromptError` (`internal/acphost/testdata`: Claude,
+  Codex and opencode prompt errors), `TestClaudeUsageLimit`
+  (`internal/adapter/testdata/claude_usage_limit.jsonl` and
+  `claude_rate_limited.jsonl`) and `TestClaudeStopFailureUsageLimit`
+  (`internal/agentstatus`). `TestCostStaysWithTheAccountThatSpentIt`
+  (`internal/cost`) keeps each segment's cost on its own account, through
+  a run deletion.
   `make test TEST_PKGS=./internal/store` covers concurrent database opens
   against real SQLite files. The migration contention regressions keep a
   competing writer active while checking startup resumption from committed
@@ -542,6 +556,7 @@ Scenarios:
 | `TestIntegrationWorkspaceEnvironment` (`workspace_environment_integration_test.go`) | The workspace environment against real Docker: an admin sets a setup script, a plain variable and a secret over the control channel; a collaborator's run finds the script already run in `/workspace` with both; a failing script fails the launch with its output in the error's `setup_output`, the secret masked, and only the exit code in the run's reason. Skips without a daemon |
 | `TestIntegrationCoordinationEndToEnd`, `TestIntegrationCoordinationKillSwitch` (`coordination_integration_test.go`) | Conflict radar and run-to-run coordination over the MCP bridge, including server restart with surviving containers and the kill switch |
 | `TestIntegrationWorkerFallsBackFromExhaustedAccount` (`fallback_integration_test.go`) | Usage fallback for a swarm worker, in the in-process runtime with a stub quota reader (`server.Config.Usage`): Bo shares his account with Ada, Ada's swarm declares a `claude` worker on it, Bo's usage reads 100%, and `worker.start` launches the worker on Ada's account; the attempt keeps Bo as `account_owner_id` with Ada as `launch_account_id`, and the run reports Bo as `requested_account_member_id`. It runs in the `integration-server-rest` job |
+| `TestIntegrationHeadlessFallback` (`fallback_integration_test.go`) | A mid-run move, in the in-process runtime with the same stub: Ada launches headless `claude` on Bo's shared account, the agent prints `internal/adapter/testdata/claude_usage_limit.jsonl` and exits 1, and the run stays `running` on Ada's account with Bo as `requested_account_member_id`, in a new container whose command resumes session `sess-1` and whose `AETHER_ACCOUNT_MEMBER_ID` is Ada's; the room gets "Continued on Ada's account because Bo's usage ran out." Enhanced moves need ACP exec, which this runtime lacks, so the scheduler suite covers them. It runs in the `integration-server-rest` job (build tag `integration`) |
 | `TestIntegrationCoordinationInContainer` (`coordination_container_integration_test.go`) | The same bridge inside real containers: the run socket and both verified read-only executable binds are realized, no Aether-managed `mcp.json` is installed, `co-authors` is found at `0444`, the staged binary executes as `/opt/aether/aether-server mcp` by a non-root agent when manually configured, and a status/send/inbox round trip works between two overlapping runs |
 | `TestIntegrationRunSSH` (`run_ssh_integration_test.go`) | The system `ssh`, `scp` and `sftp` clients into a real run container through the configuration `aether ssh-config` writes (Docker only): a command's output, user, checkout and exit status with nothing added to stderr, `aether ssh`, a login shell on a real pts, files in both directions, `ssh -L` to a listener on the loopback of a container with no other network, a forward to another host refused, an editor-style bootstrap (a script piped to `sh`, its output parsed, then a forward to the server it left running, which is stopped when the session ends), the timeline entry, an unshared collaborator refused, a paused run refused while a forward opened before the pause survives it, a dropped session's listener stopped, and a closed run refused. The authorization matrix, the caps, live revocation and its fail-closed limit, the swarm worker hold and the timeline admission are unit-tested in `internal/sshd/run_ssh_test.go` |
 | `TestIntegrationAgentStatusReporterInContainer` (`agentstatus_integration_test.go`) | The status reporter inside a real container, on the shipped `claude` and `pi` profiles in one server: each asset written at `0444` into the run's coordination directory, the argument pointing the harness at it, the staged binary running `aether-server report claude` and `report pi --json ...` against the run's own socket, and each run moving to `needs-attention` immediately after the turn ends, then back to `running` on the agent's next turn |
@@ -699,7 +714,8 @@ needed; a logged-out Codex skips at `session/new`.
 `internal/acphost/acpmock` replays conversations recorded from the real
 adapters and answers prompts by their text, so tests can drive a permission
 request (`ask permission`), a form question (`ask form`), a turn that runs
-until cancelled (`wait`) or a paced turn with a plan, tool calls, command
+until cancelled (`wait`), Claude's usage-limit prompt error (`hit the usage
+limit`) or a paced turn with a plan, tool calls, command
 output and a diff (`demo`). The
 scheduler's unit tests run it behind the fake runtime;
 `TestIntegrationEnhancedRunDocker` (scheduler) and

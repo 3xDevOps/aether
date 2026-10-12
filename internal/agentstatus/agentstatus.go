@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -34,12 +35,15 @@ const (
 )
 
 // An input-only report preserves the last execution state. SessionID is the
-// agent's top-level session, not a subagent's.
+// agent's top-level session, not a subagent's. UsageLimit marks a turn that
+// stopped on the account's subscription usage limit; Reason is then the
+// agent's own message for it.
 type Report struct {
 	State        State                   `json:"state,omitempty"`
 	Reason       string                  `json:"reason,omitempty"`
 	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
 	SessionID    string                  `json:"session_id,omitempty"`
+	UsageLimit   bool                    `json:"usage_limit,omitempty"`
 }
 
 const ReporterCommand = coordtransport.BinaryPath
@@ -67,9 +71,14 @@ type claudeHook struct {
 	ElicitationID   string     `json:"elicitation_id"`
 	IsInterrupt     bool       `json:"is_interrupt"`
 	BackgroundTasks []struct{} `json:"background_tasks"`
+	// Error and LastAssistantMessage are StopFailure's; the message is the
+	// API error Claude Code showed, read only for a usage limit.
+	Error                string `json:"error"`
+	LastAssistantMessage string `json:"last_assistant_message"`
 }
 
-// FromClaudeHook reads identifiers only, never tool inputs, answers or transcripts.
+// FromClaudeHook reads identifiers only, never tool inputs, answers or
+// transcripts, plus the usage-limit message of a StopFailure.
 // PermissionRequest explicitly lacks tool_use_id; Notification is advisory.
 // Neither can establish a correlated request using the command-hook contract.
 func FromClaudeHook(stdin []byte) (Report, bool) {
@@ -128,11 +137,15 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 		if len(hook.BackgroundTasks) > 0 {
 			return Report{State: Working}, true
 		}
-		reason := ReasonIdle
-		if hook.Event == "StopFailure" {
-			reason = "agent failed"
+		if hook.Event == "Stop" {
+			return Report{State: Idle, Reason: ReasonIdle}, true
 		}
-		return Report{State: Idle, Reason: reason}, true
+		// "rate_limit" also covers transient 429s; only the vendor's
+		// usage-limit wording marks the account's limit.
+		if hook.Error == "rate_limit" && acphost.IsUsageLimitMessage(hook.LastAssistantMessage) {
+			return Report{State: Idle, Reason: hook.LastAssistantMessage, UsageLimit: true}, true
+		}
+		return Report{State: Idle, Reason: "agent failed"}, true
 	case "SessionEnd":
 		if hook.SessionID == "" {
 			return Report{}, false

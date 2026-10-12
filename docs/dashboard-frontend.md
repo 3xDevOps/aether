@@ -812,7 +812,10 @@ Removal also repairs the selection and open route before any refresh awaits.
   because a handoff publishes no `run.status` event to carry the new owner.
   `run.title`, `run.protected` and `run.archived` follow the same fetch-first
   rule on a run the client has never seen; `run.controller` skips an unknown
-  run, whose snapshot carries the holder.
+  run, whose snapshot carries the holder. `run.account` likewise skips an
+  unknown run, and on a known one replaces `account_member_id` and
+  `requested_account_member_id` with the payload's, so the header names the
+  new account at once.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
@@ -936,6 +939,7 @@ both show:
 | Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
+| Usage limit with no account to move to | **Open** |
 | Teammate's message waiting for the controller | **Review message** |
 | Integrator down | **Open swarm** |
 | Unreviewed finish | **Review** |
@@ -1061,6 +1065,7 @@ first that applies:
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
 | Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
+| Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
 | Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | Waiting for your reply |
 | Parked at `needs-attention` without a reported outcome (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
@@ -1072,8 +1077,8 @@ requests. A stopped integrator counts only while the swarm record names it as
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
 Background (`headless`) run reaches Needs you only through a pending Aether
-approval, the swarm rows, a blocked report, an Enhanced failure or an
-unreviewed finish. A Working run's reason is what its agent is doing ("Reading
+approval, the swarm rows, a blocked report, an Enhanced failure, a usage
+limit or an unreviewed finish. A Working run's reason is what its agent is doing ("Reading
 src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working".
 
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
@@ -1389,10 +1394,12 @@ Below the select, **Options** holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
 every listed account except the selected one, each with a checkbox and
-**Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "If
-`<owner>`'s usage is at 95% or more at launch, the run starts on the
-account here with the most usage left", or "on the first ticked account,
-top to bottom, with usage left" once the list was changed. Untouched, the
+**Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "The
+run starts on the account here with the most usage left if `<owner>`'s
+usage is at 95% or more at launch, and continues there if the vendor
+reports the limit mid-run.", with "the first ticked account, top to bottom,
+with usage left" in place of "the account here with the most usage left"
+once the list was changed. Untouched, the
 form sends neither field and the server orders by usage left. After a
 reorder or untick it sends the ticked accounts in order as
 `fallback_account_member_ids`; with the checkbox off, or every account
@@ -1472,7 +1479,8 @@ protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
 "On `<name>`'s account (fallback)" when the run carries
-`requested_account_member_id` ([usage fallback](teams.md#usage-fallback)),
+`requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
+a `run.account` event updates it live when the run moves),
 the branch (click copies it) and the owner. Container queries on the state
 line drop the branch first, then the owner, then the agent's name (the glyph
 stays), and only on a phone-width column the mode word; the reason truncates
@@ -3202,7 +3210,12 @@ questions and queued messages stay contextual to their run, in its Details
   name without words. `src/lib/events.test.tsx` reads the event, timeline
   and room vocabularies from the Go sources under `internal/`, so a server
   type without words fails the test. A type this dashboard has never heard of
-  reads "Something changed" under the type name "Other".
+  reads "Something changed" under the type name "Other". A
+  [usage fallback](teams.md#usage-fallback) move reads "Moved from Alice's
+  account to your account" (`run.account`, filter **Account changed**), and
+  the headless Claude output that triggered it "Usage limit reached: You've
+  hit your session limit · resets 3pm (UTC)", the agent's message cut at 160
+  characters (`run.usage_limit`, filter **Usage limit reached**).
 - **Opening a run is one row.** Viewing a run takes its control and leaving
   releases it; `foldVisits` (`routes/activity/visits.ts`) folds each
   `run.controller` take and the release that ends it into one "Alice viewed

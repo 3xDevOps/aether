@@ -253,6 +253,17 @@ member-defined agent still runs only on its member's own account. A swarm
 worker is checked against the swarm's accountable human, and an integrator
 launch or replacement against the member who creates or replaces it.
 
+A run whose agent reports its usage limit mid-run moves to another account
+the same way: the move is a launch on the new account, with candidates
+authorized again under the launch authorization lock and the same
+installation and login rules, and it never returns to an account the run
+already used. The signal comes from inside the run's container (agent
+output, the Claude `StopFailure` hook payload, the ACP error), so the agent
+can forge it and force a move, but only to an account the launcher may
+already use that has usage left: the same reach as the launcher picking it.
+Revoking a share still does not stop a run that has already moved onto that
+account.
+
 Containers created before shares were narrowed to the login path still mount
 the account owner's whole home until they end. They stay supervised, and
 reopening one is refused:
@@ -706,7 +717,7 @@ provider read.
 Launches read the same cached quota server-side to decide on
 [usage fallback](teams.md#usage-fallback): for `claude` and `codex` runs,
 the requested account's, and every candidate's only when that one is
-exhausted. The read happens before the server takes its launch
+exhausted. A run that hits its usage limit mid-run reads every candidate's. The read happens before the server takes its launch
 authorization lock, so a slow vendor endpoint does not hold up other
 launches; every account is authorized again under the lock, and a launch
 never sends the figures it read to the client.

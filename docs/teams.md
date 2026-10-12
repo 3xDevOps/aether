@@ -1061,6 +1061,34 @@ A run that fell back keeps its launcher as owner. Its header reads
 **On `<name>`'s account (fallback)**, and `aether runs` shows the account it
 uses in the `ACCOUNT` column with ` (fallback)` appended.
 
+A run also moves mid-run when its agent reports that the account's usage
+limit stopped it: Enhanced runs of `claude` and `codex`, Background runs of
+`claude` and of `codex` over ACP, and Standard `claude` runs
+([harnesses.md](harnesses.md#usage-limit-signals) lists each signal and what
+is not covered). The next account is chosen as at launch, leaving out the
+current account and every account the run already used. Aether stops the
+agent, removes the run's container, and starts a new one with that account's
+login; the agent resumes its own session there and is told: "Your previous
+turn stopped because Grace's usage ran out. The run continues on Lin's
+account. Continue the task where you stopped." The run keeps its ID,
+checkout, branch, room and swarm attempt; processes in the old container,
+its terminals included, end. The run's room gets "Continued on Lin's
+account because Grace's usage ran out.", the header switches to Lin's
+account, and `aether runs` marks it ` (fallback)`.
+
+With no account to move to, or with fallback off, an Enhanced or Standard
+run parks at `needs-attention` and a Background run fails (a swarm's
+Background worker parks instead), both with
+`Usage limit reached on Grace's account; no fallback has usage left`, which
+the dashboard shows as **Needs you**. A move that fails once the old
+container is gone fails the run with `Usage limit reached on Grace's
+account; continuing on Lin's account failed: <error>`.
+
+Metered cost stays with the account that spent it. `aether cost` counts a
+moved run once, on the account it launched on, and adds each stretch's
+usage to the account it ran on; `aether cost --runs` lists the run once,
+with its whole spend, under the account it is on last.
+
 ### Launching a swarm
 
 A **swarm** is one objective handed to an interactive integrator
@@ -1145,9 +1173,11 @@ att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5  mem-h9zeh65yp9
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
-An attempt's `ACCOUNT` is the member ID of the account its run uses, with
-` (fallback)` appended when [usage fallback](#usage-fallback) moved it off
-the account the swarm declared for that worker. Workers fall back within the
+An attempt's `ACCOUNT` is the member ID of the account its run launched on,
+with ` (fallback)` appended when [usage fallback](#usage-fallback) launched
+it off the account the swarm declared for that worker. A worker that later
+moves to another account keeps its attempt; `aether runs` shows the account
+it is on. Workers fall back within the
 accountable human's accounts. An integrator that cannot launch for lack of
 usage leaves the swarm in place with that error, and the server retries the
 launch ([failure-handling.md](failure-handling.md#integrator-launch-failures)).

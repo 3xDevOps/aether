@@ -730,6 +730,12 @@ export interface RunControllerPayload {
   member_id: string
   last_member_id?: string
 }
+/** `requested_account_member_id` is absent once the run is back on the account it asked for. */
+export interface RunAccountPayload {
+  account_member_id: string
+  previous_account_member_id: string
+  requested_account_member_id?: string
+}
 /** Null means the run was restored. */
 export interface RunArchivedPayload {
   archived_at: string | null

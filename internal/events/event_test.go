@@ -27,6 +27,8 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunOutcomeSeenPayload{},
 		RunFinishOpenedPayload{},
 		RunCostPayload{InputTokens: 1200, OutputTokens: 340, CostUSD: 0.42, Metered: true},
+		RunUsageLimitPayload{Message: "You've hit your session limit · resets 3pm (UTC)"},
+		RunAccountPayload{Account: "mem_b", Previous: "mem_a", Requested: "mem_a"},
 		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
 		PresencePayload{State: PresenceWatching},
 		ApprovalPayload{RequestID: "req_1", Action: "rm -rf build", Decision: ApprovalDenied},
