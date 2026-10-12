@@ -41,15 +41,20 @@ func TestEdgeURLOptionIsValidated(t *testing.T) {
 func TestEdgeStatusAndClaimCode(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	if err := edgeClaimCode(&out, dir, ""); err != nil {
+	if err := edgeClaimCode(&out, dir, "https://edge.example", ""); err != nil {
 		t.Fatal(err)
 	}
 	id, err := serverID(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "aether link --claim "+id+"-") {
-		t.Errorf("claim-code output lacks the link command:\n%s", out.String())
+	lines := strings.Split(out.String(), "\n")
+	code := strings.TrimPrefix(lines[len(lines)-2], "  aether link --claim ")
+	if len(lines) != 4 || !strings.HasPrefix(code, id+"-") ||
+		!strings.HasPrefix(lines[0], "claim link: aether://claim?edge=https%3A%2F%2Fedge.example&server="+id+"#"+strings.TrimPrefix(code, id+"-")+" (valid until ") ||
+		!strings.HasSuffix(lines[0], ", 5 attempts)") ||
+		lines[1] != "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:" {
+		t.Errorf("claim-code output:\n%s", out.String())
 	}
 
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -94,20 +99,21 @@ func TestClaimCodeForAnAdmin(t *testing.T) {
 		"": "the server has members, so a claim without --admin would be refused; name the admin to connect: aether-server edge claim-code --admin <member id>; " +
 			"the admins are: " + string(admin.ID) + " (Ada); an admin reaches the same result from the dashboard",
 	} {
-		if err := edgeClaimCode(&out, dir, id); err == nil || !strings.Contains(err.Error(), want) {
+		if err := edgeClaimCode(&out, dir, "https://edge.example", id); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("claim-code --admin %s = %v, want %q", id, err, want)
 		}
 		if _, ok, _ := state.ClaimCode(); ok {
 			t.Fatalf("claim-code --admin %s issued a code", id)
 		}
 	}
-	if err := edgeClaimCode(&out, dir, admin.ID); err != nil {
+	if err := edgeClaimCode(&out, dir, "https://edge.example", admin.ID); err != nil {
 		t.Fatal(err)
 	}
 	if c, ok, err := state.ClaimCode(); err != nil || !ok || c.Admin != string(admin.ID) {
 		t.Fatalf("claim code = %+v, %v, %v; want one naming %s", c, ok, err, admin.ID)
 	}
-	if !strings.Contains(out.String(), "binds the claiming account to admin Ada ("+string(admin.ID)+")") {
+	if !strings.Contains(out.String(), "claim link: aether://claim?edge=") ||
+		!strings.Contains(out.String(), "binds the claiming account to admin Ada ("+string(admin.ID)+")") {
 		t.Fatalf("claim-code --admin does not say what the claim does:\n%s", out.String())
 	}
 }

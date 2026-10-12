@@ -43,6 +43,21 @@ func JoinLink(edgeURL, serverID, invitationID, secret string) string {
 	return strings.TrimSuffix(edgeURL, "/") + "/join/" + serverID + "/" + invitationID + "#" + secret
 }
 
+// ClaimLink is the deep link a claim code is printed as:
+// aether://claim?edge=<relay origin>&server=<server id>#<secret>. There is
+// no claim page on the edge, since a page it serves could read the secret.
+func ClaimLink(edgeURL, code string) (string, error) {
+	origin, err := Origin(edgeURL)
+	if err != nil {
+		return "", err
+	}
+	normalized, serverID, err := ParseClaimCode(code)
+	if err != nil {
+		return "", err
+	}
+	return "aether://claim?edge=" + url.QueryEscape(origin) + "&server=" + serverID + "#" + normalized[len(serverID)+1:], nil
+}
+
 // ParseJoinLink reads a link from JoinLink, or the deep link the edge's
 // join page opens, aether://join?edge=<origin>&server=<id>&invitation=<id>#<secret>,
 // and returns the edge's origin with the parts it names.

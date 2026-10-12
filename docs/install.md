@@ -1074,8 +1074,8 @@ it asks who may reach the server through it, `1` (account access) or `2`
 ([edge.md](edge.md#access-policies)). Setup is the only thing that turns
 the edge on: `edge-url` is empty unless the config file or a flag names an
 edge, so an upgrade never enrolls an existing server. With the edge on,
-setup ends by printing the server id and a claim code for `aether link
---claim <code>`.
+setup ends by printing the server id and a claim link for the Aether
+app, with the claim code inside it for `aether link --claim <code>`.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 

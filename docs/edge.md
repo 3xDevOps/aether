@@ -294,14 +294,18 @@ edge: https://edge.onaether.dev
 edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
-claim code: <server id>-<secret> (valid until 3:04PM, 5 attempts)
-claim this server with:
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
   aether link --claim <server id>-<secret>
 ```
 
-The claim code lasts 30 minutes and five attempts; `sudo aether-server
+The claim code, `<server id>-<secret>`, is inside the claim link: the
+desktop app opens the link, and the dashboard's Connect page accepts it
+pasted; `aether link --claim <code>` takes the code in a terminal. The
+code lasts 30 minutes and five attempts; `sudo aether-server
 edge claim-code` prints a new one for a server without members, and is
-refused while the server has an owner. Start the server first: `aether link --claim <code>` opens an SSH
+refused while the server has an owner. Start the server first: the app or
+`aether link --claim <code>` opens an SSH
 connection through the edge to the server the code names, and presents the
 code inside it once the server's host key has proved the id
 ([Claiming](#claiming)). The server compares the code in constant time,
@@ -849,13 +853,13 @@ sudo aether-server edge claim-code --admin <member id>
 ```
 
 ```
-claim code: <server id>-<secret> (valid until 3:04PM, 5 attempts)
-claim this server with:
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
   aether link --claim <server id>-<secret>
 the claim binds the claiming account to admin <name> (<member id>) and approves the claiming device; it creates no member and changes no role
 ```
 
-The admin signs in with the account they now use and claims with that code.
+The admin signs in with the account they now use and claims with that link or code.
 The server binds the account to that member, approves the claiming device
 and becomes owned by that account, and logs `sshd: console recovery bound
 an edge account to an admin`. It creates no member and raises no role: a

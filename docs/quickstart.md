@@ -103,17 +103,18 @@ which turns it off. It then asks for the **access policy**: `1` (account
 access) lets people you invite in by signing in with GitHub; `2`
 (approved devices) makes each new device wait until a person approves it.
 [edge.md](edge.md#access-policies) compares them. Setup then prints the
-server's id and a **claim code**, which makes whoever uses it first the
-server's admin:
+server's id and a **claim link**, which makes whoever uses it first the
+server's admin. The claim code inside it, `<server id>-<secret>`, is what
+`aether link --claim` takes:
 
 ```
 edge: https://edge.onaether.dev
 edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
-claim code: <code> (valid until 3:04PM, 5 attempts)
-claim this server with:
-  aether link --claim <code>
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
+  aether link --claim <server id>-<secret>
 ```
 
 Run the activation line and the server is live on `:2222`. The SSH port is
@@ -128,7 +129,9 @@ unprivileged, and every serve option.
 
 ## 3. Link from your machine
 
-**Through the edge**, with the claim code from step 2:
+**Through the edge**, open the claim link from step 2 on your computer
+with the Aether app, or paste it into the app's Connect page. In a
+terminal, use the claim code:
 
 ```sh
 aether login

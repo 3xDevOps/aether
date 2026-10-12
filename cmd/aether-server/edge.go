@@ -108,7 +108,7 @@ func edgeCmd(args []string) error {
 	case "status":
 		return edgeStatus(os.Stdout, *o.dataDir, edgeURL, edgeproto.AccessPolicy(*o.edgeAccess), time.Now())
 	case "claim-code":
-		return edgeClaimCode(os.Stdout, *o.dataDir, domain.MemberID(*admin))
+		return edgeClaimCode(os.Stdout, *o.dataDir, edgeURL, domain.MemberID(*admin))
 	case "trust":
 		return edgeTrust(os.Stdout, os.Stdin, *o.dataDir, edgeURL)
 	case "leave":
@@ -195,7 +195,7 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 // server, such as after deleting their account. It never creates a member
 // or changes a role, so a member who is not an admin is refused here and
 // again when the claim is made.
-func edgeClaimCode(w io.Writer, dataDir string, admin domain.MemberID) error {
+func edgeClaimCode(w io.Writer, dataDir, edgeURL string, admin domain.MemberID) error {
 	state := edgeagent.OpenState(dataDir)
 	owner, err := state.Owner()
 	if err != nil {
@@ -220,7 +220,9 @@ func edgeClaimCode(w io.Writer, dataDir string, admin domain.MemberID) error {
 	if err != nil {
 		return err
 	}
-	printClaimCode(w, code, expires)
+	if err := printClaimCode(w, edgeURL, code, expires); err != nil {
+		return err
+	}
 	if m != nil {
 		_, _ = fmt.Fprintf(w, "the claim binds the claiming account to admin %s (%s) and approves the claiming device; it creates no member and changes no role\n",
 			m.DisplayName, m.ID)
@@ -286,9 +288,14 @@ func adminsOf(members []*domain.Member) string {
 	return strings.Join(admins, ", ")
 }
 
-func printClaimCode(w io.Writer, code string, expires time.Time) {
-	_, _ = fmt.Fprintf(w, "claim code: %s (valid until %s, %d attempts)\n", code, expires.Local().Format(time.Kitchen), edgeproto.ClaimCodeAttempts)
-	_, _ = fmt.Fprintf(w, "claim this server with:\n  aether link --claim %s\n", code)
+func printClaimCode(w io.Writer, edgeURL, code string, expires time.Time) error {
+	link, err := edgeproto.ClaimLink(edgeURL, code)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "claim link: %s (valid until %s, %d attempts)\n", link, expires.Local().Format(time.Kitchen), edgeproto.ClaimCodeAttempts)
+	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  aether link --claim %s\n", code)
+	return nil
 }
 
 func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {

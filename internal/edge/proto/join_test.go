@@ -51,6 +51,24 @@ func TestJoinLink(t *testing.T) {
 	}
 }
 
+func TestClaimLink(t *testing.T) {
+	id := ServerID(seedSigner(t, 1).PublicKey())
+	code, err := NewClaimCode(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := ClaimLink(testOrigin+"/", strings.ToUpper(code))
+	if want := "aether://claim?edge=https%3A%2F%2Fedge.example&server=" + id + "#" + code[len(id)+1:]; err != nil || link != want {
+		t.Fatalf("ClaimLink = %q, %v; want %q", link, err, want)
+	}
+	if _, err := ClaimLink(testOrigin, code[:len(code)-1]); err == nil {
+		t.Error("ClaimLink accepted a short code")
+	}
+	if _, err := ClaimLink("edge.example", code); err == nil {
+		t.Error("ClaimLink accepted an edge url without a scheme")
+	}
+}
+
 func TestJoinUser(t *testing.T) {
 	secret := NewJoinSecret()
 	owner := Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: "1001"}
