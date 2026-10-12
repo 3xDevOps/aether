@@ -185,6 +185,34 @@ function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn
   )
 }
 
+function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => void }) {
+  const [text, setText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <form
+      className="flex min-w-0 max-w-sm flex-col items-start gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const link = text.trim()
+        if (parseJoin(link)) onHand({ kind: 'join', link })
+        else if (parseClaim(link)?.edge) onHand({ kind: 'claim', link })
+        else setError('That is not an invitation or claim link.')
+      }}
+    >
+      <FormField
+        className="self-stretch"
+        label="Have an invitation or claim link?"
+        error={error ?? undefined}
+      >
+        <Input className="font-code" autoComplete="off" value={text} onChange={(e) => { setText(e.target.value); setError(null) }} />
+      </FormField>
+      <Button type="submit" size="sm" variant="secondary" disabled={!text.trim()}>
+        Continue
+      </Button>
+    </form>
+  )
+}
+
 export function EdgeSignIn({
   client,
   claim,
@@ -200,7 +228,7 @@ export function EdgeSignIn({
   onHand: (link: HandedLink) => void
   onLinked: (result: EdgeLinkResult) => void
 }) {
-  const claimEdge = claim === undefined ? undefined : parseClaim(claim).edge
+  const claimEdge = claim === undefined ? undefined : parseClaim(claim)?.edge
   const signIn = useEdgeSignIn(client, claimEdge)
   const { phase, setPhase } = signIn
   const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
@@ -218,6 +246,7 @@ export function EdgeSignIn({
         )}
       </p>
       <SignInProgress signIn={signIn} />
+      {phase.name === 'signed-out' && <LinkBeforeSignIn onHand={onHand} />}
       {phase.name === 'signed-in' && (
         <EdgeChoice
           edges={phase.edges}
@@ -568,11 +597,11 @@ function ServerPicker({
                 return
               }
               const claim = parseClaim(code)
-              if (claim.edge && linkHost(claim.edge) !== edgeHost(edge)) {
+              if (claim?.edge && linkHost(claim.edge) !== edgeHost(edge)) {
                 onHand({ kind: 'claim', link: code.trim() })
                 return
               }
-              void link(() => client.localEdgeClaim(claim.code, edge))
+              void link(() => client.localEdgeClaim(claim?.code ?? code.trim(), edge))
             }}
           >
             <FormField

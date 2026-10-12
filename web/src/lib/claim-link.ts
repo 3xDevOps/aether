@@ -1,22 +1,28 @@
+const claimSecret = /^[a-z2-7]{16}$/
+const serverId = /^[a-z2-7]{26}$/
+
 /** Reads a claim code from a bare code or a pasted claim link,
  * `aether://claim?edge=<relay origin>&server=<server id>#<secret>`, which
- * also names the edge to claim through. Anything else is returned as the
- * code, for the server to accept or refuse. */
-export function parseClaim(input: string): { code: string; edge?: string } {
+ * also names the edge to claim through. A bare code is lowercased as
+ * edgeproto.ParseClaimCode does. Null when the text is neither, so nothing
+ * unchecked reaches a shell command. */
+export function parseClaim(input: string): { code: string; edge?: string } | null {
   const text = input.trim()
   let url: URL
   try {
     url = new URL(text)
   } catch {
-    return { code: text }
+    const code = text.toLowerCase()
+    const [server, secret] = code.split('-')
+    return code.length === 43 && serverId.test(server) && claimSecret.test(secret) ? { code } : null
   }
   const secret = url.hash.slice(1)
   if (url.protocol === 'aether:' && url.host === 'claim') {
     const server = url.searchParams.get('server')
     const edge = url.searchParams.get('edge')
-    if (server && edge && secret) return { code: `${server}-${secret}`, edge }
+    if (server && edge && serverId.test(server) && claimSecret.test(secret)) return { code: `${server}-${secret}`, edge }
   }
-  return { code: text }
+  return null
 }
 
 /** Reads the edge and ids a join link names:

@@ -154,8 +154,9 @@ As found in the code:
    approving the device admits it as is an admin, no other admin exists,
    and that member has no approved device. A device adding a new member
    never qualifies: the admin who invited it can approve it. `aether
-   device approve` also accepts a device id, told apart by its `dev-`
-   prefix.
+   device approve` also accepts a device id, told apart by shape: an
+   argument shaped like an approval code (`XXXX-XXXX`) is a code, anything
+   else a device id.
 10. **The edge store does not change.** An ownerless server that was once
     claimed keeps its row and directory and keeps relaying for its members.
     A server the edge has not recorded is claimed by its admin through

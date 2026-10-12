@@ -3,22 +3,29 @@ import { parseClaim, parseJoin } from '@/lib/claim-link'
 const id = 'abcdefghijklmnopqrstuvwxyz'
 
 describe('parseClaim', () => {
+  const secret = 'abcdefghijk23456'
+
   it('reads the code and the edge from a claim link', () => {
-    expect(parseClaim(`aether://claim?edge=https%3A%2F%2Fedge.example.test%3A8443&server=${id}#secret`)).toEqual({
-      code: `${id}-secret`,
+    expect(parseClaim(`aether://claim?edge=https%3A%2F%2Fedge.example.test%3A8443&server=${id}#${secret}`)).toEqual({
+      code: `${id}-${secret}`,
       edge: 'https://edge.example.test:8443',
     })
   })
 
-  it('returns anything else as the code', () => {
+  it('reads a bare code in any case', () => {
+    expect(parseClaim(` ${id.toUpperCase()}-${secret.toUpperCase()} `)).toEqual({ code: `${id}-${secret}` })
+  })
+
+  it('refuses anything else', () => {
     for (const text of [
       `${id}-secret`,
-      `https://edge.example.test/claim/${id}#secret`,
-      `https://edge.example.test/join/${id}/inv#secret`,
-      `aether://claim?server=${id}#secret`,
-      `http://edge.example.test/claim/${id}#secret`,
+      `https://edge.example.test/claim/${id}#${secret}`,
+      `aether://claim?server=${id}#${secret}`,
+      `aether://claim?edge=https%3A%2F%2Fedge.example.test&server=${id}#secret`,
+      `aether://claim?edge=https%3A%2F%2Fedge.example.test&server=${encodeURIComponent(`${id.slice(1)};touch /tmp/x;#`)}#${secret}`,
+      `${id};touch /tmp/x;#-${secret}`,
     ]) {
-      expect(parseClaim(text)).toEqual({ code: text })
+      expect(parseClaim(text)).toBeNull()
     }
   })
 })

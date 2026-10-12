@@ -401,7 +401,7 @@ state](#transfer-and-the-ownerless-state)).
 | `sudo aether-server device review` | Approve, revoke or skip each registered and pending device; list member SSH keys and tailnet logins |
 | `aether edge connect` | From an admin's linked terminal: claim the server for the GitHub account this machine is signed in with at the server's edge, bound to your own member. Prints the owner instead when the server already has one |
 | `aether link <join link>` | Join the server an invitation's link names, as the account this machine is signed in with ([teams.md](teams.md#through-an-edge)) |
-| `aether device approve <code or device id>` | From an approved device, member SSH key or tailnet connection: show what approving admits, as `sudo aether-server device approve` does, and approve after `y`. A device id starts with `dev-` |
+| `aether device approve <code or device id>` | From an approved device, member SSH key or tailnet connection: show what approving admits, as `sudo aether-server device approve` does, and approve after `y`. An argument shaped like an approval code (`XXXX-XXXX`) is a code; anything else is a device id |
 
 ```
 edge         https://edge.onaether.dev

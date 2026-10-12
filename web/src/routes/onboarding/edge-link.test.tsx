@@ -81,6 +81,27 @@ afterEach(() => {
 })
 
 describe('onboarding link through an edge', () => {
+  it('opens the Join panel for a join link pasted before signing in, and signs in to its edge', async () => {
+    seed()
+    const custom = 'https://edge.custom.test'
+    const customLogin = { ...pending, edge: custom, verification_uri: `${custom}/device` }
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => ({ edges: [] })),
+      localEdgeLogin: vi.fn(async () => customLogin),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.change(await screen.findByLabelText('Have an invitation or claim link?'), {
+      target: { value: `${custom}/join/${serverID}/inv-7k2m9q4xbd#abcdefghijk23456` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    fireEvent.click(await join.findByRole('button', { name: 'Sign in' }))
+    expect(client.localEdgeLogin).toHaveBeenCalledWith(custom)
+  })
+
   it('offers sign-in first and keeps the address form behind a disclosure', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi({ localLinkStatus: vi.fn(async () => unlinked) })} />)
@@ -348,12 +369,12 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#secret` },
+      target: { value: `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#abcdefghijk23456` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect(await screen.findByText(/^Linked to/)).toBeDefined()
-    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-secret`, edge)
+    expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-abcdefghijk23456`, edge)
   })
 
   it('opens the Join panel for a join link pasted into the claim form', async () => {
@@ -391,7 +412,7 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `aether://claim?edge=${encodeURIComponent(other)}&server=${serverID}#secret` },
+      target: { value: `aether://claim?edge=${encodeURIComponent(other)}&server=${serverID}#abcdefghijk23456` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
@@ -699,7 +720,7 @@ describe('a claim link handed to the dashboard', () => {
 
 describe('a claim link handed to a linked dashboard', () => {
   it('offers the claim form, prefilled, with the account it claims as', async () => {
-    const claimLink = `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#secret`
+    const claimLink = `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#abcdefghijk23456`
     window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimLink)}`)
     seed()
     const client = fakeApi({

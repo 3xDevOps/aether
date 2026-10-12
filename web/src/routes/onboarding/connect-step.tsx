@@ -127,10 +127,10 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
       {handed?.kind === 'join' && !edgeLinked && (
         <JoinLink key={handed.link} client={client} caps={caps} link={handed.link} onLinked={(result) => void linkedThroughEdge(result)} />
       )}
-      {handed?.kind === 'claim' && !caps.hasLocal('edge.claim') && (
+      {handed?.kind === 'claim' && claim && !caps.hasLocal('edge.claim') && (
         <LinkByCommand
           link={handed.link}
-          command={`aether link --claim ${claim?.code}${claim?.edge ? ` --edge ${shellQuote(claim.edge)}` : ''}`}
+          command={`aether link --claim ${shellQuote(claim.code)}${claim.edge ? ` --edge ${shellQuote(claim.edge)}` : ''}`}
         />
       )}
       {((choosing && handed?.kind !== 'join') || handedClaim) && (

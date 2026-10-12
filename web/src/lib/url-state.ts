@@ -83,11 +83,7 @@ function handedOnHashChange() {
   if (link) for (const listener of handedListeners) listener(link)
 }
 
-/**
- * Calls listener with each join or claim link handed over after load. A
- * shell whose page is already at the dashboard's address, as Android's
- * WebView is, changes only the fragment, and nothing reloads.
- */
+/** Calls listener with each join or claim link handed over after load. */
 export function onHandedLink(listener: (link: HandedLink) => void): () => void {
   if (handedListeners.size === 0) window.addEventListener('hashchange', handedOnHashChange)
   handedListeners.add(listener)
