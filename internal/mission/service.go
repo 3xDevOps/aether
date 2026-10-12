@@ -744,17 +744,6 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MissionCreateResult{}, err
 	}
-	if validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice); validateErr != nil {
-		// A retry of a create that already succeeded replays its result, even
-		// if the harness has since become unlaunchable.
-		replay, receiptErr := s.cfg.Missions.MissionCreateRecorded(ctx, domain.WorkspaceID(p.WorkspaceID), p.IdempotencyKey)
-		if receiptErr != nil {
-			return protocol.MissionCreateResult{}, receiptErr
-		}
-		if !replay {
-			return protocol.MissionCreateResult{}, validateErr
-		}
-	}
 	choices := make([]domain.MissionExecutionChoice, 0, len(p.ExecutionChoices))
 	for _, c := range p.ExecutionChoices {
 		mode := domain.LaunchMode(c.Mode)
@@ -765,6 +754,21 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice " + modelErr.Error())
 		}
 		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode, Model: c.Model})
+	}
+	validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice)
+	if validateErr == nil {
+		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
+	}
+	if validateErr != nil {
+		// A retry of a create that already succeeded replays its result, even
+		// if the harness has since become unlaunchable.
+		replay, receiptErr := s.cfg.Missions.MissionCreateRecorded(ctx, domain.WorkspaceID(p.WorkspaceID), p.IdempotencyKey)
+		if receiptErr != nil {
+			return protocol.MissionCreateResult{}, receiptErr
+		}
+		if !replay {
+			return protocol.MissionCreateResult{}, validateErr
+		}
 	}
 	m := &domain.Mission{
 		WorkspaceID: domain.WorkspaceID(p.WorkspaceID), Objective: p.Objective,
@@ -917,6 +921,22 @@ func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account d
 	}
 	if err := v.ValidateMissionLaunch(ctx, owner, account, choice.Harness, choice.Mode, choice.Model); err != nil {
 		return invalidMissionParams(fmt.Sprintf("integrator harness %s cannot launch in %s mode: %v", choice.Harness, choice.Mode, err))
+	}
+	return nil
+}
+
+func (s *Service) validateModelChoices(ctx context.Context, owner domain.MemberID, choices []domain.MissionExecutionChoice) error {
+	v, ok := s.cfg.Runs.(launchValidator)
+	if !ok {
+		return nil
+	}
+	for _, c := range choices {
+		if c.Model == "" {
+			continue
+		}
+		if err := v.ValidateMissionLaunch(ctx, owner, c.AccountMemberID, c.Harness, c.Mode, c.Model); err != nil {
+			return invalidMissionParams(fmt.Sprintf("execution choice harness %s cannot launch in %s mode with model %s: %v", c.Harness, c.Mode, c.Model, err))
+		}
 	}
 	return nil
 }

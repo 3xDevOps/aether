@@ -3,6 +3,7 @@ package coordcli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -255,9 +256,13 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 		if assignment == nil || assignment.Role != "integrator" {
 			return protocol.WorkerStartResult{}, usageError("worker start: this run is not a mission integrator")
 		}
+		modelGiven := false
+		fs.Visit(func(f *flag.Flag) { modelGiven = modelGiven || f.Name == "model" })
 		var matches []protocol.MissionExecutionChoice
+		anyModel := false
 		for _, choice := range assignment.ExecutionChoices {
-			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (*model == "" || choice.Model == *model) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
+			anyModel = anyModel || choice.Model != ""
+			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (!modelGiven || choice.Model == *model) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
 				matches = append(matches, choice)
 			}
 		}
@@ -265,8 +270,11 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 			var listed []string
 			for _, choice := range assignment.ExecutionChoices {
 				line := fmt.Sprintf("--harness %s --mode %s --account-owner-id %s", choice.Harness, choice.Mode, choice.AccountMemberID)
-				if choice.Model != "" {
+				switch {
+				case choice.Model != "":
 					line += " --model " + choice.Model
+				case anyModel:
+					line += ` --model ""`
 				}
 				listed = append(listed, line)
 			}

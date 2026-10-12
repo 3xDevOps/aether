@@ -579,6 +579,7 @@ func TestCLIOutputFailuresReturnContext(t *testing.T) {
 }
 
 func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
+	var sent protocol.WorkerStartParams
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		switch req.Method {
 		case protocol.MethodCoordStatus:
@@ -586,24 +587,26 @@ func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
 		case protocol.MethodTaskShow:
 			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","current_revision":3}}`)}
 		case protocol.MethodWorkerStart:
-			var p protocol.WorkerStartParams
-			if err := json.Unmarshal(req.Params, &p); err != nil {
+			if err := json.Unmarshal(req.Params, &sent); err != nil {
 				t.Fatalf("decode worker start: %v", err)
-			}
-			want := protocol.WorkerStartParams{MissionID: "mission-1", TaskID: "task-1", TaskRevision: 3, DispatchKey: "task-1-r3", Harness: "claude", Mode: "tui", Model: "opus", AccountOwnerID: "member-2", ExpectedIntegratorGeneration: 4}
-			if p != want {
-				t.Fatalf("worker start params = %+v, want %+v", p, want)
 			}
 			return protocol.Response{Result: json.RawMessage(`{"attempt":{"id":"attempt-1","state":"reserved"}}`)}
 		default:
 			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
 		}
 	})
-	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "claude", "--model", "opus"}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
-		t.Fatalf("worker start = code %d, envelope %s", code, raw)
+	for _, model := range []string{"opus", ""} {
+		sent = protocol.WorkerStartParams{}
+		if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "claude", "--model", model}, ""); code != ExitOK || !decodeEnvelope(t, raw).OK {
+			t.Fatalf("worker start --model %q = code %d, envelope %s", model, code, raw)
+		}
+		want := protocol.WorkerStartParams{MissionID: "mission-1", TaskID: "task-1", TaskRevision: 3, DispatchKey: "task-1-r3", Harness: "claude", Mode: "tui", Model: model, AccountOwnerID: "member-2", ExpectedIntegratorGeneration: 4}
+		if sent != want {
+			t.Fatalf("worker start --model %q params = %+v, want %+v", model, sent, want)
+		}
 	}
 	code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--mode", "tui"}, "")
-	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, "--harness omp --mode tui --account-owner-id member-1; --harness claude --mode tui --account-owner-id member-2; --harness claude --mode tui --account-owner-id member-2 --model opus") {
+	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, `--harness omp --mode tui --account-owner-id member-1 --model ""; --harness claude --mode tui --account-owner-id member-2 --model ""; --harness claude --mode tui --account-owner-id member-2 --model opus`) {
 		t.Fatalf("ambiguous worker start = code %d, envelope %s", code, raw)
 	}
 }

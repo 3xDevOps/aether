@@ -556,11 +556,14 @@ func (l *validatingLauncher) LaunchMission(ctx context.Context, req MissionLaunc
 	return l.recordingLauncher.LaunchMission(ctx, req)
 }
 
-func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, _ string) error {
+func (l *validatingLauncher) ValidateMissionLaunch(_ context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
 	l.calls++
 	l.validated = append(l.validated, [2]domain.MemberID{member, account})
 	if l.refuseAll || (harnessName == "legacy" && mode == domain.LaunchTUI) {
 		return errors.New(`scheduler: harness "legacy" has no command for mode "tui"`)
+	}
+	if harnessName == "legacy" && model != "" {
+		return errors.New(`scheduler: agent "legacy" takes no model`)
 	}
 	return nil
 }
@@ -616,6 +619,31 @@ func TestIntegratorTheSchedulerCannotLaunchIsRefused(t *testing.T) {
 }
 
 // A launch resolves the harness in the run owner's context, not the account's.
+func TestCreateRefusesAWorkerModelTheAgentCannotTake(t *testing.T) {
+	ctx := context.Background()
+	const want = `execution choice harness legacy cannot launch in headless mode with model opus: scheduler: agent "legacy" takes no model`
+	f := newMissionFixture(t)
+	f.svc.cfg.Runs = &validatingLauncher{recordingLauncher: f.launcher}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "claude", Mode: string(domain.LaunchTUI)}
+	create := func(worker protocol.MissionExecutionChoice, key string) error {
+		_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+			WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: key,
+			Integrator:       protocol.MissionIntegrator(integrator),
+			ExecutionChoices: []protocol.MissionExecutionChoice{integrator, worker},
+		})
+		return err
+	}
+	legacy := protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: "legacy", Mode: string(domain.LaunchHeadless), Model: "opus"}
+	var rpcErr *protocol.Error
+	if err := create(legacy, "create-model"); !errors.As(err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != want {
+		t.Fatalf("create with a worker model the agent cannot take = %v, want invalid params %q", err, want)
+	}
+	legacy.Model = ""
+	if err := create(legacy, "create-no-model"); err != nil {
+		t.Fatalf("create with a worker choice without a model: %v", err)
+	}
+}
+
 func TestLaunchValidationResolvesForTheRunOwner(t *testing.T) {
 	ctx := context.Background()
 	f := newMissionFixture(t)
