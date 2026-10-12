@@ -1026,7 +1026,8 @@ A `claude` or `codex` launch whose account has used 95% or more of its
 subscription quota starts on another account instead, when one qualifies. The server reads the
 same cached usage **Usage** shows ([harnesses.md](harnesses.md#subscription-quota)
 names the windows). An account whose usage cannot be read, such as an API-key
-login or a signed-out one, is launched on as requested; a fallback account
+login, a signed-out one, or one whose uncached vendor read takes longer than
+3 seconds, is launched on as requested; a fallback account
 needs a successful read below 95%. Other agents always launch as requested.
 
 The fallback accounts are your own and every account shared with you at that
@@ -1221,9 +1222,10 @@ A swarm is in one of four phases: `planning`, `active`, `completed`, or
 `cancelled`. It starts in `planning`, where the integrator may ask clarifying
 questions, proposes tasks, and runs `mission start`, which accepts every
 proposed task and moves the swarm to `active`. Start is refused while a
-question is unanswered and rechecks the swarm's own launch admission, so an
-accountable human who lost `run.launch` or the share of the account the
-integrator runs on cannot carry the swarm forward. In `active` the integrator dispatches
+question is unanswered and rechecks the swarm's own launch admission, so a
+member who created the swarm or last replaced its integrator, and lost
+`run.launch` or the share of the account the integrator runs on, cannot carry
+the swarm forward. In `active` the integrator dispatches
 workers, accepts their work, adds or revises tasks and accepts them itself,
 and delivers the verified candidate. Its success report moves the swarm to
 `completed` and stops leftover workers; a failure report leaves the swarm

@@ -322,7 +322,6 @@ type Attempt struct {
 	LaunchAccountID MemberID
 }
 
-// LaunchAccount returns the account whose login the attempt's run uses.
 func (a *Attempt) LaunchAccount() MemberID {
 	if a.LaunchAccountID != "" {
 		return a.LaunchAccountID

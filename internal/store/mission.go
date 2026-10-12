@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -238,6 +239,9 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 		if getErr != nil {
 			return getErr
 		}
+		if !sameFallback(existing.Fallback, m.Fallback) {
+			return ErrMissionIdempotencyConflict
+		}
 		*m = *existing
 		return nil
 	}
@@ -300,6 +304,10 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	m.Phase, m.OpenQuestions = domain.MissionPhasePlanning, 0
 	return nil
 }
+func sameFallback(a, b domain.AccountFallback) bool {
+	return a.Disabled == b.Disabled && slices.Equal(a.Order, b.Order)
+}
+
 func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.Mission, error) {
 	if runID == "" {
 		return nil, ErrNotFound

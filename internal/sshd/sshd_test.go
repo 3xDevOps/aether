@@ -448,6 +448,10 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
+func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

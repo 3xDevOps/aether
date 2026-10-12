@@ -523,6 +523,33 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	return SharedLaunchable, "", err
 }
 
+// FallbackLaunchable reports whether member's launch of harnessName in mode
+// on account can be a usage fallback: the owner's login is there to share, an
+// enhanced launch finds its ACP server, and the launch would not borrow the
+// owner's installation, whose executables only a launcher who picked that
+// account has agreed to run. It reads member homes only.
+func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
+	state, _, err := s.CheckSharedLaunch(ctx, member, account, harnessName)
+	if err != nil || state != SharedLaunchable || s.cfg.Homes == nil {
+		return err == nil && state == SharedLaunchable, err
+	}
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return false, err
+	}
+	if mode == domain.LaunchACP {
+		installed, adapterErr := s.adapterInstalled(member, account, profile, argvs)
+		if adapterErr != nil || !installed {
+			return false, adapterErr
+		}
+	}
+	if account == member || len(profile.TUIArgs) == 0 {
+		return true, nil
+	}
+	installation, err := s.cfg.Homes.Installation(member, account, profile.TUIArgs[0], profile.InstallPaths)
+	return installation != account, err
+}
+
 // pinnedLogins mounts each login file of a PinLogin harness in member's own
 // home over itself once member shares their account, except where the plan
 // already mounts another member's login. A login path that is a directory or

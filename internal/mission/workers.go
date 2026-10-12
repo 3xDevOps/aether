@@ -155,8 +155,8 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 // attemptLaunchAccount returns the account attempt's run launches on. The
 // first launch selects it under m's fallback policy from measured usage and
 // records it, so a recovered launch reuses it instead of selecting again. The
-// caller holds the authorization mutex and has admitted the attempt's
-// declared account.
+// caller holds the authorization mutex and, unless a launch account is
+// recorded, has admitted the attempt's declared account.
 func (s *Service) attemptLaunchAccount(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, measured fallback.Measured) (domain.MemberID, error) {
 	if attempt.LaunchAccountID != "" {
 		if _, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, attempt.RunOwnerID, string(attempt.LaunchAccountID)); err != nil {
@@ -164,7 +164,7 @@ func (s *Service) attemptLaunchAccount(ctx context.Context, m *domain.Mission, a
 		}
 		return attempt.LaunchAccountID, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, attempt.RunOwnerID, attempt.AccountOwnerID, m.Fallback)
+	account, err := fallback.Select(ctx, s.cfg.Store, measured, attempt.RunOwnerID, attempt.AccountOwnerID, m.Fallback, s.launchable(attempt.RunOwnerID, attempt.Harness, attempt.Mode))
 	if err != nil {
 		return "", err
 	}
@@ -324,7 +324,9 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	if a.MissionID != m.ID || p.ExpectedIntegratorGeneration != m.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale worker authority", store.ErrMissionStale)
 	}
-	if authorizeErr := s.authorizeAttempt(ctx, m, a); authorizeErr != nil {
+	// The retry launches on the declared account or selects again, so the
+	// old attempt's fallback account needs no share.
+	if _, authorizeErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, m.AccountableHumanID, string(a.AccountOwnerID)); authorizeErr != nil {
 		return nil, authorizeErr
 	}
 	if a.State.HoldsConcurrency() {

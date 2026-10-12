@@ -60,6 +60,10 @@ type RunController interface {
 	// account would be refused over the harness or the account owner's
 	// login, and why, resolving it as Launch does.
 	CheckSharedLaunch(ctx context.Context, member, account domain.MemberID, harness string) (scheduler.SharedLaunch, string, error)
+	// FallbackLaunchable reports whether member's launch of harness in mode
+	// on account can be a usage fallback, which never borrows the owner's
+	// installation.
+	FallbackLaunchable(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error

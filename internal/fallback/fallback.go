@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -21,6 +23,11 @@ import (
 // counts as exhausted: at 95% one long agent turn can spend the rest within
 // minutes.
 const ExhaustedPercent = 95
+
+// readTimeout bounds how long a launch waits on one account's quota read. A
+// slower read counts as unreadable; it carries on and fills the quota cache
+// for the next launch.
+const readTimeout = 3 * time.Second
 
 // QuotaReader reads an account's vendor quota without exposing its
 // credentials or the provider's responses to the caller.
@@ -36,8 +43,6 @@ var windows = map[string][]string{
 	"codex":  {"primary", "secondary"},
 }
 
-// Policy turns a launch request's fallback parameters into a policy. An
-// order lists the accounts to try; disabled turns fallback off.
 func Policy(order []string, disabled bool) (domain.AccountFallback, error) {
 	if disabled && len(order) > 0 {
 		return domain.AccountFallback{}, errors.New("fallback_account_member_ids and no_fallback cannot both be set")
@@ -103,31 +108,56 @@ func Measure(ctx context.Context, st store.Store, usage QuotaReader, launcher do
 	if used < ExhaustedPercent {
 		return measured, nil
 	}
-	candidates, err := candidates(ctx, st, launcher, policy)
-	if err != nil {
+	if err := measureCandidates(ctx, st, usage, launcher, harness, policy, measured); err != nil {
 		return nil, err
 	}
+	return measured, nil
+}
+
+// measureCandidates reads the usage of every candidate launcher may launch
+// on that measured has no figure for yet.
+func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured) error {
+	candidates, err := candidates(ctx, st, launcher, policy)
+	if err != nil {
+		return err
+	}
+	var (
+		mu   sync.Mutex
+		wait sync.WaitGroup
+	)
+	known := maps.Clone(measured)
 	for _, candidate := range candidates {
-		if candidate == account {
+		if _, ok := known[candidate]; ok {
 			continue
 		}
 		if _, err := ResolveLaunchAccount(ctx, st, launcher, string(candidate)); err != nil {
 			continue
 		}
-		if used, ok := usedPercent(ctx, usage, candidate, harness); ok {
-			measured[candidate] = used
-		}
+		wait.Go(func() {
+			if used, ok := usedPercent(ctx, usage, candidate, harness); ok {
+				mu.Lock()
+				measured[candidate] = used
+				mu.Unlock()
+			}
+		})
 	}
-	return measured, nil
+	wait.Wait()
+	return nil
 }
+
+// Launchable reports whether the launch can run on account as a fallback,
+// without borrowing the owner's agent installation. It runs under the
+// authorization mutex, so it reads local files only.
+type Launchable func(ctx context.Context, account domain.MemberID) (bool, error)
 
 // Select returns the account launcher's run launches on, from the usage
 // Measure read. The caller has admitted launcher's launch on requested and
 // holds the shared authorization mutex until the scheduler's durable launch
 // boundary, so each candidate needs only its account authorization checked
-// here; an account Measure could not read is never chosen. When no candidate
-// qualifies, the launch stays on the requested account.
-func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, policy domain.AccountFallback) (domain.MemberID, error) {
+// here; an account Measure could not read, or launchable refuses, is never
+// chosen. A nil launchable refuses nothing. When no candidate qualifies, the
+// launch stays on the requested account.
+func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, policy domain.AccountFallback, launchable Launchable) (domain.MemberID, error) {
 	if policy.Disabled {
 		return requested, nil
 	}
@@ -157,6 +187,15 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		if !ok || used >= ExhaustedPercent {
 			continue
 		}
+		if launchable != nil {
+			allowed, launchErr := launchable(ctx, candidate)
+			if launchErr != nil {
+				return "", launchErr
+			}
+			if !allowed {
+				continue
+			}
+		}
 		if len(policy.Order) > 0 {
 			return candidate, nil
 		}
@@ -174,8 +213,6 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 	return found[0].account, nil
 }
 
-// candidates is the policy's order, or else launcher's own account and every
-// account shared with launcher.
 func candidates(ctx context.Context, st store.Store, launcher domain.MemberID, policy domain.AccountFallback) ([]domain.MemberID, error) {
 	if len(policy.Order) > 0 {
 		return policy.Order, nil
@@ -193,13 +230,15 @@ func candidates(ctx context.Context, st store.Store, launcher domain.MemberID, p
 
 // usedPercent reports the highest used share of account's quota windows in
 // force for harness. ok is false when that usage cannot be read: an agent
-// without readable quota, a missing or API-key login, or a failed or stale
-// read.
+// without readable quota, a missing or API-key login, a failed or stale read,
+// or a row reporting none of those windows.
 func usedPercent(ctx context.Context, usage QuotaReader, account domain.MemberID, harness string) (used float64, ok bool) {
 	ids := windows[harness]
 	if ids == nil {
 		return 0, false
 	}
+	ctx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
 	providers, err := usage.Read(ctx, account, false)
 	if err != nil {
 		return 0, false
@@ -212,12 +251,17 @@ func usedPercent(ctx context.Context, usage QuotaReader, account domain.MemberID
 		if provider.Status != "ok" {
 			return 0, false
 		}
+		reported := false
 		for _, window := range provider.Windows {
-			if slices.Contains(ids, window.ID) && (window.ResetsAt == nil || window.ResetsAt.After(now)) {
+			if !slices.Contains(ids, window.ID) {
+				continue
+			}
+			reported = true
+			if window.ResetsAt == nil || window.ResetsAt.After(now) {
 				used = max(used, window.UsedPercent)
 			}
 		}
-		return used, true
+		return used, reported
 	}
 	return 0, false
 }

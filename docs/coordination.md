@@ -865,7 +865,8 @@ sent. Waiting for an answer is not being blocked: do not report an outcome
 while waiting.
 
 `mission start` is refused while a question is unanswered or when no task is
-proposed. It rechecks that the accountable human may still launch runs, then,
+proposed. It rechecks that the member who created the swarm or last replaced
+its integrator may still launch runs on the account the integrator runs on, then,
 in one transaction, accepts every proposed revision with the integrator run as
 the accepting run and moves the swarm to `active`. While the swarm is in
 `planning`, revising a task replaces the draft: the previous revision is

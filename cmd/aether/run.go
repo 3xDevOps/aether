@@ -97,7 +97,6 @@ const (
 	noFallbackHelp = "launch only on the requested account, even when its usage is exhausted"
 )
 
-// parseFallback splits a --fallback list, refusing it beside --no-fallback.
 func parseFallback(order string, none bool) ([]string, error) {
 	if order == "" {
 		return nil, nil

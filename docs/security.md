@@ -245,7 +245,10 @@ share is the owner's consent; there is no separate grant. Fallback never
 widens who may launch on an account. Its candidates are only the launcher's
 own account and the accounts shared with the launcher, each checked again
 with the share check a hand-picked launch uses, at the moment it is chosen,
-so a revoked share leaves the pool at once. An admin gains nothing, and a
+so a revoked share leaves the pool at once. A fallback account is never one
+whose agent installation the launcher would borrow, so fallback never runs a
+teammate's executables for a launcher who did not pick that account, and
+never one with no login to share. An admin gains nothing, and a
 member-defined agent still runs only on its member's own account. A swarm
 worker is checked against the swarm's accountable human, and an integrator
 launch or replacement against the member who creates or replaces it.

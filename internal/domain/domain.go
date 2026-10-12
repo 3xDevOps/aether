@@ -577,8 +577,7 @@ type Run struct {
 	// differs from AccountMemberID because that account's usage was
 	// exhausted; empty otherwise.
 	RequestedAccountMemberID MemberID
-	// Fallback is the launcher's fallback policy for this run.
-	Fallback AccountFallback
+	Fallback                 AccountFallback
 	// HomeMemberID is whose home the container mounts: the launcher. A
 	// handoff changes MemberID, never this. Empty on rows created before
 	// account shares were narrowed.

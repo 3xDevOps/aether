@@ -110,7 +110,7 @@ export function AccountOptions({
     <Collapsible defaultOpen={shared}>
       <CollapsibleTrigger>
         <span className="font-medium">Options</span>
-        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallback.off && ' · Fallback off'}</span>}
+        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, account).no_fallback && ' · Fallback off'}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
         <Label htmlFor="launch-account">{label}</Label>

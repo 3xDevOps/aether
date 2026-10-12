@@ -137,7 +137,6 @@ func TestFailedWorkerLaunchRemainsUnknownUntilConfirmedRecovery(t *testing.T) {
 	}
 }
 
-// claudeUsage reports each account's used share of its five-hour window.
 type claudeUsage map[domain.MemberID]float64
 
 func (u claudeUsage) Read(_ context.Context, account domain.MemberID, _ bool) ([]quota.Provider, error) {

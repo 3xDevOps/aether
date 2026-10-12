@@ -13,12 +13,14 @@ import (
 )
 
 // usageByName answers each account's Claude quota from its display name; an
-// account without an entry has no OAuth login.
+// account without an entry has no OAuth login, and one in modelOnly reports
+// only a per-model window.
 type usageByName struct {
-	t     *testing.T
-	names map[domain.MemberID]string
-	used  map[string]float64
-	reset time.Time
+	t         *testing.T
+	names     map[domain.MemberID]string
+	used      map[string]float64
+	modelOnly map[string]bool
+	reset     time.Time
 }
 
 func (u usageByName) Read(_ context.Context, account domain.MemberID, refresh bool) ([]quota.Provider, error) {
@@ -30,6 +32,11 @@ func (u usageByName) Read(_ context.Context, account domain.MemberID, refresh bo
 		return []quota.Provider{{Provider: "claude", Status: "unauthenticated"}}, nil
 	}
 	resets := u.reset
+	if u.modelOnly[u.names[account]] {
+		return []quota.Provider{{Provider: "claude", Status: "ok", Windows: []quota.Window{
+			{ID: "seven_day_sonnet", UsedPercent: used, ResetsAt: &resets},
+		}}}, nil
+	}
 	return []quota.Provider{{Provider: "claude", Status: "ok", Windows: []quota.Window{
 		{ID: "five_hour", UsedPercent: used, ResetsAt: &resets},
 		{ID: "seven_day_opus", UsedPercent: 100, ResetsAt: &resets},
@@ -45,6 +52,7 @@ func TestSelect(t *testing.T) {
 		order     []string
 		disabled  bool
 		revoke    string
+		modelOnly []string
 		used      map[string]float64
 		reset     time.Time
 		want      string
@@ -65,6 +73,8 @@ func TestSelect(t *testing.T) {
 			used: map[string]float64{"Ada": 100, "Bo": 0}, want: "Ada"},
 		{name: "no candidate qualifies keeps requested", requested: "Ada",
 			used: map[string]float64{"Ada": 100, "Lena": 97, "Cy": 96}, want: "Ada"},
+		{name: "row without the agent's windows is unreadable", requested: "Ada", modelOnly: []string{"Bo"},
+			used: map[string]float64{"Ada": 100, "Lena": 60, "Bo": 0}, want: "Lena"},
 		{name: "disabled keeps requested", requested: "Ada", disabled: true,
 			used: map[string]float64{"Ada": 100, "Bo": 0}, want: "Ada"},
 	} {
@@ -105,7 +115,10 @@ func TestSelect(t *testing.T) {
 			if reset.IsZero() {
 				reset = future
 			}
-			usage := usageByName{t: t, names: names, used: tc.used, reset: reset}
+			usage := usageByName{t: t, names: names, used: tc.used, modelOnly: map[string]bool{}, reset: reset}
+			for _, name := range tc.modelOnly {
+				usage.modelOnly[name] = true
+			}
 			measured, err := Measure(ctx, db, usage, launcher, string(ids[tc.requested]), harness, policy)
 			if err != nil {
 				t.Fatal(err)
@@ -116,7 +129,7 @@ func TestSelect(t *testing.T) {
 					t.Fatal(revokeErr)
 				}
 			}
-			got, err := Select(ctx, db, measured, launcher, ids[tc.requested], policy)
+			got, err := Select(ctx, db, measured, launcher, ids[tc.requested], policy, nil)
 			if err != nil || got != ids[tc.want] {
 				t.Fatalf("Select = %s, %v; want %s", names[got], err, tc.want)
 			}

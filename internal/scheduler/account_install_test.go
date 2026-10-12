@@ -208,3 +208,31 @@ func TestSharedLaunchIgnoresASymlinkedInstallation(t *testing.T) {
 	e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
 	assertNoBorrowedPath(t, spec)
 }
+
+// A usage fallback never lands on an account whose installation the launcher
+// would borrow, nor on one with no login to share; the launcher's own
+// installation makes the same account a fallback.
+func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	launchable := func() bool {
+		t.Helper()
+		ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, e.owner.ID, "claude", domain.LaunchTUI)
+		if err != nil {
+			t.Fatalf("FallbackLaunchable: %v", err)
+		}
+		return ok
+	}
+	installClaude(t, e.ownerHome)
+	if launchable() {
+		t.Fatal("an account with no login is a fallback")
+	}
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	if launchable() {
+		t.Fatal("an account whose installation the launcher would borrow is a fallback")
+	}
+	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+	if !launchable() {
+		t.Fatal("an account with a login, launched with the launcher's own installation, is not a fallback")
+	}
+}

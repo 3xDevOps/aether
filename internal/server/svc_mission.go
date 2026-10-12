@@ -129,6 +129,13 @@ func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, ac
 	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode)
 }
 
+func (l schedulerLauncher) FallbackLaunchable(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
+	if l.runs == nil {
+		return false, errors.New("mission: scheduler unavailable")
+	}
+	return l.runs.FallbackLaunchable(ctx, member, account, harnessName, mode)
+}
+
 func (l schedulerLauncher) CancelMission(ctx context.Context, run domain.RunID) error {
 	if l.runs == nil {
 		return errors.New("mission: scheduler unavailable")

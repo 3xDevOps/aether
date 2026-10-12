@@ -142,7 +142,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, rpcError(err)
 	}
 	requested := admission.Account.ID
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy)
+	account, err := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
+		return s.cfg.Runs.FallbackLaunchable(ctx, member, account, p.Harness, mode)
+	})
 	if err != nil {
 		return nil, rpcError(err)
 	}
