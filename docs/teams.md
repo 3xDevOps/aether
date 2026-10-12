@@ -1020,6 +1020,46 @@ success cache only within a 10-second request floor; failures wait at least
 same-credential successful window, reports its error and stale status, and is
 not presented as current after a reset has passed without a fresh measurement.
 
+### Usage fallback
+
+A `claude` or `codex` launch whose account has used 95% or more of its
+subscription quota starts on another account instead, when one qualifies. The server reads the
+same cached usage **Usage** shows ([harnesses.md](harnesses.md#subscription-quota)
+names the windows). An account whose usage cannot be read, such as an API-key
+login or a signed-out one, is launched on as requested; a fallback account
+needs a successful read below 95%. Other agents always launch as requested.
+
+The fallback accounts are your own and every account shared with you at that
+moment. By default the one with the most usage left wins, ties going to the
+lower member ID. In the launch dialog, **Options** (shown once someone shares
+with you) holds **Fall back to another account** and, under it, the
+**Fallback accounts** list: untick an account to leave it out, or reorder it
+with **Move `<name>` up** and **Move `<name>` down**. Once you change the
+list, the first ticked account with usage left, top to bottom, wins.
+Unticking **Fall back to another account**, or every account, turns fallback
+off, and the **Options** summary adds `· Fallback off`. From the CLI:
+
+```sh
+# If Grace's account is exhausted, try Lin's, then your own
+aether run "triage the failures" --agent claude --account <grace-member-id> \
+  --fallback <lin-member-id>,<your-member-id>
+
+# Launch on the requested account even when it is exhausted
+aether run "triage the failures" --agent claude --no-fallback
+```
+
+`--fallback` takes member IDs, comma separated, and never uses an account it
+does not list. Passing both flags fails with `--fallback and --no-fallback
+cannot be used together`. `aether swarm create` takes the same two flags; the
+swarm keeps that choice for its integrator and every worker it starts.
+
+When no account qualifies, the run launches on the requested account, as it
+would without fallback, and spends what usage is left there.
+
+A run that fell back keeps its launcher as owner. Its header reads
+**On `<name>`'s account (fallback)**, and `aether runs` shows the account it
+uses in the `ACCOUNT` column with ` (fallback)` appended.
+
 ### Launching a swarm
 
 A **swarm** is one objective handed to an interactive integrator
@@ -1099,11 +1139,17 @@ task-6jt9r5f3t3  Add /healthz           working
 task-0vstvmqcgn  Document the endpoint  ready    dependency task-6jt9r5f3t3
 
 attempts:
-ID              TASK             STATE    RUN
-att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5
+ID              TASK             STATE    RUN             ACCOUNT
+att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5  mem-h9zeh65yp9
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
+An attempt's `ACCOUNT` is the member ID of the account its run uses, with
+` (fallback)` appended when [usage fallback](#usage-fallback) moved it off
+the account the swarm declared for that worker. Workers fall back within the
+accountable human's accounts. An integrator that cannot launch for lack of
+usage leaves the swarm in place with that error, and the server retries the
+launch ([failure-handling.md](failure-handling.md#integrator-launch-failures)).
 
 The integrator's questions wait for you; nothing else does. `show` lists the
 question IDs; the commands below act on them and on the swarm, as the
@@ -1176,8 +1222,8 @@ A swarm is in one of four phases: `planning`, `active`, `completed`, or
 questions, proposes tasks, and runs `mission start`, which accepts every
 proposed task and moves the swarm to `active`. Start is refused while a
 question is unanswered and rechecks the swarm's own launch admission, so an
-accountable human who lost `run.launch` or the integrator's account share
-cannot carry the swarm forward. In `active` the integrator dispatches
+accountable human who lost `run.launch` or the share of the account the
+integrator runs on cannot carry the swarm forward. In `active` the integrator dispatches
 workers, accepts their work, adds or revises tasks and accepts them itself,
 and delivers the verified candidate. Its success report moves the swarm to
 `completed` and stops leftover workers; a failure report leaves the swarm

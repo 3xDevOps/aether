@@ -238,6 +238,18 @@ already-running container or remove the login mounted into it. Stop those
 runs before revoking access when immediate removal matters: **Kill run** in
 the run header's **More** menu, or `aether kill <run-id>`.
 
+**Usage fallback.** A launch whose account is out of usage can start on
+another account ([teams.md](teams.md#usage-fallback)), so a run can mount a
+sharing owner's login without the launcher picking that account for it. The
+share is the owner's consent; there is no separate grant. Fallback never
+widens who may launch on an account. Its candidates are only the launcher's
+own account and the accounts shared with the launcher, each checked again
+with the share check a hand-picked launch uses, at the moment it is chosen,
+so a revoked share leaves the pool at once. An admin gains nothing, and a
+member-defined agent still runs only on its member's own account. A swarm
+worker is checked against the swarm's accountable human, and an integrator
+launch or replacement against the member who creates or replaces it.
+
 Containers created before shares were narrowed to the login path still mount
 the account owner's whole home until they end. They stay supervised, and
 reopening one is refused:
@@ -687,6 +699,15 @@ agents do not become quota collectors. Account selection uses the same
 explicit directional grant as launches; administrators do not gain implicit
 access, and membership/share authorization is checked before and after the
 provider read.
+
+Launches read the same cached quota server-side to decide on
+[usage fallback](teams.md#usage-fallback): for `claude` and `codex` runs,
+the requested account's, and every candidate's only when that one is
+exhausted. The read happens before the server takes its launch
+authorization lock, so a slow vendor endpoint does not hold up other
+launches; every account is authorized again under the lock, and a launch
+never sends the figures it read to the client.
+
 ## The dashboard gateways
 
 

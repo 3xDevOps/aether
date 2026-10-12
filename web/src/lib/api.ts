@@ -427,6 +427,8 @@ export const api = {
     harness: string
     mode?: string
     account_member_id?: string
+    fallback_account_member_ids?: string[]
+    no_fallback?: boolean
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
@@ -528,6 +530,8 @@ export const api = {
       harness: string
       mode: string
     }>
+    fallback_account_member_ids?: string[]
+    no_fallback?: boolean
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>

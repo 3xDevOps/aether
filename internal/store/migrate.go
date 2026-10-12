@@ -1579,6 +1579,20 @@ CREATE TABLE push_subscriptions (
 );
 CREATE INDEX idx_push_subscriptions_member ON push_subscriptions(member_id);
 `,
+	// v59: usage fallback. A run records the account its launcher asked
+	// for when exhausted usage moved it to another, and the launcher's
+	// fallback policy (fallback_order is a JSON array of member IDs, empty
+	// for automatic); a swarm records the policy its runs follow; an
+	// attempt records the account its run launches on. Earlier rows read
+	// as automatic and launched on the requested account.
+	`
+ALTER TABLE runs ADD COLUMN requested_account_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE missions ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mission_attempts ADD COLUMN launch_account_id TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

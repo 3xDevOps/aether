@@ -275,6 +275,10 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		BaseBranch:      base.Branch,
 		BaseSource:      source,
 		BaseCheckedAt:   base.CheckedAt,
+		Fallback:        opts.Fallback,
+	}
+	if opts.RequestedAccount != account {
+		run.RequestedAccountMemberID = opts.RequestedAccount
 	}
 	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
 		if opts.AssignedRunID != "" {

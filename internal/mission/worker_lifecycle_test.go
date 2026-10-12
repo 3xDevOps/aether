@@ -3,10 +3,13 @@ package mission
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/quota"
 )
 
 type confirmedWorkerLauncher struct {
@@ -131,5 +134,48 @@ func TestFailedWorkerLaunchRemainsUnknownUntilConfirmedRecovery(t *testing.T) {
 	settled, err := f.db.GetAttempt(t.Context(), attempt.ID)
 	if err != nil || settled.State != domain.AttemptCancelled || launcher.calls != 1 {
 		t.Fatalf("recovery revived a settled worker: %+v, %v", settled, err)
+	}
+}
+
+// claudeUsage reports each account's used share of its five-hour window.
+type claudeUsage map[domain.MemberID]float64
+
+func (u claudeUsage) Read(_ context.Context, account domain.MemberID, _ bool) ([]quota.Provider, error) {
+	resets := time.Now().Add(time.Hour)
+	return []quota.Provider{{Provider: "claude", Status: "ok", Windows: []quota.Window{
+		{ID: "five_hour", UsedPercent: u[account], ResetsAt: &resets},
+	}}}, nil
+}
+
+func TestWorkerStartFallsBackFromExhaustedDeclaredAccount(t *testing.T) {
+	f := newMissionFixture(t)
+	ctx := t.Context()
+	owner := regressionMember(t, f.db, "owner")
+	if err := f.db.ShareAccount(ctx, owner.ID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.cfg.Usage = claudeUsage{f.member.ID: 100, owner.ID: 20}
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	launcher := &confirmedWorkerLauncher{recordingLauncher: f.launcher, status: domain.RunRunning}
+	f.svc.cfg.Runs = launcher
+	params := protocol.WorkerStartParams{
+		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+		DispatchKey: "fallback-worker", Harness: "claude", Mode: string(domain.LaunchHeadless), AccountOwnerID: string(f.member.ID),
+	}
+	out := f.mustCall(t, protocol.MethodWorkerStart, params).(protocol.WorkerStartResult)
+	if out.Attempt.AccountOwnerID != string(f.member.ID) || out.Attempt.LaunchAccountID != string(owner.ID) {
+		t.Fatalf("attempt accounts = declared %s, launch %s; want %s, %s", out.Attempt.AccountOwnerID, out.Attempt.LaunchAccountID, f.member.ID, owner.ID)
+	}
+	run, err := f.db.GetRun(ctx, domain.RunID(out.Attempt.RunID))
+	if err != nil || run.AccountMemberID != owner.ID || run.RequestedAccountMemberID != f.member.ID {
+		t.Fatalf("worker run = %+v, %v; want account %s requested %s", run, err, owner.ID, f.member.ID)
+	}
+	replayed := f.mustCall(t, protocol.MethodWorkerStart, params).(protocol.WorkerStartResult)
+	if !replayed.Replayed || replayed.Attempt.ID != out.Attempt.ID || replayed.Attempt.LaunchAccountID != string(owner.ID) || launcher.calls != 1 {
+		t.Fatalf("dispatch replay = %+v, launches=%d", replayed, launcher.calls)
+	}
+	params.DispatchKey, params.AccountOwnerID = "fallback-account-as-choice", string(owner.ID)
+	if _, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, params); err == nil || !strings.Contains(err.Error(), "worker choice is not authorized") {
+		t.Fatalf("worker.start on the fallback account = %v, want the declared choices only", err)
 	}
 }

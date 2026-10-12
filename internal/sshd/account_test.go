@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -415,5 +416,53 @@ func TestAccountShareCannotTargetSelfOrPendingMember(t *testing.T) {
 	}
 	if _, perr := e.srv.accountShare(ctx, e.member.ID, accountParams(t, pending.ID)); perr == nil || perr.Code != protocol.CodeInvalidParams {
 		t.Fatalf("pending share = %+v, want invalid params", perr)
+	}
+}
+
+// claudeUsage reports each account's used share of its five-hour window.
+type claudeUsage map[domain.MemberID]float64
+
+func (u claudeUsage) Read(_ context.Context, account domain.MemberID, _ bool) ([]quota.Provider, error) {
+	resets := time.Now().Add(time.Hour)
+	return []quota.Provider{{Provider: "claude", Status: "ok", Windows: []quota.Window{
+		{ID: "five_hour", UsedPercent: u[account], ResetsAt: &resets},
+	}}}, nil
+}
+
+func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+		t.Fatal(err)
+	}
+	usage := claudeUsage{grantee.ID: 96, e.member.ID: 10}
+	e.srv.cfg.Services.Usage = usage
+	result, perr := e.srv.runLaunch(ctx, grantee.ID, launchParams(t, e.ws.ID, ""))
+	if perr != nil {
+		t.Fatalf("run.launch: %+v", perr)
+	}
+	run := result.(protocol.RunResult).Run
+	if run.AccountMemberID != string(e.member.ID) || run.RequestedAccountMemberID != string(grantee.ID) {
+		t.Fatalf("run account/requested = %s/%s, want %s/%s", run.AccountMemberID, run.RequestedAccountMemberID, e.member.ID, grantee.ID)
+	}
+
+	usage[e.member.ID] = 99
+	result, perr = e.srv.runLaunch(ctx, grantee.ID, launchParams(t, e.ws.ID, ""))
+	if perr != nil {
+		t.Fatalf("run.launch with every account exhausted: %+v", perr)
+	}
+	if run := result.(protocol.RunResult).Run; run.AccountMemberID != string(grantee.ID) || run.RequestedAccountMemberID != "" {
+		t.Fatalf("run account/requested with no usable fallback = %s/%s, want %s/none", run.AccountMemberID, run.RequestedAccountMemberID, grantee.ID)
+	}
+	both, err := json.Marshal(protocol.RunLaunchParams{
+		WorkspaceID: string(e.ws.ID), Harness: "claude", FallbackAccountMemberIDs: []string{string(e.member.ID)}, NoFallback: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := e.srv.runLaunch(ctx, grantee.ID, both); perr == nil || perr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("launch with a fallback order and no_fallback = %+v, want invalid params", perr)
 	}
 }

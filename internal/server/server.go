@@ -24,12 +24,14 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -82,6 +84,8 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// Usage overrides the vendor quota reader, primarily for tests.
+	Usage fallback.QuotaReader
 	// IntegrationAdmission is the server-controlled policy seam for
 	// consequential candidate mutations. It is never populated from a
 	// request field.
@@ -418,6 +422,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	sshCfg.EdgeAccess = cfg.EdgeAccess
+	sshCfg.Services.Usage = cfg.Usage
+	if sshCfg.Services.Usage == nil {
+		sshCfg.Services.Usage = quota.New(homes)
+	}
 	if err = s.buildServices(Deps{
 		Config:     cfg,
 		DataDir:    cfg.DataDir,

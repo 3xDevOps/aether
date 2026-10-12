@@ -1385,6 +1385,20 @@ heading reads "Neither you nor <owner> has an agent installed." and the note
 says the run uses the owner's login and the caller's installation, or the
 owner's when the caller has none.
 
+Below the select, **Options** holds the [usage
+fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
+**Fall back to another account** checkbox and the **Fallback accounts** list,
+every listed account except the selected one, each with a checkbox and
+**Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "If
+`<owner>`'s usage is at 95% or more at launch, the run starts on the
+account here with the most usage left", or "on the first ticked account,
+top to bottom, with usage left" once the list was changed. Untouched, the
+form sends neither field and the server orders by usage left. After a
+reorder or untick it sends the ticked accounts in order as
+`fallback_account_member_ids`; with the checkbox off, or every account
+unticked, it sends `no_fallback: true` and the summary adds "· Fallback
+off". The Swarm tab sends the same fields on `mission.create`.
+
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its
 base branch. The switcher is the picker, so a second one inside the dialog
@@ -1457,6 +1471,8 @@ line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
+"On `<name>`'s account (fallback)" when the run carries
+`requested_account_member_id` ([usage fallback](teams.md#usage-fallback)),
 the branch (click copies it) and the owner. Container queries on the state
 line drop the branch first, then the owner, then the agent's name (the glyph
 stays), and only on a phone-width column the mode word; the reason truncates

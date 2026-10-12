@@ -77,6 +77,11 @@ describe('run frame', () => {
     expect(StubSocket.opened).toHaveLength(1)
   })
 
+  it('names the account a usage fallback moved the run to', async () => {
+    open({ account_member_id: bob.id, requested_account_member_id: alice.id })
+    await waitFor(() => expect(screen.getByRole('banner').textContent).toContain("On Bob's account (fallback)"))
+  })
+
   it('keeps the agent terminal attached while other views are shown', () => {
     const view = open()
     attached()

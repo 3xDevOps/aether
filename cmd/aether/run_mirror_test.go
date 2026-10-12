@@ -43,22 +43,29 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	params := launchParams("ws 1", "-fix API's cache", "claude", "headless", "mem_2", "")
+	params.FallbackAccountMemberIDs = []string{"mem_3", "mem_4"}
 	got := cachedBaseLaunchError(&protocol.Error{
 		Code:    protocol.CodeUnavailable,
 		Message: "base capture failed: mirror offline",
 		Data:    data,
-	}, "-fix API's cache", "claude", "headless", "ws 1", "mem_2")
+	}, params)
 	want := "base capture failed: mirror offline\nretry from cached " + accepted + " with:\n" +
-		"  aether run --agent claude --mode background --workspace 'ws 1' --account mem_2 --cached-base " + accepted + " -- " +
+		"  aether run --agent claude --mode background --workspace 'ws 1' --account mem_2 --fallback mem_3,mem_4 --cached-base " + accepted + " -- " +
 		`'-fix API'\''s cache'`
 	if got == nil || got.Error() != want {
 		t.Fatalf("retry error = %v, want %q", got, want)
+	}
+	params.FallbackAccountMemberIDs, params.NoFallback = nil, true
+	if got := cachedBaseLaunchError(&protocol.Error{Message: "offline", Data: data}, params); got == nil ||
+		!strings.Contains(got.Error(), " --account mem_2 --no-fallback --cached-base ") {
+		t.Fatalf("retry error = %v, want --no-fallback carried", got)
 	}
 }
 
 func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 	original := &protocol.Error{Code: protocol.CodeUnavailable, Message: "base capture failed"}
-	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "ws_1", ""); got != original {
+	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "")); got != original {
 		t.Fatalf("error without accepted commit = %v, want original error", got)
 	}
 
@@ -67,7 +74,7 @@ func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	original.Data = data
-	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "ws_1", ""); got != original {
+	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "")); got != original {
 		t.Fatalf("failure without accepted commit = %v, want original error", got)
 	}
 }

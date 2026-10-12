@@ -27,6 +27,8 @@ export interface Run {
   member_id: string
   /** Account backing the run; absent on servers predating account sharing. */
   account_member_id?: string
+  /** The account the launcher chose, present only when usage fallback moved the run to `account_member_id`. */
+  requested_account_member_id?: string
   mission_id?: string
   mission_role?: 'integrator' | 'worker'
   integrator_run_id?: string

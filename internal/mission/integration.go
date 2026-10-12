@@ -361,10 +361,6 @@ func (s *Service) authorizeMissionAgent(ctx context.Context, a feature.Admission
 	if authorizer == "" || m.Integrator.AccountMemberID == "" {
 		return missionDenied("mission has incomplete authorization")
 	}
-	admission, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, authorizer, string(m.Integrator.AccountMemberID))
-	if err != nil {
-		return err
-	}
 	run, err := s.cfg.Store.GetRun(ctx, a.Actor.RunID)
 	if err != nil {
 		return err
@@ -376,10 +372,15 @@ func (s *Service) authorizeMissionAgent(ctx context.Context, a feature.Admission
 	if owner == "" {
 		owner = authorizer
 	}
-	if m.CurrentIntegratorRunID != a.Actor.RunID || run.MemberID != owner || run.AccountMember() != admission.Account.ID {
+	declared := run.RequestedAccountMemberID
+	if declared == "" {
+		declared = run.AccountMember()
+	}
+	if m.CurrentIntegratorRunID != a.Actor.RunID || run.MemberID != owner || declared != m.Integrator.AccountMemberID {
 		return missionDenied("run actor is not the current integrator")
 	}
-	return nil
+	_, err = sshd.AuthorizeLaunch(ctx, s.cfg.Store, authorizer, string(run.AccountMember()))
+	return err
 }
 
 // prepareIntegration resolves mission context before the candidate engine sees

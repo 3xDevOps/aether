@@ -103,6 +103,23 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 }
 
+func TestSwarmCreateSendsFallbackPolicy(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "claude", "--fallback", "mem2, mem3"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	if params := missionCreateParams("ws1", "mem1", spec, "key-1"); strings.Join(params.FallbackAccountMemberIDs, ",") != "mem2,mem3" || params.NoFallback {
+		t.Errorf("--fallback params = %+v, want ordered mem2,mem3", params)
+	}
+	spec, err = parseSwarmCreate([]string{"objective", "--agent", "claude", "--no-fallback"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	if params := missionCreateParams("ws1", "mem1", spec, "key-1"); !params.NoFallback || params.FallbackAccountMemberIDs != nil {
+		t.Errorf("--no-fallback params = %+v, want no_fallback only", params)
+	}
+}
+
 func TestSwarmCreateEnhancedIntegrator(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{"objective", "--agent", "codex", "--mode", "enhanced"}, strings.NewReader(""))
 	if err != nil {
@@ -124,6 +141,7 @@ func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		"bad worker mode":       {args: []string{"objective", "--agent", "claude", "--worker", "codex:headless"}, want: `invalid --worker "codex:headless"`},
 		"empty worker":          {args: []string{"objective", "--agent", "claude", "--worker", ":standard"}, want: `invalid --worker ":standard"`},
 		"background integrator": {args: []string{"objective", "--agent", "claude", "--mode", "background"}, want: "--mode must be standard or enhanced"},
+		"fallback and none":     {args: []string{"objective", "--agent", "claude", "--fallback", "mem2", "--no-fallback"}, want: "--fallback and --no-fallback cannot be used together"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// swarmCreate reaches withControl only after validation, and no
@@ -171,7 +189,10 @@ func TestRenderSwarm(t *testing.T) {
 			{ID: "t2", Status: "proposed", PendingRevision: &protocol.TaskRevision{Title: "Write the docs"},
 				Blockers: []protocol.TaskBlocker{{Kind: "proposal", TaskID: "t2"}, {Kind: "dependency", TaskID: "t1"}}},
 		},
-		Attempts: []protocol.Attempt{{ID: "a1", TaskID: "t1", State: "running", RunID: "r2"}},
+		Attempts: []protocol.Attempt{
+			{ID: "a1", TaskID: "t1", State: "running", RunID: "r2", AccountOwnerID: "mem1", LaunchAccountID: "mem1"},
+			{ID: "a2", TaskID: "t2", State: "running", RunID: "r3", AccountOwnerID: "mem1", LaunchAccountID: "mem2"},
+		},
 	}
 	var buf bytes.Buffer
 	if err := renderSwarm(&buf, res); err != nil {
@@ -195,8 +216,9 @@ t1  Add the command (pending rev 2: Add the swarm command)  working
 t2  Write the docs                                          proposed  proposal t2, dependency t1
 
 attempts:
-ID  TASK  STATE    RUN
-a1  t1    running  r2
+ID  TASK  STATE    RUN  ACCOUNT
+a1  t1    running  r2   mem1
+a2  t2    running  r3   mem2 (fallback)
 `
 	if got := buf.String(); got != want {
 		t.Errorf("renderSwarm() =\n%s\nwant\n%s", got, want)

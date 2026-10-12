@@ -50,6 +50,14 @@ Stale data is retained only for the same credential identity, always carries
 its error and `stale` status, and is not shown as current after its reset
 window has passed without a new measurement.
 
+[Usage fallback](teams.md#usage-fallback) reads the same cache, never
+refreshing it. An account counts as exhausted when any window a run draws on
+that has not reset is at 95% used or more (`fallback.ExhaustedPercent` in
+`internal/fallback`): `five_hour` and `seven_day` for `claude`, `primary`
+and `secondary` for `codex`. Claude's per-model weekly windows are ignored,
+because Aether does not know which model a run uses. A row other than `ok`
+means unknown usage, never exhausted.
+
 ## Shipped harnesses
 
 | `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced | Switch |

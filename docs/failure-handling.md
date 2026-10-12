@@ -722,6 +722,11 @@ retry:
 aether run --cached-base <40-character-commit>
 ```
 
+The printed command also repeats the refused launch's `--agent`, `--mode`,
+`--workspace`, `--account`, its `--fallback` list or `--no-fallback`, and the
+task, so the retry keeps the same [usage fallback](teams.md#usage-fallback)
+choice.
+
 The `--cached-base` override is request-scoped: it applies only to the launch
 request where it is supplied and is never inherited by later launches.
 Repeating the same override is accepted while the SHA still matches the

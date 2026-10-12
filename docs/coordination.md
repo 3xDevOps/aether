@@ -901,7 +901,8 @@ The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
 (`headless`) with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
-account, agent, and mode among the execution choices;
+account, agent, and mode among the execution choices (the run may still
+launch on another account; see the usage fallback note under `worker start`);
 `mission.replace-integrator` accepts any listed account and agent in Standard
 or Enhanced, so a swarm whose choices are all Background can still get an
 interactive integrator; `aether swarm replace-integrator` always asks for
@@ -1078,6 +1079,20 @@ key, so replaying the same start cannot create a second attempt. Worker
 retries require an explicit `--dispatch-key`. Worker cancellation requires its
 own `--idempotency-key` and the observed
 `--expected-integrator-generation`.
+
+Execution choices are matched as declared; [usage
+fallback](teams.md#usage-fallback) applies only when the worker's run
+launches. If the chosen account is exhausted, the run starts on another
+account the accountable human may use, under the fallback policy the swarm
+was created with (`fallback_account_member_ids`, `no_fallback`). The attempt
+keeps the declared account in `account_owner_id` and records the one its
+run uses in `launch_account_id`; a recovered launch reuses that account
+instead of choosing again, and a replayed dispatch key returns the attempt
+unchanged. When no account qualifies, the run starts on the declared
+account. The integrator's launch, its
+replacement and its recovery relaunch fall back the same way, within the
+accounts of the member who created the swarm or last replaced its
+integrator.
 
 A worker attempt remains `launching` while its run is queued or provisioning.
 Once the scheduler confirms `running` or `needs-attention`, the attempt is

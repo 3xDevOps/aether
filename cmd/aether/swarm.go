@@ -21,7 +21,7 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--account <member-id>] [--worker <agent>[:standard|enhanced|background]]... [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <swarm-id>\n" +
 	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
@@ -50,12 +50,14 @@ func runSwarm(args []string) error {
 }
 
 type swarmSpec struct {
-	objective string
-	agent     string
-	mode      string
-	account   string
-	workspace string
-	workers   []protocol.MissionExecutionChoice
+	objective  string
+	agent      string
+	mode       string
+	account    string
+	workspace  string
+	workers    []protocol.MissionExecutionChoice
+	fallbacks  []string
+	noFallback bool
 }
 
 func swarmCreate(args []string, stdin io.Reader) error {
@@ -88,6 +90,8 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	mode := fs.String("mode", "standard", "integrator mode: standard or enhanced")
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
+	fallbackOrder := fs.String("fallback", "", fallbackHelp)
+	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
 	var workers stringList
 	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode] with mode "+launchModeHelp+" (repeatable, default standard)")
 	objective, err := parseLeadingArg(fs, args)
@@ -105,7 +109,14 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if integratorMode == "headless" {
 		return swarmSpec{}, errors.New("the integrator runs until the swarm ends: --mode must be standard or enhanced")
 	}
-	spec := swarmSpec{objective: objective, agent: *agent, mode: integratorMode, account: *account, workspace: *workspace}
+	fallbacks, err := parseFallback(*fallbackOrder, *noFallback)
+	if err != nil {
+		return swarmSpec{}, err
+	}
+	spec := swarmSpec{
+		objective: objective, agent: *agent, mode: integratorMode, account: *account, workspace: *workspace,
+		fallbacks: fallbacks, noFallback: *noFallback,
+	}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
 		if parseErr != nil {
@@ -168,6 +179,9 @@ func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key stri
 		Integrator:       protocol.MissionIntegrator(integrator),
 		ExecutionChoices: choices,
 		IdempotencyKey:   key,
+
+		FallbackAccountMemberIDs: spec.fallbacks,
+		NoFallback:               spec.noFallback,
 	}
 }
 
@@ -319,11 +333,15 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(tw, "\nattempts:\nID\tTASK\tSTATE\tRUN"); err != nil {
+	if _, err := fmt.Fprintln(tw, "\nattempts:\nID\tTASK\tSTATE\tRUN\tACCOUNT"); err != nil {
 		return err
 	}
 	for _, a := range res.Attempts {
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.ID, a.TaskID, a.State, a.RunID); err != nil {
+		account := a.AccountOwnerID
+		if a.LaunchAccountID != "" && a.LaunchAccountID != a.AccountOwnerID {
+			account = a.LaunchAccountID + " (fallback)"
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.ID, a.TaskID, a.State, a.RunID, account); err != nil {
 			return err
 		}
 	}

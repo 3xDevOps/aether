@@ -12,7 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-const attemptColumns = `id, mission_id, task_id, task_revision, number, dispatch_key, harness, mode, state, run_id, actor_run_id, authorizing_human_id, run_owner_id, account_owner_id, authority_generation, integrator_generation, created_at, reserved_at, started_at, finished_at, cancel_requested_at, cancellation_actor_run_id, cancellation_generation, last_error`
+const attemptColumns = `id, mission_id, task_id, task_revision, number, dispatch_key, harness, mode, state, run_id, actor_run_id, authorizing_human_id, run_owner_id, account_owner_id, authority_generation, integrator_generation, created_at, reserved_at, started_at, finished_at, cancel_requested_at, cancellation_actor_run_id, cancellation_generation, last_error, launch_account_id`
 
 func scanAttempt(row interface{ Scan(...any) error }) (*domain.Attempt, error) {
 	var a domain.Attempt
@@ -20,7 +20,7 @@ func scanAttempt(row interface{ Scan(...any) error }) (*domain.Attempt, error) {
 	var mode, state string
 	var created, reserved int64
 	var started, finished, cancelRequested *int64
-	if err := row.Scan(&a.ID, &a.MissionID, &a.TaskID, &a.TaskRevision, &a.Number, &a.DispatchKey, &a.Harness, &mode, &state, &runID, &a.ActorRunID, &a.AuthorizingHumanID, &a.RunOwnerID, &a.AccountOwnerID, &a.AuthorityGeneration, &a.IntegratorGeneration, &created, &reserved, &started, &finished, &cancelRequested, &a.CancellationActorRunID, &a.CancellationGeneration, &a.LastError); err != nil {
+	if err := row.Scan(&a.ID, &a.MissionID, &a.TaskID, &a.TaskRevision, &a.Number, &a.DispatchKey, &a.Harness, &mode, &state, &runID, &a.ActorRunID, &a.AuthorizingHumanID, &a.RunOwnerID, &a.AccountOwnerID, &a.AuthorityGeneration, &a.IntegratorGeneration, &created, &reserved, &started, &finished, &cancelRequested, &a.CancellationActorRunID, &a.CancellationGeneration, &a.LastError, &a.LaunchAccountID); err != nil {
 		return nil, err
 	}
 	a.Mode, a.State = domain.LaunchMode(mode), domain.AttemptState(state)
@@ -186,6 +186,19 @@ func (d *DB) BindAttemptRun(ctx context.Context, id domain.AttemptID, runID doma
 		return nil
 	}
 	return ErrMissionStale
+}
+func (d *DB) RecordAttemptLaunchAccount(ctx context.Context, id domain.AttemptID, runID domain.RunID, authority, integrator uint64, account domain.MemberID) error {
+	if id == "" || runID == "" || account == "" {
+		return errors.New("store: record attempt launch account: invalid request")
+	}
+	res, err := d.db.ExecContext(ctx, `UPDATE mission_attempts SET launch_account_id=? WHERE id=? AND run_id=? AND authority_generation=? AND integrator_generation=? AND launch_account_id='' AND state IN ('reserved','launching','unknown')`, account, id, runID, authority, integrator)
+	if err != nil {
+		return fmt.Errorf("store: record attempt %s launch account: %w", id, err)
+	}
+	if affected, _ := res.RowsAffected(); affected != 1 {
+		return ErrMissionStale
+	}
+	return nil
 }
 func (d *DB) RequestAttemptCancellation(ctx context.Context, attemptID domain.AttemptID, actorRunID domain.RunID, generation uint64, key string) (*domain.Attempt, bool, error) {
 	if attemptID == "" || actorRunID == "" || generation == 0 || key == "" || len(key) > 256 || strings.ContainsAny(key, "\r\n\x00") {

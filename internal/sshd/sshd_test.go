@@ -473,11 +473,15 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.Works
 			return nil, ctx.Err()
 		}
 	}
-	return &domain.Run{
+	run := &domain.Run{
 		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account,
 		Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued,
-		CreatedAt: time.Now().UTC(),
-	}, nil
+		CreatedAt: time.Now().UTC(), Fallback: opts.Fallback,
+	}
+	if opts.RequestedAccount != account {
+		run.RequestedAccountMemberID = opts.RequestedAccount
+	}
+	return run, nil
 }
 
 func (f *fakeRuns) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {

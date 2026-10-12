@@ -432,6 +432,17 @@ them rather than choosing an arbitrary parent; repeated attempts within one
 swarm retain that swarm. These fields come from durable relationships,
 not task text, and confer no authorization.
 
+`account_member_id` on a run snapshot is the account the run uses.
+`requested_account_member_id` appears only when [usage
+fallback](teams.md#usage-fallback) launched the run on another account than
+the one asked for, and holds that one. `run.launch` and `mission.create`
+take the fallback policy as `fallback_account_member_ids` (member IDs, tried
+in order) or `no_fallback: true`; omitting both orders the launcher's
+accounts by usage left, and sending both is refused with `-32602`
+`fallback_account_member_ids and no_fallback cannot both be set`. When no
+account qualifies, the run launches on the requested account. Swarm
+attempts carry `launch_account_id`, the account the worker's run uses.
+
 Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
 current `status`, or its current `reason` while it is `needs-attention`. A
 same-status rewrite of the reason, such as retention expiry relabelling a

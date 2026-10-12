@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -123,6 +124,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
+	policy, err := fallback.Policy(p.FallbackAccountMemberIDs, p.NoFallback)
+	if err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	s.authorizationMu.Lock()
 	defer s.authorizationMu.Unlock()
 	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID)
@@ -132,8 +141,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, rpcError(err)
 	}
-	account := admission.Account.ID
-	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{CachedBase: p.CachedBase})
+	requested := admission.Account.ID
+	account, err := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
+		CachedBase: p.CachedBase, RequestedAccount: requested, Fallback: policy,
+	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
 			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: cached base retry is not supported by this server"}

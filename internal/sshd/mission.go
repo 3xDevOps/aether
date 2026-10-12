@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -54,7 +55,7 @@ func AuthorizeLaunch(ctx context.Context, st store.Store, actorID domain.MemberI
 	if err = permissions.Check(permissions.Launch, permissions.Actor{ID: actor.ID, Role: actor.Role}, permissions.Target{}); err != nil {
 		return LaunchAdmission{}, err
 	}
-	accountID, err := ResolveLaunchAccount(ctx, st, actor.ID, requestedAccount)
+	accountID, err := fallback.ResolveLaunchAccount(ctx, st, actor.ID, requestedAccount)
 	if err != nil {
 		return LaunchAdmission{}, err
 	}
@@ -66,32 +67,6 @@ func AuthorizeLaunch(ctx context.Context, st store.Store, actorID domain.MemberI
 		return LaunchAdmission{}, fmt.Errorf("%w: account owner is pending admin approval", permissions.ErrDenied)
 	}
 	return LaunchAdmission{Actor: actor, Account: account}, nil
-}
-
-// ResolveLaunchAccount returns the account a launch by actor runs on: actor's
-// own, or requested when its owner has shared their agent login with actor.
-// Shares are directional. It is shared by human and mission launches so
-// administrators do not acquire implicit credential-use authority.
-func ResolveLaunchAccount(ctx context.Context, st store.Store, actor domain.MemberID, requested string) (domain.MemberID, error) {
-	account := domain.MemberID(requested)
-	if account == "" || account == actor {
-		return actor, nil
-	}
-	owner, err := st.GetMember(ctx, account)
-	if err != nil {
-		return "", err
-	}
-	if owner.Pending {
-		return "", fmt.Errorf("%w: account owner is pending admin approval", permissions.ErrDenied)
-	}
-	shared, err := st.AccountSharedWith(ctx, account, actor)
-	if err != nil {
-		return "", err
-	}
-	if !shared {
-		return "", fmt.Errorf("%w: member %s has not shared their account with you", permissions.ErrDenied, account)
-	}
-	return account, nil
 }
 
 // lockAuthorization runs the admission callback under the process-wide
