@@ -341,7 +341,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		OnState: func(working bool, reason string, failed error) {
 			if oneShot && !working {
 				if reason != "" {
-					d.endOneShot(entry, reason == "end_turn", turnEndReport(reason))
+					d.endOneShot(entry, reason == "end_turn", false, turnEndReport(reason))
 				}
 				return
 			}
@@ -398,7 +398,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	switch {
 	case oneShot && modelErr != nil:
 		// Unattended, the task would otherwise run on the agent's default model.
-		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":
@@ -425,12 +425,12 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 				prompt = oneShotResume
 			}
 		default:
-			d.endOneShot(entry, last.StopReason == "end_turn", turnEndReport(last.StopReason))
+			d.endOneShot(entry, last.StopReason == "end_turn", false, turnEndReport(last.StopReason))
 			return
 		}
 	}
 	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
-		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }
 
@@ -442,8 +442,9 @@ func turnEndReport(stop string) agentstatus.Report {
 }
 
 // Only the first call for a session ends it, and its session takes no input
-// from then on.
-func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Report) {
+// from then on. A swarm worker's run is left to CompleteMission unless
+// untried: its agent never got the task, so there is nothing to judge.
+func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentstatus.Report) {
 	d.mu.Lock()
 	r := d.runs[entry.runID]
 	skip := d.closed || r == nil || r.stopping || r.ended
@@ -467,7 +468,7 @@ func (d *acpDriver) endOneShot(entry *supervised, ok bool, idle agentstatus.Repo
 		}
 		unlock()
 		d.s.mu.Lock()
-		assigned, cid := entry.missionAssigned, entry.containerID
+		assigned, cid := entry.missionAssigned && !untried, entry.containerID
 		if !ok && !assigned {
 			entry.exitDetail = idle.Reason
 		}
@@ -506,7 +507,7 @@ func (d *acpDriver) fail(entry *supervised, err error) {
 	d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpFailedReason + err.Error()}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, idle)
+		d.endOneShot(entry, false, false, idle)
 		return
 	}
 	go d.report(entry.runID, idle)
@@ -573,7 +574,7 @@ func (d *acpDriver) watch(entry *supervised, r *acpRun) {
 	d.notice(entry.runID, "error", "Enhanced session ended", cause.Error())
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + cause.Error()}
 	if d.oneShot(entry) {
-		d.endOneShot(entry, false, idle)
+		d.endOneShot(entry, false, false, idle)
 		return
 	}
 	d.report(entry.runID, idle)
