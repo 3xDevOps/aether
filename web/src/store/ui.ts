@@ -79,6 +79,7 @@ export type OnboardingStep = (typeof onboardingSteps)[number]
 export interface OnboardingFirstRun {
   harness: string
   task: string
+  model?: string
 }
 
 const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }

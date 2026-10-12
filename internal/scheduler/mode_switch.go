@@ -183,11 +183,13 @@ type modeSwitch struct {
 }
 
 func (m modeSwitch) toStandard(ctx context.Context) error {
-	nonce, reporter, err := m.writeTerminal()
-	if err != nil {
-		return err
-	}
+	// The adapter stops first so the composer cannot change the model after
+	// writeTerminal reads it.
 	if err := m.s.acp.stopAdapter(ctx, m.entry.runID); err != nil {
+		return errors.Join(err, m.reopenEnhanced(ctx))
+	}
+	nonce, reporter, err := m.writeTerminal(ctx)
+	if err != nil {
 		return errors.Join(err, m.reopenEnhanced(ctx))
 	}
 	if err := m.recordIntent(&switchIntent{Mode: domain.LaunchTUI, Nonce: nonce, Reporter: reporter}); err != nil {
@@ -256,7 +258,7 @@ func (m modeSwitch) reopenEnhanced(ctx context.Context) error {
 }
 
 func (m modeSwitch) restoreStandard(ctx context.Context) error {
-	nonce, _, err := m.writeTerminal()
+	nonce, _, err := m.writeTerminal(ctx)
 	if err == nil {
 		err = m.s.swapChild(ctx, m.cid, nonce, tuiSettle)
 	}
@@ -282,11 +284,14 @@ func (m modeSwitch) recordIntent(intent *switchIntent) error {
 
 // writeTerminal returns the next-command file's nonce and the reporter the
 // command gives the run.
-func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
-	argv := m.profile.ResumeCommand(m.session, m.run.Model)
+func (m modeSwitch) writeTerminal(ctx context.Context) (string, harness.Reporter, error) {
+	current, err := m.s.cfg.Store.GetRun(ctx, m.entry.runID)
+	if err != nil {
+		return "", 0, fmt.Errorf("load the run's model: %w", err)
+	}
+	argv := m.profile.ResumeCommand(m.session, current.Model)
 	var native harness.NativeLaunch
 	if m.c.enabled && m.run.Task != "" {
-		var err error
 		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, nil); err != nil {
 			return "", 0, fmt.Errorf("prepare native coordination: %w", err)
 		}

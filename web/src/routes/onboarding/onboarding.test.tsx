@@ -1722,6 +1722,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(await screen.findByLabelText('Task'), {
       target: { value: 'add a health check endpoint' },
     })
+    fireEvent.change(await screen.findByLabelText('Model'), { target: { value: 'haiku' } })
     const steps = screen.getByLabelText('Steps')
     fireEvent.click(
       within(steps).getByRole('button', {
@@ -1738,6 +1739,7 @@ describe('onboarding wizard', () => {
     expect(
       (await screen.findByLabelText<HTMLTextAreaElement>('Task')).value,
     ).toBe('add a health check endpoint')
+    await waitFor(() => expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('haiku'))
   })
 
   it('renders a launch refusal verbatim and lets the user retry', async () => {

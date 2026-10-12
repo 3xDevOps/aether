@@ -695,7 +695,6 @@ func (s *Session) Model() string {
 	return s.options.model.current
 }
 
-// Notice appends a notice to the session's items.
 func (s *Session) Notice(severity, title, description string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

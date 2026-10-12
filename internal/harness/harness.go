@@ -208,7 +208,7 @@ func isPathWithin(candidate, root string) bool {
 
 // Profile converts a generic definition to a launch profile. The registry
 // entry of the same name still supplies what is not part of the argv:
-// EnvPassthrough, Env, PermissionEnv and ACPMode.
+// EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs and ModelEnv.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -224,6 +224,8 @@ func (d Definition) Profile() Profile {
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
 		p.ACPMode = registered.ACPMode
+		p.ModelArgs = slices.Clone(registered.ModelArgs)
+		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}
 	return p
 }

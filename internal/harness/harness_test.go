@@ -473,6 +473,9 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 	if override.ACPMode != claude.ACPMode {
 		t.Errorf("override enhanced mode = %q, want %q", override.ACPMode, claude.ACPMode)
 	}
+	if !slices.Equal(override.ModelArgs, claude.ModelArgs) {
+		t.Errorf("override model args = %v, want %v", override.ModelArgs, claude.ModelArgs)
+	}
 	// The copy must not alias the registry: a caller editing an override's
 	// environment would otherwise change every later launch.
 	override.Env["IS_SANDBOX"] = "0"
@@ -480,7 +483,7 @@ func TestDefinitionProfileKeepsRegistryEnvironment(t *testing.T) {
 		t.Fatalf("registry claude env mutated through an override: %v", again.Env)
 	}
 	// An unshipped name has no registry entry to inherit from.
-	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 {
+	if unknown := (Definition{Name: "aider", Executable: "aider"}).Profile(); len(unknown.Env) != 0 || len(unknown.EnvPassthrough) != 0 || len(unknown.ModelArgs) != 0 {
 		t.Fatalf("unshipped definition inherited environment: %+v", unknown)
 	}
 	// The scheduler would run the shipped CLI's updater against a program

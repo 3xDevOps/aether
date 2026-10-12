@@ -24,11 +24,12 @@ function preselect(list: AgentInfo[], preferred?: string): string {
 }
 
 /** The agent, mode and model a launch uses, reloaded for each account; `preferred`
- * wins the first pick when that agent can launch. */
-export function useAgentChoice({ account, ownAccountID, preferred, client = api }: {
+ * wins the first pick when that agent can launch, with `preferredModel` as its model. */
+export function useAgentChoice({ account, ownAccountID, preferred, preferredModel, client = api }: {
   account: string
   ownAccountID: string
   preferred?: string
+  preferredModel?: string
   client?: Api
 }) {
   const [agents, setAgents] = useState<AgentInfo[] | null>(null)
@@ -37,8 +38,8 @@ export function useAgentChoice({ account, ownAccountID, preferred, client = api 
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [model, setModel] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const choice = useRef({ harness, mode, preferred })
-  choice.current = { harness, mode, preferred: choice.current.preferred }
+  const choice = useRef({ harness, mode, preferred, preferredModel })
+  choice.current = { ...choice.current, harness, mode }
 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
     setHarness(name)
@@ -57,7 +58,11 @@ export function useAgentChoice({ account, ownAccountID, preferred, client = api 
       setAgents(list)
       const current = choice.current
       const keep = current.harness === customAgent || list.some((item) => item.name === current.harness && launchable(item))
-      if (!keep) choose(preselect(list, current.preferred), list)
+      if (!keep) {
+        const name = preselect(list, current.preferred)
+        choose(name, list)
+        if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
+      }
       else if (modeRefusal(list.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
     }).catch((err) => {
       if (!live) return
