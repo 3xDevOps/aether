@@ -3,8 +3,6 @@ import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import { initialRoute } from '@/lib/url-state'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type {
-  ConfigExclusion,
-  ConfigImportResult,
   LaunchMode,
   LinkRepoResult,
   RepoFastForwardResult,
@@ -103,26 +101,6 @@ export const minSidebarWidth = 220
 export const maxSidebarWidth = 400
 export const defaultSidebarWidth = 260
 
-export interface ConfigImportCandidate {
-  path: string
-  destinationPath: string
-  file: File
-  problem?: ConfigExclusion
-}
-
-export interface ConfigImportStatus {
-  owner: string | null
-  basename: string
-  destination: string
-  totalFiles: number
-  excluded: ConfigExclusion[]
-  phase: 'reading' | 'uploading' | 'complete'
-  result: ConfigImportResult
-  unknownPaths: string[]
-  remaining: ConfigImportCandidate[]
-  errors: string[]
-}
-
 export interface UiSlice {
   theme: Theme
   textSize: TextSize
@@ -148,8 +126,6 @@ export interface UiSlice {
   onboardingWorkspace: string
   onboardingSource: 'local' | 'remote'
   onboardingRepo: OnboardingRepo | null
-  configImportPending: boolean
-  configImportStatus: ConfigImportStatus | null
   /** Here so a jump to another step and back keeps the draft. */
   onboardingFirstRun: OnboardingFirstRun
   onboardingAgentSkipped: boolean
@@ -239,8 +215,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
-  configImportPending: false,
-  configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
   onboardingAgentSkipped: false,
   activeWorkspace: '',

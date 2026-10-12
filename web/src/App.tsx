@@ -27,18 +27,17 @@ export function App() {
   const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
-  const importPending = useStore((s) => s.configImportPending)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
-    if (!dirty && !importPending) return
+    if (!dirty) return
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [drafts, importPending])
+  }, [drafts])
   const theme = useStore((s) => s.theme)
   // A retry remounts the connection effect; a page reload would lose the
   // in-memory session token.

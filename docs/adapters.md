@@ -28,8 +28,8 @@ one entry to the `profiles` map:
 | `CredentialPaths` | Home-relative files or directories holding native login state, strictly below the home. They persist in the member home like everything else there. An account share mounts exactly these paths, read-write, from the owner's home into a recipient's run, so name the login file itself, not its configuration directory. |
 | `InstallPaths` | Home-relative directories the CLI's `~/.local/bin` launcher links into, outside `~/.local/bin` and `~/.local/lib`; `claude` names `.local/share/claude`, where its native installer puts the versions it links to. A recipient's run that borrows the owner's installation mounts each read-only from the owner's home at the same path. Leave empty for an npm install (under `~/.local/lib`) or a single binary in `~/.local/bin`. |
 | `BorrowedState` | A home-relative JSON file and the keys a launch that borrows this login sets in the launcher's copy when they are absent, so the CLI starts signed in with the owner's login instead of running first-time setup against an empty home. `claude` sets `hasCompletedOnboarding: true` in `.claude.json`, because Claude Code's setup wizard shows its sign-in step regardless of an existing login. The file is created with mode 0600 when missing, rewritten in place when it is a JSON object, and left alone otherwise. |
-| `LocalRoot` | Home-relative configuration root exposed to the browser's repeatable **Agent config files** import and the **Files** editor. It also names the local root used by the explicit `profile` CLI commands. Empty means the agent has no configuration root. |
-| `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so the browser excludes them before reads and upload. The server and manual profile path enforce the same names; `*.pem` is always denied. |
+| `LocalRoot` | Home-relative configuration root, the same path on the member's computer and in the member home. `aether config push` uploads from it, the **Files** editor edits it, and the explicit `profile` CLI commands read it. Empty means the agent has no configuration root. |
+| `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so `aether config push` leaves them out before reading them. The server and manual profile path enforce the same names; `*.pem` is always denied. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
 | `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
 
@@ -46,36 +46,30 @@ Rules that are easy to get wrong:
   `.config/opencode` for configuration and `.local/share/opencode/auth.json`
   for account sharing. Registry roots are home-relative defaults, not
   environment-expanded paths; native configuration overrides do not relocate
-  browser import or manual profile commands.
+  `aether config` or manual profile commands.
 - **`CredentialPaths` and `DenyNames` are two different lists.** The first says
   what an account share *mounts* into another member's run; the second says
-  what configuration import and explicit profile commands must never
+  what `aether config push` and explicit profile commands must never
   *upload*. A credential file usually appears in both, from opposite
   directions.
-- **Nothing under `LocalRoot` may be assumed private.** Browser import sends
-  ordinary remaining bytes to the server for scanning. Known credential names
-  are skipped locally, but scanner findings are a server-side boundary, not a
-  promise that all secret content stays local.
-- **Configuration changes the shared member HOME.** The repeatable browser
-  directory picker under **Agents > Agent config files** and the **Files**
-  editor write the authenticated member's persistent home, visible to that
-  member's active and future runs. The importer is available on both gateways
-  when `config.roots` and `config.import` are advertised, without a workspace or onboarding prerequisite. Onboarding
-  optionally uses the same importer. No daemon watches `LocalRoot` or
-  automatically synchronizes configuration.
-- **Directory size does not truncate imports.** The browser previews metadata
-  and transfers the explicitly selected files in bounded requests. Runtime
-  and credential policy applies before the 64 MiB per-file size check.
-  An oversized eligible file remains visible until the user explicitly omits
-  it; a read failure can be retried or omitted from the remaining review.
-  Every omission is reported. Interrupted imports distinguish confirmed,
-  failed/unattempted, and unknown outcomes without automatically replaying
-  submitted files. Required larger assets can be installed or downloaded in
-  the persistent home through `aether terminal`, outside the browser importer.
-- **Browser file metadata is limited.** New files use `0644`; overwrites retain
-  existing remote modes. The browser cannot preserve source executable bits
-  or symlinks.
-- **Profile snapshots are optional history, not the HOME.** Browser imports
+- **Nothing under `LocalRoot` may be assumed private.** `aether config push`
+  uploads every named file that passes the credential, runtime, and
+  secret-scanner checks. The scanner finds known secret patterns, not every
+  secret.
+- **Configuration changes the shared member HOME.** `aether config push` and
+  the **Files** editor write the authenticated member's persistent home,
+  visible to that member's active and future runs. No daemon watches
+  `LocalRoot` or automatically synchronizes configuration.
+- **Directory size does not truncate uploads.** `aether config push` sends the
+  named files in bounded requests. Runtime and credential policy applies
+  before the 64 MiB per-file size check. Every omission is reported; a larger
+  file can be installed or downloaded in the persistent home through
+  `aether terminal`. A failed request reports confirmed and unknown outcomes
+  and is not retried automatically.
+- **File metadata is limited.** New files get the local permission bits
+  (`0644` from Windows); overwrites retain existing remote modes. Symlinks
+  are not uploaded.
+- **Profile snapshots are optional history, not the HOME.** `aether config push`
   and Files edits do not create CLI snapshots. A run's snapshot pin records
   provenance, not an isolated writable copy. Manual profile push and rollback
   overlay snapshot files into the same shared HOME; absent paths are not
