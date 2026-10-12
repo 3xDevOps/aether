@@ -59,5 +59,5 @@ private fun edgeLink(base: String, uri: URI, link: String, names: List<String>):
     if (!RELAY_ORIGIN.matches(params.getValue("edge"))) return null
     if (!SERVER_ID.matches(params.getValue("server"))) return null
     if ("invitation" in params && !INVITATION_ID.matches(params.getValue("invitation"))) return null
-    return "$base?${uri.host}=${URLEncoder.encode(link, "UTF-8")}"
+    return "$base#${uri.host}=${URLEncoder.encode(link, "UTF-8")}"
 }

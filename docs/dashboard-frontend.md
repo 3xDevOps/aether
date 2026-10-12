@@ -573,11 +573,11 @@ token is removed on first load as before.
 
 Both shells deliver three deep links: `aether://run/<id>` loads
 `<dashboard>?run=<id>`, and `aether://join?…#<secret>` and
-`aether://claim?…#<secret>` load `<dashboard>?join=<link>` and
-`?claim=<link>` with the whole link URL-encoded
-([local-gateway.md](local-gateway.md#running-it)). `handedLink()` in
-`src/lib/url-state.ts` takes `join` and `claim` off the address on first
-load and holds the link in memory for the Connect step. `?run=<id>` opens
+`aether://claim?…#<secret>` load `<dashboard>#join=<link>` and
+`#claim=<link>` with the whole link URL-encoded in the fragment, which
+never reaches the server ([local-gateway.md](local-gateway.md#running-it)).
+`handedLink()` in `src/lib/url-state.ts` takes `join` and `claim` off the
+address on first load and holds the link in memory for the Connect step. `?run=<id>` opens
 the run's default view (see [Run view](#run-view)). When the first
 hydration does not find the run, the dashboard opens the board instead, or
 onboarding for a member who has not finished it. A `?page=` name with no

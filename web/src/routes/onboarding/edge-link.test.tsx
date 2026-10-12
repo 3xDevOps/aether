@@ -445,7 +445,7 @@ describe('a join link handed to the dashboard', () => {
   const joinLink = `aether://join?edge=${encodeURIComponent(edge)}&server=${serverID}&invitation=inv-7k2m9q4xbd#abcdefghijk23456`
 
   function handOver() {
-    window.history.replaceState(null, '', `/?token=t&join=${encodeURIComponent(joinLink)}`)
+    window.history.replaceState(null, '', `/?token=t#join=${encodeURIComponent(joinLink)}`)
   }
 
   it('shows the account it joins as, then joins, and takes the link off the address', async () => {
@@ -460,6 +460,7 @@ describe('a join link handed to the dashboard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     expect(window.location.search).toBe('?token=t')
+    expect(window.location.hash).toBe('')
     const join = within(await screen.findByRole('region', { name: 'Join' }))
     expect(join.getByText(/as the invited account\?/).textContent).toBe(`Join ${serverID} as the invited account?`)
     expect((await join.findByText(/This device is signed in/)).textContent).toContain('edge.example.test as octocat (GitHub)')

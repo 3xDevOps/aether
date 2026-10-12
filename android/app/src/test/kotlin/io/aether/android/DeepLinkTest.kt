@@ -40,9 +40,9 @@ class DeepLinkTest {
     @Test
     fun joinAndClaimLinksOpenTheConnectStepWithTheWholeLink() {
         val join = "aether://join?edge=https://edge.example.test&server=$SERVER&invitation=inv-7k2m9q4xbd#$SECRET"
-        assertEquals("$BASE?join=${URLEncoder.encode(join, "UTF-8")}", deepLinkUrl(BASE, join))
+        assertEquals("$BASE#join=${URLEncoder.encode(join, "UTF-8")}", deepLinkUrl(BASE, join))
         val claim = "aether://claim?edge=https%3A%2F%2Fedge.example.test%3A8443&server=$SERVER#$SECRET"
-        assertEquals("$BASE?claim=${URLEncoder.encode(claim, "UTF-8")}", deepLinkUrl(BASE, claim))
+        assertEquals("$BASE#claim=${URLEncoder.encode(claim, "UTF-8")}", deepLinkUrl(BASE, claim))
     }
 
     @Test

@@ -860,7 +860,7 @@ go test -race ./internal/edge/edgetest/
 | --- | --- |
 | `TestAccountAccess` | Under `account` an invited person joins by the invitation's link and works with no approval, the device is recorded `registered`, and a registered device approves nothing |
 | `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
-| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance without the link's secret, refused with nothing recorded, not even a waiting device, and the invitation still open; a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance without the link's secret, refused with nothing recorded, not even a waiting device, and the invitation still open; the same acceptance with the link's harvested secret, which only leaves the device pending on the invitation, with no member, no bound account and the invitation still open; a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
 | `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
 | `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
 | `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
@@ -894,8 +894,10 @@ go test -race ./internal/edge/edgetest/
 
 Beside the suite, `internal/sshd` checks each server rule on its own,
 among them `TestJoinByLink` (a join by an invitation's link is admitted
-under `account` and waits under `approved-devices`; a wrong secret and a
-missing link are refused with nothing recorded),
+under `account` and waits under `approved-devices`; a wrong secret under
+either policy, another invitation's secret, a consumed invitation, the
+right secret from an account the invitation does not name, and a missing
+link are refused with nothing recorded),
 `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
 an invitation until one is approved, which creates the member and removes
 the others), `TestRevokedInvitationDropsItsWaitingDevices`,

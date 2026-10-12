@@ -326,38 +326,73 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	e.mustRefuseEdge(t, other, newSigner(t), "phone", "github account someone is not a member of this server")
 }
 
-// An invitation is joined only with the secret of its link: under account
-// access the join is the whole of it, under approved-devices the device
-// waits on the invitation. A wrong secret or none records nothing.
+// An invitation is joined only with the secret of its link, by the
+// account it names: under account access the join is the whole of it,
+// under approved-devices the device waits on the invitation. A wrong
+// secret, another invitation's, a closed invitation's, or the right one
+// from another account records nothing.
 func TestJoinByLink(t *testing.T) {
 	t.Parallel()
+	someone := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "7007", Login: "someone", IdentityAt: time.Now()}
+	joinUser := func(inv domain.InvitationID, secret string, account edgeproto.Account) string {
+		u, _ := edgeproto.JoinUser(string(inv), secret, edgeproto.AccountPrincipal(account))
+		return u
+	}
+	wrongSecret := func(_ *testing.T, _ *testEnv, inv domain.InvitationID, _ string) string {
+		return joinUser(inv, edgeproto.NewJoinSecret(), octo)
+	}
 	for _, tc := range []struct {
-		name   string
-		policy edgeproto.AccessPolicy
-		user   func(inv domain.InvitationID, secret string) string
-		want   edgeproto.RefusedKind
+		name    string
+		policy  edgeproto.AccessPolicy
+		account edgeproto.Account
+		user    func(t *testing.T, e *testEnv, inv domain.InvitationID, secret string) string
+		want    edgeproto.RefusedKind
 	}{
 		{name: "account", policy: edgeproto.PolicyAccount},
 		{name: "approved-devices", policy: edgeproto.PolicyApprovedDevices, want: edgeproto.RefusedDevicePending},
-		{name: "wrong secret", policy: edgeproto.PolicyAccount, want: edgeproto.RefusedJoinWrong,
-			user: func(inv domain.InvitationID, _ string) string {
-				u, _ := edgeproto.JoinUser(string(inv), edgeproto.NewJoinSecret(), edgeproto.AccountPrincipal(octo))
-				return u
+		{name: "wrong secret", policy: edgeproto.PolicyAccount, want: edgeproto.RefusedJoinWrong, user: wrongSecret},
+		{name: "wrong secret under approved-devices", policy: edgeproto.PolicyApprovedDevices, want: edgeproto.RefusedJoinWrong, user: wrongSecret},
+		{name: "account the invitation does not name", policy: edgeproto.PolicyAccount, account: someone, want: edgeproto.RefusedJoinWrong,
+			user: func(_ *testing.T, _ *testEnv, inv domain.InvitationID, secret string) string {
+				return joinUser(inv, secret, someone)
+			}},
+		{name: "another invitation's secret", policy: edgeproto.PolicyAccount, want: edgeproto.RefusedJoinWrong,
+			user: func(t *testing.T, e *testEnv, inv domain.InvitationID, _ string) string {
+				other := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
+				secret, _ := e.joinSecrets.Load(other.ID)
+				return joinUser(inv, secret.(string), octo)
+			}},
+		{name: "consumed invitation", policy: edgeproto.PolicyAccount, want: edgeproto.RefusedJoinWrong,
+			user: func(t *testing.T, e *testEnv, inv domain.InvitationID, secret string) string {
+				open, err := identities(t, e).GetInvitation(context.Background(), inv)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.srv.acceptInvitation(context.Background(), identities(t, e), open, someone); err != nil {
+					t.Fatal(err)
+				}
+				return joinUser(inv, secret, octo)
 			}},
 		{name: "no link", policy: edgeproto.PolicyApprovedDevices, want: edgeproto.RefusedInvitationNeedsLink,
-			user: func(domain.InvitationID, string) string { return edgeproto.AccountUser(octo) }},
+			user: func(*testing.T, *testEnv, domain.InvitationID, string) string { return edgeproto.AccountUser(octo) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := newTestEnv(t, withPolicy(tc.policy))
 			inv := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
-			user := e.edgeUser(t, octo)
+			account := octo
+			if tc.account.Subject != "" {
+				account = tc.account
+			}
+			user := e.edgeUser(t, account)
 			if tc.user != nil {
 				secret, _ := e.joinSecrets.Load(inv.ID)
-				user = tc.user(inv.ID, secret.(string))
+				user = tc.user(t, e, inv.ID, secret.(string))
 			}
+			ctx := context.Background()
+			open, _ := identities(t, e).ListInvitations(ctx)
 			signer := newSigner(t)
-			c, banner, err := e.dialEdge(t, grantFor(octo, signer, "laptop"), signer, user)
+			c, banner, err := e.dialEdge(t, grantFor(account, signer, "laptop"), signer, user)
 			if tc.want == "" {
 				if err != nil {
 					t.Fatalf("join: %v (banner %q)", err, banner)
@@ -370,11 +405,14 @@ func TestJoinByLink(t *testing.T) {
 			if r, ok := edgeproto.ParseRefusedBanner(banner); err == nil || !ok || r.Kind != tc.want {
 				t.Fatalf("join = %v, banner %q; want %s", err, banner, tc.want)
 			}
-			if _, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(signer.PublicKey())); errors.Is(err, store.ErrNotFound) == (tc.want == edgeproto.RefusedDevicePending) {
+			if _, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(signer.PublicKey())); errors.Is(err, store.ErrNotFound) == (tc.want == edgeproto.RefusedDevicePending) {
 				t.Fatalf("device after %s: %v", tc.want, err)
 			}
-			if left, _ := identities(t, e).ListInvitations(context.Background()); len(left) != 1 {
-				t.Fatalf("invitations after %s = %+v; want it still open", tc.want, left)
+			if m, err := identities(t, e).GetMemberByIdentity(ctx, account.Provider, account.Subject); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("member after %s = %+v, %v; want none", tc.want, m, err)
+			}
+			if left, _ := identities(t, e).ListInvitations(ctx); len(left) != len(open) {
+				t.Fatalf("invitations after %s = %+v; want %+v", tc.want, left, open)
 			}
 		})
 	}

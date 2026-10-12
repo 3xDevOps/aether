@@ -113,8 +113,8 @@ func grantKeyCallback(grant edgeproto.Grant) func(ssh.ConnMetadata, ssh.PublicKe
 // user name (edgeproto.JoinUser) for that account, under the client's own
 // signature: a grant naming any other account is refused before anything
 // is recorded, so an edge cannot register or bind a device key it relays
-// to an account of its choosing. A join user name holds a secret, so
-// neither callback logs it or puts it in an error.
+// to an account of its choosing. A join or claim user name holds a
+// secret, so neither callback logs it or puts it in an error.
 func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.ServerConfig {
 	keyOK := grantKeyCallback(grant)
 	cfg := &ssh.ServerConfig{
@@ -124,6 +124,8 @@ func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.Ser
 				user = owner.Provider + ":" + owner.Subject
 			} else if strings.HasPrefix(user, "join:") {
 				user = "join:…"
+			} else if strings.HasPrefix(user, "claim:") {
+				user = "claim:…"
 			}
 			if user != want {
 				return nil, refusal(fmt.Errorf("sshd: relayed connection as %q with a grant for %s", user, want),

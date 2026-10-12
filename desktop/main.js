@@ -47,9 +47,10 @@ function main() {
   let gatewayOrigin = ''
   let respawns = 0
   let quitting = false
-  // The query a deep link adds to the gateway URL, held until the gateway
-  // is up: &run=<id>, &join=<link> or &claim=<link>.
-  let pendingQuery = ''
+  // What a deep link appends to the gateway URL, held until the gateway is
+  // up: the query &run=<id>, or the fragment #join=<link> or #claim=<link>,
+  // which keeps the link's secret out of the request to the gateway.
+  let pendingSuffix = ''
 
   // --- binary discovery ---------------------------------------------------
 
@@ -282,8 +283,8 @@ function main() {
   // --- window ---------------------------------------------------------------
 
   function openWindow() {
-    const url = gatewayURL + pendingQuery
-    pendingQuery = ''
+    const url = gatewayURL + pendingSuffix
+    pendingSuffix = ''
     if (win && !win.isDestroyed()) {
       win.loadURL(url)
       focusWindow()
@@ -375,19 +376,19 @@ function main() {
   // aether://run/<id> focuses the window on that run: the SPA reads &run=<id>
   // off the gateway URL and opens that run's terminal once it has hydrated
   // (docs/local-gateway.md). aether://join?… and aether://claim?… open the
-  // Connect step with that link as &join= or &claim=.
+  // Connect step with that link as #join= or #claim=.
   function handleDeepLink(raw) {
-    const query = deepLinkQuery(raw)
-    if (!query) return
+    const suffix = deepLinkSuffix(raw)
+    if (!suffix) return
     if (!gatewayURL) {
-      pendingQuery = query
+      pendingSuffix = suffix
       return
     }
     if (win && !win.isDestroyed()) {
-      win.loadURL(gatewayURL + query)
+      win.loadURL(gatewayURL + suffix)
       focusWindow()
     } else {
-      pendingQuery = query
+      pendingSuffix = suffix
       openWindow()
     }
   }
@@ -395,7 +396,7 @@ function main() {
   // Every part of a link is checked before any of it reaches the gateway
   // URL; anything else is refused rather than concatenating
   // attacker-shaped text into it.
-  function deepLinkQuery(raw) {
+  function deepLinkSuffix(raw) {
     let parsed
     try {
       parsed = new URL(raw)
@@ -425,7 +426,7 @@ function main() {
     if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
     if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
     if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''
-    return '&' + parsed.hostname + '=' + encodeURIComponent(parsed.href)
+    return '#' + parsed.hostname + '=' + encodeURIComponent(parsed.href)
   }
 
   // Opens a run in the page as it stands. The dashboard keeps its route in
@@ -434,7 +435,7 @@ function main() {
   // as a load that failed, is loaded at the run instead.
   function showRun(id) {
     if (!win || win.isDestroyed()) {
-      pendingQuery = '&run=' + encodeURIComponent(id)
+      pendingSuffix = '&run=' + encodeURIComponent(id)
       openWindow()
       return
     }

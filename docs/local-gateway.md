@@ -81,8 +81,9 @@ dashboard URL and load that.
 and `aether://claim?edge=<relay origin>&server=<server id>#<secret>`
 ([edge.md](edge.md#join-page)). Each shell checks every part of the link
 and refuses any other shape, then appends the whole link URL-encoded as
-`?join=` or `?claim=`. The dashboard removes the parameter from the address
-on first load (`replaceState`), so the secret stays in neither the address
+the fragment `#join=` or `#claim=`, which the browser does not send to the
+dashboard's server. The dashboard removes the fragment from the address on
+first load (`replaceState`), so the secret stays in neither the address
 bar nor history, and opens onboarding's Connect step with the link.
 
 Onboarding is an initial landing page, not a reconnect redirect. Choosing
