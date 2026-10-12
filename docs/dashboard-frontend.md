@@ -249,7 +249,9 @@ re-renders only its text.
 The `messages` slice holds agent mail (`coord.messages.list`) per workspace,
 swarm, or run scope, merged by message ID. A scope's list is held only while
 a view that shows it is mounted (`useMessageList`); the last one to unmount
-drops it and the messages no other list holds. A `coord.message` event
+drops it and the messages no other list holds. Messages list oldest first;
+those created at the same instant keep the order the server inserted them,
+which it reports newest first. A `coord.message` event
 carries no body, so every held scope the message belongs to re-reads its
 newest page; a scope whose first read failed is held empty so it re-reads too.
 `coord.message.acked` stamps the row. Both re-read the recipient run for its
@@ -923,6 +925,68 @@ open, on an account change, on reconnect and on its refresh button; nothing
 polls. An older server that does not know this method is shown as needing an
 update.
 
+### Actions
+
+Every action the dashboard sends falls in one of two categories:
+
+- **The client can predict the result**, such as adding a note: the change
+  renders at once and is confirmed or reverted when the server answers. A
+  refusal reverts it, puts back what the user typed, and shows the server's
+  error verbatim (`errorSentence`, inline `Callout`).
+- **The server decides the result**, such as approving a teammate's message:
+  only the control that sent it shows a pending label, within one frame, and
+  past the deadline it reads "Still waiting for the server…".
+
+The deadline is `optimisticDeadlineMs` (`store/optimistic.ts`, 5 seconds).
+The slowest `run.room.post` measured through the local gateway over SSH
+under load took 57 ms (p99 42 ms); each gateway RPC also costs about three
+edge round trips, which were not measured, and 5 seconds leaves room for
+three 1.5-second round trips.
+`optimistic()` there runs a predictable action: it calls `apply`, then
+`send`, and either `confirm`s the server's answer or `revert`s on a refusal
+or at the deadline. The returned outcome carries the error and a `retry`
+that resends the same request, so `send` must carry one idempotency key
+across calls or be idempotent by nature. An answer that arrives after the
+deadline is still `confirm`ed, and the store dedupes it by id or idempotency
+key, so a late success shows as saved once and clears the error. Once any
+attempt of a mutation is answered, no attempt of it reverts, and a **Retry**
+still pending resolves as that success. A late
+refusal resolves the unanswered outcome's `refused` promise with the
+server's error, which replaces the timeout failure and drops **Retry**,
+unless an attempt of that mutation was answered first.
+Only a JSON-RPC error from the server is a refusal; a failure that carries no
+answer, such as `Failed to fetch`, a gateway 502 or 504, the local
+gateway's `server unreachable:` or `network unreachable:`, or any error
+whose data carries an edge-path `refusal`, is treated like the deadline,
+with its own error text and **Retry**, because the server may have
+committed.
+
+A server-decided action locks only its own control, and the siblings a
+second press would race with, such as the Deny beside a pressed Approve.
+`usePastDeadline` (`store/optimistic.ts`) turns true once a pending flag has
+held for the deadline; the label then reads "Still waiting for the server…".
+Past the deadline, **Cancel** stops waiting and unlocks the control, only
+where a resend is deduped or refused and the eventual result still shows:
+
+| Control | Pending label | Cancel past the deadline |
+| --- | --- | --- |
+| Question **Reply** (Details) | Replying… | Yes: a resend of the same text reuses the idempotency key, and the reply arrives as a room event |
+| Teammate message and permission **Approve** / **Deny** (Details, Approvals) | Approving… / Denying… | No: a second decision would race the first, and its "already decided" refusal would sit beside the first's success |
+| Board card **Approve** | Approving… | No, for the same reason |
+| Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
+| Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
+| **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
+| Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
+| **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
+| Needs you device card **Approve** / **Deny** | Approving… / Denying… | No: a second decision would race the first |
+| Settings **Connect my GitHub account** | Connecting as *account* (*provider*) | No: each press asks the server for a new claim code |
+| Device **Approve** / **Revoke** (confirm dialog) | Approving… / Revoking… | The dialog's **Cancel** turns into **Close**; it and `Esc` close the dialog while the request keeps going. A late success still refreshes the list and toasts but leaves the approval code field alone, since it may hold a code typed since; a late failure shows as a toast |
+| Schedule **Unschedule** | Unscheduling… | No |
+| Invite code **Generate code** | Generating… | No: each call mints a new code |
+| Roster **Remove** (confirm dialog) | Removing… | Closes the dialog, as for Device **Approve** |
+| Giving up your own admin role (confirm dialog) | Becoming *role*… | Closes the dialog, as for Device **Approve** |
+| Invitation **Invite** | Inviting…, and the new row reads Creating… | No, and no **Retry**: the row stays until the server answers, and the answer carries the join link. The dialog's **Cancel** closes it while the request keeps going; the answer then shows as a toast. A refusal drops the row and shows the error; a failure with no answer re-reads `member.invitation.list` once and keeps the invitation if the server holds it, else drops the row |
+
 ## Board
 
 `src/routes/board/` is the default center view and the triage surface,
@@ -1293,8 +1357,56 @@ all workspaces**, **New run…**, **New swarm…**, **Launch from a template…*
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the run's More menu and
-the palette. Deletion removes the confirmed run locally; archive, restore,
-protect and free do not overwrite the server's events with an RPC response.
+the palette. Pause, resume, kill, free, archive, restore, protect and
+unprotect follow [Actions](#actions): the command's `predict` names the
+fields the server's success certainly sets (`pausedRuns`; `status`
+`abandoned` with reason `killed`; cleared `container_retained_until` and
+`cleanup_pending`; `archived_at`; `protected`), the runner shows them at
+once, and the success toast waits for the answer. A refusal puts back each
+predicted field that still holds its predicted value; a field anything else
+wrote meanwhile stays. With no answer by the deadline, or a failure that
+carries none, the runner does not guess: it re-reads the run with `run.get`
+(bounded by the same deadline) and applies the server's record. If the
+run's record or pause state changed while the read was pending, that change
+is newer than the read, so the read only replaces the predicted fields that
+still hold their predicted value. If the read's record shows the predicted
+state, the verb counts as confirmed (a field the
+wire omits at its zero value, such as `protected`, reads as false) and toasts
+its success; otherwise the toast reads "The server did not answer in 5
+seconds." with **Retry**. If the re-read fails too, the predicted fields
+still on screen are put back and the same toast shows. The toast keeps
+**Retry** until it is pressed or the late answer arrives: a late success
+dismisses it, a late refusal replaces it. While another predicted verb is
+pending on the run, **Retry** sends nothing, stays, and a second toast says
+why. Each **Retry** is a new attempt
+with its own captured state. Once any attempt of the verb succeeds, no
+other attempt puts it back, a re-read answered before the commit is
+ignored, and an earlier attempt's late refusal is dropped. Once the
+signed-in member changes, the toast is dismissed, its **Retry** sends
+nothing, and the press's late answer, re-read or refusal changes and shows
+nothing. Kill and free
+(`slow` on the command) skip the deadline, because the server answers only
+after the container stops: `run.kill` waits out the runtime's stop grace,
+10 seconds by default. Past the deadline their prediction stays, More
+shows a disabled "Still waiting for the server…" entry (`waiting` on the
+run's `predicting` marker), a late success clears it without a toast, and
+a refusal puts the prediction back and toasts the server's error. A failure
+that carries no answer still re-reads the run, and if the re-read does not
+show the result, toasts that failure's own error with **Retry**. Kill's predicted change time carries
+`stateChangedAtPredicted`, so the server's `run.status` event replaces it
+even when the status is unchanged; any other estimated time stays. While a
+predicted verb is pending on a run (`predicting` in `store/runs.ts`, held
+by that attempt's marker so a late answer clears only its own lock), More
+and the palette offer no other predicted verb for that run, because one
+offered from the predicted state, such as Archive after Kill, could re-read
+the run and overwrite the prediction. Both subscribe to the lock, so an open
+menu shows the verbs again once the answer lands. An invalid-state refusal
+(`codeInvalidState`, such as "run is already paused" after a retry) re-reads
+the run with `run.get` instead, bounded by the deadline and applied on the
+same condition, and toasts only if the run does not show the
+predicted state. Deletion removes the
+confirmed run locally; archive, restore, protect and free do not overwrite
+the server's events with an RPC response.
 
 - **Forward a port…** opens `forward-dialog.tsx` over the local `forward.*`
   verbs. It forwards the port typed to the same port on this machine and
@@ -1331,9 +1443,9 @@ palette, with Cancel initially focused. **Close run…** opens its own dialog,
 which asks whether the work was merged or abandoned. Palette confirmations
 capture the authenticated identity with the run and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
-another account. More locks while a verb is in flight and shows a spinner in
-place of its icon, which also stops a second click racing a branch pull over
-SSH.
+another account. More locks while an unpredicted verb is in flight and shows
+a spinner in place of its icon, which also stops a second click racing a
+branch pull over SSH.
 
 **The command palette** (`src/components/palette/`) opens from **Search** in
 the sidebar or the phone top bar, `⌘K` on macOS or `Ctrl+K` elsewhere;
@@ -1508,9 +1620,13 @@ and End.
 
 The agent's attach lives in `useAgentTerminal` at frame level, so switching
 views never reattaches, and `useRunRoom` reads the newest room page once per
-frame, then follows `workspace.room_message` events; after the event stream
-reconnects it reads back to the cached history, as one page or more, so a gap
-is closed. It polls presence every ten seconds with an abortable 15-second
+frame, then follows `workspace.room_message` events. An event naming a
+message the store already holds in the event's `state`, such as the author's
+own post, reads nothing, unless that message is a steering request, whose
+agent delivery the payload does not carry. After the event stream reconnects
+it reads back to the cached history, as one page or more, so a gap is
+closed; each older page merges below the pages before it, so same-instant
+messages keep the server's order. It polls presence every ten seconds with an abortable 15-second
 deadline.
 
 ### Header
@@ -1803,7 +1919,12 @@ request in flight and its error are part of the draft too. A composer that
 mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
 the request settles: nothing can be added to a prompt that is being sent, and
 it cannot be sent or uploaded a second time. A request settles only the draft
-it marked (`beginDraftRequest`), never one that replaced it. The first focus
+it marked (`beginDraftRequest`), never one that replaced it. Past the
+deadline a send reads "Still waiting for the server…" with **Cancel**, which
+clears the mark and unlocks the draft, and a resend reuses the draft's key.
+A late success then settles nothing; a late failure of an Enhanced prompt
+still shows its error on the draft without locking it, unless a newer send
+is in flight or the draft no longer carries that send's key. The first focus
 of a composer that mounts with text puts the caret after it, and the
 suggestion menu follows the selection as well as the text.
 
@@ -2819,13 +2940,29 @@ whatever opened it. Sections (`details.tsx`):
 - **Needs you**: `RequestCard`s for pending native inputs, Aether approvals
   with **Approve** / **Deny**, teammate messages awaiting the controller with
   **Approve** / **Deny** through `run.room.decide`, and teammate questions
-  with a reply field. With none of these, one card with the needs-you reason
+  with a reply field. A pending decision or reply locks only its own card
+  ([Actions](#actions)). With none of these, one card with the needs-you reason
   and the header's action as a secondary button, or "Nothing is waiting on
   you."
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
 - **Notes**: notes are `comment` room messages, human to human on the run,
-  with an **Add a note** field and **Add**.
+  with an **Add a note** field and **Add**. **Add** follows
+  [Actions](#actions): the field empties and the note shows muted with
+  "Sending…" under its idempotency key as its id, until `run.room.post` or
+  the `workspace.room_message` refetch brings the server's copy with that
+  key. A refusal, the deadline or a failure with no answer removes it and
+  shows the error under the list beside the note's text, one entry per
+  failed note; the text goes back into the field when the field is empty.
+  Every failure except a refusal adds **Retry**. Until a saved copy arrives, resending the same text by
+  **Retry**, **Add**, or after **Dismiss** reuses its key, so a late answer
+  never shows twice. A refusal keeps the key too: `run.room.post` can save
+  the note and then fail, so the key is dropped only when a saved copy with
+  it arrives or the signed-in member changes. The field, pending keys and failures live in the store
+  per run, so they survive closing Details, and are dropped, with any note
+  still reading "Sending…", when the signed-in member changes; an answer or failure that arrives after the
+  change is dropped too. Adding a note never disables **Reply**,
+  **Approve** / **Deny** or the composer.
 - **Details**: the task, Owner, Agent account (when it is someone else's),
   Agent and mode, Branch, Created, Changed, Last commit, In control,
   Watching, Container ("Starting", "Running", "Stopped, kept for reopening"
@@ -2834,8 +2971,8 @@ whatever opened it. Sections (`details.tsx`):
   admins once measured), Archived, and **Last reason**, the server's `run.reason`, so
   a parked error or stall detail the reason line leaves out is never hidden.
 
-A failed room action shows its error above the sections with **Dismiss**;
-the composer's own failures stay above the composer.
+Any other failed room action shows its error above the sections with
+**Dismiss**; the composer's own failures stay above the composer.
 
 ### Captures and candidate review
 
@@ -3085,7 +3222,7 @@ when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
 the `Confirm` primitive and send `mission.archive` and `mission.delete`;
 **Unarchive swarm** sends `mission.unarchive` at once and toasts the result
 or the error. A delete removes the swarm from the store and returns to the
-list. Each item needs its capability; cancel, archive, unarchive and delete
+list, unless the dialog was closed past the deadline. Each item needs its capability; cancel, archive, unarchive and delete
 also need the accountable human or an admin. Failures stay in the dialog,
 verbatim, such as `run <id> is running; cancel the swarm and wait for its
 runs to stop`.
@@ -3439,6 +3576,54 @@ never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. With no templates the view says what one is and offers **New
 template**.
 
+Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
+closes on Save or Delete and the list shows the result at once; a saved
+schedule shows at once and its next launch arrives with the server's answer.
+A refusal puts the list back and shows the dialog again, reopened if closed,
+with what was typed and the server's error. At the deadline it shows "The
+server did not answer in 5 seconds." with **Retry**. `template.save` and `schedule.save`
+upsert by name, and a delete retry treats "not found" as deleted, so a retry
+never applies twice. A refusal or deadline puts back the last value the
+server confirmed, and only while the row still shows that action's
+prediction. A late success shows the saved row or removes the deleted one,
+and closes the dialog only if it still shows that unedited draft. If another
+dialog is open when a failure arrives, it stays as it is and a toast shows
+the error with **Reopen**, plus **Retry** at the deadline; a late refusal
+replaces that toast, and is dropped once a **Retry** of that action was
+answered. A late success of that action dismisses its toast. After the
+signed-in member changes, the toast is dismissed, its **Retry** and
+**Reopen** do nothing, a later failure of that action is not shown, and its
+late answer or rollback leaves the lists alone.
+The same toast shows a failure that arrives after you
+left Templates, or after a workspace switch, and its **Reopen** opens
+Templates in the workspace the action was sent from, with the dialog as it
+was. A form reopened before the first `template.list` read answers keeps
+what it saves.
+**Retry** in a dialog sends what the dialog shows now, so edits made after
+the deadline are not lost. A template whose save the server has not answered, past the deadline
+too, offers no **Launch**, **Delete** or **Schedule…**, since
+`template.launch` sends only the name. **Unschedule** reads "Unscheduling…", then
+"Still waiting for the server…" past the deadline; while a schedule save for
+that template in that workspace is unanswered it reads "Saving…" and is disabled, so the delete
+cannot land before the save. Both holds last across leaving Templates and
+coming back, and so do the lists, kept per workspace outside the view:
+coming back shows them at once, and an answer or rollback that arrives
+after you left still lands on them.
+When saves of one template, or of its schedule, overlap, only
+the answer to the last one sent is written; an earlier answer leaves the
+list alone. An earlier save's answer becomes the value a later pending
+save of that template, or of its schedule, puts back on a refusal or
+deadline. A `template.list` or `schedule.list` answer older than the last
+one applied in that workspace, or sent before the signed-in member
+changed, is dropped. A `template.list` or `schedule.list` read,
+on opening, on a workspace switch or after **Unschedule**, keeps the
+templates and schedules saved or removed here while it was pending, and
+those whose save is still unanswered. A
+refused delete puts the template back only if none of that name was saved
+meanwhile, and a successful delete removes the row, or its schedule, only if
+none of that name was saved after the delete was sent. An answer or rollback that arrives after the active workspace
+changed lands on the list of the workspace it was sent from, not the shown one.
+
 ## Agents
 
 An **agent** is the coding CLI a run starts, such as Claude Code or Codex.
@@ -3684,9 +3869,10 @@ before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
 container is running, or that re-read fails, **Agent account sharing** says
-so and offers **Stop environment**. A share while another grant already
-exists shows nothing, because the page cannot tell whether the container
-predates the first one.
+so and offers **Stop environment**. The advice follows the first share the
+server answered while no other grant was saved; a later share shows
+nothing, because the page cannot tell whether the container predates the
+first one.
 
 ## Members, devices and Profile
 
@@ -3702,6 +3888,39 @@ menu; giving up your own admin role, and removing anyone, ask first. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
 admins see **Open invitations** with **Revoke**.
 
+A role change, **Approve**, and a confirmed **Revoke** follow
+[Actions](#actions): the radio moves, the member joins the roster, or the
+invitation row goes at once. A refusal puts it back and shows the server's
+error above the roster or the invitations. At the deadline the change is put
+back with "The server did not answer in 5 seconds." and **Retry**, which
+resends the same call, unless a server record for that member arrived
+meanwhile; your own name and colour in the header then follow that record.
+When overlapping changes of one field all fail, the field returns to the
+last value the server confirmed. Starting an action clears only that
+action's earlier error, such as the same member's role or the same
+invitation's revoke. A retried revoke that is refused as not found counts
+as revoked, because the first `member.invitation.revoke` landed; a first
+revoke refused as not found, such as of an invitation already accepted,
+puts the row back and shows the server's error. A late
+success applies the change again and clears its error; a late refusal shows
+its error even after newer actions, unless a **Retry** of that action was
+answered, and an older answer never overwrites a newer one, and writes only
+the field that action changed, also across closing and reopening Profile
+(`nextMemberOrder` in `store/members.ts`). A `member.list` read keeps the
+record of a member changed anywhere since the read was sent, Profile
+included; for a member with a change still pending it keeps only the
+fields that change touches and takes the rest from the read. This holds
+for every `member.list` read, including the read after **Remove**, the reads a `member.changed` event or
+an unknown actor triggers, and the reconnect snapshot unless the signed-in
+member changed. The `member.invitation.list` read made
+when the section mounts keeps rows created or revoked while it was pending,
+and rows whose create or revoke is still unanswered, so switching tabs and
+back keeps a **Creating…** row and leaves a revoked row out. An answer that arrives
+after the signed-in member changed leaves the invitations alone. **Remove**
+and giving up your admin role read "Removing…" and "Becoming *role*…", then
+"Still waiting for the server…" past the deadline, when the dialog can be
+closed and the request goes on.
+
 **Invite…** in the header is the one way to invite. Its dialog has two tabs
 when the gateway serves both: **Account** invites a GitHub login or an email
 with a role (`member.invitation.create`) and then shows the invitation's
@@ -3713,6 +3932,27 @@ version stored for another provider shows that provider, such as
 under each policy: under `account` opening it makes the account a member;
 under `approved-devices` its device waits until an admin approves it from
 Needs you.
+
+**Invite** on the Account tab lists the invitation at once with
+**Creating…** in place of its expiry, then swaps in the server's row. The
+join link comes only in the server's answer, so the dialog stays open and
+**Invite** reads "Inviting…", then "Still waiting for the server…", until
+the answer shows the link. `member.invitation.create` takes no idempotency
+key, so nothing offers a resend that could create a second invitation. A
+refusal, early or late, drops the row and shows the server's error in the
+dialog, with what was typed. A failure with no answer, such as `Failed to
+fetch`, re-reads `member.invitation.list` once: an invitation the server
+holds for that account and role replaces the row, and the error says its
+link was lost with the answer, so revoke it and invite again. Otherwise, or
+if that read fails too, the row goes and the error warns that the
+invitation may have been created, since the create may still be running;
+nothing resends it. If that dialog was closed, or you have left Members, a
+toast shows the error with **Reopen**, which opens Members with the dialog
+as it was, or shows `Invited <account>` with **Show link**, which opens the
+dialog on the link. Once the signed-in member changes, that toast is
+dismissed, its action does nothing, and a later answer to that invite is
+not shown. **Generate code** reads
+"Generating…", then "Still waiting for the server…".
 
 **Devices** (`src/routes/devices/`) lists the computers members reach the
 server with through an edge: the member's own, or every member's for an
@@ -3729,13 +3969,31 @@ It revokes a device too, and shows every server refusal verbatim.
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
 the member's name and role, **Display name** (an input with **Save**, sent
-as `member.rename`; the header, roster and every avatar take the new name
-from the saved member and a fresh `member.list`, and a refusal shows under
-the field verbatim), **Colour**, **Git identity** (the name and email
+as `member.rename`), **Colour**, **Git identity** (the name and email
 the member's agents commit as, saved with `member.git`; the same form
 onboarding shows) and **Agent account sharing** (**Share account** or
 **Revoke access** per teammate, with the omp warning behind **Learn more**).
 Profile is the one place that edits the git identity; Agents links to it.
+
+Display name, colour, and share or revoke follow [Actions](#actions): the
+header, roster and avatars take the new name or colour, and the teammate's
+row flips, at once; that row's button stays disabled until the server
+answers. A refusal restores the earlier value, keeps the typed name in the
+field, and shows the server's error under the section. A share or revoke
+goes back to the last grant the server confirmed for that teammate, which
+a late answer to an earlier press may have changed. At the deadline the
+change is put back with "The server did not answer in 5 seconds." and
+**Retry**, which resends the same call; each is idempotent by nature. A late
+success shows the change again unless a newer one for the same field or
+teammate has started, and a late refusal shows its error even after a newer
+change saved, unless a **Retry** of that change was answered. A failure that arrives after Profile closed shows as a toast
+with the server's error, **Retry** at the deadline, and for the display name
+**Reopen**, which opens Profile with the typed name and the error. Once the
+signed-in member changes, that toast is dismissed, its **Retry** and
+**Reopen** do nothing, and the action's later failures are not shown, so
+nothing is resent as the new member.
+The `account.list` read made when Profile opens keeps the shown state of a
+teammate shared or revoked since it was sent.
 A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 

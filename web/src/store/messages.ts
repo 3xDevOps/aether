@@ -3,7 +3,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { RunMessage } from '@/lib/types'
 import type { RootStore } from '@/store'
-import { byCreated } from '@/store/collaboration'
+import { compareInstants } from '@/store/collaboration'
 import type { SliceCreator } from '@/store/slice'
 
 export type MessageScope =
@@ -84,9 +84,13 @@ export const createMessagesSlice: SliceCreator<MessagesSlice> = (set) => ({
       // with what is held may have skipped messages in between.
       const gap = !older && nextBefore !== undefined && !messages.some((m) => held?.ids.includes(m.id))
       const keep = held && !gap ? held.ids : []
-      const ids = byCreated([...new Set([...keep, ...messages.map((m) => m.id)])].map((id) => runMessages[id])).map(
-        (m) => m.id,
-      )
+      // A page lists newest first; the stable sort keeps the server's insertion order among same-instant messages.
+      const page = messages.map((m) => m.id).reverse()
+      const rest = keep.filter((id) => !page.includes(id))
+      const ids = [...new Set(older ? [...page, ...rest] : [...rest, ...page])]
+        .map((id) => runMessages[id])
+        .sort((a, b) => compareInstants(a.created_at, b.created_at))
+        .map((m) => m.id)
       const cursor = older || !held || gap || nextBefore === undefined ? (nextBefore ?? null) : held.nextBefore
       return {
         runMessages,

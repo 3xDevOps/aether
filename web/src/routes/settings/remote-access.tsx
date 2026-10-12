@@ -10,6 +10,7 @@ import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { loadEdge } from '@/store/edge'
 import { useCapability, useIsAdmin } from '@/store/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const pollMs = 2000
 
@@ -77,6 +78,7 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
   const caps = useCapability()
   const live = useRef(true)
   const busy = useRef(false)
+  const late = usePastDeadline(phase.name === 'connecting')
   useEffect(() => {
     live.current = true
     return () => {
@@ -166,7 +168,9 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
         </p>
       )}
       {phase.name === 'connecting' && (
-        <p role="status">Connecting as {phase.account.login ?? phase.account.subject} ({phase.account.provider})</p>
+        <p role="status">
+          {late ? stillWaiting : `Connecting as ${phase.account.login ?? phase.account.subject} (${phase.account.provider})`}
+        </p>
       )}
       {error && <Callout tone="failed" role="alert" className="self-stretch whitespace-pre-wrap">{error}</Callout>}
     </div>

@@ -9,13 +9,15 @@ import { errorSentence } from '@/lib/format'
 import type { DeviceNeed } from '@/lib/needs-you'
 import { useStore } from '@/store'
 import { loadDevices } from '@/store/devices'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 export function DeviceCard({ need }: { need: DeviceNeed }) {
   const { device } = need
-  const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<'Approve' | 'Deny' | null>(null)
+  const late = usePastDeadline(pending !== null)
 
   const act = async (verb: 'Approve' | 'Deny') => {
-    setBusy(true)
+    setPending(verb)
     try {
       if (verb === 'Approve') await api.memberDeviceApprove(device.id)
       else await api.memberDeviceRevoke(device.id)
@@ -23,10 +25,12 @@ export function DeviceCard({ need }: { need: DeviceNeed }) {
     } catch (err) {
       toast.error(`${verb} failed: ${errorSentence(err)}`)
     } finally {
-      setBusy(false)
+      setPending(null)
     }
     await loadDevices(useStore, api).catch((err: unknown) => toast.error(errorSentence(err)))
   }
+
+  const label = (verb: 'Approve' | 'Deny', doing: string) => (pending !== verb ? verb : late ? stillWaiting : doing)
 
   return (
     <Card data-device-id={device.id}>
@@ -38,8 +42,8 @@ export function DeviceCard({ need }: { need: DeviceNeed }) {
         <span className="truncate font-code" title={device.fingerprint}>{device.fingerprint}</span>
       </div>
       <div className="flex items-center justify-end gap-1.5">
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void act('Deny')}>Deny</Button>
-        <Button variant="secondary" size="sm" disabled={busy} onClick={() => void act('Approve')}>Approve</Button>
+        <Button variant="ghost" size="sm" disabled={pending !== null} onClick={() => void act('Deny')}>{label('Deny', 'Denying…')}</Button>
+        <Button variant="secondary" size="sm" disabled={pending !== null} onClick={() => void act('Approve')}>{label('Approve', 'Approving…')}</Button>
       </div>
     </Card>
   )

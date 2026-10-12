@@ -23,6 +23,7 @@ import {
 import { api, type Api } from '@/lib/api'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 /** The permissive default's form value; see the Styleguide in docs/dashboard-frontend.md. */
 const everyone = 'everyone'
@@ -42,6 +43,7 @@ export function WorkspaceSettingsDialog({
   const upsertWorkspace = useStore((s) => s.upsertWorkspace)
   const [steerOthers, setSteerOthers] = useState(workspace?.steer_others ?? '')
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
   const [error, setError] = useState<string | null>(null)
   const returnFocus = useReturnFocus()
 
@@ -121,7 +123,7 @@ export function WorkspaceSettingsDialog({
             Cancel
           </Button>
           <Button type="submit" form="workspace-settings" disabled={busy}>
-            {busy ? 'Saving…' : 'Save'}
+            {late ? stillWaiting : busy ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

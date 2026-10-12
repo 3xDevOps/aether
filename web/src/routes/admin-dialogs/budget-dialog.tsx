@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api, type Api } from '@/lib/api'
 import { useReturnFocus } from '@/lib/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 export function BudgetDialog({
   workspaceID,
@@ -28,12 +29,13 @@ export function BudgetDialog({
 }) {
   const [limit, setLimit] = useState('')
   const [warn, setWarn] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'set' | 'clear' | null>(null)
+  const late = usePastDeadline(busy !== null)
   const [error, setError] = useState<string | null>(null)
   const returnFocus = useReturnFocus()
 
   const save = async (clear: boolean) => {
-    setBusy(true)
+    setBusy(clear ? 'clear' : 'set')
     setError(null)
     try {
       if (clear) {
@@ -48,7 +50,7 @@ export function BudgetDialog({
       onClose()
       toast.success(clear ? 'Budget cleared' : 'Budget set')
     } catch (err) {
-      setBusy(false)
+      setBusy(null)
       setError(message(err))
     }
   }
@@ -112,14 +114,14 @@ export function BudgetDialog({
           )}
         </form>
         <DialogFooter className="border-t pt-3">
-          <Button variant="ghost" disabled={busy} onClick={() => void save(true)}>
-            Clear budget
+          <Button variant="ghost" disabled={busy !== null} onClick={() => void save(true)}>
+            {busy === 'clear' ? (late ? stillWaiting : 'Clearing…') : 'Clear budget'}
           </Button>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="budget-set" disabled={busy || !limitValid}>
-            {busy ? 'Saving…' : 'Set'}
+          <Button type="submit" form="budget-set" disabled={busy !== null || !limitValid}>
+            {busy === 'set' ? (late ? stillWaiting : 'Saving…') : 'Set'}
           </Button>
         </DialogFooter>
       </DialogContent>

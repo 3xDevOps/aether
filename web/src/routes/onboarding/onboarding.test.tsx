@@ -18,6 +18,7 @@ import type {
 import { OnboardingRoute } from '@/routes/onboarding'
 import { FirstRunStep } from '@/routes/onboarding/first-run-step'
 import { useStore, type RootState } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import {
   agentInfo,
   alice,
@@ -403,6 +404,24 @@ describe('onboarding wizard', () => {
 
     expect(await screen.findByText('git email must contain @')).toBeDefined()
     expect(screen.queryByText('Saved')).toBeNull()
+  })
+
+  it('shows Saving… while the save is unanswered, and keeps it locked past the deadline', async () => {
+    const client = fakeApi({ memberGit: vi.fn(() => new Promise<never>(() => {})) })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await machineIdentity()
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
+      expect(screen.getByRole('button', { name: 'Saving…' })).toHaveProperty('disabled', true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('moves on without saving an identity', async () => {

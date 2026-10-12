@@ -149,7 +149,7 @@ func (d *DB) ListProfileSnapshots(ctx context.Context, member domain.MemberID, h
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT `+profileSnapshotCols+` FROM profile_snapshots
 		 WHERE member_id = ? AND harness = ?
-		 ORDER BY created_at DESC, id DESC`, member, harness)
+		 ORDER BY created_at DESC, rowid DESC`, member, harness)
 	if err != nil {
 		return nil, fmt.Errorf("store: list profile snapshots: %w", err)
 	}
@@ -238,7 +238,7 @@ func (d *DB) PruneProfileSnapshots(ctx context.Context, member domain.MemberID, 
 			SELECT id FROM (
 				SELECT id FROM profile_snapshots
 				WHERE member_id = ? AND harness = ?
-				ORDER BY created_at DESC, id DESC
+				ORDER BY created_at DESC, rowid DESC
 				LIMIT ?
 			)
 			UNION

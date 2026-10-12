@@ -17,6 +17,8 @@ export interface ComposerDraft {
   idempotency?: { identity: string; key: string }
   /** The send or other request in flight, which the next composer to mount waits for too. */
   busy?: number
+  /** Whether `busy` is a prompt send, the only request whose resend is deduped. */
+  busyPrompt?: boolean
   uploading?: number
   error?: string
   uploadError?: string

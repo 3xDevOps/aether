@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { modes } from '@/components/launch/modes'
 import { ModelField } from '@/components/launch/run-fields'
 import {
@@ -14,56 +13,51 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { FailureCallout } from '@/components/ui/failure-callout'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
 import type { Template } from '@/lib/types'
+import type { Outcome } from '@/store/optimistic'
 
 const harnesses = ['claude', 'codex', 'pi', 'omp', 'opencode', 'custom']
 
 export type FormMode = { kind: 'new' } | { kind: 'edit'; template: Template } | { kind: 'duplicate'; template: Template }
 
+export type Failure = Extract<Outcome<unknown>, { ok: false }>
+
+export interface TemplateDraft {
+  name: string
+  task: string
+  harness: string
+  mode: string
+  model?: string
+}
+
 export function TemplateForm({
-  workspaceID,
   form,
-  client,
   onClose,
-  onSaved,
+  onEdit,
+  onSave,
+  onRetry,
 }: {
-  workspaceID: string
-  form: FormMode
-  client: Api
+  form: FormMode & { draft?: TemplateDraft; failure?: Failure }
   onClose: () => void
-  onSaved: () => void
+  onEdit: () => void
+  onSave: (draft: TemplateDraft) => void
+  onRetry: (draft: TemplateDraft) => void
 }) {
-  const source = form.kind === 'new' ? undefined : form.template
+  const source = form.draft ?? (form.kind === 'new' ? undefined : form.template)
   const editing = form.kind === 'edit'
-  const [name, setName] = useState(form.kind === 'duplicate' ? `${form.template.name} copy` : (source?.name ?? ''))
+  const [name, setName] = useState(form.kind === 'duplicate' && !form.draft ? `${form.template.name} copy` : (source?.name ?? ''))
   const [task, setTask] = useState(source?.task ?? '')
   const [harness, setHarness] = useState(source?.harness ?? harnesses[0])
   const [mode, setMode] = useState(source?.mode ?? 'headless')
   const [model, setModel] = useState(source?.model ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const save = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      const chosenModel = model.trim()
-      await client.templateSave({ workspace_id: workspaceID, name: name.trim(), task: task.trim(), harness, mode, ...(chosenModel ? { model: chosenModel } : {}) })
-      onSaved()
-      onClose()
-      toast.success('Template saved')
-    } catch (err) {
-      setBusy(false)
-      setError(message(err))
-    }
-  }
+  const chosenModel = model.trim()
+  const draft = { name: name.trim(), task: task.trim(), harness, mode, ...(chosenModel ? { model: chosenModel } : {}) }
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -77,19 +71,28 @@ export function TemplateForm({
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            void save()
+            onSave(draft)
           }}
         >
           <FormField label="Name" help={editing ? 'Template names stay fixed when editing.' : 'Use a short name people can scan.'}>
-            <Input autoFocus value={name} readOnly={editing} onChange={(e) => setName(e.target.value)} />
+            <Input autoFocus value={name} readOnly={editing} onChange={(e) => {
+              setName(e.target.value)
+              onEdit()
+            }} />
           </FormField>
           <FormField label="Task" help="This task is sent unchanged when the template launches.">
-            <Textarea rows={5} value={task} onChange={(e) => setTask(e.target.value)} />
+            <Textarea rows={5} value={task} onChange={(e) => {
+              setTask(e.target.value)
+              onEdit()
+            }} />
           </FormField>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
               <Label htmlFor="template-harness">Agent</Label>
-              <Select value={harness} onValueChange={setHarness}>
+              <Select value={harness} onValueChange={(value) => {
+                setHarness(value)
+                onEdit()
+              }}>
                 <SelectTrigger id="template-harness">
                   <SelectValue />
                 </SelectTrigger>
@@ -104,7 +107,10 @@ export function TemplateForm({
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="template-mode">Mode</Label>
-              <Select value={mode} onValueChange={setMode}>
+              <Select value={mode} onValueChange={(value) => {
+                setMode(value)
+                onEdit()
+              }}>
                 <SelectTrigger id="template-mode">
                   <SelectValue />
                 </SelectTrigger>
@@ -118,19 +124,18 @@ export function TemplateForm({
               </Select>
             </div>
           </div>
-          <ModelField harness={harness} value={model} onChange={setModel} />
-          {error && (
-            <p role="alert" className="text-ui-sm text-state-failed">
-              {error}
-            </p>
-          )}
+          <ModelField harness={harness} value={model} onChange={(value) => {
+            setModel(value)
+            onEdit()
+          }} />
         </form>
+        {form.failure && <FailureCallout error={form.failure.error} onRetry={form.failure.unanswered ? () => onRetry(draft) : undefined} />}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="template-save" disabled={busy || !name.trim() || !task.trim()}>
-            {busy ? 'Saving…' : 'Save'}
+          <Button type="submit" form="template-save" disabled={!name.trim() || !task.trim()}>
+            Save
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -139,37 +144,20 @@ export function TemplateForm({
 }
 
 export function DeleteTemplate({
-  workspaceID,
   template,
-  client,
+  failure,
   onClose,
-  onDeleted,
+  onDelete,
+  onRetry,
 }: {
-  workspaceID: string
   template: Template
-  client: Api
+  failure?: Failure
   onClose: () => void
-  onDeleted: () => void
+  onDelete: () => void
+  onRetry: () => void
 }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const remove = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await client.templateDelete(workspaceID, template.name)
-      onDeleted()
-      onClose()
-      toast.success('Template deleted')
-    } catch (err) {
-      setBusy(false)
-      setError(message(err))
-    }
-  }
-
   return (
-    <AlertDialog open onOpenChange={() => !busy && onClose()}>
+    <AlertDialog open onOpenChange={onClose}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {template.name}?</AlertDialogTitle>
@@ -177,21 +165,16 @@ export function DeleteTemplate({
             The template and its schedule are removed together. Existing runs are not changed.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {error && (
-          <p role="alert" className="text-ui-sm text-state-failed">
-            {error}
-          </p>
-        )}
+        {failure && <FailureCallout error={failure.error} onRetry={failure.unanswered ? onRetry : undefined} />}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={busy}
             onClick={(event) => {
               event.preventDefault()
-              void remove()
+              onDelete()
             }}
           >
-            {busy ? 'Deleting…' : 'Delete'}
+            Delete
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

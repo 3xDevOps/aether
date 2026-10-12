@@ -4,6 +4,7 @@ import { MessageRow } from '@/components/messages/message-row'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
+import { FailureCallout } from '@/components/ui/failure-callout'
 import { Input } from '@/components/ui/input'
 import { RequestCard } from '@/components/ui/request-card'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -21,6 +22,7 @@ import type { RunRoom } from '@/routes/run/room'
 import type { RunView } from '@/routes/run/views'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { isProvisional, type FailedNote } from '@/store/collaboration'
 import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { loadMessagePage, messageScopeKey, useMessageList, type MessageScope } from '@/store/messages'
@@ -91,45 +93,59 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   )
 }
 
-function Notes({ run, room, inset, draft }: { run: RunRecord; room: RunRoom; inset: boolean; draft: { text: string } | null }) {
+const noFailedNotes: FailedNote[] = []
+
+function Notes({ run, room, inset, focus }: { run: RunRecord; room: RunRoom; inset: boolean; focus: number }) {
   const notes = useStore((s) => s.roomMessages[run.id] ?? emptyMessages).filter((m) => m.kind === 'comment' || m.kind === 'question')
-  const [body, setBody] = useState('')
+  const body = useStore((s) => s.noteDrafts[run.id] ?? '')
+  const failed = useStore((s) => s.failedNotes[run.id] ?? noFailedNotes)
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
-    if (!draft) return
-    setBody(draft.text)
-    input.current?.focus()
-  }, [draft])
-  const send = async () => {
-    const text = body.trim()
-    if (!text || room.busy) return
-    if (await room.post({ kind: 'comment', body: text })) setBody('')
+    if (focus) input.current?.focus()
+  }, [focus])
+  const send = (text: string) => {
+    if (text) void room.note(text)
   }
   return (
     <Section title="Notes" count={notes.length} inset={inset}>
       {notes.length > 0 && (
         <ol className="flex flex-col gap-2">
-          {notes.map((note) => (
-            <li key={note.id} className="flex flex-col gap-0.5 text-ui-sm">
-              <span className="flex min-w-0 items-center gap-1.5 text-muted">
-                <Person id={note.actor_id} />
-                {note.kind === 'question' && <span className="shrink-0">· question</span>}
-                <RelativeTime at={note.created_at} className="ml-auto shrink-0 tabular-nums" />
-              </span>
-              <span className="break-words whitespace-pre-wrap text-ui text-text">{note.body}</span>
-            </li>
-          ))}
+          {notes.map((note) => {
+            const pending = isProvisional(note)
+            return (
+              <li key={note.id} className="flex flex-col gap-0.5 text-ui-sm">
+                <span className="flex min-w-0 items-center gap-1.5 text-muted">
+                  <Person id={note.actor_id} />
+                  {note.kind === 'question' && <span className="shrink-0">· question</span>}
+                  {pending
+                    ? <span className="ml-auto shrink-0">Sending…</span>
+                    : <RelativeTime at={note.created_at} className="ml-auto shrink-0 tabular-nums" />}
+                </span>
+                <span className={cn('break-words whitespace-pre-wrap text-ui', pending ? 'text-muted' : 'text-text')}>{note.body}</span>
+              </li>
+            )
+          })}
         </ol>
       )}
+      {failed.map((note) => (
+        <div key={note.key} className="flex flex-col gap-1">
+          <span className="break-words whitespace-pre-wrap text-ui text-muted">{note.text}</span>
+          <FailureCallout
+            error={note.error}
+            onRetry={note.unanswered ? () => send(note.text) : undefined}
+            onDismiss={() => useStore.getState().dismissFailedNote(run.id, note.key)}
+          />
+        </div>
+      ))}
       <form
         className="flex items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          void send()
+          send(body.trim())
         }}
       >
-        <Input ref={input} aria-label="Add a note" placeholder="Add a note for people on this run" value={body} onChange={(event) => setBody(event.target.value)} />
-        <Button type="submit" size="sm" variant="secondary" disabled={!body.trim() || room.busy}>Add</Button>
+        <Input ref={input} aria-label="Add a note" placeholder="Add a note for people on this run" value={body} onChange={(event) => useStore.getState().setNoteDraft(run.id, event.target.value)} />
+        <Button type="submit" size="sm" variant="secondary" disabled={!body.trim()}>Add</Button>
       </form>
       <p className="text-ui-xs text-muted">Notes are for people. The agent never sees them.</p>
     </Section>
@@ -198,7 +214,7 @@ function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunVie
   )
 }
 
-export function RunDetails({ run, view, agent, agentName, room, nav, inset, noteDraft }: {
+export function RunDetails({ run, view, agent, agentName, room, nav, inset, noteFocus }: {
   run: RunRecord
   view: RunView
   agentName: string
@@ -206,7 +222,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
   room: RunRoom
   nav: RunNavigation
   inset: boolean
-  noteDraft: { text: string } | null
+  noteFocus: number
 }) {
   const requests = useRunRequests(run)
   const waiting = requests.inputs.length + requests.sessionRequests.length + requests.approvals.length + requests.steers.length + requests.questions.length
@@ -224,7 +240,7 @@ export function RunDetails({ run, view, agent, agentName, room, nav, inset, note
           : <ConditionCard run={run} view={view} agent={agent} nav={nav} />}
       </Section>
       <AgentMessages run={run} inset={inset} />
-      <Notes run={run} room={room} inset={inset} draft={noteDraft} />
+      <Notes run={run} room={room} inset={inset} focus={noteFocus} />
       <Facts run={run} agent={agent} agentName={agentName} inset={inset} />
     </div>
   )

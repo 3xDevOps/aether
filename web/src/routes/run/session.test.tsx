@@ -8,6 +8,7 @@ import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import type { TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
 import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
@@ -370,6 +371,43 @@ describe('the Enhanced session view', () => {
     expect(screen.getByText('Added to the current turn.')).toBeDefined()
     fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'also docs', expect.any(String), expect.objectContaining({ steer: true, lease: expect.objectContaining({ control_generation: 4 }) })))
+  })
+
+  it('offers no Cancel on an interrupt the server has not answered', async () => {
+    vi.mocked(api.runACPCancel).mockImplementationOnce(() => new Promise(() => {}))
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, steering: true }) }, [item('turn_start', 1)])
+    await screen.findByRole('combobox', { name: 'Message the agent' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Interrupt the agent' }).textContent).toContain('Still waiting for the server…')
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows a prompt\'s late refusal after Cancel without locking the composer again', async () => {
+    const { promise, reject } = Promise.withResolvers<never>()
+    vi.mocked(api.runInject).mockReturnValueOnce(promise)
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state() }, [])
+    const box = await screen.findByRole('combobox', { name: 'Message the agent' })
+    await userEvent.type(box, 'add tests')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    } finally {
+      vi.useRealTimers()
+    }
+    await act(async () => reject(new Error('session is closed')))
+    expect(screen.getByRole('alert').textContent).toContain('session is closed')
+    expect(screen.getByRole('button', { name: /^Send/ })).toHaveProperty('disabled', false)
+    expect(box).toHaveProperty('value', 'add tests')
   })
 
   it('does nothing on Mod+Enter with an empty box, and keeps Interrupt while a request waits', async () => {

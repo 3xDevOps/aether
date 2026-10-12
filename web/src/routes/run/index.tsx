@@ -64,7 +64,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [composing, setComposing] = useState(false)
   const [dialog, setDialog] = useState<'captures' | 'events' | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
-  const [noteDraft, setNoteDraft] = useState<{ text: string } | null>(null)
+  const [noteFocus, setNoteFocus] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
   const browser = hasBrowser(run, cap)
@@ -169,7 +169,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   })
 
   const details = (inset: boolean) => (
-    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
+    <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteFocus={noteFocus} />
   )
   const requesterID = agent.takeover.review?.requester_member_id
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
@@ -277,7 +277,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
         onOpenChange={(open) => setDialog(open ? 'captures' : null)}
         onAnswer={(fact) => {
           setDialog(null)
-          setNoteDraft({ text: fact })
+          useStore.getState().setNoteDraft(run.id, fact)
+          setNoteFocus((n) => n + 1)
           setDetails(true)
         }}
       />
