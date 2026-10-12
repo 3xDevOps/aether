@@ -150,6 +150,9 @@ func configTree(c *protocol.Client, out io.Writer, agent, path string) error {
 	if err != nil {
 		return err
 	}
+	if path != "" {
+		path = configServerPath(root, path)
+	}
 	var result protocol.ConfigTreeResult
 	if err := c.Call(protocol.MethodConfigTree, protocol.ConfigTreeParams{Harness: root.Harness, Path: path}, &result); err != nil {
 		return err
@@ -164,25 +167,34 @@ func configTree(c *protocol.Client, out io.Writer, agent, path string) error {
 	return nil
 }
 
+// configServerPath prefixes rel with the agent's directory relative to home.
+// The server strips one such prefix, so a rel that starts with the
+// directory's own name, such as .claude/settings.json, would otherwise land
+// one level up.
+func configServerPath(root protocol.ConfigRoot, rel string) string {
+	return strings.TrimPrefix(root.Path, "~/") + "/" + rel
+}
+
 // configFile is a file the walk will read; rel is slash-separated and
 // relative to the agent's directory.
 type configFile struct {
-	rel, abs string
-	mode     uint32
+	rel  string
+	mode uint32
 }
 
 type configLeftOut struct {
 	rel, reason string
 }
 
-// walkConfig resolves each path argument against the agent's directory and
-// classifies everything under it without reading file contents.
-func walkConfig(root protocol.ConfigRoot, dir string, paths []string) ([]configFile, []configLeftOut, error) {
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return nil, nil, err
-	}
+// walkConfig resolves each path argument against the agent's directory, dir,
+// whose symlinks resolve to resolved, and classifies everything under it
+// without reading file contents.
+func walkConfig(root protocol.ConfigRoot, dir, resolved string, paths []string) ([]configFile, []configLeftOut, error) {
+	var files []configFile
+	var leftOut []configLeftOut
+	seen := map[string]bool{}
 	starts := make([]string, 0, len(paths))
+args:
 	for _, arg := range paths {
 		abs := arg
 		if !filepath.IsAbs(abs) {
@@ -192,14 +204,23 @@ func walkConfig(root protocol.ConfigRoot, dir string, paths []string) ([]configF
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, nil, fmt.Errorf("%s is outside %s", arg, root.Path)
 		}
-		if _, err := os.Lstat(filepath.Join(resolved, rel)); err != nil {
-			return nil, nil, err
+		var component string
+		for _, name := range strings.Split(rel, string(filepath.Separator)) {
+			component = filepath.Join(component, name)
+			info, err := os.Lstat(filepath.Join(resolved, component))
+			if err != nil {
+				return nil, nil, err
+			}
+			if info.Mode()&fs.ModeSymlink != 0 {
+				if slash := filepath.ToSlash(rel); !seen[slash] {
+					seen[slash] = true
+					leftOut = append(leftOut, configLeftOut{rel: slash, reason: fmt.Sprintf("symlink %s, not followed", filepath.ToSlash(component))})
+				}
+				continue args
+			}
 		}
 		starts = append(starts, rel)
 	}
-	var files []configFile
-	var leftOut []configLeftOut
-	seen := map[string]bool{}
 	for _, start := range starts {
 		err := filepath.WalkDir(filepath.Join(resolved, start), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -248,14 +269,14 @@ func walkConfig(root protocol.ConfigRoot, dir string, paths []string) ([]configF
 				return err
 			}
 			if info.Size() > configMaxFileBytes {
-				leftOut = append(leftOut, configLeftOut{rel: rel, reason: fmt.Sprintf("%d bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal", info.Size())})
+				leftOut = append(leftOut, configLeftOut{rel: rel, reason: configTooLarge(info.Size())})
 				return nil
 			}
 			mode := uint32(info.Mode().Perm())
 			if runtime.GOOS == "windows" {
 				mode = 0
 			}
-			files = append(files, configFile{rel: rel, abs: p, mode: mode})
+			files = append(files, configFile{rel: rel, mode: mode})
 			return nil
 		})
 		if err != nil {
@@ -263,6 +284,31 @@ func walkConfig(root protocol.ConfigRoot, dir string, paths []string) ([]configF
 		}
 	}
 	return files, leftOut, nil
+}
+
+func configTooLarge(size int64) string {
+	return fmt.Sprintf("%d bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal", size)
+}
+
+// configRead reads through local, which refuses a file swapped for a symlink
+// out of the agent's directory after the walk, and stops one byte past the
+// upload limit in case the file grew after the walk. size is the file's size
+// when it was read.
+func configRead(local *os.Root, rel string) (content []byte, size int64, err error) {
+	f, err := local.Open(filepath.FromSlash(rel))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = f.Close() }()
+	content, err = io.ReadAll(io.LimitReader(f, configMaxFileBytes+1))
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	return content, info.Size(), nil
 }
 
 // configRuntimeIgnored matches the server's runtime ignores: exact,
@@ -286,10 +332,19 @@ func configPush(c *protocol.Client, out io.Writer, agent string, paths []string,
 	if err != nil {
 		return err
 	}
-	files, leftOut, err := walkConfig(root, dir, paths)
+	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return err
 	}
+	files, leftOut, err := walkConfig(root, dir, resolved, paths)
+	if err != nil {
+		return err
+	}
+	local, err := os.OpenRoot(resolved)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = local.Close() }()
 	leave := "left out"
 	if dryRun {
 		leave = "would leave out"
@@ -301,12 +356,13 @@ func configPush(c *protocol.Client, out io.Writer, agent string, paths []string,
 	var uploaded int
 	var uploadedBytes int64
 	var batch []protocol.ConfigImportFile
+	var batchRels []string
 	var batchBytes int
 	send := func() error {
 		var result protocol.ConfigImportResult
 		if err := c.Call(protocol.MethodConfigImport, protocol.ConfigImportParams{Harness: root.Harness, Files: batch}, &result); err != nil {
-			for _, f := range batch {
-				_, _ = fmt.Fprintf(out, "unconfirmed %s\n", f.Path)
+			for _, rel := range batchRels {
+				_, _ = fmt.Fprintf(out, "unconfirmed %s\n", rel)
 			}
 			return fmt.Errorf("config.import: %w; the %d unconfirmed files may or may not be on the server, and later files were not sent; aether config ls %s shows what the server has", err, len(batch), root.Harness)
 		}
@@ -326,20 +382,25 @@ func configPush(c *protocol.Client, out io.Writer, agent string, paths []string,
 			}
 			return fmt.Errorf("upload to %s stopped: %s", root.Path, result.Error)
 		}
-		for _, f := range batch {
-			if !excluded[f.Path] {
-				_, _ = fmt.Fprintf(out, "uploaded %s\n", f.Path)
+		for _, rel := range batchRels {
+			if !excluded[rel] {
+				_, _ = fmt.Fprintf(out, "uploaded %s\n", rel)
 			}
 		}
 		uploaded += result.Files
 		uploadedBytes += result.Bytes
-		batch, batchBytes = nil, 0
+		batch, batchRels, batchBytes = nil, nil, 0
 		return nil
 	}
 	for _, f := range files {
-		content, err := os.ReadFile(f.abs)
+		content, size, err := configRead(local, f.rel)
 		if err != nil {
 			return err
+		}
+		if len(content) > configMaxFileBytes {
+			_, _ = fmt.Fprintf(out, "%s %s: %s\n", leave, f.rel, configTooLarge(size))
+			skipped++
+			continue
 		}
 		if hits := secretscan.Scan(f.rel, content); len(hits) != 0 {
 			_, _ = fmt.Fprintf(out, "%s %s: secret detected at %s (%s)\n", leave, f.rel, hits[0].Location, hits[0].Kind)
@@ -357,7 +418,8 @@ func configPush(c *protocol.Client, out io.Writer, agent string, paths []string,
 				return err
 			}
 		}
-		batch = append(batch, protocol.ConfigImportFile{Path: f.rel, ContentBase64: base64.StdEncoding.EncodeToString(content), Mode: f.mode})
+		batch = append(batch, protocol.ConfigImportFile{Path: configServerPath(root, f.rel), ContentBase64: base64.StdEncoding.EncodeToString(content), Mode: f.mode})
+		batchRels = append(batchRels, f.rel)
 		batchBytes += len(content)
 	}
 	if len(batch) > 0 {

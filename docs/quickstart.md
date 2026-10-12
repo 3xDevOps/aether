@@ -664,7 +664,9 @@ the push leaves out:
 - `.aether-profile-ignore`
 - the agent's runtime and history paths, matched exactly and case-sensitively
   from the directory root
-- symlinks, which are not followed, and sockets, FIFOs, and devices
+- symlinks, which are not followed, and sockets, FIFOs, and devices; a path
+  you name that runs through a symlink is left out whole, as in
+  `left out skills/linked/SKILL.md: symlink skills/linked, not followed`
 - files over **64 MiB (67,108,864 bytes)**; install or download those in
   `aether terminal`
 
