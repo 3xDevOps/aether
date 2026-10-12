@@ -596,15 +596,17 @@ for the next server to move it.
 | Moved | The run carries on with the same ID, checkout, branch and room. A `run.account` event and a room note announce it. An Enhanced session gets its continuation prompt after the move has let go of the run, so a second limit moves it again, to an account it has not used. |
 | No account qualifies | Nothing is removed. An account whose check failed (an unreadable installation, a store error) is left out; when none qualified and a check failed, the reason is the `cannot continue` one below with those errors. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
 | Fallback is off for the run | The same, with `Usage limit reached on <owner>'s account; fallback is off for this run`. |
-| The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
-| The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. |
+| The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, the replacement is not admitted for disk or memory capacity as a launch would not be, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
+| The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. A swarm worker has no container left to retain, so it finishes at once and its attempt settles as failed. |
 | The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>`; a Background run fails with it. No room note is posted. |
 | The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
 | The run is paused, switching mode, being killed or closed, or finishing a reported outcome | No move: the run ends its turn or exits as it would without fallback. |
 
 A headless agent's usage limit is read from its output by the adapter,
 which reads only the current agent process's output: what an earlier
-process printed, before a restart or a move, is never read again. The limit
+process printed, before a restart or a move, is never read again. A
+replacement that prints its result and exits before the adapter attaches
+is still read, from its own part of the transcript. The limit
 is kept in the run's sidecar, so a run whose agent exited while the server
 was down still moves when recovery finalizes it; that move starts once
 recovery has finished, so the run's terminals and browser are reconciled

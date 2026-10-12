@@ -476,6 +476,12 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 	if err != nil {
 		return stop("read fallback usage: " + err.Error())
 	}
+	// Admitted like a launch, and held until the replacement has started.
+	release, err := s.reserveCapacity(ctx)
+	if err != nil {
+		return stop(err.Error())
+	}
+	defer release()
 	run, to, seq, excluded, err := s.recordMove(ctx, entry, f, run.ID, from, measured)
 	switch {
 	case err != nil:
@@ -586,6 +592,10 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 		s.mu.Lock()
 		entry.accountSwap = nil
+		if !entry.destroyPending {
+			// Any container the move created is destroyed.
+			entry.containerID = ""
+		}
 		if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 			slog.Warn("scheduler: persist the failed account move", "run", run.ID, "error", werr)
 		}
@@ -648,14 +658,18 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	default:
 		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName))
 	}
+	unlockCaches := s.lockRunCaches(home.ID, to)
 	plan, err := s.runPlan(ctx, entry, &next, ws, home, profile)
 	if err != nil {
+		unlockCaches()
 		return failed(err)
 	}
 	s.mu.Lock()
 	persistSupervisor := entry.missionAssigned
 	s.mu.Unlock()
-	if _, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor); err != nil {
+	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor)
+	unlockCaches()
+	if err != nil {
 		return failed(err)
 	}
 

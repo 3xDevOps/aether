@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -302,23 +303,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // concurrent Kill takes the supervised path instead of transitioning the row
 // underneath the in-flight launch.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
-	// Cache ownership spans the create/sidecar gap. GC tries this lock rather
-	// than waiting behind provisioning; never acquire it under Scheduler.mu.
-	if s.cfg.Homes != nil {
-		home, account := run.HomeMember(), run.AccountMember()
-		first, second := home, account
-		if second < first {
-			first, second = second, first
-		}
-		if first != "" {
-			unlock := s.cfg.Homes.LockCaches(first)
-			defer unlock()
-		}
-		if second != "" && second != first {
-			unlock := s.cfg.Homes.LockCaches(second)
-			defer unlock()
-		}
-	}
+	defer s.lockRunCaches(run.HomeMember(), run.AccountMember())()
 	entry := &supervised{
 		runID:           run.ID,
 		workspaceID:     run.WorkspaceID,
@@ -525,6 +510,28 @@ func (s *Scheduler) failContainer(ctx context.Context, entry *supervised, cid ru
 			fmt.Errorf("scheduler: destroy container after failed provisioning: %w", derr))
 	}
 	return fmt.Errorf("%s: %w", step, cause)
+}
+
+// lockRunCaches holds the cache ownership of a container that mounts home
+// and account's login across the create/sidecar gap. GC tries this lock
+// rather than waiting behind provisioning; never acquire it under
+// Scheduler.mu.
+func (s *Scheduler) lockRunCaches(home, account domain.MemberID) func() {
+	if s.cfg.Homes == nil {
+		return func() {}
+	}
+	members := slices.Compact(slices.Sorted(slices.Values([]domain.MemberID{home, account})))
+	unlocks := make([]func(), 0, len(members))
+	for _, member := range members {
+		if member != "" {
+			unlocks = append(unlocks, s.cfg.Homes.LockCaches(member))
+		}
+	}
+	return func() {
+		for _, unlock := range slices.Backward(unlocks) {
+			unlock()
+		}
+	}
 }
 
 // failProvisioning uses a fresh context so a cancelled launch still lands in

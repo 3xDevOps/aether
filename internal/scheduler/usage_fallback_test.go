@@ -15,6 +15,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/quota"
@@ -156,7 +157,8 @@ func TestEnhancedRunContinuesOnAFallbackAccount(t *testing.T) {
 
 // When the run does not move, the Enhanced run waits for its owner in the
 // container it had, with the real reason: no account qualifies, fallback is
-// off for the run, or the owner may no longer launch at all.
+// off for the run, the replacement would not be admitted for capacity, or
+// the owner may no longer launch at all.
 func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -167,6 +169,9 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 		{"no account qualifies", "Usage limit reached on Ada's account; no fallback has usage left", nil, domain.LaunchOptions{}},
 		{"fallback off", "Usage limit reached on Ada's account; fallback is off for this run", nil,
 			domain.LaunchOptions{Fallback: domain.AccountFallback{Disabled: true}}},
+		{"no capacity for the replacement", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
+			e.sched.cfg.filesystemCapacity = func(string) (disk.Usage, error) { return disk.Usage{}, errors.New("statfs failed") }
+		}, domain.LaunchOptions{}},
 		{"owner demoted to viewer", "Usage limit reached on Ada's account; cannot continue on another account: ", func(e *shareEnv) {
 			e.member.Role = domain.RoleViewer
 			if err := e.db.UpdateMember(context.Background(), e.member); err != nil {
@@ -647,4 +652,43 @@ func TestShutdownDuringAMoveLeavesTheRunForRecovery(t *testing.T) {
 	s2.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
 	startScheduler(t, s2)
 	e.assertMovedToOwner(t, run.ID, notes)
+}
+
+// A swarm worker whose replacement container cannot be created has no
+// container left to retain: it fails at once with the real error and leaves
+// the scheduler, so its attempt settles instead of holding a swarm slot.
+func TestWorkerWhoseMoveFailsFinishesWithoutRetention(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	startScheduler(t, e.sched)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "moving-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
+		Harness: "claude", Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-e.sched.RecoveryReady()
+	e.rt.mu.Lock()
+	e.rt.createErr = errors.New("no space left on device")
+	e.rt.mu.Unlock()
+	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
+		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: create container: no space left on device" {
+		t.Fatalf("reason %q", got.Reason)
+	}
+	waitFor(t, "the worker released", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] == nil
+	})
+	if _, err := e.sched.readSidecar(run.ID); !os.IsNotExist(err) || len(notes.all()) != 0 || e.containerCount() != 0 {
+		t.Fatalf("sidecar %v, notes %v, %d containers; want the worker gone without a move", err, notes.all(), e.containerCount())
+	}
 }

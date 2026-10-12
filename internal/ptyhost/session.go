@@ -54,16 +54,19 @@ type pendingOutputEvent struct {
 // transcript history, bounded replay ring for non-run terminals, and attached
 // clients.
 type session struct {
-	run           SessionKey
-	resumeID      string
-	generation    uint64
-	att           runtime.Attachment
-	tr            *castWriter
-	checkpoint    string
-	checkpointMu  sync.Mutex
-	checkpointSeq uint64
-	stdinMu       sync.Mutex
-	stdin         io.WriteCloser
+	run        SessionKey
+	resumeID   string
+	generation uint64
+	att        runtime.Attachment
+	tr         *castWriter
+	// transcriptStart is the incarnation the session's transcript opened
+	// with; it outlives tr, which the session's end closes.
+	transcriptStart int64
+	checkpoint      string
+	checkpointMu    sync.Mutex
+	checkpointSeq   uint64
+	stdinMu         sync.Mutex
+	stdin           io.WriteCloser
 
 	mu                 sync.Mutex
 	clients            map[*client]struct{}
