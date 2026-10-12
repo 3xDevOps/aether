@@ -4,8 +4,8 @@ package agentstatus
 import (
 	_ "embed"
 	"encoding/json"
+	"strings"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -142,7 +142,7 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 		}
 		// "rate_limit" also covers transient 429s; only the vendor's
 		// usage-limit wording marks the account's limit.
-		if hook.Error == "rate_limit" && acphost.IsUsageLimitMessage(hook.LastAssistantMessage) {
+		if hook.Error == "rate_limit" && IsUsageLimitMessage(hook.LastAssistantMessage) {
 			return Report{State: Idle, Reason: hook.LastAssistantMessage, UsageLimit: true}, true
 		}
 		return Report{State: Idle, Reason: "agent failed"}, true
@@ -181,3 +181,32 @@ const PiExtensionName = "status.ts"
 
 //go:embed status.ts
 var PiExtension []byte
+
+// usageLimitPrefixes is USAGE_LIMIT_ERROR_PREFIXES as exported by
+// @anthropic-ai/claude-agent-sdk in sdk.d.ts: Claude Code starts every
+// subscription usage-limit message with one of these.
+var usageLimitPrefixes = [...]string{
+	"You've hit your",
+	"You've reached your",
+	"You're out of usage credits",
+	"Your org is out of usage · add funds to continue",
+	"Your org is out of usage · contact your admin",
+	"Your seat type doesn't include usage credits",
+	"Your seat type doesn't include usage",
+	"Your usage allocation has been disabled by your admin",
+	"Your group's usage limit is set to $0",
+	"Fable 5 requires usage credits",
+	"You're out of extra usage",
+	"Your seat type doesn't include extra usage",
+}
+
+// IsUsageLimitMessage reports whether text is Claude Code's wording for a
+// subscription usage limit.
+func IsUsageLimitMessage(text string) bool {
+	for _, p := range usageLimitPrefixes {
+		if strings.HasPrefix(text, p) {
+			return true
+		}
+	}
+	return false
+}

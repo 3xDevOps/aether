@@ -3,7 +3,7 @@ package adapter
 import (
 	"encoding/json"
 
-	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
@@ -143,7 +143,7 @@ func (c *claude) ConsumeLine(line string) []events.Payload {
 			CostUSD:      msg.TotalCostUSD,
 			Metered:      true,
 		}}
-		if c.rejected && msg.IsError && acphost.IsUsageLimitMessage(msg.Result) {
+		if c.rejected && msg.IsError && agentstatus.IsUsageLimitMessage(msg.Result) {
 			out = append(out, events.RunUsageLimitPayload{Message: msg.Result, SessionID: msg.SessionID})
 		}
 		c.rejected = false
