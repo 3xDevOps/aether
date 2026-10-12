@@ -32,7 +32,9 @@ type TerminalHistoryProps = {
 function lineTop(line: number, origin: number, height: number): number {
   // Scroll positions are pixel-snapped by the browser. Snap both edges of
   // every row too, so a fractional zoom cannot round the anchor differently.
-  return padding + Math.round((line - origin) * height)
+  // Snap each line by itself, not its distance from the origin: an older page
+  // moves the origin, and rows must keep their spacing when it does.
+  return padding + Math.round(line * height) - Math.round(origin * height)
 }
 
 function rowTop(row: number, origin: number, height: number): number {

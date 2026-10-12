@@ -261,6 +261,29 @@ test('keeps the latest row, pixel and horizontal anchor when a delayed older pag
   view.dispose()
 })
 
+test('keeps every rendered row on its pixel when an older page arrives at a fractional cell height', async () => {
+  // A terminal opened on fallback font metrics at a 2.625 device scale.
+  vi.mocked(captureTerminalPresentation).mockReturnValue({ ...frozenScreen, cellHeight: 14.078125 })
+  const older = Promise.withResolvers<TerminalHistoryResult>()
+  const client = fakeApi({ terminalHistory: vi.fn()
+    .mockResolvedValueOnce(historyResult(page(200, 400), { has_more: true, next_cursor: 'older' }))
+    .mockImplementationOnce(() => older.promise) })
+  const cache = cacheFor(client)
+  const view = mountHistory(cache)
+  const output = await beginReading(view)
+  await waitFor(() => expect(cache.snapshot().count).toBe(200))
+  fireEvent.scroll(output, { target: { scrollTop: 400 } })
+  await waitFor(() => expect(client.terminalHistory).toHaveBeenCalledTimes(2))
+  const offsets = () => [...output.querySelectorAll<HTMLElement>('[data-history-row]')]
+    .map((row) => [row.dataset.historyRow, Number.parseFloat(row.style.top) - output.scrollTop])
+  await waitFor(() => expect(offsets().length).toBeGreaterThan(12))
+  const before = offsets()
+  await act(async () => older.resolve(historyResult(page(0, 200))))
+  await waitFor(() => expect(cache.snapshot().count).toBe(400))
+  expect(offsets()).toEqual(before)
+  view.dispose()
+})
+
 test('keeps the actual partially visible row and exact pixel offset through fractional zoom', async () => {
   vi.mocked(captureTerminalPresentation).mockReturnValue({
     ...frozenScreen,
