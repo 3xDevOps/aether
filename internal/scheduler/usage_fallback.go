@@ -878,7 +878,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 	}
 	if run.ACP {
-		if _, err := s.acp.live(run.ID); err != nil {
+		if err := s.acp.openError(run.ID); err != nil {
 			s.clearAccountSwap(entry, swap)
 			return usageNoFallback, fmt.Sprintf("%s%s's account; the run is on %s's account and its session could not be restored: %v", usageLimitReason, fromName, toName, err)
 		}

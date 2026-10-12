@@ -261,6 +261,18 @@ func (d *acpDriver) live(run domain.RunID) (*acphost.Session, error) {
 	return nil, ErrACPNotRunning
 }
 
+// openError is the failure the run's last open recorded, nil when it opened.
+// A background run that then ended its session on purpose has none: its own
+// ending carries the reason.
+func (d *acpDriver) openError(run domain.RunID) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if r := d.runs[run]; r != nil && r.session == nil && !r.ended {
+		return r.err
+	}
+	return nil
+}
+
 // started returns the live session, or else a channel closed when the next
 // one starts and the release for it, both read under one lock.
 func (d *acpDriver) started(run domain.RunID) (*acphost.Session, <-chan struct{}, func()) {
@@ -504,15 +516,6 @@ func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, f
 		report := agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
 		if !oneShot {
 			d.report(entry.runID, report)
-			return
-		}
-		d.mu.Lock()
-		r := d.runs[entry.runID]
-		ended := r != nil && r.ended
-		d.mu.Unlock()
-		if ended {
-			// The replacement's open already ended the run with its own
-			// reason.
 			return
 		}
 		d.s.mu.Lock()
