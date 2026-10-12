@@ -384,6 +384,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
   }
   return {
     serverInfo: vi.fn(async () => serverInfo),
+    serverEdge: vi.fn(async () => needsOverride('serverEdge')),
+    serverEdgeClaimCode: vi.fn(async () => needsOverride('serverEdgeClaimCode')),
     workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => [alice, bob]),
     accountUsage: vi.fn(async (): Promise<UsageResult> => ({

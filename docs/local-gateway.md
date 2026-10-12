@@ -1407,7 +1407,10 @@ optional and, when given, must name that device),
 `server.owner.transfer` (`{"member_id":"..."}`) and `server.edge`, which
 any member calls for the edge URL, server id, access policy, the owner's
 provider and login or `null`, whether the server is connected, and whether
-the edge last reported it claimed. Their shapes are in
+the edge last reported it claimed, and `server.edge.claimcode`, which
+issues the calling admin a claim code bound to their own member,
+`{"code":"...","expires_at":"..."}`, for the dashboard to pass straight
+to `edge.claim`. Their shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`,
 and [edge.md](edge.md) describes what each does.
 

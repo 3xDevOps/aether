@@ -69,6 +69,8 @@ import type {
   Run,
   RunPatch,
   Schedule,
+  ServerEdge,
+  ServerEdgeClaimCode,
   ServerInfo,
   ServerUpdateResult,
   ServerUpdateStatus,
@@ -411,6 +413,8 @@ export function browserStreamURL(params: DevBrowserStreamRequest): string {
 
 export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
+  serverEdge: () => call<ServerEdge>('server.edge'),
+  serverEdgeClaimCode: () => call<ServerEdgeClaimCode>('server.edge.claimcode'),
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
   accountList: () => call<AccountAccess>('account.list'),
@@ -921,7 +925,7 @@ export const api = {
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
   /** Starts a sign-in at the edge; edge.status reports how it ends. */
-  localEdgeLogin: () => local<EdgeLogin>('edge.login'),
+  localEdgeLogin: (edge?: string) => local<EdgeLogin>('edge.login', edge ? { edge } : {}),
   localEdgeStatus: () => local<EdgeStatus>('edge.status'),
   localEdgeServers: (edge: string) =>
     local<{ edge: string; servers: EdgeServer[] }>('edge.servers', { edge }),

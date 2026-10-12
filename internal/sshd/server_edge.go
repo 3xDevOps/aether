@@ -3,6 +3,9 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -11,6 +14,7 @@ import (
 
 func init() {
 	registerMethod(protocol.MethodServerEdge, (*Server).serverEdge)
+	registerMethod(protocol.MethodServerEdgeClaimCode, (*Server).serverEdgeClaimCode)
 }
 
 func (s *Server) serverEdge(context.Context, domain.MemberID, json.RawMessage) (any, *protocol.Error) {
@@ -28,6 +32,38 @@ func (s *Server) serverEdge(context.Context, domain.MemberID, json.RawMessage) (
 		out.Owner = &protocol.EdgeAccount{Provider: owner.Provider, Login: owner.Login}
 	}
 	return out, nil
+}
+
+// serverEdgeClaimCode issues the calling admin a claim code bound to their
+// own member, so an admin who joined over an SSH key or a tailnet can
+// connect their GitHub account and give the server an owner. The claim
+// creates no member and raises no role.
+func (s *Server) serverEdgeClaimCode(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+	const method = protocol.MethodServerEdgeClaimCode
+	if perr := s.requireAdmin(ctx, member, method); perr != nil {
+		return nil, perr
+	}
+	if perr := s.requireApprovedCaller(ctx, method, true); perr != nil {
+		return nil, perr
+	}
+	edge := s.currentEdgeOwner()
+	if edge == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": this server is not enrolled with an edge (edge-url is empty)"}
+	}
+	owner, err := edge.Owner()
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": " + err.Error()}
+	}
+	if owner != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+			"%s: this server is already owned at its edge by %s %s; aether member transfer moves ownership", method, owner.Provider, owner.Login)}
+	}
+	code, expires, err := edge.IssueClaimCode(member)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": " + err.Error()}
+	}
+	slog.Info("sshd: an admin issued a claim code for themself", "member", member)
+	return protocol.ServerEdgeClaimCodeResult{Code: code, ExpiresAt: expires.UTC().Format(time.RFC3339)}, nil
 }
 
 // requireEdgeClaimed refuses method while the edge last reported this

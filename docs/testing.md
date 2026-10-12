@@ -868,6 +868,7 @@ go test -race ./internal/edge/edgetest/
 | `TestTransferStandsOnlyOnceTheEdgeRecordsIt` | `server.owner.transfer` whose answer is lost, which the edge refuses, or with the edge unreachable fails with the reason and keeps the server's owner; after the lost answer the edge records the server's owner again when it reconnects |
 | `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner; the edge closes the server's control channel, the server drops its owner, and a fresh code claims again for the same account only |
 | `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link, and the invitee joins |
+| `TestAdminConnectsTheirAccount` | A server whose admin joined with an SSH key refuses invitations until claimed; the admin's `server.edge.claimcode` over that key claims it through the edge for their own member, approves the device and adds no member; invitations then work; a collaborator gets no code, a pending device opens no control channel, and an owned server issues none |
 | `TestInvitations` | By login and email; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
 | `TestRoleChange` | A new role reaches the edge's list and the member's live connection |
 | `TestCrossServerIsolation` | A member of one server is refused on another, by the edge and, for forged grants, by the server |

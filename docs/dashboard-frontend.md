@@ -3739,6 +3739,18 @@ through either gateway:
   Run headers, action confirmations and the Finished release dialog show the
   exact runtime deadline and cleanup failures. Cleanup-only refreshes preserve
   the completion time; reopening clears the old retention disclosure.
+- **Remote access**, when the server answers `server.edge` (the `edge`
+  store slice, read at hydration): the **Edge** URL or `off`, the copyable
+  **Server id**, the **Access policy**, the **Owner** (`<login> (github)`
+  or `none`) and the **Connection**. For an admin of a server with no
+  owner, a dashboard with the local verbs `edge.status`, `edge.login` and
+  `edge.claim` shows **Connect my GitHub account**: it signs in at the
+  server's edge if this machine is not signed in there, calls
+  `server.edge.claimcode`, passes the code to `edge.claim`, and reads
+  `server.edge` again. Without those verbs it shows `aether edge connect`
+  to copy ([edge.md](edge.md#server-id-and-claiming)). Under
+  `approved-devices`, Needs you also lists devices still `registered`
+  from `account`.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you.
 

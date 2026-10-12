@@ -423,6 +423,15 @@ type fakeEdgeOwner struct {
 	// state is what EdgeState returns; empty is an edge that has not
 	// answered.
 	state string
+	// issuedFor is the admin of the last IssueClaimCode.
+	issuedFor domain.MemberID
+}
+
+func (f *fakeEdgeOwner) IssueClaimCode(admin domain.MemberID) (string, time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issuedFor = admin
+	return testClaimCode, time.Now().Add(edgeproto.ClaimCodeTTL), nil
 }
 
 func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, nil }

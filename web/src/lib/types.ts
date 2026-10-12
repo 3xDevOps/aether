@@ -1183,6 +1183,24 @@ export interface EdgeRefusal {
   detail?: string
 }
 
+/** server.edge: the server's edge. `edge_url` is empty while the edge is
+ * off, `owner` null while the server has no owner at its edge, and
+ * `claimed` whether the edge last reported the server claimed. */
+export interface ServerEdge {
+  edge_url: string
+  server_id: string
+  access_policy: 'account' | 'approved-devices'
+  owner: { provider: string; login: string } | null
+  connected: boolean
+  claimed: boolean
+}
+
+/** server.edge.claimcode: a claim code bound to the calling admin. */
+export interface ServerEdgeClaimCode {
+  code: string
+  expires_at: string
+}
+
 /** edge.link and edge.claim: the link just saved. */
 export interface EdgeLinkResult {
   server_id: string

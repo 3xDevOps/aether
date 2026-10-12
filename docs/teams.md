@@ -102,7 +102,18 @@ invite code described [below](#by-invite-code-fallback).
 
 #### Linking an existing member
 
-An admin who joined by SSH key or tailnet names their own GitHub account:
+An admin who joined by SSH key or tailnet links their own GitHub account
+with **Connect my GitHub account** in Settings › Remote access, or from a
+linked terminal:
+
+```sh
+aether edge connect
+```
+
+That claims the server for the account this machine is signed in with at
+the server's edge, binds it to the admin's member, and approves this
+device ([edge.md](edge.md#server-id-and-claiming)). It is refused once
+the server has an owner. To link an account without claiming, name it:
 
 ```sh
 aether member link --github dana

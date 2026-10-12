@@ -409,7 +409,18 @@ describe('device cards', () => {
     ['of a member', pendingDevice({ member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' }),
       'laptop (github bob) signed in as Bob', 'admits as: Bob (collaborator)'],
   ])('asks an admin to approve a device %s', (_, device, reason, admits) => {
-    expect(deviceNeeds([device], 'admin')).toEqual([{ device, reason, admits, waitingSince: device.created_at }])
-    expect(deviceNeeds([device], 'collaborator')).toEqual([])
+    expect(deviceNeeds([device], 'admin', 'account')).toEqual([{ device, reason, admits, waitingSince: device.created_at }])
+    expect(deviceNeeds([device], 'collaborator', 'account')).toEqual([])
+  })
+
+  it('asks for a device registered under account once the server is under approved-devices', () => {
+    const device = pendingDevice({ status: 'registered', member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' })
+    expect(deviceNeeds([device], 'admin', 'account')).toEqual([])
+    expect(deviceNeeds([device], 'admin', 'approved-devices')).toEqual([{
+      device,
+      reason: 'laptop (github bob) signed in as Bob and is not approved',
+      admits: 'admits as: Bob (collaborator)',
+      waitingSince: device.created_at,
+    }])
   })
 })

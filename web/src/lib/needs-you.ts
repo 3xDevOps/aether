@@ -6,6 +6,7 @@ import type {
   RoomMessage,
   RoomStatusResult,
   Run,
+  ServerEdge,
   Workspace,
 } from '@/lib/types'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
@@ -424,19 +425,29 @@ export interface DeviceNeed {
   waitingSince: string
 }
 
-/** Devices are not runs, so they sit beside the run table. Only a pending
- * device asks: a registered one was admitted by signing in alone. */
-export function deviceNeeds(devices: Device[], viewerRole: Member['role'] | null): DeviceNeed[] {
+/** Devices are not runs, so they sit beside the run table. A pending device
+ * asks, and so does a registered one, admitted by signing in alone under
+ * `account`, once the server is under `approved-devices`: it is refused
+ * there until someone approves it. */
+export function deviceNeeds(
+  devices: Device[],
+  viewerRole: Member['role'] | null,
+  accessPolicy: ServerEdge['access_policy'] | undefined,
+): DeviceNeed[] {
   if (viewerRole !== 'admin') return []
+  const waiting = (device: Device) =>
+    device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
   return devices
-    .filter((device) => device.status === 'pending')
+    .filter(waiting)
     .map((device) => {
       const who = `${device.label} (${device.provider} ${device.account})`
       return {
         device,
-        reason: device.display_name
-          ? `${who} signed in as ${device.display_name}`
-          : `${who} wants to join as ${device.role}`,
+        reason: device.status === 'registered'
+          ? `${who} signed in as ${device.display_name} and is not approved`
+          : device.display_name
+            ? `${who} signed in as ${device.display_name}`
+            : `${who} wants to join as ${device.role}`,
         admits: device.display_name ? `admits as: ${device.display_name} (${device.role})` : `new member, ${device.role}`,
         waitingSince: device.created_at,
       }

@@ -26,7 +26,8 @@ export function useStateContext(): StateContext {
 export function useDeviceNeeds(): DeviceNeed[] {
   const devices = useStore((s) => s.devices)
   const role = useSelfRole()
-  return useMemo(() => deviceNeeds(devices, role), [devices, role])
+  const policy = useStore((s) => s.edge?.access_policy)
+  return useMemo(() => deviceNeeds(devices, role, policy), [devices, role, policy])
 }
 
 export function useSidebarGroups(): SidebarGroup[] {

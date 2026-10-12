@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
@@ -66,6 +67,12 @@ func (a *Agent) TransferOwner(owner edgeproto.Account) error {
 	return a.state.transferOwner(a.origin, owner, func() error {
 		return s.transfer(edgeproto.AccountPrincipal(owner))
 	})
+}
+
+// IssueClaimCode replaces any claim code with a fresh one whose claim
+// binds the claiming account to the existing admin member admin.
+func (a *Agent) IssueClaimCode(admin domain.MemberID) (string, time.Time, error) {
+	return a.state.IssueClaimCode(a.serverID, string(admin), time.Now())
 }
 
 // Owner returns this server's owner at the edge, nil when it has none.

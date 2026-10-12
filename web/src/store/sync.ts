@@ -29,6 +29,7 @@ import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
 import { loadDevices } from '@/store/devices'
+import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
 import { inMessageScope, loadMessagePage } from '@/store/messages'
@@ -178,6 +179,7 @@ export async function hydrate(
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
+    await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
     // Nothing else fetches linkStatus before settings or onboarding opens, so
     // without this a linked machine launches looking unlinked. Must not fail hydration.

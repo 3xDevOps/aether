@@ -308,9 +308,31 @@ code inside it once the server's host key has proved the id
 makes the claiming account its admin, and approves the claiming device
 under either policy, because the code came from the machine's console.
 
-A server that already has members is claimed by an admin the machine's
-administrator names ([Console recovery](#console-recovery)). Without
-`--admin`, `claim-code` on such a server is refused and lists its admins:
+A server that already has members, because its first admin joined with
+an SSH key or over the tailnet, is claimed by one of its admins with
+**Connect my GitHub account**: in the dashboard under Settings › Remote
+access, or from a linked terminal:
+
+```sh
+aether login --edge <edge url>   # if this machine is not signed in there
+aether edge connect
+```
+
+```
+connected server <server id> to <edge host> as <login> (github); this device is approved
+linked to server <server id> at <addr>, then through <edge host> as <name> (admin)
+```
+
+Both call `server.edge.claimcode`, which issues a claim code bound to the
+calling admin's own member, and claim with it at once; the code is never
+shown. The server accepts the call only from an admin on an approved
+device, a member SSH key or the tailnet, and refuses it while the server
+has an owner or the edge is off. The claim binds the signed-in GitHub
+account to that admin, approves the device, and adds no member and
+changes no role. `aether edge connect` saves the edge link as the current
+one, with the previous address tried first. An admin with no other way
+in uses [Console recovery](#console-recovery). Without `--admin`,
+`claim-code` on such a server is refused and lists its admins:
 
 ```
 the server has members, so a claim without --admin would be refused; name the admin to connect: aether-server edge claim-code --admin <member id>; the admins are: <member id> (<name>); an admin reaches the same result from the dashboard: Settings › Remote access › Connect my GitHub account, or aether edge connect
@@ -346,6 +368,7 @@ state](#transfer-and-the-ownerless-state)).
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner and the claim code, set `edge-url ""` |
 | `sudo aether-server device approve <code>` | Show the device a code names, the account it signed in as and the member and role approving admits it as, and approve it after you answer `y` |
 | `sudo aether-server device review` | Approve, revoke or skip each registered and pending device; list member SSH keys and tailnet logins |
+| `aether edge connect` | From a linked terminal: claim the server for the GitHub account this machine is signed in with at the server's edge, bound to your own admin member. Prints the owner instead when the server already has one |
 
 ```
 edge         https://edge.onaether.dev
@@ -741,8 +764,12 @@ repeated one (`TestTransferTakesOnlyItsOwnAnswer`).
 When the owner's identity leaves the server, because the member was
 removed or the account deleted, the server forgets the owner and reports
 itself ownerless. An ownerless server stays enrolled and keeps relaying for
-its members. Only a new claim code naming an admin gives it an owner
-again ([Console recovery](#console-recovery)):
+its members. Only a claim code naming an admin gives it an owner again:
+an admin runs **Connect my GitHub account** (Settings › Remote access, or
+`aether edge connect`; see [Server id and
+claiming](#server-id-and-claiming)), or, with no other way in, the
+machine's administrator issues one ([Console
+recovery](#console-recovery)):
 
 ```sh
 sudo aether-server edge claim-code --admin <member id>   # on the machine

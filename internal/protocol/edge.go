@@ -21,3 +21,14 @@ type EdgeAccount struct {
 	Provider string `json:"provider"`
 	Login    string `json:"login"`
 }
+
+// MethodServerEdgeClaimCode issues the calling admin a claim code that
+// binds the account claiming with it to that admin's member.
+const MethodServerEdgeClaimCode = "server.edge.claimcode"
+
+// ServerEdgeClaimCodeResult is a claim code and when it expires, in
+// RFC 3339.
+type ServerEdgeClaimCodeResult struct {
+	Code      string `json:"code"`
+	ExpiresAt string `json:"expires_at"`
+}
