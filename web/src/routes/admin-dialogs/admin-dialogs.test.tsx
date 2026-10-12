@@ -100,4 +100,20 @@ describe('budget dialog', () => {
       clear: true,
     })
   })
+
+  it('shows Clearing… on Clear budget alone while the server decides', async () => {
+    const client = fakeApi({ budgetSet: vi.fn(() => new Promise<never>(() => {})) })
+    seed()
+    render(
+      <BudgetDialog workspaceID={workspace.id} client={client} onClose={() => {}} />,
+    )
+
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.change(dialog.getByLabelText(/Limit/), { target: { value: '2' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Clear budget' }))
+
+    expect(dialog.getByRole('button', { name: 'Clearing…' })).toHaveProperty('disabled', true)
+    expect(dialog.getByRole('button', { name: 'Set' })).toHaveProperty('disabled', true)
+    expect(dialog.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', false)
+  })
 })

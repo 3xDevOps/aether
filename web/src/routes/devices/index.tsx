@@ -78,10 +78,11 @@ export function DevicesPanel({ client }: { client: Api }) {
           {device.invitation_id ? `, and approving accepts invitation ${device.invitation_id}` : ''}. Whoever holds this device gets that member&apos;s access.
         </>}
         action="Approve"
+        pending="Approving…"
         onConfirm={() => client.memberDeviceApprove(device.id, confirming.code)}
-        onDone={() => {
+        onDone={(open) => {
           toast.success(`${device.label} approved`)
-          setCode('')
+          if (open) setCode('')
           void refetch()
         }}
         onClose={() => setConfirming(null)}
@@ -164,6 +165,7 @@ export function DevicesPanel({ client }: { client: Api }) {
           title={`Revoke ${revoking.label}${isAdmin ? ` of ${owner(revoking)}` : ''}?`}
           description="The server refuses its device key on every path, direct and through the edge, and closes its open connections. aether on that computer stops reaching this server. This cannot be undone."
           action="Revoke"
+          pending="Revoking…"
           onConfirm={() => client.memberDeviceRevoke(revoking.id)}
           onDone={() => {
             toast.success(`${revoking.label} revoked`)

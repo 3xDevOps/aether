@@ -11,6 +11,7 @@ import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 import { runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import type { Route } from '@/store/ui'
 
@@ -58,6 +59,7 @@ export function CardActionButton({
 }) {
   const navigate = useStore((s) => s.navigate)
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
 
   return (
     <Button
@@ -73,7 +75,7 @@ export function CardActionButton({
         else openCard(card, navigate)
       }}
     >
-      {action.label}
+      {late ? stillWaiting : busy ? 'Approving…' : action.label}
     </Button>
   )
 }

@@ -961,6 +961,8 @@ where a resend is deduped or refused and the eventual result still shows:
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
 | Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
 | **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
+| Needs you device card **Approve** / **Deny** | Approving… / Denying… | No: a second decision would race the first |
+| Settings **Connect my GitHub account** | Connecting as *account* (*provider*) | No: each press asks the server for a new claim code |
 | Device **Approve** / **Revoke** (confirm dialog) | Approving… / Revoking… | The dialog's **Cancel** turns into **Close**; it and `Esc` close the dialog while the request keeps going. A late success still refreshes the list and toasts but leaves the approval code field alone, since it may hold a code typed since; a late failure shows as a toast |
 | Schedule **Unschedule** | Unscheduling… | No |
 | Invite code **Generate code** | Generating… | No: each call mints a new code |
@@ -3203,7 +3205,7 @@ when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
 the `Confirm` primitive and send `mission.archive` and `mission.delete`;
 **Unarchive swarm** sends `mission.unarchive` at once and toasts the result
 or the error. A delete removes the swarm from the store and returns to the
-list. Each item needs its capability; cancel, archive, unarchive and delete
+list, unless the dialog was closed past the deadline. Each item needs its capability; cancel, archive, unarchive and delete
 also need the accountable human or an admin. Failures stay in the dialog,
 verbatim, such as `run <id> is running; cancel the swarm and wait for its
 runs to stop`.

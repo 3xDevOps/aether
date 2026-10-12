@@ -9,6 +9,7 @@ import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import '@/routes/missions'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
 import {
@@ -324,6 +325,53 @@ describe('Needs you actions', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Needs you 1' })).toBeDefined())
     expect(api.memberDeviceApprove).toHaveBeenCalledWith('dev_1')
     expect(toast.success).toHaveBeenCalledWith('laptop approved')
+  })
+
+  it('labels a waiting device\'s pressed button, locks both, and says when the server is slow', () => {
+    seed([stopped])
+    useStore.setState({ devices: [pendingDevice()] })
+    vi.mocked(api.memberDeviceRevoke).mockImplementationOnce(() => new Promise<never>(() => {}))
+    renderBoard()
+    const [card] = column('Needs you').getAllByRole('article')
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(within(card!).getByRole('button', { name: 'Deny' }))
+      expect(within(card!).getByRole('button', { name: 'Denying…' })).toHaveProperty('disabled', true)
+      expect(within(card!).getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(within(card!).getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows Approving… on the card while the server decides', () => {
+    seed([working])
+    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
+    vi.mocked(api.approvalDecide).mockImplementationOnce(() => new Promise<never>(() => {}))
+    renderBoard()
+
+    fireEvent.click(cardOf('still going').getByRole('button', { name: 'Approve' }))
+
+    expect(cardOf('still going').getByRole('button', { name: 'Approving…' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps the card Approve locked past the deadline with no Cancel', () => {
+    seed([working])
+    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
+    vi.mocked(api.approvalDecide).mockImplementationOnce(() => new Promise<never>(() => {}))
+    renderBoard()
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(cardOf('still going').getByRole('button', { name: 'Approve' }))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(cardOf('still going').getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      expect(cardOf('still going').queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('says to open the terminal for a request a Standard run answers there', () => {

@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { toast } from 'sonner'
 import { type Api, ApiError } from '@/lib/api'
 import type { ServerEdge } from '@/lib/types'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { fakeApi, serverInfo } from '@/test/fixtures'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
@@ -75,6 +76,26 @@ it('claims with the code server.edge.claimcode issues and shows the new owner', 
   expect(client.localEdgeClaim).toHaveBeenCalledWith('wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', edgeURL)
   await waitFor(() => expect(vi.mocked(client.serverEdgeClaimCode).mock.invocationCallOrder[0])
     .toBeLessThan(vi.mocked(client.localEdgeClaim).mock.invocationCallOrder[0]))
+})
+
+it('says when the server is slow to issue the claim', async () => {
+  seed('admin', ownerless)
+  const client = api({
+    localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
+    serverEdgeClaimCode: vi.fn(() => new Promise<never>(() => {})),
+  })
+  render(<RemoteAccessSection client={client} />)
+  const connect = await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    fireEvent.click(connect)
+    await act(async () => {})
+    expect(screen.getByRole('status').textContent).toBe('Connecting as octo (github)')
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    expect(screen.getByRole('status').textContent).toBe('Still waiting for the server…')
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('refuses to claim when the gateway now reaches another server', async () => {

@@ -1,4 +1,5 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,12 +13,18 @@ import {
 import { Callout } from '@/components/ui/callout'
 import { message } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
-/** Holds open until the server answers, and keeps its refusal on screen. */
+/**
+ * Holds open until the server answers, and keeps its refusal on screen. Past
+ * the deadline it can be closed; the request still finishes, `onDone` learns
+ * whether the dialog is still open, and a failure then shows as a toast.
+ */
 export function Confirm({
   title,
   description,
   action,
+  pending,
   onConfirm,
   onDone,
   onClose,
@@ -26,28 +33,36 @@ export function Confirm({
   title: string
   description: ReactNode
   action: string
+  pending?: string
   onConfirm: () => Promise<unknown>
-  onDone: () => void
+  onDone: (open: boolean) => void
   onClose: () => void
   children?: ReactNode
 }) {
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
   const [error, setError] = useState<string | null>(null)
+  const closed = useRef(false)
   const returnFocus = useReturnFocus()
+  const close = () => {
+    closed.current = true
+    onClose()
+  }
   const confirm = async () => {
     setBusy(true)
     setError(null)
     try {
       await onConfirm()
-      onDone()
-      onClose()
+      onDone(!closed.current)
+      if (!closed.current) onClose()
     } catch (err) {
+      if (closed.current) toast.error(`${action} failed: ${message(err)}`)
       setBusy(false)
       setError(message(err))
     }
   }
   return (
-    <AlertDialog open onOpenChange={() => !busy && onClose()}>
+    <AlertDialog open onOpenChange={() => (!busy || late) && close()}>
       <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -56,7 +71,7 @@ export function Confirm({
         {children}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy && !late}>{late ? 'Close' : 'Cancel'}</AlertDialogCancel>
           <AlertDialogAction
             disabled={busy}
             onClick={(event) => {
@@ -64,7 +79,7 @@ export function Confirm({
               void confirm()
             }}
           >
-            {action}
+            {late ? stillWaiting : busy ? pending ?? action : action}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Check, ShieldQuestion, X } from '@/components/icons'
+import { DecisionButtons } from '@/components/decision-buttons'
+import { ShieldQuestion } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -104,19 +105,15 @@ function Row({
     approval.decided_by ? s.members[approval.decided_by] : undefined,
   )
   const navigate = useStore((s) => s.navigate)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const open = approval.decision === 'requested'
 
   const decide = async (approve: boolean) => {
-    setBusy(true)
     setError(null)
     try {
       onDecided(await client.approvalDecide(approval.run_id, approval.id, approve))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -150,19 +147,7 @@ function Row({
         </div>
         {open && (
           <span className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-            <Button size="md" disabled={busy} onClick={() => void decide(true)}>
-              <Check />
-              Approve
-            </Button>
-            <Button
-              size="md"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => void decide(false)}
-            >
-              <X />
-              Deny
-            </Button>
+            <DecisionButtons size="md" icons decide={decide} />
           </span>
         )}
       </div>

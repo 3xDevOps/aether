@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { DecisionButtons } from '@/components/decision-buttons'
 import { Button } from '@/components/ui/button'
 import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
@@ -96,25 +97,6 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
         {late && <Button size="sm" variant="ghost" onClick={() => setSending(null)}>Cancel</Button>}
       </div>
     </div>
-  )
-}
-
-function DecisionButtons({ decide }: { decide: (approve: boolean) => Promise<unknown> }) {
-  const [pending, setPending] = useState<{ approve: boolean } | null>(null)
-  const late = usePastDeadline(pending !== null)
-  const press = (approve: boolean) => {
-    const mine = { approve }
-    setPending(mine)
-    void decide(approve).finally(() => setPending((current) => (current === mine ? null : current)))
-  }
-  const label = (approve: boolean) => pending?.approve !== approve
-    ? (approve ? 'Approve' : 'Deny')
-    : late ? stillWaiting : approve ? 'Approving…' : 'Denying…'
-  return (
-    <>
-      <Button size="sm" disabled={pending !== null} onClick={() => press(true)}>{label(true)}</Button>
-      <Button size="sm" variant="secondary" disabled={pending !== null} onClick={() => press(false)}>{label(false)}</Button>
-    </>
   )
 }
 
