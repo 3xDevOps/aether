@@ -448,7 +448,7 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
-func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
+func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
 	return true, nil
 }
 

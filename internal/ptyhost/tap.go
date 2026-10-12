@@ -9,8 +9,10 @@ import (
 
 // TapOutput opens a read-only stream of the run's raw PTY output for
 // in-process consumers (the adapter manager). The tap is a regular
-// read-only session client: it starts with the scrollback replay (so a
-// consumer attaching just after StartSession misses nothing), never
+// read-only session client: it starts with the replay of the current PTY
+// session's output (so a consumer attaching just after StartSession misses
+// nothing, and never sees again what an earlier process of the run, before
+// a restart or a move to another account, printed), never
 // affects terminal geometry, and is bounded by the same slow-client
 // policy as remote attachments - a tap that stops reading is detached
 // (its reader fails) rather than ever blocking the session pump. The
@@ -22,6 +24,7 @@ func (h *Host) TapOutput(run domain.RunID) (io.ReadCloser, error) {
 	}
 	pr, pw := io.Pipe()
 	c := newClient(tapConn{pw}, AttachClient{ReadOnly: true})
+	c.sessionReplay = true
 	if err := s.addClient(c); err != nil {
 		return nil, err
 	}

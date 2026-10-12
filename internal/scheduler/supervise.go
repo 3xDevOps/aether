@@ -92,8 +92,9 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 	// publish is in flight.
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
-	// A move to another account replaced the container this waited on.
-	live, retained := s.runs[entry.runID] == entry && entry.containerID == cid, entry.retained
+	// A move to another account replaced the container this waited on. A
+	// wait that started before the run had a container waited on none.
+	live, retained := s.runs[entry.runID] == entry && (cid == "" || entry.containerID == cid), entry.retained
 	alreadyFinalizing := entry.finalizing
 	if live && !retained && !alreadyFinalizing {
 		entry.finalizing = true

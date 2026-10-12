@@ -248,19 +248,29 @@ with the share check a hand-picked launch uses, at the moment it is chosen,
 so a revoked share leaves the pool at once. A fallback account is never one
 whose agent installation the launcher would borrow, so fallback never runs a
 teammate's executables for a launcher who did not pick that account, and
-never one with no login to share. An admin gains nothing, and a
+never one with no login to share. Without an installation of the launcher's
+own, an account qualifies only when the requested launch would also have run
+the image's agent, so a launch that relied on the requested account's
+installation never lands where the agent is missing. An admin gains nothing, and a
 member-defined agent still runs only on its member's own account. A swarm
 worker is checked against the swarm's accountable human, and an integrator
 launch or replacement against the member who creates or replaces it.
 
 A run whose agent reports its usage limit mid-run moves to another account
-the same way: the move is a launch on the new account, with candidates
-authorized again under the launch authorization lock and the same
-installation and login rules, and it never returns to an account the run
-already used. The signal comes from inside the run's container (agent
+the same way: the move is a launch on the new account. Under the launch
+authorization lock, the run's owner and the member whose home its container
+mounts (the launcher, who differ after a handoff) must both still be allowed
+to launch, as `AuthorizeLaunch` requires, and each candidate must be shared
+with both and pass the same installation and login rules in that home. The
+lock is held until the run records the new account, as a launch holds it
+until its admission is durable, and not while the container is replaced. A
+move never returns to an account the run already used. A swarm worker's
+later checks use the account its run is on now, not the one it launched on. The signal comes from inside the run's container (agent
 output, the Claude `StopFailure` hook payload, the ACP error), so the agent
 can forge it and force a move, but only to an account the launcher may
 already use that has usage left: the same reach as the launcher picking it.
+Only the current agent process's output counts: output an earlier process
+printed is never read again after a restart or a move.
 Revoking a share still does not stop a run that has already moved onto that
 account.
 

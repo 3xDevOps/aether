@@ -523,12 +523,16 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	return SharedLaunchable, "", err
 }
 
-// FallbackLaunchable reports whether member's launch of harnessName in mode
-// on account can be a usage fallback: the owner's login is there to share, an
-// enhanced launch finds its ACP server, and the launch would not borrow the
-// owner's installation, whose executables only a launcher who picked that
-// account has agreed to run. It reads member homes only.
-func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
+// FallbackLaunchable reports whether a launch in member's home of harnessName
+// in mode on account can stand in for one on requested as a usage fallback:
+// the owner's login is there to share, an enhanced launch finds its ACP
+// server, and the agent runs from member's own installation, or from the
+// image when the launch on requested would too. It never borrows the owner's
+// installation, whose executables only a launcher who picked that account
+// has agreed to run, and never moves a launch that relied on requested's
+// installation to an account where the agent is missing. It reads member
+// homes only.
+func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
 	state, _, err := s.CheckSharedLaunch(ctx, member, account, harnessName)
 	if err != nil || state != SharedLaunchable || s.cfg.Homes == nil {
 		return err == nil && state == SharedLaunchable, err
@@ -543,11 +547,15 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, account doma
 			return false, adapterErr
 		}
 	}
-	if account == member || len(profile.TUIArgs) == 0 {
+	if len(profile.TUIArgs) == 0 {
 		return true, nil
 	}
 	installation, err := s.cfg.Homes.Installation(member, account, profile.TUIArgs[0], profile.InstallPaths)
-	return installation != account, err
+	if err != nil || installation != "" {
+		return installation == member, err
+	}
+	asked, err := s.cfg.Homes.Installation(member, requested, profile.TUIArgs[0], profile.InstallPaths)
+	return err == nil && asked == "", err
 }
 
 // pinnedLogins mounts each login file of a PinLogin harness in member's own

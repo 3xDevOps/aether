@@ -1031,7 +1031,11 @@ login, a signed-out one, or one whose uncached vendor read takes longer than
 needs a successful read below 95%. Other agents always launch as requested.
 
 The fallback accounts are your own and every account shared with you at that
-moment. By default the one with the most usage left wins, ties going to the
+moment. An account qualifies only when its owner is logged in to the agent
+and the run would start the agent from your own installation, or from the
+environment image when the launch on the requested account would too: a
+fallback never runs a teammate's installation, and never lands where the
+agent is missing. By default the one with the most usage left wins, ties going to the
 lower member ID. In the launch dialog, **Options** (shown once someone shares
 with you) holds **Fall back to another account** and, under it, the
 **Fallback accounts** list: untick an account to leave it out, or reorder it
@@ -1066,7 +1070,9 @@ limit stopped it: Enhanced runs of `claude` and `codex`, Background runs of
 `claude` and of `codex` over ACP, and Standard `claude` runs
 ([harnesses.md](harnesses.md#usage-limit-signals) lists each signal and what
 is not covered). The next account is chosen as at launch, leaving out the
-current account and every account the run already used. Aether stops the
+current account and every account the run already used; after a handoff it
+must be shared with both the run's owner and the launcher, whose home the
+container mounts. Aether stops the
 agent, removes the run's container, and starts a new one with that account's
 login; the agent resumes its own session there and is told: "Your previous
 turn stopped because Grace's usage ran out. The run continues on Lin's
@@ -1076,17 +1082,25 @@ its terminals included, end. The run's room gets "Continued on Lin's
 account because Grace's usage ran out.", the header switches to Lin's
 account, and `aether runs` marks it ` (fallback)`.
 
-With no account to move to, or with fallback off, an Enhanced or Standard
-run parks at `needs-attention` and a Background run fails (a swarm's
-Background worker parks instead), both with
+With no account to move to, an Enhanced or Standard run parks at
+`needs-attention` and a Background run fails (a swarm's Background worker
+parks instead), both with
 `Usage limit reached on Grace's account; no fallback has usage left`, which
-the dashboard shows as **Needs you**. A move that fails once the old
-container is gone fails the run with `Usage limit reached on Grace's
-account; continuing on Lin's account failed: <error>`.
+the dashboard shows as **Needs you**. With fallback off the reason ends
+`fallback is off for this run`, and a run that cannot move ends
+`cannot continue on another account: <reason>` with the real reason, such as
+`the agent has not reported a session to resume`. A move that fails once the
+old container is gone fails the run with `Usage limit reached on Grace's
+account; continuing on Lin's account failed: <error>`; an Enhanced session
+that cannot be restored on Lin's account parks the run there with that
+reason. A run that hits the limit again on Lin's account moves on to the
+next account.
 
-Metered cost stays with the account that spent it. `aether cost` counts a
-moved run once, on the account it launched on, and adds each stretch's
-usage to the account it ran on; `aether cost --runs` lists the run once,
+Metered cost stays with the account that spent it: a result counts for the
+account the run was on when the agent reported it, even when it is recorded
+after the move. `aether cost` counts a moved run once, on the account it
+launched on (as unmetered when nothing was measured there), and adds each
+stretch's usage to the account it ran on; `aether cost --runs` lists the run once,
 with its whole spend, under the account it is on last.
 
 ### Launching a swarm

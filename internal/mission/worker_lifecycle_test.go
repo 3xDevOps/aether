@@ -174,7 +174,33 @@ func TestWorkerStartFallsBackFromExhaustedDeclaredAccount(t *testing.T) {
 		t.Fatalf("dispatch replay = %+v, launches=%d", replayed, launcher.calls)
 	}
 	params.DispatchKey, params.AccountOwnerID = "fallback-account-as-choice", string(owner.ID)
-	if _, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, params); err == nil || !strings.Contains(err.Error(), "worker choice is not authorized") {
+	if _, err = f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, params); err == nil || !strings.Contains(err.Error(), "worker choice is not authorized") {
 		t.Fatalf("worker.start on the fallback account = %v, want the declared choices only", err)
+	}
+
+	// The run hits its limit and moves to a third account: the worker is
+	// checked against the account it runs on now, not the one it launched on.
+	third := regressionMember(t, f.db, "third")
+	if err = f.db.ShareAccount(ctx, third.ID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.db.SetRunAccount(ctx, run.ID, third.ID, "usage limit", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.db.RevokeAccountShare(ctx, owner.ID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := f.db.GetAttempt(ctx, domain.AttemptID(out.Attempt.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.svc.authorizeMissionTaskActor(ctx, f.reloadMission(t), attempt); err != nil {
+		t.Fatalf("a moved worker is checked against the account it left: %v", err)
+	}
+	if err = f.db.RevokeAccountShare(ctx, third.ID, f.member.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.svc.authorizeMissionTaskActor(ctx, f.reloadMission(t), attempt); err == nil {
+		t.Fatal("a moved worker kept its authority after the account it runs on was revoked")
 	}
 }

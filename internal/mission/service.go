@@ -34,7 +34,7 @@ type launchValidator interface {
 // fallbackChecker refuses a usage fallback account the scheduler could not
 // launch on without borrowing the owner's installation.
 type fallbackChecker interface {
-	FallbackLaunchable(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
+	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
 }
 
 type Canceller interface {
@@ -296,14 +296,35 @@ func (s *Service) authorizeAttempt(ctx context.Context, mission *domain.Mission,
 	if mission == nil || attempt == nil || mission.AccountableHumanID == "" || attempt.AccountOwnerID == "" {
 		return errors.New("mission: attempt authorization is incomplete")
 	}
-	admission, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, mission.AccountableHumanID, string(attempt.LaunchAccount()))
+	account, err := s.attemptAccount(ctx, attempt)
 	if err != nil {
 		return err
 	}
-	if admission.Account.ID != attempt.LaunchAccount() {
+	admission, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, mission.AccountableHumanID, string(account))
+	if err != nil {
+		return err
+	}
+	if admission.Account.ID != account {
 		return errors.New("mission: attempt account attribution changed")
 	}
 	return nil
+}
+
+// attemptAccount is the account attempt's run is on now: a run that hit its
+// usage limit may have moved off the account it launched on. Before the run
+// exists it is the launch account.
+func (s *Service) attemptAccount(ctx context.Context, attempt *domain.Attempt) (domain.MemberID, error) {
+	if attempt.RunID == "" {
+		return attempt.LaunchAccount(), nil
+	}
+	run, err := s.cfg.Store.GetRun(ctx, attempt.RunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return attempt.LaunchAccount(), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return run.AccountMember(), nil
 }
 func (s *Service) authorizeAttemptKill(ctx context.Context, mission *domain.Mission, attempt *domain.Attempt) error {
 	if err := s.authorizeAttempt(ctx, mission, attempt); err != nil {
@@ -380,7 +401,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				return fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
 			}
 			if err = authorizeDeclared(); err == nil {
-				req.AccountOwner, err = fallback.Select(ctx, s.cfg.Store, measured, req.RunOwnerID, req.RequestedAccount, current.Fallback, s.launchable(req.RunOwnerID, req.Harness, req.Mode))
+				req.AccountOwner, err = fallback.Select(ctx, s.cfg.Store, measured, req.RunOwnerID, req.RequestedAccount, current.Fallback, s.launchable(req.RunOwnerID, req.RequestedAccount, req.Harness, req.Mode))
 			}
 		} else {
 			attempt, attemptErr := s.cfg.Missions.GetAttempt(ctx, req.AttemptID)
@@ -846,7 +867,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if m.IntegratorRunLaunched || m.Phase.Terminal() {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, m.Fallback, s.launchable(actor, choice.Harness, choice.Mode))
+	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, m.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
 	if err != nil {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
 	}
@@ -959,7 +980,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if replaced.IntegratorRunLaunched || replaced.Phase.Terminal() {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(replaced.CurrentIntegratorRunID)}, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, replaced.Fallback, s.launchable(actor, choice.Harness, choice.Mode))
+	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, replaced.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
 	}
@@ -980,13 +1001,13 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
 }
 
-func (s *Service) launchable(launcher domain.MemberID, harness string, mode domain.LaunchMode) fallback.Launchable {
+func (s *Service) launchable(launcher, requested domain.MemberID, harness string, mode domain.LaunchMode) fallback.Launchable {
 	checker, ok := s.cfg.Runs.(fallbackChecker)
 	if !ok {
 		return nil
 	}
 	return func(ctx context.Context, account domain.MemberID) (bool, error) {
-		return checker.FallbackLaunchable(ctx, launcher, account, harness, mode)
+		return checker.FallbackLaunchable(ctx, launcher, requested, account, harness, mode)
 	}
 }
 

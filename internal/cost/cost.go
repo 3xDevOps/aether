@@ -35,8 +35,9 @@ type Rollup struct {
 }
 
 // Add folds one record into the rollup. A run that moved accounts has a
-// record per segment; only the counted one, its lowest, adds to the run
-// counts, while every metered record adds its usage.
+// record per segment; only the counted one, segment 0 on the account it
+// launched on, adds to the run counts, while every metered record adds its
+// usage.
 func (r *Rollup) Add(c *store.RunCost, counted bool) {
 	if counted {
 		r.Runs++
@@ -90,16 +91,10 @@ type Report struct {
 // first record (the store lists them oldest first).
 func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
 	rep := Report{Workspace: workspace}
-	first := map[domain.RunID]int{}
-	for _, c := range records {
-		if seg, ok := first[c.RunID]; !ok || c.Segment < seg {
-			first[c.RunID] = c.Segment
-		}
-	}
 	runs := map[domain.RunID]*store.RunCost{}
 	byMember := map[domain.MemberID]*Rollup{}
 	for _, c := range records {
-		counted := c.Segment == first[c.RunID]
+		counted := c.Segment == 0
 		rep.Total.Add(c, counted)
 		m, ok := byMember[c.MemberID]
 		if !ok {

@@ -348,7 +348,10 @@ func (s *Service) authorizeMissionTaskActor(ctx context.Context, mission *domain
 	var account domain.MemberID
 	human := mission.IntegratorAuthorizingHumanID
 	if attempt != nil {
-		account = attempt.LaunchAccount()
+		var err error
+		if account, err = s.attemptAccount(ctx, attempt); err != nil {
+			return err
+		}
 		human = attempt.AuthorizingHumanID
 	} else {
 		integrator, err := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)

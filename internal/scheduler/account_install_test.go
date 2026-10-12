@@ -210,29 +210,46 @@ func TestSharedLaunchIgnoresASymlinkedInstallation(t *testing.T) {
 }
 
 // A usage fallback never lands on an account whose installation the launcher
-// would borrow, nor on one with no login to share; the launcher's own
-// installation makes the same account a fallback.
+// would borrow, nor on one with no login to share. Without an installation of
+// the launcher's own, an account qualifies only when the launch it replaces
+// also ran the image's agent: a launch that borrowed the requested account's
+// installation would find no agent there. The launcher's own installation
+// makes every logged-in account a fallback.
 func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
-	launchable := func() bool {
+	lin := e.addRecipient(t)
+	linHome, err := e.cfg.Homes.Path(lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFiles(t, linHome, ".claude/.credentials.json")
+	launchable := func(requested, account domain.MemberID) bool {
 		t.Helper()
-		ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, e.owner.ID, "claude", domain.LaunchTUI)
+		ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, requested, account, "claude", domain.LaunchTUI)
 		if err != nil {
 			t.Fatalf("FallbackLaunchable: %v", err)
 		}
 		return ok
 	}
 	installClaude(t, e.ownerHome)
-	if launchable() {
+	if launchable(lin.ID, e.owner.ID) {
 		t.Fatal("an account with no login is a fallback")
 	}
 	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
-	if launchable() {
+	if launchable(lin.ID, e.owner.ID) {
 		t.Fatal("an account whose installation the launcher would borrow is a fallback")
 	}
+	if launchable(e.owner.ID, lin.ID) || launchable(e.owner.ID, e.member.ID) {
+		t.Fatal("a launch that borrowed Grace's installation can fall back to an account with no agent")
+	}
+	if !launchable(e.member.ID, lin.ID) {
+		t.Fatal("a launch that ran the image's agent cannot fall back to another account that does")
+	}
 	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
-	if !launchable() {
-		t.Fatal("an account with a login, launched with the launcher's own installation, is not a fallback")
+	for _, account := range []domain.MemberID{e.owner.ID, lin.ID, e.member.ID} {
+		if !launchable(e.owner.ID, account) {
+			t.Fatalf("account %s with a login, launched with the launcher's own installation, is not a fallback", account)
+		}
 	}
 }

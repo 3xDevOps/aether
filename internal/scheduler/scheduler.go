@@ -359,11 +359,9 @@ type supervised struct {
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
 	// usageLimit is the agent's usage-limit message its headless output
-	// carried, accountSwap the move to another account in progress, and
-	// continuation the prompt the moved agent's session gets first.
-	usageLimit   string
-	accountSwap  *accountSwap
-	continuation string
+	// carried, and accountSwap the move to another account in progress.
+	usageLimit  string
+	accountSwap *accountSwap
 	// failReason replaces the exit code in the reason of a run finalize
 	// fails.
 	failReason string

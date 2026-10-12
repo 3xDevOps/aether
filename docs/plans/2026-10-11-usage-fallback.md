@@ -70,9 +70,16 @@ one account.
    and swarm attempt stay the same. A room note on the run says: "Continued
    on <B>'s account because <A>'s usage ran out." The next account is
    chosen as in (A), excluding the current account and every account the run
-   already used, with each candidate authorised again under the launch
-   authorisation lock. A non-ACP run moves only with a stored agent session
-   and resume arguments for its mode.
+   already used. Under the launch authorisation lock the run's owner and the
+   member whose home the container mounts (they differ after a handoff) are
+   admitted again as for a launch, each candidate must be shared with both
+   and launchable in that home, and the run records the new account; the
+   lock is released before the container is replaced. A candidate qualifies
+   only when the agent runs from the home's own installation there, or from
+   the image when the replaced launch did too; (A) applies the same rule. A
+   non-ACP run moves only with a stored agent session and resume arguments
+   for its mode. The adapter reads only the current agent process's output,
+   so an earlier process's limit is never read again.
 6. **Empty pool.** When no candidate qualifies (no account shared, every
    one exhausted, unreadable or no longer authorised), (A) launches on the
    requested account, as without fallback, and spends what usage is left
@@ -80,20 +87,28 @@ one account.
    account, an Enhanced or Standard run parks at `needs-attention` and a
    headless run fails, both with the reason "Usage limit reached on
    <owner>'s account; no fallback has usage left", which the dashboard's
-   **Needs you** card shows. A move that fails after the old container is
-   gone fails the run with "Usage limit reached on <A>'s account;
-   continuing on <B>'s account failed: <error>".
+   **Needs you** card shows. With fallback off the reason ends "fallback is
+   off for this run", and a run that cannot move ends "cannot continue on
+   another account: <real reason>". A move that fails after the old
+   container is gone fails the run with "Usage limit reached on <A>'s
+   account; continuing on <B>'s account failed: <error>"; an Enhanced
+   session that cannot be restored there parks the run with that reason.
 7. **Cost.** Metered cost stays with the account that spent it. A run keeps
    its account history in `run_account_segments`; a move appends a segment
    and never rewrites an earlier one. Only headless Claude runs report
    metered cost today (`result` lines read by `internal/adapter/claude.go`),
-   so cost rows are kept per run and segment. Reports count a run once, on
-   its first account, and each segment's usage on its own account.
-8. **Crash safety.** The run's sidecar holds an `account_swap` marker from
-   choosing the account until the move is recorded. Recovery records a move
-   whose new container the sidecar names, interrupts a run whose old
-   container was removed before the sidecar named a new one, and never
-   creates a container itself, so a move never launches twice.
+   so cost rows are kept per run and segment. A result is recorded in the
+   segment that was current when it was published. Reports count a run
+   once, on segment 0's account (unmetered there when only a later segment
+   was measured), and each segment's usage on its own account.
+8. **Crash safety.** The run's sidecar holds an `account_swap` marker,
+   with an Enhanced session's pending continuation, from recording the
+   account until the move finishes, and the headless usage-limit mark.
+   Recovery resumes a run whose new container the sidecar names and sends
+   the owed continuation, interrupts a run whose old container was removed
+   before the sidecar named a new one or whose old container survives on a
+   row already moved, and never creates a container itself, so a move never
+   launches twice.
 9. **Authorisation.** A fallback launch is authorised exactly like a direct
    launch on that account (`AuthorizeLaunch`, built on
    `fallback.ResolveLaunchAccount`), against the launcher, or the swarm's

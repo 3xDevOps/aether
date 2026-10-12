@@ -123,21 +123,60 @@ func (d *acpDriver) Start(ctx context.Context, entry *supervised, att runtime.At
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
-	d.s.mu.Lock()
-	how := openNew
-	if entry.continuation != "" {
-		how = openContinue
+	if !d.continuationOwed(entry) {
+		d.connect(ctx, entry, openNew)
+		return nil
 	}
-	d.s.mu.Unlock()
-	d.connect(ctx, entry, how)
+	// The move that started this container reports a failed restore as its
+	// own error, so it is recorded here rather than reported.
+	if err := d.openRestored(ctx, entry, openContinue); err != nil {
+		d.setRun(entry.runID, &acpRun{err: err})
+		d.notice(entry.runID, "error", "Enhanced session failed", err.Error())
+	}
 	return nil
+}
+
+func (d *acpDriver) continuationOwed(entry *supervised) bool {
+	d.s.mu.Lock()
+	defer d.s.mu.Unlock()
+	return entry.accountSwap != nil && entry.accountSwap.Continuation != ""
+}
+
+// sendContinuation sends the session restored on the run's new account the
+// continuation its move owes it, then lets the move go.
+func (d *acpDriver) sendContinuation(entry *supervised) {
+	d.s.mu.Lock()
+	swap := entry.accountSwap
+	d.s.mu.Unlock()
+	if swap == nil || swap.Continuation == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
+	defer cancel()
+	sess, err := d.live(entry.runID)
+	if err == nil {
+		_, err = sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(swap.Continuation)}, false, nil)
+	}
+	d.s.clearAccountSwap(entry, swap)
+	switch {
+	case err == nil:
+	case d.oneShot(entry):
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
+	default:
+		slog.Warn("scheduler: send the continuation to the agent", "run", entry.runID, "error", err)
+	}
 }
 
 func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.Attachment) error {
 	if err := d.s.cfg.PTY.StartSession(ctx, ptyhost.RunSession(entry.runID), att); err != nil {
 		return err
 	}
-	d.connect(ctx, entry, openRestore)
+	if !d.continuationOwed(entry) {
+		d.connect(ctx, entry, openRestore)
+		return nil
+	}
+	d.connect(ctx, entry, openContinue)
+	d.sendContinuation(entry)
 	return nil
 }
 
@@ -247,7 +286,7 @@ const (
 	openRestore
 	openSwitch
 	// openContinue restores the session in a container that replaced the
-	// run's, on another account, and sends it entry.continuation.
+	// run's, on another account; the move sends it its continuation.
 	openContinue
 )
 
@@ -260,13 +299,13 @@ func (d *acpDriver) connect(ctx context.Context, entry *supervised, how acpOpen)
 	}
 }
 
-// openForSwitch opens a Standard run's stored session as its enhanced
-// session. On failure nothing is recorded: the switch restores the terminal.
-func (d *acpDriver) openForSwitch(ctx context.Context, entry *supervised) error {
+// openRestored restores the run's stored session, how being openSwitch or
+// openContinue, and returns the failure instead of recording it.
+func (d *acpDriver) openRestored(ctx context.Context, entry *supervised, how acpOpen) error {
 	defer d.lockOp(entry.runID)()
 	ctx, cancel := context.WithTimeout(ctx, acpConnectTimeout)
 	defer cancel()
-	return d.open(ctx, entry, openSwitch)
+	return d.open(ctx, entry, how)
 }
 
 // open runs under the run's op lock.
@@ -278,7 +317,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 
 	d.s.mu.Lock()
 	paused, cid, coordDir, cachedSession, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.task
-	continuation := entry.continuation
 	oneShot := entry.launchMode == domain.LaunchHeadless
 	d.s.mu.Unlock()
 	if paused {
@@ -388,13 +426,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	switch {
 	case how == openContinue:
-		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(continuation)}, false, nil); err != nil {
-			if oneShot {
-				d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
-			} else {
-				slog.Warn("scheduler: send the continuation to the agent", "run", runID, "error", err)
-			}
-		}
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":

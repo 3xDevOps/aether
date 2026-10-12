@@ -577,35 +577,49 @@ agent to continue; a turn that had already ended finishes the run.
 
 When an agent reports that its account's usage limit stopped it
 ([signals](harnesses.md#usage-limit-signals)), Aether moves the run to
-another account ([teams.md](teams.md#usage-fallback)): it stops the agent,
-removes the container, creates one with the next account's login, and
+another account ([teams.md](teams.md#usage-fallback)). Under the shared
+authorization lock it checks again that the run's owner, and the member
+whose home the container mounts, may launch, chooses the account, and
+records the run on it: a segment appended to `run_account_segments` and
+`runs.account_member_id` set. It then releases the lock, stops the agent,
+removes the container, creates one with the new account's login, and
 resumes the agent's session there. The move has five minutes.
 
 | Outcome | What happens |
 | --- | --- |
-| Moved | The run carries on with the same ID, checkout, branch and room. A segment is appended to `run_account_segments`, `runs.account_member_id` names the new account, and a `run.account` event and a room note announce it. |
-| No account has usage left, or fallback is off | Nothing is removed. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
-| The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. |
+| Moved | The run carries on with the same ID, checkout, branch and room. A `run.account` event and a room note announce it. An Enhanced session gets its continuation prompt after the move has let go of the run, so a second limit moves it again, to an account it has not used. |
+| No account qualifies | Nothing is removed. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
+| Fallback is off for the run | The same, with `Usage limit reached on <owner>'s account; fallback is off for this run`. |
+| The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
+| The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. |
+| The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with the same `continuing on <B>'s account failed` reason; a Background run fails with it. No room note is posted. |
+| The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
 | The run is paused, switching mode, being killed or closed, or finishing a reported outcome | No move: the run ends its turn or exits as it would without fallback. |
 
-A run with no stored agent session, or whose agent has no resume arguments
-for its mode (a member-defined agent, for instance), is not moved and stops
-with the no-fallback reason. So is a run created before account shares
-were narrowed to the login file.
+A headless agent's usage limit is read from its output by the adapter,
+which reads only the current agent process's output: what an earlier
+process printed, before a restart or a move, is never read again. The limit
+is kept in the run's sidecar, so a run whose agent exited while the server
+was down still moves when recovery finalizes it.
 
-From choosing the account until the move is recorded, the run's sidecar
-holds an `account_swap` marker naming both accounts and, once it exists,
-the new container. Recovery after a crash reads it first:
+From recording the account until the move finishes, the run's sidecar holds
+an `account_swap` marker naming both accounts, the new container once it
+exists, and an Enhanced session's pending continuation. Recovery after a
+crash reads it first:
 
-- **The sidecar names the new container**: the move is recorded (segment,
-  `run.account` event) and the run is recovered on the new account like any
-  other surviving or lost container.
+- **The sidecar names the new container**: the run is recovered on the new
+  account like any other surviving or lost container, and an Enhanced
+  session that was not sent its continuation is sent it.
 - **The sidecar names no container**: the old one was removed and the new
   one, if created, was never recorded. The run is handled as one that never
   started: a container found by its creation key is destroyed, partial work
   is preserved, and the run is marked `interrupted`.
-- **The sidecar still names the old container**: the marker is dropped and
-  the run is recovered on its old account.
+- **The sidecar still names the old container, and the run is recorded on
+  the new account**: the container mounts a login the run no longer
+  records. It is destroyed, partial work is preserved, and the run is marked
+  `interrupted`.
+- **The sidecar names the old container and the run is still on it**: the
+  marker is dropped and the run is recovered on its old account.
 
 Recovery never creates a container for a move, so a move cannot launch
 twice.

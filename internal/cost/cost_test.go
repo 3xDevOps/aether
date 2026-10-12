@@ -407,9 +407,12 @@ func TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList(t *testing.T) {
 }
 
 // TestCostStaysWithTheAccountThatSpentIt: a run metered on Ada's account
-// moves to Grace's and is metered again. Each account keeps what it spent,
-// the run counts once, on the account it launched on, and lists as one row;
-// deleting the run keeps every figure.
+// moves to Grace's and is metered again. Ada's result arrives only after the
+// move, and still counts for Ada: a result belongs to the segment it was
+// published in. Each account keeps what it spent, the run counts once, on the
+// account it launched on, and lists as one row. A second run, measured only
+// after its move, counts on Ada's account as unmetered. Deleting the runs
+// keeps every figure.
 func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 	ctx := context.Background()
 	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
@@ -437,19 +440,27 @@ func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	run := &domain.Run{WorkspaceID: ws.ID, MemberID: ada.ID, Task: "task", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning}
-	if err = db.CreateRun(ctx, run); err != nil {
-		t.Fatal(err)
+	moved := time.Now().UTC()
+	var runs []*domain.Run
+	for range 2 {
+		run := &domain.Run{WorkspaceID: ws.ID, MemberID: ada.ID, Task: "task", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning}
+		if err = db.CreateRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.SetRunAccount(ctx, run.ID, grace.ID, "usage limit", moved); err != nil {
+			t.Fatal(err)
+		}
+		runs = append(runs, run)
 	}
-	meter := func(usd float64) {
-		svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunCostPayload{InputTokens: 100, OutputTokens: 10, CostUSD: usd, Metered: true}})
+	meter := func(run *domain.Run, at time.Time, usd float64) {
+		svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Time: at, Payload: events.RunCostPayload{InputTokens: 100, OutputTokens: 10, CostUSD: usd, Metered: true}})
 	}
-	meter(2)
-	if _, err = db.SetRunAccount(ctx, run.ID, grace.ID, "usage limit", time.Now()); err != nil {
-		t.Fatal(err)
+	meter(runs[0], moved.Add(time.Second), 3)
+	meter(runs[0], moved.Add(-time.Second), 2)
+	meter(runs[1], moved.Add(time.Second), 4)
+	for _, run := range runs {
+		svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted}})
 	}
-	meter(3)
-	svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted}})
 
 	check := func(when string, listed int) {
 		t.Helper()
@@ -458,27 +469,30 @@ func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 			t.Fatalf("%s: Report: %v", when, reportErr)
 		}
 		want := []MemberRollup{
-			{Member: ada.ID, Rollup: Rollup{Runs: 1, Metered: 1, InputTokens: 100, OutputTokens: 10, CostUSD: 2}},
-			{Member: grace.ID, Rollup: Rollup{InputTokens: 100, OutputTokens: 10, CostUSD: 3}},
+			{Member: ada.ID, Rollup: Rollup{Runs: 2, Metered: 1, Unmetered: 1, InputTokens: 100, OutputTokens: 10, CostUSD: 2}},
+			{Member: grace.ID, Rollup: Rollup{InputTokens: 200, OutputTokens: 20, CostUSD: 7}},
 		}
 		if want[1].Member < want[0].Member {
 			want[0], want[1] = want[1], want[0]
 		}
-		if rep.Total != (Rollup{Runs: 1, Metered: 1, InputTokens: 200, OutputTokens: 20, CostUSD: 5}) || len(rep.Members) != 2 ||
+		total := Rollup{Runs: 2, Metered: 1, Unmetered: 1, InputTokens: 300, OutputTokens: 30, CostUSD: 9}
+		if rep.Total != total || len(rep.Members) != 2 ||
 			rep.Members[0] != want[0] || rep.Members[1] != want[1] || len(rep.Runs) != listed {
 			t.Fatalf("%s: report total %+v members %+v runs %d", when, rep.Total, rep.Members, len(rep.Runs))
 		}
-		if listed == 1 && (rep.Runs[0].CostUSD != 5 || rep.Runs[0].MemberID != grace.ID) {
-			t.Fatalf("%s: run row %+v, want $5 on Grace's account", when, rep.Runs[0])
+		if listed == 2 && (rep.Runs[0].CostUSD+rep.Runs[1].CostUSD != 9 || rep.Runs[0].MemberID != grace.ID) {
+			t.Fatalf("%s: run rows %+v %+v, want $9 in all on Grace's account", when, rep.Runs[0], rep.Runs[1])
 		}
 		summary, sumErr := db.SummarizeRunCosts(ctx, ws.ID)
-		if sumErr != nil || summary != (store.RunCostSummary{Runs: 1, Metered: 1, InputTokens: 200, OutputTokens: 20, CostUSD: 5}) {
+		if sumErr != nil || summary != (store.RunCostSummary{Runs: 2, Metered: 1, Unmetered: 1, InputTokens: 300, OutputTokens: 30, CostUSD: 9}) {
 			t.Fatalf("%s: summary %+v, %v", when, summary, sumErr)
 		}
 	}
-	check("live", 1)
-	if err = db.DeleteRun(ctx, run.ID); err != nil {
-		t.Fatal(err)
+	check("live", 2)
+	for _, run := range runs {
+		if err = db.DeleteRun(ctx, run.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	check("deleted", 0)
 }

@@ -62,6 +62,8 @@ const geometryQueueCost = 24
 type client struct {
 	conn     io.ReadWriter
 	readOnly bool
+	// sessionReplay replays only the current PTY session's output.
+	sessionReplay bool
 	// follow keeps this client out of the geometry reconcile whether or
 	// not it may write: it renders the size the session is, so it can
 	// never reflow the agent's screen for anyone else.

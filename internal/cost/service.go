@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -173,7 +174,7 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 		// Unmetered reports are this service's own marker for runs nobody
 		// measured; only real measurements are recorded from the bus.
 		if p.Metered {
-			s.record(ctx, e.RunID, p)
+			s.record(ctx, e.RunID, e.Time, p)
 		}
 	case events.RunStatusPayload:
 		if p.To.Terminal() {
@@ -187,9 +188,12 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 	s.mu.Unlock()
 }
 
-// record stores a metered result in the run's current account segment and
-// re-evaluates the workspace's budget.
-func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCostPayload) {
+// record stores a metered result in the account segment the run was in when
+// the result was published, under that segment's account, and re-evaluates
+// the workspace's budget. A run counts on segment 0, so a result for a later
+// segment of a run with no segment 0 record also records segment 0 as
+// unmetered: what the run spent there was never measured.
+func (s *Service) record(ctx context.Context, run domain.RunID, at time.Time, p events.RunCostPayload) {
 	r, err := s.store.GetRun(ctx, run)
 	if err != nil {
 		slog.Warn("cost: cannot attribute usage", "run", run, "error", err)
@@ -209,8 +213,25 @@ func (s *Service) record(ctx context.Context, run domain.RunID, p events.RunCost
 		CostUSD:      p.CostUSD,
 		Metered:      true,
 	}
-	if len(segments) > 0 {
-		c.Segment = segments[len(segments)-1].Seq
+	for i, segment := range segments {
+		if i == 0 || at.IsZero() || !segment.StartedAt.After(at) {
+			c.Segment, c.MemberID = segment.Seq, segment.AccountMemberID
+		}
+	}
+	if c.Segment > 0 {
+		records, err := s.store.ListRunCosts(ctx, run)
+		if err != nil {
+			slog.Warn("cost: read usage failed", "run", run, "error", err)
+			return
+		}
+		if len(records) == 0 || records[0].Segment != 0 {
+			if err := s.store.PutRunCost(ctx, &store.RunCost{
+				RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: segments[0].AccountMemberID,
+			}); err != nil {
+				slog.Warn("cost: record unmetered segment failed", "run", run, "error", err)
+				return
+			}
+		}
 	}
 	if err := s.store.PutRunCost(ctx, c); err != nil {
 		slog.Warn("cost: record usage failed", "run", run, "error", err)

@@ -115,7 +115,9 @@ func TestIntegrationWorkerFallsBackFromExhaustedAccount(t *testing.T) {
 // Claude on Bo's shared account. Its output reports Bo's usage limit and it
 // exits; the run continues on Ada's own account, which has usage left, in a
 // new container that resumes the agent's session, and its room says so.
-// Enhanced runs take the same move from their failed prompt; this runtime
+// When the resumed agent then fails for another reason, the run fails with
+// that exit: the adapter reads only the new session's output, never the
+// first agent's limit again. Enhanced runs take the same move from their failed prompt; this runtime
 // has no ACP exec, so the scheduler suite covers them.
 func TestIntegrationHeadlessFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -145,6 +147,14 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 		c.output(`{"type":"system","subtype":"init","session_id":"sess-1"}` + "\r\n")
 		c.output(strings.ReplaceAll(string(limit), "\n", "\r\n"))
 		time.Sleep(500 * time.Millisecond)
+		c.exitNow(1)
+	})
+	// The resumed agent fails for another reason once the adapter has tapped
+	// its session: the first agent's usage limit, still in the run's
+	// transcript, must not be read as this one's.
+	rt.script("Your previous turn stopped because Bo's usage ran out. The run continues on Ada's account. Continue the task where you stopped.", func(c *e2eContainer) {
+		c.output("resumed\r\n")
+		time.Sleep(time.Second)
 		c.exitNow(1)
 	})
 
@@ -180,10 +190,16 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 	if run.Run.Status != string(domain.RunRunning) || run.Run.RequestedAccountMemberID != string(e.bo.id) {
 		t.Fatalf("moved run %s requested %s; want running, requested on Bo's account", run.Run.Status, run.Run.RequestedAccountMemberID)
 	}
-	moved := rt.container(launched.Run.ID)
-	if moved == nil || moved == first || !slices.Contains(moved.spec.Command, "sess-1") ||
-		moved.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.ada.id) {
-		t.Fatalf("the run's container after the move: %+v", moved)
+	var moved *e2eContainer
+	for moved == nil || moved == first {
+		moved = rt.container(launched.Run.ID)
+		if time.Now().After(deadline) {
+			t.Fatal("no container replaced the exhausted one")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !slices.Contains(moved.spec.Command, "sess-1") || moved.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.ada.id) {
+		t.Fatalf("the run's container after the move: %+v", moved.spec)
 	}
 	for noted := false; !noted; {
 		page, err := srv.srv.Store().ListRoomMessages(ctx, e.ws.ID, runID, "", 50)
@@ -197,5 +213,20 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 			t.Fatal("the room has no note of the move")
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	for {
+		if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: launched.Run.ID}, &run); err != nil {
+			t.Fatalf("run.get: %v", err)
+		}
+		if run.Run.Status == string(domain.RunFailed) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s (%s); want the resumed agent's failure", run.Run.Status, run.Run.Reason)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if strings.HasPrefix(run.Run.Reason, "Usage limit reached") || run.Run.AccountMemberID != string(e.ada.id) {
+		t.Fatalf("resumed run failed with %q on %s; want its own exit on Ada's account", run.Run.Reason, run.Run.AccountMemberID)
 	}
 }

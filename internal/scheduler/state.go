@@ -407,6 +407,7 @@ type sidecar struct {
 	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
 	Switch         *switchIntent         `json:"switch,omitempty"`
 	AccountSwap    *accountSwap          `json:"account_swap,omitempty"`
+	UsageLimit     string                `json:"usage_limit,omitempty"`
 }
 
 // sidecar snapshots the entry's durable state. Caller must hold s.mu.
@@ -472,6 +473,7 @@ func (e *supervised) sidecar() sidecar {
 		AgentExec:           e.agentExec,
 		Switch:              e.switchIntent,
 		AccountSwap:         swap,
+		UsageLimit:          e.usageLimit,
 	}
 }
 

@@ -75,8 +75,8 @@ type CostStore interface {
 	ListRunCosts(ctx context.Context, run domain.RunID) ([]*RunCost, error)
 	// SummarizeRunCosts returns the same workspace history as a scalar
 	// aggregate using standard SQL SUM semantics, while avoiding allocation
-	// of every record. A run counts once, on its lowest segment's record;
-	// every segment's usage counts. It includes runs deleted from the
+	// of every record. A run counts once, on its segment 0 record; every
+	// segment's usage counts. It includes runs deleted from the
 	// workspace (see DeleteRun), so a deletion cannot lower counted spend
 	// or reopen a budget cap.
 	SummarizeRunCosts(ctx context.Context, workspace domain.WorkspaceID) (RunCostSummary, error)
@@ -138,10 +138,10 @@ func (d *DB) ListRunCosts(ctx context.Context, run domain.RunID) ([]*RunCost, er
 }
 
 // countedRunCostsSQL is a workspace's run_costs rows, each with counted set
-// on its run's lowest segment, the one row that counts the run.
+// on its run's segment 0, the account the run launched on and the one row
+// that counts the run.
 const countedRunCostsSQL = `
-SELECT c.*, CASE WHEN c.segment = (SELECT MIN(m.segment) FROM run_costs m WHERE m.run_id = c.run_id)
-                 THEN 1 ELSE 0 END AS counted
+SELECT c.*, CASE WHEN c.segment = 0 THEN 1 ELSE 0 END AS counted
 FROM run_costs c`
 
 // SummarizeRunCosts returns the aggregate used by budget status and
@@ -208,7 +208,7 @@ func (d *DB) ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceI
 // counted spend cannot drop, and a budget cap cannot reopen, just because
 // the run itself is gone. A no-op when the run never had a cost row. The
 // CASE guards mirror SummarizeRunCosts: an unmetered row's numeric columns
-// are ignored, and only the run's lowest segment carries its run counts.
+// are ignored, and only the run's segment 0 carries its run counts.
 const foldDeletedRunCostSQL = `
 INSERT INTO run_cost_deletions (workspace_id, member_id, runs, metered, unmetered, input_tokens, output_tokens, cost_usd)
 SELECT workspace_id, member_id, counted,

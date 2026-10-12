@@ -529,7 +529,7 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 			if c.screen || s.development {
 				c.setReplay(s.screenSnapshotLocked().Data)
 			} else if _, isRun := s.run.Run(); isRun {
-				replay, replayBytes, err := s.tr.snapshot()
+				replay, replayBytes, err := s.tr.snapshot(c.sessionReplay)
 				if err != nil {
 					s.mu.Unlock()
 					return fmt.Errorf("ptyhost: snapshot run transcript: %w", err)
