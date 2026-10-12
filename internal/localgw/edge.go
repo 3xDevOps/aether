@@ -1,16 +1,20 @@
 package localgw
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -124,9 +128,32 @@ func chooseEdge(edgeURL string) (*edgeclient.Client, *protocol.Error) {
 func edgeError(err error) *protocol.Error {
 	var refused *edgeclient.RefusedError
 	if errors.Is(err, edgeclient.ErrNotSignedIn) || (errors.As(err, &refused) && refused.Status < http.StatusInternalServerError) {
-		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: refusalData(err)}
+}
+
+// refusalData is the error data {"refusal": <edgeproto.Refused>} of a
+// failure on the edge path, nil for any other. A server's refusal comes
+// before the edge's when a direct and an edge attempt both failed.
+func refusalData(err error) json.RawMessage {
+	var (
+		refused     *edgeproto.Refused
+		edgeRefused *edgeclient.RefusedError
+	)
+	switch {
+	case errors.As(err, &refused):
+	case errors.As(err, &edgeRefused):
+		refused = edgeproto.RefusedBy(edgeproto.Refusal(edgeRefused.Message))
+	case errors.Is(err, edgeclient.ErrNotSignedIn):
+		refused = &edgeproto.Refused{Kind: edgeproto.RefusedNotSignedIn}
+	default:
+		return nil
+	}
+	raw, _ := json.Marshal(struct {
+		Refusal *edgeproto.Refused `json:"refusal"`
+	}{refused})
+	return raw
 }
 
 // localEdgeLogin starts a device sign-in, as aether login does, and
@@ -253,13 +280,15 @@ type edgeLinkParams struct {
 	Name string `json:"name"`
 }
 
-// edgeLinked is the answer of edge.link and edge.claim.
+// edgeLinked is the answer of edge.link, edge.claim and edge.join.
 type edgeLinked struct {
 	ServerID string          `json:"server_id"`
 	Edge     string          `json:"edge"`
 	Addr     string          `json:"addr,omitempty"`
 	User     string          `json:"user"`
 	Member   protocol.Member `json:"member"`
+	// RemoteError is set when the link succeeded but the clone's aether remote could not be moved.
+	RemoteError string `json:"remote_error,omitempty"`
 }
 
 func (g *Gateway) localEdgeLink(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -329,16 +358,39 @@ func (g *Gateway) localEdgeClaim(_ *http.Request, body []byte) (any, *protocol.E
 	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, EdgeURL: client.URL(), Claim: params.Code})
 }
 
+// localEdgeJoin refuses a device waiting for approval with kind
+// device-pending each time; the caller tries again.
+func (g *Gateway) localEdgeJoin(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Link string `json:"link"`
+		Addr string `json:"addr"`
+		Name string `json:"name"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if _, _, _, _, err := edgeproto.ParseJoinLink(params.Link); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, Join: params.Link})
+}
+
 // linkEdge links the gateway to a server through an edge and moves every
 // later request onto it, as link.apply does for an address.
 func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) {
-	result, err := cli.Link(opts, g.local.snapshot())
+	prev := g.local.snapshot()
+	result, err := cli.Link(opts, prev)
 	if err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
-	if perr := g.adoptLink(result); perr != nil {
+	if perr := g.adoptLink(result, opts.Name); perr != nil {
 		return nil, perr
 	}
 	cfg := result.Config
-	return &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}, nil
+	var out bytes.Buffer
+	linked := &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}
+	if _, err := localops.MoveRemote(prev, cfg, &out, &out); err != nil {
+		linked.RemoteError = fmt.Sprintf("the link is saved, but the clone's aether remote was not updated: %v: %s", err, strings.TrimSpace(out.String()))
+	}
+	return linked, nil
 }

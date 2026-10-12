@@ -37,7 +37,7 @@ func (g *Gateway) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if !errors.As(err, &perr) {
 			perr = &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 		}
-		_ = s.WriteJSON(protocol.SubscribeResponse{OK: false, Code: perr.Code, Error: perr.Message})
+		_ = s.WriteJSON(protocol.SubscribeResponse{OK: false, Code: perr.Code, Error: perr.Message, Data: perr.Data})
 		// The close reason carries the refusal itself.
 		_ = s.Conn.Close(websocket.StatusPolicyViolation, perr.Message)
 		return

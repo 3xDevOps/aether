@@ -54,42 +54,69 @@ aether invite --email dana@example.com --role viewer
 ```
 
 ```
+invite link: https://<edge host>/join/<server id>/<invitation id>#<secret>
+server id: <server id>
+send them the link; they open it, sign in with GitHub and join
+Under edge-access approved-devices, the default, their device waits until an admin approves it from the dashboard's Needs you card
 invited <account> as collaborator until <expiry> (invitation <invitation-id>)
-send them this server's id, which sudo aether-server edge status prints; they run aether login, then aether link <server id>.
-Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>
 ```
 
-No code changes hands. `--role` is `viewer`, `collaborator` (the default)
-or `admin`. An email invitation matches the account whose primary email
-GitHub reports as verified, whatever its login: use it when you know the
-address but not the login. The invitation is in the directory the server
-pushes to the edge, so the teammate sees the server in `aether servers`
-after signing in. Send them
-the server id as well: linking by an id you gave pins the right server even
-if the edge lists a false one.
+`--role` is `viewer`, `collaborator` (the default) or `admin`. An email
+invitation matches the account whose primary email GitHub reports as
+verified, whatever its login: use it when you know the address but not the
+login. In the dashboard, Members › **Invite…** does the same and shows
+the link with **Copy link**. The link is shown once: it carries the
+invitation's join secret after the `#`, and the server keeps only a hash
+of it. Send it to the teammate. The part after `#` never reaches the edge:
+the client presents the secret inside SSH, after the server's host key
+proved the server id in the link.
+
+The teammate opens the link. The edge's [join page](edge.md#join-page)
+opens the desktop app at its Connect step, which has them sign in with
+GitHub if this machine is not signed in to that edge, then asks `Join
+<server id> as the invited account?`; **Join** joins. In a terminal:
 
 ```sh
 aether login
-aether link <server id>     # the id you sent them
+aether link '<invite link>'
 ```
 
-Linking from the edge's list instead, with `aether link --from-edge <server
-id>`, shows the server's name, id and host key fingerprint and asks before
-it pins them ([edge.md](edge.md#first-link-and-server-identity)).
+```
+joined server <server id> as <name> (<role>)
+linked to server <server id> through <edge host> as <name> (<role>)
+```
 
-Under `account`, their first connection creates their member with the
-invited role, binds it to their account, and uses the invitation up. The
-member is not pending: the invitation admitted the account. Under
-`approved-devices` that connection only records their device as waiting on
-the invitation and shows them its approval code; the member is created,
-the account bound and the invitation used up when a person approves that
-device ([Devices](#devices)). An
+An invited account that connects without the link, with `aether link
+<server id>`, is refused with `<account> is invited to this server; open
+the invitation link the admin sent, or run: aether link <link>`, and
+nothing is recorded. A link with a wrong secret, or one already used, is
+refused with `the invitation link is not valid for this server: wrong,
+revoked or expired; ask the admin for a new one`. The edge refuses a
+revoked or expired invitation's link earlier, with `not a member of this
+server`.
+
+Under `account`, the join creates their member with the invited role, binds
+it to their account, and uses the invitation up. The member is not pending:
+the invitation admitted the account. Under `approved-devices` the join only
+records their device as waiting on the invitation. The app shows `Waiting
+for an admin of <server> to approve this device` with the device label and
+key fingerprint; `aether link` prints `waiting for an admin of <server> to
+approve this device (<label>, <fingerprint>)…`. When nobody can approve
+the device in the app, both show the server's refusal instead, which names
+`sudo aether-server device approve <code>`. Both try again every 5
+seconds until the device is admitted. Each admin's dashboard shows a Needs
+you card, `<label> (github <login>) wants to join as <role>`, and **Approve**
+there creates the member, binds the account and uses the invitation up
+([Devices](#devices)). An
 invitation matches a login or email only within 24 hours of the
 teammate's last GitHub sign-in at the edge, because a login or email can
 move to someone else; past that, `aether servers` leaves it out and
 connecting is refused with `open this edge in a browser to confirm them`.
 Opening any edge page, including the one `aether login` shows, signs them
-in with GitHub again. Invitations expire after 7 days:
+in with GitHub again. Upgrading to a server with join links removes the
+invitations and account links still open, and the devices waiting on them,
+since they carry no secret; issue them again.
+Invitations expire after 7 days:
 
 ```sh
 aether invite list
@@ -101,20 +128,41 @@ invite code described [below](#by-invite-code-fallback).
 
 #### Linking an existing member
 
-An admin who joined by SSH key or tailnet names their own GitHub account:
+An admin who joined by SSH key or tailnet links their own GitHub account
+with **Connect my GitHub account** in Settings › Remote access, or from a
+linked terminal:
+
+```sh
+aether edge connect
+```
+
+That claims the server for the account this machine is signed in with at
+the server's edge, binds it to the admin's member, and approves this
+device ([edge.md](edge.md#server-id-and-claiming)). It is refused once
+the server has an owner. To link an account without claiming, name it:
 
 ```sh
 aether member link --github dana
 aether member link --email dana@example.com
 ```
 
-That account then connects through the edge as the same member. Under
-`approved-devices` its first connection binds nothing: the device waits on
-the link, and the admin approves it from this SSH key or tailnet connection
-with `aether device approve <code>`, which binds the account. An admin does this before claiming, through the edge, a
-server that already has members. Only admins can link: nothing proves the caller holds the account
-they name. Any other member is invited by an admin with `aether invite
---github` or `--email`, which creates a new member for that account.
+```
+invite link: https://<edge host>/join/<server id>/<invitation id>#<secret>
+server id: <server id>
+github:dana can link to member <member id> until <expiry>: open the link on a device signed in with that account
+```
+
+Opening that link, or `aether link '<invite link>'`, connects the account
+through the edge as the same member. Under `approved-devices` it binds
+nothing at first: the device waits on the link, and the admin approves it
+from this SSH key or tailnet connection, with **Approve** on its Needs you
+card or `aether device approve <code or device id>`, which binds the
+account. While the edge reports the server unclaimed, linking and inviting
+are refused ([edge.md](edge.md#server-id-and-claiming)); an ownerless
+server the edge has recorded keeps relaying and accepts both. Only admins
+can link: nothing proves the caller holds the account they name. Any other
+member is invited by an admin with `aether invite --github` or `--email`,
+which creates a new member for that account.
 
 An admin makes another admin with a linked GitHub account the server's
 owner at its edge, as before deleting their own account
@@ -137,36 +185,69 @@ device gets depends on the server's `edge-access` policy
 ([edge.md](edge.md#turning-it-on)):
 
 - `approved-devices`, the default: every new device waits, a member's first
-  one included, and is refused with the code that approves it. A device
+  one included, and is refused until a person approves it. A device
   signing in with an invited account waits on the invitation: nothing is
   created until a person approves it, and that approval creates the member
   with the invited role, or binds the account to the linked member, and
   uses the invitation up. Several devices may wait on one invitation, such
   as one an edge forged for the same login; approving one deletes the
-  others. Only an admin approves a device waiting on an invitation, or the
+  others. A device that joins with another valid invitation's link becomes
+  a new device, with a new id, waiting on that invitation; an approval of
+  the device as it was shown before approves nothing, with `not found` by
+  id or `approval code "<code>" names device <new id>, not "<id>"; nothing
+  was approved` by code, and on the console `device <id> no longer waits
+  for approval as it was shown; nothing was approved: not found`. Only an admin approves a device waiting on an invitation, or the
   member a link names. Revoking the invitation deletes its waiting devices;
   once it expires they are no longer listed or approvable. A new or rotated
   key is a new device.
 - `account`: signing in admits the new device, recorded as `registered`.
 
+A waiting device of an existing member is refused with:
+
 ```
-device "dana-laptop", signed in as github account dana, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
+device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
+  aether device approve <device id>
+or on the server:
+  sudo aether-server device review
+```
+
+A device waiting on an invitation gets the same without `, or you do, from
+an approved device of yours`. Approval is one click. Every admin's
+dashboard shows the device as a Needs you card, and a member's approved
+devices show their own new one:
+
+| Device | Card | Shown to |
+| --- | --- | --- |
+| Waiting on an invitation | `<label> (github <login>) wants to join as <role>` | Admins |
+| A member's | `<label> (github <login>) signed in as <member>` | Admins |
+| Your own | `New device <label> signed in as you` | You, on an approved device |
+
+The card also shows the account, the key fingerprint and the member and
+role approving admits it as. **Approve** approves the device by its id, and
+**Deny** revokes it. The joining device is admitted on its next attempt.
+
+Only when the device admits as the server's only admin, and that admin has
+no approved device, can nobody approve it in the app. The refusal then
+carries its approval code instead:
+
+```
+device "ada-laptop", signed in as github account ada, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
   aether device approve <code>
 or on the server:
   sudo aether-server device approve <code>
 ```
 
 The code is derived from the device key and shown only to that device;
-`aether device list` never shows it. The person passes it to the approver.
-At most 10 pending devices wait per account, and 10 per invitation; past
-that a new device is refused with `10 devices of <account> are waiting for
-approval on this server already, so no new one is recorded`, and an admin
-approves or revokes the waiting ones.
+`aether device list` never shows it. At most 10 pending devices wait per
+account, and 10 per invitation; past that a new device is refused with `10
+devices of <account> are waiting for approval on this server already, so no
+new one is recorded`, and an admin approves or revokes the waiting ones.
 
-Approving first shows what the code admits. The member a device belongs to
-follows from the account it signed in as, which the edge vouches for, so
-check that it is the member and role you expect: a code someone hands you
-can admit their key as your own member.
+`aether device approve` takes a code or a device id and first shows what
+approving admits. The member a device belongs to follows from the account
+it signed in as, which the edge vouches for, so check that it is the
+member and role you expect: a code someone hands you can admit their key
+as your own member.
 
 ```
 device "dana-laptop", key SHA256:<fingerprint>
@@ -177,12 +258,12 @@ Whoever holds this device gets that member's access. approve it? [y/N]:
 ```
 
 Only `y` or `yes` approves. `sudo aether-server device approve <code>`
-shows the same and asks the same, and the dashboard's Members > Devices tab shows it
-in a dialog before **Approve**.
+shows the same and asks the same, and the dashboard's Members > Devices tab
+shows it in a dialog before **Approve** when you type a code there.
 
 ```sh
 aether device list                 # yours; an admin sees every member's, and those waiting on invitations; never shows codes
-aether device approve <code>       # the member, or an admin
+aether device approve <code or device-id>   # the member, or an admin
 aether device revoke <device-id>
 sudo aether-server device approve <code>   # on the server
 sudo aether-server device review           # every registered and pending device, to approve or revoke
@@ -218,8 +299,9 @@ Unlinking removes one account from the member when it was linked while
 someone else held it: the devices that signed in with it are revoked and
 their connections closed, and the member, its role, its other accounts, SSH
 key and tailnet identity stay. The member or an admin may do both. An
-account is linked again with `aether member link` by an admin for
-themself, and restored on the machine for an admin who has no other way in
+admin links an account to themself again with `aether member link` and its
+link, or with **Connect my GitHub account** while the server has no owner;
+an admin who has no other way in is restored on the machine
 ([edge.md](edge.md#console-recovery)).
 
 A server built from the `v0.5.2-alpha.3` tag that used an edge with Google
@@ -237,11 +319,11 @@ Remove them with `aether member unlink <member-id> google:<subject>` and
 | Revoke | Command | Effect |
 | --- | --- | --- |
 | A member | `aether member remove <id>` | Identity and devices deleted, directory updated, live connections closed |
-| A device | `aether device revoke <id>` | That device key refused on every path; its connections closed |
+| A device | `aether device revoke <id>`, or **Deny** on its Needs you card | That device key refused on every path; its connections closed |
 | One edge account of a member | `aether member unlink <member-id> github:<user id>` | Account unbound; the devices that signed in with it revoked and their connections closed; the member stays |
 | A device token | `aether logout`, or the edge's Devices page | No further relayed connections; live relayed ones closed. The device key stays approved on the server, so a direct connection with it still works |
 | An edge account | The edge's Account page, whose address `aether logout --delete-account` prints | Each server removes that identity and its edge devices and closes their connections, direct ones included; the member, its role and its SSH keys and tailnet identity stay ([edge.md](edge.md#deleting-an-account)) |
-| An invitation | `aether invite revoke <id>` | Removed from the directory |
+| An invitation | `aether invite revoke <id>` | Removed from the directory; its link stops working and the devices waiting on it are deleted |
 | A server | `sudo aether-server edge leave`, or the edge's Servers page | Unenrolled; members keep direct and tailnet access |
 
 ### By invite code (fallback)

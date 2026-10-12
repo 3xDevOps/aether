@@ -26,7 +26,6 @@ const status: Record<Device['status'], { tone: Tone; label: string }> = {
 
 const provider = (device: Device) => providerName[device.provider] ?? device.provider
 
-/** Approval needs the code the device shows on its own screen; no row carries it. */
 export function DevicesPanel({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
   const isAdmin = useIsAdmin()
@@ -79,7 +78,7 @@ export function DevicesPanel({ client }: { client: Api }) {
           {device.invitation_id ? `, and approving accepts invitation ${device.invitation_id}` : ''}. Whoever holds this device gets that member&apos;s access.
         </>}
         action="Approve"
-        onConfirm={() => client.memberDeviceApprove(confirming.code, device.id)}
+        onConfirm={() => client.memberDeviceApprove(device.id, confirming.code)}
         onDone={() => {
           toast.success(`${device.label} approved`)
           setCode('')
@@ -96,7 +95,7 @@ export function DevicesPanel({ client }: { client: Api }) {
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-1">
         <p className="text-ui text-muted">
-          A device is a computer running aether that reaches this server through an edge. Approve one only with the code shown on its own screen.
+          A device is a computer running aether that reaches this server through an edge. Approve a new one with Approve on its Needs you card. Use the form below only for a device whose refusal showed an approval code.
         </p>
         <Collapsible>
           <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>

@@ -3,7 +3,10 @@ package edge
 import (
 	"crypto/rand"
 	"errors"
+	"html/template"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -197,4 +200,25 @@ func (s *Service) deviceRevoke(w http.ResponseWriter, r *http.Request, v visitor
 	}
 	http.Redirect(w, r, "/devices", http.StatusSeeOther)
 	return nil
+}
+
+// invitationID is the shape internal/store gives invitation ids.
+var invitationID = regexp.MustCompile(`^inv-[0-9a-hjkmnp-tv-z]{10}$`)
+
+// joinPage opens a join link in the Aether app. The link's secret is its
+// fragment, which the browser never sends: join.js appends it to the
+// aether:// link and to the link shown for copying.
+func (s *Service) joinPage(w http.ResponseWriter, r *http.Request) {
+	server, invitation := r.PathValue("server_id"), r.PathValue("invitation_id")
+	if !edgeproto.ValidServerID(server) || !invitationID.MatchString(invitation) {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, http.StatusOK, "join", s.view(nil, "Join an Aether server", struct {
+		App  template.URL
+		Link string
+	}{
+		App:  template.URL("aether://join?edge=" + url.QueryEscape(s.relayOrigin) + "&server=" + server + "&invitation=" + invitation),
+		Link: s.relayOrigin + "/join/" + server + "/" + invitation,
+	}))
 }

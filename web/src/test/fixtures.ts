@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
+  Device,
   DevController,
   DevControlStatusParams,
   DevTerminal,
@@ -209,6 +210,23 @@ export function approval(over: Partial<Approval> = {}): Approval {
   }
 }
 
+/** A device waiting on an invitation that adds a new collaborator. */
+export function pendingDevice(over: Partial<Device> = {}): Device {
+  return {
+    id: 'dev_1',
+    member_id: '',
+    invitation_id: 'inv_1',
+    provider: 'github',
+    account: 'mallory',
+    label: 'laptop',
+    status: 'pending',
+    fingerprint: 'SHA256:examplefingerprint',
+    created_at: '2026-08-14T10:04:00Z',
+    role: 'collaborator',
+    ...over,
+  }
+}
+
 export const template: Template = {
   id: 'tpl_1',
   workspace_id: workspace.id,
@@ -366,6 +384,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
   }
   return {
     serverInfo: vi.fn(async () => serverInfo),
+    serverEdge: vi.fn(async () => needsOverride('serverEdge')),
+    serverEdgeClaimCode: vi.fn(async () => needsOverride('serverEdgeClaimCode')),
     workspaceGet: vi.fn(async () => workspace),
     memberList: vi.fn(async () => [alice, bob]),
     accountUsage: vi.fn(async (): Promise<UsageResult> => ({
@@ -753,6 +773,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localEdgeHostKey: vi.fn(async () => needsOverride('localEdgeHostKey')),
     localEdgeLink: vi.fn(async () => needsOverride('localEdgeLink')),
     localEdgeClaim: vi.fn(async () => needsOverride('localEdgeClaim')),
+    localEdgeJoin: vi.fn(async () => needsOverride('localEdgeJoin')),
     localPull: vi.fn(async () => ({
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',

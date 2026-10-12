@@ -155,6 +155,14 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "refusing to delete the last admin"}
 		}
 	}
+	ids, perr := s.rpcIdentityStore()
+	if perr != nil {
+		return nil, perr
+	}
+	devs, err := ids.ListDevices(ctx, "")
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
 		var listErr error
@@ -227,6 +235,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	}
 	s.closeMemberConns(id)
 	s.notifyDirectory()
+	s.publishDroppedDevices(ctx, member, ids, devs)
 	return struct{}{}, nil
 }
 

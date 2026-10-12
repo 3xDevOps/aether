@@ -1,10 +1,12 @@
 import type {
   Approval,
+  Device,
   Member,
   Mission,
   RoomMessage,
   RoomStatusResult,
   Run,
+  ServerEdge,
   Workspace,
 } from '@/lib/types'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
@@ -414,4 +416,45 @@ export function waitingOn(run: RunRecord, ctx: StateContext): string | undefined
     if (member !== undefined) return member
   }
   return undefined
+}
+
+export interface DeviceNeed {
+  device: Device
+  reason: string
+  admits: string
+  waitingSince: string
+}
+
+/** Devices are not runs, so they sit beside the run table. A pending device
+ * asks, and so does a registered one, admitted by signing in alone under
+ * `account`, once the server is under `approved-devices`: it is refused
+ * there until someone approves it. */
+export function deviceNeeds(
+  devices: Device[],
+  viewer: Pick<StateContext, 'viewerID' | 'viewerRole'>,
+  accessPolicy: ServerEdge['access_policy'] | undefined,
+): DeviceNeed[] {
+  const admin = viewer.viewerRole === 'admin'
+  const waiting = (device: Device) =>
+    admin
+      ? device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
+      : device.status === 'pending' && device.member_id === viewer.viewerID
+  return devices
+    .filter(waiting)
+    .map((device) => {
+      const who = `${device.label} (${device.provider} ${device.account})`
+      return {
+        device,
+        reason: !admin
+          ? `New device ${device.label} signed in as you`
+          : device.status === 'registered'
+          ? `${who} signed in as ${device.display_name} and is not approved`
+          : device.display_name
+            ? `${who} signed in as ${device.display_name}`
+            : `${who} wants to join as ${device.role}`,
+        admits: device.display_name ? `admits as: ${device.display_name} (${device.role})` : `new member, ${device.role}`,
+        waitingSince: device.created_at,
+      }
+    })
+    .sort((a, b) => a.waitingSince.localeCompare(b.waitingSince) || a.device.id.localeCompare(b.device.id))
 }

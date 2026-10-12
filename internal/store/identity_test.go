@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +75,53 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	}
 	if err := db.CreateMember(ctx, &domain.Member{DisplayName: "x", Color: "#000000", Role: domain.RoleViewer}); err == nil {
 		t.Fatal("CreateMember without key or tailnet login succeeded")
+	}
+}
+
+// TestJoinSecretMigrationDropsOpenInvitations upgrades a database from
+// before join secrets: its open invitations, which no link can join, are
+// gone with the device waiting on one, and everything else stays.
+func TestJoinSecretMigrationDropsOpenInvitations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 59)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
+			VALUES ('m1', 'Ada', '', '', 0, '#e6194b', 'admin', 1), ('m2', 'bob', '', '', 0, '#3cb44b', 'collaborator', 2);
+		INSERT INTO member_identities (provider, subject, member_id, login, created_at)
+			VALUES ('github', '1', 'm1', 'ada', 1), ('github', '2', 'm2', 'bob', 2);
+		INSERT INTO identity_invitations (id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at)
+			VALUES ('inv-used', 'github', 'bob', '', 'collaborator', 'm2', 'm1', 1, 9e18, 2),
+			       ('inv-open', 'github', 'carol', '', 'viewer', NULL, 'm1', 1, 9e18, NULL);
+		INSERT INTO member_devices (id, member_id, invitation_id, provider, subject, credential, label, status, approval_code, created_at)
+			VALUES ('d1', 'm1', NULL, 'github', '1', 'c1', 'laptop', 'approved', '', 1),
+			       ('d2', NULL, 'inv-open', 'github', '3', 'c2', 'carol-laptop', 'pending', 'code', 1);
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before := rowCounts(t, raw)
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if _, err := db.GetInvitation(ctx, "inv-open"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("open invitation after migration: %v; want ErrNotFound", err)
+	}
+	if inv, err := db.GetInvitation(ctx, "inv-used"); err != nil || inv.ConsumedAt == nil {
+		t.Fatalf("consumed invitation after migration = %+v, %v", inv, err)
+	}
+	before["identity_invitations"]--
+	before["member_devices"]--
+	after := rowCounts(t, db.db)
+	for table, n := range before {
+		if after[table] != n {
+			t.Errorf("table %s has %d rows after the migration, want %d", table, after[table], n)
+		}
 	}
 }
 
@@ -498,6 +546,63 @@ func TestInvitationDevices(t *testing.T) {
 	}
 	if _, err = db.GetDevice(ctx, stale.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("an expired invitation's device after the next registration = %v, want deleted", err)
+	}
+}
+
+// A device that moves to another invitation is a new device there, so an
+// approval of the id its approver saw finds nothing, creates nothing and
+// leaves the new device waiting.
+func TestApprovalAfterTheDeviceMovedIsRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestDB(t)
+	admin := mustCreateMember(t, db)
+	shown := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
+	joined := mustInvite(t, db, admin.ID, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	now := time.Now()
+	dev := invitationDevice(t, shown, "42")
+	if err := db.RegisterInvitationDevice(ctx, dev, now); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := db.MoveInvitationDevice(ctx, dev.ID, joined.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.ID == dev.ID || moved.Invitation != joined.ID || moved.Credential != dev.Credential ||
+		moved.Subject != dev.Subject || moved.Label != dev.Label || moved.ApprovalCode != dev.ApprovalCode {
+		t.Fatalf("moved device = %+v, want a new id for the same key, account and label on %s", moved, joined.ID)
+	}
+	if _, err = db.AcceptInvitationDevice(ctx, dev.ID, admin.ID, edgeMember("octo"), now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("approval of the device id before the move = %v, want ErrNotFound", err)
+	}
+	if members, _ := db.ListMembers(ctx); len(members) != 1 {
+		t.Fatalf("members after the refused approval = %d, want 1", len(members))
+	}
+	if _, err = db.GetMemberByIdentity(ctx, "github", "42"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("identity after the refused approval = %v, want none bound", err)
+	}
+	for _, inv := range []*domain.Invitation{shown, joined} {
+		if got, gerr := db.GetInvitation(ctx, inv.ID); gerr != nil || got.ConsumedAt != nil {
+			t.Fatalf("invitation %s after the refused approval = %+v, %v; want open", inv.ID, got, gerr)
+		}
+	}
+	got, err := db.GetDeviceByCredential(ctx, dev.Credential)
+	if err != nil || got.ID != moved.ID || got.Status != domain.DevicePending || got.Invitation != joined.ID || got.Member != "" {
+		t.Fatalf("device after the refused approval = %+v, %v; want %s pending on %s", got, err, moved.ID, joined.ID)
+	}
+	for i := range MaxWaitingDevices {
+		if err = db.RegisterInvitationDevice(ctx, invitationDevice(t, shown, strconv.Itoa(100+i)), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = db.MoveInvitationDevice(ctx, moved.ID, shown.ID, now); !errors.Is(err, ErrLimit) {
+		t.Fatalf("move to an invitation with %d waiting = %v, want ErrLimit", MaxWaitingDevices, err)
+	}
+	if got, err = db.GetDevice(ctx, moved.ID); err != nil || got.Invitation != joined.ID {
+		t.Fatalf("device after the refused move = %+v, %v; want it kept on %s", got, err, joined.ID)
+	}
+	if m, err := db.AcceptInvitationDevice(ctx, moved.ID, admin.ID, edgeMember("octo"), now); err != nil || m.Role != domain.RoleAdmin {
+		t.Fatalf("approval of the device the move created = %+v, %v", m, err)
 	}
 }
 

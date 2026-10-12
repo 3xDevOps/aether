@@ -1110,6 +1110,77 @@ export interface EdgeHostKey {
   fingerprint: string
 }
 
+/** A refusal on the edge path, as internal/edge/proto's Refused carries
+ * it in the local gateway's error data. Fields beyond `kind` depend on it. */
+export interface EdgeRefusal {
+  kind:
+    | 'device-pending'
+    | 'device-revoked'
+    | 'not-member'
+    | 'too-many-waiting'
+    | 'key-of-another-account'
+    | 'account-mismatch'
+    | 'grant-key-mismatch'
+    | 'claim-user-missing'
+    | 'claim-account-mismatch'
+    | 'claim-wrong'
+    | 'claim-expired'
+    | 'claim-exhausted'
+    | 'claimed'
+    | 'claim-member-gone'
+    | 'claim-member-not-admin'
+    | 'claim-account-of-another-member'
+    | 'claim-device-revoked'
+    | 'claim-failed'
+    | 'join-wrong'
+    | 'invitation-needs-link'
+    | 'not-signed-in'
+    | 'token-revoked'
+    | 'server-not-connected'
+    | 'unknown-server'
+    | 'too-many-attempts'
+    | 'connection-limit'
+    | 'server-blocked'
+    | 'account-blocked'
+    | 'identity-stale'
+    | 'edge-refused'
+  server?: string
+  device?: string
+  fingerprint?: string
+  account?: string
+  member_id?: string
+  member_name?: string
+  role?: string
+  bound_member?: string
+  invitation?: string
+  waiting?: number
+  registered?: boolean
+  direct?: boolean
+  approval_code?: string
+  user?: string
+  principal?: string
+  refusal?: string
+  detail?: string
+}
+
+/** server.edge: the server's edge. `edge_url` is empty while the edge is
+ * off, `owner` null while the server has no owner at its edge, and
+ * `claimed` whether the edge last reported the server claimed. */
+export interface ServerEdge {
+  edge_url: string
+  server_id: string
+  access_policy: 'account' | 'approved-devices'
+  owner: { provider: string; login: string } | null
+  connected: boolean
+  claimed: boolean
+}
+
+/** server.edge.claimcode: a claim code bound to the calling admin. */
+export interface ServerEdgeClaimCode {
+  code: string
+  expires_at: string
+}
+
 /** edge.link and edge.claim: the link just saved. */
 export interface EdgeLinkResult {
   server_id: string
@@ -1119,12 +1190,16 @@ export interface EdgeLinkResult {
   addr?: string
   user: string
   member: { id: string; display_name: string; role: string }
+  /** The link is saved, but the clone's aether remote was not updated. */
+  remote_error?: string
 }
 
 /** member.device.list: a client install a member reaches the server through
  * an edge with. `account` is the login, else email, of the edge account it
  * signed in as. A device waiting on an invitation has `invitation_id` and
- * an empty `member_id`. */
+ * an empty `member_id`. A device awaiting approval carries `role`, and
+ * `display_name` unless approving it adds a new member: whom approving
+ * admits it as, as member.device.lookup gives them. */
 export interface Device {
   id: string
   member_id: string
@@ -1137,6 +1212,8 @@ export interface Device {
   created_at: string
   last_seen_at?: string
   approved_by?: string
+  display_name?: string
+  role?: Member['role']
 }
 
 /** member.device.lookup: the device an approval code names and whom
@@ -1162,6 +1239,14 @@ export interface Invitation {
   created_by: string
   created_at: string
   expires_at: string
+}
+
+/** member.invitation.create and member.identity.link: the invitation, and
+ * its join link, returned only here: the link holds the join secret. */
+export interface InvitationResult {
+  invitation: Invitation
+  link: string
+  server_id: string
 }
 
 /** link.apply: the server identity linked to this local gateway. */

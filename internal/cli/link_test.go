@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -134,5 +136,85 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	}
 	if _, err := linkKey(filepath.Join(home, "missing"), Config{}, ""); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("linkKey(missing) = %v, want not found", err)
+	}
+}
+
+func TestClaimOfTheCurrentServerKeepsItsLink(t *testing.T) {
+	host := mustSigner(t)
+	id := edgeproto.ServerID(host.PublicKey())
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(knownHosts, []byte(knownhosts.Line([]string{"srv:2222", "10.0.0.1:2222"}, host.PublicKey())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := Config{Addr: "srv:2222", User: "aether", Repo: "/src/repo", KnownHosts: knownHosts}
+	if other, err := prev.pins(edgeproto.ServerID(mustSigner(t).PublicKey())); err != nil || other {
+		t.Fatalf("pins(another server) = %v, %v", other, err)
+	}
+	same, err := prev.pins(id)
+	if err != nil || !same {
+		t.Fatalf("pins(%s) = %v, %v", id, same, err)
+	}
+	line := knownhosts.Line([]string{knownhosts.HashHostname("[srv]:2222")}, host.PublicKey())
+	for body, want := range map[string]bool{
+		line + "\n":                        true,
+		line + "\n@revoked " + line + "\n": false,
+		knownhosts.Line([]string{knownhosts.HashHostname("[other]:2222")}, host.PublicKey()) + "\n": false,
+	} {
+		if err := os.WriteFile(knownHosts, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if same, err := prev.pins(id); err != nil || same != want {
+			t.Fatalf("pins with known_hosts %q = %v, %v; want %v", body, same, err, want)
+		}
+	}
+	prev.ServerID = id
+	got := linkConfig(Config{User: "aether", EdgeURL: "https://edge.example", ServerID: id}, prev, "")
+	if got.Repo != "/src/repo" || got.Addr != "srv:2222" || got.KnownHosts != knownHosts || got.EdgeURL != "https://edge.example" || got.ServerID != id {
+		t.Fatalf("claim of the current server saved %+v", got)
+	}
+}
+
+func TestClaimFailsOnUnreadableKnownHostsBeforeTheCodeIsSpent(t *testing.T) {
+	w := newEdgeWorld(t)
+	r := w.relay(t, w.serverConfig(w.host))
+	w.signIn(t, r.URL)
+	code, _ := claimCode(t, w.serverID())
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(knownHosts, []byte("srv:2222 ssh-ed25519 not-base64!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := Config{Addr: "srv:2222", User: "aether", KnownHosts: knownHosts}
+
+	res, err := Link(LinkOptions{Claim: code, EdgeURL: r.URL}, prev)
+	if err == nil {
+		_ = res.Conn.Close()
+		t.Fatal("Link claimed past a known_hosts it could not read")
+	}
+	if !strings.Contains(err.Error(), "known_hosts "+knownHosts) {
+		t.Fatalf("Link = %v, want the known_hosts error", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.requests) != 0 || len(r.users) != 0 {
+		t.Fatalf("the claim dialed before the check: requests %q, users %q", r.requests, r.users)
+	}
+}
+
+func TestClaimOfTheCurrentServerMovesItsGitRemote(t *testing.T) {
+	id := edgeproto.ServerID(mustSigner(t).PublicKey())
+	prev := Config{Addr: "srv:2222", User: "aether", Repo: "/src/repo"}
+	claimed := prev
+	claimed.ServerID = id
+	got := linkConfig(Config{User: "aether", EdgeURL: "https://edge.example", ServerID: id}, claimed, "")
+	remote := GitURL(prev.User, prev.GitHost(), "ws_1")
+	want := "ssh://aether@" + EdgeHost(id) + "/ws_1.git"
+	if moved, ok := got.MovedGitURL(prev, remote); !ok || moved != want {
+		t.Fatalf("MovedGitURL(%s) = %q, %v; want %q", remote, moved, ok, want)
+	}
+	if moved, ok := got.MovedGitURL(prev, "ssh://aether@elsewhere:2222/ws_1.git"); ok {
+		t.Fatalf("a remote of another host moved to %q", moved)
+	}
+	if moved, ok := got.MovedGitURL(got, want); ok {
+		t.Fatalf("a remote already on the edge host moved to %q", moved)
 	}
 }

@@ -120,6 +120,24 @@ func GitRemote(repo, url string, stdout, stderr io.Writer) error {
 	return gitSSHCommand(repo, stdout)
 }
 
+// MoveRemote points the `aether` remote of cfg's repository at the git
+// host of cfg when it still names the git host of prev, the same link
+// before it changed. It returns the new URL, or "" when the remote stays.
+func MoveRemote(prev, cfg cli.Config, stdout, stderr io.Writer) (string, error) {
+	if cfg.Repo == "" {
+		return "", nil
+	}
+	url, err := AetherRemoteURL(cfg.Repo)
+	if err != nil {
+		return "", fmt.Errorf("localops: read the aether remote of %s: %w", cfg.Repo, err)
+	}
+	moved, ok := cfg.MovedGitURL(prev, url)
+	if !ok {
+		return "", nil
+	}
+	return moved, GitRemote(cfg.Repo, moved, stdout, stderr)
+}
+
 // gitSSHCommand sets repo's core.sshCommand to aether edge-ssh when no
 // git config names one, or when the value is an aether edge-ssh an
 // earlier binary wrote, whose path an upgrade or a move may have

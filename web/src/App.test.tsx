@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import type { AetherDesktop } from '@/components/shell/window-bar'
 import type * as apiModule from '@/lib/api'
 import { App } from '@/App'
+import { forgetHandedLink } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -127,6 +128,26 @@ describe('App', () => {
       vi.useRealTimers()
       delete shellWindow.aetherDesktop
       window.sessionStorage.clear()
+      useStore.setState(previous, true)
+    }
+  })
+
+  it('keeps a handed link\'s Connect step on screen while the saved server cannot answer', async () => {
+    const previous = useStore.getState()
+    window.history.replaceState(null, '', '/?page=onboarding#join=aether%3A%2F%2Fjoin%3Fedge%3Dhttps%253A%252F%252Fedge.example.test')
+    useStore.setState({ route: { name: 'onboarding', params: {} }, hydrated: false, gatewayRestarting: false, paletteDialog: null })
+    const app = render(<App />)
+
+    try {
+      act(() => useStore.setState({ hydrationError: 'dial tcp: connection refused', unreachable: 'server' }))
+      expect(await screen.findByRole('heading', { level: 1, name: 'Onboarding' })).toBeDefined()
+      expect(screen.queryByRole('button', { name: 'Retry connection' })).toBeNull()
+
+      act(() => forgetHandedLink())
+      expect(screen.getByRole('button', { name: 'Retry connection' })).toBeDefined()
+    } finally {
+      app.unmount()
+      forgetHandedLink()
       useStore.setState(previous, true)
     }
   })

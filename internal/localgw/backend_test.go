@@ -17,6 +17,8 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
@@ -354,5 +356,34 @@ func TestEventsDialFailureFrameIsUnavailable(t *testing.T) {
 	}
 	if !strings.HasPrefix(ack.Error, "server unreachable: ") {
 		t.Fatalf("ack error = %q, want prefix %q", ack.Error, "server unreachable: ")
+	}
+}
+
+// A refusal on the edge path reaches the dashboard as data beside the
+// message, on the API and on the events refusal frame alike.
+func TestEdgeRefusalCarriesItsKind(t *testing.T) {
+	t.Setenv(cli.ConfigDirEnv, t.TempDir())
+	dir, err := cli.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = edgeclient.EnsureDeviceKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	host, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewSSHBackend(cli.Config{EdgeURL: "https://edge.example.test", ServerID: edgeproto.ServerID(host.PublicKey())})
+	want := `{"refusal":{"kind":"not-signed-in"}}`
+
+	if _, perr := b.Call(context.Background(), protocol.MethodServerInfo, nil); perr == nil || string(perr.Data) != want {
+		t.Fatalf("Call = %+v, want data %s", perr, want)
+	}
+	g, base := newWSGateway(t, b)
+	conn := wsDial(t, base, "/ws/events", g.Token())
+	writeWSJSON(t, conn, protocol.SubscribeRequest{})
+	if ack := readWSJSON[protocol.SubscribeResponse](t, conn); ack.Code != protocol.CodeUnavailable || string(ack.Data) != want {
+		t.Fatalf("ack = %+v, want code %d and data %s", ack, protocol.CodeUnavailable, want)
 	}
 }

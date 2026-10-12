@@ -7,10 +7,13 @@ import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
+import { parseClaim } from '@/lib/claim-link'
 import { edgeHost, linkTarget, message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { shellQuote } from '@/lib/shell'
 import type { EdgeLinkResult, LinkApplyResult, LinkStatus } from '@/lib/types'
-import { EdgeSignIn } from '@/routes/onboarding/edge-link'
+import { forgetHandedLink, handedLink, onHandedLink } from '@/lib/url-state'
+import { EdgeSignIn, JoinLink, LinkBeforeSignIn, LinkByCommand } from '@/routes/onboarding/edge-link'
 import { GitIdentityForm } from '@/routes/onboarding/git-identity'
 import { Step } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
@@ -25,8 +28,20 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   const [invite, setInvite] = useState('')
   const [name, setName] = useState('')
   const [linking, setLinking] = useState(false)
+  const [signedOut, setSignedOut] = useState(false)
   const [success, setSuccess] = useState<LinkApplyResult | null>(null)
   const [edgeLinked, setEdgeLinked] = useState<EdgeLinkResult | null>(null)
+  const [handed, setHanded] = useState(handedLink)
+  const local = caps.hasLocal('link.status')
+
+  useEffect(
+    () =>
+      onHandedLink((next) => {
+        setHanded(next)
+        setEdgeLinked(null)
+      }),
+    [],
+  )
 
   const check = useCallback(async () => {
     setStatusError(null)
@@ -40,11 +55,12 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   }, [client, setLinkStatus])
 
   useEffect(() => {
+    if (!local) return
     void check()
     const onFocus = () => void check()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [check])
+  }, [check, local])
 
   const link = async () => {
     setLinking(true)
@@ -66,14 +82,17 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   }
 
   const linkedThroughEdge = async (result: EdgeLinkResult) => {
+    forgetHandedLink()
     setEdgeLinked(result)
     useStore.getState().reconnect()
     await check()
   }
 
-  const loading = useDelayed(status === null && statusError === null)
+  const loading = useDelayed(local && status === null && statusError === null)
   const connected = success !== null || edgeLinked !== null || status?.server_configured === true
   const choosing = status !== null && !connected
+  const handedClaim = handed?.kind === 'claim' && !edgeLinked && caps.hasLocal('edge.claim')
+  const claim = handed?.kind === 'claim' ? parseClaim(handed.link) : null
 
   const summary = success ? (
     <>
@@ -97,7 +116,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
       label="Connect"
       title="Connect to your server"
       lead="Aether runs your agents on a server you host. Link this computer to it once."
-      actions={connected && <Button onClick={onNext}>Continue</Button>}
+      actions={(connected || !local) && <Button onClick={onNext}>Continue</Button>}
     >
       {loading && <div className="h-20"><Skeleton className="size-full" /></div>}
       {statusError && (
@@ -106,7 +125,24 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
         </Callout>
       )}
       {connected && <Callout tone="done" title="Connected">{summary}</Callout>}
-      {choosing && <EdgeSignIn client={client} onLinked={(result) => void linkedThroughEdge(result)} />}
+      {handed?.kind === 'join' && !edgeLinked && (
+        <JoinLink key={handed.link} client={client} caps={caps} link={handed.link} onLinked={(result) => void linkedThroughEdge(result)} />
+      )}
+      {handed?.kind === 'claim' && claim && !caps.hasLocal('edge.claim') && (
+        <LinkByCommand
+          link={handed.link}
+          command={`aether link --claim ${shellQuote(claim.code)}${claim.edge ? ` --edge ${shellQuote(claim.edge)}` : ''}`}
+        />
+      )}
+      {((choosing && handed?.kind !== 'join') || handedClaim) && (
+        <EdgeSignIn
+          client={client}
+          claim={handed?.kind === 'claim' ? handed.link : undefined}
+          onHand={setHanded}
+          onLinked={(result) => void linkedThroughEdge(result)}
+          onSignedOut={setSignedOut}
+        />
+      )}
       {choosing && (
         <Collapsible>
           <CollapsibleTrigger>
@@ -143,6 +179,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
           </CollapsibleContent>
         </Collapsible>
       )}
+      {choosing && signedOut && <LinkBeforeSignIn onHand={setHanded} />}
       {connected && caps.hasMethod('member.git') && (
         <section aria-labelledby="connect-git-identity" className="flex flex-col gap-2 border-t border-seam pt-4">
           <h3 id="connect-git-identity" className="text-ui font-medium text-text">Git identity</h3>

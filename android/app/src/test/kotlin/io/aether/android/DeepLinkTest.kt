@@ -33,4 +33,10 @@ class DeepLinkTest {
         assertNull(deepLinkUrl(BASE, "aether://run/01k4x7m2qc/../../etc"))
         assertNull(deepLinkUrl(BASE, "aether://run/01k4x7m2qc&token=x"))
     }
+
+    @Test
+    fun aClaimLinkIsNotHandedToTheServersDashboard() {
+        val claim = "aether://claim?edge=https://edge.example.test&server=abcdefghijklmnopqrstuvwxyz#abcdefghijk23456"
+        assertNull(deepLinkUrl(BASE, claim))
+    }
 }

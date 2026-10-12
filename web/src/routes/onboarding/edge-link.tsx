@@ -1,16 +1,23 @@
 // The local gateway runs the edge device flow and keeps the device token;
 // this screen never sees it.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { StatusDot } from '@/components/ui/status-dot'
-import type { Api } from '@/lib/api'
+import { ApiError, type Api } from '@/lib/api'
+import { parseClaim, parseJoin } from '@/lib/claim-link'
 import { edgeHost, message, providerName } from '@/lib/format'
-import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeServer } from '@/lib/types'
+import { isApprovalCode, shellQuote } from '@/lib/shell'
+import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeRefusal, EdgeServer } from '@/lib/types'
+import type { HandedLink } from '@/lib/url-state'
+import { useStore } from '@/store'
+import type { Capability } from '@/store/hooks'
 
 const pollMs = 2000
 
@@ -27,47 +34,59 @@ function ErrorLine({ children }: { children: string }) {
   return <Callout tone="failed" role="alert" className="self-stretch whitespace-pre-wrap">{children}</Callout>
 }
 
-export function EdgeSignIn({
-  client,
-  onLinked,
-}: {
-  client: Api
-  onLinked: (result: EdgeLinkResult) => void
-}) {
+type SignIn = {
+  phase: Phase
+  setPhase: (phase: Phase) => void
+  error: string | null
+  starting: boolean
+  signIn: () => Promise<void>
+}
+
+/** The gateway's edge sign-in as edge.status reports it, started here and
+ * polled until it ends. With `edge`, only that edge counts. */
+function useEdgeSignIn(client: Api, edge?: string): SignIn {
   const [phase, setPhase] = useState<Phase>({ name: 'checking' })
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
-  const check = useCallback(async () => {
+  useEffect(() => {
+    let ignore = false
+    setPhase({ name: 'checking' })
     setError(null)
-    try {
-      const status = await client.localEdgeStatus()
-      if (status.login?.state === 'pending') {
-        setPhase({ name: 'waiting', login: status.login })
-        return
+    void (async () => {
+      try {
+        const status = await client.localEdgeStatus()
+        if (ignore) return
+        const login = !edge || status.login?.edge === edge ? status.login : undefined
+        if (login?.state === 'pending') {
+          setPhase({ name: 'waiting', login })
+          return
+        }
+        if (login?.state === 'failed' && login.error) setError(login.error)
+        const edges = status.edges.filter((e) => !edge || e.edge === edge)
+        const signedIn = edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
+        if (signedIn.length > 0) {
+          setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
+          return
+        }
+        const unreadable = edges.find((e) => e.error)?.error
+        if (unreadable) setError(unreadable)
+        setPhase({ name: 'signed-out' })
+      } catch (err) {
+        if (ignore) return
+        setError(message(err))
+        setPhase({ name: 'signed-out' })
       }
-      if (status.login?.state === 'failed' && status.login.error) setError(status.login.error)
-      const signedIn = status.edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
-      if (signedIn.length > 0) {
-        setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
-        return
-      }
-      const unreadable = status.edges.find((e) => e.error)?.error
-      if (unreadable) setError(unreadable)
-      setPhase({ name: 'signed-out' })
-    } catch (err) {
-      setError(message(err))
-      setPhase({ name: 'signed-out' })
+    })()
+    return () => {
+      ignore = true
     }
-  }, [client])
+  }, [client, edge])
 
+  const waitingEdge = phase.name === 'waiting' ? phase.login.edge : null
+  const waitingCode = phase.name === 'waiting' ? phase.login.user_code : null
   useEffect(() => {
-    void check()
-  }, [check])
-
-  const waiting = phase.name === 'waiting'
-  useEffect(() => {
-    if (!waiting) return
+    if (!waitingEdge) return
     let live = true
     let timer: ReturnType<typeof setTimeout>
     const poll = () => {
@@ -76,14 +95,17 @@ export function EdgeSignIn({
           (status) => {
             if (!live) return
             const login = status.login
-            if (login?.state === 'signed_in' && login.account) {
+            if (login?.edge !== waitingEdge || login.user_code !== waitingCode) {
+              setError('Sign-in was replaced by another window. Try again.')
+              setPhase({ name: 'signed-out' })
+            } else if (login.state === 'signed_in' && login.account) {
               setError(null)
               setPhase({
                 name: 'signed-in',
                 edges: [{ edge: login.edge, account: login.account }],
                 chosen: login.edge,
               })
-            } else if (login?.state === 'failed') {
+            } else if (login.state === 'failed') {
               setError(login.error ?? 'sign in failed')
               setPhase({ name: 'signed-out' })
             } else {
@@ -104,7 +126,7 @@ export function EdgeSignIn({
       live = false
       clearTimeout(timer)
     }
-  }, [client, waiting])
+  }, [client, waitingEdge, waitingCode])
 
   const signIn = async () => {
     setStarting(true)
@@ -114,7 +136,7 @@ export function EdgeSignIn({
     const popup = window.open('about:blank', '_blank')
     if (popup) popup.opener = null
     try {
-      const login = await client.localEdgeLogin()
+      const login = await client.localEdgeLogin(edge)
       if (popup) popup.location.replace(login.verification_uri)
       else window.open(login.verification_uri, '_blank', 'noopener,noreferrer')
       setPhase({ name: 'waiting', login })
@@ -126,13 +148,12 @@ export function EdgeSignIn({
     }
   }
 
-  const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
+  return { phase, setPhase, error, starting, signIn }
+}
 
+function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn: SignIn }) {
   return (
-    <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
-      <p className="text-text">
-        Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.
-      </p>
+    <>
       {error && <ErrorLine>{error}</ErrorLine>}
       {phase.name === 'signed-out' && (
         <Button size="sm" disabled={starting} onClick={() => void signIn()}>
@@ -165,6 +186,78 @@ export function EdgeSignIn({
           </p>
         </div>
       )}
+    </>
+  )
+}
+
+export function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => void }) {
+  const [text, setText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <form
+      className="flex min-w-0 max-w-sm flex-col items-start gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const link = text.trim()
+        if (parseJoin(link)) onHand({ kind: 'join', link })
+        else if (parseClaim(link)?.edge) onHand({ kind: 'claim', link })
+        else setError('That is not an invitation or claim link.')
+      }}
+    >
+      <FormField
+        className="self-stretch"
+        label="Have an invitation or claim link?"
+        error={error ?? undefined}
+      >
+        <Input className="font-code" autoComplete="off" value={text} onChange={(e) => { setText(e.target.value); setError(null) }} />
+      </FormField>
+      <Button type="submit" size="sm" variant="secondary" disabled={!text.trim()}>
+        Open link
+      </Button>
+    </form>
+  )
+}
+
+export function EdgeSignIn({
+  client,
+  claim,
+  onHand,
+  onLinked,
+  onSignedOut,
+}: {
+  client: Api
+  /** A claim link handed to the dashboard, filled into the claim form. The
+   * edge it names is the only one signed in to. */
+  claim?: string
+  /** Called with a join link, or a claim link naming another edge, pasted
+   * into the claim form. */
+  onHand: (link: HandedLink) => void
+  onLinked: (result: EdgeLinkResult) => void
+  onSignedOut: (signedOut: boolean) => void
+}) {
+  const claimEdge = claim === undefined ? undefined : parseClaim(claim)?.edge
+  const signIn = useEdgeSignIn(client, claimEdge)
+  const { phase, setPhase } = signIn
+  const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
+  const signedOut = phase.name === 'signed-out'
+  useEffect(() => {
+    onSignedOut(signedOut)
+    return () => onSignedOut(false)
+  }, [signedOut, onSignedOut])
+
+  return (
+    <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
+      <p className="text-text">
+        {claimEdge ? (
+          <>
+            Sign in to <span className="font-code">{linkHost(claimEdge)}</span>, the edge this claim link names, with
+            GitHub.
+          </>
+        ) : (
+          'Sign in with GitHub to reach your server through an edge relay: no VPN, open port or address to set up.'
+        )}
+      </p>
+      <SignInProgress signIn={signIn} />
       {phase.name === 'signed-in' && (
         <EdgeChoice
           edges={phase.edges}
@@ -174,12 +267,171 @@ export function EdgeSignIn({
       )}
       {picked && (
         <ServerPicker
-          key={picked.edge}
+          key={`${picked.edge} ${claim ?? ''}`}
           client={client}
           edge={picked.edge}
           account={picked.account}
+          claim={claim}
+          onHand={onHand}
           onLinked={onLinked}
         />
+      )}
+    </section>
+  )
+}
+
+const joinRetryMs = 5000
+
+/** A join link handed to the dashboard. Without the gateway's edge.join, as
+ * on a dashboard served over a tailnet, it shows the command instead. */
+export function JoinLink({
+  client,
+  caps,
+  link,
+  onLinked,
+}: {
+  client: Api
+  caps: Capability
+  link: string
+  onLinked: (result: EdgeLinkResult) => void
+}) {
+  const join = parseJoin(link)
+  if (!join) return <ErrorLine>{`${link} is not a join link`}</ErrorLine>
+  if (!caps.hasLocal('edge.join')) return <LinkByCommand link={link} command={`aether link ${shellQuote(link)}`} />
+  return <JoinPanel client={client} link={link} join={join} onLinked={onLinked} />
+}
+
+export function LinkByCommand({ link, command }: { link: string; command: string }) {
+  return (
+    <section aria-label="Link from a terminal" className="flex min-w-0 flex-col gap-2 text-ui">
+      <p>This dashboard cannot link a server itself. Open this link in the Aether desktop app:</p>
+      <p className="break-all font-code select-all">{link}</p>
+      <p>or run on the computer to link:</p>
+      <CopyableCommand command={command} />
+    </section>
+  )
+}
+
+function JoinPanel({
+  client,
+  link,
+  join,
+  onLinked,
+}: {
+  client: Api
+  link: string
+  join: { edge: string; server: string }
+  onLinked: (result: EdgeLinkResult) => void
+}) {
+  const signIn = useEdgeSignIn(client, join.edge)
+  const { phase, setPhase } = signIn
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState<{ refusal: EdgeRefusal; text: string } | null>(null)
+  const [resign, setResign] = useState<string | null>(null)
+  const live = useRef(true)
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  useEffect(() => {
+    live.current = true
+    return () => {
+      live.current = false
+      clearTimeout(retry.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (phase.name === 'waiting') setResign(null)
+  }, [phase.name])
+
+  const attempt = async () => {
+    setBusy(true)
+    setError(null)
+    setResign(null)
+    try {
+      const result = await client.localEdgeJoin(link)
+      if (result.remote_error) toast.error(result.remote_error)
+      // The gateway now serves the joined server, so the dashboard follows
+      // it even after this panel is gone.
+      if (live.current) onLinked(result)
+      else useStore.getState().reconnect()
+    } catch (err) {
+      if (!live.current) return
+      const refusal = err instanceof ApiError ? err.data?.refusal : undefined
+      if (refusal?.kind === 'device-pending') {
+        setPending({ refusal, text: message(err) })
+        retry.current = setTimeout(() => void attempt(), joinRetryMs)
+        return
+      }
+      setPending(null)
+      if (refusal?.kind === 'join-wrong' && refusal.user && refusal.account) setResign('Sign in with another account')
+      if (refusal?.kind === 'identity-stale') setResign('Sign in again')
+      if (refusal?.kind === 'not-signed-in' || refusal?.kind === 'token-revoked') setPhase({ name: 'signed-out' })
+      setError(message(err))
+    } finally {
+      if (live.current) setBusy(false)
+    }
+  }
+
+  const account = phase.name === 'signed-in' ? phase.edges[0]?.account : undefined
+
+  if (pending) {
+    return (
+      <section aria-label="Join" role="status" className="flex min-w-0 flex-col gap-2 text-ui">
+        {isApprovalCode(pending.refusal.approval_code) ? (
+          <p className="whitespace-pre-wrap">{pending.text}</p>
+        ) : (
+          <>
+            <p className="font-medium">
+              Waiting for an admin of {pending.refusal.server ?? join.server} to approve this device
+            </p>
+            <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
+              <dt className="text-muted">Device</dt>
+              <dd className="min-w-0 break-all">{pending.refusal.device}</dd>
+              <dt className="text-muted">Device key</dt>
+              <dd className="min-w-0 break-all font-code">{pending.refusal.fingerprint}</dd>
+            </dl>
+          </>
+        )}
+        <p className="text-muted">This page asks again every {joinRetryMs / 1000} seconds.</p>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label="Join" className="flex min-w-0 flex-col items-start gap-3 text-ui">
+      <p className="font-medium">
+        Join <span className="font-code">{join.server}</span> as the invited account?
+      </p>
+      {error && <ErrorLine>{error}</ErrorLine>}
+      {account && resign ? (
+        <>
+          <SignInProgress signIn={signIn} />
+          <Button size="sm" disabled={signIn.starting} onClick={() => void signIn.signIn()}>
+            {signIn.starting ? 'Signing in…' : resign}
+          </Button>
+        </>
+      ) : account ? (
+        <>
+          <p>
+            This device is signed in to <span className="font-code">{edgeHost(join.edge)}</span> as{' '}
+            <span className="font-medium">{accountName(account)}</span>. The server admits only the account the
+            invitation names.
+          </p>
+          <Button size="sm" disabled={busy} onClick={() => void attempt()}>
+            {busy ? 'Joining…' : 'Join'}
+          </Button>
+        </>
+      ) : (
+        phase.name !== 'checking' && (
+          <>
+            <p>
+              Sign in to <span className="font-code">{edgeHost(join.edge)}</span> with GitHub as the invited account
+              first.
+            </p>
+            <SignInProgress signIn={signIn} />
+          </>
+        )
       )}
     </section>
   )
@@ -232,17 +484,21 @@ function ServerPicker({
   client,
   edge,
   account,
+  claim,
+  onHand,
   onLinked,
 }: {
   client: Api
   edge: string
   account: EdgeAccount
+  claim?: string
+  onHand: (link: HandedLink) => void
   onLinked: (result: EdgeLinkResult) => void
 }) {
   const [servers, setServers] = useState<EdgeServer[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(claim ?? '')
   const [serverID, setServerID] = useState('')
   const [confirming, setConfirming] = useState<EdgeServer | null>(null)
 
@@ -263,7 +519,9 @@ function ServerPicker({
     setBusy(true)
     setError(null)
     try {
-      onLinked(await run())
+      const result = await run()
+      if (result.remote_error) toast.error(result.remote_error)
+      onLinked(result)
     } catch (err) {
       setError(message(err))
     } finally {
@@ -333,7 +591,7 @@ function ServerPicker({
           }
         />
       )}
-      <Collapsible>
+      <Collapsible defaultOpen={claim !== undefined}>
         <CollapsibleTrigger>Other ways to link</CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-4 pt-2 pl-5">
           <form
@@ -360,13 +618,22 @@ function ServerPicker({
             className="flex min-w-0 max-w-sm flex-col items-start gap-2"
             onSubmit={(e) => {
               e.preventDefault()
-              void link(() => client.localEdgeClaim(code.trim(), edge))
+              if (parseJoin(code)) {
+                onHand({ kind: 'join', link: code.trim() })
+                return
+              }
+              const claim = parseClaim(code)
+              if (claim?.edge && !sameEdge(claim.edge, edge)) {
+                onHand({ kind: 'claim', link: code.trim() })
+                return
+              }
+              void link(() => client.localEdgeClaim(claim?.code ?? code.trim(), edge))
             }}
           >
             <FormField
               className="self-stretch"
-              label="Claim code"
-              help={<><span className="font-code">aether-server setup</span> printed it, valid for 30 minutes; <span className="font-code">sudo aether-server edge claim-code</span> prints a new one. Claiming makes {accountName(account)} the server&apos;s admin.</>}
+              label="Claim code or link"
+              help={<><span className="font-code">aether-server setup</span> printed it, valid for 30 minutes; <span className="font-code">sudo aether-server edge claim-code</span> prints a new one. Claiming makes {accountName(account)} the server&apos;s admin. An invitation&apos;s join link opens the Join panel.</>}
             >
               <Input className="font-code" autoComplete="off" value={code} disabled={busy} onChange={(e) => setCode(e.target.value)} />
             </FormField>
@@ -378,6 +645,22 @@ function ServerPicker({
       </Collapsible>
     </div>
   )
+}
+
+function sameEdge(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return a === b
+  }
+}
+
+function linkHost(edge: string): string {
+  try {
+    return new URL(edge).host
+  } catch {
+    return edge
+  }
 }
 
 /** The id comes from the edge, so only comparing it with the admin's rules

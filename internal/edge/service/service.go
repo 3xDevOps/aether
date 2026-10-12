@@ -191,9 +191,10 @@ func requestHost(r *http.Request) string {
 
 // Handler serves both origins, picked by the request's host name: on the
 // sign-in host the pages and the client API, on the relay host the
-// relay's endpoints and PathEdgeInfo. A path of one origin requested on
+// relay's endpoints, PathEdgeInfo and the join page. A path of one origin requested on
 // the other is refused with 421 Misdirected Request naming the right
-// origin, so no page, cookie or API answer is served on the relay host.
+// origin, so no signed-in page, cookie or API answer is served on the
+// relay host.
 // GET /healthz answers on any host. Call SetLink first.
 func (s *Service) Handler() http.Handler {
 	pages := http.NewServeMux()
@@ -224,7 +225,13 @@ func (s *Service) Handler() http.Handler {
 
 	signin := http.NewServeMux()
 	signin.Handle("/v1/", api)
-	signin.Handle("/", s.pageHeaders(http.NewCrossOriginProtection().Handler(pages)))
+	signin.Handle("/", s.pageHeaders(pageCSP, http.NewCrossOriginProtection().Handler(pages)))
+
+	join := http.NewServeMux()
+	join.HandleFunc("GET /join/{server_id}/{invitation_id}", s.joinPage)
+	join.HandleFunc("GET /join.js", serveJoinScript)
+	join.HandleFunc("GET /edge.css", serveCSS)
+	joinPages := s.pageHeaders(pageCSP+"; script-src 'self'", join)
 
 	relay := http.NewServeMux()
 	s.link.Register(relay)
@@ -251,6 +258,8 @@ func (s *Service) Handler() http.Handler {
 			switch {
 			case routes(relay, r):
 				relay.ServeHTTP(w, r)
+			case routes(join, r):
+				joinPages.ServeHTTP(w, r)
 			case routes(api, r) || routes(pages, r):
 				misdirected(w, r, s.signinOrigin)
 			default:

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
@@ -19,12 +20,14 @@ import (
 // would forget the owner at its next enrollment.
 func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func(admin string) error) error {
 	return func(code string, claim func(admin string) error) error {
+		var reports uint64
 		err := a.state.attemptClaim(code, grant.Account, time.Now(), func(admin string) error {
 			if err := claim(admin); err != nil {
 				return err
 			}
-			s, err := a.liveSession()
-			if err != nil {
+			var s *session
+			var err error
+			if s, reports, err = a.liveSession(); err != nil {
 				return err
 			}
 			return s.send(edgeproto.Claimed{ConnID: grant.ConnID, Owner: edgeproto.AccountPrincipal(grant.Account)})
@@ -33,21 +36,27 @@ func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func
 			slog.Warn("edge: refused claim", "conn", grant.ConnID, "error", err)
 			return err
 		}
+		// The claim is already recorded, so a failed write of the advisory edge
+		// state is logged, not returned.
+		if err := a.setClaimed(reports); err != nil {
+			slog.Warn("edge: write edge state after claim", "conn", grant.ConnID, "error", err)
+		}
 		slog.Info("edge: server claimed", "conn", grant.ConnID,
 			"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
 		return nil
 	}
 }
 
-// liveSession returns the enrolled control connection.
-func (a *Agent) liveSession() (*session, error) {
+// liveSession returns the enrolled control connection and the count of
+// edge states recorded up to its enrollment.
+func (a *Agent) liveSession() (*session, uint64, error) {
 	a.mu.Lock()
-	s := a.live
+	s, reports := a.live, a.edgeReports
 	a.mu.Unlock()
 	if s == nil {
-		return nil, fmt.Errorf("the server is not connected to %s; retry once `aether-server edge status` shows it connected", a.origin)
+		return nil, 0, fmt.Errorf("the server is not connected to %s; retry once `aether-server edge status` shows it connected", a.origin)
 	}
-	return s, nil
+	return s, reports, nil
 }
 
 // TransferOwner records owner, an admin's edge identity, as this server's
@@ -56,13 +65,40 @@ func (a *Agent) liveSession() (*session, error) {
 // one, and keeps the previous owner unless the edge answers that it
 // recorded the new one.
 func (a *Agent) TransferOwner(owner edgeproto.Account) error {
-	s, err := a.liveSession()
+	s, _, err := a.liveSession()
 	if err != nil {
 		return err
 	}
 	return a.state.transferOwner(a.origin, owner, func() error {
 		return s.transfer(edgeproto.AccountPrincipal(owner))
 	})
+}
+
+// IssueClaimCode replaces any claim code with a fresh one whose claim
+// binds the claiming account to the existing admin member admin.
+func (a *Agent) IssueClaimCode(admin domain.MemberID) (string, time.Time, error) {
+	return a.state.IssueClaimCode(a.serverID, string(admin), time.Now())
+}
+
+// Owner returns this server's owner at the edge, nil when it has none.
+func (a *Agent) Owner() (*edgeproto.Account, error) { return a.state.Owner() }
+
+// Origin is the edge's https origin.
+func (a *Agent) Origin() string { return a.origin }
+
+// Connected reports whether the control connection is enrolled.
+func (a *Agent) Connected() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.live != nil
+}
+
+// EdgeState is the edge's last reported state for this server,
+// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+func (a *Agent) EdgeState() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.edgeState
 }
 
 // transfer reports owner as the new owner and waits for the edge's answer

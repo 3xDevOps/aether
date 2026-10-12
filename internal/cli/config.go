@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config is the local linked-server configuration written by `aether link`.
@@ -138,6 +139,21 @@ func (c Config) GitHost() string {
 		return EdgeHost(c.ServerID)
 	}
 	return c.Addr
+}
+
+// MovedGitURL is rawURL, a git remote of the link prev, on the git host
+// of c. The second result is false when rawURL is not a remote of prev
+// or c names the same host: a link that gains a server id moves its
+// remotes from the address to the logical edge host.
+func (c Config) MovedGitURL(prev Config, rawURL string) (string, bool) {
+	if c.GitHost() == prev.GitHost() {
+		return "", false
+	}
+	workspace, ok := strings.CutPrefix(rawURL, strings.TrimSuffix(GitURL(prev.User, prev.GitHost(), ""), ".git"))
+	if !ok {
+		return "", false
+	}
+	return GitURL(c.User, c.GitHost(), strings.TrimSuffix(workspace, ".git")), true
 }
 
 func (c Config) user() string {

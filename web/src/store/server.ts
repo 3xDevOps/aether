@@ -19,13 +19,14 @@ import type { SliceCreator } from '@/store/slice'
  * `tailnet`: the same silence on a phone, where the server itself serves the
  * page over the tailnet, so the hop that died is the tailnet or the host.
  * `server`: the gateway answers but its SSH backend cannot reach
- * aether-server (it reports 503 "server unreachable: ..."). The next seven
- * are that failure on a link through an edge, told apart by the client's
- * own error: `edge` could not be reached, `edge-server` said the server is
- * not connected to it, `edge-refused` refused it for another reason,
+ * aether-server (it reports 503 "server unreachable: ..."). The next eight
+ * are that failure on the edge path, told apart by the refusal's kind:
+ * `edge` could not be reached, `edge-server` said the server is not
+ * connected to it, `edge-refused` refused it for another reason,
  * `signed-out` has no valid sign-in for this machine, `not-member` means
- * the edge or the server no longer counts the account as a member, and the
- * server refused this device as `device-revoked` or `device-pending`. */
+ * the edge or the server no longer counts the account as a member, the
+ * server refused this device as `device-revoked` or `device-pending`, or
+ * for another reason as `server-refused`. */
 export type UnreachableKind =
   | 'network'
   | 'gateway'
@@ -38,6 +39,7 @@ export type UnreachableKind =
   | 'not-member'
   | 'device-revoked'
   | 'device-pending'
+  | 'server-refused'
   | 'refused'
   | 'identity'
 
@@ -103,6 +105,9 @@ export interface ServerSlice {
   streamDead: boolean
   /** Which hop failed on the last fetch, or null when reachable. */
   unreachable: UnreachableKind | null
+  /** The approval code a device-pending refusal carried, which the server
+   * sends only when nobody can approve the device in the app. */
+  approvalCode: string | null
   /** The last server.update_status answer; null until the update banner
    * host reads it, and on a server too old to serve the method. */
   serverUpdate: ServerUpdateStatus | null
@@ -126,7 +131,7 @@ export interface ServerSlice {
   resetSeq: () => void
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
-  setUnreachable: (kind: UnreachableKind | null) => void
+  setUnreachable: (kind: UnreachableKind | null, approvalCode?: string) => void
   setServerUpdate: (status: ServerUpdateStatus) => void
   /** Records a failed status read, keeping the last good answer. */
   setServerUpdateFailed: (detail: string) => void
@@ -145,6 +150,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       hydrationError: null,
       streamDead: false,
       unreachable: null,
+      approvalCode: null,
     })
   return {
     info: null,
@@ -158,6 +164,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     hydrationError: null,
     streamDead: false,
     unreachable: null,
+    approvalCode: null,
     serverUpdate: null,
     serverUpdateError: null,
     serverUpdateProgress: null,
@@ -178,7 +185,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     setHydrated: (hydrated, error = null) =>
       set({ hydrated, hydrationError: error }),
     setStreamDead: () => set({ streamDead: true }),
-    setUnreachable: (unreachable) => set({ unreachable }),
+    setUnreachable: (unreachable, approvalCode) => set({ unreachable, approvalCode: approvalCode ?? null }),
     setServerUpdate: (serverUpdate) =>
       set((s) => ({
         serverUpdate,

@@ -6,7 +6,9 @@ import { createCollaborationSlice, type CollaborationSlice } from '@/store/colla
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
+import { createDevicesSlice, type DevicesSlice } from '@/store/devices'
 import { createDiffSlice, type DiffSlice } from '@/store/diff'
+import { createEdgeSlice, type EdgeSlice } from '@/store/edge'
 import { createFilesSlice, type FilesSlice } from '@/store/files'
 import { createEnvTerminalSlice, type EnvTerminalSlice } from '@/store/env-terminal'
 import { createLocalSlice, type LocalSlice } from '@/store/local'
@@ -52,6 +54,8 @@ export type RootState = ServerSlice &
   WorkspacesSlice &
   RunsSlice &
   MembersSlice &
+  DevicesSlice &
+  EdgeSlice &
   TerminalSlice &
   EnvTerminalSlice &
   BoardSlice &
@@ -110,6 +114,8 @@ export function createRootStore() {
         ...createWorkspacesSlice(...a),
         ...createRunsSlice(...a),
         ...createMembersSlice(...a),
+        ...createDevicesSlice(...a),
+        ...createEdgeSlice(...a),
         ...createEnvTerminalSlice(...a),
         ...createTerminalSlice(...a),
         ...createBoardSlice(...a),

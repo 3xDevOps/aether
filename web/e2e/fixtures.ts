@@ -133,8 +133,7 @@ case "$1 $2" in
 	cp "$3" "$HOME/gh-registered-key"
 	;;
 "ssh-key list")
-	set -- $(ssh-keygen -lf "$HOME/gh-registered-key")
-	printf 'aether\\t%s\\t2026-01-01T00:00:00Z\\t1\\tsigning\\n' "$2"
+	printf 'aether\\t%s\\t2026-01-01T00:00:00Z\\t1\\tsigning\\n' "$(cut -d' ' -f1,2 "$HOME/gh-registered-key")"
 	;;
 *)
 	echo "gh: unsupported invocation: $*" >&2

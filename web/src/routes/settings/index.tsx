@@ -8,6 +8,7 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { GitHubSection } from '@/routes/settings/github'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { NotificationsSection } from '@/routes/settings/notifications'
+import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { ServerSection } from '@/routes/settings/server'
 import { ThisComputerSection } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
@@ -85,6 +86,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
           <GitHubSection client={client} />
           <ThisComputerSection client={client} />
           <ServerSection />
+          <RemoteAccessSection client={client} />
           <UsageSection client={client} />
           <OnboardingSection />
         </div>

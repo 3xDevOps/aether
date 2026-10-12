@@ -827,6 +827,8 @@ type testEnv struct {
 	ws          *domain.Workspace
 	run         *domain.Run
 	serveCancel context.CancelFunc
+	// joinSecrets maps an invitation id to the join secret of its link.
+	joinSecrets *sync.Map
 }
 
 func newSigner(t *testing.T) ssh.Signer {
@@ -874,12 +876,13 @@ func buildTestEnv(t *testing.T, mod func(*Config), signer ssh.Signer, seed bool)
 	t.Cleanup(func() { _ = bus.Close() })
 
 	e := &testEnv{
-		store:  db,
-		bus:    bus,
-		git:    &fakeGit{},
-		pty:    &fakePTY{resumeID: "fake-pty"},
-		runs:   &fakeRuns{},
-		signer: signer,
+		store:       db,
+		bus:         bus,
+		git:         &fakeGit{},
+		pty:         &fakePTY{resumeID: "fake-pty"},
+		runs:        &fakeRuns{},
+		signer:      signer,
+		joinSecrets: new(sync.Map),
 	}
 
 	if seed {

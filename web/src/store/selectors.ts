@@ -187,10 +187,11 @@ export function listedRuns(workspace: string, ctx: StateContext): RunRow[] {
     .sort((a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group) || inGroup[a.group](a, b))
 }
 
-export function sidebarGroups(s: RunsInput): SidebarGroup[] {
+/** `devices` counts the device cards that join the runs in Needs you. */
+export function sidebarGroups(s: RunsInput, devices = 0): SidebarGroup[] {
   const groups = runGroups(s)
   return groupOrder
-    .filter((key) => groups[key].length > 0)
+    .filter((key) => groups[key].length > 0 || (key === 'needs-you' && devices > 0))
     .map((key) => ({
       key,
       label: groupLabel[key],
@@ -205,7 +206,7 @@ export function sidebarGroups(s: RunsInput): SidebarGroup[] {
         key === 'needs-you'
           ? groups[key].reduce(
               (n, tree) => n + Number(tree.state === 'needs-you') + tree.children.length,
-              0,
+              devices,
             )
           : groups[key].length,
     }))

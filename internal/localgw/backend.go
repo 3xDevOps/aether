@@ -93,7 +93,7 @@ func unreachableError(err error) *protocol.Error {
 		errors.Is(err, syscall.EHOSTDOWN) {
 		prefix = "network unreachable: "
 	}
-	return &protocol.Error{Code: protocol.CodeUnavailable, Message: prefix + err.Error()}
+	return &protocol.Error{Code: protocol.CodeUnavailable, Message: prefix + err.Error(), Data: refusalData(err)}
 }
 
 // callTimeout bounds one control round-trip. A black-holed TCP connection

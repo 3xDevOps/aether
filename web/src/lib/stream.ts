@@ -1,8 +1,8 @@
 // The /ws/events subscription: one socket, jittered reconnect, replay from
 // the last sequence the store has seen so a reconnect loses nothing.
 
-import { api } from '@/lib/api'
-import type { Event, SubscribeRequest } from '@/lib/types'
+import { api, type ApiErrorData } from '@/lib/api'
+import type { EdgeRefusal, Event, SubscribeRequest } from '@/lib/types'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
@@ -17,8 +17,9 @@ export interface StreamHandlers {
    * never got off its own network stack; `server` means it did and
    * aether-server did not answer. `detail` is the refusal message, which on
    * a stream that never goes live is the only account of the failure the
-   * client ever gets. Fired before the retry is scheduled. */
-  onUnreachable?: (kind: 'network' | 'server', detail: string) => void
+   * client ever gets. `refusal` is set for a failure on the edge path.
+   * Fired before the retry is scheduled. */
+  onUnreachable?: (kind: 'network' | 'server', detail: string, refusal?: EdgeRefusal) => void
   /** Last sequence applied to the store; replay resumes after it. */
   afterSeq: () => number
 }
@@ -94,6 +95,7 @@ export function connectEvents(h: StreamHandlers): () => void {
           ok?: boolean
           code?: number
           error?: string
+          data?: ApiErrorData
         }
         if (parsed.type === undefined) {
           // The subscribe acknowledgement, not an event. Only now has the
@@ -110,7 +112,7 @@ export function connectEvents(h: StreamHandlers): () => void {
             if (detail.startsWith('network unreachable')) {
               h.onUnreachable?.('network', detail)
             } else if (detail.startsWith('server unreachable')) {
-              h.onUnreachable?.('server', detail)
+              h.onUnreachable?.('server', detail, parsed.data?.refusal)
             }
           }
           return

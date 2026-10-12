@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Confirm } from '@/components/confirm'
+import { Copy } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Code } from '@/components/ui/code'
@@ -15,9 +16,10 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Api } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { message, providerName, timeAgo } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
-import type { Invitation, Member } from '@/lib/types'
+import type { Invitation, InvitationResult, Member } from '@/lib/types'
 import { roleLabel, roles } from '@/routes/members/roster'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -105,7 +107,7 @@ export function InviteDialog({ client, onClose, onInvited }: { client: Api; onCl
           <DialogTitle>Invite a member</DialogTitle>
           <DialogDescription>
             {tab === 'account'
-              ? 'Invite the account they sign in to the edge with; they see this server after aether login.'
+              ? 'Invite the GitHub account they sign in with. You get a link to send them; opening it joins this server.'
               : 'A one-time code joins a computer with aether link. It is shown only here.'}
           </DialogDescription>
         </DialogHeader>
@@ -130,20 +132,21 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
   const [role, setRole] = useState<Member['role']>('collaborator')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [created, setCreated] = useState<InvitationResult | null>(null)
 
   const invite = async () => {
     setBusy(true)
     setError(null)
     try {
-      const invitation = await client.memberInvitationCreate(by === 'login' ? { login: who.trim(), role } : { email: who.trim(), role })
-      toast.success(`Invited ${invitee(invitation)}`)
+      setCreated(await client.memberInvitationCreate(by === 'login' ? { login: who.trim(), role } : { email: who.trim(), role }))
       onInvited()
-      onClose()
     } catch (err) {
       setError(message(err))
       setBusy(false)
     }
   }
+
+  if (created) return <InviteLink created={created} onClose={onClose} />
 
   return (
     <form
@@ -188,10 +191,13 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
       <Collapsible>
         <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
-          <p className="text-ui-sm text-muted">When signing in is enough for this server, their first connection makes them a member with this role.</p>
           <p className="text-ui-sm text-muted">
-            When the server admits approved devices only, their device waits until an admin approves it with the code it shows, under
-            Members &gt; Devices, with <Code>aether device approve</Code>, or with <Code>sudo aether-server device approve</Code> on the server.
+            They open the link and sign in with GitHub as this account. When signing in is enough for this server, that makes them a
+            member with this role.
+          </p>
+          <p className="text-ui-sm text-muted">
+            When the server admits approved devices only, their device waits until an admin clicks Approve on its card in Needs you, or
+            runs <Code>aether device approve</Code>.
           </p>
           <p className="text-ui-sm text-muted">Invitations expire after 7 days.</p>
         </CollapsibleContent>
@@ -202,6 +208,33 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
         <Button type="submit" disabled={busy || !who.trim()}>Invite</Button>
       </DialogFooter>
     </form>
+  )
+}
+
+function InviteLink({ created, onClose }: { created: InvitationResult; onClose: () => void }) {
+  const labelId = useId()
+  const codeRef = useRef<HTMLElement>(null)
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        <Label id={labelId}>Invite link</Label>
+        <div role="group" aria-labelledby={labelId} className="flex min-w-0 items-center gap-1 rounded-control border border-seam bg-canvas px-1.5 py-1">
+          <code ref={codeRef} tabIndex={0} title={created.link} className="min-w-0 flex-1 overflow-x-auto whitespace-pre px-1 font-code text-ui-sm leading-5 text-text select-text">
+            {created.link}
+          </code>
+          <Button size="sm" variant="ghost" onClick={() => void copyText(created.link, codeRef.current)}>
+            <Copy aria-hidden />
+            Copy link
+          </Button>
+        </div>
+      </div>
+      <p className="text-ui-sm text-muted">
+        Send this link to {invitee(created.invitation)}. It names their GitHub account and expires in 7 days.
+      </p>
+      <DialogFooter>
+        <Button onClick={onClose}>Done</Button>
+      </DialogFooter>
+    </div>
   )
 }
 

@@ -107,12 +107,10 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	al, bo, ma, bo2 := cs[0], cs[1], cs[2], cs[3]
 	h.claimServer(al, a)
 	ctl := h.control(al, a)
-	inviteLogin(t, ctl, bo, a.id, "collaborator")
-	_, err := h.dial(bo, h.link(a))
-	approve(t, ctl, waitingCode(t, "bob's first device", err))
+	h.join(ctl, bo, a, "collaborator")
 	h.mustDial(bo, a)
 	// An open admin invitation, for dave, who has not signed in yet.
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Login: dave.Login, Role: "admin"})
+	daveInv := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: dave.Login, Role: "admin"})
 	start := a.snapshot(t)
 	approved := start.approvedKeys()
 
@@ -128,11 +126,12 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	}
 	// Whoever is handed its code is shown, before approving, that it
 	// admits the key as alice's admin member.
-	m := approvalCode.FindStringSubmatch(banner)
-	if m == nil {
-		t.Fatalf("no approval code in %q", banner)
+	r, ok := edgeproto.ParseRefusedBanner(banner)
+	if !ok {
+		t.Fatalf("no structured refusal in %q", banner)
 	}
-	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{Code: m[1]})
+	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup,
+		protocol.MemberDeviceLookupParams{Code: a.pendingCode(t, "the attacker's device", r)})
 	if found.MemberID != string(a.memberOf(t, alice).ID) || found.Role != string(domain.RoleAdmin) || found.Device.Account != alice.Login {
 		t.Fatalf("lookup of the attacker's code = %+v, want alice's admin member", found)
 	}
@@ -164,31 +163,69 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	}
 
 	// A forged acceptance of dave's admin invitation, under dave's account
-	// with the attacker's key, creates no member and no administrator,
-	// binds no account and uses nothing up: the device waits on the
-	// invitation until a person approves it.
+	// with the attacker's key, lacks the secret of the invitation's link,
+	// which the edge never sees: it creates no member and no
+	// administrator, binds no account, uses nothing up, and records not
+	// even a waiting device.
+	recorded = len(a.snapshot(t).devices)
 	daveKey := newSigner(t)
 	nc, err = h.forge(t, a, forgery{kind: edgeproto.KindSSH, account: dave.account(), key: daveKey.PublicKey()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, banner, herr := sshOver(nc, a, edgeproto.AccountUser(dave.account()), daveKey); herr == nil || !strings.Contains(banner, "is waiting for approval") {
-		t.Fatalf("forged invitation acceptance: %v, banner %q", herr, banner)
+	_, banner, err = sshOver(nc, a, edgeproto.AccountUser(dave.account()), daveKey)
+	if r, ok := edgeproto.ParseRefusedBanner(banner); err == nil || !ok || r.Kind != edgeproto.RefusedInvitationNeedsLink {
+		t.Fatalf("forged invitation acceptance: %v, banner %q", err, banner)
 	}
 	ctx := context.Background()
 	if m, gerr := a.db.GetMemberByIdentity(ctx, edgeproto.ProviderGitHub, dave.account().Subject); !errors.Is(gerr, store.ErrNotFound) {
 		t.Fatalf("a forged acceptance bound dave's account to %+v, %v; want no member", m, gerr)
 	}
 	got := a.snapshot(t)
+	if len(got.members) != len(start.members) || len(got.admins()) != len(start.admins()) || !sameKeys(got.approvedKeys(), approved) ||
+		len(got.devices) != recorded {
+		t.Fatalf("after a forged acceptance: members %v -> %v, approved %v, %d devices; want nothing added",
+			start.members, got.members, got.approvedKeys(), len(got.devices))
+	}
+	invs, err := a.db.ListInvitations(ctx)
+	if err != nil || len(invs) != 1 || invs[0].Login != dave.Login {
+		t.Fatalf("invitations after a forged acceptance = %+v, %v; want dave's open", invs, err)
+	}
+
+	// The same forgery with the secret harvested from dave's link: the
+	// attacker's device only waits on the invitation, and no member,
+	// administrator or bound account exists until an approver clicks
+	// Approve on its card or types its code on the console.
+	_, _, _, secret, err := edgeproto.ParseJoinLink(daveInv.Link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinUser, err := edgeproto.JoinUser(daveInv.Invitation.ID, secret, edgeproto.AccountPrincipal(dave.account()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc, err = h.forge(t, a, forgery{kind: edgeproto.KindSSH, account: dave.account(), key: daveKey.PublicKey()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, banner, err = sshOver(nc, a, joinUser, daveKey)
+	if r, ok := edgeproto.ParseRefusedBanner(banner); err == nil || !ok || r.Kind != edgeproto.RefusedDevicePending || r.Invitation != daveInv.Invitation.ID {
+		t.Fatalf("forged acceptance with the secret: %v, banner %q; want a device waiting on the invitation", err, banner)
+	}
+	if m, gerr := a.db.GetMemberByIdentity(ctx, edgeproto.ProviderGitHub, dave.account().Subject); !errors.Is(gerr, store.ErrNotFound) {
+		t.Fatalf("a forged acceptance with the secret bound dave's account to %+v, %v; want no member", m, gerr)
+	}
+	got = a.snapshot(t)
 	if len(got.members) != len(start.members) || len(got.admins()) != len(start.admins()) || !sameKeys(got.approvedKeys(), approved) {
-		t.Fatalf("after a forged acceptance: members %v -> %v, approved %v; want nothing added", start.members, got.members, got.approvedKeys())
+		t.Fatalf("after a forged acceptance with the secret: members %v -> %v, approved %v; want nothing added",
+			start.members, got.members, got.approvedKeys())
 	}
-	waiting, err := a.db.GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(daveKey.PublicKey()))
-	if err != nil || waiting.Member != "" || waiting.Invitation == "" || waiting.Status != domain.DevicePending {
-		t.Fatalf("the forged device = %+v, %v; want it pending on the invitation, with no member", waiting, err)
+	if d := got.devices[edgeproto.DeviceKeyLine(daveKey.PublicKey())]; !strings.HasSuffix(d, " pending") {
+		t.Fatalf("the attacker's device with the secret is %q, want pending", d)
 	}
-	if inv, ierr := a.db.GetInvitation(ctx, waiting.Invitation); ierr != nil || inv.ConsumedAt != nil || inv.Role != domain.RoleAdmin {
-		t.Fatalf("dave's invitation after a forged acceptance = %+v, %v; want it open", inv, ierr)
+	invs, err = a.db.ListInvitations(ctx)
+	if err != nil || len(invs) != 1 || invs[0].Login != dave.Login {
+		t.Fatalf("invitations after a forged acceptance with the secret = %+v, %v; want dave's open", invs, err)
 	}
 
 	// A connection replayed: the server refuses a connection id it served.
@@ -320,8 +357,7 @@ func TestMaliciousEdgeAccountAccess(t *testing.T) {
 	al, bo := cs[0], cs[1]
 	h.claimServer(al, a)
 	ctl := h.control(al, a)
-	inviteLogin(t, ctl, bo, a.id, "collaborator")
-	h.mustDial(bo, a)
+	h.join(ctl, bo, a, "collaborator")
 
 	attacker := newSigner(t)
 	nc, err := h.forge(t, a, forgery{kind: edgeproto.KindSSH, account: alice.account(), key: attacker.PublicKey()})
@@ -365,11 +401,7 @@ func TestTakenOverProviderAccount(t *testing.T) {
 			al, bo, thief := cs[0], cs[1], cs[2]
 			h.claimServer(al, a)
 			ctl := h.control(al, a)
-			inviteLogin(t, ctl, bo, a.id, "admin")
-			if policy == edgeproto.PolicyApprovedDevices {
-				_, err := h.dial(bo, h.link(a))
-				approve(t, ctl, waitingCode(t, "bob's device", err))
-			}
+			h.join(ctl, bo, a, "admin")
 			h.mustDial(bo, a)
 			before := a.snapshot(t)
 
@@ -385,7 +417,7 @@ func TestTakenOverProviderAccount(t *testing.T) {
 					t.Fatalf("the thief is %+v, want bob's admin member", info.Member)
 				}
 			default:
-				waitingCode(t, "taken-over account under approved devices", err)
+				a.waitingCode(t, "taken-over account under approved devices", err)
 				after := a.snapshot(t)
 				if !sameKeys(after.approvedKeys(), before.approvedKeys()) || len(after.admins()) != len(before.admins()) {
 					t.Fatalf("the thief changed who is approved: %v -> %v", before.approvedKeys(), after.approvedKeys())

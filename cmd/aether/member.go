@@ -125,7 +125,8 @@ func memberLink(args []string) error {
 		if err := c.Call(protocol.MethodMemberIdentityLink, params, &res); err != nil {
 			return err
 		}
-		fmt.Printf("%s can link to member %s until %s: sign in with aether login and connect through the edge\n",
+		printInvitationLink(res)
+		fmt.Printf("%s can link to member %s until %s: open the link on a device signed in with that account\n",
 			inviteeOf(res.Invitation), res.Invitation.MemberID, res.Invitation.ExpiresAt)
 		return nil
 	})

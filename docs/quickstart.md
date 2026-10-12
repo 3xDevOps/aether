@@ -103,23 +103,25 @@ which turns it off. It then asks for the **access policy**: `1` (account
 access) lets people you invite in by signing in with GitHub; `2`
 (approved devices) makes each new device wait until a person approves it.
 [edge.md](edge.md#access-policies) compares them. Setup then prints the
-server's id and a **claim code**, which makes whoever uses it first the
-server's admin:
+server's id and a **claim link**, which makes whoever uses it first the
+server's admin. The claim code inside it, `<server id>-<secret>`, is what
+`aether link --claim` takes:
 
 ```
 edge: https://edge.onaether.dev
 edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
-claim code: <code> (valid until 3:04PM, 5 attempts)
-claim this server with:
-  aether link --claim <code>
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
+  aether link --claim <server id>-<secret>
 ```
 
 Run the activation line and the server is live on `:2222`. The SSH port is
 the only thing it listens on unless you answered the dashboard question; the
 edge connection is outbound. The claim code lasts 30 minutes;
-`sudo aether-server edge claim-code` prints a new one. Change any option
+`sudo aether-server edge claim-code` prints a new link until someone has
+joined the server. Change any option
 later with `aether-server config set <key> <value>`, then restart.
 
 To try it in the foreground first, `sudo aether-server serve` runs until
@@ -128,7 +130,11 @@ unprivileged, and every serve option.
 
 ## 3. Link from your machine
 
-**Through the edge**, with the claim code from step 2:
+**Through the edge**, open the claim link from step 2 on your computer. The
+desktop app ([install.md](install.md#desktop-app)) opens at its Connect
+step with the link filled in: sign in with GitHub when it asks, check the
+account it shows, and click **Claim and link**. The Connect step also
+accepts the link pasted. In a terminal, use the claim code:
 
 ```sh
 aether login
@@ -148,6 +154,7 @@ the edge and deletes it here; the edge's Devices page and deleting the account r
 the edge path refuses with the edge's reason, and a link's --addr still reaches the server with this device's
 key until the account is deleted, which removes the account's devices on every server. SSH keys and tailnet
 identities are not affected.
+claiming server <server id> as <login> (github), the account edge.onaether.dev reported when this device signed in
 claimed server <server id>
 linked to server <server id> through edge.onaether.dev as <your name> (admin)
 ```
@@ -1217,11 +1224,14 @@ container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 | `parse ssh key <path>` | The file at that path is not an SSH private key (a public key, or a truncated file). Pass the private key with `aether link <addr> --key <path>`. |
 | `link --key: stat <path>` / `ssh key <path>: open <path>: no such file` | The key path you chose is not there. A chosen key is never skipped in favor of the agent, so re-link with the right `--key`. Re-linking without `--key` keeps the saved one; to go back to `~/.ssh/id_ed25519`, delete the `key` line from `~/.config/aether/config.json`. |
 | `host key mismatch` / `REMOTE HOST IDENTIFICATION HAS CHANGED` on `aether link` | The server was reinstalled and generated a new host key, but your `known_hosts` still trusts the old one. Clear it: `ssh-keygen -R '[<server-host>]:2222'`. |
-| `not signed in` from `aether link --claim` or `aether servers` | This machine has no edge sign-in. Run `aether login`. |
-| `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new code, valid 30 minutes. |
+| `not signed in` from `aether link --claim`, `aether link <join link>`, `aether edge connect` or `aether servers` | This machine has no edge sign-in. Run `aether login`, with `--edge <url>` for an edge other than the default. |
+| `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new claim link, valid 30 minutes. Once the server has members it needs `--admin <member id>`; an admin connects from the dashboard instead ([edge.md](edge.md#server-id-and-claiming)). |
+| `the server has members, so a claim without --admin would be refused; ...` | Someone already joined, by SSH key or over the tailnet. That admin runs **Connect my GitHub account** in Settings › Remote access, or `aether edge connect` from a linked terminal. |
 | `server is not connected to the edge` | The server is stopped or cannot reach the edge. On the server, `sudo aether-server edge status` shows the last connection error. |
-| `not a member of this server` | Your edge account has no membership or open invitation there. An admin runs `aether invite --github <your-login>` ([teams.md](teams.md#through-an-edge)). |
-| `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only (`edge-access approved-devices`), and this one is new. Run the `aether device approve <code>` the message prints from a device, SSH key or tailnet connection you already use, or give the code to an admin or to the machine's administrator (`sudo aether-server device approve <code>`). Either shows the member and role the code admits the device as and asks before approving. |
+| `not a member of this server` | Your edge account has no membership or open invitation there, or the invitation was revoked or expired. An admin runs `aether invite --github <your-login>` and sends you the new link ([teams.md](teams.md#through-an-edge)). |
+| `<account> is invited to this server; open the invitation link the admin sent, or run: aether link <link>` | You linked by server id. Open the link the admin sent, or run `aether link '<invite link>'`. |
+| `the invitation link is not valid for this server: wrong, revoked or expired; ask the admin for a new one` | The link's secret does not match an open invitation. Ask the admin for a new link. |
+| `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only (`edge-access approved-devices`), and this one is new. An admin clicks **Approve** on its Needs you card in the dashboard, or you do from a device you already use. When the message carries an approval code instead, nobody can approve it in the app: run one of the commands it prints, such as `sudo aether-server device approve <code>` on the server. |
 | `10 devices of <account> are waiting for approval on this server already, so no new one is recorded` | An admin approves or revokes the waiting devices with `aether device list` and `aether device revoke <device-id>`, or `sudo aether-server device review` on the server. |
 | `this device connects as "github:<user id>", but the edge signed the connection in as <account> ...; nothing was recorded` | The edge vouched for another account than the one this device signed in as. Nothing changed on the server; tell the edge's operator. |
 | `... was admitted by signing in alone and is waiting for approval: this server now admits approved devices only` | The server switched from `account` to `approved-devices`. Approve it the same way. |
