@@ -112,6 +112,9 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 		w := deviceToWire(d)
 		if d.Status.AwaitsApproval() {
 			_, name, role, err := s.admitsAs(ctx, ids, d)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
 			if err != nil {
 				return nil, rpcError(err)
 			}

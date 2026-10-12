@@ -8,7 +8,7 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
-import { bindRouteToUrl } from '@/lib/url-state'
+import { bindRouteToUrl, handedLink, onHandedLink } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -29,6 +29,9 @@ export function App() {
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
   const importPending = useStore((s) => s.configImportPending)
+  const onboardingRoute = useStore((s) => s.route.name === 'onboarding')
+  const [handed, setHanded] = useState(handedLink)
+  useEffect(() => onHandedLink(setHanded), [])
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
@@ -50,7 +53,9 @@ export function App() {
   useEffect(() => bindRouteToUrl(useStore), [])
 
   // An in-app update restarts the gateway on purpose, so it is not a total failure.
-  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
+  // A handed link's Connect step talks only to the local gateway, so a saved
+  // server that cannot answer must not hide it.
+  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting && !(handed && onboardingRoute)
 
   useEffect(() => {
     if (!hydrationError || blocked) return

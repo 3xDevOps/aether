@@ -29,11 +29,13 @@ describe('parseJoin', () => {
     expect(parseJoin(` https://edge.example.test/join/${id}/inv-7k2m9q4xbd#secret `)).toEqual(named)
     expect(parseJoin(`aether://join?edge=https%3A%2F%2Fedge.example.test&server=${id}&invitation=inv-7k2m9q4xbd#secret`)).toEqual(named)
     expect(parseJoin(`https://Edge.example.test:443/join/${id}/inv-7k2m9q4xbd#secret`)).toEqual({ ...named, edge: 'https://edge.example.test:443' })
+    expect(parseJoin(`aether://join?edge=http%3A%2F%2F127.0.0.1%3A8080&server=${id}&invitation=inv-7k2m9q4xbd#secret`)).toEqual({ ...named, edge: 'http://127.0.0.1:8080' })
     for (const text of [
       `https://edge.example.test/join/${id}/inv-7k2m9q4xbd`,
       `aether://join?edge=https%3A%2F%2Fedge.example.test&server=${id}#secret`,
       `aether://join?edge=https%3A%2F%2Fuser%40edge.example.test%2Fx&server=${id}&invitation=inv-7k2m9q4xbd#secret`,
       `https://edge.example.test/claim/${id}#secret`,
+      `aether://join?edge=http%3A%2F%2Fedge.example.test&server=${id}&invitation=inv-7k2m9q4xbd#secret`,
       `${id}-secret`,
     ]) {
       expect(parseJoin(text)).toBeNull()

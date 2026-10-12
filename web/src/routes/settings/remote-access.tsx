@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import type { Api } from '@/lib/api'
+import { type Api, ApiError } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { EdgeAccount, EdgeLogin, ServerEdge } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
@@ -74,7 +74,10 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
   const signedIn = async (): Promise<EdgeAccount> => {
     const status = await client.localEdgeStatus()
     const account = status.edges.find((e) => e.edge === edgeURL)?.account
-    if (account) return account
+    return account ?? signIn()
+  }
+
+  const signIn = async (): Promise<EdgeAccount> => {
     const login = await client.localEdgeLogin(edgeURL)
     setPhase({ name: 'signing-in', login })
     for (;;) {
@@ -87,6 +90,13 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
     }
   }
 
+  const claim = async () => {
+    const { code } = await client.serverEdgeClaimCode()
+    // The gateway is shared, so another tab may have relinked it since.
+    if (code.split('-')[0] !== serverID) throw new Error('The gateway now reaches another server; reload and try again.')
+    await client.localEdgeClaim(code, edgeURL)
+  }
+
   const connect = async () => {
     if (busy.current) return
     busy.current = true
@@ -95,10 +105,18 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
       const account = await signedIn()
       if (live.current) setKnown(account)
       setPhase({ name: 'connecting', account })
-      const { code } = await client.serverEdgeClaimCode()
-      // The gateway is shared, so another tab may have relinked it since.
-      if (code.split('-')[0] !== serverID) throw new Error('The gateway now reaches another server; reload and try again.')
-      await client.localEdgeClaim(code, edgeURL)
+      try {
+        await claim()
+      } catch (err) {
+        const refusal = err instanceof ApiError ? err.data?.refusal : undefined
+        if (refusal?.kind !== 'token-revoked' && refusal?.kind !== 'not-signed-in') throw err
+        const fresh = await signIn().catch(() => {
+          throw err
+        })
+        if (live.current) setKnown(fresh)
+        setPhase({ name: 'connecting', account: fresh })
+        await claim()
+      }
       await loadEdge(useStore, client)
     } catch (err) {
       if (live.current) setError(message(err))

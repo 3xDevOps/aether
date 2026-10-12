@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { ApiError } from '@/lib/api'
 import type { ServerEdge } from '@/lib/types'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { useStore } from '@/store'
@@ -74,4 +75,30 @@ it('refuses to claim when the gateway now reaches another server', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
   expect(await screen.findByText('The gateway now reaches another server; reload and try again.')).toBeTruthy()
   expect(client.localEdgeClaim).not.toHaveBeenCalled()
+})
+
+it('signs in afresh when the edge revoked the saved token, then claims', async () => {
+  seed('admin', ownerless)
+  const stale = { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' }
+  const login = { state: 'pending' as const, edge: edgeURL, signin_origin: edgeURL, user_code: 'WDJB-MJHT', verification_uri: `${edgeURL}/device` }
+  const revoked = new ApiError(503, 'the edge revoked this device token; sign in again', undefined, { refusal: { kind: 'token-revoked' } })
+  const client = fakeApi({
+    localEdgeStatus: vi.fn()
+      .mockResolvedValueOnce({ edges: [{ edge: edgeURL, account: stale }] })
+      .mockResolvedValueOnce({ edges: [{ edge: edgeURL, account: stale }] })
+      .mockResolvedValue({ edges: [{ edge: edgeURL, account: stale }], login: { ...login, state: 'signed_in', account: stale } }),
+    localEdgeLogin: vi.fn(async () => login),
+    serverEdgeClaimCode: vi.fn(async () => ({ code: 'wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
+    localEdgeClaim: vi.fn()
+      .mockRejectedValueOnce(revoked)
+      .mockResolvedValue({ server_id: ownerless.server_id, edge: edgeURL, user: 'aether', member: { id: 'mem_1', display_name: 'Alice', role: 'admin' } }),
+    serverEdge: vi.fn(async () => ({ ...ownerless, owner: { provider: 'github', login: 'octo' }, claimed: true })),
+  })
+  render(<RemoteAccessSection client={client} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
+  expect(await screen.findByText('WDJB-MJHT')).toBeTruthy()
+  await screen.findByText('octo (github)', undefined, { timeout: 5000 })
+  expect(client.localEdgeLogin).toHaveBeenCalledWith(edgeURL)
+  expect(client.localEdgeClaim).toHaveBeenCalledTimes(2)
+  expect(screen.queryByRole('alert')).toBeNull()
 })

@@ -47,13 +47,21 @@ export function parseJoin(input: string): { edge: string; server: string; invita
   return null
 }
 
-/** Whether edge is https://host[:port] and nothing else, as desktop/main.js
- * checks. URL.origin drops an explicit :443, which edgeproto.Origin keeps. */
+/** Whether edge is https://host[:port], or http:// for a loopback host,
+ * and nothing else, as edgeproto.Origin and desktop/main.js accept. URL.origin
+ * drops an explicit default port, which edgeproto.Origin keeps. */
 function relayOrigin(edge: string): boolean {
   try {
     const url = new URL(edge)
-    return url.protocol === 'https:' && (edge === url.origin || edge === `${url.origin}:443`)
+    if (url.protocol === 'https:') return edge === url.origin || edge === `${url.origin}:443`
+    return url.protocol === 'http:' && loopback(url.hostname) && (edge === url.origin || edge === `${url.origin}:80`)
   } catch {
     return false
   }
+}
+
+/** localhost, 127.0.0.0/8, or ::1, also IPv4-mapped, as URL serializes them. */
+function loopback(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || /^127\.\d+\.\d+\.\d+$/.test(hostname) ||
+    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(hostname)
 }

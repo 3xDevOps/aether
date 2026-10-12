@@ -421,10 +421,17 @@ function main() {
     } catch {
       return ''
     }
-    // A relay origin: https://host[:port], nothing else. URL.origin drops
-    // an explicit :443, which edgeproto.Origin keeps.
+    // A relay origin as edgeproto.Origin accepts it: https://host[:port], or
+    // http:// for a loopback host, nothing else. URL.origin drops an explicit
+    // default port, which edgeproto.Origin keeps.
     const origin = params.get('edge')
-    if (edge.protocol !== 'https:' || (origin !== edge.origin && origin !== edge.origin + ':443')) return ''
+    const loopback =
+      edge.hostname === 'localhost' ||
+      edge.hostname === '[::1]' ||
+      /^127\.\d+\.\d+\.\d+$/.test(edge.hostname) ||
+      /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(edge.hostname)
+    const port = edge.protocol === 'https:' ? ':443' : edge.protocol === 'http:' && loopback ? ':80' : null
+    if (!port || (origin !== edge.origin && origin !== edge.origin + port)) return ''
     if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
     if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
     if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''
