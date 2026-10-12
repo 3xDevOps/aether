@@ -53,6 +53,13 @@ const usageLimitReason = "Usage limit reached on "
 // usageLimitSegment is the reason an account segment records for a move.
 const usageLimitSegment = "usage limit"
 
+// usageStreamRetry and usageStreamRetryMax bound the delay before the
+// usage-limit stream resubscribes after it failed.
+const (
+	usageStreamRetry    = 100 * time.Millisecond
+	usageStreamRetryMax = 30 * time.Second
+)
+
 // usageMoveTimeout bounds a move: removing the container, starting another
 // and reopening the agent's session.
 const usageMoveTimeout = 5 * time.Minute
@@ -99,6 +106,9 @@ const (
 	// usageRefused: the run is not this move's to take; it carries on as
 	// it would have without fallback.
 	usageRefused usageOutcome = iota
+	// usageSkipped: another move holds the run, or the usage limit that
+	// triggered this one was already acted on; nothing is reported.
+	usageSkipped
 	// usageNoFallback: the run stays where it is and stops with the reason.
 	usageNoFallback
 	usageContinued
@@ -113,19 +123,23 @@ const (
 	usageShutdown
 )
 
-// continueLiveRun moves a run whose live agent hit its usage limit to the
-// next account. For usageNoFallback it returns the reason the run stops
-// with.
-func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool) (usageOutcome, string) {
+// continueLiveRun moves a run whose live agent hit the usage limit it
+// reported as message to the next account. For usageNoFallback it returns
+// the reason the run stops with.
+func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool, message string) (usageOutcome, string) {
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
-	claimed := s.usageMovableLocked(entry, terminal) && !entry.finalizing && !entry.exitObserved
+	skipped := entry.moving || entry.usageLimit != message
+	claimed := !skipped && s.usageMovableLocked(entry, terminal) && !entry.finalizing && !entry.exitObserved
 	if claimed {
-		entry.finalizing = true
+		entry.finalizing, entry.moving = true, true
 	}
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
-	if !claimed {
+	switch {
+	case skipped:
+		return usageSkipped, ""
+	case !claimed:
 		return usageRefused, ""
 	}
 	ctx, cancel := context.WithTimeout(s.superCtx, usageMoveTimeout)
@@ -151,7 +165,7 @@ func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool) (usageOutc
 func (s *Scheduler) releaseMoveClaim(entry *supervised) bool {
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
-	entry.finalizing = false
+	entry.finalizing, entry.moving = false, false
 	cid := entry.containerID
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
@@ -206,11 +220,17 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 	}
 	// A successful move already dropped the old container's mark; a mark
 	// left now is the new container's.
+	s.mu.Lock()
+	entry.moving = true
+	s.mu.Unlock()
 	outcome, reason := s.moveAccount(ctx, entry)
 	switch outcome {
 	case usageContinued, usageShutdown:
 		return true
 	}
+	s.mu.Lock()
+	entry.moving = false
+	s.mu.Unlock()
 	s.clearUsageLimit(entry)
 	s.mu.Lock()
 	entry.failReason = reason
@@ -220,12 +240,12 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 
 // clearUsageLimit drops a usage-limit mark once a move has acted on it, so a
 // later exit of the same container, or of a reopened retained one, is not
-// taken for it. A move in progress keeps the mark: it follows a new limit
-// once it is done.
+// taken for it. A move in progress keeps the mark: a limit the replacement
+// reports is followed once it is done.
 func (s *Scheduler) clearUsageLimit(entry *supervised) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry.usageLimit == "" || (entry.finalizing && entry.accountSwap != nil) {
+	if entry.usageLimit == "" || entry.moving {
 		return
 	}
 	entry.usageLimit = ""
@@ -283,7 +303,7 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 	if !supervised {
 		return
 	}
-	s.goMove(func() { s.continueWorker(entry) })
+	s.goMove(func() { s.continueWorker(entry, message) })
 }
 
 // setUsageLimitLocked records the agent's usage-limit message until a move
@@ -301,9 +321,10 @@ func (s *Scheduler) setUsageLimitLocked(entry *supervised, message string) {
 
 // continueWorker moves a swarm worker whose agent stopped on its usage limit
 // while its container lives on.
-func (s *Scheduler) continueWorker(entry *supervised) {
-	outcome, reason := s.continueLiveRun(entry, false)
-	if outcome == usageContinued || outcome == usageShutdown {
+func (s *Scheduler) continueWorker(entry *supervised, message string) {
+	outcome, reason := s.continueLiveRun(entry, false, message)
+	switch outcome {
+	case usageContinued, usageShutdown, usageSkipped:
 		return
 	}
 	s.clearUsageLimit(entry)
@@ -318,9 +339,9 @@ func (s *Scheduler) continueWorker(entry *supervised) {
 // usage limit. A run that does not move gets the report it would have had
 // without fallback, or the reason it cannot move.
 func (s *Scheduler) continueStandard(entry *supervised, message string) {
-	outcome, stopped := s.continueLiveRun(entry, true)
+	outcome, stopped := s.continueLiveRun(entry, true, message)
 	switch outcome {
-	case usageContinued, usageShutdown:
+	case usageContinued, usageShutdown, usageSkipped:
 		return
 	}
 	s.clearUsageLimit(entry)
@@ -354,11 +375,11 @@ func (s *Scheduler) resumeUsageMove(entry *supervised) {
 		}
 		switch {
 		case acp:
-			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, "error", errors.New(message))
+			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, "error", errors.New(message), message)
 		case mode == domain.LaunchTUI:
 			s.continueStandard(entry, message)
 		case assigned:
-			s.continueWorker(entry)
+			s.continueWorker(entry, message)
 		}
 	})
 }
@@ -386,6 +407,11 @@ func (s *Scheduler) goMove(move func()) {
 func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, report agentstatus.Report) bool {
 	s.mu.Lock()
 	entry := s.runs[run]
+	if entry != nil && entry.moving {
+		// The move in flight replaces the agent that reported this.
+		s.mu.Unlock()
+		return true
+	}
 	movable := entry != nil && s.usageMovableLocked(entry, true) && !entry.finalizing && !entry.exitObserved
 	newSession := movable && s.recordReportedSessionLocked(entry, report.SessionID)
 	if movable {
@@ -419,14 +445,33 @@ func (s *Scheduler) subscribeUsageLimits(ctx context.Context, after uint64, repl
 // watchUsageLimits marks the runs whose adapters read a usage limit in
 // their agents' output, until ctx ends. A limit must not be lost: a dropped
 // event or a closed stream resubscribes with replay from the last event
-// handled, or from start, the log's position when sub began, before any.
+// handled, or from start, the log's position when sub began, before any. A
+// stream that keeps failing is retried with a growing delay.
 func (s *Scheduler) watchUsageLimits(ctx context.Context, sub events.Subscription, start uint64) {
 	last := start
+	delay := time.Duration(0)
 	for {
-		last = s.consumeUsageLimits(ctx, sub, last)
+		handled := s.consumeUsageLimits(ctx, sub, last)
 		_ = sub.Close()
 		if ctx.Err() != nil {
 			return
+		}
+		switch err := sub.Err(); {
+		case err == nil || handled > last:
+			delay = 0
+		case delay == 0:
+			slog.Warn("scheduler: usage-limit stream failed; retrying", "error", err)
+			delay = usageStreamRetry
+		default:
+			delay = min(2*delay, usageStreamRetryMax)
+		}
+		last = handled
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
 		}
 		next, err := s.subscribeUsageLimits(ctx, last, true)
 		if err != nil {
@@ -460,7 +505,7 @@ func (s *Scheduler) consumeUsageLimits(ctx context.Context, sub events.Subscript
 
 func (s *Scheduler) finalizeWithReason(entry *supervised, reason string) {
 	s.mu.Lock()
-	entry.failReason = reason
+	entry.failReason, entry.moving = reason, false
 	s.mu.Unlock()
 	s.finalize(entry, -1)
 }
@@ -537,7 +582,7 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 		return stop(err.Error())
 	}
 	defer release()
-	run, to, seq, excluded, err := s.recordMove(ctx, entry, f, run.ID, from, measured)
+	run, to, excluded, err := s.chooseMove(ctx, entry, f, run.ID, from, measured)
 	switch {
 	case err != nil:
 		return stop(err.Error())
@@ -548,7 +593,7 @@ func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcom
 	case excluded != nil:
 		slog.Warn("scheduler: fallback accounts left out of a move", "run", run.ID, "error", excluded)
 	}
-	return s.replaceContainer(ctx, entry, f, run, from, to, seq, session)
+	return s.replaceContainer(ctx, entry, f, run, from, to, session)
 }
 
 // mayLaunch is the launch admission a member's own standing needs, checked
@@ -564,29 +609,28 @@ func (s *Scheduler) mayLaunch(ctx context.Context, id domain.MemberID) error {
 	return permissions.Check(permissions.Launch, permissions.Actor{ID: member.ID, Role: member.Role}, permissions.Target{})
 }
 
-// recordMove chooses the account and records the run on it under the
-// authorization mutex, as a launch is admitted: a launch, handoff or
-// revocation is ordered entirely before or after it. The run is read again
-// under the mutex and authorised for both the member whose home its
-// container mounts and its current owner, who differ after a handoff; an
-// account measured for an earlier owner but not shared with this one is
-// left out. It returns the run as read, and no account when none qualifies
-// with excluded joining the candidate checks that failed; it records
-// nothing on an error.
-func (s *Scheduler) recordMove(ctx context.Context, entry *supervised, f *UsageFallback, id domain.RunID, from domain.MemberID, measured fallback.Measured) (*domain.Run, domain.MemberID, int, error, error) {
+// chooseMove chooses the account under the authorization mutex and writes
+// the move's marker. The run is read again under the mutex and authorised
+// for both the member whose home its container mounts and its current owner,
+// who differ after a handoff; an account measured for an earlier owner but
+// not shared with this one is left out. It returns the run as read, and no
+// account when none qualifies with excluded joining the candidate checks
+// that failed. commitMove records the account once the old container is
+// gone.
+func (s *Scheduler) chooseMove(ctx context.Context, entry *supervised, f *UsageFallback, id domain.RunID, from domain.MemberID, measured fallback.Measured) (*domain.Run, domain.MemberID, error, error) {
 	f.AuthorizationMu.Lock()
 	defer f.AuthorizationMu.Unlock()
 	run, err := s.cfg.Store.GetRun(ctx, id)
 	if err != nil {
-		return nil, "", 0, nil, fmt.Errorf("load the run: %w", err)
+		return nil, "", nil, fmt.Errorf("load the run: %w", err)
 	}
 	if run.AccountMember() != from {
-		return nil, "", 0, nil, fmt.Errorf("the run moved to %s's account meanwhile", s.memberName(ctx, run.AccountMember()))
+		return nil, "", nil, fmt.Errorf("the run moved to %s's account meanwhile", s.memberName(ctx, run.AccountMember()))
 	}
 	home := run.HomeMember()
 	for _, member := range slices.Compact([]domain.MemberID{home, run.MemberID}) {
 		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
-			return nil, "", 0, nil, launchErr
+			return nil, "", nil, launchErr
 		}
 	}
 	mode := run.Mode
@@ -605,7 +649,7 @@ func (s *Scheduler) recordMove(ctx context.Context, entry *supervised, f *UsageF
 		return s.FallbackLaunchable(ctx, home, from, account, run.Harness, mode)
 	})
 	if to == from {
-		return run, "", 0, excluded, nil
+		return run, "", excluded, nil
 	}
 	swap := &accountSwap{From: from, To: to}
 	if run.ACP {
@@ -614,7 +658,7 @@ func (s *Scheduler) recordMove(ctx context.Context, entry *supervised, f *UsageF
 	s.mu.Lock()
 	if entry.killRequested {
 		s.mu.Unlock()
-		return nil, "", 0, nil, errors.New("the run is being killed")
+		return nil, "", nil, errors.New("the run is being killed")
 	}
 	entry.accountSwap = swap
 	err = s.writeSidecar(entry.sidecar())
@@ -623,19 +667,51 @@ func (s *Scheduler) recordMove(ctx context.Context, entry *supervised, f *UsageF
 	}
 	s.mu.Unlock()
 	if err != nil {
-		return nil, "", 0, nil, fmt.Errorf("persist the move: %w", err)
+		return nil, "", nil, fmt.Errorf("persist the move: %w", err)
+	}
+	return run, to, excluded, nil
+}
+
+// commitMove records the run on to once its old container is gone, under
+// the authorization mutex, as a launch is admitted: the run's owner and home
+// member are admitted again and to must still be shared with both, so a
+// handoff, revocation or kill since chooseMove fails the move rather than
+// record an account the run never ran on.
+func (s *Scheduler) commitMove(ctx context.Context, entry *supervised, f *UsageFallback, run *domain.Run, to domain.MemberID) (int, error) {
+	f.AuthorizationMu.Lock()
+	defer f.AuthorizationMu.Unlock()
+	current, err := s.cfg.Store.GetRun(ctx, run.ID)
+	if err != nil {
+		return 0, fmt.Errorf("load the run: %w", err)
+	}
+	if current.MemberID != run.MemberID {
+		return 0, errors.New("the run was handed off meanwhile")
+	}
+	for _, member := range slices.Compact([]domain.MemberID{run.HomeMember(), run.MemberID}) {
+		if launchErr := s.mayLaunch(ctx, member); launchErr != nil {
+			return 0, launchErr
+		}
+		if _, authErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(to)); authErr != nil {
+			return 0, authErr
+		}
+	}
+	s.mu.Lock()
+	killed := entry.killRequested
+	s.mu.Unlock()
+	if killed {
+		return 0, errors.New("the run is being killed")
 	}
 	seq, err := s.cfg.Store.SetRunAccount(ctx, run.ID, to, usageLimitSegment, time.Now().UTC())
 	if err != nil {
-		s.clearAccountSwap(entry, swap)
-		return nil, "", 0, nil, fmt.Errorf("record the run's account: %w", err)
+		return 0, fmt.Errorf("record the run's account: %w", err)
 	}
-	return run, to, seq, nil, nil
+	return seq, nil
 }
 
-// replaceContainer runs outside the authorization mutex: the run is already
-// recorded on to.
-func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *UsageFallback, run *domain.Run, from, to domain.MemberID, seq int, session string) (usageOutcome, string) {
+// replaceContainer removes the run's container, records the run on to, and
+// starts the replacement on to's login. A failure leaves no replacement and
+// no container the swarm keeps.
+func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *UsageFallback, run *domain.Run, from, to domain.MemberID, session string) (usageOutcome, string) {
 	fromName, toName := s.memberName(ctx, from), s.memberName(ctx, to)
 	failure := func(err error) string {
 		return fmt.Sprintf("%s%s's account; continuing on %s's account failed: %v", usageLimitReason, fromName, toName, err)
@@ -650,6 +726,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 		s.mu.Lock()
 		entry.accountSwap = nil
+		entry.noRetain = true
 		if entry.containerID != cid && !entry.destroyPending {
 			// startRunContainer destroyed the replacement it created. The
 			// old container stays the run's until it is confirmed gone, so
@@ -690,6 +767,10 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		slog.Warn("scheduler: persist the removed container", "run", run.ID, "error", werr)
 	}
 	s.mu.Unlock()
+	seq, err := s.commitMove(ctx, entry, f, run, to)
+	if err != nil {
+		return failed(err)
+	}
 	if run.ACP {
 		s.acp.switchNotice(run.ID, "info", "Continued on "+toName+"'s account", fromName+"'s usage ran out.")
 	}
@@ -736,7 +817,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	if !run.ACP {
 		entry.accountSwap = nil
 	}
-	entry.finalizing, entry.waitStarted = false, false
+	entry.finalizing, entry.moving, entry.waitStarted = false, false, false
 	again := entry.usageLimit
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: persist the account move", "run", run.ID, "error", werr)

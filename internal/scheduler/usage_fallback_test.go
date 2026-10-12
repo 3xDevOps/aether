@@ -861,3 +861,147 @@ func TestUsageLimitStreamReplaysADropBeforeTheFirstLimit(t *testing.T) {
 		t.Fatalf("resubscribed with %+v, want replay after 41", got)
 	}
 }
+
+// A move owed for a usage limit that another move has since acted on does
+// nothing: no claim and no report, so a run that already moved on is left
+// alone.
+func TestStaleUsageLimitMoveDoesNothing(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	e.sched.continueStandard(entry, "You've hit your session limit · resets 3pm (UTC)")
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || row.Status != domain.RunRunning || row.AccountMemberID != e.member.ID || len(notes.all()) != 0 {
+		t.Fatalf("run = %+v, %v, notes %v; want it untouched", row, err, notes.all())
+	}
+}
+
+// A second usage-limit report while a move holds the run neither reports
+// nor clears the limit: a shutdown then leaves it for the next server.
+func TestDuplicateLimitDuringAMoveKeepsTheMark(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	limit, _ := agentstatus.FromClaudeHook([]byte(`{"session_id":"sess-1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 3pm (UTC)"}`))
+	var run *domain.Run
+	stopped := make(chan struct{})
+	e.sched.UseUsageFallback(UsageFallback{Usage: &hookedUsage{claudeUsage: claudeUsage{e.owner.ID: 10}, during: func() {
+		if err := e.sched.ReportAgentState(context.Background(), run.ID, limit); err != nil {
+			panic(err)
+		}
+		go func() {
+			_ = e.sched.Close()
+			close(stopped)
+		}()
+		<-e.sched.superCtx.Done()
+	}}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	startScheduler(t, e.sched)
+	var err error
+	run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "sess-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, limit); err != nil {
+		t.Fatal(err)
+	}
+	<-stopped
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || row.Status != domain.RunRunning {
+		t.Fatalf("run = %+v, %v; want it still running", row, err)
+	}
+	if sc, scErr := e.sched.readSidecar(run.ID); scErr != nil || sc.UsageLimit == "" {
+		t.Fatalf("sidecar = %+v, %v; want the usage limit kept", sc, scErr)
+	}
+}
+
+// A swarm worker whose old container cannot be removed fails with that
+// error, stays on its account, and keeps the container for cleanup to retry
+// rather than for the swarm.
+func TestWorkerWhoseOldContainerCannotBeRemovedFails(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	startScheduler(t, e.sched)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "stuck-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
+		Harness: "claude", Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-e.sched.RecoveryReady()
+	first := e.rt.byName(string(run.ID))
+	e.rt.mu.Lock()
+	e.rt.destroyErr = errors.New("daemon busy")
+	e.rt.mu.Unlock()
+	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
+		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the container on Ada's account: daemon busy" || got.AccountMemberID != e.member.ID {
+		t.Fatalf("worker = reason %q account %s", got.Reason, got.AccountMemberID)
+	}
+	waitFor(t, "the old container kept for cleanup", func() bool {
+		sc, scErr := e.sched.readSidecar(run.ID)
+		return scErr == nil && sc.DestroyPending && sc.ContainerID == string(first.id)
+	})
+	if segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID); err != nil || len(segments) != 0 || len(notes.all()) != 0 {
+		t.Fatalf("segments %+v, %v, notes %v; want no move recorded", segments, err, notes.all())
+	}
+}
+
+// failingSub ends at once with an error, as a replay whose log read fails.
+type failingSub struct{ ch chan events.Event }
+
+func (f failingSub) Events() <-chan events.Event { return f.ch }
+func (failingSub) Dropped() uint64               { return 0 }
+func (failingSub) Err() error                    { return errors.New("read the event log: disk I/O error") }
+func (failingSub) Close() error                  { return nil }
+
+type failingBus struct {
+	events.Bus
+	mu    sync.Mutex
+	count int
+}
+
+func (b *failingBus) Subscribe(context.Context, events.SubscribeOptions) (events.Subscription, error) {
+	b.mu.Lock()
+	b.count++
+	b.mu.Unlock()
+	ch := make(chan events.Event)
+	close(ch)
+	return failingSub{ch: ch}, nil
+}
+
+// A usage-limit stream that keeps failing is retried with a growing delay,
+// not in a hot loop.
+func TestFailingUsageLimitStreamBacksOff(t *testing.T) {
+	t.Parallel()
+	bus := &failingBus{}
+	s := &Scheduler{cfg: Config{Bus: bus, EventSeq: func(context.Context) (uint64, error) { return 7, nil }}}
+	first, err := bus.Subscribe(t.Context(), events.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	s.watchUsageLimits(ctx, first, 7)
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	if bus.count > 6 {
+		t.Fatalf("%d subscriptions in half a second; want a growing delay between them", bus.count)
+	}
+}

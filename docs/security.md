@@ -267,8 +267,10 @@ move's quota read counts, the run's owner and the member whose home its containe
 mounts (the launcher, who differ after a handoff) must both still be allowed
 to launch, as `AuthorizeLaunch` requires, and each candidate must be shared
 with both and pass the same installation and login rules in that home. The
-lock is held until the run records the new account, as a launch holds it
-until its admission is durable, and not while the container is replaced. A
+lock is released while the old container is removed, then taken again: the
+owner, home member and share are admitted once more and the run records the
+new account, as a launch holds the lock until its admission is durable. It
+is not held while the replacement starts. A
 move never returns to an account the run already used. A swarm worker's
 later checks use the account its run is on now, not the one it launched on. The signal comes from inside the run's container (agent
 output, the Claude `StopFailure` hook payload, the ACP error), so the agent

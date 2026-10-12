@@ -400,7 +400,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.mu.Unlock()
 				// The move stops this session, which waits for this
 				// callback to return.
-				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed) })
+				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed, message) })
 				return
 			}
 			d.turnState(entry, oneShot, working, reason, failed)
@@ -478,10 +478,10 @@ func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason s
 
 // usageLimit handles a turn that failed on the account's usage limit: the
 // run continues on another account, or stops with the reason why not.
-func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error) {
-	outcome, stopped := d.s.continueLiveRun(entry, false)
+func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error, message string) {
+	outcome, stopped := d.s.continueLiveRun(entry, false, message)
 	switch outcome {
-	case usageContinued, usageShutdown:
+	case usageContinued, usageShutdown, usageSkipped:
 		return
 	}
 	d.s.clearUsageLimit(entry)

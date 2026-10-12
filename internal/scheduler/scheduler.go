@@ -368,6 +368,10 @@ type supervised struct {
 	// failReason replaces the exit code in the reason of a run finalize
 	// fails.
 	failReason string
+	// moving is set while a move holds the run's finalizing claim. noRetain
+	// is set by a move that failed: a swarm keeps no container of it.
+	moving   bool
+	noRetain bool
 }
 
 type pendingRun struct {
@@ -565,7 +569,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return fmt.Errorf("scheduler: read the event log's position: %w", err)
 		}
 	}
-	limits, err := s.subscribeUsageLimits(ctx, start, false)
+	limits, err := s.subscribeUsageLimits(ctx, start, true)
 	if err != nil {
 		return fmt.Errorf("scheduler: subscribe to usage limits: %w", err)
 	}

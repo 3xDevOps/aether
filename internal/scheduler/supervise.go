@@ -235,8 +235,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
 		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
 	}
-	// A failed move to another account leaves no container to retain.
-	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0 && entry.containerID != ""
+	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0 && !entry.noRetain
 	if retain {
 		deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
 		entry.evidenceIdentity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)

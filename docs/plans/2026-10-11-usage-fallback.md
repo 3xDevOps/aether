@@ -73,8 +73,10 @@ one account.
    already used. Under the launch authorisation lock the run's owner and the
    member whose home the container mounts (they differ after a handoff) are
    admitted again as for a launch, each candidate must be shared with both
-   and launchable in that home, and the run records the new account; the
-   lock is released before the container is replaced. A candidate qualifies
+   and launchable in that home; the lock is released while the old
+   container is removed, and taken again, with the owner, home member and
+   share admitted once more, to record the new account before the
+   replacement starts. A failed removal records nothing. A candidate qualifies
    only when the agent runs from the home's own installation there, or from
    the image when the replaced launch did too; (A) applies the same rule. A
    non-ACP run moves only with a stored agent session and resume arguments
@@ -105,12 +107,13 @@ one account.
    once, on segment 0's account (unmetered there when only a later segment
    was measured), and each segment's usage on its own account.
 8. **Crash safety.** The run's sidecar holds an `account_swap` marker,
-   with an Enhanced session's pending continuation, from recording the
-   account until the move finishes, and the headless usage-limit mark.
+   with an Enhanced session's pending continuation, from choosing the
+   account until the move finishes, and every trigger's usage-limit mark.
    Recovery resumes a run whose new container the sidecar names and sends
    the owed continuation, interrupts a run whose old container was removed
-   before the sidecar named a new one or whose old container survives on a
-   row already moved, and never creates a container itself, so a move never
+   before the sidecar named a new one, recovers a run whose old container
+   the sidecar still names on its old account, starts the move a live run's
+   mark still owes, and never creates a container itself, so a move never
    launches twice.
 9. **Authorisation.** A fallback launch is authorised exactly like a direct
    launch on that account (`AuthorizeLaunch`, built on
