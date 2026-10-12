@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -270,7 +271,7 @@ func TestEnhancedRunWhoseRestoreFailsNeedsAttention(t *testing.T) {
 	rt.mu.Unlock()
 	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; continuing on Grace's account failed: ") ||
+	if !strings.HasPrefix(got.Reason, "Usage limit reached on Ada's account; the run is on Grace's account and its session could not be restored: ") ||
 		!strings.Contains(got.Reason, "exec: no such file") || got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
 		t.Fatalf("run = reason %q account %s notes %v", got.Reason, got.AccountMemberID, notes.all())
 	}
@@ -322,7 +323,7 @@ func TestEnhancedRunMovesAgainOnASecondLimit(t *testing.T) {
 // error, without a second attempt.
 func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []string{"live", "exited while the server was down", "new container fails"} {
+	for _, tc := range []string{"live", "exited while the server was down", "new container fails", "no fallback"} {
 		t.Run(tc, func(t *testing.T) {
 			t.Parallel()
 			e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
@@ -344,13 +345,11 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.waitStoreStatus(t, run.ID, domain.RunRunning)
-			for _, payload := range []events.Payload{
-				events.AgentEventPayload{Kind: events.AgentSession, HarnessSessionID: "sess-1"},
-				events.RunUsageLimitPayload{Message: "You've hit your session limit · resets 3pm (UTC)"},
-			} {
-				if _, perr := e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: payload}); perr != nil {
-					t.Fatal(perr)
-				}
+			<-e.sched.RecoveryReady()
+			if _, perr := e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
+				Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
+			}}); perr != nil {
+				t.Fatal(perr)
 			}
 			waitFor(t, "the usage limit recorded", func() bool {
 				sc, scErr := e.sched.readSidecar(run.ID)
@@ -372,6 +371,20 @@ func TestHeadlessRunContinuesOnAFallbackAccount(t *testing.T) {
 				t.Cleanup(func() { _ = sched.Close() })
 				sched.UseUsageFallback(seam)
 				startScheduler(t, sched)
+			case "no fallback":
+				if err = e.db.RevokeAccountShare(t.Context(), e.owner.ID, e.member.ID); err != nil {
+					t.Fatal(err)
+				}
+				e.rt.byName(string(run.ID)).exitNow(1)
+				got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+				if got.Reason != "Usage limit reached on Ada's account; no fallback has usage left" {
+					t.Fatalf("reason %q", got.Reason)
+				}
+				waitFor(t, "the acted-on usage limit cleared", func() bool {
+					sc, scErr := e.sched.readSidecar(run.ID)
+					return os.IsNotExist(scErr) || (scErr == nil && sc.UsageLimit == "")
+				})
+				return
 			case "new container fails":
 				e.rt.mu.Lock()
 				e.rt.createErr = errors.New("no space left on device")
@@ -520,6 +533,64 @@ func TestRestartSettlesAnInterruptedAccountMove(t *testing.T) {
 				sc, err := s2.readSidecar(run.ID)
 				return err == nil && sc.AccountSwap == nil
 			})
+		})
+	}
+}
+
+// hookedUsage runs during before the first quota read, which a move makes
+// before it takes the authorization mutex.
+type hookedUsage struct {
+	claudeUsage
+	once   sync.Once
+	during func()
+}
+
+func (u *hookedUsage) Read(ctx context.Context, account domain.MemberID, refresh bool) ([]quota.Provider, error) {
+	u.once.Do(u.during)
+	return u.claudeUsage.Read(ctx, account, refresh)
+}
+
+// What changes while a move reads quota is what it decides on: a handoff to
+// Lin, with whom Grace shared nothing, leaves the run where it is; a kill
+// stops it there, recorded on the account it ran on.
+func TestMoveDecidesOnTheRunAsItIsWhenItRecords(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []string{"handed off", "killed"} {
+		t.Run(tc, func(t *testing.T) {
+			t.Parallel()
+			e, _, notes := newFallbackEnv(t, enhancedClaude)
+			e.share(t)
+			lin := e.addRecipient(t)
+			run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+			usage := &hookedUsage{claudeUsage: claudeUsage{e.owner.ID: 10}, during: func() {
+				if tc == "killed" {
+					if err := e.sched.Kill(context.Background(), run.ID, e.member.ID); err != nil {
+						panic(err)
+					}
+					return
+				}
+				if err := e.db.TransferRun(context.Background(), run.ID, lin.ID); err != nil {
+					panic(err)
+				}
+			}}
+			e.sched.UseUsageFallback(UsageFallback{Usage: usage, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+
+			want := domain.RunNeedsAttention
+			if tc == "killed" {
+				want = domain.RunAbandoned
+			}
+			got := e.waitStoreStatus(t, run.ID, want)
+			if got.AccountMemberID != e.member.ID || len(notes.all()) != 0 {
+				t.Fatalf("run = %s on %s (%q), notes %v; want it left on Ada's account", got.Status, got.AccountMemberID, got.Reason, notes.all())
+			}
+			if segments, err := e.db.ListRunAccountSegments(t.Context(), run.ID); err != nil || len(segments) != 0 {
+				t.Fatalf("segments = %+v, %v; want no move recorded", segments, err)
+			}
 		})
 	}
 }

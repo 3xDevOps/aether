@@ -530,8 +530,9 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 // image when the launch on requested would too. It never borrows the owner's
 // installation, whose executables only a launcher who picked that account
 // has agreed to run, and never moves a launch that relied on requested's
-// installation to an account where the agent is missing. It reads member
-// homes only.
+// installation to an account where the agent is missing, nor onto a login a
+// live container holds under another uid:gid. It reads member homes, the
+// member's row and the image's user, never the vendor.
 func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
 	state, _, err := s.CheckSharedLaunch(ctx, member, account, harnessName)
 	if err != nil || state != SharedLaunchable || s.cfg.Homes == nil {
@@ -547,15 +548,36 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 			return false, adapterErr
 		}
 	}
-	if len(profile.TUIArgs) == 0 {
-		return true, nil
+	if len(profile.TUIArgs) > 0 {
+		installation, installErr := s.cfg.Homes.Installation(member, account, profile.TUIArgs[0], profile.InstallPaths)
+		if installErr != nil || (installation != "" && installation != member) {
+			return false, installErr
+		}
+		if installation == "" {
+			asked, askedErr := s.cfg.Homes.Installation(member, requested, profile.TUIArgs[0], profile.InstallPaths)
+			if askedErr != nil || asked != "" {
+				return false, askedErr
+			}
+		}
 	}
-	installation, err := s.cfg.Homes.Installation(member, account, profile.TUIArgs[0], profile.InstallPaths)
-	if err != nil || installation != "" {
-		return installation == member, err
+	// A live container that holds the login under another uid:gid would
+	// refuse the launch once its run exists.
+	owner, err := s.cfg.Store.GetMember(ctx, member)
+	if err != nil {
+		return false, err
 	}
-	asked, err := s.cfg.Homes.Installation(member, requested, profile.TUIArgs[0], profile.InstallPaths)
-	return err == nil && asked == "", err
+	image := owner.Image
+	if image == "" {
+		image = s.cfg.StandardImage
+	}
+	user, err := s.resolveContainerUser(ctx, image, profile)
+	if err != nil || user == "" {
+		return err == nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncRunUserReservationsLocked()
+	return s.reservationConflictLocked(member, account, user, "") == nil, nil
 }
 
 // pinnedLogins mounts each login file of a PinLogin harness in member's own

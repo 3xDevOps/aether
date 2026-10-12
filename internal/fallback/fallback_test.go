@@ -2,6 +2,7 @@ package fallback
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,6 +53,7 @@ func TestSelect(t *testing.T) {
 		order     []string
 		disabled  bool
 		revoke    string
+		failing   string
 		modelOnly []string
 		used      map[string]float64
 		reset     time.Time
@@ -77,6 +79,10 @@ func TestSelect(t *testing.T) {
 			used: map[string]float64{"Ada": 100, "Lena": 60, "Bo": 0}, want: "Lena"},
 		{name: "disabled keeps requested", requested: "Ada", disabled: true,
 			used: map[string]float64{"Ada": 100, "Bo": 0}, want: "Ada"},
+		{name: "a candidate whose check fails is left out", requested: "Ada", failing: "Bo",
+			used: map[string]float64{"Ada": 100, "Lena": 60, "Bo": 0}, want: "Lena"},
+		{name: "a failing only candidate keeps requested", requested: "Ada", failing: "Bo",
+			used: map[string]float64{"Ada": 100, "Lena": 99, "Bo": 0, "Cy": 99}, want: "Ada"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -129,9 +135,19 @@ func TestSelect(t *testing.T) {
 					t.Fatal(revokeErr)
 				}
 			}
-			got, err := Select(ctx, db, measured, launcher, ids[tc.requested], policy, nil)
-			if err != nil || got != ids[tc.want] {
-				t.Fatalf("Select = %s, %v; want %s", names[got], err, tc.want)
+			var launchable Launchable
+			if tc.failing != "" {
+				launchable = func(_ context.Context, account domain.MemberID) (bool, error) {
+					if account == ids[tc.failing] {
+						return false, errors.New("read the installation: input/output error")
+					}
+					return true, nil
+				}
+			}
+			got, excluded := Select(ctx, db, measured, launcher, ids[tc.requested], policy, launchable)
+			if got != ids[tc.want] || (excluded != nil) != (tc.failing != "") ||
+				(excluded != nil && !strings.Contains(excluded.Error(), "input/output error")) {
+				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
 			}
 		})
 	}

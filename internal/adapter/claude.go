@@ -144,7 +144,7 @@ func (c *claude) ConsumeLine(line string) []events.Payload {
 			Metered:      true,
 		}}
 		if c.rejected && msg.IsError && acphost.IsUsageLimitMessage(msg.Result) {
-			out = append(out, events.RunUsageLimitPayload{Message: msg.Result})
+			out = append(out, events.RunUsageLimitPayload{Message: msg.Result, SessionID: msg.SessionID})
 		}
 		c.rejected = false
 		return out

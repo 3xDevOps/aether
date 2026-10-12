@@ -248,7 +248,8 @@ with the share check a hand-picked launch uses, at the moment it is chosen,
 so a revoked share leaves the pool at once. A fallback account is never one
 whose agent installation the launcher would borrow, so fallback never runs a
 teammate's executables for a launcher who did not pick that account, and
-never one with no login to share. Without an installation of the launcher's
+never one with no login to share, nor one whose login a live container holds
+under another uid:gid. Without an installation of the launcher's
 own, an account qualifies only when the requested launch would also have run
 the image's agent, so a launch that relied on the requested account's
 installation never lands where the agent is missing. An admin gains nothing, and a
@@ -258,7 +259,8 @@ launch or replacement against the member who creates or replaces it.
 
 A run whose agent reports its usage limit mid-run moves to another account
 the same way: the move is a launch on the new account. Under the launch
-authorization lock, the run's owner and the member whose home its container
+authorization lock, with the run read again there so a handoff during the
+move's quota read counts, the run's owner and the member whose home its container
 mounts (the launcher, who differ after a handoff) must both still be allowed
 to launch, as `AuthorizeLaunch` requires, and each candidate must be shared
 with both and pass the same installation and login rules in that home. The

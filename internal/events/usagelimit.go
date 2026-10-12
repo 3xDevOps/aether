@@ -6,9 +6,11 @@ import "github.com/3xDevOps/Aether/internal/domain"
 // hit a subscription usage limit.
 const TypeRunUsageLimit Type = "run.usage_limit"
 
-// RunUsageLimitPayload carries the agent's own usage-limit message.
+// RunUsageLimitPayload carries the agent's own usage-limit message and the
+// session it stopped, which a move to another account resumes.
 type RunUsageLimitPayload struct {
-	Message string `json:"message"`
+	Message   string `json:"message"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 func (RunUsageLimitPayload) EventType() Type { return TypeRunUsageLimit }

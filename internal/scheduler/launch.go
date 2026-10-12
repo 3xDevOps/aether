@@ -419,8 +419,6 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	return nil
 }
 
-// runPlan builds the environment run's container mounts and reserves its
-// user for the home and login the plan mounts.
 func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {
 	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
 	if err != nil {
@@ -442,8 +440,7 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 	return plan, nil
 }
 
-// startRunContainer creates and starts run's container from plan and opens
-// the agent session on it: the part of a launch a move to another account
+// startRunContainer is the part of a launch a move to another account
 // repeats. On failure no container of it is left running.
 func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool) (AgentDriver, error) {
 	var native harness.NativeLaunch
@@ -513,8 +510,8 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	return driver, nil
 }
 
-// failContainer destroys a container whose provisioning step failed. When
-// the destroy is uncertain the run keeps it as destroy-pending.
+// failContainer keeps a container whose destroy is uncertain as the run's
+// destroy-pending one.
 func (s *Scheduler) failContainer(ctx context.Context, entry *supervised, cid runtime.ID, step string, cause error) error {
 	if derr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid); derr != nil &&
 		!errors.Is(derr, runtime.ErrNotFound) {

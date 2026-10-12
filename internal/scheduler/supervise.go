@@ -163,11 +163,11 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 // otherwise. The caller has already released entry.lifecycleMu; the
 // finalizing flag keeps other destructive operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
-	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
-	defer cancel()
-	if s.continueExitedRun(ctx, entry, code) {
+	if s.continueExitedRun(entry, code) {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
+	defer cancel()
 
 	s.cfg.Git.StopDiffWatch(entry.runID)
 

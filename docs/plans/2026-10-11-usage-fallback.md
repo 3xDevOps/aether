@@ -92,7 +92,10 @@ one account.
    another account: <real reason>". A move that fails after the old
    container is gone fails the run with "Usage limit reached on <A>'s
    account; continuing on <B>'s account failed: <error>"; an Enhanced
-   session that cannot be restored there parks the run with that reason.
+   session that cannot be restored there parks the run with "Usage limit
+   reached on <A>'s account; the run is on <B>'s account and its session
+   could not be restored: <error>". A candidate whose check fails is left
+   out rather than failing the launch or move.
 7. **Cost.** Metered cost stays with the account that spent it. A run keeps
    its account history in `run_account_segments`; a move appends a segment
    and never rewrites an earlier one. Only headless Claude runs report

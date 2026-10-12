@@ -164,10 +164,8 @@ func (s *Service) attemptLaunchAccount(ctx context.Context, m *domain.Mission, a
 		}
 		return attempt.LaunchAccountID, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, attempt.RunOwnerID, attempt.AccountOwnerID, m.Fallback, s.launchable(attempt.RunOwnerID, attempt.AccountOwnerID, attempt.Harness, attempt.Mode))
-	if err != nil {
-		return "", err
-	}
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, attempt.RunOwnerID, attempt.AccountOwnerID, m.Fallback, s.launchable(attempt.RunOwnerID, attempt.AccountOwnerID, attempt.Harness, attempt.Mode))
+	logExcluded(attempt.RunID, excluded)
 	if err := s.cfg.Missions.RecordAttemptLaunchAccount(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, account); err != nil {
 		return "", err
 	}

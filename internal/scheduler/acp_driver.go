@@ -142,8 +142,6 @@ func (d *acpDriver) continuationOwed(entry *supervised) bool {
 	return entry.accountSwap != nil && entry.accountSwap.Continuation != ""
 }
 
-// sendContinuation sends the session restored on the run's new account the
-// continuation its move owes it, then lets the move go.
 func (d *acpDriver) sendContinuation(entry *supervised) {
 	d.s.mu.Lock()
 	swap := entry.accountSwap
@@ -159,12 +157,20 @@ func (d *acpDriver) sendContinuation(entry *supervised) {
 	}
 	d.s.clearAccountSwap(entry, swap)
 	switch {
-	case err == nil:
+	case err == nil || usageLimited(err):
 	case d.oneShot(entry):
 		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the continuation to the agent: " + err.Error()})
 	default:
 		slog.Warn("scheduler: send the continuation to the agent", "run", entry.runID, "error", err)
 	}
+}
+
+// usageLimited reports a prompt refused on the account's usage limit, which
+// the session's turn-end callback hands to a move: ending a background run
+// for it here would race that move.
+func usageLimited(err error) bool {
+	_, ok := acphost.UsageLimit(err)
+	return ok
 }
 
 func (d *acpDriver) Resume(ctx context.Context, entry *supervised, att runtime.Attachment) error {
@@ -390,7 +396,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			if _, ok := acphost.UsageLimit(failed); ok {
 				// The move stops this session, which waits for this
 				// callback to return.
-				go d.usageLimit(entry, oneShot, reason, failed)
+				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed) })
 				return
 			}
 			d.turnState(entry, oneShot, working, reason, failed)
@@ -499,7 +505,7 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 			return
 		}
 	}
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
+	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil && !usageLimited(err) {
 		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
 }

@@ -89,7 +89,7 @@ func TestClaudeUsageLimit(t *testing.T) {
 		fixture string
 		want    []events.Payload
 	}{
-		{"claude_usage_limit", []events.Payload{refused, events.RunUsageLimitPayload{Message: "You've hit your session limit · resets 3pm (UTC)"}}},
+		{"claude_usage_limit", []events.Payload{refused, events.RunUsageLimitPayload{Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "s1"}}},
 		{"claude_rate_limited", []events.Payload{refused}},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {

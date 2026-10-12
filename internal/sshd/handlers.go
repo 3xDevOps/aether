@@ -142,11 +142,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, rpcError(err)
 	}
 	requested := admission.Account.ID
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, member, requested, account, p.Harness, mode)
 	})
-	if err != nil {
-		return nil, rpcError(err)
+	if excluded != nil {
+		slog.Warn("sshd: fallback accounts left out of a launch", "member", member, "error", excluded)
 	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		CachedBase: p.CachedBase, RequestedAccount: requested, Fallback: policy,

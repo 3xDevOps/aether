@@ -132,8 +132,6 @@ func MeasureNext(ctx context.Context, st store.Store, usage QuotaReader, launche
 	return measured, nil
 }
 
-// measureCandidates reads the usage of every candidate launcher may launch
-// on that measured has no figure for yet.
 func measureCandidates(ctx context.Context, st store.Store, usage QuotaReader, launcher domain.MemberID, harness string, policy domain.AccountFallback, measured Measured) error {
 	candidates, err := candidates(ctx, st, launcher, policy)
 	if err != nil {
@@ -174,8 +172,10 @@ type Launchable func(ctx context.Context, account domain.MemberID) (bool, error)
 // boundary, so each candidate needs only its account authorization checked
 // here; an account Measure could not read, or launchable refuses, is never
 // chosen. A nil launchable refuses nothing. When no candidate qualifies, the
-// launch stays on the requested account.
-func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, policy domain.AccountFallback, launchable Launchable) (domain.MemberID, error) {
+// launch stays on the requested account. A candidate whose check fails is
+// left out like a refused one, so it never fails a launch that can stay on
+// the requested account; excluded joins those failures.
+func Select(ctx context.Context, st store.Store, measured Measured, launcher, requested domain.MemberID, policy domain.AccountFallback, launchable Launchable) (account domain.MemberID, excluded error) {
 	if policy.Disabled {
 		return requested, nil
 	}
@@ -184,8 +184,9 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 	}
 	candidates, err := candidates(ctx, st, launcher, policy)
 	if err != nil {
-		return "", err
+		return requested, fmt.Errorf("list fallback accounts: %w", err)
 	}
+	var failures []error
 	type usable struct {
 		account domain.MemberID
 		used    float64
@@ -196,10 +197,10 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 			continue
 		}
 		if _, authErr := ResolveLaunchAccount(ctx, st, launcher, string(candidate)); authErr != nil {
-			if errors.Is(authErr, permissions.ErrDenied) || errors.Is(authErr, store.ErrNotFound) {
-				continue
+			if !errors.Is(authErr, permissions.ErrDenied) && !errors.Is(authErr, store.ErrNotFound) {
+				failures = append(failures, fmt.Errorf("account %s: %w", candidate, authErr))
 			}
-			return "", authErr
+			continue
 		}
 		used, ok := measured[candidate]
 		if !ok || used >= ExhaustedPercent {
@@ -208,19 +209,20 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		if launchable != nil {
 			allowed, launchErr := launchable(ctx, candidate)
 			if launchErr != nil {
-				return "", launchErr
+				failures = append(failures, fmt.Errorf("account %s: %w", candidate, launchErr))
+				continue
 			}
 			if !allowed {
 				continue
 			}
 		}
 		if len(policy.Order) > 0 {
-			return candidate, nil
+			return candidate, errors.Join(failures...)
 		}
 		found = append(found, usable{candidate, used})
 	}
 	if len(found) == 0 {
-		return requested, nil
+		return requested, errors.Join(failures...)
 	}
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].used != found[j].used {
@@ -228,7 +230,7 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		}
 		return found[i].account < found[j].account
 	})
-	return found[0].account, nil
+	return found[0].account, errors.Join(failures...)
 }
 
 func candidates(ctx context.Context, st store.Store, launcher domain.MemberID, policy domain.AccountFallback) ([]domain.MemberID, error) {

@@ -117,8 +117,9 @@ func TestIntegrationWorkerFallsBackFromExhaustedAccount(t *testing.T) {
 // new container that resumes the agent's session, and its room says so.
 // When the resumed agent then fails for another reason, the run fails with
 // that exit: the adapter reads only the new session's output, never the
-// first agent's limit again. Enhanced runs take the same move from their failed prompt; this runtime
-// has no ACP exec, so the scheduler suite covers them.
+// first agent's limit again. Enhanced runs take the same move from their
+// failed prompt; this runtime has no ACP exec, so the scheduler suite covers
+// them.
 func TestIntegrationHeadlessFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -144,7 +145,6 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 	}
 	const task = "run until the usage limit"
 	rt.script(task, func(c *e2eContainer) {
-		c.output(`{"type":"system","subtype":"init","session_id":"sess-1"}` + "\r\n")
 		c.output(strings.ReplaceAll(string(limit), "\n", "\r\n"))
 		time.Sleep(500 * time.Millisecond)
 		c.exitNow(1)
@@ -198,7 +198,7 @@ func TestIntegrationHeadlessFallback(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !slices.Contains(moved.spec.Command, "sess-1") || moved.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.ada.id) {
+	if !slices.Contains(moved.spec.Command, "s1") || moved.spec.Env["AETHER_ACCOUNT_MEMBER_ID"] != string(e.ada.id) {
 		t.Fatalf("the run's container after the move: %+v", moved.spec)
 	}
 	for noted := false; !noted; {

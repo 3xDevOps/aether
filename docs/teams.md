@@ -1092,8 +1092,9 @@ the dashboard shows as **Needs you**. With fallback off the reason ends
 `the agent has not reported a session to resume`. A move that fails once the
 old container is gone fails the run with `Usage limit reached on Grace's
 account; continuing on Lin's account failed: <error>`; an Enhanced session
-that cannot be restored on Lin's account parks the run there with that
-reason. A run that hits the limit again on Lin's account moves on to the
+that cannot be restored on Lin's account parks the run there with
+`Usage limit reached on Grace's account; the run is on Lin's account and its
+session could not be restored: <error>`. A run that hits the limit again on Lin's account moves on to the
 next account.
 
 Metered cost stays with the account that spent it: a result counts for the
@@ -1101,7 +1102,8 @@ account the run was on when the agent reported it, even when it is recorded
 after the move. `aether cost` counts a moved run once, on the account it
 launched on (as unmetered when nothing was measured there), and adds each
 stretch's usage to the account it ran on; `aether cost --runs` lists the run once,
-with its whole spend, under the account it is on last.
+with its whole spend, under the account it is on now, and marks it metered
+only when its first account's stretch was measured.
 
 ### Launching a swarm
 

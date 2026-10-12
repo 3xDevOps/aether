@@ -410,9 +410,9 @@ func TestReportKeepsDeletedRunSpendInTotalsButNotInTheRunList(t *testing.T) {
 // moves to Grace's and is metered again. Ada's result arrives only after the
 // move, and still counts for Ada: a result belongs to the segment it was
 // published in. Each account keeps what it spent, the run counts once, on the
-// account it launched on, and lists as one row. A second run, measured only
-// after its move, counts on Ada's account as unmetered. Deleting the runs
-// keeps every figure.
+// account it launched on, and lists as one row under the account it is on
+// now. A second run, measured only after its move, counts on Ada's account
+// as unmetered, and its row says so. Deleting the runs keeps every figure.
 func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 	ctx := context.Background()
 	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
@@ -480,8 +480,9 @@ func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 			rep.Members[0] != want[0] || rep.Members[1] != want[1] || len(rep.Runs) != listed {
 			t.Fatalf("%s: report total %+v members %+v runs %d", when, rep.Total, rep.Members, len(rep.Runs))
 		}
-		if listed == 2 && (rep.Runs[0].CostUSD+rep.Runs[1].CostUSD != 9 || rep.Runs[0].MemberID != grace.ID) {
-			t.Fatalf("%s: run rows %+v %+v, want $9 in all on Grace's account", when, rep.Runs[0], rep.Runs[1])
+		if listed == 2 && (rep.Runs[0].CostUSD != 5 || rep.Runs[1].CostUSD != 4 || rep.Runs[0].MemberID != grace.ID ||
+			rep.Runs[1].MemberID != grace.ID || !rep.Runs[0].Metered || rep.Runs[1].Metered) {
+			t.Fatalf("%s: run rows %+v %+v, want $5 metered and $4 unmetered, both on Grace's account", when, rep.Runs[0], rep.Runs[1])
 		}
 		summary, sumErr := db.SummarizeRunCosts(ctx, ws.ID)
 		if sumErr != nil || summary != (store.RunCostSummary{Runs: 2, Metered: 1, Unmetered: 1, InputTokens: 300, OutputTokens: 30, CostUSD: 9}) {

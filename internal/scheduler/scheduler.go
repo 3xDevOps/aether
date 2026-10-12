@@ -551,18 +551,35 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	// Subscribed before recovery, so a usage limit published meanwhile
+	// waits for the run recovery brings back.
+	limits, err := s.subscribeUsageLimits(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("scheduler: subscribe to usage limits: %w", err)
+	}
 	if err := s.recoverRuns(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	if err := s.recoverTerminals(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	if err := s.recoverDevelopment(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
-	output, closeOutput := s.watchAgentOutput(ctx)
-	defer closeOutput()
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		s.watchUsageLimits(watchCtx, limits)
+	}()
+	defer func() {
+		stopWatch()
+		<-watched
+	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute
@@ -582,12 +599,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
-		case e, ok := <-output:
-			if !ok {
-				output = nil
-				continue
-			}
-			s.applyAgentOutput(e)
 		case <-sweep.C:
 			s.checkStalls(ctx)
 			s.finishOverdueReports()

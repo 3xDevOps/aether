@@ -1335,9 +1335,22 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 		return
 	}
 	entry.finalizing = true
+	moving := entry.usageLimit != "" && sc.ExitCode != 0
+	if moving {
+		s.wg.Add(1)
+	}
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
-	s.finalize(entry, sc.ExitCode)
+	if !moving {
+		s.finalize(entry, sc.ExitCode)
+		return
+	}
+	// A move to another account can take minutes; the other runs' recovery
+	// does not wait for it.
+	go func() {
+		defer s.wg.Done()
+		s.finalize(entry, sc.ExitCode)
+	}()
 }
 
 func (s *Scheduler) preserveRecoveryEvidence(ctx context.Context, run *domain.Run) error {

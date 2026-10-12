@@ -578,21 +578,25 @@ agent to continue; a turn that had already ended finishes the run.
 When an agent reports that its account's usage limit stopped it
 ([signals](harnesses.md#usage-limit-signals)), Aether moves the run to
 another account ([teams.md](teams.md#usage-fallback)). Under the shared
-authorization lock it checks again that the run's owner, and the member
-whose home the container mounts, may launch, chooses the account, and
-records the run on it: a segment appended to `run_account_segments` and
-`runs.account_member_id` set. It then releases the lock, stops the agent,
-removes the container, creates one with the new account's login, and
-resumes the agent's session there. The move has five minutes.
+authorization lock it reads the run again, checks that its current owner,
+and the member whose home the container mounts, may launch, chooses the
+account, and records the run on it: a segment appended to
+`run_account_segments` and `runs.account_member_id` set. A handoff or kill
+while the move read quota is decided on there: an account the new owner
+cannot use is left out, and a run being killed is not recorded anywhere
+new. It then releases the lock, stops the agent, removes the container,
+creates one with the new account's login, and resumes the agent's session
+there. The move has five minutes, and the run's finish afterwards gets its
+own. A server that stops mid-move leaves the marker below for recovery.
 
 | Outcome | What happens |
 | --- | --- |
 | Moved | The run carries on with the same ID, checkout, branch and room. A `run.account` event and a room note announce it. An Enhanced session gets its continuation prompt after the move has let go of the run, so a second limit moves it again, to an account it has not used. |
-| No account qualifies | Nothing is removed. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
+| No account qualifies | Nothing is removed. An account whose check failed (an unreadable installation, a store error) is left out; when none qualified and a check failed, the reason is the `cannot continue` one below with those errors. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
 | Fallback is off for the run | The same, with `Usage limit reached on <owner>'s account; fallback is off for this run`. |
 | The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
 | The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. |
-| The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with the same `continuing on <B>'s account failed` reason; a Background run fails with it. No room note is posted. |
+| The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>`; a Background run fails with it. No room note is posted. |
 | The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
 | The run is paused, switching mode, being killed or closed, or finishing a reported outcome | No move: the run ends its turn or exits as it would without fallback. |
 
@@ -600,7 +604,12 @@ A headless agent's usage limit is read from its output by the adapter,
 which reads only the current agent process's output: what an earlier
 process printed, before a restart or a move, is never read again. The limit
 is kept in the run's sidecar, so a run whose agent exited while the server
-was down still moves when recovery finalizes it.
+was down still moves when recovery finalizes it; that move runs beside the
+recovery of other runs, not before it. The scheduler subscribes to usage
+limits before recovery and resubscribes with replay from the last limit it
+handled if the stream drops an event or closes. Once a move has acted on a
+limit (moved, no account, or no move possible), the limit is cleared, so a
+later unrelated exit is not taken for it.
 
 From recording the account until the move finishes, the run's sidecar holds
 an `account_swap` marker naming both accounts, the new container once it

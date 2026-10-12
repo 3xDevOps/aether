@@ -86,7 +86,8 @@ type Report struct {
 }
 
 // Roll aggregates a workspace's run records into a report: one row per
-// run, its segments' usage summed under the account it is on last. Members
+// run, its segments' usage summed under the account it is on now, metered as
+// the rollups count it, by segment 0. Members
 // are ordered by ID so the output is stable; runs keep the order of their
 // first record (the store lists them oldest first).
 func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
@@ -104,18 +105,20 @@ func Roll(workspace domain.WorkspaceID, records []*store.RunCost) Report {
 		m.Add(c, counted)
 		run := runs[c.RunID]
 		if run == nil {
-			run = &store.RunCost{RunID: c.RunID, WorkspaceID: c.WorkspaceID, Segment: -1}
+			run = &store.RunCost{RunID: c.RunID, WorkspaceID: c.WorkspaceID, MemberID: c.RunAccountMemberID}
+			if run.MemberID == "" {
+				run.MemberID = c.MemberID
+			}
 			runs[c.RunID] = run
 			rep.Runs = append(rep.Runs, run)
 		}
-		run.Metered = run.Metered || c.Metered
+		if counted {
+			run.Metered = c.Metered
+		}
 		if c.Metered {
 			run.InputTokens += c.InputTokens
 			run.OutputTokens += c.OutputTokens
 			run.CostUSD += c.CostUSD
-		}
-		if c.Segment > run.Segment {
-			run.Segment, run.MemberID = c.Segment, c.MemberID
 		}
 		if c.RecordedAt.After(run.RecordedAt) {
 			run.RecordedAt = c.RecordedAt

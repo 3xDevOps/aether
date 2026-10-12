@@ -28,6 +28,9 @@ type RunCost struct {
 	CostUSD      float64
 	Metered      bool
 	RecordedAt   time.Time
+	// RunAccountMemberID is the account the run is on now, which
+	// ListWorkspaceCosts reads from the run.
+	RunAccountMemberID domain.MemberID
 }
 
 // WorkspaceBudget is a workspace's spend cap. LimitUSD is the hard cap new
@@ -181,12 +184,26 @@ func (d *DB) ListWorkspaceCosts(ctx context.Context, workspace domain.WorkspaceI
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.QueryContext(ctx,
-		`SELECT `+runCostCols+` FROM run_costs WHERE workspace_id = ? ORDER BY recorded_at, run_id, segment`, workspace)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT c.run_id, c.segment, c.workspace_id, c.member_id, c.input_tokens, c.output_tokens, c.cost_usd, c.metered, c.recorded_at,
+		       COALESCE(r.account_member_id, r.member_id)
+		FROM run_costs c JOIN runs r ON r.id = c.run_id
+		WHERE c.workspace_id = ? ORDER BY c.recorded_at, c.run_id, c.segment`, workspace)
 	if err != nil {
 		return nil, nil, fmt.Errorf("store: list workspace costs: %w", err)
 	}
-	records, err := collect(rows, scanRunCost)
+	records, err := collect(rows, func(row interface{ Scan(...any) error }) (*RunCost, error) {
+		var (
+			c          RunCost
+			recordedAt int64
+		)
+		if scanErr := row.Scan(&c.RunID, &c.Segment, &c.WorkspaceID, &c.MemberID, &c.InputTokens,
+			&c.OutputTokens, &c.CostUSD, &c.Metered, &recordedAt, &c.RunAccountMemberID); scanErr != nil {
+			return nil, scanErr
+		}
+		c.RecordedAt = decodeTime(recordedAt)
+		return &c, nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}

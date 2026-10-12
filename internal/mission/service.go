@@ -401,7 +401,9 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				return fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
 			}
 			if err = authorizeDeclared(); err == nil {
-				req.AccountOwner, err = fallback.Select(ctx, s.cfg.Store, measured, req.RunOwnerID, req.RequestedAccount, current.Fallback, s.launchable(req.RunOwnerID, req.RequestedAccount, req.Harness, req.Mode))
+				var excluded error
+				req.AccountOwner, excluded = fallback.Select(ctx, s.cfg.Store, measured, req.RunOwnerID, req.RequestedAccount, current.Fallback, s.launchable(req.RunOwnerID, req.RequestedAccount, req.Harness, req.Mode))
+				logExcluded(req.RunID, excluded)
 			}
 		} else {
 			attempt, attemptErr := s.cfg.Missions.GetAttempt(ctx, req.AttemptID)
@@ -867,10 +869,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if m.IntegratorRunLaunched || m.Phase.Terminal() {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, m.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
-	if err != nil {
-		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
-	}
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, m.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
+	logExcluded(m.CurrentIntegratorRunID, excluded)
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: m.CurrentIntegratorRunID,
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
@@ -980,10 +980,8 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if replaced.IntegratorRunLaunched || replaced.Phase.Terminal() {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(replaced.CurrentIntegratorRunID)}, nil
 	}
-	account, err := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, replaced.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
-	if err != nil {
-		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, err
-	}
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, replaced.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
+	logExcluded(replaced.CurrentIntegratorRunID, excluded)
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: replaced.WorkspaceID, RunID: replaced.CurrentIntegratorRunID,
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,
@@ -999,6 +997,14 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 			fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", replaced.ID, launched.ID, recordErr)
 	}
 	return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced), RunID: string(launched.ID)}, nil
+}
+
+// logExcluded keeps visible why fallback accounts were left out of a launch
+// that went ahead without them.
+func logExcluded(run domain.RunID, excluded error) {
+	if excluded != nil {
+		slog.Warn("mission: fallback accounts left out of a launch", "run", run, "error", excluded)
+	}
 }
 
 func (s *Service) launchable(launcher, requested domain.MemberID, harness string, mode domain.LaunchMode) fallback.Launchable {

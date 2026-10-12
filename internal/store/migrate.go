@@ -1584,9 +1584,10 @@ CREATE INDEX idx_push_subscriptions_member ON push_subscriptions(member_id);
 	// fallback policy (fallback_order is a JSON array of member IDs, empty
 	// for automatic); a swarm records the policy its runs follow; an
 	// attempt records the account its run launches on. Earlier rows read
-	// as automatic and launched on the requested account.
+	// as automatic and launched on the requested account; a run's requested
+	// account is NULL unless it differs from the one it runs on.
 	`
-ALTER TABLE runs ADD COLUMN requested_account_member_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN requested_account_member_id TEXT REFERENCES members(id);
 ALTER TABLE runs ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE missions ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
@@ -1602,7 +1603,7 @@ ALTER TABLE mission_attempts ADD COLUMN launch_account_id TEXT NOT NULL DEFAULT 
 CREATE TABLE run_account_segments (
 	run_id            TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
 	seq               INTEGER NOT NULL,
-	account_member_id TEXT NOT NULL,
+	account_member_id TEXT NOT NULL REFERENCES members(id),
 	reason            TEXT NOT NULL,
 	started_at        INTEGER NOT NULL,
 	PRIMARY KEY (run_id, seq)
