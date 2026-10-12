@@ -161,14 +161,22 @@ func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool, message st
 // releaseMoveClaim gives up a move's claim on a run that stays where it is.
 // The wait for the container's exit leaves an exit it saw while the move held
 // the claim to the claim's owner, so a container that exited or was killed
-// meanwhile is finalized here. It reports whether it finalized the run.
+// meanwhile is finalized here. A move that already completed released its
+// claim and has nothing left to release. It reports whether it finalized the
+// run.
 func (s *Scheduler) releaseMoveClaim(entry *supervised) bool {
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
-	entry.finalizing, entry.moving = false, false
+	held := entry.moving
+	if held {
+		entry.finalizing, entry.moving = false, false
+	}
 	cid := entry.containerID
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
+	if !held {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ExitProbeTimeout)
 	st, err := s.cfg.Runtime.Wait(ctx, cid)
 	cancel()
@@ -176,6 +184,10 @@ func (s *Scheduler) releaseMoveClaim(entry *supervised) bool {
 	case errors.Is(err, runtime.ErrNotFound):
 		st.Code = -1
 	case err != nil:
+		s.mu.Lock()
+		entry.waitStarted = false
+		s.mu.Unlock()
+		s.startSupervision(entry)
 		return false
 	}
 	entry.lifecycleMu.Lock()
@@ -408,7 +420,12 @@ func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, r
 	s.mu.Lock()
 	entry := s.runs[run]
 	if entry != nil && entry.moving {
-		// The move in flight replaces the agent that reported this.
+		// The move in flight replaces the agent that reported this, unless
+		// the report is the replacement's: the move follows that limit once
+		// it is done.
+		if entry.containerID != "" && entry.containerID != entry.moveFrom {
+			s.setUsageLimitLocked(entry, report.Reason)
+		}
 		s.mu.Unlock()
 		return true
 	}
@@ -435,9 +452,7 @@ func (s *Scheduler) subscribeUsageLimits(ctx context.Context, after uint64, repl
 	if replay && s.cfg.EventSeq != nil {
 		replayed := opts
 		replayed.Replay, replayed.AfterSeq = true, after
-		if sub, err := s.cfg.Bus.Subscribe(ctx, replayed); err == nil {
-			return sub, nil
-		}
+		return s.cfg.Bus.Subscribe(ctx, replayed)
 	}
 	return s.cfg.Bus.Subscribe(ctx, opts)
 }
@@ -466,21 +481,29 @@ func (s *Scheduler) watchUsageLimits(ctx context.Context, sub events.Subscriptio
 			delay = min(2*delay, usageStreamRetryMax)
 		}
 		last = handled
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
+		for {
+			if delay > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(delay):
+				}
+			}
+			next, err := s.subscribeUsageLimits(ctx, last, true)
+			if err == nil {
+				sub = next
+				break
+			}
+			if errors.Is(err, events.ErrBusClosed) || ctx.Err() != nil {
 				return
-			case <-time.After(delay):
+			}
+			if delay == 0 {
+				slog.Warn("scheduler: resubscribe to usage limits; retrying", "error", err)
+				delay = usageStreamRetry
+			} else {
+				delay = min(2*delay, usageStreamRetryMax)
 			}
 		}
-		next, err := s.subscribeUsageLimits(ctx, last, true)
-		if err != nil {
-			if !errors.Is(err, events.ErrBusClosed) && ctx.Err() == nil {
-				slog.Warn("scheduler: resubscribe to usage limits; headless runs will not continue on another account", "error", err)
-			}
-			return
-		}
-		sub = next
 	}
 }
 
@@ -718,6 +741,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	s.mu.Lock()
 	cid := entry.containerID
+	entry.moveFrom = cid
 	s.mu.Unlock()
 	failed := func(err error) (usageOutcome, string) {
 		if s.superCtx.Err() != nil {
@@ -847,9 +871,16 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 	}
 	switch {
-	case run.ACP:
+	case again == "" && run.ACP:
 		s.acp.sendContinuation(entry)
-	case again != "" && persistSupervisor:
+	case again == "":
+	case run.ACP:
+		s.goMove(func() {
+			s.acp.usageLimit(entry, run.Mode == domain.LaunchHeadless, "error", errors.New(again), again)
+		})
+	case run.Mode == domain.LaunchTUI:
+		s.goMove(func() { s.continueStandard(entry, again) })
+	case persistSupervisor:
 		s.markUsageLimit(run.ID, again, "")
 	}
 	return usageContinued, ""

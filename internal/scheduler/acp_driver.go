@@ -444,13 +444,13 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		c.svc.EnhancedSessionOpened(ctx, runID)
 	}
 	switch {
-	case how == openContinue:
 	case oneShot && marked:
 		// The move a persisted usage limit owes after a restart decides
 		// how the failed turn ends.
 	case oneShot && modelErr != nil:
 		// Unattended, the task would otherwise run on the agent's default model.
 		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
+	case how == openContinue:
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":
@@ -504,6 +504,15 @@ func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, f
 		report := agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
 		if !oneShot {
 			d.report(entry.runID, report)
+			return
+		}
+		d.mu.Lock()
+		r := d.runs[entry.runID]
+		ended := r != nil && r.ended
+		d.mu.Unlock()
+		if ended {
+			// The replacement's open already ended the run with its own
+			// reason.
 			return
 		}
 		d.s.mu.Lock()

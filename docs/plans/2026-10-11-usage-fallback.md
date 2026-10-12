@@ -30,7 +30,8 @@ one account.
 2. **Order.** Automatic: most remaining usage first, read through
    `internal/quota` from the windows the agent draws on: Claude `five_hour`
    and `seven_day`, Codex `primary` and `secondary`. Claude's per-model
-   windows are ignored because Aether does not know the run's model.
+   windows are ignored because a run's model can change mid-run and an unset
+   model is the agent's own choice.
    Remaining is 100 minus the highest used percent among those windows that
    have not reset; ties go to the lower member id. The launcher can instead
    give an explicit list, tried in order (reordering or excluding accounts),

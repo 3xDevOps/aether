@@ -265,6 +265,61 @@ func TestManagerStartupScan(t *testing.T) {
 	}
 }
 
+// sessionTap serves one reader per PTY session, in order, and refuses once
+// they are used up.
+type sessionTap struct {
+	mu       sync.Mutex
+	sessions []io.ReadCloser
+}
+
+func (s *sessionTap) TapOutput(domain.RunID) (io.ReadCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.sessions) == 0 {
+		return nil, io.ErrClosedPipe
+	}
+	r := s.sessions[0]
+	s.sessions = s.sessions[1:]
+	return r, nil
+}
+
+// TestManagerTapsReplacementSessionAfterOldTapEnds: when the old session's
+// tap is still active as a move's account event is lost, the tap on the
+// replacement session opens once the old one ends.
+func TestManagerTapsReplacementSessionAfterOldTapEnds(t *testing.T) {
+	data, err := os.ReadFile("testdata/claude_tty.jsonl")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	const (
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
+	)
+	bus := newTestBus(t)
+	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
+		run: {ID: run, WorkspaceID: workspace, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+	}}
+	oldR, oldW := io.Pipe()
+	tap := &sessionTap{sessions: []io.ReadCloser{oldR, io.NopCloser(bytes.NewReader(data))}}
+	sub, err := bus.Subscribe(t.Context(), events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeAgentEvent, events.TypeRunCost}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	startManager(t, bus, runs, tap)
+	_ = oldW.Close()
+
+	want := fixturePayloads()
+	var payloads []events.Payload
+	for _, e := range collect(t, sub, len(want), 5*time.Second) {
+		payloads = append(payloads, e.Payload)
+	}
+	assertPayloads(t, payloads, want)
+}
+
 type pipeTap struct {
 	mu sync.Mutex
 	n  int

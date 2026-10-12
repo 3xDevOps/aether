@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"slices"
@@ -32,6 +33,14 @@ func (u claudeUsage) Read(_ context.Context, account domain.MemberID, _ bool) ([
 	return []quota.Provider{{Provider: "claude", Status: "ok", Windows: []quota.Window{
 		{ID: "five_hour", UsedPercent: u[account], ResetsAt: &resets},
 	}}}, nil
+}
+
+// codexUsage reports every account's Codex windows as unused.
+type codexUsage struct{}
+
+func (codexUsage) Read(context.Context, domain.MemberID, bool) ([]quota.Provider, error) {
+	resets := time.Now().Add(time.Hour)
+	return []quota.Provider{{Provider: "codex", Status: "ok", Windows: []quota.Window{{ID: "primary", ResetsAt: &resets}}}}, nil
 }
 
 type roomNotes struct {
@@ -236,6 +245,18 @@ func TestHandedOffRunMovesOnlyToAccountsSharedWithItsHome(t *testing.T) {
 // supervising it.
 func TestRunThatExitsDuringAFailedMoveIsFinalized(t *testing.T) {
 	t.Parallel()
+	testExitDuringFailedMove(t, false)
+}
+
+// The move's probe of the exited container fails with a transient runtime
+// error; supervision restarts and observes the exit itself.
+func TestRunThatExitsDuringAFailedMoveIsFinalizedAfterAProbeError(t *testing.T) {
+	t.Parallel()
+	testExitDuringFailedMove(t, true)
+}
+
+func testExitDuringFailedMove(t *testing.T, probeFails bool) {
+	t.Helper()
 	e, _, _ := newFallbackEnv(t, enhancedClaude)
 	mu := &sync.Mutex{}
 	e.sched.UseUsageFallback(UsageFallback{Usage: claudeUsage{}, AuthorizationMu: mu})
@@ -253,7 +274,14 @@ func TestRunThatExitsDuringAFailedMoveIsFinalized(t *testing.T) {
 	})
 	e.rt.byName(string(run.ID)).exitNow(1)
 	time.Sleep(50 * time.Millisecond)
+	if probeFails {
+		e.rt.setWaitError(errors.New("runtime unavailable"))
+	}
 	mu.Unlock()
+	if probeFails {
+		time.Sleep(100 * time.Millisecond)
+		e.rt.setWaitError(nil)
+	}
 	if got := e.waitStoreStatus(t, run.ID, domain.RunFailed); !strings.HasPrefix(got.Reason, exitedFailedReasonPrefix) {
 		t.Fatalf("reason %q, want the exit", got.Reason)
 	}
@@ -463,6 +491,124 @@ func TestStandardRunContinuesOnAFallbackAccount(t *testing.T) {
 	}
 }
 
+// A usage-limit report the replacement's agent sends while the move is still
+// finishing is followed once the move is done: no account is left, so the
+// run stops with that reason instead of staying on an exhausted account.
+func TestReplacementLimitReportedDuringAMoveIsFollowed(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	limit, _ := agentstatus.FromClaudeHook([]byte(`{"session_id":"sess-1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 3pm (UTC)"}`))
+	var run *domain.Run
+	var starts atomic.Int32
+	launched := make(chan struct{})
+	e.rt.mu.Lock()
+	e.rt.startHook = func(c *fakeContainer) {
+		<-launched
+		if c.spec.Name == string(run.ID) && starts.Add(1) == 2 {
+			if err := e.sched.ReportAgentState(context.Background(), run.ID, limit); err != nil {
+				panic(err)
+			}
+		}
+	}
+	e.rt.mu.Unlock()
+	var err error
+	run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(launched)
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "sess-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, limit); err != nil {
+		t.Fatal(err)
+	}
+	e.assertMovedToOwner(t, run.ID, notes)
+	if got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); !strings.HasPrefix(got.Reason, usageLimitReason) {
+		t.Fatalf("reason %q, want the usage limit", got.Reason)
+	}
+}
+
+// While a move holds the run, a limit reported by the container it replaces
+// is a duplicate and one reported by the replacement's is kept.
+func TestMoveKeepsOnlyTheReplacementsLimit(t *testing.T) {
+	t.Parallel()
+	e, _, _ := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	limit, _ := agentstatus.FromClaudeHook([]byte(`{"session_id":"sess-1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 3pm (UTC)"}`))
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	entry.moving, entry.moveFrom = true, entry.containerID
+	e.sched.mu.Unlock()
+	marked := func() string {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return entry.usageLimit
+	}
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, limit); err != nil || marked() != "" {
+		t.Fatalf("old container's report: err %v, mark %q; want it ignored", err, marked())
+	}
+	e.sched.mu.Lock()
+	entry.moveFrom = "old"
+	e.sched.mu.Unlock()
+	if err = e.sched.ReportAgentState(t.Context(), run.ID, limit); err != nil || marked() != limit.Reason {
+		t.Fatalf("replacement's report: err %v, mark %q; want %q", err, marked(), limit.Reason)
+	}
+	e.sched.mu.Lock()
+	entry.moving = false
+	e.sched.mu.Unlock()
+}
+
+// A Background run moved to another account whose agent refuses the run's
+// model ends instead of continuing on the agent's default model, as a fresh
+// open does.
+func TestBackgroundRunMovedToAnAccountThatRefusesItsModelEnds(t *testing.T) {
+	t.Parallel()
+	e, rt, notes := newFallbackEnv(t, func(cfg *Config) {
+		cfg.Harnesses["codex"] = HarnessSpec{HeadlessArgs: []string{"fake-agent", "-p", "{task}"}, ACPArgs: []string{"acp-mock"}}
+	})
+	e.share(t)
+	writeHomeFiles(t, e.ownerHome, ".codex/auth.json")
+	e.sched.UseUsageFallback(UsageFallback{Usage: codexUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	e.rt.execHandler = func(id runtime.ID, argv []string) (int, string, error) {
+		c, err := e.rt.get(id)
+		if err != nil {
+			return 1, "", err
+		}
+		if strings.Join(argv, " ") == "/bin/sh -c kill -USR2 1" {
+			c.exitNow(1)
+		}
+		return 0, "", nil
+	}
+	var creates atomic.Int32
+	e.rt.createHook = func() {
+		if creates.Add(1) == 2 {
+			// The restored session lists no configOptions, so the model goes
+			// through session/set_model, which the mock agent does not
+			// implement.
+			rt.fixture.Load.Result = json.RawMessage(`{}`)
+		}
+	}
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, acpmock.PromptUsageLimit, "codex", domain.LaunchHeadless, domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if !strings.Contains(got.Reason, "model not set: ") {
+		t.Fatalf("reason %q, want the refused model", got.Reason)
+	}
+	for _, exec := range rt.all()[1:] {
+		if slices.Contains(exec.agent.Methods(), acp.AgentMethodSessionPrompt) {
+			t.Fatal("the continuation ran on the agent's default model")
+		}
+	}
+}
+
 // A move records the run on Grace's account before it replaces the
 // container, and a server can stop anywhere after. With the move's own
 // container recorded, the restart resumes the session on Grace's account and
@@ -475,7 +621,7 @@ func TestRestartSettlesAnInterruptedAccountMove(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		container string
-	}{{"new container recorded", "new"}, {"no container recorded", "none"}, {"old container on a moved run", "old"}} {
+	}{{"new container recorded", "new"}, {"no container recorded", "none"}, {"no container and no move marker", "unmarked"}, {"old container on a moved run", "old"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e, rt, _ := newFallbackEnv(t, enhancedClaude)
@@ -500,6 +646,8 @@ func TestRestartSettlesAnInterruptedAccountMove(t *testing.T) {
 				sc.AccountSwap.Container = sc.ContainerID
 			case "none":
 				sc.ContainerID = ""
+			case "unmarked":
+				sc.ContainerID, sc.AccountSwap = "", nil
 			}
 			if err = e.sched.writeSidecar(sc); err != nil {
 				t.Fatal(err)

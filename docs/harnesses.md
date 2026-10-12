@@ -55,7 +55,8 @@ refreshing it. An account counts as exhausted when any window a run draws on
 that has not reset is at 95% used or more (`fallback.ExhaustedPercent` in
 `internal/fallback`): `five_hour` and `seven_day` for `claude`, `primary`
 and `secondary` for `codex`. Claude's per-model weekly windows are ignored,
-because Aether does not know which model a run uses. A row other than `ok`
+because a run's model can change mid-run and an unset model is the agent's
+own choice. A row other than `ok`
 means unknown usage, never exhausted.
 
 ### Usage-limit signals

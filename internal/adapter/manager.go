@@ -176,17 +176,38 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace
 	go m.pump(workspace, run, a, tap)
 }
 
+// reattachIfRunning taps the run's current PTY session after the tap on its
+// previous one ended: a dropped account-move event leaves the replacement
+// session untapped, since a move publishes no running transition. Only a
+// session that ended cleanly counts, so a tap the host detached from a
+// live session is never replaced by a second replay of it.
+func (m *Manager) reattachIfRunning(workspace domain.WorkspaceID, run domain.RunID) {
+	r, err := m.runs.GetRun(context.Background(), run)
+	if err != nil {
+		slog.Warn("adapter: resolve run failed", "run", run, "error", err)
+		return
+	}
+	if r.Status == domain.RunRunning {
+		m.attach(workspace, run, false)
+	}
+}
+
 // pump reads the tap to EOF (the PTY session ending), normalizing chunks
 // into lines and publishing what the adapter makes of them.
 func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter, tap io.ReadCloser) {
 	defer m.wg.Done()
+	ended := false
 	defer func() {
 		m.mu.Lock()
-		if m.active[run] == tap {
+		current := m.active[run] == tap
+		if current {
 			delete(m.active, run)
 		}
 		m.mu.Unlock()
 		_ = tap.Close()
+		if ended && current {
+			m.reattachIfRunning(workspace, run)
+		}
 	}()
 	var norm LineNormalizer
 	buf := make([]byte, 32*1024)
@@ -198,6 +219,7 @@ func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter
 			}
 		}
 		if err != nil {
+			ended = err == io.EOF
 			// The final line of a run may lack a terminator.
 			if line, ok := norm.Flush(); ok {
 				m.publish(workspace, run, a.ConsumeLine(line))

@@ -1232,19 +1232,21 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		}
 		return
 	}
+	// A sidecar without a container, a failed account move's or a launch's
+	// that never recorded one, names nothing to wait on: any container is
+	// destroyed and the run interrupted.
+	if sc.ContainerID == "" {
+		s.recoverUnstarted(ctx, r)
+		return
+	}
 	// A move to another account the previous process did not finish. With
-	// no container, the old one is gone and the new one never recorded: any
-	// container is destroyed and the run interrupted. With the move's own
-	// container, the run is on the new account and an Enhanced session gets
-	// the continuation it is owed. With the old container on a row already
+	// the move's own container, the run is on the new account and an
+	// Enhanced session gets the continuation it is owed. With the old container on a row already
 	// moved, the container mounts a login the run no longer records, so it
 	// is destroyed and the run interrupted. Otherwise the move never
 	// recorded the account and the run carries on where it was.
 	if swap := sc.AccountSwap; swap != nil {
 		switch {
-		case sc.ContainerID == "":
-			s.recoverUnstarted(ctx, r)
-			return
 		case sc.ContainerID == swap.Container:
 			if swap.Continuation == "" {
 				s.dropAccountSwap(r.ID, &sc)
@@ -1295,6 +1297,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		entry := s.adoptLiveSidecar(r, sc)
 		if entry != nil {
 			s.startSupervision(entry)
+			s.resumeUsageMove(entry)
 		}
 	}
 }

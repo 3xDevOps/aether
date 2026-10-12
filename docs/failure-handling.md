@@ -602,6 +602,7 @@ for the next server, whose recovery moves it as described below.
 | The old container cannot be removed | The run stays recorded on its account and fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: remove the container on <A>'s account: <error>`. It keeps owning that container, which may still run, as a run whose destroy failed: cleanup retries until it is gone. A swarm worker does the same; its container is not kept for the swarm. |
 | The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. A swarm worker has no container left to retain, so it finishes at once and its attempt settles as failed. |
 | The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>`; a Background run fails with it. No room note is posted. |
+| A Background run's model cannot be set on the new account | The run fails with `model not set: <error>`, as at launch, rather than continue on the agent's default model. |
 | The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
 | The run is paused, switching mode, being killed or closed, or finishing a reported outcome | No move: the run ends its turn or exits as it would without fallback. |
 
@@ -623,7 +624,9 @@ run's or an Enhanced run's. A run that recovery then cannot move gets the
 report it would have had without fallback (a Standard run idles with the
 agent's own message, an Enhanced turn fails as without fallback), or the
 reason it cannot move as in the table above. A second report of a limit
-while a move holds the run neither reports nor clears it, and a move owed
+while a move holds the run neither reports nor clears it, but a limit the
+replacement container reports before the move finishes is kept and followed
+when it does, and a move owed
 for a limit another move already acted on does nothing. The scheduler
 subscribes to usage limits before recovery, replaying from the event log's
 position, and resubscribes with replay from the last limit it handled if
@@ -641,8 +644,10 @@ crash reads it first:
 - **The sidecar names the new container**: the run is recovered on the new
   account like any other surviving or lost container, and an Enhanced
   session that was not sent its continuation is sent it.
-- **The sidecar names no container**: the old one was removed and the new
-  one, if created, was never recorded. The run is handled as one that never
+- **The sidecar names no container**, with or without the marker (a move
+  that failed after removing the old container clears it): the old one was
+  removed and the new one, if created, was never recorded. The run is handled
+  as one that never
   started: a container found by its creation key is destroyed, partial work
   is preserved, and the run is marked `interrupted`.
 - **The sidecar still names the old container**: the move recorded nothing

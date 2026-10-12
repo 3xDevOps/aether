@@ -368,9 +368,12 @@ type supervised struct {
 	// failReason replaces the exit code in the reason of a run finalize
 	// fails.
 	failReason string
-	// moving is set while a move holds the run's finalizing claim. noRetain
-	// is set by a move that failed: a swarm keeps no container of it.
+	// moving is set while a move holds the run's finalizing claim, and
+	// moveFrom is the container it replaces: once the entry has another, it
+	// is the replacement's. noRetain is set by a move that failed: a swarm
+	// keeps no container of it.
 	moving   bool
+	moveFrom runtime.ID
 	noRetain bool
 }
 
