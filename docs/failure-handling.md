@@ -611,7 +611,9 @@ which reads only the current agent process's output: what an earlier
 process printed, before a restart or a move, is never read again. A
 replacement that prints its result and exits before the adapter attaches
 is still read, once, from its own part of the transcript; a session the
-scheduler stopped, or one already read, is not.
+scheduler stopped, or one already read, is not. If the adapter misses a
+move's `run.account` event, its next scan of running runs sees the run on
+another account than the one it read and reads the replacement.
 
 Every usage limit, whichever agent reported it (headless output, a Standard
 run's hook, an Enhanced turn's error), is kept in the run's sidecar until a
@@ -626,7 +628,8 @@ agent's own message, an Enhanced turn fails as without fallback), or the
 reason it cannot move as in the table above. A second report of a limit
 while a move holds the run neither reports nor clears it, but a limit the
 replacement container reports before the move finishes is kept and followed
-when it does, and a move owed
+when it does (an Enhanced session's pending continuation is dropped then,
+not sent later), and a move owed
 for a limit another move already acted on does nothing. The scheduler
 subscribes to usage limits before recovery, replaying from the event log's
 position, and resubscribes with replay from the last limit it handled if

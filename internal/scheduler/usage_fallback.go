@@ -132,7 +132,7 @@ func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool, message st
 	skipped := entry.moving || entry.usageLimit != message
 	claimed := !skipped && s.usageMovableLocked(entry, terminal) && !entry.finalizing && !entry.exitObserved
 	if claimed {
-		entry.finalizing, entry.moving = true, true
+		entry.finalizing, entry.moving, entry.moveFrom = true, true, entry.containerID
 	}
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
@@ -169,7 +169,7 @@ func (s *Scheduler) releaseMoveClaim(entry *supervised) bool {
 	s.mu.Lock()
 	held := entry.moving
 	if held {
-		entry.finalizing, entry.moving = false, false
+		entry.finalizing, entry.moving, entry.moveFrom = false, false, ""
 	}
 	cid := entry.containerID
 	s.mu.Unlock()
@@ -184,14 +184,23 @@ func (s *Scheduler) releaseMoveClaim(entry *supervised) bool {
 	case errors.Is(err, runtime.ErrNotFound):
 		st.Code = -1
 	case err != nil:
+		// A container still running leaves its wait in place. Only a wait
+		// that yielded to this move, and so saw an exit this probe could not
+		// read, is replaced.
 		s.mu.Lock()
-		entry.waitStarted = false
+		yielded := entry.waitYielded
+		if yielded {
+			entry.waitStarted, entry.waitYielded = false, false
+		}
 		s.mu.Unlock()
-		s.startSupervision(entry)
+		if yielded {
+			s.startSupervision(entry)
+		}
 		return false
 	}
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
+	entry.waitYielded = false
 	claimed := s.runs[entry.runID] == entry && entry.containerID == cid && !entry.finalizing && !entry.retained
 	if claimed {
 		entry.finalizing = true
@@ -233,7 +242,7 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 	// A successful move already dropped the old container's mark; a mark
 	// left now is the new container's.
 	s.mu.Lock()
-	entry.moving = true
+	entry.moving, entry.moveFrom = true, entry.containerID
 	s.mu.Unlock()
 	outcome, reason := s.moveAccount(ctx, entry)
 	switch outcome {
@@ -241,7 +250,7 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 		return true
 	}
 	s.mu.Lock()
-	entry.moving = false
+	entry.moving, entry.moveFrom = false, ""
 	s.mu.Unlock()
 	s.clearUsageLimit(entry)
 	s.mu.Lock()
@@ -423,10 +432,15 @@ func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, r
 		// The move in flight replaces the agent that reported this, unless
 		// the report is the replacement's: the move follows that limit once
 		// it is done.
+		newSession := false
 		if entry.containerID != "" && entry.containerID != entry.moveFrom {
+			newSession = s.recordReportedSessionLocked(entry, report.SessionID)
 			s.setUsageLimitLocked(entry, report.Reason)
 		}
 		s.mu.Unlock()
+		if newSession {
+			s.recordAgentSession(ctx, entry)
+		}
 		return true
 	}
 	movable := entry != nil && s.usageMovableLocked(entry, true) && !entry.finalizing && !entry.exitObserved
@@ -528,7 +542,7 @@ func (s *Scheduler) consumeUsageLimits(ctx context.Context, sub events.Subscript
 
 func (s *Scheduler) finalizeWithReason(entry *supervised, reason string) {
 	s.mu.Lock()
-	entry.failReason, entry.moving = reason, false
+	entry.failReason, entry.moving, entry.moveFrom = reason, false, ""
 	s.mu.Unlock()
 	s.finalize(entry, -1)
 }
@@ -741,7 +755,6 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	s.mu.Lock()
 	cid := entry.containerID
-	entry.moveFrom = cid
 	s.mu.Unlock()
 	failed := func(err error) (usageOutcome, string) {
 		if s.superCtx.Err() != nil {
@@ -841,7 +854,8 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	if !run.ACP {
 		entry.accountSwap = nil
 	}
-	entry.finalizing, entry.moving, entry.waitStarted = false, false, false
+	entry.finalizing, entry.moving, entry.moveFrom = false, false, ""
+	entry.waitStarted, entry.waitYielded = false, false
 	again := entry.usageLimit
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: persist the account move", "run", run.ID, "error", werr)
@@ -875,6 +889,8 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		s.acp.sendContinuation(entry)
 	case again == "":
 	case run.ACP:
+		// The follow-up move supersedes the continuation this one owed.
+		s.clearAccountSwap(entry, swap)
 		s.goMove(func() {
 			s.acp.usageLimit(entry, run.Mode == domain.LaunchHeadless, "error", errors.New(again), again)
 		})

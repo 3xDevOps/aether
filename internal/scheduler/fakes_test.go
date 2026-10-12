@@ -31,6 +31,7 @@ type fakeRuntime struct {
 	createHook  func()
 	stopErr     error
 	destroyErr  error
+	waitCalls   int
 	startErr    error
 	waitErr     error
 	startHook   func(c *fakeContainer)
@@ -363,6 +364,7 @@ func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
 	r.mu.Lock()
+	r.waitCalls++
 	waitErr := r.waitErr
 	r.mu.Unlock()
 	if waitErr != nil {

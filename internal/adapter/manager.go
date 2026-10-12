@@ -37,6 +37,9 @@ type Manager struct {
 
 	mu     sync.Mutex
 	active map[domain.RunID]io.Closer
+	// tapped is the account each run was on when its output was last
+	// tapped, kept after that tap ends until the run does.
+	tapped map[domain.RunID]domain.MemberID
 	closed bool
 
 	sub events.Subscription
@@ -45,7 +48,8 @@ type Manager struct {
 
 // NewManager builds a Manager; call Start to begin consuming events.
 func NewManager(bus events.Bus, runs RunLookup, pty OutputTap) *Manager {
-	return &Manager{bus: bus, runs: runs, pty: pty, active: make(map[domain.RunID]io.Closer)}
+	return &Manager{bus: bus, runs: runs, pty: pty,
+		active: make(map[domain.RunID]io.Closer), tapped: make(map[domain.RunID]domain.MemberID)}
 }
 
 // Start subscribes to run-status events, attaches taps to already-running
@@ -68,7 +72,9 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // scan attaches taps to every currently running run; attach dedups and
 // filters mode/harness itself. Used at startup and after subscription
-// drops, so a lost running transition is never permanent.
+// drops, so a lost running transition or account move is never permanent: a
+// run tapped on another account than it is on now moved, and its tap is
+// replaced with one on the replacement's session.
 func (m *Manager) scan(ctx context.Context) {
 	runs, err := m.runs.ListActiveRuns(ctx)
 	if err != nil {
@@ -76,9 +82,13 @@ func (m *Manager) scan(ctx context.Context) {
 		return
 	}
 	for _, r := range runs {
-		if r.Status == domain.RunRunning {
-			m.attach(r.WorkspaceID, r.ID, false)
+		if r.Status != domain.RunRunning {
+			continue
 		}
+		m.mu.Lock()
+		account, known := m.tapped[r.ID]
+		m.mu.Unlock()
+		m.attach(r.WorkspaceID, r.ID, known && account != r.AccountMember())
 	}
 }
 
@@ -118,8 +128,13 @@ func (m *Manager) loop() {
 		}
 		switch p := e.Payload.(type) {
 		case events.RunStatusPayload:
-			if p.To == domain.RunRunning {
+			switch {
+			case p.To == domain.RunRunning:
 				m.attach(e.WorkspaceID, e.RunID, false)
+			case p.To.Terminal():
+				m.mu.Lock()
+				delete(m.tapped, e.RunID)
+				m.mu.Unlock()
 			}
 		case events.RunAccountPayload:
 			m.attach(e.WorkspaceID, e.RunID, true)
@@ -153,9 +168,17 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace
 	if !ok {
 		return // no adapter for this harness: graceful degradation
 	}
+	account := r.AccountMember()
 	tap, err := m.pty.TapOutput(run)
 	if err != nil {
-		slog.Warn("adapter: tap pty output failed", "run", run, "error", err)
+		m.mu.Lock()
+		read := m.tapped[run] == account
+		m.mu.Unlock()
+		// A session this manager already read to its end refuses a second
+		// tap: the run's row is still running when its PTY ends.
+		if !read {
+			slog.Warn("adapter: tap pty output failed", "run", run, "error", err)
+		}
 		return
 	}
 
@@ -167,6 +190,7 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace
 	}
 	previous := m.active[run]
 	m.active[run] = tap
+	m.tapped[run] = account
 	m.mu.Unlock()
 	if previous != nil {
 		_ = previous.Close()
@@ -176,38 +200,17 @@ func (m *Manager) attach(workspace domain.WorkspaceID, run domain.RunID, replace
 	go m.pump(workspace, run, a, tap)
 }
 
-// reattachIfRunning taps the run's current PTY session after the tap on its
-// previous one ended: a dropped account-move event leaves the replacement
-// session untapped, since a move publishes no running transition. Only a
-// session that ended cleanly counts, so a tap the host detached from a
-// live session is never replaced by a second replay of it.
-func (m *Manager) reattachIfRunning(workspace domain.WorkspaceID, run domain.RunID) {
-	r, err := m.runs.GetRun(context.Background(), run)
-	if err != nil {
-		slog.Warn("adapter: resolve run failed", "run", run, "error", err)
-		return
-	}
-	if r.Status == domain.RunRunning {
-		m.attach(workspace, run, false)
-	}
-}
-
 // pump reads the tap to EOF (the PTY session ending), normalizing chunks
 // into lines and publishing what the adapter makes of them.
 func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter, tap io.ReadCloser) {
 	defer m.wg.Done()
-	ended := false
 	defer func() {
 		m.mu.Lock()
-		current := m.active[run] == tap
-		if current {
+		if m.active[run] == tap {
 			delete(m.active, run)
 		}
 		m.mu.Unlock()
 		_ = tap.Close()
-		if ended && current {
-			m.reattachIfRunning(workspace, run)
-		}
 	}()
 	var norm LineNormalizer
 	buf := make([]byte, 32*1024)
@@ -219,7 +222,6 @@ func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter
 			}
 		}
 		if err != nil {
-			ended = err == io.EOF
 			// The final line of a run may lack a terminator.
 			if line, ok := norm.Flush(); ok {
 				m.publish(workspace, run, a.ConsumeLine(line))

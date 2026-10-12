@@ -99,6 +99,9 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 	if live && !retained && !alreadyFinalizing {
 		entry.finalizing = true
 	}
+	if live && alreadyFinalizing && entry.moving {
+		entry.waitYielded = true
+	}
 	s.mu.Unlock()
 	if !live || alreadyFinalizing {
 		entry.lifecycleMu.Unlock()

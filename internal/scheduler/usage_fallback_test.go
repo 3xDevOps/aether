@@ -212,6 +212,15 @@ func TestEnhancedRunWithoutFallbackNeedsAttention(t *testing.T) {
 			if e.rt.byName(string(run.ID)) != first || first.currentState() != "running" || len(notes.all()) != 0 {
 				t.Fatal("a run that did not move lost its container or posted a move")
 			}
+			// The launch's wait and at most the move's one probe: a live
+			// container keeps its single wait.
+			time.Sleep(50 * time.Millisecond)
+			e.rt.mu.Lock()
+			waits := e.rt.waitCalls
+			e.rt.mu.Unlock()
+			if waits > 2 {
+				t.Fatalf("%d waits on the live container, want its one wait and at most one probe", waits)
+			}
 		})
 	}
 }
@@ -249,7 +258,8 @@ func TestRunThatExitsDuringAFailedMoveIsFinalized(t *testing.T) {
 }
 
 // The move's probe of the exited container fails with a transient runtime
-// error; supervision restarts and observes the exit itself.
+// error. The wait that yielded to the move is gone, so supervision restarts
+// and observes the exit itself.
 func TestRunThatExitsDuringAFailedMoveIsFinalizedAfterAProbeError(t *testing.T) {
 	t.Parallel()
 	testExitDuringFailedMove(t, true)
@@ -273,13 +283,21 @@ func testExitDuringFailedMove(t *testing.T, probeFails bool) {
 		return e.sched.runs[run.ID].finalizing
 	})
 	e.rt.byName(string(run.ID)).exitNow(1)
-	time.Sleep(50 * time.Millisecond)
+	yielded := func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID] != nil && e.sched.runs[run.ID].waitYielded
+	}
+	waitFor(t, "the wait yielding to the move", yielded)
 	if probeFails {
 		e.rt.setWaitError(errors.New("runtime unavailable"))
 	}
 	mu.Unlock()
 	if probeFails {
-		time.Sleep(100 * time.Millisecond)
+		waitFor(t, "supervision restarted after the failed probe", func() bool { return !yielded() })
+		if got, err := e.db.GetRun(t.Context(), run.ID); err != nil || got.Status.Terminal() {
+			t.Fatalf("run = %+v, %v; want it live until the runtime answers", got, err)
+		}
 		e.rt.setWaitError(nil)
 	}
 	if got := e.waitStoreStatus(t, run.ID, domain.RunFailed); !strings.HasPrefix(got.Reason, exitedFailedReasonPrefix) {
@@ -556,12 +574,17 @@ func TestMoveKeepsOnlyTheReplacementsLimit(t *testing.T) {
 	e.sched.mu.Lock()
 	entry.moveFrom = "old"
 	e.sched.mu.Unlock()
+	limit.SessionID = "sess-2"
 	if err = e.sched.ReportAgentState(t.Context(), run.ID, limit); err != nil || marked() != limit.Reason {
 		t.Fatalf("replacement's report: err %v, mark %q; want %q", err, marked(), limit.Reason)
 	}
 	e.sched.mu.Lock()
 	entry.moving = false
+	session := entry.agentSessionID
 	e.sched.mu.Unlock()
+	if session != "sess-2" {
+		t.Fatalf("session after the replacement's report = %q, want the one it reported", session)
+	}
 }
 
 // A Background run moved to another account whose agent refuses the run's
@@ -1040,10 +1063,18 @@ func TestDuplicateLimitDuringAMoveKeepsTheMark(t *testing.T) {
 	limit, _ := agentstatus.FromClaudeHook([]byte(`{"session_id":"sess-1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 3pm (UTC)"}`))
 	var run *domain.Run
 	stopped := make(chan struct{})
+	var session atomic.Value
 	e.sched.UseUsageFallback(UsageFallback{Usage: &hookedUsage{claudeUsage: claudeUsage{e.owner.ID: 10}, during: func() {
-		if err := e.sched.ReportAgentState(context.Background(), run.ID, limit); err != nil {
+		// A repeat from the exhausted agent, under another session id: it
+		// is the old container's, whatever the move has done so far.
+		repeat := limit
+		repeat.SessionID = "sess-repeat"
+		if err := e.sched.ReportAgentState(context.Background(), run.ID, repeat); err != nil {
 			panic(err)
 		}
+		e.sched.mu.Lock()
+		session.Store(e.sched.runs[run.ID].agentSessionID)
+		e.sched.mu.Unlock()
 		go func() {
 			_ = e.sched.Close()
 			close(stopped)
@@ -1069,6 +1100,9 @@ func TestDuplicateLimitDuringAMoveKeepsTheMark(t *testing.T) {
 	}
 	if sc, scErr := e.sched.readSidecar(run.ID); scErr != nil || sc.UsageLimit == "" {
 		t.Fatalf("sidecar = %+v, %v; want the usage limit kept", sc, scErr)
+	}
+	if got := session.Load(); got != "sess-1" {
+		t.Fatalf("session after the old agent's repeat = %v, want it taken for the old container's and ignored", got)
 	}
 }
 
@@ -1151,5 +1185,40 @@ func TestFailingUsageLimitStreamBacksOff(t *testing.T) {
 	defer bus.mu.Unlock()
 	if bus.count > 6 {
 		t.Fatalf("%d subscriptions in half a second; want a growing delay between them", bus.count)
+	}
+}
+
+// An Enhanced run whose replacement hits the limit before its move is done
+// is followed by another move, which supersedes the continuation the first
+// one owed: with no account left, nothing later tells the agent that the
+// run continues on Grace's account.
+func TestFollowUpMoveDropsTheContinuationItSupersedes(t *testing.T) {
+	t.Parallel()
+	e, rt, _ := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The replacement reports its limit as soon as it is created.
+	e.rt.createHook = func() {
+		e.sched.mu.Lock()
+		e.sched.setUsageLimitLocked(e.sched.runs[run.ID], "You've hit your weekly limit")
+		e.sched.mu.Unlock()
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+
+	waitFor(t, "the follow-up move's reason", func() bool {
+		got, getErr := e.db.GetRun(t.Context(), run.ID)
+		return getErr == nil && got.Status == domain.RunNeedsAttention &&
+			got.Reason == "Usage limit reached on Grace's account; no fallback has usage left"
+	})
+	if sc, scErr := e.sched.readSidecar(run.ID); scErr != nil || sc.AccountSwap != nil {
+		t.Fatalf("sidecar = %+v, %v; want no continuation left to send", sc, scErr)
+	}
+	execs := rt.all()
+	if prompts := execs[len(execs)-1].wire.prompts(t); len(prompts) != 0 {
+		t.Fatalf("the superseded session was prompted: %v", prompts)
 	}
 }

@@ -375,6 +375,10 @@ type supervised struct {
 	moving   bool
 	moveFrom runtime.ID
 	noRetain bool
+	// waitYielded is set when the wait for the container's exit returned
+	// because a move held the claim: nothing waits on the container until
+	// the move finalizes it or restarts supervision.
+	waitYielded bool
 }
 
 type pendingRun struct {
