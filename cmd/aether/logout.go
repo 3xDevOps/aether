@@ -61,8 +61,8 @@ func deleteEdgeAccount(ctx context.Context, client *edgeclient.Client, out io.Wr
 	printServers(out, "servers it is a member of", sum.Member)
 	_, _ = fmt.Fprintf(out, "deleting it ends its sign-ins and device tokens, and each server above removes this account's identity and\n"+
 		"its edge devices. No server loses a member, a role or data: an SSH key or tailnet identity of yours keeps\n"+
-		"working there until an admin removes it. A server left without an owner is claimed again with a code from\n"+
-		"`aether-server edge claim-code` on its machine.\n"+
+		"working there until an admin removes it. An admin gives a server left without an owner an owner again with\n"+
+		"Settings › Remote access › Connect my GitHub account in the dashboard, or `aether edge connect`.\n"+
 		"delete it in a browser at %s%s: sign in with GitHub there and type %s. Then run `aether logout` here to\n"+
 		"delete this machine's token.\n", session.SigninOrigin, edgeproto.PathAccountPage, sum.Confirm)
 	return nil
