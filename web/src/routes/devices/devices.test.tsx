@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Device } from '@/lib/types'
 import { DevicesPanel } from '@/routes/devices'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { alice, bob, fakeApi, serverInfo } from '@/test/fixtures'
 
 function device(over: Partial<Device> = {}): Device {
@@ -123,6 +124,37 @@ describe('devices tab', () => {
     expect(list).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps a code typed after the approve dialog closed past the deadline', async () => {
+    seed()
+    const approve = Promise.withResolvers<Device>()
+    const list = vi.fn().mockResolvedValueOnce([pendingDesktop]).mockResolvedValue([{ ...pendingDesktop, status: 'approved' }])
+    const client = fakeApi({
+      memberDeviceList: list,
+      memberDeviceLookup: vi.fn(async () => ({ device: pendingDesktop, member_id: bob.id, display_name: 'Bob', role: 'admin' as const })),
+      memberDeviceApprove: vi.fn(() => approve.promise),
+    })
+    render(<DevicesPanel client={client} />)
+    await screen.findByText('desktop')
+
+    fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(dialog.getByRole('button', { name: 'Approve' }))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    } finally {
+      vi.useRealTimers()
+    }
+    fireEvent.click(dialog.getByRole('button', { name: 'Close' }))
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    fireEvent.change(screen.getByLabelText('Approval code'), { target: { value: 'WXYZ-1234' } })
+
+    await act(async () => approve.resolve({ ...pendingDesktop, status: 'approved' }))
+    expect(await screen.findByText('Approved')).toBeDefined()
+    expect(screen.getByLabelText('Approval code')).toHaveProperty('value', 'WXYZ-1234')
+  })
+
   it('says when a code adds a new member through an invitation', async () => {
     seed()
     const waiting = device({ id: 'dev_new', member_id: '', invitation_id: 'inv_1', account: 'dana', label: 'new', status: 'pending' })
@@ -191,6 +223,50 @@ describe('devices tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Revoke laptop' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }))
     await vi.waitFor(() => expect(client.memberDeviceRevoke).toHaveBeenCalledWith('dev_laptop'))
+  })
+
+  it('shows Revoking… on the confirm button while the server decides', async () => {
+    seed()
+    const client = fakeApi({
+      memberDeviceList: vi.fn(async () => [device()]),
+      memberDeviceRevoke: vi.fn(() => new Promise<never>(() => {})),
+    })
+    render(<DevicesPanel client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke laptop' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    fireEvent.click(dialog.getByRole('button', { name: 'Revoke' }))
+
+    expect(dialog.getByRole('button', { name: 'Revoking…' })).toHaveProperty('disabled', true)
+  })
+
+  it('lets the dialog close past the deadline, and still refreshes the list when the revoke lands', async () => {
+    seed()
+    const revoke = Promise.withResolvers<Device>()
+    const client = fakeApi({
+      memberDeviceList: vi.fn(async () => [device()]),
+      memberDeviceRevoke: vi.fn(() => revoke.promise),
+    })
+    render(<DevicesPanel client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke laptop' }))
+    const dialog = within(await screen.findByRole('alertdialog'))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(dialog.getByRole('button', { name: 'Revoke' }))
+      expect(dialog.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(dialog.getByRole('button', { name: 'Still waiting for the server…' })).toBeDefined()
+    fireEvent.click(dialog.getByRole('button', { name: 'Close' }))
+    await vi.waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+
+    vi.mocked(client.memberDeviceList).mockResolvedValueOnce([device({ status: 'revoked' })])
+    await act(async () => revoke.resolve(device({ status: 'revoked' })))
+    expect(await screen.findByText('Revoked')).toBeDefined()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
   it('keeps a refused revoke in the dialog', async () => {

@@ -9,6 +9,8 @@ export type RunRecord = Omit<Run, 'status_changed_at'> & {
   stateChangedAt: string
   /** The snapshot had no `status_changed_at`, so this is the run's finish, start or creation. */
   stateChangedAtEstimated: boolean
+  /** A pending kill's prediction wrote `stateChangedAt`, so the server's event replaces it. */
+  stateChangedAtPredicted?: boolean
   /** Client-side only: what the agent did last, from `run.agent` events. */
   activity?: RunActivity
 }
@@ -20,7 +22,10 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
   // a same-status run's change time backwards. The wire has whole seconds and
   // an event a finer time: they compare as instants, not as strings.
   const behind =
-    carry && snapshotAt !== undefined && Date.parse(snapshotAt) < Date.parse(previous.stateChangedAt)
+    carry &&
+    !previous.stateChangedAtEstimated &&
+    snapshotAt !== undefined &&
+    Date.parse(snapshotAt) < Date.parse(previous.stateChangedAt)
   const changedAt = behind ? undefined : snapshotAt
   const record: RunRecord = {
     ...wire,
@@ -49,11 +54,25 @@ export function pruneRuns<T>(
   return pruned
 }
 
+export interface PredictionMarker {
+  waiting?: boolean
+}
+
 export interface RunsSlice {
   runs: Record<string, RunRecord>
   setRuns: (runs: Run[]) => void
   upsertRun: (run: Run) => void
   removeRun: (runID: string) => void
+  /** Merges a verb's predicted fields; see "Actions" in docs/dashboard-frontend.md. */
+  patchRun: (runID: string, fields: Partial<RunRecord>) => void
+  /**
+   * Runs with a predicted verb awaiting its answer, each held by that verb's
+   * marker; `waiting` marks a slow verb past the deadline. See "Actions" in
+   * docs/dashboard-frontend.md.
+   */
+  predicting: Record<string, PredictionMarker>
+  /** Clearing leaves alone a lock another verb's marker holds. */
+  setPredicting: (runID: string, marker: PredictionMarker, pending: boolean) => void
   applyRunInput: (runID: string, requests: RunInputRequest[]) => void
   applyRunStatus: (
     runID: string,
@@ -112,21 +131,35 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
       }
     }),
+  patchRun: (runID, fields) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, ...fields } } }
+    }),
+  predicting: {},
+  setPredicting: (runID, marker, pending) =>
+    set((s) => {
+      if (pending) return { predicting: { ...s.predicting, [runID]: marker } }
+      return s.predicting[runID] === marker ? { predicting: pruneRuns(s.predicting, (id) => id !== runID) } : {}
+    }),
   applyRunStatus: (runID, to, reason, time, outcomeUnseen = false, finishUnopened = false) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
       // The server moves `status_changed_at` on the same changes and no others.
       const changed = to !== current.status || (to === 'needs-attention' && reason !== current.reason)
+      const timed = changed || current.stateChangedAtPredicted
       const next: RunRecord = {
         ...current,
         status: to,
         reason,
-        stateChangedAt: changed ? time : current.stateChangedAt,
-        stateChangedAtEstimated: !changed && current.stateChangedAtEstimated,
+        stateChangedAt: timed ? time : current.stateChangedAt,
+        stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,
         outcome_unseen: outcomeUnseen,
         finish_unopened: finishUnopened,
       }
+      delete next.stateChangedAtPredicted
       if (to !== current.status) delete next.activity
       if (to === 'running' && !next.started_at) next.started_at = time
       if (isTerminal(to)) {

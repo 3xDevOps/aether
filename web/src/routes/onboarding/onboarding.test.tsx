@@ -18,6 +18,7 @@ import type {
 import { OnboardingRoute } from '@/routes/onboarding'
 import { FirstRunStep } from '@/routes/onboarding/first-run-step'
 import { useStore, type RootState } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import {
   agentInfo,
   alice,
@@ -52,6 +53,9 @@ const olderCaps: GatewayCapabilities = {
   ...localCaps,
   local: ['link.status', 'link.repo', 'pull', 'daemon.status'],
 }
+
+const chooserTimeout =
+  'the window held focus for the last 10s, so no chooser seems to have opened. Electron asks xdg-desktop-portal for the chooser when the portal offers one (version 4 or newer), kdialog on KDE when installed, and GTK otherwise; run the app from a terminal to see any error Electron prints'
 
 const localTip = '9f1c2ab3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9'
 const workspaceTip = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'
@@ -402,6 +406,24 @@ describe('onboarding wizard', () => {
     expect(screen.queryByText('Saved')).toBeNull()
   })
 
+  it('shows Saving… while the save is unanswered, and keeps it locked past the deadline', async () => {
+    const client = fakeApi({ memberGit: vi.fn(() => new Promise<never>(() => {})) })
+    seed()
+    render(<OnboardingRoute params={{}} client={client} />)
+    await machineIdentity()
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Save identity' }))
+      expect(screen.getByRole('button', { name: 'Saving…' })).toHaveProperty('disabled', true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('moves on without saving an identity', async () => {
     const client = fakeApi()
     seed()
@@ -719,8 +741,35 @@ describe('onboarding wizard', () => {
     shellWindow.aetherDesktop = {
       platform: 'linux',
       chooseFolder: vi.fn(async () => {
-        throw new Error('no dialog available')
+        throw new Error(chooserTimeout)
       }),
+    }
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toRepoStep()
+
+    const path =
+      await screen.findByLabelText<HTMLInputElement>('Repository path')
+    fireEvent.change(path, { target: { value: '/home/alice/code/myproject' } })
+    const choose = screen.getByRole('button', { name: 'Choose folder' })
+    fireEvent.click(choose)
+
+    expect(await screen.findByText(chooserTimeout)).toBeDefined()
+    await waitFor(() => expect(choose.hasAttribute('disabled')).toBe(false))
+    expect(path.value).toBe('/home/alice/code/myproject')
+  })
+
+  it('takes a folder picked after the shell stopped waiting for the chooser', async () => {
+    let chosen: (path: string) => void = () => {}
+    shellWindow.aetherDesktop = {
+      platform: 'linux',
+      chooseFolder: vi.fn(async () => {
+        throw new Error(chooserTimeout)
+      }),
+      onFolderChosen: (cb) => {
+        chosen = cb
+        return () => {}
+      },
     }
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
@@ -729,8 +778,44 @@ describe('onboarding wizard', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Choose folder' }),
     )
+    const failure = await screen.findByText(chooserTimeout)
 
-    expect(await screen.findByText('no dialog available')).toBeDefined()
+    act(() => chosen('/home/alice/code/myproject'))
+
+    const path =
+      await screen.findByLabelText<HTMLInputElement>('Repository path')
+    expect(path.value).toBe('/home/alice/code/myproject')
+    expect(failure.isConnected).toBe(false)
+  })
+
+  it('keeps a path typed after the shell stopped waiting for the chooser', async () => {
+    let chosen: (path: string) => void = () => {}
+    shellWindow.aetherDesktop = {
+      platform: 'linux',
+      chooseFolder: vi.fn(async () => {
+        throw new Error(chooserTimeout)
+      }),
+      onFolderChosen: (cb) => {
+        chosen = cb
+        return () => {}
+      },
+    }
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toRepoStep()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Choose folder' }),
+    )
+    await screen.findByText(chooserTimeout)
+    const path =
+      await screen.findByLabelText<HTMLInputElement>('Repository path')
+    await waitFor(() => expect(path.hasAttribute('disabled')).toBe(false))
+    fireEvent.change(path, { target: { value: '/home/alice/code/typed' } })
+
+    act(() => chosen('/home/alice/code/myproject'))
+
+    expect(path.value).toBe('/home/alice/code/typed')
   })
 
   it('keeps the error that sent the user to the dialog when they cancel', async () => {

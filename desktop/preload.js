@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('aetherDesktop', {
   // The onboarding wizard's Repository step asks for a folder on this
   // machine, which only the main process can browse.
   chooseFolder: () => ipcRenderer.invoke('dialog:choose-folder'),
+  // A folder picked after chooseFolder gave up waiting for the chooser.
+  onFolderChosen: (cb) => {
+    const listener = (_event, path) => cb(path)
+    ipcRenderer.on('dialog:folder-chosen', listener)
+    return () => ipcRenderer.removeListener('dialog:folder-chosen', listener)
+  },
   ...(shellVersion ? { shellVersion } : {}),
   ...(controls ? { controls } : {}),
 })

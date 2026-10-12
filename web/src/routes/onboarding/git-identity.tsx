@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useStore } from '@/store'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { Capability } from '@/store/hooks'
 
 /** Saved values win; the machine's `git config` fills only what is still empty. */
@@ -15,6 +16,7 @@ export function GitIdentityForm({ client, caps }: { client: Api; caps: Capabilit
   const [email, setEmail] = useState(saved?.git_email ?? '')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
   const [done, setDone] = useState(false)
   const probe = caps.hasLocal('git.identity')
   // A field the user has typed in is theirs; the probe never overwrites it,
@@ -102,7 +104,7 @@ export function GitIdentityForm({ client, caps }: { client: Api; caps: Capabilit
           variant="secondary"
           disabled={busy || !caps.hasMethod('member.git') || !name.trim() || !email.trim()}
         >
-          Save identity
+          {late ? stillWaiting : busy ? 'Saving…' : 'Save identity'}
         </Button>
         {done && <span role="status" className="text-ui-sm text-muted">Saved</span>}
       </div>

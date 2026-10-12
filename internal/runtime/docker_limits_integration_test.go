@@ -11,7 +11,10 @@ import (
 )
 
 // The allocation exceeds only the disposable container's 64MiB ceiling, never
-// the host budget. A second live container and a fresh daemon RPC prove that
+// the host budget. The allocation waits a second after start so the OOM event
+// is observable before the exit; containerd loses it for a container killed
+// within tens of milliseconds of starting (containerd/containerd#8180,
+// #12260). A second live container and a fresh daemon RPC prove that
 // memory pressure is contained rather than taking down the worker host.
 func TestDockerOOMContained(t *testing.T) {
 	d := newTestDocker(t)
@@ -22,8 +25,14 @@ func TestDockerOOMContained(t *testing.T) {
 		t.Fatal(err)
 	}
 	oom := createContainer(t, d, Spec{
-		Image:    "python:3.13-alpine",
-		Command:  []string{"python3", "-c", "payload = bytearray(256 * 1024 * 1024); print(len(payload), flush=True)"},
+		Image: "python:3.13-alpine",
+		Command: []string{"python3", "-c", `
+import time
+print("ready", flush=True)
+time.sleep(1)
+chunks = [b"x" * (1 << 20) for _ in range(256)]
+print(len(chunks), flush=True)
+`},
 		CPULimit: 0.5, MemoryLimitBytes: 64 << 20, PidsLimit: 32,
 	})
 	if err := d.Start(ctx, oom); err != nil {

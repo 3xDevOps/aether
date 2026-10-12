@@ -7,7 +7,7 @@ const middleID = '01ARZ3NDEKTSV4RRFFQ69G5FAW'
 const newestID = '01ARZ3NDEKTSV4RRFFQ69G5FAX'
 
 describe('collaboration slice', () => {
-  it('orders same-timestamp room messages by ascending ID', () => {
+  it('keeps the server\'s insertion order for same-timestamp room messages', () => {
     const store = createRootStore()
     const oldest = roomMessage({ id: oldestID, body: 'oldest', created_at: createdAt })
     const middle = roomMessage({ id: middleID, body: 'middle', created_at: createdAt })
@@ -27,7 +27,7 @@ describe('collaboration slice', () => {
     ])
 
     // A replayed page and event update must not duplicate or reorder messages.
-    store.getState().setRoomPage('run_1', [oldest, middle, newest], undefined, true)
+    store.getState().setRoomPage('run_1', [newest, middle, oldest], undefined, true)
     store.getState().upsertRoomMessage({ ...middle, body: 'middle updated' })
 
     expect(store.getState().roomMessages.run_1.map((message) => message.id)).toEqual([
@@ -37,6 +37,16 @@ describe('collaboration slice', () => {
     ])
     expect(store.getState().roomMessages.run_1).toHaveLength(3)
     expect(store.getState().roomMessages.run_1[1].body).toBe('middle updated')
+  })
+
+  it('lists same-timestamp room messages in the order the server inserted them, not by ID', () => {
+    const store = createRootStore()
+    const first = roomMessage({ id: newestID, body: 'first', created_at: createdAt })
+    const second = roomMessage({ id: oldestID, body: 'second', created_at: createdAt })
+
+    store.getState().setRoomPage('run_1', [second, first], undefined)
+
+    expect(store.getState().roomMessages.run_1.map((message) => message.body)).toEqual(['first', 'second'])
   })
 
   it('keeps newer event state when an older list response arrives', () => {
@@ -52,8 +62,8 @@ describe('collaboration slice', () => {
     store.getState().upsertRoomMessage(delivered)
 
     store.getState().setRoomPage('run_1', [
-      roomMessage({ id: oldestID, body: 'loaded from page', created_at: createdAt }),
       { ...delivered, state: 'queued', body: 'stale', updated_at: '2026-08-14T10:00:01Z' },
+      roomMessage({ id: oldestID, body: 'loaded from page', created_at: createdAt }),
     ])
 
     expect(store.getState().roomMessages.run_1.map((message) => message.id)).toEqual([

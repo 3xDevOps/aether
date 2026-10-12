@@ -30,6 +30,7 @@ import type { AgentPayload } from '@/store/activity'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
+import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
@@ -117,11 +118,13 @@ export async function hydrate(
   if (signal?.aborted) return false
   const s = store.getState()
   try {
-    const [info, workspaces, members, runs, overlaps, capabilities] =
+    const memberRead = client.memberList()
+    const [info, workspaces, members, keptMembers, runs, overlaps, capabilities] =
       await Promise.all([
         client.serverInfo(),
         client.workspaceListFull(),
-        client.memberList(),
+        memberRead,
+        s.readMembers(memberRead),
         client.runList(),
         // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
@@ -132,11 +135,6 @@ export async function hydrate(
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
     const incomingIdentity = `${origin}\u0000${info.tailnet_hostname ?? ''}\u0000${info.member.id}`
-    const previousIdentity = store.getState().identityKey
-    if (previousIdentity && previousIdentity !== incomingIdentity) {
-      // Reconnects retain drafts; a different authenticated owner must not.
-      store.getState().resetFiles()
-    }
     if (!s.hydrated && capabilities?.local?.includes('workspace.selection')) {
       try {
         const saved = await client.localWorkspaceSelection()
@@ -152,11 +150,19 @@ export async function hydrate(
         toast.error(errorSentence(err))
       }
     }
+    const previousIdentity = store.getState().identityKey
+    const identityChanged = Boolean(previousIdentity) && previousIdentity !== incomingIdentity
+    if (identityChanged) {
+      // Reconnects retain drafts; a different authenticated owner must not.
+      store.getState().resetFiles()
+      store.getState().resetNotes()
+      store.setState({ invitations: null, revokingInvitations: [] })
+    }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
-    s.setMembers(members)
+    s.setMembers(identityChanged ? members : keptMembers)
     s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
@@ -240,7 +246,7 @@ async function reconcileRoomHistory(
   runID: string,
   targetMessageID?: string,
 ): Promise<void> {
-  const cached = store.getState().roomMessages[runID] ?? []
+  const cached = (store.getState().roomMessages[runID] ?? []).filter((message) => !isProvisional(message))
   const cachedIDs = new Set(cached.map((message) => message.id))
   const oldestCachedID = cached[0]?.id
   let before: string | undefined
@@ -341,7 +347,7 @@ export async function applyEvent(
 
   // A new teammate has no event of their own; without this they render as a raw ID.
   if (ev.actor_id && !store.getState().members[ev.actor_id]) {
-    await client.memberList().then(store.getState().setMembers).catch(ignore)
+    await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
   }
 
   if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
@@ -420,7 +426,7 @@ export async function applyEvent(
       break
     case 'member.changed': {
       const p = ev.payload as { member_id: string; display_name: string }
-      await client.memberList().then(store.getState().setMembers).catch(ignore)
+      await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
       const info = store.getState().info
       if (info && info.member.id === p.member_id) {
         store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })
@@ -655,7 +661,7 @@ export async function applyEvent(
       // server-computed attention count even for a room never opened.
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
-      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string }
+      const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
       if (
         runID &&
         (payload.kind === 'question' || payload.kind === 'reply')
@@ -668,7 +674,13 @@ export async function applyEvent(
           return false
         }
       }
-      if (runID && workspaceID && store.getState().roomMessages[runID]) {
+      const held = runID
+        ? store.getState().roomMessages[runID]?.find((message) => message.id === payload.message_id)
+        : undefined
+      // A steer request's agent delivery changes without its state, and the
+      // payload does not carry it.
+      const current = held !== undefined && held.kind !== 'steer_request' && held.state === payload.state
+      if (runID && workspaceID && store.getState().roomMessages[runID] && !current) {
         await reconcileRoomHistory(store, client, workspaceID, runID, payload.message_id)
           .then(() => store.getState().setRoomError(runID))
           .catch((err) => {

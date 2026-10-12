@@ -201,3 +201,9 @@ export function createRootStore() {
 export type RootStore = ReturnType<typeof createRootStore>
 
 export const useStore = createRootStore()
+
+/** Whether the signed-in identity is still the one at this call. A sign-in change clears the old member's state, so an answer for them must not land in the new member's. */
+export function sameIdentity(): () => boolean {
+  const { identityKey } = useStore.getState()
+  return () => useStore.getState().identityKey === identityKey
+}

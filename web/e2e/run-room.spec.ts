@@ -164,12 +164,17 @@ test('two members share notes, moderated messages, and explicit control transfer
     await testInfo.attach('desktop-run-details', { body: await page.screenshot(), contentType: 'image/png' })
     await testInfo.attach('desktop-run-observer', { body: await bobPage.screenshot(), contentType: 'image/png' })
 
-    // A note is persisted once and the room event makes the other browser
-    // refetch it; neither side relies on an optimistic echo.
+    // Alice's note shows at once and settles into the one persisted copy;
+    // the room event makes the other browser refetch it.
     const bobDetails = bobPage.getByRole('complementary', { name: 'Run details' })
-    await aliceDetails.getByRole('textbox', { name: 'Add a note' }).fill(comment)
+    const aliceNotes = aliceDetails.getByRole('region', { name: 'Notes' })
+    const noteBox = aliceDetails.getByRole('textbox', { name: 'Add a note' })
+    await noteBox.fill(comment)
     await aliceDetails.getByRole('button', { name: 'Add', exact: true }).click()
-    await expect(aliceDetails.getByRole('region', { name: 'Notes' })).toContainText(comment)
+    await expect(noteBox).toHaveValue('')
+    await expect(aliceNotes).toContainText(comment)
+    await expect(aliceNotes.getByText('Sending…')).toHaveCount(0)
+    await expect(aliceNotes.getByText(comment, { exact: true })).toHaveCount(1)
     await expect(bobDetails.getByRole('region', { name: 'Notes' })).toContainText(comment)
 
     // Bob does not control the run: his message waits 45 seconds unless

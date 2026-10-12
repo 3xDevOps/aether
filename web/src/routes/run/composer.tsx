@@ -13,10 +13,11 @@ import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ComposerImagePicker, ComposerImages, useComposerImages } from '@/routes/run/composer-images'
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
-import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type Pill } from '@/routes/run/composer-state'
+import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import { sessionLease } from '@/store/session-stream'
 import { cn } from '@/lib/utils'
@@ -152,7 +153,8 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const coarse = useMediaQuery(coarsePointer)
   const draft = useComposerDraft(run.id)
   const { body } = draft
-  const busy = room.busy || Boolean(draft.busy)
+  const busy = Boolean(draft.busy)
+  const late = usePastDeadline(busy)
   const hintID = useId()
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
@@ -170,7 +172,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
       const latest = composerDraft(run.id)
       const text = latest.body.trim()
       const attachments = images.getPaths()
-      if (!text || latest.busy || room.busy || !images.isReady()) return
+      if (!text || latest.busy || !images.isReady()) return
       const idempotency = draftSendKey(latest, text, attachments)
       const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined })
       const posted = await room.post({ kind: 'steer_request', body: text, attachments, key: idempotency.key })
@@ -220,8 +222,9 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
             onClick={send}
           >
             <ArrowUp />
-            {busy ? 'Sending…' : 'Send'}
+            {late ? stillWaiting : busy ? 'Sending…' : 'Send'}
           </Button>
+          {late && <Button size="sm" variant="ghost" onClick={() => saveComposerDraft(run.id, { busy: undefined })}>Cancel</Button>}
         </div>
       </div>
     </div>
@@ -260,6 +263,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const draft = useComposerDraft(run.id)
   const { body, error } = draft
   const busy = Boolean(draft.busy)
+  const late = usePastDeadline(busy)
   const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
   const [caret, setCaret] = useState(0)
   const [focused, setFocused] = useState(false)
@@ -306,7 +310,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
   const attempt = async (action: () => Promise<unknown>) => {
     if (composerDraft(run.id).busy) return
-    const request = beginDraftRequest(run.id, 'busy', { error: undefined })
+    const request = beginDraftRequest(run.id, 'busy', { error: undefined, busyPrompt: false })
     try {
       await action()
       request.settle()
@@ -326,16 +330,22 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
       return
     }
     const idempotency = draftSendKey(latest, text, attachments)
-    const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined })
+    const request = beginDraftRequest(run.id, 'busy', { idempotency, error: undefined, busyPrompt: true })
+    // After Cancel a failure still shows on the draft it was sent from; a success stays silent.
+    const settle = (settled: Partial<ComposerDraft>) => {
+      const draft = composerDraft(run.id)
+      if (request.current()) request.settle(settled)
+      else if (settled.error && !draft.busy && draft.idempotency?.key === idempotency.key) saveComposerDraft(run.id, settled)
+    }
     try {
       const result = await api.runInject(run.id, text, idempotency.key, { steer, lease, attachments })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
-      if (delivery === 'sent' || delivery === 'queued') request.settle(sentDraft)
-      else if (delivery === 'uncertain') request.settle({ error: result.message.failure?.message ?? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.' })
-      else request.settle({ error: result.message.failure?.message ?? 'The message was not sent. Your draft was kept.', idempotency: undefined })
+      if (delivery === 'sent' || delivery === 'queued') settle(sentDraft)
+      else if (delivery === 'uncertain') settle({ error: result.message.failure?.message ?? 'Delivery is uncertain. Your draft was kept; check the conversation before retrying.' })
+      else settle({ error: result.message.failure?.message ?? 'The message was not sent. Your draft was kept.', idempotency: undefined })
     } catch (err) {
-      request.settle({ error: message(err) })
+      settle({ error: message(err) })
     }
   }
 
@@ -465,8 +475,9 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
             onClick={() => act(pill)}
           >
             <look.Icon className={cn(pill === 'interrupt' && 'fill-current')} />
-            {busy ? 'Sending…' : look.label}
+            {late ? stillWaiting : busy ? 'Sending…' : look.label}
           </Button>
+          {late && draft.busyPrompt && <Button size="sm" variant="ghost" onClick={() => saveComposerDraft(run.id, { busy: undefined })}>Cancel</Button>}
         </div>
       </div>
     </div>

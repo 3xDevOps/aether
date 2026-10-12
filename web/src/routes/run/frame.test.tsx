@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
@@ -6,10 +6,12 @@ import type { Run } from '@/lib/types'
 import { openRunLink } from '@/routes/browser/open'
 import { openInFiles } from '@/routes/files/open'
 import { lookupRoute } from '@/routes/registry'
+import { useRunRoom } from '@/routes/run/room'
 import '@/routes/run'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { applyEvent } from '@/store/sync'
-import { agentInfo, alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, approval, bob, fakeApi, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -50,6 +52,9 @@ beforeEach(() => {
     members: { [alice.id]: alice, [bob.id]: bob },
     workspaces: { [workspace.id]: workspace },
     roomMessages: {},
+    noteDrafts: {},
+    noteKeys: {},
+    failedNotes: {},
     roomStatus: {},
     roomStatusControl: {},
     approvalsByRun: {},
@@ -464,11 +469,325 @@ describe('run details', () => {
     })))
   })
 
-  it('adds a note for people, never for the agent', async () => {
+  async function waitingCards() {
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [
+      roomMessage({ id: 'q_1', kind: 'question', actor_id: bob.id, body: 'keep the prefix?' }),
+      roomMessage({ id: 'steer_1', kind: 'steer_request', state: 'queued', actor_id: bob.id, body: 'add a test', deliver_after: '2099-01-01T00:00:00Z' }),
+    ] })
+    open()
+    attached(true)
+    const panel = await details()
+    const card = (title: string) => within(panel.getByText(title).closest('[data-slot=request-card]') as HTMLElement)
+    await waitFor(() => card('Bob asked'))
+    return { panel, question: card('Bob asked'), steer: card('Bob sent the agent a message') }
+  }
+  const never = () => new Promise<never>(() => {})
+
+  it('keeps Reply and a teammate message\'s Approve live while a note is sending', async () => {
+    const post = heldPost()
+    const { panel, question, steer } = await waitingCards()
+    await userEvent.type(panel.getByRole('textbox', { name: 'Add a note' }), 'reviewing now{Enter}')
+    await userEvent.type(question.getByRole('textbox'), 'yes')
+    expect(question.getByRole('button', { name: 'Reply' })).toHaveProperty('disabled', false)
+    expect(steer.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', false)
+    await act(async () => post.resolve({ message: savedNote() }))
+  })
+
+  it('shows Replying… on the reply alone while it is sent', async () => {
+    const { question, steer } = await waitingCards()
+    vi.mocked(api.runRoomPost).mockImplementationOnce(never)
+    await userEvent.type(question.getByRole('textbox'), 'yes')
+    fireEvent.click(question.getByRole('button', { name: 'Reply' }))
+    expect(question.getByRole('button', { name: 'Replying…' })).toHaveProperty('disabled', true)
+    expect(steer.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', false)
+  })
+
+  it('shows Denying… on the pressed decision, then still waiting past the deadline with no Cancel', async () => {
+    const { question, steer } = await waitingCards()
+    vi.mocked(api.runRoomDecide).mockImplementationOnce(never)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(steer.getByRole('button', { name: 'Deny' }))
+      expect(steer.getByRole('button', { name: 'Denying…' })).toHaveProperty('disabled', true)
+      expect(steer.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+      fireEvent.change(question.getByRole('textbox'), { target: { value: 'yes' } })
+      expect(question.getByRole('button', { name: 'Reply' })).toHaveProperty('disabled', false)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(steer.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      expect(steer.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+      expect(steer.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows Approving… on one permission request and leaves the others live', async () => {
+    useStore.setState({ approvalsByRun: { run_1: [approval({ id: 'ap_1', action: 'push' }), approval({ id: 'ap_2', action: 'deploy' })] } })
+    vi.mocked(api.approvalDecide).mockImplementationOnce(never)
+    open()
+    const panel = await details()
+    const card = (action: string) => within(panel.getByText(`Permission: ${action}`).closest('[data-slot=request-card]') as HTMLElement)
+    fireEvent.click(card('push').getByRole('button', { name: 'Approve' }))
+    expect(card('push').getByRole('button', { name: 'Approving…' })).toHaveProperty('disabled', true)
+    expect(card('push').getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', true)
+    expect(card('deploy').getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', false)
+  })
+
+  type Posted = { message: ReturnType<typeof roomMessage> }
+  function heldPost() {
+    const held = { resolve: (_: Posted) => {}, reject: (_: Error) => {} }
+    vi.mocked(api.runRoomPost).mockImplementationOnce(() => new Promise<Posted>((resolve, reject) => Object.assign(held, { resolve, reject })))
+    return held
+  }
+  const refusal = (text: string) => new ApiError(403, text, -32001)
+  const savedNote = () => roomMessage({
+    id: 'note_1', kind: 'comment', body: 'reviewing now', idempotency_key: vi.mocked(api.runRoomPost).mock.lastCall![0].idempotency_key,
+  })
+
+  it('shows a note at once as sending, then as saved once', async () => {
+    const post = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'reviewing now{Enter}')
+    const notes = within(panel.getByRole('region', { name: 'Notes' }))
+    expect(box).toHaveProperty('value', '')
+    expect(notes.getByText('reviewing now')).toBeDefined()
+    expect(notes.getByText('Sending…')).toBeDefined()
+    expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'comment', body: 'reviewing now' }))
+    await act(async () => post.resolve({ message: savedNote() }))
+    expect(notes.getAllByText('reviewing now')).toHaveLength(1)
+    expect(notes.queryByText('Sending…')).toBeNull()
+  })
+
+  it('takes a refused note back into the input and shows the server error', async () => {
+    vi.mocked(api.runRoomPost).mockRejectedValueOnce(refusal('run.room.post: 403 forbidden: notes are closed on this run'))
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'reviewing now{Enter}')
+    expect((await panel.findByRole('alert')).textContent).toContain('403 forbidden: notes are closed on this run')
+    expect(box).toHaveProperty('value', 'reviewing now')
+    expect(within(panel.getByRole('region', { name: 'Notes' })).getAllByText('reviewing now')).toHaveLength(1)
+  })
+
+  it('keeps a note refused while Details was closed, with its text and error', async () => {
+    const post = heldPost()
+    open()
+    let panel = await details()
+    await userEvent.type(panel.getByRole('textbox', { name: 'Add a note' }), 'reviewing now{Enter}')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Run details' })).toBeNull())
+    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
+    panel = await details()
+    expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this run')
+    expect(panel.getByRole('textbox', { name: 'Add a note' })).toHaveProperty('value', 'reviewing now')
+  })
+
+  it('drops a note\'s refusal that arrives after another member signed in', async () => {
+    const post = heldPost()
+    useStore.setState({ identityKey: 'alice' })
     open()
     const panel = await details()
     await userEvent.type(panel.getByRole('textbox', { name: 'Add a note' }), 'reviewing now{Enter}')
-    await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({ kind: 'comment', body: 'reviewing now' })))
+    expect(panel.getByText('reviewing now')).toBeDefined()
+    act(() => {
+      useStore.setState({ identityKey: 'bob' })
+      useStore.getState().resetNotes()
+    })
+    expect((await details()).queryByText('reviewing now')).toBeNull()
+    await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
+    expect(useStore.getState().failedNotes).toEqual({})
+    expect(useStore.getState().noteKeys).toEqual({})
+  })
+
+  it('keeps the text of every refused note', async () => {
+    const first = heldPost()
+    const second = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'first note{Enter}')
+    await userEvent.type(box, 'second note{Enter}')
+    await userEvent.type(box, 'still typing')
+    await act(async () => first.reject(refusal('403 forbidden: first')))
+    await act(async () => second.reject(refusal('403 forbidden: second')))
+    expect(panel.getAllByRole('alert')).toHaveLength(2)
+    const notes = within(panel.getByRole('region', { name: 'Notes' }))
+    expect(notes.getByText('first note')).toBeDefined()
+    expect(notes.getByText('second note')).toBeDefined()
+    expect(box).toHaveProperty('value', 'still typing')
+  })
+
+  it('keeps the key of a note whose post got no answer, so Add again does not post it twice', async () => {
+    vi.mocked(api.runRoomPost).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    const resent = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'reviewing now{Enter}')
+    expect((await panel.findByRole('alert')).textContent).toContain('Failed to fetch')
+    expect(panel.getByRole('button', { name: 'Retry' })).toBeDefined()
+    expect(box).toHaveProperty('value', 'reviewing now')
+    fireEvent.submit(box.closest('form')!)
+    const [first, second] = vi.mocked(api.runRoomPost).mock.calls.slice(-2)
+    expect(second![0].idempotency_key).toBe(first![0].idempotency_key)
+    await act(async () => resent.resolve({ message: savedNote() }))
+  })
+
+  it('resends a refused note under its first key, since a refused post may still have been saved', async () => {
+    vi.mocked(api.runRoomPost).mockRejectedValueOnce(refusal('run.room.post: publish: event bus closed'))
+    const resent = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'reviewing now{Enter}')
+    expect((await panel.findByRole('alert')).textContent).toContain('event bus closed')
+    fireEvent.submit(box.closest('form')!)
+    const [first, second] = vi.mocked(api.runRoomPost).mock.calls.slice(-2)
+    expect(second![0].idempotency_key).toBe(first![0].idempotency_key)
+    await act(async () => resent.resolve({ message: savedNote() }))
+  })
+
+  it('sends a note whose text names an Object property under a fresh string key', async () => {
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    await userEvent.type(box, 'reviewing now{Enter}')
+    await userEvent.type(box, 'constructor{Enter}')
+    expect(vi.mocked(api.runRoomPost).mock.lastCall![0].idempotency_key).toEqual(expect.any(String))
+  })
+
+  it('resends a dismissed unanswered note under its key, so its late answer shows once', async () => {
+    const late = heldPost()
+    const resent = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.change(box, { target: { value: 'reviewing now' } })
+      fireEvent.submit(box.closest('form')!)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      fireEvent.click(within(panel.getByRole('region', { name: 'Notes' })).getByRole('button', { name: 'Dismiss' }))
+      fireEvent.submit(box.closest('form')!)
+      const [first, second] = vi.mocked(api.runRoomPost).mock.calls.slice(-2)
+      expect(second![0].idempotency_key).toBe(first![0].idempotency_key)
+      await act(async () => late.resolve({ message: savedNote() }))
+      await act(async () => resent.resolve({ message: savedNote() }))
+      expect(within(panel.getByRole('region', { name: 'Notes' })).getAllByText('reviewing now')).toHaveLength(1)
+      expect(panel.queryByRole('alert')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('replaces an unanswered note\'s timeout with the refusal that comes later', async () => {
+    const post = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.change(box, { target: { value: 'reviewing now' } })
+      fireEvent.submit(box.closest('form')!)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      await act(async () => post.reject(refusal('run.room.post: 403 forbidden: notes are closed on this run')))
+      expect(panel.getByRole('alert').textContent).toContain('403 forbidden: notes are closed on this run')
+      expect(panel.queryByRole('button', { name: 'Retry' })).toBeNull()
+      expect(box).toHaveProperty('value', 'reviewing now')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a note\'s key while a retry is unanswered, even once the first post is refused', async () => {
+    const first = heldPost()
+    heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.change(box, { target: { value: 'reviewing now' } })
+      fireEvent.submit(box.closest('form')!)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      fireEvent.click(panel.getByRole('button', { name: 'Retry' }))
+      await act(async () => first.reject(refusal('run.room.post: 503 busy')))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      fireEvent.click(panel.getByRole('button', { name: 'Retry' }))
+      const keys = vi.mocked(api.runRoomPost).mock.calls.slice(-3).map(([post]) => post.idempotency_key)
+      expect(new Set(keys).size).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows no error for an unanswered note whose saved copy already arrived', async () => {
+    heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.change(box, { target: { value: 'reviewing now' } })
+      fireEvent.submit(box.closest('form')!)
+      act(() => useStore.getState().upsertRoomMessage(savedNote()))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      expect(panel.queryByRole('alert')).toBeNull()
+      expect(within(panel.getByRole('region', { name: 'Notes' })).getAllByText('reviewing now')).toHaveLength(1)
+      expect(box).toHaveProperty('value', '')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reverts an unanswered note with Retry, then shows a late answer once without the error', async () => {
+    const post = heldPost()
+    open()
+    const panel = await details()
+    const box = panel.getByRole('textbox', { name: 'Add a note' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.change(box, { target: { value: 'reviewing now' } })
+      fireEvent.submit(box.closest('form')!)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+      expect(panel.getByRole('alert').textContent).toContain('The server did not answer in 5 seconds.')
+      expect(panel.getByRole('button', { name: 'Retry' })).toBeDefined()
+      expect(box).toHaveProperty('value', 'reviewing now')
+      const notes = within(panel.getByRole('region', { name: 'Notes' }))
+      expect(notes.getAllByText('reviewing now')).toHaveLength(1)
+
+      await act(async () => post.resolve({ message: savedNote() }))
+      act(() => useStore.getState().upsertRoomMessage(savedNote()))
+      const { idempotency_key: key } = savedNote()
+      act(() => useStore.getState().upsertRoomMessage({ ...savedNote(), id: key! }))
+      expect(notes.getAllByText('reviewing now')).toHaveLength(1)
+      expect(panel.queryByRole('alert')).toBeNull()
+      expect(box).toHaveProperty('value', '')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the server order of same-instant notes across a reconnect walk of several pages', async () => {
+    const note = (id: string) => roomMessage({ id })
+    const client = fakeApi({
+      runRoomList: vi.fn()
+        .mockResolvedValueOnce({ messages: [note('a')] })
+        .mockResolvedValueOnce({ messages: [note('d'), note('c')], next_before: 'c' })
+        .mockResolvedValueOnce({ messages: [note('b'), note('a')] }),
+    })
+    const { result } = renderHook(() => useRunRoom(run(), undefined, client))
+    await waitFor(() => expect(useStore.getState().roomMessages.run_1).toHaveLength(1))
+    await act(() => result.current.refresh())
+    expect(useStore.getState().roomMessages.run_1.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd'])
   })
 })
 
@@ -548,6 +867,28 @@ describe('the session composer', () => {
     const [failed, resent] = vi.mocked(api.runRoomPost).mock.calls
     expect(vi.mocked(api.runRoomPost)).toHaveBeenCalledTimes(2)
     expect(resent![0].idempotency_key).toBe(failed![0].idempotency_key)
+  })
+
+  it('says it is still waiting past the deadline, and Cancel unlocks the draft for a resend under the same key', async () => {
+    const hang = () => new Promise<never>(() => {})
+    vi.mocked(api.runRoomPost).mockReset().mockImplementationOnce(hang).mockImplementationOnce(hang)
+    open({}, 'session')
+    const box = screen.getByRole('textbox', { name: 'Message the agent' })
+    await userEvent.type(box, 'run the tests')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      expect(box).toMatchObject({ value: 'run the tests', readOnly: false })
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      const [first, second] = vi.mocked(api.runRoomPost).mock.calls
+      expect(second![0].idempotency_key).toBe(first![0].idempotency_key)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it.each([

@@ -63,6 +63,18 @@ describe('messages slice', () => {
     expect(store.getState().messageLists['run:run_1'].nextBefore).toBeNull()
   })
 
+  it('keeps the server\'s insertion order for same-instant messages across pages', () => {
+    const store = createRootStore()
+    const [first, second, third, fourth] = ['d', 'c', 'a', 'b'].map((id) => runMessage({ id }))
+
+    store.getState().setMessagePage(runScope, [third, second], 'cursor-c')
+    store.getState().setMessagePage(runScope, [first], undefined, true)
+    expect(ids(scopeMessages(store.getState(), runScope))).toEqual(['d', 'c', 'a'])
+
+    store.getState().setMessagePage(runScope, [fourth, third], 'cursor-a')
+    expect(ids(scopeMessages(store.getState(), runScope))).toEqual(['d', 'c', 'a', 'b'])
+  })
+
   it('replaces a list when the newest page skips past everything held', () => {
     const store = createRootStore()
     store.getState().setMessagePage(workspaceScope, [runMessage({ id: 'old' })], undefined)

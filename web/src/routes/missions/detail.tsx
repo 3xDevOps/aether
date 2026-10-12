@@ -326,10 +326,10 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           description="Removes the swarm with its tasks, submissions and agent messages, and deletes its runs with their checkouts and transcripts. Published branches stay. This cannot be undone."
           action="Delete swarm"
           onConfirm={() => client.missionDelete(mission.id)}
-          onDone={() => {
+          onDone={(open) => {
             useStore.getState().removeMission(mission.id)
             toast.success('Swarm deleted')
-            navigate('missions')
+            if (open) navigate('missions')
           }}
           onClose={closeDialog}
         />

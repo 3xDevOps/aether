@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Ellipsis } from '@/components/icons'
 import { Confirm } from '@/components/confirm'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Callout } from '@/components/ui/callout'
+import { FailureCallout } from '@/components/ui/failure-callout'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
 import type { AccountAccess, Member } from '@/lib/types'
+import { useFailure } from '@/components/failure'
 import { useStore } from '@/store'
+import { nextMemberOrder, type MemberPatch } from '@/store/members'
 import { useCapability, useIsAdmin } from '@/store/hooks'
+import { optimistic } from '@/store/optimistic'
 import { onlineMembers } from '@/store/presence'
 
 export const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
@@ -44,30 +46,37 @@ export function Roster({ client }: { client: Api }) {
   const [access, setAccess] = useState<AccountAccess | null>(null)
   const [removing, setRemoving] = useState<Member | null>(null)
   const [demoting, setDemoting] = useState<Member['role'] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
+  const { failures, run } = useFailure()
   const canListAccounts = caps.hasMethod('account.list')
+
+  const readMembers = useCallback(() => useStore.getState().readMembers(client.memberList()), [client])
 
   useEffect(() => {
     let live = true
-    client.memberList().then((list) => live && setMembers(list), () => {})
+    readMembers().then((list) => live && setMembers(list), () => {})
     if (canListAccounts) client.accountList().then((a) => live && setAccess(a), () => {})
     return () => {
       live = false
     }
-  }, [canListAccounts, client, setMembers])
+  }, [canListAccounts, client, readMembers, setMembers])
 
-  const refetch = async () => setMembers(await client.memberList())
+  const refetch = async () => setMembers(await readMembers())
 
-  const act = async (work: () => Promise<unknown>, done: string) => {
-    setError(null)
-    try {
-      await work()
-      await refetch()
-      toast.success(done)
-    } catch (err) {
-      setError(message(err))
-    }
+  const update = (member: Member, next: Partial<Member>, send: () => Promise<Member>, done: string) => {
+    const { patchMember, revertMember, confirmMember } = useStore.getState()
+    let patch: MemberPatch | undefined
+    const order = nextMemberOrder()
+    void run((answered) => optimistic({
+      apply: () => {
+        patch = patchMember(member.id, next, order)
+      },
+      send,
+      confirm: (result) => {
+        answered()
+        confirmMember(member.id, Object.fromEntries(Object.keys(next).map((key) => [key, result[key as keyof Member]])), patch)
+      },
+      revert: () => revertMember(member.id, patch),
+    }), { onDone: () => toast.success(done), key: member.id })
   }
 
   const changeRole = (member: Member, role: Member['role']) => {
@@ -77,7 +86,7 @@ export function Roster({ client }: { client: Api }) {
       setDemoting(role)
       return
     }
-    void act(() => client.memberRole(member.id, role), `${member.display_name} is now ${roleLabel[role].toLowerCase()}`)
+    update(member, { role }, () => client.memberRole(member.id, role), `${member.display_name} is now ${roleLabel[role].toLowerCase()}`)
   }
 
   const online = new Set(onlineMembers(presence))
@@ -91,7 +100,7 @@ export function Roster({ client }: { client: Api }) {
 
   return (
     <>
-      {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      {failures.map((failure) => <FailureCallout key={failure.id} error={failure.error} onRetry={failure.retry} />)}
       {pending.length > 0 && (
         <section aria-label="Pending members" className="flex min-w-0 flex-col gap-2">
           <SectionLabel as="h2">Waiting for approval</SectionLabel>
@@ -101,7 +110,7 @@ export function Roster({ client }: { client: Api }) {
                 <Avatar name={member.display_name} color={member.color} size="header" />
                 <span className="min-w-0 flex-1 truncate text-ui font-medium text-text">{member.display_name}</span>
                 {canApprove
-                  ? <Button size="sm" onClick={() => void act(() => client.memberApprove(member.id), `${member.display_name} approved`)}>Approve</Button>
+                  ? <Button size="sm" onClick={() => update(member, { pending: false }, () => client.memberApprove(member.id), `${member.display_name} approved`)}>Approve</Button>
                   : <span className="text-ui-sm text-muted">Waiting for an admin</span>}
               </li>
             ))}
@@ -176,6 +185,7 @@ export function Roster({ client }: { client: Api }) {
           title={`Remove ${removing.display_name}?`}
           description="Their runs and history stay; their access ends now."
           action="Remove"
+          pending="Removing…"
           onConfirm={() => client.memberRemove(removing.id)}
           onDone={() => {
             toast.success(`${removing.display_name} removed`)
@@ -189,6 +199,7 @@ export function Roster({ client }: { client: Api }) {
           title="Give up your admin role?"
           description={`You become ${roleLabel[demoting].toLowerCase()} and lose admin access at once. Another admin has to hand it back.`}
           action={`Become ${roleLabel[demoting].toLowerCase()}`}
+          pending={`Becoming ${roleLabel[demoting].toLowerCase()}…`}
           onConfirm={() => client.memberRole(self.id, demoting)}
           onDone={() => {
             toast.success(`You are now ${roleLabel[demoting].toLowerCase()}`)

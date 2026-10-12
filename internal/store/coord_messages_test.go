@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -338,5 +340,64 @@ func TestMessageHistoryMigrationKeepsMailAndTypesTheOutbox(t *testing.T) {
 	}
 	if pub.EventType != CoordAuditMessage || pub.Kind != "question" || pub.CorrelationID != "msg1" {
 		t.Fatalf("migrated audit publication = %+v, want a pending typed question", pub)
+	}
+}
+
+func TestListRunMessagesPagesPastADeletedCursorRow(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	gone := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	from := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	to := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+
+	at := time.Now().Add(-time.Hour).UnixNano()
+	seed := []struct {
+		id       string
+		from, to domain.RunID
+	}{
+		{"msg-keep00001", from.ID, to.ID},
+		{"msg-keep00002", from.ID, to.ID},
+		{"msg-gone00003", gone.ID, gone.ID},
+		{"msg-keep00004", from.ID, to.ID},
+		{"msg-keep00005", from.ID, to.ID},
+	}
+	for _, msg := range seed {
+		if _, err := db.db.ExecContext(ctx,
+			`INSERT INTO run_messages (id, workspace_id, from_run, to_run, body, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			msg.id, w.ID, msg.from, msg.to, "same instant", at); err != nil {
+			t.Fatalf("seed %s: %v", msg.id, err)
+		}
+	}
+
+	var listed []string
+	first, err := db.ListRunMessages(ctx, RunMessageFilter{WorkspaceID: w.ID, Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	for _, msg := range first.Items {
+		listed = append(listed, msg.ID)
+	}
+	if listed[len(listed)-1] != "msg-gone00003" {
+		t.Fatalf("first page = %v, want it to end at the message the deleted run owns", listed)
+	}
+	if err := db.DeleteRun(ctx, gone.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	for before := first.NextBefore; before != ""; {
+		page, err := db.ListRunMessages(ctx, RunMessageFilter{WorkspaceID: w.ID, Limit: 3, Before: before})
+		if err != nil {
+			t.Fatalf("next page: %v", err)
+		}
+		for _, msg := range page.Items {
+			listed = append(listed, msg.ID)
+		}
+		before = page.NextBefore
+	}
+	want := []string{"msg-keep00005", "msg-keep00004", "msg-gone00003", "msg-keep00002", "msg-keep00001"}
+	if !slices.Equal(listed, want) {
+		t.Fatalf("listed = %v, want %v", listed, want)
 	}
 }

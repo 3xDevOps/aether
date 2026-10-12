@@ -453,10 +453,20 @@ test('scrolling reaches every retained page and prepends without moving visible 
     await wheelUntil(page, scroller, -2400, async () => delayedOlder)
     await expect.poll(async () => (await visibleHistory(scroller)).rows.length).toBeGreaterThan(0)
     const beforePrepend = await visibleHistory(scroller)
+    const heightBefore = await scroller.evaluate((element) => element.scrollHeight)
     const pagesBeforePrepend = completedPages
     releaseOlder()
     await expect.poll(() => completedPages).toBeGreaterThan(pagesBeforePrepend)
-    await expect.poll(() => visibleHistory(scroller)).toEqual(beforePrepend)
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight))
+      .toBeGreaterThan(heightBefore)
+    // A wheel that clamps at the oldest loaded row leaves the scroller's top
+    // padding blank; the older page's last row then shows there, above output
+    // that must stay where it was.
+    const oldestVisible = beforePrepend.rows[0].index
+    await expect.poll(async () => {
+      const after = await visibleHistory(scroller)
+      return { ...after, rows: after.rows.filter((row) => row.index >= oldestVisible) }
+    }).toEqual(beforePrepend)
 
     await wheelUntil(page, scroller, -8000, async () =>
       (await visibleHistory(scroller)).rows.some((row) => row.text?.includes('EARLIEST-LONG')),

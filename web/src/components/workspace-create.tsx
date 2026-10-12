@@ -13,6 +13,7 @@ import { ImportRepositoryDialog } from '@/routes/admin-dialogs/import-repository
 import { GitHubRepositoryDialog } from '@/routes/admin-dialogs/github-repository-dialog'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 export function WorkspaceCreate({ client, onCreated, onRefresh }: {
   client: Api
@@ -26,6 +27,7 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
   const [name, setName] = useState('')
   const [base, setBase] = useState('main')
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
   const [error, setError] = useState<string | null>(null)
   const [uncertain, setUncertain] = useState(false)
   const generation = useRef(0)
@@ -101,7 +103,7 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
       </fieldset>
       {error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout>}
       {uncertain && <Callout tone="needs-you" role="alert">Creation could not be confirmed. Inspect the refreshed workspace list before trying again; if it exists, open it and link your clone there.</Callout>}
-      <div><Button type="submit" size="sm" disabled={busy || uncertain || !name.trim() || !base.trim()}>{busy ? 'Creating…' : 'Create workspace'}</Button></div>
+      <div><Button type="submit" size="sm" disabled={busy || uncertain || !name.trim() || !base.trim()}>{late ? stillWaiting : busy ? 'Creating…' : 'Create workspace'}</Button></div>
     </form> : <div className="flex flex-col gap-2 border-t border-seam pt-3 text-ui">
       <p>This hosted gateway cannot reach your clone. On the computer holding it, open the desktop app or run <Code>aether gui</Code> connected to this server, then choose <strong>Create from local clone</strong>.</p>
       <p className="text-ui-sm text-muted">From a terminal instead, replace <Code>&lt;server-address-or-id&gt;</Code> with this server&apos;s SSH address or server id from your administrator, and the name, branch and path below. Creating a workspace requires an admin.</p>

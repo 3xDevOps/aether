@@ -73,9 +73,11 @@ export function RepoStep({
   const [busy, setBusy] = useState(false)
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const chooseFolder = desktopBridge()?.chooseFolder
-  // An out-of-process chooser (xdg-desktop-portal) is not modal, so the form
-  // waits on it. Component state, so leaving the step escapes a dead chooser.
+  const onFolderChosen = desktopBridge()?.onFolderChosen
+  // An out-of-process chooser (portal or kdialog) is not modal, so the form waits on it.
+  // The Linux shell rejects after 10s of window focus; on an older shell, leave the step.
   const [picking, setPicking] = useState(false)
+  const lateFolder = useRef(false)
   const suggestions = knownRepos(useStore((s) => s.linkStatus))
   const fieldId = useId()
   const listId = useId()
@@ -98,6 +100,7 @@ export function RepoStep({
       linkVersion.current += 1
       setConnected(null)
       setLinkChecked(false)
+      lateFolder.current = false
       setRepo('')
       setBusy(false)
       setPushing(false)
@@ -108,6 +111,18 @@ export function RepoStep({
     })
     return () => { linkVersion.current += 1; unsubscribe() }
   }, [client, workspace?.id, setConnected])
+  const gate = useRef({ busy, connected })
+  gate.current = { busy, connected }
+  useEffect(() => {
+    if (!onFolderChosen) return
+    return onFolderChosen((path) => {
+      const form = gate.current
+      if (!lateFolder.current || form.busy || form.connected) return
+      lateFolder.current = false
+      setRepo(path)
+      setError(null)
+    })
+  }, [onFolderChosen])
   useEffect(() => {
     if (!caps.hasLocal('link.status')) return
     let live = true
@@ -247,15 +262,19 @@ export function RepoStep({
   const pick = async () => {
     if (!chooseFolder) return
     setPicking(true)
+    const version = linkVersion.current
     try {
       const picked = await chooseFolder()
       // Cancelling answers "" and must leave the path and its error alone: the
       // error is often why the dialog was opened.
-      if (picked) {
+      if (picked && version === linkVersion.current) {
+        lateFolder.current = false
         setRepo(picked)
         setError(null)
       }
     } catch (err) {
+      if (version !== linkVersion.current) return
+      lateFolder.current = true
       setError(message(err))
     } finally {
       setPicking(false)
@@ -264,6 +283,7 @@ export function RepoStep({
 
   const repoint = () => {
     linkVersion.current += 1
+    lateFolder.current = false
     setRepo(connected?.path ?? '')
     setConnected(null)
     setError(null)
@@ -324,7 +344,10 @@ export function RepoStep({
                   list={listId}
                   disabled={picking}
                   placeholder="/home/you/code/myproject"
-                  onChange={(e) => setRepo(e.target.value)}
+                  onChange={(e) => {
+                    lateFolder.current = false
+                    setRepo(e.target.value)
+                  }}
                 />
                 <datalist id={listId}>
                   {suggestions.map((path) => (

@@ -253,6 +253,10 @@ async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: 
  * failure on the edge path; other fields belong to the method. */
 export type ApiErrorData = { refusal?: EdgeRefusal } & Record<string, unknown>
 
+// internal/protocol's error codes.
+export const codeNotFound = -32000
+export const codeInvalidState = -32002
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,

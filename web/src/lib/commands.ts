@@ -28,14 +28,16 @@ import {
   Trash2,
   UserPlus,
 } from '@/components/icons'
-import { api, ApiError, type Api } from '@/lib/api'
+import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
 import { errorSentence, message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import type { LinkStatus, Member, PullResult, Workspace } from '@/lib/types'
-import { useStore } from '@/store'
+import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
+import { dismissOnIdentityChange } from '@/components/failure'
+import { sameIdentity, useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
+import { optimistic, optimisticDeadlineMs, refusedByServer, type Mutation, type Outcome } from '@/store/optimistic'
 import type { PaletteDialog } from '@/store/palette'
-import { isArchivable, isTerminal, type RunRecord } from '@/store/runs'
+import { isArchivable, isTerminal, toRecord, type PredictionMarker, type RunRecord } from '@/store/runs'
 import type { Theme } from '@/store/ui'
 
 export interface CommandDeps {
@@ -66,7 +68,18 @@ export interface Command {
   disabled?: boolean
   /** Set on irreversible verbs; every surface confirms before running them. */
   confirm?: { title: string; body: string; action: string }
+  /** The state the verb's success certainly sets; the runner shows it before the server answers. */
+  predict?: () => Prediction
+  /** The server answers only once the change is done, which can outlast the deadline, so the prediction waits for that answer. */
+  slow?: boolean
   perform: (deps: CommandDeps) => Promise<unknown> | void
+}
+
+export interface Prediction {
+  runID: string
+  record?: Partial<RunRecord>
+  /** Paused lives in `pausedRuns`, not on the record. */
+  paused?: boolean
 }
 
 export interface RunCommandContext {
@@ -81,6 +94,8 @@ export interface RunCommandContext {
   /** The caller, for the permission questions the server will ask again. */
   self: { id: string | null; role: Member['role'] | null }
   steerOthers?: string
+  /** A predicted verb is pending on the run; the caller subscribes to it. */
+  predicting?: boolean
 }
 
 export interface BoardCommandContext {
@@ -174,10 +189,6 @@ export function clearDonePlan(
   return plan
 }
 
-// internal/protocol.CodeNotFound: the run was already deleted, so there is
-// nothing left to archive.
-const codeRunNotFound = -32000
-
 // Both bulk actions bound gateway requests rather than opening one per run.
 const bulkRunConcurrency = 6
 
@@ -196,7 +207,8 @@ export async function runClearDone(
       try {
         await deps.api.runArchive(eligible[i].id, true)
       } catch (err) {
-        if (err instanceof ApiError && err.code === codeRunNotFound) {
+        // The run was already deleted, so there is nothing left to archive.
+        if (err instanceof ApiError && err.code === codeNotFound) {
           deps.removeRun(eligible[i].id)
         } else {
           errors[i] = message(err)
@@ -287,6 +299,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         short: 'Resume',
         Icon: Play,
         done: 'Resumed',
+        predict: () => ({ runID: id, paused: false }),
         perform: (d) => d.api.runResume(id),
       })
     }
@@ -297,6 +310,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         short: 'Pause',
         Icon: Pause,
         done: 'Paused',
+        predict: () => ({ runID: id, paused: true }),
         perform: (d) => d.api.runPause(id),
       })
     }
@@ -341,6 +355,17 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         body: 'The agent stops immediately. Work already committed to the run branch stays.',
         action: 'Kill run',
       },
+      predict: () => ({
+        runID: id,
+        record: {
+          status: 'abandoned',
+          reason: 'killed',
+          stateChangedAt: new Date().toISOString(),
+          stateChangedAtEstimated: true,
+          stateChangedAtPredicted: true,
+        },
+      }),
+      slow: true,
       perform: (d) => d.api.runKill(id),
     })
   }
@@ -376,6 +401,8 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         body: 'Its compute is released and the exact process cannot be reopened. Files, result branches and history have separate lifetimes; this does not delete all run data or archive it.',
         action: 'Free container',
       },
+      predict: () => ({ runID: id, record: { container_retained_until: undefined, cleanup_pending: undefined } }),
+      slow: true,
       perform: (d) => d.api.runRelease(id),
     })
   }
@@ -388,6 +415,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         short: 'Restore',
         Icon: ArchiveRestore,
         done: 'Restored',
+        predict: () => ({ runID: id, record: { archived_at: undefined } }),
         perform: (d) => d.api.runArchive(id, false),
       })
     } else {
@@ -397,6 +425,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         short: 'Archive',
         Icon: Archive,
         done: 'Archived',
+        predict: () => ({ runID: id, record: { archived_at: new Date().toISOString() } }),
         perform: (d) => d.api.runArchive(id, true),
       })
     }
@@ -409,6 +438,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       short: run.protected ? 'Unprotect' : 'Protect',
       Icon: run.protected ? ShieldOff : Shield,
       done: run.protected ? 'Unprotected' : 'Protected',
+      predict: () => ({ runID: id, record: { protected: !run.protected } }),
       perform: (d) => d.api.runProtect(id, !run.protected),
     })
   }
@@ -443,7 +473,8 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     })
   }
 
-  return list
+  // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
+  return ctx.predicting ? list.filter((command) => !command.predict) : list
 }
 
 /** Older agent-report finishes can still have a retained interactive runtime. */
@@ -550,6 +581,244 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
   return list
 }
 
+/** Instants the client predicts with its own clock; a server record matches by presence. */
+const instants = new Set(['archived_at'])
+/** The client's guess at the change time, which the server's record replaces. */
+const guessed = new Set(['stateChangedAt', 'stateChangedAtEstimated', 'stateChangedAtPredicted'])
+/** The wire omits a field at its zero value (`omitempty`), so a re-read lacks a false or empty field. */
+const omitZero = (value: unknown) => value || undefined
+
+function holds({ runID, record, paused }: Prediction): boolean {
+  const s = useStore.getState()
+  const run = s.runs[runID]
+  return (
+    (!record || (run !== undefined && Object.entries(record).every(([key, value]) => run[key as keyof RunRecord] === value))) &&
+    (paused === undefined || s.pausedRuns[runID] === paused)
+  )
+}
+
+function show({ runID, record, paused }: Prediction) {
+  const s = useStore.getState()
+  if (record) s.patchRun(runID, record)
+  if (paused !== undefined) s.setPaused(runID, paused)
+}
+
+/** Puts back each predicted value still on screen; a value anything else wrote stays. */
+function unshow({ runID, record, paused }: Prediction, before: Prediction) {
+  const s = useStore.getState()
+  const run = s.runs[runID]
+  show({
+    runID,
+    record: record && run && Object.fromEntries(
+      Object.keys(record)
+        .filter((key) => run[key as keyof RunRecord] === record[key as keyof RunRecord])
+        .map((key) => [key, before.record?.[key as keyof RunRecord]]),
+    ),
+    paused: paused !== undefined && s.pausedRuns[runID] === paused ? before.paused : undefined,
+  })
+}
+
+/**
+ * Shows a `run.get` answer and says whether it shows the predicted state. A run
+ * changed since the read was sent keeps its newer fields: the read only replaces
+ * the predicted values still on screen.
+ */
+function applyRead(prediction: Prediction, run: Run, unchanged: boolean): boolean {
+  const s = useStore.getState()
+  const read = toRecord(run, s.runs[run.id])
+  const server: Prediction = {
+    runID: run.id,
+    record: prediction.record && Object.fromEntries(Object.keys(prediction.record).map((key) => [key, read[key as keyof RunRecord]])),
+    paused: run.paused,
+  }
+  if (unchanged) {
+    s.upsertRun(run)
+    if (run.paused !== undefined) s.setPaused(run.id, run.paused)
+  } else unshow(prediction, server)
+  const same = (key: string, value: unknown) => {
+    const held = server.record?.[key as keyof RunRecord]
+    return guessed.has(key) || (instants.has(key) ? Boolean(held) === Boolean(value) : omitZero(held) === omitZero(value))
+  }
+  return (
+    (!prediction.record || Object.entries(prediction.record).every(([key, value]) => same(key, value))) &&
+    (prediction.paused === undefined || (run.paused ?? prediction.paused) === prediction.paused)
+  )
+}
+
+/** Whether the run's record and pause state are still those at this call; a `run.get` sent here is older than any change since. */
+function unchangedSince(runID: string): () => boolean {
+  const { runs, pausedRuns } = useStore.getState()
+  const record = runs[runID]
+  const paused = pausedRuns[runID]
+  return () => {
+    const s = useStore.getState()
+    return s.runs[runID] === record && s.pausedRuns[runID] === paused
+  }
+}
+
+function readRun(client: Api, runID: string): Promise<Run> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    client.runGet(runID),
+    new Promise<never>((_, reject) => (timer = setTimeout(reject, optimisticDeadlineMs))),
+  ]).finally(() => clearTimeout(timer))
+}
+
+/** One press of a predicted verb, across its retries. */
+interface Press {
+  /** Set by any attempt's success, so no attempt reverts it or reports it failed afterwards. */
+  confirmed: boolean
+  /** The timeout toast a late success dismisses. */
+  toast?: string | number
+  /** From `sameIdentity()` at the press: once false, nothing of the press runs or shows. */
+  same: () => boolean
+}
+
+/** `quiet`: nothing is left to report, or a late refusal reports itself. */
+type Landing = 'shown' | 'quiet' | 'lost'
+
+interface Attempt {
+  outcome: Promise<Outcome<unknown>>
+  landed: Promise<Landing>
+  /** A slow verb's failure with no answer after the deadline. */
+  lostError: () => string | undefined
+}
+
+/** An invalid-state refusal can follow a call that already landed, so it re-reads the run. */
+function predicted(
+  prediction: Prediction,
+  send: () => Promise<unknown>,
+  client: Api,
+  press: Press,
+  slow?: boolean,
+): Mutation<unknown> & { landed: Promise<Landing>; lostError: () => string | undefined } {
+  const { runID } = prediction
+  let before = prediction
+  let reverted = false
+  let refused = false
+  let lost = false
+  let lostError: string | undefined
+  let land = (_: Landing) => {}
+  const landed = new Promise<Landing>((resolve) => (land = resolve))
+  const marker: PredictionMarker = {}
+  const finish = () => useStore.getState().setPredicting(runID, marker, false)
+  const putBack = () => {
+    if (press.confirmed || !press.same()) return
+    unshow(prediction, before)
+    reverted = true
+  }
+  const revert = () => {
+    if (!press.same()) {
+      finish()
+      return land('quiet')
+    }
+    if (refused) return
+    if (slow && !lost) {
+      marker.waiting = true
+      useStore.getState().setPredicting(runID, marker, true)
+      return
+    }
+    const unchanged = unchangedSince(runID)
+    void readRun(client, runID)
+      .then((run) => {
+        if (press.confirmed || !press.same()) return
+        if (applyRead(prediction, run, unchanged())) press.confirmed = true
+        else reverted = true
+      }, putBack)
+      .finally(() => {
+        finish()
+        land(press.confirmed ? 'shown' : 'lost')
+      })
+  }
+  return {
+    landed,
+    lostError: () => lostError,
+    apply: () => {
+      const s = useStore.getState()
+      const run = s.runs[runID]
+      before = {
+        runID,
+        record: prediction.record && run && Object.fromEntries(Object.keys(prediction.record).map((key) => [key, run[key as keyof RunRecord]])),
+        paused: prediction.paused === undefined ? undefined : s.pausedRuns[runID],
+      }
+      show(prediction)
+      s.setPredicting(runID, marker, true)
+    },
+    send: () =>
+      send().catch(async (cause: unknown) => {
+        if (!refusedByServer(cause)) {
+          lost = true
+          if (marker.waiting) {
+            lostError = errorSentence(cause)
+            revert()
+          }
+          throw cause
+        }
+        refused = true
+        const unchanged = unchangedSince(runID)
+        const run = cause instanceof ApiError && cause.code === codeInvalidState
+          ? await readRun(client, runID).catch(() => undefined)
+          : undefined
+        if (run && !press.confirmed && press.same()) {
+          if (applyRead(prediction, run, unchanged())) return
+        } else putBack()
+        finish()
+        land('quiet')
+        throw cause
+      }),
+    confirm: () => {
+      if (!press.same()) {
+        finish()
+        return land('quiet')
+      }
+      press.confirmed = true
+      finish()
+      if (reverted && holds(before)) show(prediction)
+      land(marker.waiting ? 'quiet' : 'shown')
+    },
+    revert,
+  }
+}
+
+async function settle(done: string, runID: string, attempt: () => Attempt, press: Press): Promise<void> {
+  const { outcome: pending, landed, lostError } = attempt()
+  const outcome = await pending
+  if (!press.same()) return
+  if (outcome.ok) {
+    toast.success(done)
+    return
+  }
+  if (!outcome.unanswered) {
+    toast.error(`${done} failed: ${outcome.error}`)
+    return
+  }
+  const landing = await landed
+  if (!press.same()) return
+  if (landing === 'shown') {
+    toast.success(done)
+    return
+  }
+  const id = landing === 'lost'
+    ? toast.error(`${done} failed: ${lostError() ?? outcome.error}`, {
+      duration: Infinity,
+      action: {
+        label: 'Retry',
+        onClick: (event) => {
+          if (!press.same()) return
+          if (!useStore.getState().predicting[runID]) return void settle(done, runID, attempt, press)
+          event.preventDefault()
+          toast.error(`${done} not retried: another action on this run is still waiting for the server.`)
+        },
+      },
+    })
+    : undefined
+  if (id !== undefined) dismissOnIdentityChange(id, press.same)
+  press.toast = id
+  void outcome.refused?.then((error) => {
+    if (!press.confirmed && press.same()) toast.error(`${done} failed: ${error}`, { id, action: undefined, duration: undefined })
+  })
+}
+
 /** Gateway verbs toast their past-tense name or the server's refusal verbatim; dialog openers report nothing. */
 export function useCommandRunner(
   opts: { onDone?: () => void; onTemplates?: () => void } = {},
@@ -565,7 +834,7 @@ export function useCommandRunner(
   return useCallback(
     async (command: Command) => {
       onDone?.()
-      const result = command.perform({
+      const deps: CommandDeps = {
         api,
         navigate,
         openDialog,
@@ -574,8 +843,23 @@ export function useCommandRunner(
         removeRun,
         setTheme,
         onTemplates: onTemplates ?? (() => {}),
-      })
+      }
       const done = command.done
+      if (command.predict && done) {
+        const press: Press = { confirmed: false, same: sameIdentity() }
+        const prediction = command.predict()
+        const attempt = (): Attempt => {
+          const mutation = predicted(prediction, async () => command.perform(deps), api, press, command.slow)
+          const confirm: typeof mutation.confirm = (result) => {
+            mutation.confirm(result)
+            if (press.toast !== undefined) toast.dismiss(press.toast)
+          }
+          return { outcome: optimistic({ ...mutation, confirm }), landed: mutation.landed, lostError: mutation.lostError }
+        }
+        await settle(done, prediction.runID, attempt, press)
+        return
+      }
+      const result = command.perform(deps)
       if (!done) return
       try {
         const value = await result

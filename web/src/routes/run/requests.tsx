@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { DecisionButtons } from '@/components/decision-buttons'
 import { Button } from '@/components/ui/button'
 import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +15,7 @@ import type { RunRoom } from '@/routes/run/room'
 import { SessionRequestCard } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 
 export const requestCardID = {
@@ -62,10 +64,16 @@ export function useRunRequests(run: RunRecord) {
 
 function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom }) {
   const [body, setBody] = useState('')
+  const [sending, setSending] = useState<object | null>(null)
+  const late = usePastDeadline(sending !== null)
   const send = async () => {
     const text = body.trim()
-    if (!text || room.busy) return
-    if (await room.post({ kind: 'reply', body: text, correlationID: question.id })) setBody('')
+    if (!text || sending) return
+    const mine = {}
+    setSending(mine)
+    const posted = await room.post({ kind: 'reply', body: text, correlationID: question.id })
+    setSending((current) => (current === mine ? null : current))
+    if (posted) setBody((current) => (current.trim() === text ? '' : current))
   }
   return (
     <div className="flex w-full flex-col gap-2">
@@ -82,8 +90,11 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
           }
         }}
       />
-      <div>
-        <Button size="sm" disabled={!body.trim() || room.busy} onClick={() => void send()}>Reply</Button>
+      <div className="flex gap-2">
+        <Button size="sm" disabled={!body.trim() || sending !== null} onClick={() => void send()}>
+          {late ? stillWaiting : sending ? 'Replying…' : 'Reply'}
+        </Button>
+        {late && <Button size="sm" variant="ghost" onClick={() => setSending(null)}>Cancel</Button>}
       </div>
     </div>
   )
@@ -98,19 +109,15 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
 }) {
   const members = useStore((s) => s.members)
   const { inputs, sessionRequests, approvals, steers, questions } = useRunRequests(run)
-  const [deciding, setDeciding] = useState<string | null>(null)
   const name = (id: string, snapshot?: string) => members[id]?.display_name ?? snapshot ?? id
   const openTerminal = () => {
     nav.go('terminal')
     if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()
   }
-  const decideApproval = (approval: Approval, approve: boolean) => {
-    setDeciding(approval.id)
-    api.approvalDecide(run.id, approval.id, approve).then(
-      (decided) => useStore.getState().decideApproval(decided.workspace_id, decided.id, decided.decision, decided.decided_by ?? '', decided.decided_at ?? ''),
-      (err) => toast.error(`${approve ? 'Approve' : 'Deny'} failed: ${errorSentence(err)}`),
-    ).finally(() => setDeciding(null))
-  }
+  const decideApproval = (approval: Approval, approve: boolean) => api.approvalDecide(run.id, approval.id, approve).then(
+    (decided) => useStore.getState().decideApproval(decided.workspace_id, decided.id, decided.decision, decided.decided_by ?? '', decided.decided_at ?? ''),
+    (err) => toast.error(`${approve ? 'Approve' : 'Deny'} failed: ${errorSentence(err)}`),
+  )
 
   return (
     <div className="flex flex-col gap-2">
@@ -136,12 +143,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
           key={approval.id}
           id={requestCardID.approval(approval.id)}
           title={`Permission: ${approval.action}`}
-          actions={
-            <>
-              <Button size="sm" disabled={deciding === approval.id} onClick={() => decideApproval(approval, true)}>Approve</Button>
-              <Button size="sm" variant="secondary" disabled={deciding === approval.id} onClick={() => decideApproval(approval, false)}>Deny</Button>
-            </>
-          }
+          actions={<DecisionButtons decide={(approve) => decideApproval(approval, approve)} />}
         >
           {approval.detail}
         </RequestCard>
@@ -153,10 +155,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
           title={`${name(steer.actor_id, steer.actor_display_name)} sent the agent a message`}
           meta={<DeliveryCountdown deliverAfter={steer.deliver_after} />}
           actions={agent.localControl ? (
-            <>
-              <Button size="sm" disabled={room.busy} onClick={() => void room.decide(steer.id, 'approve')}>Approve</Button>
-              <Button size="sm" variant="secondary" disabled={room.busy} onClick={() => void room.decide(steer.id, 'deny')}>Deny</Button>
-            </>
+            <DecisionButtons decide={(approve) => room.decide(steer.id, approve ? 'approve' : 'deny')} />
           ) : agent.steerable && agent.hasAgentTerminal && (
             <Button size="sm" variant="secondary" onClick={openTerminal}>Take control to decide</Button>
           )}

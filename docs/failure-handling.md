@@ -368,7 +368,10 @@ database or edit `schema_migrations` to bypass the failure.
 ### Server reboot, or a hard kill
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
-to run. On the next boot the scheduler reconciles every non-terminal run and
+to run. `aether.db` commits without fsync (WAL with `synchronous=NORMAL`): a
+killed server loses no committed write, but a power loss or kernel crash can
+roll back the last commits before it; the database stays consistent. On the
+next boot the scheduler reconciles every non-terminal run and
 every retained TUI or completed swarm run against the runtime's actual
 containers:
 

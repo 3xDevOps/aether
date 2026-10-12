@@ -7,6 +7,7 @@ import { TeamSummary } from '@/routes/team/budget'
 import { ServerSection } from '@/routes/settings/server'
 import type { Api } from '@/lib/api'
 import { pendingApprovals } from '@/store/approvals'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { heartbeat, refreshInbox, refreshTeam } from '@/routes/team/sync'
 import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -379,6 +380,39 @@ describe('approval inbox', () => {
       screen.getByRole('listitem').textContent?.replace(/\s+/g, ' '),
     ).toContain('Approved by Alice')
     expect(client.approvalDecide).toHaveBeenCalledWith('run_1', 'apr_1', true)
+  })
+
+  it('shows Denying… on the pressed button and locks only that request', async () => {
+    const other = approval({ id: 'apr_2', action: 'deploy' })
+    const client = fakeApi({
+      approvalList: vi.fn(async () => [approval(), other]),
+      approvalDecide: vi.fn(() => new Promise<never>(() => {})),
+    })
+    seed({ inbox: { [workspace.id]: [approval(), other] } })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    const [first, second] = screen.getAllByRole('listitem').map((item) => within(item))
+    fireEvent.click(first!.getByRole('button', { name: 'Deny' }))
+    expect(first!.getByRole('button', { name: 'Denying…' })).toHaveProperty('disabled', true)
+    expect(first!.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+    expect(second!.getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', false)
+  })
+
+  it('keeps a decision locked past the deadline with no Cancel, so no second decision races it', () => {
+    const client = fakeApi({ approvalDecide: vi.fn(() => new Promise<never>(() => {})) })
+    seed({ inbox: { [workspace.id]: [approval()] } })
+    render(<ApprovalInbox params={{}} client={client} />)
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
+      expect(screen.getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', true)
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('opens the run behind a request on its terminal tab', async () => {
