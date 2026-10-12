@@ -23,8 +23,8 @@ If a server is already available, open its authenticated dashboard and start
 with [workspace onboarding](#4-create-a-workspace). Otherwise install and link
 below. A local client works on Linux, macOS, or Windows and needs git for
 clone linking and pushing. The hosted dashboard can import remote repositories
-and browser-selected configuration, but cannot read an arbitrary path on your
-computer or use its Git/SSH identity.
+and edit agent configuration, but cannot read a path on your computer or use
+its Git/SSH identity.
 
 ---
 
@@ -586,75 +586,138 @@ No vendor login yet? [Prove the plumbing without an agent
 subscription](#prove-the-plumbing-without-an-agent-subscription) runs the
 whole path with a scripted stand-in.
 
-### Import configuration
+### Upload agent configuration
 
-Configuration import is separate from installing an agent or logging in.
-Open **Agent config files** under **Onboarding → Agent** or on the
-**Agents** page; the command palette finds Agents for "config files".
-It works through either gateway, without a workspace, for members with
-launch permission.
+An agent's configuration - settings, instruction files such as `CLAUDE.md`,
+commands, subagents, skills, hooks, MCP and plugin configuration - lives in a
+directory such as `~/.claude`. Runs read the same path in your **home**, the
+persistent directory Aether keeps for you on the server. Uploading
+configuration is separate from installing an agent or logging in.
 
-1. Click **Choose directory** and select the configuration root, such as
-   `~/.claude`, `~/.codex`, `~/.pi`, `~/.omp`, or `~/.config/opencode`.
-   The browser can read only the directory you explicitly select, including
-   on a hosted dashboard; this does not grant local repository access.
-2. Check **Configuration destination** and its remote path. A known basename
-   selects one automatically; renamed or ambiguous directories need a choice.
-   You can change it before import; that resets the file selection.
-3. Under **Select files**, uncheck anything unwanted. Review **Left out before
-   upload**. Known credential and runtime paths are excluded before reading
-   their bytes and cannot be re-enabled.
-4. Click **Import configuration**, then inspect the imported count, bytes,
-   paths, and omissions. **Import finished with omissions** is not a claim
-   that every file was copied. Use **Open remote files** to inspect the
-   destination, or **Import another directory** to explicitly repeat import.
+A coding agent on the computer that has the configuration decides what to
+upload, asks you, and uploads it with the `aether config` CLI:
 
-For OMP, root-level `stats.db`, `stats.db-wal`, and `stats.db-shm` are runtime
-exclusions, even when larger than 64 MiB. History, caches, and known login
-files are also excluded; settings, MCP configuration, skills, and extensions
-remain eligible. This is not a blanket exclusion of databases or dependency
-directories. See the [exact OMP exclusions](harnesses.md#agent-configuration-import-and-files).
+1. Open **Agents > Agent config files** (or **Onboarding > Agent**) and click
+   **Copy prompt**.
+2. Paste the prompt into Claude Code, Codex, opencode, or another agent on
+   that computer. It needs the `aether` CLI linked to the server
+   ([step 3](#3-link-from-your-machine)).
+3. Approve or change the list of what it will upload and leave behind. When it
+   finishes, run the commands it lists for you in `aether terminal`.
 
-An eligible file over **64 MiB (67,108,864 bytes)** stays visible and blocks
-import until you uncheck it or click **Exclude unsupported files**. Review
-the remainder before confirming. Directories have no total-size or file-count
-ceiling; transfer uses bounded batches. To install a required larger asset,
-use `aether terminal` and install or download it into the displayed remote
-destination. **Files** is a text editor, not a large-file uploader.
+The prompt:
 
-Remaining selected bytes are uploaded and server-scanned; do not assume
-all secret content stays local. Empty and binary regular files are preserved.
-New files use mode `0644`; overwrites keep remote permissions. Local
-executable bits and symlinks are not preserved, so a new script may need
-`chmod` in the remote terminal.
+```text
+Move my coding-agent configuration from this computer to my Aether server, so agents I run there behave the way they do here. The server runs Linux. Use the `aether` CLI, which is linked to it.
 
-**Import incomplete** preserves the actual error and separates **Imported
-paths**, **Paths with unknown outcome**, and **Failed or unattempted paths**.
-Copied files remain; there is no rollback or automatic retry. Use **Review
-remaining files** to continue only failed/unattempted paths. After fixing a
-local read failure, choose **Retry reading on import**, or uncheck that file.
-Recovery does not resend confirmed or unknown-outcome paths: inspect **Files**
-before deliberately reselecting uncertain files. Keep the browser window
-open; navigating within the dashboard preserves the result, but reloading
-loses the in-memory review.
+1. Run `aether config ls`. It lists each agent Aether can hold configuration for, its directory (the same path here and on the server, such as ~/.claude), and the files Aether always leaves out.
+2. For each listed directory that exists here, look through it and decide what belongs on the server:
+   - Upload: settings, instruction files such as CLAUDE.md or AGENTS.md, custom commands, subagents, skills, hooks, and MCP or plugin configuration.
+   - Leave behind: logins, tokens, and API keys; session history, transcripts, caches, and logs; anything that only works on this computer, such as hooks or MCP servers that run programs at local absolute paths, or macOS-only tools.
+   Run `aether config ls <agent>` to see what the server already has; a push replaces a server file at the same path.
+3. Show me what you will upload and what you will leave behind, with a one-line reason for each, and wait for my approval. Point out files that would need an edit to work on the server. Do not edit my local files.
+4. Upload the approved files and directories with `aether config push <agent> <path>...`. Each path is a file or directory inside the agent's directory, relative to it; a directory uploads everything in it, and `.` uploads the whole directory. Run it with --dry-run first to see what Aether itself will leave out.
+5. Report what was uploaded, and every file Aether left out with its reason.
+6. End with a list of what I still need to do myself, each with its exact command: for example, reinstalling a plugin or MCP server whose configuration you uploaded, logging in to an agent, or fixing a file that needs a server-side path. Those commands run on the server, in `aether terminal`.
 
-Imports overwrite matching files in your authenticated member's persistent
-home. They immediately affect that home in your Environment and
-active/future runs using that home; a running agent may need to reload. They do not
-rebuild the environment image, create an isolated per-run profile, or watch
-the local directory. A snapshot pin records launch provenance, not an
-isolated copy. An already-open **Files** editor keeps its draft after import;
-**Reload from server** discards that draft and reads the new remote bytes.
-See [configuration import and Files](harnesses.md#agent-configuration-import-and-files)
-for permissions, interruption handling, and manual snapshot commands.
+Never print, copy, or upload a credential.
+```
 
-**OpenCode recovery:** its configuration destination is `~/.config/opencode`,
-not `~/.local/share/opencode`. If you imported with an older destination,
-explicitly choose your local `~/.config/opencode` directory again, select the
-OpenCode destination, review, and re-import. Inspect the files under the new
-root and reload/restart OpenCode as needed. Old imports are not automatically
-moved. Leave login credentials at `~/.local/share/opencode/auth.json`;
-do not move the data directory or import credentials to repair configuration.
+The agent runs these commands; you can run them yourself:
+
+```sh
+aether config ls
+aether config ls claude
+aether config ls claude skills/deploy
+aether config push --dry-run claude settings.json CLAUDE.md skills commands
+aether config push claude settings.json CLAUDE.md skills commands
+```
+
+`aether config ls` prints one entry per agent: its name for the other
+commands, its directory (the same home-relative path on this computer and on
+the server), whether that directory exists on this computer, and what is
+always left out:
+
+```text
+claude (Claude Code): ~/.claude, exists on this computer
+  always left out, credentials: .credentials.json, credentials.json, credentials, .claude.json, auth.json, keychain, token.json, tokens.json, oauth.json, agent.db, agent.db-wal, agent.db-shm, *.pem
+  always left out, runtime and history: projects/, shell-snapshots/, statsig/, todos/, file-history/, history.jsonl, daemon/
+codex (Codex): ~/.codex, does not exist on this computer
+...
+always left out, every agent: symlinks, special files, files over 64 MiB, .aether-profile-ignore, and files the secret scanner flags
+```
+
+An agent you registered is listed when its definition sets `ProfileRoot`
+([custom agents](harnesses.md#custom-agents)).
+`aether config ls <agent> [path]` lists what the server already has in that
+directory, in the `aether files ls` format: `dir<TAB><name>` and
+`file<TAB><size><TAB><name>`.
+
+`aether config push <agent> <path>...` uploads files and directories. A
+relative path resolves against the agent's directory, not the current one; an
+absolute path such as `~/.claude/skills` must be inside it; `.` uploads the
+whole directory. Directories are walked recursively. Before reading a file,
+the push leaves out:
+
+- credential names in any path component, matched case-insensitively, and
+  every `*.pem`
+- `.aether-profile-ignore`
+- the agent's runtime and history paths, matched exactly and case-sensitively
+  from the directory root
+- symlinks, which are not followed, and sockets, FIFOs, and devices; a path
+  you name that runs through a symlink is left out whole, as in
+  `left out skills/linked/SKILL.md: symlink skills/linked, not followed`
+- files over **64 MiB (67,108,864 bytes)**; install or download those in
+  `aether terminal`
+
+It then runs the server's secret scanner on each remaining file and leaves
+out every flagged file, so its bytes never leave your computer. There is no
+override. The server applies the same rules, so a dry run lists exactly what
+the server keeps. Each file gets one line:
+
+```text
+left out .credentials.json: credential
+left out history.jsonl: runtime or history path
+left out projects/: runtime or history path
+left out skills/linked: symlink, not followed
+left out skills/deploy/notes.md: secret detected at 0:27 (generic-api-key)
+uploaded CLAUDE.md
+uploaded commands/review.md
+uploaded settings.json
+uploaded skills/deploy/SKILL.md
+uploaded 4 files (42 bytes) to ~/.claude; left out 5
+```
+
+`--dry-run` sends nothing and prints `would upload <path>` and
+`would leave out <path>: <reason>`, then
+`would upload 4 files (42 bytes) to ~/.claude; would leave out 5`.
+
+A push replaces a server file at the same path and deletes nothing. A new
+file gets the local permission bits, so scripts stay executable; a replaced
+file keeps its server mode. From Windows, new files are `0644`. Files travel
+in requests of at most 2,000 files and about 20 MiB; the directory itself has
+no size or file-count limit. If the server fails partway through a request,
+the push prints `uploaded <path>` for what it wrote and exits with the
+server's error. If a request gets no answer, the push prints
+`unconfirmed <path>` for each file in it and exits with the error;
+`aether config ls <agent>` shows what the server has. Running the same push
+again is safe. The command exits 0 when the server confirmed every request,
+even if files were left out.
+
+An upload writes your home at once: your Environment and active and future
+runs see it, and a running agent may need to reload. Nothing watches the
+local directory; push again after changing it. Edit uploaded files in
+**Files** ([harnesses.md](harnesses.md#agent-configuration-import-and-files)).
+
+For OMP, root-level `stats.db`, `stats.db-wal`, and `stats.db-shm` are
+runtime exclusions; settings, MCP configuration, skills, and extensions are
+not. See the [exact OMP exclusions](harnesses.md#agent-configuration-import-and-files).
+
+**OpenCode:** its configuration directory is `~/.config/opencode`, not
+`~/.local/share/opencode`. Files an older Aether release imported under
+`~/.local/share/opencode` are not moved; upload the configuration again with
+`aether config push opencode <path>...`, then reload OpenCode. Leave the login
+at `~/.local/share/opencode/auth.json`.
 
 ### Agent coordination hooks
 
@@ -774,7 +837,8 @@ away: the top bar holds **Open sidebar** (with a dot when a run needs you),
 the current page's name, **Search** and **New run**. To hear about that run
 with the dashboard closed, turn on **Settings > Notify this device when a run
 needs me** ([networking.md](networking.md#notifications)). Hosted onboarding supports remote
-repository import, Git identity, agent setup, and configuration import/editing.
+repository import, Git identity, agent setup, the configuration prompt, and
+editing configuration in **Files**.
 It has no machine-local link, clone, push, or pull operations; those require
 the desktop app or `aether gui` on the computer holding the clone.
 
@@ -1184,5 +1248,5 @@ go or the next `aether link` fails.
 - [environment-home.md](environment-home.md) - your environment's home, installed agents, and migration
 - [networking.md](networking.md) - Tailscale-first, plus LAN and VPN
 - [teams.md](teams.md) - joining, roles, workspaces
-- [harnesses.md](harnesses.md) - agents: login, configuration import, and launch definitions
+- [harnesses.md](harnesses.md) - agents: login, configuration, and launch definitions
 - [security.md](security.md) - what the container boundary does and does not do

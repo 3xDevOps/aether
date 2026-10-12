@@ -17,7 +17,7 @@ The home is the member's durable environment:
 
 - Executables installed in `~/.local/bin`
 - Vendor login state and other files written by the agent
-- Configuration imported explicitly from the browser or edited in **Files**
+- Agent configuration uploaded with `aether config push` or edited in **Files**
 - The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
 - The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
 - `~/.gitconfig`, which carries the git identity, gh's credential helper, and
@@ -359,56 +359,36 @@ own gh take over, or to replace it with 2.81.0 or newer:
 rm ~/.local/bin/gh
 ```
 
-## Importing and editing configuration
+## Uploading and editing configuration
 
-Open **Agent config files** on the **Agents** page or onboarding's **Agent**
-step in either dashboard and use **Choose directory**. Import is explicit and repeatable. A known unique basename
-automatically selects its **Configuration destination**; an unknown or
-ambiguous basename requires a choice. Any destination can be changed before
-import. The browser waits for root metadata, then previews paths without
-reading file bytes. Changing the destination resets file checkboxes and
-recomputes policy from retained handles.
+A coding agent on your computer uploads your agent configuration with
+`aether config push`, from a prompt the dashboard gives you under
+**Agents > Agent config files**. [Upload agent
+configuration](quickstart.md#upload-agent-configuration) covers the prompt,
+the commands, what is always left out, and the output.
 
-Under **Select files**, uncheck unwanted configuration. **Left out before
-upload** shows every local omission and its reason. The server advertises
-effective `credential_names` and `runtime_ignores` for each destination.
-Credential names match any path component case-insensitively, and `*.pem`
-files are always excluded. Runtime paths use exact, case-sensitive,
-root-relative component-prefix matching. These exclusions cannot be
-re-enabled. `.aether-profile-ignore` is also excluded; its CLI rules do not
-apply to browser imports.
-
-Directories have no file-count or aggregate-size ceiling; the browser
-transfers bounded batches. Eligible files larger than **64 MiB (67,108,864
-bytes)** block confirmation, not the rest of the directory: uncheck them or
-choose **Exclude unsupported files**, then **Import configuration**. Known
-runtime files are excluded before their size can block import, including
-OMP's statistics database and SQLite sidecars. See the
+The server advertises effective `credential_names` and `runtime_ignores` for
+each agent in `config.roots`, and `aether config push` applies them before
+reading a file. Credential names match any path component
+case-insensitively, and `*.pem` files are always excluded. Runtime paths use
+exact, case-sensitive, root-relative component-prefix matching.
+`.aether-profile-ignore` is also excluded; its rules apply only to
+`aether profile push`. Known runtime files are excluded before the 64 MiB
+size check, including OMP's statistics database and SQLite sidecars. See the
 [runtime policy](harnesses.md#agent-configuration-import-and-files).
 For a required larger asset, run `aether terminal` and install or download it
-directly into the displayed destination in your persistent home. Neither
+directly into the agent's directory in your persistent home. Neither
 **Files** nor `aether profile push` is a large-file upload alternative.
 
-Remaining bytes are uploaded and scanned by the server, so secret content is
-not guaranteed to stay on the browser machine. Empty files and binary assets
-are preserved. The result lists server and local exclusions and explicitly
-reports completion with omissions. Failures preserve the original error and
-separate confirmed writes, unknown-outcome paths, and failed or unattempted
-paths. **Review remaining files** lets you retry a read or explicitly omit a
-failure before continuing; it does not replay confirmed or unknown paths.
-Inspect **Files** before deliberately reimporting unknown paths.
-Navigation preserves the operation and review, but a page reload loses this
-in-memory state. Changing members or servers discards the review and stops
-further batches; an in-flight request can still finish for its original owner.
-New browser-imported files use mode `0644`; existing files retain their current
-modes, including restrictive server-side umask modes. Executable mode and
-symlinks cannot be represented by the browser. Server-side validation rejects
-unsafe paths, symlink components, hardlinks, and nonregular files, while
-preserving directory and staged-file ownership.
+Empty files and binary assets are preserved. New files get the permission
+bits sent with them (`0644` when none are sent); existing files retain their
+current modes, including restrictive server-side umask modes. Server-side
+validation rejects unsafe paths, symlink components, hardlinks, and
+nonregular files, while preserving directory and staged-file ownership.
 
-The import writes the authenticated member's own persistent home. Because that
+An upload writes the authenticated member's own persistent home. Because that
 home is mounted read-write in your environment and in every run the
-member launches, imported or edited files are visible immediately, including
+member launches, uploaded or edited files are visible immediately, including
 to active runs; the agent may need to reload. It is not an isolated per-run
 profile, and a share of your agent account does not expose it, except the
 `~/.omp/agent` directory an `omp` share mounts. A snapshot
@@ -421,7 +401,7 @@ oversized files are read-only. New configuration files accept nested relative
 paths and refuse to overwrite an existing file. Save explicitly with **Save** or
 Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
 before unloading them. There is no autosave or force-save. A failed or stale
-save keeps the draft. Repeat imports also leave open buffers intact;
+save keeps the draft. Later pushes also leave open buffers intact;
 **Reload from server** deliberately discards the draft and loads remote bytes.
 All `config.*` methods require `Launch` and target only the authenticated
 member's own home; there is no admin/member selector.

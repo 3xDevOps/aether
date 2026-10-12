@@ -667,6 +667,7 @@ commit captured at launch.
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
+| `aether config ls [<agent> [path]]` / `aether config push [--dry-run] <agent> <path>...` | List the agents Aether holds configuration for and what your home has for one, or upload files and directories from an agent's directory into your own home. See [quickstart.md](quickstart.md#upload-agent-configuration). |
 
 The dashboard shows each run in one of five states: **Needs you**,
 **Working**, **Paused**, **Done** or **Failed**, with a reason line. **Needs
@@ -1239,15 +1240,11 @@ and any scope deviation must carry an explicit disposition. The resulting
 evidence remains provenance of what Aether captured or a participant reported,
 not independent verification.
 
-Agent configuration is not watched or inventoried automatically. Open
-**Agents → Agent config files** in either dashboard to choose a local directory,
-review its files, and explicitly import or update the remote configuration.
-The onboarding Agent step uses the same importer. Known credential
-names and runtime/history defaults are skipped locally; remaining bytes are
-uploaded and server-scanned, so do not assume all secret content stays local.
-Directory-wide count and byte budgets do not truncate imports; bounded batches
-carry the full eligible selection and report progress or an explicit failure.
-The import writes the authenticated member's persistent home immediately,
+Agent configuration is not watched or inventoried automatically. Each member
+uploads their own with `aether config push`, usually run by a coding agent on
+their computer from the prompt under **Agents → Agent config files**
+([Upload agent configuration](quickstart.md#upload-agent-configuration)).
+The upload writes the authenticated member's persistent home immediately,
 including for that member's active runs. An agent may need to reload its
 configuration.
 
@@ -1262,12 +1259,9 @@ refuse overwrite. Every `config.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 
-New browser-import files are mode `0644`; existing remote permission bits are
-preserved. Local executable mode and symlinks cannot be represented by the
-browser. Imports preserve empty and arbitrary binary regular files up to
-64 MiB each, without a directory-wide file-count or aggregate-size ceiling.
-The server rejects unsafe paths, symlink components, hardlinks, and nonregular
-files. Every run a member launches, on their own or a shared account, uses
+Uploaded files keep their local permission bits when new; existing remote
+permission bits are preserved. The server rejects unsafe paths, symlink
+components, hardlinks, and nonregular files. Every run a member launches, on their own or a shared account, uses
 that member's read-write home rather than an isolated per-run copy; an account
 share never exposes it. A snapshot pin records launch provenance, not an
 isolated writable home or a promise that home edits wait for later runs.
@@ -1291,6 +1285,6 @@ aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
 
-Browser imports and **Files** edits do not create profile snapshots. A manual
+`aether config push` and **Files** edits do not create profile snapshots. A manual
 push or rollback overlays snapshot files into the same persistent home; it
 does not remove unlisted files or create isolated configuration for a run.

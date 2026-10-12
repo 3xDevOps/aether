@@ -8,8 +8,6 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
-  ConfigImportParams,
-  ConfigImportResult,
   ConfigRoot,
   CoordMessagesListResult,
   DaemonInstallResult,
@@ -892,8 +890,6 @@ export const api = {
     call<FileRead>('config.read', params),
   configWrite: (params: { harness: string; path: string; content: string; revision: string }) =>
     call<FileRead>('config.write', params),
-  configImport: (params: ConfigImportParams) =>
-    call<ConfigImportResult>('config.import', params),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),

@@ -701,9 +701,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       content, size: new TextEncoder().encode(content).length,
       binary: false, truncated: false, revision: 'saved', writable: true,
     })),
-    configImport: vi.fn(async ({ harness, files }) => ({
-      harness, files: files.length, bytes: 0, excluded: [],
-    })),
     agentList: vi.fn(async () => [
       agentInfo({ display_name: 'Claude Code' }),
       agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),

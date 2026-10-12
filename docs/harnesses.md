@@ -1165,8 +1165,9 @@ The login commands below run in the Environment. Three things to know:
 Inside `aether terminal`, start the CLI and use its `/login` slash command,
 which prints a URL to open in your own browser and takes a code back. `/status`
 shows which credential is active. Credentials land in
-`~/.claude/.credentials.json` and remain in the member's persistent home. The
-browser configuration import skips known credential names before upload.
+`~/.claude/.credentials.json` and remain in the member's persistent home.
+[`aether config push`](quickstart.md#upload-agent-configuration) never uploads
+known credential names.
 Once you share your account, `/logout` in your own containers revokes the
 login but leaves the file in place; see
 [security.md](security.md#account-sharing).
@@ -1181,8 +1182,8 @@ is not in the passthrough list, so use the terminal for subscription auth.
 
 Inside `aether terminal`, run the CLI's login command and choose the
 device-code option. Codex writes `auth.json` under `~/.codex`, which remains
-in your member home. The browser configuration import skips known credential
-names before upload.
+in your member home. `aether config push` never uploads known credential
+names.
 
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
@@ -1190,7 +1191,7 @@ names before upload.
 
 Inside `aether terminal`, start the CLI and use its `/login` command to pick
 a provider. Tokens land in `~/.pi/agent/auth.json` under the member's home.
-The browser configuration import skips known credential names before upload.
+`aether config push` never uploads known credential names.
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### omp
@@ -1216,22 +1217,20 @@ Inside `aether terminal`, run `opencode auth login` and pick your provider.
 Credentials are written to `~/.local/share/opencode/auth.json` in the member
 home.
 
-**Agent config files** import, **Files**, and the manual `aether profile` commands
+`aether config`, **Files**, and the manual `aether profile` commands
 use `~/.config/opencode`, the default native configuration home for the
 [V1](#opencode-v1-inbox-integration) and [V2](#opencode-v2-inbox-integration)
 targets above. OpenCode loads settings and plugins there, not from its login
-directory. Aether's import/profile root is fixed relative to the member home;
+directory. Aether's configuration root is fixed relative to the member home;
 it does not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR`, or
 `OPENCODE_CONFIG` overrides. Native custom-root consumption requires separate
 verification; V2 `OPENCODE_CONFIG_DIR` relocation remains unverified.
 
-If an earlier import reported `~/.local/share/opencode` as its destination,
-open **Agents > Agent config files**, select your local `~/.config/opencode` directory
-again, choose `opencode` with destination `~/.config/opencode`, review, and
-import. This writes the corrected destination without moving or deleting old
-files. Do not copy the data directory wholesale or move/delete
-`~/.local/share/opencode/auth.json`; native login and account sharing still
-use that file.
+If an earlier import wrote to `~/.local/share/opencode`, upload the
+configuration again with `aether config push opencode <path>...`. This writes
+`~/.config/opencode` without moving or deleting old files. Do not copy the
+data directory wholesale or move/delete `~/.local/share/opencode/auth.json`;
+native login and account sharing still use that file.
 
 ### `fake`
 
@@ -1306,9 +1305,9 @@ The server validates that the executable is a name rather than a host path,
 that argv starts with that executable, and that profile, credential, and
 deny-name policies are safe. An invalid administrator definition rejects
 server startup; an invalid member registration is refused at the RPC.
-Agent installation, login state, configuration import, and launch definitions
+Agent installation, login state, configuration uploads, and launch definitions
 remain separate concerns: installation and login state live in the member home,
-the explicit browser import writes selected configuration there, and the
+`aether config push` writes selected configuration there, and the
 definition resolves argv for that member. The terminal is the only setup
 transport for installation and login.
 
@@ -1393,34 +1392,17 @@ To turn updates off for the whole server, start it with
 
 ## Agent configuration: import and Files
 
-Expand **Agent config files** on the Agents page in either the local
-dashboard (`aether gui`) or the server-hosted dashboard; the command palette
-finds the Agents page by that name. The section appears whenever the gateway
-advertises `config.roots` and `config.import`, and needs no workspace or
-onboarding progress. Onboarding's Agent step shows the same section.
+[Upload agent configuration](quickstart.md#upload-agent-configuration) covers
+the prompt under **Agents > Agent config files** and the `aether config ls`
+and `aether config push` commands a local agent runs with it. This section
+covers what an upload and a **Files** edit change on the server.
 
-Choose one directory such as `~/.claude`, `~/.codex`, `~/.pi`, or `~/.omp`
-with **Choose directory**. A hosted page can read a directory you explicitly
-select, not arbitrary local paths. A unique basename selects its
-**Configuration destination** automatically; an unknown or ambiguous basename
-requires a choice. You can change any destination before importing. Doing so
-recomputes the metadata-only preview and resets the file checkboxes; it does
-not read file bytes.
-
-Under **Select files**, uncheck any configuration you do not want to copy.
-**Left out before upload** lists every local exclusion and its reason.
-Credential and runtime exclusions cannot be re-enabled. Review the selected
-paths and omissions, then choose **Import configuration**. After a result,
-select another directory for a repeat import or choose **Open remote files**.
-
-![Configuration import outside onboarding](media/configuration-import.webp)
-
-The destination's policy applies to renamed directories too.
-`.aether-profile-ignore` is excluded: its CLI rules do not override browser
-policy. Remaining bytes are uploaded and scanned by the server; do not assume
-all secret-looking content stays on the laptop. Server exclusions appear in
-the result. Any local or server omission produces **Import finished with
-omissions**, not a claim that the whole directory was copied.
+`aether config push` reads each agent's `credential_names` and
+`runtime_ignores` from `config.roots` and leaves those paths out before
+reading them. The server enforces the same names, the runtime paths,
+`.aether-profile-ignore`, and the secret scanner again on every
+`config.import` request. Rules inside `.aether-profile-ignore` apply only to
+`aether profile push`.
 
 For oh-my-pi, the shared runtime policy excludes:
 
@@ -1440,51 +1422,18 @@ The policy does not exclude all databases or dependency directories:
 `agent/npm/` remain eligible, including an extension's own `stats.db`.
 Empty files and binary assets are preserved.
 
-Directories have no file-count or total-size ceiling. The browser reads and
-uploads bounded batches, showing cumulative progress. Each file must be at
-most **64 MiB (67,108,864 bytes)**. A larger eligible file remains visible and
-blocks confirmation until you uncheck it or choose **Exclude unsupported
-files**. Runtime and credential exclusions happen before this size check, so
-a large runtime database does not block real configuration.
-
 For a required asset larger than 64 MiB, open your persistent member-home shell:
 
 ```sh
 aether terminal
 ```
 
-Install or download the asset there into the displayed configuration
-destination, following the asset's installation instructions. This is a
-terminal operation, not a browser import or a Files-editor upload. The manual
-`profile push` command is not a large-file alternative: it allows 1 MiB per
-file and 20 MiB per snapshot.
+Install or download the asset there into the agent's directory, following
+the asset's installation instructions. The manual `profile push` command is
+not a large-file alternative: it allows 1 MiB per file and 20 MiB per
+snapshot.
 
-An interruption stops further requests and preserves the original error.
-The result separates **Imported paths** (confirmed writes), **Paths with
-unknown outcome** (a submitted batch without a definitive reply), and
-**Failed or unattempted paths**. Copied files remain; there is no rollback or
-automatic retry.
-
-Use **Review remaining files** to continue only failed or unattempted paths.
-For a read failure, choose **Retry reading on import** after fixing access, or
-uncheck that file, then confirm again. Previously confirmed paths and
-unknown-outcome paths are not replayed by this recovery action. Earlier errors
-remain available after recovery. Inspect **Files** before deliberately
-reselecting and reimporting any path whose outcome is unknown.
-
-Navigation within the dashboard preserves the operation, remaining file
-handles, and result. A page reload loses this in-memory review; inspect
-**Files** before selecting the directory again. Changing authenticated members
-or servers discards preparation and remaining handles and stops further
-batches. An already submitted request may still finish for its original
-owner; its paths and result are not shown to the new identity.
-Browser imports create new files with mode `0644` and preserve existing remote
-file modes when overwriting. The browser cannot preserve local executable bits
-or symlinks, so a newly imported script may need `chmod` in the remote terminal.
-
-![An interrupted import reports confirmed writes and the failure](media/configuration-incomplete.webp)
-
-The imported files are written into your authenticated member's persistent
+Uploaded files are written into your authenticated member's persistent
 configuration home. That home is mounted read-write in your Environment
 and in runs you launch, so the change is immediately visible to
 existing and future runs (an agent may need to reload its configuration). It
@@ -1495,7 +1444,7 @@ records launch provenance, not an isolated writable copy or a promise that
 home changes wait for later runs.
 Changing configuration does not rebuild the installed-agent image.
 
-After import, open **Files** to browse your own member configuration alongside
+After an upload, open **Files** to browse your own member configuration alongside
 workspace base and live-run files. The editor supports JSON, JavaScript,
 TypeScript, Markdown, Python, and TOML syntax highlighting, plus find/replace.
 Edits stay as in-memory dirty tabs while you navigate. Save explicitly with
@@ -1504,7 +1453,7 @@ force-save. Browser navigation warns before unloading dirty buffers.
 
 Configuration files are complete UTF-8 text up to 64 MiB. Binary and oversized
 files are read-only. New configuration files accept nested relative paths and
-never overwrite an existing file. A repeat import does not replace an already
+never overwrite an existing file. A later push does not replace an already
 open editor buffer. Use **Reload from server** when you want current remote
 bytes, including after a stale save; it deliberately discards the local draft.
 Every `config.*` method requires `Launch` and addresses only the authenticated
@@ -1539,14 +1488,14 @@ aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 
 `profile push` reads the selected agent's local configuration root and records a
 content-addressed snapshot; `status` reports recorded snapshot metadata, not a
-live inventory of the home. Browser imports and **Files** edits do not create
-or update this CLI snapshot history. Configuration persists in the member HOME
+live inventory of the home. `aether config push` and **Files** edits do not
+create or update this CLI snapshot history. Configuration persists in the member HOME
 even when no snapshot exists.
 
 CLI built-in runtime exclusions match from the profile root.
 `.aether-profile-ignore` keeps gitignore syntax and can reinclude runtime paths
 with `!`, but cannot reinclude credential names. These overrides do not apply to
-browser imports.
+`aether config push`.
 
 Manual `push` and `rollback` overlay the snapshot's files into that same shared
 HOME, making those writes visible to the member's active and future runs.

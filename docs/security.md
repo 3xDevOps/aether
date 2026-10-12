@@ -852,23 +852,6 @@ library's ECDH, HKDF, AES-GCM and ECDSA, checked against the example message
 in RFC 8291. The worker the dashboard registers, `/sw.js`, has no `fetch`
 handler, so it never sees a request or a response.
 
-### Browser configuration imports
-
-The shared Configuration importer prepares user-selected file metadata only
-after `config.roots` returns and a destination is known. The root's
-`credential_names` combines shared denials and the agent's `DenyNames`;
-names match any component case-insensitively. Those names and `*.pem` files
-are filtered before browser reads. A missing credential list fails closed.
-Runtime/history paths use the selected root's `runtime_ignores`. Neither list
-can be overridden by file checkboxes or `.aether-profile-ignore`, which is
-itself excluded. The server independently enforces policy and scans the
-remaining uploaded bytes.
-Unknown or ambiguous basenames require a destination choice. Changing any
-destination recomputes metadata from retained `File` handles without reading
-bytes and resets checkboxes. Generation guards prevent a preview for one
-destination from being submitted to another. Both dashboards can read a
-directory explicitly chosen through the browser picker, not arbitrary paths.
-
 ### Terminal image uploads
 
 `terminal.image` accepts image bytes, not a client path. The dashboard sends
@@ -918,48 +901,32 @@ local object URLs; it never loads an arbitrary URI supplied by the transcript.
 Deleting the message or run, removing the home file, or losing View access
 prevents another download. Existing member-home image retention still applies.
 
-## Browser configuration and Files
+## Agent configuration and Files
 
-**Agents > Agent config files** provides explicit, repeatable browser
-directory import on both local and server-hosted dashboards when `config.roots`
-and `config.import` are advertised. Onboarding's Agent step shows the same
-importer, and the command palette reaches it through **Agents**; no workspace
-or onboarding progress is required. After a result,
-the user can select another directory or choose **Open remote files** to visit
-the existing **Files** editor. The browser waits for `config.roots` and a known
-destination before previewing or reading bytes. A known unique basename selects
-its destination automatically; an unknown or ambiguous basename requires an
-explicit choice. Credential names in any path component and `*.pem` files are
-always skipped before upload. Runtime/history paths come from the selected
-root's `runtime_ignores` metadata and match exact, root-relative paths or
-component prefixes case-sensitively after trailing slashes are trimmed.
-Changing the destination recomputes the preview from retained browser `File`
-handles without reading their bytes. Users can uncheck eligible paths; the
-preview lists every local omission and its reason. No directory-wide count or
-byte ceiling silently discards files. The browser reads and encodes one
-bounded batch at a time, targeting 20 MiB decoded and at most 2,000 files;
-a larger individual file travels alone. Requests permit 64 MiB decoded and
-each file has a 64 MiB ceiling. Oversized eligible files block confirmation
-until explicitly omitted; invalid paths and destination collisions fail
-before any upload. None of these controls bypasses server validation.
-Owner-scoped progress and results survive dashboard navigation. Identity changes
-discard preparation and prevent subsequent batches, including after an awaited
-file read. An already submitted request may finish for its original owner;
-its result is never shown to the new identity. There is no watcher, automatic
-configuration synchronization, or automatic import retry.
+`aether config push` uploads agent configuration from the computer the CLI
+runs on ([Upload agent configuration](quickstart.md#upload-agent-configuration)).
+The dashboard shows only the prompt that asks a local agent to run it; it
+reads no local files. The CLI reads the agent's root from `config.roots`
+and refuses an unknown agent and any path outside the agent's directory.
+The root's `credential_names` combines shared denials and the agent's
+`DenyNames`; names match any path component case-insensitively. Those
+names, `*.pem` files, `.aether-profile-ignore`, and the root's
+`runtime_ignores` (exact, root-relative paths or component prefixes,
+case-sensitive, trailing slashes trimmed) are left out before the CLI reads a
+file. Symlinks are not followed, special files are skipped, and files over
+64 MiB are never read. The CLI then runs the server's secret scanner on each
+remaining file and does not send a flagged one; there is no override. None
+of these client checks replaces server validation: the server enforces the
+same credential, runtime, and `.aether-profile-ignore` policy and scans every
+uploaded file again. There is no watcher, automatic configuration
+synchronization, or automatic retry.
 
-The browser reads accepted regular-file bytes and sends them to the server,
-where they are scanned before writing; a secret finding is therefore not proof
-that the content stayed local. Empty files and arbitrary binary regular bytes
-are preserved. Server exclusions remain visible alongside local omissions.
-A failed or interrupted batch stops further requests. The result separates
-confirmed writes, failed/unattempted paths, and a submitted batch whose
-outcome is unknown. The server reports exact committed paths and exclusions
-even when a preflight failure confirms zero writes. Recovery reviews only
-failed/unattempted paths; it never automatically replays confirmed or
-unknown-outcome paths. A read failure can be retried or explicitly omitted.
-Original errors remain available after recovery. A page reload loses the
-in-memory review and result; inspect Files before a new explicit import.
+A `config.import` request carries at most 2,000 files and 64 MiB decoded,
+and each file at most 64 MiB; the CLI sends batches of about 20 MiB. A
+request that fails after writing files returns the exact committed paths and
+the error, and the server reports them even when a preflight failure
+confirms zero writes. A call that returns no result has an unknown outcome;
+the CLI reports that batch as unconfirmed and stops.
 The shared HTTP gateway permits a 96 MiB request for `config.import`,
 385 MiB for `config.write` and `files.write`, and 1 MiB for ordinary methods.
 Decoded file and import-request limits remain authoritative. The authenticated
@@ -970,8 +937,7 @@ admission lasts through backend processing and the response. Excess requests
 receive HTTP 503 without their bodies being read. Body reads expire after
 30 seconds without progress or 15 minutes total and return HTTP 408.
 HTTP admission, body, and JSON-validation refusals carry
-`error.data.config_import_not_started: true` before backend dispatch,
-so the importer can report failed/unattempted paths rather than unknown writes.
+`error.data.config_import_not_started: true` before backend dispatch.
 A status code or message alone is not no-write evidence: backend or transport
 errors, including HTTP 503 without that marker, retain an unknown outcome.
 SSH control frames that grow beyond 64 KiB require admission: at most two
@@ -983,15 +949,15 @@ Expiry closes the offending SSH connection, including its other channels, so
 a peer cannot retain the large buffer by ignoring channel closure. Idle
 channels between frames do not start a frame timer.
 
-Browser metadata is intentionally limited. New imported files are `0644`;
-existing modes are preserved even when the server uses a restrictive umask.
-The browser cannot preserve executable mode or symlinks. The server rejects
-unsafe paths, symlink components, hardlinks, and nonregular destinations,
-and retains directory and staged-file ownership. Every `config.*` method
-requires the `Launch` capability and targets only the authenticated member's
-own home; an admin cannot select another member or account.
+New files get the permission bits the request carries, `0644` when it
+carries none; existing modes are preserved even when the server uses a
+restrictive umask. The server rejects unsafe paths, symlink components,
+hardlinks, and nonregular destinations, and retains directory and
+staged-file ownership. Every `config.*` method requires the `Launch`
+capability and targets only the authenticated member's own home; an admin
+cannot select another member or account.
 
-The imported and edited files are in the member's shared read-write home,
+Uploaded and edited files are in the member's shared read-write home,
 mounted into that member's environment and the active and future
 runs they launch, including runs on a shared account. A member's account
 share does not expose them, except the `~/.omp/agent` directory an `omp`
@@ -999,7 +965,7 @@ share mounts; otherwise only the agent login path is shared
 ([Account sharing](#account-sharing)). The home is not a per-run isolated
 configuration copy. A snapshot pin records
 optional launch provenance, not an isolation boundary or a promise that home
-edits wait for later runs. Browser imports and Files edits do not create or
+edits wait for later runs. Uploads and Files edits do not create or
 update CLI snapshot history; the HOME persists independently. Manual profile
 push and rollback overlay snapshot files into that same HOME and leave paths
 absent from the snapshot untouched. Rollback is not an exact-tree restore.
@@ -1010,7 +976,7 @@ Binary and oversized files are read-only. Run and configuration saves recheck
 SHA-256 revisions immediately before atomic rename under Aether's root lock;
 base-branch commits compare-and-swap the branch head. These locks do not
 exclude arbitrary live-agent filesystem writers. A stale or failed save leaves
-the browser draft available. Repeat imports do not replace open editor buffers;
+the browser draft available. Later uploads do not replace open editor buffers;
 **Reload from server** explicitly discards a draft and reads remote content.
 
 ## SSH into a run

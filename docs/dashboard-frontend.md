@@ -3307,9 +3307,9 @@ keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
 All runs the member launches and their Environment mount one shared
-read-write persistent HOME, so accepted configuration imports and saves
-are visible to active and future runs; a tool may need to reload. Browser
-imports and Files edits do not create CLI snapshot history. Optional run
+read-write persistent HOME, so uploaded configuration and saves are
+visible to active and future runs; a tool may need to reload. Files edits
+do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
@@ -3413,7 +3413,8 @@ command and an optional Enhanced command, sent through `agent.register`.
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
 member's Profile and opens it with **Set it in Profile** rather than editing
-the identity itself; **GitHub**; and **Agent config files**.
+the identity itself; **GitHub**; and **Agent config files**, a prompt that
+has an agent on the member's computer upload its configuration.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how runs
 show it**, **Install and log in** and **Check**. The first is
@@ -3532,49 +3533,32 @@ assert one string.
 
 ### Agent config files
 
-`src/components/profile-import.tsx` is the configuration importer, under the
-**Agent config files** disclosure on Agents and in onboarding's Agent step
-whenever `config.roots` and `config.import` are advertised, on both gateways,
-without a workspace. There is no separate route: typing "config files" in the
-command palette finds **Agents**, through the `keywords` its entry in
-`src/lib/surfaces.ts` carries.
+`src/components/agents/config-prompt.tsx` fills the **Agent config files**
+disclosure on Agents and in onboarding's Agent step whenever `config.roots`
+and `config.import` are advertised, on both gateways, without a workspace.
+There is no separate route: typing "config files" in the command palette
+finds **Agents**, through the `keywords` its entry in `src/lib/surfaces.ts`
+carries.
 
-`config.roots` supplies destinations such as `~/.claude` and their runtime
-exclusions. A unique basename selects the destination automatically; an
-unknown or ambiguous basename requires a choice before file bytes are read.
-Retained browser `File` handles allow the metadata preview to be recomputed
-after a destination change. Credential names in any path component and
-`*.pem` files are excluded before read; destination-specific
-`runtime_ignores` match exact root-relative paths or component prefixes
-case-sensitively.
+The browser reads and uploads nothing. The section gives the member a prompt
+to paste into a coding agent on the computer that has their configuration;
+that agent picks the files, asks the member, and uploads them with
+`aether config ls` and `aether config push`, so that computer needs the
+`aether` CLI linked to this server. The two sentences above the prompt say so and link
+the quickstart's install and link steps.
 
-The browser directory picker grants access to the directory the user selects
-even when the dashboard is server-hosted; it does not grant access to
-arbitrary local paths. The importer previews metadata and policy exclusions
-without reading file bytes. It transfers the entire eligible directory through
-sequential bounded requests, not a truncated selection. It retains at most the
-current batch's encoded payload and shows cumulative progress. Files above the
-64 MiB configuration-file ceiling and read failures are explicit errors.
-Server exclusions and exact committed paths accumulate across batches; a
-failure stops subsequent requests, distinguishing known commits from a request
-whose response was lost. A response with `error` shows committed counts,
-exact canonical `imported_paths` and the real error, and warns that copied
-files remain. A lost RPC response leaves the outcome unknown; inspect
-**Files** before importing again.
-
-After a result the user can select another directory or use **Open remote
-files**, which navigates to the `files` route. There is no automatic
-configuration sync, watcher, or import retry. Nonpersisted owner-scoped
-progress and results survive navigation; `configImportPending` serializes
-operations and protects against page unload. Each request rechecks identity
-after asynchronous reads, so a member/server switch prevents further writes
-and hides the old result. New browser-imported files use `0644`; existing
-remote modes are preserved on overwrite. The browser cannot preserve source
-executable bits or symlinks. Agent logins are separate from this import. See
+The prompt is `configPrompt` in `src/lib/config-prompt.ts`, a plain module
+so the Playwright spec can import it; the user docs print the same text byte
+for byte. It shows in a read-only, focusable monospace block that keeps its
+line breaks, wraps long lines and scrolls past 18rem. **Copy prompt** goes
+through `copyText` (`src/lib/clipboard.ts`): it toasts **Copied**, or, when
+the clipboard refuses, selects the whole prompt and toasts **Selected. Press
+Ctrl+C to copy.** **Open remote files** navigates to the `files` route, where
+the uploads show under **Agent config**. Agent logins are separate. See
 [Agent configuration](harnesses.md#agent-configuration-import-and-files) for
 the user workflow and [the
-protocol](local-gateway.md#files-and-member-configuration) for import result
-and failure semantics.
+protocol](local-gateway.md#files-and-member-configuration) for the
+`config.*` methods.
 
 ## Environment
 
