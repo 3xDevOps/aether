@@ -426,6 +426,7 @@ export const api = {
     task?: string
     harness: string
     mode?: string
+    model?: string
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
@@ -522,6 +523,7 @@ export const api = {
       account_member_id: string
       harness: string
       mode: string
+      model?: string
     }
     execution_choices: Array<{
       account_member_id: string
@@ -837,6 +839,7 @@ export const api = {
     task: string
     harness: string
     mode?: string
+    model?: string
   }) =>
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,

@@ -112,6 +112,18 @@ describe('new run', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
   })
 
+  it('sends a typed model and preselects it for that agent next time', async () => {
+    await open()
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'opus' } })
+    fireEvent.click(launchButton())
+
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', model: 'opus' }))
+    expect(useStore.getState().launchDefaults.claude.model).toBe('opus')
+    cleanup()
+    await open()
+    expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('opus')
+  })
+
   it('preselects the most recently launched agent in its remembered mode', async () => {
     vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'codex', display_name: 'Codex' })])
     useStore.setState({ launchDefaults: { claude: { mode: 'tui', at: 1 }, codex: { mode: 'headless', at: 2 } } })
@@ -377,6 +389,21 @@ describe('swarm', () => {
     await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
     expect(vi.mocked(api.missionCreate).mock.calls[0][0].execution_choices).toEqual([
       { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    ])
+  })
+
+  it('sends the integrator and worker models, keeping a worker that differs only by model', async () => {
+    await openSwarm()
+    await userEvent.click(workerMode('Standard'))
+    fireEvent.change(screen.getByLabelText('Integrator model'), { target: { value: 'opus' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Model for Claude Code' }), { target: { value: 'haiku' } })
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'tui', model: 'opus' })
+    expect(params.execution_choices).toEqual([
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui', model: 'haiku' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui', model: 'opus' },
     ])
   })
 

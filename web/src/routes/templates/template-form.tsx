@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { modes } from '@/components/launch/modes'
+import { ModelField } from '@/components/launch/run-fields'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +46,7 @@ export function TemplateForm({
   const [task, setTask] = useState(source?.task ?? '')
   const [harness, setHarness] = useState(source?.harness ?? harnesses[0])
   const [mode, setMode] = useState(source?.mode ?? 'headless')
+  const [model, setModel] = useState(source?.model ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -52,7 +54,8 @@ export function TemplateForm({
     setBusy(true)
     setError(null)
     try {
-      await client.templateSave({ workspace_id: workspaceID, name: name.trim(), task: task.trim(), harness, mode })
+      const chosenModel = model.trim()
+      await client.templateSave({ workspace_id: workspaceID, name: name.trim(), task: task.trim(), harness, mode, ...(chosenModel ? { model: chosenModel } : {}) })
       onSaved()
       onClose()
       toast.success('Template saved')
@@ -115,6 +118,7 @@ export function TemplateForm({
               </Select>
             </div>
           </div>
+          <ModelField harness={harness} value={model} onChange={setModel} />
           {error && (
             <p role="alert" className="text-ui-sm text-state-failed">
               {error}

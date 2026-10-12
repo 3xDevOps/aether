@@ -4,7 +4,7 @@ import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent
 import { AccountOptions, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
-import { needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
 import { Button } from '@/components/ui/button'
@@ -60,7 +60,7 @@ export function LaunchDialog() {
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
   const choice = useAgentChoice({ account, ownAccountID })
-  const { agents, agentError, agent, harness, mode, noAgents } = choice
+  const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
@@ -136,16 +136,22 @@ export function LaunchDialog() {
       : current.filter((item) => !sameWorker(item, choice)))
   }
 
+  const setWorkerModel = (choice: WorkerChoice, next: string) => {
+    setWorkers((current) => current.map((item) => sameWorker(item, choice) ? { ...item, model: next } : item))
+  }
+
   const launchRun = async () => {
     const trimmed = task.trim()
+    const chosenModel = model.trim()
     const run = await api.runLaunch({
       workspace_id: workspaceID,
       harness,
       ...(trimmed ? { task: trimmed } : {}),
       ...(mode === 'tui' ? {} : { mode }),
+      ...(chosenModel ? { model: chosenModel } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
     })
-    rememberLaunch(harness, mode)
+    rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
     close()
     navigate('run', { runId: run.id })
@@ -158,10 +164,17 @@ export function LaunchDialog() {
     if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness) {
       throw new Error('Enter an objective and choose an integrator agent.')
     }
-    const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: integratorMode }
+    const integratorModel = model.trim()
+    const integrator: MissionExecutionChoice = { account_member_id: account, harness, mode: integratorMode, ...(integratorModel ? { model: integratorModel } : {}) }
     const workerChoices = workers.map((choice): MissionExecutionChoice => {
       const info = agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness)
-      return { ...choice, mode: modeRefusal(info, choice.harness, workerMode) ? 'tui' : workerMode }
+      const workerModel = choice.model?.trim()
+      return {
+        account_member_id: choice.account_member_id,
+        harness: choice.harness,
+        mode: modeRefusal(info, choice.harness, workerMode) ? 'tui' : workerMode,
+        ...(workerModel ? { model: workerModel } : {}),
+      }
     })
     const contents = {
       workspace_id: workspaceID,
@@ -171,7 +184,7 @@ export function LaunchDialog() {
       // Sorted: the idempotency key and the server's receipt check both
       // follow the serialized list.
       execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
-        .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode)),
+        .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '')),
     }
     const serialized = JSON.stringify(contents)
     const key = swarmKeys.get(serialized) ?? idempotencyKey()
@@ -270,7 +283,8 @@ export function LaunchDialog() {
                   onSetUp={setUp}
                 />
               )}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} />
+              {harness && <ModelField label="Integrator model" harness={harness} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
+              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} onModel={setWorkerModel} />
               <ModeControl
                 label="Worker mode"
                 value={workerMode}

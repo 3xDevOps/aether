@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
 import { ModeControl } from '@/components/launch/mode-control'
+import { modelHints } from '@/components/launch/models'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
 import { FormField } from '@/components/ui/form-field'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -21,7 +23,7 @@ function preselect(list: AgentInfo[], preferred?: string): string {
   return recent?.harness ?? ok[0]?.name ?? ''
 }
 
-/** The agent and mode a launch uses, reloaded for each account; `preferred`
+/** The agent, mode and model a launch uses, reloaded for each account; `preferred`
  * wins the first pick when that agent can launch. */
 export function useAgentChoice({ account, ownAccountID, preferred, client = api }: {
   account: string
@@ -33,6 +35,7 @@ export function useAgentChoice({ account, ownAccountID, preferred, client = api 
   const [agentError, setAgentError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
+  const [model, setModel] = useState('')
   const [attempt, setAttempt] = useState(0)
   const choice = useRef({ harness, mode, preferred })
   choice.current = { harness, mode, preferred: choice.current.preferred }
@@ -40,7 +43,9 @@ export function useAgentChoice({ account, ownAccountID, preferred, client = api 
   const choose = useCallback((name: string, list: AgentInfo[]) => {
     setHarness(name)
     const info = list.find((item) => item.name === name)
-    setMode(initialMode(info, name, useStore.getState().launchDefaults[name]?.mode))
+    const remembered = useStore.getState().launchDefaults[name]
+    setMode(initialMode(info, name, remembered?.mode))
+    setModel(remembered?.model ?? '')
   }, [])
 
   useEffect(() => {
@@ -71,6 +76,8 @@ export function useAgentChoice({ account, ownAccountID, preferred, client = api 
     harness,
     mode,
     setMode,
+    model,
+    setModel,
     noAgents,
     choose: (name: string) => choose(name, agents ?? []),
     reload: () => setAttempt((n) => n + 1),
@@ -119,6 +126,38 @@ export function RunFields({
       )}
       {harness && (
         <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
+      )}
+      {harness && <ModelField harness={harness} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
+    </>
+  )
+}
+
+export function ModelField({ label = 'Model', harness, value, onChange, disabled = false }: {
+  label?: string
+  harness: string
+  value: string
+  onChange: (model: string) => void
+  disabled?: boolean
+}) {
+  const listId = useId()
+  const { placeholder, suggestions } = modelHints(harness)
+  return (
+    <>
+      <FormField label={label} help="Optional. The agent's own default when empty.">
+        <Input
+          value={value}
+          placeholder={placeholder}
+          list={suggestions.length ? listId : undefined}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </FormField>
+      {suggestions.length > 0 && (
+        <datalist id={listId}>
+          {suggestions.map((model) => <option key={model} value={model} />)}
+        </datalist>
       )}
     </>
   )
