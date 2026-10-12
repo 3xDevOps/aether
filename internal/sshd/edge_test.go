@@ -418,6 +418,41 @@ func TestJoinByLink(t *testing.T) {
 	}
 }
 
+// A device waiting on one invitation that joins with another's link waits
+// on that one from then on, so approving it gives the role of the
+// invitation the person opened.
+func TestJoinByAnotherLinkMovesTheWaitingDevice(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyApprovedDevices))
+	ctx := context.Background()
+	first := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleViewer})
+	second := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
+	signer := newSigner(t)
+	var banner string
+	for _, inv := range []*domain.Invitation{first, second} {
+		secret, _ := e.joinSecrets.Load(inv.ID)
+		user, err := edgeproto.JoinUser(string(inv.ID), secret.(string), edgeproto.AccountPrincipal(octo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, banner, err = e.dialEdge(t, grantFor(octo, signer, "laptop"), signer, user); err == nil {
+			t.Fatalf("join through %s was admitted before approval", inv.ID)
+		}
+		if r, ok := edgeproto.ParseRefusedBanner(banner); !ok || r.Kind != edgeproto.RefusedDevicePending ||
+			r.Invitation != string(inv.ID) || r.Role != string(inv.Role) {
+			t.Fatalf("join through %s (%s): banner %q", inv.ID, inv.Role, banner)
+		}
+	}
+	approveAsAdmin(t, e, e.approvalCode(t, signer, banner))
+	m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject)
+	if err != nil || m.Role != domain.RoleCollaborator {
+		t.Fatalf("member after approval = %+v, %v; want a collaborator", m, err)
+	}
+	if left, err := identities(t, e).GetInvitation(ctx, first.ID); err != nil || left.ConsumedAt != nil {
+		t.Fatalf("the invitation the device left = %+v, %v; want open", left, err)
+	}
+}
+
 func TestEdgeExpiredInvitationRefused(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

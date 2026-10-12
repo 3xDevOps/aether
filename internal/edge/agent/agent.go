@@ -117,7 +117,8 @@ func New(cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("edgeagent: %w", err)
 	}
 	state := OpenState(cfg.DataDir)
-	edgeState, err := state.EdgeState()
+	serverID := edgeproto.ServerID(cfg.HostKey.PublicKey())
+	edgeState, err := state.EdgeState(serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +135,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg:              cfg,
 		name:             name,
 		origin:           origin,
-		serverID:         edgeproto.ServerID(cfg.HostKey.PublicKey()),
+		serverID:         serverID,
 		policy:           policy,
 		state:            state,
 		minBackoff:       edgeproto.ReconnectMinBackoff,

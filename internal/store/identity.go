@@ -75,6 +75,11 @@ type IdentityStore interface {
 	// than MaxWaitingDevices may wait on it (ErrLimit). It first deletes the
 	// devices waiting on invitations expired at now.
 	RegisterInvitationDevice(ctx context.Context, d *domain.Device, now time.Time) error
+	// MoveInvitationDevice makes the device id, pending and no member's,
+	// wait on invitation instead of the one it waits on. It is ErrNotFound
+	// when the device no longer waits or invitation is not open at now,
+	// and ErrLimit when MaxWaitingDevices wait on invitation already.
+	MoveInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, now time.Time) error
 	GetDevice(ctx context.Context, id domain.DeviceID) (*domain.Device, error)
 	GetDeviceByCredential(ctx context.Context, credential string) (*domain.Device, error)
 	// GetDeviceByApprovalCode finds the device awaiting approval with

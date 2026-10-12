@@ -175,6 +175,37 @@ func (d *DB) RegisterInvitationDevice(ctx context.Context, dev *domain.Device, n
 	return nil
 }
 
+func (d *DB) MoveInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, now time.Time) error {
+	nowNS, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: move invitation device: %w", err)
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin move invitation device: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = checkWaiting(ctx, tx, `invitation_id = ?`, invitation); err != nil {
+		return fmt.Errorf("store: move invitation device: invitation %s: %w", invitation, err)
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx,
+		`UPDATE member_devices SET invitation_id = ?
+		 WHERE id = ? AND member_id IS NULL AND status = 'pending'
+		 AND EXISTS (SELECT 1 FROM identity_invitations WHERE id = ? AND consumed_at IS NULL AND expires_at > ?)`,
+		invitation, id, invitation, nowNS))
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: move invitation device: device %s no longer waits, or invitation %s is used or expired: %w",
+			id, invitation, ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("store: move invitation device: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit move invitation device: %w", err)
+	}
+	return nil
+}
+
 // insertDevice inserts dev when the condition cond, with args, holds, and
 // returns ErrNotFound when it does not.
 func insertDevice(ctx context.Context, q execer, dev *domain.Device, cond string, args ...any) error {

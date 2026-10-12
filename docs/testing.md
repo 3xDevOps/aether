@@ -897,6 +897,7 @@ Beside the suite, each package checks its own rules:
 | Test | Proves |
 | --- | --- |
 | `TestJoinByLink` (`internal/sshd`) | An invitation's link joins under `account` and leaves the device waiting under `approved-devices`; a wrong secret under either policy, another invitation's secret, a used invitation, the right secret from an account the invitation does not name, and no link at all are refused with nothing recorded |
+| `TestJoinByAnotherLinkMovesTheWaitingDevice` (`internal/sshd`) | Under `approved-devices`, a device waiting on one invitation that joins with another invitation's link waits on that one: approving it gives that invitation's role and leaves the first open |
 | `TestInvitationWaitsUntilOneDeviceIsApproved` (`internal/sshd`) | Devices wait on an invitation until one is approved, which creates the member and removes the others |
 | `TestRevokedInvitationDropsItsWaitingDevices` (`internal/sshd`) | Revoking an invitation removes the devices waiting on it, and only an admin approves a device whose invitation creates a member |
 | `TestMemberIdentityListAndRemove` (`internal/sshd`) | `member.identity.remove` unbinds one account, revokes its devices and closes their connections, and keeps the member |
@@ -910,7 +911,7 @@ Beside the suite, each package checks its own rules:
 | `TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount` (`internal/sshd`) | A device key relayed with a grant for another account is refused before any device is recorded |
 | `TestWaitingDevicesAreBounded` (`internal/sshd`) | At most 10 devices wait per account and per invitation; approving one makes room |
 | `TestPinAndOwnerFollowTheEdgeKey`, `TestEarlierLayoutPinIsNotSilentlyReplaced`, `TestTransferOwner`, `TestOwnerIsReportedAgainAtEnrollment` (`internal/edge/agent`) | The pin and the owner follow the edge's key; an earlier layout's pin is not replaced silently; transfers, and the owner reported again at each enrollment |
-| `TestEdgeStateSurvivesARestart` (`internal/edge/agent`) | The edge's last `unclaimed` report is read back from `edge_state.json` after a restart |
+| `TestEdgeStateSurvivesARestart` (`internal/edge/agent`) | The edge's last `unclaimed` report is read back from `edge_state.json` after a restart, and not by a server whose host key, and so its server id, changed |
 | `TestJoinLink`, `TestClaimLink`, `TestJoinUser` (`internal/edge/proto`) | Join links in both forms parse and every other shape is refused; a claim link carries the code split around `#`; the `join:` SSH user name round-trips and refuses malformed parts |
 | `TestParseRefusedBanner` (`internal/edge/proto`) | A banner is structured only by its `aether-refusal/1` first line, and only when no field carries a control character |
 | `TestJoinPage` (`internal/edge/service`) | The relay origin serves the join page with its `aether://join` link, `/join.js`, the CSP with `script-src 'self'`, `no-referrer` and `no-store`, and no cookie; ids of the wrong shape get 404 |

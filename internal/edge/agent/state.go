@@ -168,25 +168,30 @@ func (s *State) keyFile(file string) (string, error) {
 }
 
 type edgeStateRecord struct {
-	State string `json:"state"`
+	ServerID string `json:"server_id"`
+	State    string `json:"state"`
 }
 
 // EdgeState returns the state the edge holding the pinned key last
-// reported for this server, edgeproto.StateClaimed or StateUnclaimed,
-// empty when it never reported one or no key is pinned.
-func (s *State) EdgeState() (string, error) {
+// reported for the server serverID, edgeproto.StateClaimed or
+// StateUnclaimed, empty when it never reported one or no key is pinned.
+// A state recorded for another server id, which is this server before its
+// host key changed, is not this server's.
+func (s *State) EdgeState(serverID string) (string, error) {
 	name, err := s.keyFile(edgeStateFile)
 	if err != nil || name == "" {
 		return "", err
 	}
 	var r edgeStateRecord
-	_, err = s.read(name, &r)
-	return r.State, err
+	if _, err = s.read(name, &r); err != nil || r.ServerID != serverID {
+		return "", err
+	}
+	return r.State, nil
 }
 
 // writeEdgeState records state as the one the edge holding the pinned key
-// last reported.
-func (s *State) writeEdgeState(state string) error {
+// last reported for the server serverID.
+func (s *State) writeEdgeState(serverID, state string) error {
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -199,7 +204,7 @@ func (s *State) writeEdgeState(state string) error {
 	if name == "" {
 		return errors.New("edgeagent: no edge key is pinned, so no edge state can be recorded")
 	}
-	return s.write(name, edgeStateRecord{State: state})
+	return s.write(name, edgeStateRecord{ServerID: serverID, State: state})
 }
 
 // writeOwner records owner for the pinned key.

@@ -284,7 +284,7 @@ func (a *Agent) setEdgeState(state string) error {
 	a.mu.Lock()
 	a.edgeState = state
 	a.mu.Unlock()
-	return a.state.writeEdgeState(state)
+	return a.state.writeEdgeState(a.serverID, state)
 }
 
 // pushDirectory sends the directory whenever it may have changed, and

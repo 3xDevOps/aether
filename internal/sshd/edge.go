@@ -448,8 +448,9 @@ func (s *Server) joinedInvitation(ctx context.Context, ids store.IdentityStore, 
 }
 
 // invitationDevice records the device with keyLine as waiting on inv for
-// account, when it is new, and returns the device's refusal: the code
-// that approves it, or its revocation.
+// account, when it is new or waits on another invitation of account, and
+// returns the device's refusal: the code that approves it, or its
+// revocation.
 func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, inv *domain.Invitation, account edgeproto.Account, keyLine, label string) error {
 	dev := &domain.Device{Invitation: inv.ID, Provider: account.Provider, Subject: account.Subject,
 		Email: account.Email, Login: account.Login, Name: account.Name,
@@ -470,6 +471,19 @@ func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, 
 	}
 	if dev.Member != "" || dev.Provider != account.Provider || dev.Subject != account.Subject {
 		return errKeyOfAnotherAccount
+	}
+	if dev.Status == domain.DevicePending && dev.Invitation != inv.ID {
+		err = ids.MoveInvitationDevice(ctx, dev.ID, inv.ID, time.Now())
+		if errors.Is(err, store.ErrLimit) {
+			return tooManyWaiting(err, account)
+		}
+		if err != nil {
+			return fmt.Errorf("sshd: invitation device: %w", err)
+		}
+		slog.Info("sshd: edge device moved to the invitation it joined with", "invitation", inv.ID, "was", dev.Invitation,
+			"device", dev.ID, "provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
+		dev.Invitation = inv.ID
+		s.publishDevice(ctx, "", dev.ID, dev.Status)
 	}
 	return s.deviceRefusal(ctx, ids, dev, true)
 }

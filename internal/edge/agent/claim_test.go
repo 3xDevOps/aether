@@ -567,7 +567,7 @@ func TestStateWrittenAsRootBelongsToTheDataDirOwner(t *testing.T) {
 	if err = s.writeOwner(testOwner); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.writeEdgeState(edgeproto.StateClaimed); err != nil {
+	if err = s.writeEdgeState("server", edgeproto.StateClaimed); err != nil {
 		t.Fatal(err)
 	}
 	issue(t, s, time.Now())
