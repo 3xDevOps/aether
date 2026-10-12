@@ -107,7 +107,7 @@ export function InviteDialog({ client, onClose, onInvited }: { client: Api; onCl
           <DialogTitle>Invite a member</DialogTitle>
           <DialogDescription>
             {tab === 'account'
-              ? 'Invite the account they sign in to the edge with; they see this server after aether login.'
+              ? 'Invite the GitHub account they sign in with. You get a link to send them; opening it joins this server.'
               : 'A one-time code joins a computer with aether link. It is shown only here.'}
           </DialogDescription>
         </DialogHeader>
@@ -191,10 +191,13 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
       <Collapsible>
         <CollapsibleTrigger><span className="text-muted">Learn more</span></CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2 pt-1 pl-4">
-          <p className="text-ui-sm text-muted">When signing in is enough for this server, their first connection makes them a member with this role.</p>
           <p className="text-ui-sm text-muted">
-            When the server admits approved devices only, their device waits until an admin approves it with the code it shows, under
-            Members &gt; Devices, with <Code>aether device approve</Code>, or with <Code>sudo aether-server device approve</Code> on the server.
+            They open the link and sign in with GitHub as this account. When signing in is enough for this server, that makes them a
+            member with this role.
+          </p>
+          <p className="text-ui-sm text-muted">
+            When the server admits approved devices only, their device waits until an admin clicks Approve on its card in Needs you, or
+            runs <Code>aether device approve</Code>.
           </p>
           <p className="text-ui-sm text-muted">Invitations expire after 7 days.</p>
         </CollapsibleContent>
