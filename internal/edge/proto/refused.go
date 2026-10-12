@@ -56,12 +56,14 @@ const refusedBanner = "aether-refusal/1 "
 // Refused is a structured refusal on the edge path. Kind decides which
 // fields are set and what Error says; a field a kind does not use is
 // empty. ApprovalCode approves a pending device, so a Refused that
-// carries one goes only to that device.
+// carries one goes only to that device; the server sets it only when
+// nobody can approve the device in the app.
 type Refused struct {
 	Kind RefusedKind `json:"kind"`
 	// Server is the server's name, its host name.
 	Server      string `json:"server,omitempty"`
 	Device      string `json:"device,omitempty"`
+	DeviceID    string `json:"device_id,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Account is the account as its owner knows it: "github account dana".
 	Account string `json:"account,omitempty"`
@@ -142,6 +144,14 @@ func (r *Refused) Error() string {
 		case r.Registered:
 			state = "was admitted by signing in alone and is waiting for approval: this server now admits approved devices only"
 		}
+		if r.ApprovalCode == "" {
+			who := "An admin approves it from the dashboard's Needs you card"
+			if r.MemberID != "" {
+				who += ", or you do, from an approved device of yours"
+			}
+			return fmt.Sprintf("device %q, signed in as %s, %s. %s, or with:\n  aether device approve %s",
+				r.Device, r.Account, state, who, r.DeviceID)
+		}
 		who := "from an approved device, SSH key or tailnet connection of this account, or as an admin"
 		if r.Invitation != "" {
 			who = "as an admin, or as the member an account link names; approving it accepts the invitation"
@@ -219,7 +229,7 @@ func ParseRefusedBanner(banner string) (*Refused, bool) {
 	if json.Unmarshal([]byte(raw), &r) != nil || r.Kind == "" {
 		return nil, false
 	}
-	for _, s := range []string{string(r.Kind), r.Server, r.Device, r.Fingerprint, r.Account, r.MemberID, r.MemberName,
+	for _, s := range []string{string(r.Kind), r.Server, r.Device, r.DeviceID, r.Fingerprint, r.Account, r.MemberID, r.MemberName,
 		r.Role, r.BoundMember, r.Invitation, r.ApprovalCode, r.User, r.Principal, string(r.Refusal), r.Detail} {
 		if !validText(s, maxErrorText) {
 			return nil, false

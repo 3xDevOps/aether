@@ -294,21 +294,57 @@ func (s *Server) deviceRefusal(ctx context.Context, ids store.IdentityStore, dev
 	return refusal(fmt.Errorf("sshd: device %s", dev.Status), pending)
 }
 
-// approvalRefusal shows a device awaiting approval its code, the account
+// approvalRefusal shows a device awaiting approval its id, the account
 // it signed in as, and the member and role approving admits it as, which
-// that account decides. The code is shown here, inside SSH, and in no
-// list.
+// that account decides. Its code is shown only where nobody can approve
+// it in the app, here, inside SSH, and in no list.
 func (s *Server) approvalRefusal(ctx context.Context, ids store.IdentityStore, dev *domain.Device, relayed bool) (*edgeproto.Refused, error) {
-	r := &edgeproto.Refused{Kind: edgeproto.RefusedDevicePending, Server: s.cfg.Name, Device: dev.Label,
+	r := &edgeproto.Refused{Kind: edgeproto.RefusedDevicePending, Server: s.cfg.Name, Device: dev.Label, DeviceID: string(dev.ID),
 		Fingerprint: fingerprintOf(dev.Credential), Invitation: string(dev.Invitation),
 		Account:    accountName(edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Login: dev.Login, Email: dev.Email}),
-		Registered: dev.Status == domain.DeviceRegistered, Direct: !relayed, ApprovalCode: dev.ApprovalCode}
+		Registered: dev.Status == domain.DeviceRegistered, Direct: !relayed}
 	member, name, role, err := s.admitsAs(ctx, ids, dev)
 	if err != nil {
 		return nil, fmt.Errorf("sshd: device %s: %w", dev.ID, err)
 	}
 	r.MemberID, r.MemberName, r.Role = string(member), name, string(role)
+	lone, err := s.loneApprover(ctx, ids, member, role)
+	if err != nil {
+		return nil, fmt.Errorf("sshd: device %s: %w", dev.ID, err)
+	}
+	if lone {
+		r.ApprovalCode = dev.ApprovalCode
+	}
 	return r, nil
+}
+
+// loneApprover reports whether nobody can approve a device admitting as
+// member in the app: member is an admin, no other admin exists,
+// and member has no approved device. A device adding a new member (member
+// empty) always has one, the admin who invited it.
+func (s *Server) loneApprover(ctx context.Context, ids store.IdentityStore, member domain.MemberID, role domain.Role) (bool, error) {
+	if member == "" || role != domain.RoleAdmin {
+		return false, nil
+	}
+	members, err := s.cfg.Store.ListMembers(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.ID != member && m.Role == domain.RoleAdmin {
+			return false, nil
+		}
+	}
+	devs, err := ids.ListDevices(ctx, member)
+	if err != nil {
+		return false, err
+	}
+	for _, d := range devs {
+		if d.Status == domain.DeviceApproved {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // directDevice admits an edge device key on a direct or tailnet

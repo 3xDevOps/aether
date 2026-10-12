@@ -754,6 +754,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   `edge-refused`, `signed-out` (no valid device token; gives the
   `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.
+  The `device-pending` page sends the member to Needs you, and shows
+  `sudo aether-server device approve <code>` only when the refusal carries
+  `approval_code`.
   An edge that did not answer refused nothing; on a link through an edge,
   an error naming its host is `edge`. `src/store/edge-sync.test.ts` pins
   the class of each kind. The capabilities probe records
@@ -1073,7 +1076,8 @@ first that applies:
 | Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
-file turns it into a card for an admin. The store's `devices` come from
+file turns it into a card for an admin, and a member's own pending device
+into a card for that member. The store's `devices` come from
 `member.device.list`, read at hydration, on each `member.device` event, and
 whenever the tab returns to the foreground or the browser comes back online,
 which catches a failed read and an approval made with
@@ -1083,6 +1087,7 @@ which catches a failed read and an approval made with
 | --- | --- | --- | --- |
 | Pending, waiting on an invitation | an admin | laptop (github mallory) wants to join as collaborator | **Approve** (`member.device.approve {device_id}`), **Deny** (`member.device.revoke`) |
 | Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
+| Pending, the viewer's own | the member, not an admin | New device laptop signed in as you | the same |
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. Device cards list before

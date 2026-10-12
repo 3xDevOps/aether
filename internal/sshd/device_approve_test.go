@@ -13,8 +13,9 @@ import (
 )
 
 // An admin approves a device by its id alone, after member.device.list
-// showed whom it admits; a connection that signed in with a pending device
-// cannot. Recording and approving the device are each published.
+// or member.device.lookup by id showed whom it admits; a connection that
+// signed in with a pending device cannot. Recording and approving the
+// device are each published.
 func TestApproveDeviceByID(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -62,6 +63,11 @@ func TestApproveDeviceByID(t *testing.T) {
 		t.Fatalf("listed member device = %+v, want octo's admin member", d)
 	}
 
+	var found protocol.MemberDeviceLookupResult
+	if err = admin.Call(protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{DeviceID: string(waiting.ID)}, &found); err != nil ||
+		found.Device.ID != string(waiting.ID) || found.MemberID != "" || found.Role != string(domain.RoleCollaborator) {
+		t.Fatalf("lookup by id = %+v, %v; want the invitation device admitting a new collaborator", found, err)
+	}
 	if err = admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{DeviceID: string(waiting.ID)}, nil); err != nil {
 		t.Fatalf("approve by id: %v", err)
 	}

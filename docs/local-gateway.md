@@ -1415,7 +1415,8 @@ does, with the same files in the config directory:
 
 The member's devices and edge invitations are control-channel methods, so
 the dashboard calls them through `POST /api/v1/<method>` like any other:
-`member.device.list`, `member.device.lookup` (`{"code":"..."}`),
+`member.device.list`, `member.device.lookup` (`{"code":"..."}` or
+`{"device_id":"..."}`),
 `member.device.approve` (`{"device_id":"...","code":"..."}`; `code` is
 optional and, when given, must name that device),
 `member.device.revoke` (`{"device_id":"..."}`),

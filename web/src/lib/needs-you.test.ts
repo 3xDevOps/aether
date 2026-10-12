@@ -404,19 +404,34 @@ describe('background runs', () => {
 })
 
 describe('device cards', () => {
+  const admin = { viewerID: 'mem_admin', viewerRole: 'admin' as const }
+  const collaborator = { viewerID: bob.id, viewerRole: 'collaborator' as const }
+
   it.each([
     ['waiting on an invitation', pendingDevice(), 'laptop (github mallory) wants to join as collaborator', 'new member, collaborator'],
     ['of a member', pendingDevice({ member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' }),
       'laptop (github bob) signed in as Bob', 'admits as: Bob (collaborator)'],
   ])('asks an admin to approve a device %s', (_, device, reason, admits) => {
-    expect(deviceNeeds([device], 'admin', 'account')).toEqual([{ device, reason, admits, waitingSince: device.created_at }])
-    expect(deviceNeeds([device], 'collaborator', 'account')).toEqual([])
+    expect(deviceNeeds([device], admin, 'account')).toEqual([{ device, reason, admits, waitingSince: device.created_at }])
+    expect(deviceNeeds([device], { ...collaborator, viewerID: 'mem_other' }, 'account')).toEqual([])
+  })
+
+  it('asks a member to approve only their own pending device', () => {
+    const own = pendingDevice({ member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' })
+    const invited = pendingDevice({ id: 'dev_2' })
+    const registered = pendingDevice({ id: 'dev_3', status: 'registered', member_id: bob.id, invitation_id: undefined })
+    expect(deviceNeeds([own, invited, registered], collaborator, 'approved-devices')).toEqual([{
+      device: own,
+      reason: 'New device laptop signed in as you',
+      admits: 'admits as: Bob (collaborator)',
+      waitingSince: own.created_at,
+    }])
   })
 
   it('asks for a device registered under account once the server is under approved-devices', () => {
     const device = pendingDevice({ status: 'registered', member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' })
-    expect(deviceNeeds([device], 'admin', 'account')).toEqual([])
-    expect(deviceNeeds([device], 'admin', 'approved-devices')).toEqual([{
+    expect(deviceNeeds([device], admin, 'account')).toEqual([])
+    expect(deviceNeeds([device], admin, 'approved-devices')).toEqual([{
       device,
       reason: 'laptop (github bob) signed in as Bob and is not approved',
       admits: 'admits as: Bob (collaborator)',

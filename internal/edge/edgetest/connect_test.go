@@ -62,7 +62,7 @@ func TestAdminConnectsTheirAccount(t *testing.T) {
 	invite(t, ctl, inv)
 
 	_, err = h.dial(al2, h.link(a))
-	waitingCode(t, "alice's second device", err)
+	a.waitingCode(t, "alice's second device", err)
 	if err = ctl.Call(protocol.MethodServerEdgeClaimCode, struct{}{}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState ||
 		!strings.Contains(pe.Message, "already owned at its edge by github alice") {
 		t.Fatalf("claim code on an owned server = %v, want CodeInvalidState", err)

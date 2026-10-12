@@ -6,9 +6,9 @@ const (
 	// MethodMemberDeviceList lists the caller's devices; an admin sees
 	// every member's.
 	MethodMemberDeviceList = "member.device.list"
-	// MethodMemberDeviceLookup describes the device an approval code names
-	// and whom approving it admits, without approving it: the callers
-	// member.device.approve accepts.
+	// MethodMemberDeviceLookup describes the device an approval code or a
+	// device id names and whom approving it admits, without approving it:
+	// the callers member.device.approve accepts.
 	MethodMemberDeviceLookup = "member.device.lookup"
 	// MethodMemberDeviceApprove approves a device awaiting approval by its
 	// id, and when a code is given, only if the code names that device: its
@@ -73,9 +73,11 @@ type MemberDeviceListResult struct {
 	Devices []Device `json:"devices"`
 }
 
-// MemberDeviceLookupParams are the params of member.device.lookup.
+// MemberDeviceLookupParams are the params of member.device.lookup:
+// DeviceID, or else Code.
 type MemberDeviceLookupParams struct {
-	Code string `json:"code"`
+	Code     string `json:"code,omitempty"`
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 // MemberDeviceLookupResult is the result of member.device.lookup: the

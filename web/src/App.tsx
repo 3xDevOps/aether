@@ -21,6 +21,7 @@ export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
   const unreachable = useStore((s) => s.unreachable)
+  const approvalCode = useStore((s) => s.approvalCode)
   const edge = useStore((s) => s.linkStatus?.edge_url)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
@@ -76,6 +77,7 @@ export function App() {
               dead={streamDead}
               error={hydrationError}
               edge={edge}
+              approvalCode={approvalCode}
               onRetry={retry}
             />
           ) : (

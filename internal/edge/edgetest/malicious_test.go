@@ -126,11 +126,12 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 	}
 	// Whoever is handed its code is shown, before approving, that it
 	// admits the key as alice's admin member.
-	m := approvalCode.FindStringSubmatch(banner)
-	if m == nil {
-		t.Fatalf("no approval code in %q", banner)
+	r, ok := edgeproto.ParseRefusedBanner(banner)
+	if !ok {
+		t.Fatalf("no structured refusal in %q", banner)
 	}
-	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{Code: m[1]})
+	found := call[protocol.MemberDeviceLookupResult](t, ctl, protocol.MethodMemberDeviceLookup,
+		protocol.MemberDeviceLookupParams{Code: a.pendingCode(t, "the attacker's device", r)})
 	if found.MemberID != string(a.memberOf(t, alice).ID) || found.Role != string(domain.RoleAdmin) || found.Device.Account != alice.Login {
 		t.Fatalf("lookup of the attacker's code = %+v, want alice's admin member", found)
 	}
@@ -416,7 +417,7 @@ func TestTakenOverProviderAccount(t *testing.T) {
 					t.Fatalf("the thief is %+v, want bob's admin member", info.Member)
 				}
 			default:
-				waitingCode(t, "taken-over account under approved devices", err)
+				a.waitingCode(t, "taken-over account under approved devices", err)
 				after := a.snapshot(t)
 				if !sameKeys(after.approvedKeys(), before.approvedKeys()) || len(after.admins()) != len(before.admins()) {
 					t.Fatalf("the thief changed who is approved: %v -> %v", before.approvedKeys(), after.approvedKeys())

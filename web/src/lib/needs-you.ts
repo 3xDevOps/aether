@@ -431,19 +431,23 @@ export interface DeviceNeed {
  * there until someone approves it. */
 export function deviceNeeds(
   devices: Device[],
-  viewerRole: Member['role'] | null,
+  viewer: Pick<StateContext, 'viewerID' | 'viewerRole'>,
   accessPolicy: ServerEdge['access_policy'] | undefined,
 ): DeviceNeed[] {
-  if (viewerRole !== 'admin') return []
+  const admin = viewer.viewerRole === 'admin'
   const waiting = (device: Device) =>
-    device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
+    admin
+      ? device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
+      : device.status === 'pending' && device.member_id === viewer.viewerID
   return devices
     .filter(waiting)
     .map((device) => {
       const who = `${device.label} (${device.provider} ${device.account})`
       return {
         device,
-        reason: device.status === 'registered'
+        reason: !admin
+          ? `New device ${device.label} signed in as you`
+          : device.status === 'registered'
           ? `${who} signed in as ${device.display_name} and is not approved`
           : device.display_name
             ? `${who} signed in as ${device.display_name}`

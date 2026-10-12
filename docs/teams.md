@@ -160,7 +160,9 @@ device gets depends on the server's `edge-access` policy
 ([edge.md](edge.md#turning-it-on)):
 
 - `approved-devices`, the default: every new device waits, a member's first
-  one included, and is refused with the code that approves it. A device
+  one included, and is refused; an admin, or the member from an approved
+  device, approves it from the dashboard's Needs you card. The code is
+  shown only when nobody else can approve in-app. A device
   signing in with an invited account waits on the invitation: nothing is
   created until a person approves it, and that approval creates the member
   with the invited role, or binds the account to the linked member, and
@@ -173,14 +175,14 @@ device gets depends on the server's `edge-access` policy
 - `account`: signing in admits the new device, recorded as `registered`.
 
 ```
-device "dana-laptop", signed in as github account dana, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
-  aether device approve <code>
-or on the server:
-  sudo aether-server device approve <code>
+device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
+  aether device approve <device id>
 ```
 
-The code is derived from the device key and shown only to that device;
-`aether device list` never shows it. The person passes it to the approver.
+The refusal carries the approval code, with `sudo aether-server device
+approve <code>`, only when the device admits as the server's only admin and
+that admin has no approved device. The code is derived from the device key
+and shown only to that device; `aether device list` never shows it.
 At most 10 pending devices wait per account, and 10 per invitation; past
 that a new device is refused with `10 devices of <account> are waiting for
 approval on this server already, so no new one is recorded`, and an admin
@@ -203,11 +205,12 @@ Only `y` or `yes` approves. `sudo aether-server device approve <code>`
 shows the same and asks the same, and the dashboard's Members > Devices tab shows it
 in a dialog before **Approve**. An admin's dashboard also raises a pending
 device as a Needs you card with its account, fingerprint and the member and
-role it admits as; **Approve** there needs no code.
+role it admits as; **Approve** there needs no code. A member approves their
+own new device the same way, from the Needs you card on an approved device.
 
 ```sh
 aether device list                 # yours; an admin sees every member's, and those waiting on invitations; never shows codes
-aether device approve <code>       # the member, or an admin
+aether device approve <code or device-id>   # the member, or an admin
 aether device revoke <device-id>
 sudo aether-server device approve <code>   # on the server
 sudo aether-server device review           # every registered and pending device, to approve or revoke

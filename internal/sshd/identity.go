@@ -161,10 +161,24 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 	return dev, nil
 }
 
-// memberDeviceLookup shows the approver of a code which device it names
-// and which member and role approving admits it as. The member is chosen
-// by the account the device signed in as, which the edge vouches for, so
-// the approver checks it before member.device.approve commits.
+// deviceByID returns the device id names, which must await approval.
+func deviceByID(ctx context.Context, ids store.IdentityStore, id string) (*domain.Device, *protocol.Error) {
+	dev, err := ids.GetDevice(ctx, domain.DeviceID(id))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if !dev.Status.AwaitsApproval() {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+			"device %s is %s, not waiting for approval", dev.ID, dev.Status)}
+	}
+	return dev, nil
+}
+
+// memberDeviceLookup shows the approver of a code or a device id which
+// device it names and which member and role approving admits it as. The
+// member is chosen by the account the device signed in as, which the
+// edge vouches for, so the approver checks it before member.device.approve
+// commits.
 func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberDeviceLookup, true); perr != nil {
 		return nil, perr
@@ -177,7 +191,12 @@ func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID,
 	if perr != nil {
 		return nil, perr
 	}
-	dev, perr := deviceByCode(ctx, ids, p.Code)
+	var dev *domain.Device
+	if p.DeviceID != "" {
+		dev, perr = deviceByID(ctx, ids, p.DeviceID)
+	} else {
+		dev, perr = deviceByCode(ctx, ids, p.Code)
+	}
 	if perr != nil {
 		return nil, perr
 	}
@@ -218,15 +237,8 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		if dev, perr = deviceByCode(ctx, ids, p.Code); perr != nil {
 			return nil, perr
 		}
-	} else {
-		var err error
-		if dev, err = ids.GetDevice(ctx, domain.DeviceID(p.DeviceID)); err != nil {
-			return nil, rpcError(err)
-		}
-		if !dev.Status.AwaitsApproval() {
-			return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"device %s is %s, not waiting for approval", dev.ID, dev.Status)}
-		}
+	} else if dev, perr = deviceByID(ctx, ids, p.DeviceID); perr != nil {
+		return nil, perr
 	}
 	invitation := dev.Invitation
 	if invitation != "" {

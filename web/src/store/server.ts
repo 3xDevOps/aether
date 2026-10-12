@@ -105,6 +105,9 @@ export interface ServerSlice {
   streamDead: boolean
   /** Which hop failed on the last fetch, or null when reachable. */
   unreachable: UnreachableKind | null
+  /** The approval code a device-pending refusal carried, which the server
+   * sends only when nobody can approve the device in the app. */
+  approvalCode: string | null
   /** The last server.update_status answer; null until the update banner
    * host reads it, and on a server too old to serve the method. */
   serverUpdate: ServerUpdateStatus | null
@@ -128,7 +131,7 @@ export interface ServerSlice {
   resetSeq: () => void
   setHydrated: (hydrated: boolean, error?: string | null) => void
   setStreamDead: () => void
-  setUnreachable: (kind: UnreachableKind | null) => void
+  setUnreachable: (kind: UnreachableKind | null, approvalCode?: string) => void
   setServerUpdate: (status: ServerUpdateStatus) => void
   /** Records a failed status read, keeping the last good answer. */
   setServerUpdateFailed: (detail: string) => void
@@ -147,6 +150,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       hydrationError: null,
       streamDead: false,
       unreachable: null,
+      approvalCode: null,
     })
   return {
     info: null,
@@ -160,6 +164,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     hydrationError: null,
     streamDead: false,
     unreachable: null,
+    approvalCode: null,
     serverUpdate: null,
     serverUpdateError: null,
     serverUpdateProgress: null,
@@ -180,7 +185,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     setHydrated: (hydrated, error = null) =>
       set({ hydrated, hydrationError: error }),
     setStreamDead: () => set({ streamDead: true }),
-    setUnreachable: (unreachable) => set({ unreachable }),
+    setUnreachable: (unreachable, approvalCode) => set({ unreachable, approvalCode: approvalCode ?? null }),
     setServerUpdate: (serverUpdate) =>
       set((s) => ({
         serverUpdate,

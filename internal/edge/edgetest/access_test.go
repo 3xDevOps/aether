@@ -96,7 +96,7 @@ func TestApprovedDevices(t *testing.T) {
 
 	// Alice's second device, approved from her first.
 	_, err := h.dial(al2, h.link(a))
-	code := waitingCode(t, "alice's second device", err)
+	code := a.waitingCode(t, "alice's second device", err)
 	approved := approve(t, ctl, code)
 	if approved.Device.Status != "approved" || approved.Device.ApprovedBy != string(a.memberOf(t, alice).ID) {
 		t.Fatalf("approve: %+v", approved.Device)
@@ -106,7 +106,7 @@ func TestApprovedDevices(t *testing.T) {
 	// No first-device exception: bob's first device waits, and the
 	// admin approves it from an approved device.
 	_, err = h.joinBy(bo, inviteLogin(t, ctl, bo, a.id, "collaborator"))
-	code = waitingCode(t, "bob's first device", err)
+	code = a.waitingCode(t, "bob's first device", err)
 	if _, err = h.tryControl(bo, a); err == nil {
 		t.Fatal("bob's waiting device opened a control channel")
 	}
@@ -115,16 +115,16 @@ func TestApprovedDevices(t *testing.T) {
 
 	// Bob's second device, approved on the machine.
 	_, err = h.dial(bo2, h.link(a))
-	a.consoleApprove(t, waitingCode(t, "bob's second device", err))
+	a.consoleApprove(t, a.waitingCode(t, "bob's second device", err))
 	h.mustDial(bo2, a)
 
 	// Carol's first device waits; nothing it presents lets it approve
 	// itself.
 	carolLink := inviteLogin(t, ctl, ca, a.id, "admin")
 	_, err = h.joinBy(ca, carolLink)
-	carolCode := waitingCode(t, "carol's first device", err)
+	carolCode := a.waitingCode(t, "carol's first device", err)
 	for range 3 {
-		if _, cerr := h.joinBy(ca, carolLink); cerr == nil || !strings.Contains(cerr.Error(), carolCode) {
+		if _, cerr := h.joinBy(ca, carolLink); a.waitingCode(t, "carol's waiting device", cerr) != carolCode {
 			t.Fatalf("carol's waiting device: %v, want its refusal", cerr)
 		}
 	}
@@ -137,7 +137,7 @@ func TestApprovedDevices(t *testing.T) {
 	// link an identity or transfer ownership.
 	before := a.snapshot(t)
 	_, err = h.dial(al3, h.link(a))
-	waitingCode(t, "alice's third device", err)
+	a.waitingCode(t, "alice's third device", err)
 	if _, err = h.tryControl(al3, a); err == nil {
 		t.Fatal("alice's waiting device opened a control channel")
 	}

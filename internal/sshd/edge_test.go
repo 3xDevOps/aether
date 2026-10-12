@@ -438,32 +438,46 @@ func TestEdgeStaleIdentityMatchesNoInvitation(t *testing.T) {
 	e.mustDialEdge(t, octo, newSigner(t), "laptop")
 }
 
-// approvalCode reads the code a device awaiting approval was shown.
-func approvalCode(t *testing.T, banner string) string {
+// approvalCode returns the approval code of the device signer refused
+// with banner: the one the banner carries, or, where the banner names
+// only the device id because someone can approve it in the app, the one
+// the console reads from the store.
+func (e *testEnv) approvalCode(t *testing.T, signer ssh.Signer, banner string) string {
 	t.Helper()
-	_, rest, _ := strings.Cut(banner, "aether device approve ")
-	code, _, _ := strings.Cut(rest, "\n")
-	if code == "" || !strings.Contains(banner, "sudo aether-server device approve "+code) {
+	r, ok := edgeproto.ParseRefusedBanner(banner)
+	if !ok || r.Kind != edgeproto.RefusedDevicePending {
 		t.Fatalf("approval banner = %q", banner)
 	}
-	return code
+	if r.ApprovalCode != "" {
+		if !strings.Contains(banner, "sudo aether-server device approve "+r.ApprovalCode) {
+			t.Fatalf("approval banner = %q", banner)
+		}
+		return r.ApprovalCode
+	}
+	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(signer.PublicKey()))
+	if err != nil || string(dev.ID) != r.DeviceID || !strings.Contains(banner, "aether device approve "+r.DeviceID+"\n") ||
+		strings.Contains(banner, "sudo aether-server") {
+		t.Fatalf("approval banner = %q for device %+v, %v", banner, dev, err)
+	}
+	return dev.ApprovalCode
 }
 
-// refusedForApproval dials and returns the approval code the refused
-// device was shown.
+// refusedForApproval dials and returns the approval code of the refused
+// device.
 func (e *testEnv) refusedForApproval(t *testing.T, account edgeproto.Account, signer ssh.Signer, label string) string {
 	t.Helper()
 	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, e.edgeUser(t, account))
 	if err == nil {
 		t.Fatalf("device %s connected without approval", label)
 	}
-	return approvalCode(t, banner)
+	return e.approvalCode(t, signer, banner)
 }
 
 // Under approved-devices a member's first device waits like any other,
 // and until a person approves it the invitation is only waited on: no
 // member, no bound account, the invitation still open (rules 1 and 5).
-// The device shows its code inside SSH; no list carries it (rule 3).
+// The device is named by its id inside SSH; no list carries its code
+// (rule 3).
 func TestEdgeFirstDevicePendingUntilApproved(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1023,7 +1037,7 @@ func TestEdgeDeviceKeyOnTheDirectPath(t *testing.T) {
 			if _, err := e.dialWith(laptop, &banner); err == nil || !strings.Contains(banner.String(), "aether device approve") {
 				t.Fatalf("direct dial with an unapproved device key: %v, banner %q", err, banner.String())
 			}
-			if err := approveByCode(controlClient(t, e), approvalCode(t, banner.String()), nil); err != nil {
+			if err := approveByCode(controlClient(t, e), e.approvalCode(t, laptop, banner.String()), nil); err != nil {
 				t.Fatalf("approve: %v", err)
 			}
 			direct, err := e.dialWith(laptop, nil)

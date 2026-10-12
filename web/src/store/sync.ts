@@ -222,7 +222,7 @@ export async function hydrate(
     // A failed re-hydration keeps existing data. Once the token is known dead,
     // its recorded recovery hint beats this raw failure.
     if (!store.getState().streamDead) {
-      s.setUnreachable(classifyUnreachable(err, store))
+      s.setUnreachable(classifyUnreachable(err, store), err instanceof ApiError ? err.data?.refusal?.approval_code : undefined)
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
     }
     return false
@@ -912,7 +912,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       },
       onUnreachable: (kind, detail, refusal) => {
         const s = store.getState()
-        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind)
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code)
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
@@ -951,7 +951,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // The handshake status never reaches the stream code, so this stays the
       // reason while the stream keeps retrying.
       const { refused } = probe
-      store.getState().setUnreachable(refusalKind(refused, store))
+      store.getState().setUnreachable(refusalKind(refused, store), refused.data?.refusal?.approval_code)
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))

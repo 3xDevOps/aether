@@ -91,9 +91,9 @@ authorizes it.
 | | `account` | `approved-devices` |
 | --- | --- | --- |
 | What signing in gives | Access, with the member's role | Identification only |
-| A member's new device | `registered` on its first connection, and admitted | `pending`, and refused with its approval code |
+| A member's new device | `registered` on its first connection, and admitted | `pending`, and refused; an admin, or the member from an approved device, approves it from the dashboard's Needs you card; the code is shown only when nobody else can approve in-app |
 | A member's first device | Registered | Pending, like every other |
-| Who approves | Nobody needs to | The member from an approved device, SSH key or tailnet connection; an admin the same way; or `sudo aether-server device approve <code>` on the machine |
+| Who approves | Nobody needs to | The member from an approved device, SSH key or tailnet connection; an admin the same way; from the dashboard's Needs you card or `aether device approve <device id>`. `sudo aether-server device approve <code>` on the machine when nobody else can approve in-app |
 | The claiming device | Approved: the code came from the machine's console | Approved, the same way |
 | Lost every device | Sign in on a new one | An admin, or the machine's administrator, approves the new one |
 | Suits | One person, or a team that already relies on its GitHub accounts for source access | A server holding code or credentials that must stay protected even if a GitHub account, or the edge, is taken over |
