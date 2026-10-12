@@ -101,6 +101,12 @@ type Agent struct {
 	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
 	// It is read from the state at New and recorded there on change.
 	edgeState string
+	// edgeReports counts the states recorded, so a claim records its own
+	// only when none followed the session it reported on.
+	edgeReports uint64
+	// edgeStateMu orders the records of edgeState in the state directory.
+	// It is taken before mu and the state lock, never under either.
+	edgeStateMu sync.Mutex
 }
 
 // New checks cfg and returns an agent that has not dialed yet.

@@ -185,7 +185,7 @@ function SignInProgress({ signIn: { phase, error, starting, signIn } }: { signIn
   )
 }
 
-function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => void }) {
+export function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => void }) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   return (
@@ -207,7 +207,7 @@ function LinkBeforeSignIn({ onHand }: { onHand: (link: HandedLink) => void }) {
         <Input className="font-code" autoComplete="off" value={text} onChange={(e) => { setText(e.target.value); setError(null) }} />
       </FormField>
       <Button type="submit" size="sm" variant="secondary" disabled={!text.trim()}>
-        Continue
+        Open link
       </Button>
     </form>
   )
@@ -218,6 +218,7 @@ export function EdgeSignIn({
   claim,
   onHand,
   onLinked,
+  onSignedOut,
 }: {
   client: Api
   /** A claim link handed to the dashboard, filled into the claim form. The
@@ -227,11 +228,17 @@ export function EdgeSignIn({
    * into the claim form. */
   onHand: (link: HandedLink) => void
   onLinked: (result: EdgeLinkResult) => void
+  onSignedOut: (signedOut: boolean) => void
 }) {
   const claimEdge = claim === undefined ? undefined : parseClaim(claim)?.edge
   const signIn = useEdgeSignIn(client, claimEdge)
   const { phase, setPhase } = signIn
   const picked = phase.name === 'signed-in' ? phase.edges.find((e) => e.edge === phase.chosen) : undefined
+  const signedOut = phase.name === 'signed-out'
+  useEffect(() => {
+    onSignedOut(signedOut)
+    return () => onSignedOut(false)
+  }, [signedOut, onSignedOut])
 
   return (
     <section aria-label="Sign in" className="flex min-w-0 flex-col items-start gap-3 text-ui">
@@ -246,7 +253,6 @@ export function EdgeSignIn({
         )}
       </p>
       <SignInProgress signIn={signIn} />
-      {phase.name === 'signed-out' && <LinkBeforeSignIn onHand={onHand} />}
       {phase.name === 'signed-in' && (
         <EdgeChoice
           edges={phase.edges}
@@ -597,7 +603,7 @@ function ServerPicker({
                 return
               }
               const claim = parseClaim(code)
-              if (claim?.edge && linkHost(claim.edge) !== edgeHost(edge)) {
+              if (claim?.edge && !sameEdge(claim.edge, edge)) {
                 onHand({ kind: 'claim', link: code.trim() })
                 return
               }
@@ -619,6 +625,14 @@ function ServerPicker({
       </Collapsible>
     </div>
   )
+}
+
+function sameEdge(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin
+  } catch {
+    return a === b
+  }
 }
 
 function linkHost(edge: string): string {

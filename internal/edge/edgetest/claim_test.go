@@ -145,6 +145,9 @@ func TestFailedClaimRecordRecovers(t *testing.T) {
 		}
 		return ownerErr
 	})
+	if state, serr := a.state().EdgeState(a.id); serr != nil || state != edgeproto.StateUnclaimed {
+		t.Fatalf("edge state after the edge refused the claim = %q, %v; want unclaimed", state, serr)
+	}
 
 	// As `aether-server edge claim-code` does, now that the server is
 	// unclaimed.

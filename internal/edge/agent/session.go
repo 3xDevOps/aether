@@ -281,10 +281,30 @@ func (a *Agent) setLive(s *session) {
 }
 
 func (a *Agent) setEdgeState(state string) error {
+	a.edgeStateMu.Lock()
+	defer a.edgeStateMu.Unlock()
 	a.mu.Lock()
+	a.edgeReports++
 	a.edgeState = state
 	a.mu.Unlock()
 	return a.state.writeEdgeState(a.serverID, state)
+}
+
+// setClaimed records the claim reported when edgeReports was reports,
+// unless a state was recorded since: that one is newer than the claim.
+func (a *Agent) setClaimed(reports uint64) error {
+	a.edgeStateMu.Lock()
+	defer a.edgeStateMu.Unlock()
+	a.mu.Lock()
+	stale := a.edgeReports != reports
+	if !stale {
+		a.edgeState = edgeproto.StateClaimed
+	}
+	a.mu.Unlock()
+	if stale {
+		return nil
+	}
+	return a.state.writeEdgeState(a.serverID, edgeproto.StateClaimed)
 }
 
 // pushDirectory sends the directory whenever it may have changed, and

@@ -897,7 +897,8 @@ Beside the suite, each package checks its own rules:
 | Test | Proves |
 | --- | --- |
 | `TestJoinByLink` (`internal/sshd`) | An invitation's link joins under `account` and leaves the device waiting under `approved-devices`; a wrong secret under either policy, another invitation's secret, a used invitation, the right secret from an account the invitation does not name, and no link at all are refused with nothing recorded |
-| `TestJoinByAnotherLinkMovesTheWaitingDevice` (`internal/sshd`) | Under `approved-devices`, a device waiting on one invitation that joins with another invitation's link waits on that one: approving it gives that invitation's role and leaves the first open |
+| `TestJoinByAnotherLinkMovesTheWaitingDevice` (`internal/sshd`) | Under `approved-devices`, a device waiting on one invitation that joins with another invitation's link waits on that one: approving it gives that invitation's role and leaves the first open, and an approval that names the invitation it left is a conflict that approves nothing |
+| `TestApprovalAfterTheDeviceMovedIsRefused` (`internal/store`) | Approving a device with the invitation it waited on before it moved is `ErrConflict`: no member, no bound account, both invitations open, the device still pending on the new one |
 | `TestInvitationWaitsUntilOneDeviceIsApproved` (`internal/sshd`) | Devices wait on an invitation until one is approved, which creates the member and removes the others |
 | `TestRevokedInvitationDropsItsWaitingDevices` (`internal/sshd`) | Revoking an invitation removes the devices waiting on it, and only an admin approves a device whose invitation creates a member |
 | `TestMemberIdentityListAndRemove` (`internal/sshd`) | `member.identity.remove` unbinds one account, revokes its devices and closes their connections, and keeps the member |

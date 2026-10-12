@@ -443,6 +443,16 @@ func TestJoinByAnotherLinkMovesTheWaitingDevice(t *testing.T) {
 			t.Fatalf("join through %s (%s): banner %q", inv.ID, inv.Role, banner)
 		}
 	}
+	shown, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(signer.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown.Invitation = first.ID
+	var conflict *protocol.Error
+	if _, err = ApproveDevice(ctx, identities(t, e), e.store, shown, ""); !errors.As(err, &conflict) ||
+		conflict.Code != protocol.CodeConflict || !strings.Contains(conflict.Message, "now waits on another invitation; nothing was approved") {
+		t.Fatalf("approval through the invitation the device left = %v, want a conflict", err)
+	}
 	approveAsAdmin(t, e, e.approvalCode(t, signer, banner))
 	m, err := identities(t, e).GetMemberByIdentity(ctx, octo.Provider, octo.Subject)
 	if err != nil || m.Role != domain.RoleCollaborator {

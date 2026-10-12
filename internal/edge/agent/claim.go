@@ -20,12 +20,14 @@ import (
 // would forget the owner at its next enrollment.
 func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func(admin string) error) error {
 	return func(code string, claim func(admin string) error) error {
+		var reports uint64
 		err := a.state.attemptClaim(code, grant.Account, time.Now(), func(admin string) error {
 			if err := claim(admin); err != nil {
 				return err
 			}
-			s, err := a.liveSession()
-			if err != nil {
+			var s *session
+			var err error
+			if s, reports, err = a.liveSession(); err != nil {
 				return err
 			}
 			return s.send(edgeproto.Claimed{ConnID: grant.ConnID, Owner: edgeproto.AccountPrincipal(grant.Account)})
@@ -34,7 +36,7 @@ func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func
 			slog.Warn("edge: refused claim", "conn", grant.ConnID, "error", err)
 			return err
 		}
-		if err := a.setEdgeState(edgeproto.StateClaimed); err != nil {
+		if err := a.setClaimed(reports); err != nil {
 			return err
 		}
 		slog.Info("edge: server claimed", "conn", grant.ConnID,
@@ -43,15 +45,16 @@ func (a *Agent) claimAttempt(grant edgeproto.Grant) func(code string, claim func
 	}
 }
 
-// liveSession returns the enrolled control connection.
-func (a *Agent) liveSession() (*session, error) {
+// liveSession returns the enrolled control connection and the count of
+// edge states recorded up to its enrollment.
+func (a *Agent) liveSession() (*session, uint64, error) {
 	a.mu.Lock()
-	s := a.live
+	s, reports := a.live, a.edgeReports
 	a.mu.Unlock()
 	if s == nil {
-		return nil, fmt.Errorf("the server is not connected to %s; retry once `aether-server edge status` shows it connected", a.origin)
+		return nil, 0, fmt.Errorf("the server is not connected to %s; retry once `aether-server edge status` shows it connected", a.origin)
 	}
-	return s, nil
+	return s, reports, nil
 }
 
 // TransferOwner records owner, an admin's edge identity, as this server's
@@ -60,7 +63,7 @@ func (a *Agent) liveSession() (*session, error) {
 // one, and keeps the previous owner unless the edge answers that it
 // recorded the new one.
 func (a *Agent) TransferOwner(owner edgeproto.Account) error {
-	s, err := a.liveSession()
+	s, _, err := a.liveSession()
 	if err != nil {
 		return err
 	}

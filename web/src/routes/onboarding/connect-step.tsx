@@ -13,7 +13,7 @@ import { useDelayed } from '@/lib/hooks'
 import { shellQuote } from '@/lib/shell'
 import type { EdgeLinkResult, LinkApplyResult, LinkStatus } from '@/lib/types'
 import { forgetHandedLink, handedLink, onHandedLink } from '@/lib/url-state'
-import { EdgeSignIn, JoinLink, LinkByCommand } from '@/routes/onboarding/edge-link'
+import { EdgeSignIn, JoinLink, LinkBeforeSignIn, LinkByCommand } from '@/routes/onboarding/edge-link'
 import { GitIdentityForm } from '@/routes/onboarding/git-identity'
 import { Step } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
@@ -28,6 +28,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   const [invite, setInvite] = useState('')
   const [name, setName] = useState('')
   const [linking, setLinking] = useState(false)
+  const [signedOut, setSignedOut] = useState(false)
   const [success, setSuccess] = useState<LinkApplyResult | null>(null)
   const [edgeLinked, setEdgeLinked] = useState<EdgeLinkResult | null>(null)
   const [handed, setHanded] = useState(handedLink)
@@ -139,6 +140,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
           claim={handed?.kind === 'claim' ? handed.link : undefined}
           onHand={setHanded}
           onLinked={(result) => void linkedThroughEdge(result)}
+          onSignedOut={setSignedOut}
         />
       )}
       {choosing && (
@@ -177,6 +179,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
           </CollapsibleContent>
         </Collapsible>
       )}
+      {choosing && signedOut && <LinkBeforeSignIn onHand={setHanded} />}
       {connected && caps.hasMethod('member.git') && (
         <section aria-labelledby="connect-git-identity" className="flex flex-col gap-2 border-t border-seam pt-4">
           <h3 id="connect-git-identity" className="text-ui font-medium text-text">Git identity</h3>

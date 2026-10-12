@@ -281,7 +281,9 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 // device waiting on an invitation is approved by accepting that invitation
 // for the account the device signed in as: it creates the invited member,
 // or binds the account to the member a link names, and uses the
-// invitation up.
+// invitation up. dev.Invitation is the invitation the approver was shown:
+// a device that joined with another invitation's link since is a conflict
+// and nothing is approved.
 func ApproveDevice(ctx context.Context, ids store.IdentityStore, members MemberLister, dev *domain.Device, approver domain.MemberID) (*domain.Device, error) {
 	if dev.Invitation == "" {
 		if err := ids.ApproveDevice(ctx, dev.ID, approver); err != nil {
@@ -295,7 +297,11 @@ func ApproveDevice(ctx context.Context, ids store.IdentityStore, members MemberL
 	}
 	account := edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Email: dev.Email, Login: dev.Login, Name: dev.Name}
 	fresh := &domain.Member{DisplayName: displayNameOf(account), Color: attribution.NextColor(memberColorsOf(all))}
-	m, err := ids.AcceptInvitationDevice(ctx, dev.ID, approver, fresh, time.Now())
+	m, err := ids.AcceptInvitationDevice(ctx, dev.ID, dev.Invitation, approver, fresh, time.Now())
+	if errors.Is(err, store.ErrDeviceMoved) {
+		return nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+			"device %s now waits on another invitation; nothing was approved", dev.ID)}
+	}
 	if err != nil {
 		return nil, err
 	}

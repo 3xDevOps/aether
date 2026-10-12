@@ -95,7 +95,7 @@ describe('onboarding link through an edge', () => {
     fireEvent.change(await screen.findByLabelText('Have an invitation or claim link?'), {
       target: { value: `${custom}/join/${serverID}/inv-7k2m9q4xbd#abcdefghijk23456` },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open link' }))
 
     const join = within(await screen.findByRole('region', { name: 'Join' }))
     fireEvent.click(await join.findByRole('button', { name: 'Sign in' }))
@@ -418,6 +418,27 @@ describe('onboarding link through an edge', () => {
 
     expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
     expect(screen.getByText('edge.other.test')).toBeDefined()
+    expect(client.localEdgeClaim).not.toHaveBeenCalled()
+  })
+
+  it('treats a claim link for the same host on another scheme as a different edge', async () => {
+    seed()
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+      localEdgeClaim: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
+    const plain = edge.replace('https://', 'http://')
+    fireEvent.change(screen.getByLabelText('Claim code or link'), {
+      target: { value: `aether://claim?edge=${encodeURIComponent(plain)}&server=${serverID}#abcdefghijk23456` },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
+
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeDefined()
     expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 

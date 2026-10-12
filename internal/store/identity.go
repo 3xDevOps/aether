@@ -47,8 +47,10 @@ type IdentityStore interface {
 	// invitation links an existing member, and makes the device that
 	// member's, approved by approver. The invitation must be unconsumed
 	// and unexpired at now, and the account no member's yet; the other
-	// devices waiting on it are deleted.
-	AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error)
+	// devices waiting on it are deleted. invitation is the one the
+	// approver saw the device wait on: when the device waits on another
+	// by now it returns ErrDeviceMoved and approves nothing.
+	AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error)
 	// BindIdentity binds identity to its existing Member; ErrConflict when
 	// the account is bound already.
 	BindIdentity(ctx context.Context, identity *domain.Identity) error
@@ -403,7 +405,11 @@ func (d *DB) AcceptInvitation(ctx context.Context, id domain.InvitationID, ident
 	return m, nil
 }
 
-func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error) {
+// ErrDeviceMoved is the ErrConflict of approving a device that waits on
+// another invitation than the one its approver saw.
+var ErrDeviceMoved = fmt.Errorf("%w: the device waits on another invitation", ErrConflict)
+
+func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, approver domain.MemberID, m *domain.Member, now time.Time) (*domain.Member, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: begin accept invitation device: %w", err)
@@ -418,6 +424,9 @@ func (d *DB) AcceptInvitationDevice(ctx context.Context, id domain.DeviceID, app
 	}
 	if dev.Invitation == "" || dev.Status != domain.DevicePending {
 		return nil, fmt.Errorf("%w: device %s is not waiting on an invitation", ErrNotFound, id)
+	}
+	if dev.Invitation != invitation {
+		return nil, fmt.Errorf("device %s: %w", id, ErrDeviceMoved)
 	}
 	var bound bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM member_identities WHERE provider = ? AND subject = ?)`,
