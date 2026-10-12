@@ -1527,6 +1527,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })
+    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'sonnet' } })
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() => {
@@ -1534,6 +1535,7 @@ describe('onboarding wizard', () => {
         workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
+        model: 'sonnet',
       })
     })
     // The wizard hands off to the run view rather than holding a done
@@ -1546,7 +1548,7 @@ describe('onboarding wizard', () => {
       })
       expect(useStore.getState().runs.run_1).toBeDefined()
     })
-    expect(useStore.getState().launchDefaults.claude?.mode).toBe('tui')
+    expect(useStore.getState().launchDefaults.claude).toMatchObject({ mode: 'tui', model: 'sonnet' })
   })
 
   it('launches Enhanced when the setup chose it', async () => {

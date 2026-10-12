@@ -436,13 +436,15 @@ describe('the Enhanced session view', () => {
   })
 
   it('shows the adapter failure with its stderr and the two ways on', async () => {
-    open({ status: 'needs-attention' })
+    open({ status: 'needs-attention', model: 'opus' })
     acpSocket().open({ live: false }, [
       item('notice', 0, { notice: { severity: 'error', title: 'Enhanced session ended', description: "the agent's ACP server exited with code 1; stderr: boom" } }),
     ])
     expect(await screen.findByText(/stderr: boom/, { selector: 'pre' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Retry Enhanced' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Open in Standard' })).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'Open in Standard' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start a Standard run' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ mode: 'tui', model: 'opus' })))
   })
 })
 
