@@ -71,10 +71,10 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		if !ok {
 			return nil, fmt.Errorf("store: list run messages: %w %q", ErrInvalidCursor, f.Before)
 		}
-		query += ` AND (m.created_at, m.id) < (?, ?)`
+		query += ` AND (m.created_at, m.rowid) < (?, (SELECT rowid FROM run_messages WHERE id = ?))`
 		args = append(args, beforeAt.UnixNano(), beforeID)
 	}
-	query += ` ORDER BY m.created_at DESC, m.id DESC LIMIT ?`
+	query += ` ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
