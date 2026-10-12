@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -194,6 +196,54 @@ func TestCancelQueuedSteerRequestsIsAtomicAndScoped(t *testing.T) {
 	}
 	if len(cancelled) != 0 {
 		t.Fatalf("cancellation claimed row, returned %d rows", len(cancelled))
+	}
+}
+
+func TestSameInstantRoomMessagesKeepInsertionOrder(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	base := testRoomMessage(t, db, RoomMessageSteerRequest, "")
+	base.CreatedAt = time.Now().UTC().Truncate(time.Microsecond)
+	var ids []string
+	for i := range 8 {
+		msg := *base
+		msg.IdempotencyKey = "tie-" + strconv.Itoa(i)
+		if err := db.CreateRoomMessage(ctx, &msg); err != nil {
+			t.Fatalf("CreateRoomMessage %d: %v", i, err)
+		}
+		ids = append(ids, msg.ID)
+	}
+
+	var listed []string
+	before := ""
+	for {
+		page, err := db.ListRoomMessages(ctx, base.WorkspaceID, base.RunID, before, 3)
+		if err != nil {
+			t.Fatalf("ListRoomMessages: %v", err)
+		}
+		for _, msg := range page.Items {
+			listed = append(listed, msg.ID)
+		}
+		if page.NextBefore == "" {
+			break
+		}
+		before = page.NextBefore
+	}
+	slices.Reverse(listed)
+	if !slices.Equal(listed, ids) {
+		t.Fatalf("listed oldest first = %v, want %v", listed, ids)
+	}
+
+	cancelled, err := db.CancelQueuedSteerRequests(ctx, base.RunID, "moderator", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CancelQueuedSteerRequests: %v", err)
+	}
+	var settled []string
+	for _, msg := range cancelled {
+		settled = append(settled, msg.ID)
+	}
+	if !slices.Equal(settled, ids) {
+		t.Fatalf("cancelled = %v, want %v", settled, ids)
 	}
 }
 

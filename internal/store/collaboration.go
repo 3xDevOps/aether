@@ -500,10 +500,10 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 		args = append(args, run)
 	}
 	if before != "" {
-		query += ` AND (created_at, id) < (SELECT created_at, id FROM room_messages WHERE id = ?)`
+		query += ` AND (created_at, rowid) < (SELECT created_at, rowid FROM room_messages WHERE id = ?)`
 		args = append(args, before)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += ` ORDER BY created_at DESC, rowid DESC LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -627,7 +627,7 @@ func (d *DB) CancelQueuedSteerRequests(ctx context.Context, run domain.RunID, by
 		return nil, fmt.Errorf("store: cancel queued steer requests: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, id`, run, RoomMessageSteerRequest, RoomMessageQueued)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, rowid`, run, RoomMessageSteerRequest, RoomMessageQueued)
 	if err != nil {
 		return nil, fmt.Errorf("store: cancel queued steer requests: select: %w", err)
 	}
@@ -711,7 +711,7 @@ func (d *DB) SetRunProtectedAndCancelQueuedSteerRequests(ctx context.Context, ru
 		}
 		return nil, nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, id`, run, RoomMessageSteerRequest, RoomMessageQueued)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM room_messages WHERE run_id = ? AND kind = ? AND state = ? ORDER BY created_at, rowid`, run, RoomMessageSteerRequest, RoomMessageQueued)
 	if err != nil {
 		return nil, fmt.Errorf("store: protect run: select: %w", err)
 	}
