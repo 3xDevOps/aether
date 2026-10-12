@@ -17,6 +17,7 @@ import type {
   RunControllerPayload,
   RunDiffPayload,
   RunInputPayload,
+  RunModelPayload,
   RunProtectedPayload,
   RunRetentionPayload,
   RunStatusPayload,
@@ -499,6 +500,19 @@ export async function applyEvent(
         }
       }
       store.getState().applyRunTitle(ev.run_id, p.title)
+      break
+    }
+    case 'run.model': {
+      const p = ev.payload as RunModelPayload
+      if (!store.getState().runs[ev.run_id]) {
+        try {
+          store.getState().upsertRun(await client.runGet(ev.run_id))
+        } catch (err) {
+          store.getState().setUnreachable(classifyUnreachable(err, store))
+          return false
+        }
+      }
+      store.getState().applyRunModel(ev.run_id, p.model)
       break
     }
     case 'run.protected': {

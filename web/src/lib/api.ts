@@ -8,8 +8,6 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
-  ConfigImportParams,
-  ConfigImportResult,
   ConfigRoot,
   CoordMessagesListResult,
   DaemonInstallResult,
@@ -44,6 +42,8 @@ import type {
   Mission,
   MissionCancelResult,
   MissionCreateResult,
+  MissionExecutionChoice,
+  MissionIntegrator,
   MissionListResult,
   MissionQuestionResult,
   MissionReplaceIntegratorResult,
@@ -129,6 +129,8 @@ import type {
   DevBrowserCloseResult,
   DevBrowserConsoleParams,
   DevBrowserConsoleResult,
+  DevBrowserInspectParams,
+  DevBrowserInspectResult,
   DevBrowserNavigateParams,
   DevBrowserNavigateResult,
   DevBrowserNetworkParams,
@@ -434,6 +436,7 @@ export const api = {
     task?: string
     harness: string
     mode?: string
+    model?: string
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
@@ -482,6 +485,10 @@ export const api = {
     call<DevBrowserNavigateResult>('dev.browser.navigate', params),
   devBrowserSnapshot: (params: DevBrowserSnapshotParams) =>
     call<DevBrowserSnapshotResult>('dev.browser.snapshot', params),
+  /** Reads the element under a point. It needs no control of the Browser.
+   * A companion older than the server answers -32601 with the reason. */
+  devBrowserInspect: (params: DevBrowserInspectParams) =>
+    call<DevBrowserInspectResult>('dev.browser.inspect', params),
   devBrowserAction: (params: DevBrowserActionParams) =>
     call<DevBrowserActionResult>('dev.browser.action', params),
   devBrowserScreenshot: (params: DevBrowserScreenshotParams) =>
@@ -522,16 +529,8 @@ export const api = {
     workspace_id: string
     objective: string
     accountable_human_id: string
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
-    execution_choices: Array<{
-      account_member_id: string
-      harness: string
-      mode: string
-    }>
+    integrator: MissionIntegrator
+    execution_choices: MissionExecutionChoice[]
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>
@@ -541,11 +540,7 @@ export const api = {
   missionReplaceIntegrator: (params: {
     mission_id: string
     expected_generation: number
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
+    integrator: MissionIntegrator
     idempotency_key: string
   }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
   missionQuestionAnswer: (params: {
@@ -839,6 +834,7 @@ export const api = {
     task: string
     harness: string
     mode?: string
+    model?: string
   }) =>
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,
@@ -902,8 +898,6 @@ export const api = {
     call<FileRead>('config.read', params),
   configWrite: (params: { harness: string; path: string; content: string; revision: string }) =>
     call<FileRead>('config.write', params),
-  configImport: (params: ConfigImportParams) =>
-    call<ConfigImportResult>('config.import', params),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),

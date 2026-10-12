@@ -72,12 +72,12 @@ func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 		protocol.MethodMissionReplaceIntegrator: replace,
 	})
 	var out bytes.Buffer
-	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "", "key-1"); err != nil {
+	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "gpt-5-codex", "", "key-1"); err != nil {
 		t.Fatalf("replaceSwarmIntegrator: %v", err)
 	}
 	want := protocol.MissionReplaceIntegratorParams{
 		MissionID: "m1", ExpectedGeneration: 2,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "tui"},
+		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "tui", Model: "gpt-5-codex"},
 		IdempotencyKey: "key-1",
 	}
 	if got, wantJSON := string(replace.got), mustJSON(t, want); got != wantJSON {
@@ -87,7 +87,7 @@ func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 		t.Errorf("output = %q, want %q", out.String(), wantOut)
 	}
 
-	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "mem2", "key-2"); err != nil {
+	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "", "mem2", "key-2"); err != nil {
 		t.Fatalf("replaceSwarmIntegrator with --account: %v", err)
 	}
 	var sent protocol.MissionReplaceIntegratorParams

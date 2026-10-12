@@ -21,6 +21,9 @@ type Template struct {
 	Task        string
 	Harness     string
 	Mode        domain.LaunchMode
+	// Model is the agent model each launch uses; empty keeps the agent's
+	// default.
+	Model string
 	// Params are the task prompt's parameter defaults, keyed by the name
 	// used in its {{placeholders}}.
 	Params map[string]string
@@ -71,11 +74,14 @@ type TemplateStore interface {
 	MarkScheduleFired(ctx context.Context, id string, at time.Time) error
 }
 
-const templateCols = `id, workspace_id, name, task, harness, mode, params, budget_usd, created_at`
+const templateCols = `id, workspace_id, name, task, harness, mode, model, params, budget_usd, created_at`
 
 func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
 	if t.WorkspaceID == "" || t.Name == "" || t.Task == "" || t.Harness == "" {
 		return errors.New("store: save template: workspace_id, name, task, and harness are required")
+	}
+	if err := domain.ValidModel(t.Model); err != nil {
+		return fmt.Errorf("store: save template: %w", err)
 	}
 	id, ts, err := prepareCreate("tpl", t.CreatedAt)
 	if err != nil {
@@ -95,12 +101,12 @@ func (d *DB) SaveTemplate(ctx context.Context, t *Template) error {
 	)
 	err = d.db.QueryRowContext(ctx,
 		`INSERT INTO templates (`+templateCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (workspace_id, name) DO UPDATE SET
-		   task = excluded.task, harness = excluded.harness, mode = excluded.mode,
+		   task = excluded.task, harness = excluded.harness, mode = excluded.mode, model = excluded.model,
 		   params = excluded.params, budget_usd = excluded.budget_usd
 		 RETURNING id, created_at`,
-		id, t.WorkspaceID, t.Name, t.Task, t.Harness, t.Mode, string(params), t.BudgetUSD, createdAt,
+		id, t.WorkspaceID, t.Name, t.Task, t.Harness, t.Mode, t.Model, string(params), t.BudgetUSD, createdAt,
 	).Scan(&gotID, &gotCreated)
 	if err != nil {
 		return fmt.Errorf("store: save template: %w", mapConstraint(err, ErrNotFound))
@@ -219,7 +225,7 @@ func scanTemplate(row interface{ Scan(...any) error }) (*Template, error) {
 		params    string
 		createdAt int64
 	)
-	if err := row.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Task, &t.Harness, &t.Mode,
+	if err := row.Scan(&t.ID, &t.WorkspaceID, &t.Name, &t.Task, &t.Harness, &t.Mode, &t.Model,
 		&params, &t.BudgetUSD, &createdAt); err != nil {
 		return nil, err
 	}

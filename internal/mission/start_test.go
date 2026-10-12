@@ -23,7 +23,7 @@ func (l *recordingLauncher) LaunchMission(ctx context.Context, req MissionLaunch
 	defer l.mu.Unlock()
 	r := &domain.Run{
 		ID: req.RunID, WorkspaceID: req.WorkspaceID, MemberID: req.RunOwnerID, Task: req.Task,
-		Harness: req.Harness, Mode: req.Mode, Status: domain.RunQueued,
+		Harness: req.Harness, Mode: req.Mode, Model: req.Model, Status: domain.RunQueued,
 	}
 	if err := l.db.CreateRunWithID(ctx, r); err != nil {
 		return nil, err

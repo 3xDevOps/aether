@@ -195,10 +195,11 @@ export function quotePatch(lines: PatchLine[]): string {
   return [`@@ -${old[0]?.old ?? 0},${old.length} +${added[0]?.new ?? 0},${added.length} @@`, ...quoteLines(lines)].join('\n')
 }
 
-function fenced(lines: string[]): string {
+/** `lines` as a fenced block that no run of backticks inside them can close. */
+export function fenced(language: string, lines: string[]): string {
   const longest = Math.max(0, ...[...lines.join('\n').matchAll(/`+/g)].map((run) => run[0].length))
   const fence = '`'.repeat(Math.max(3, longest + 1))
-  return [`${fence}diff`, ...lines, fence].join('\n')
+  return [`${fence}${language}`, ...lines, fence].join('\n')
 }
 
 export interface ReviewEntry {
@@ -230,7 +231,7 @@ export function reviewEntries(comments: ReviewComment[], files: PatchFile[], sco
 export function reviewMessage(entries: ReviewEntry[]): string {
   const blocks = entries.map((entry, index) => [
     `${index + 1}. ${entry.comment.path}:${lineLabel(entry.lines)}${entry.outdated ? ' (these lines have changed since the comment was written)' : ''}`,
-    fenced(quoteLines(entry.lines)),
+    fenced('diff', quoteLines(entry.lines)),
     entry.comment.body,
   ].join('\n'))
   const count = entries.length === 1 ? '1 review comment' : `${entries.length} review comments`

@@ -99,7 +99,7 @@ func cancelSwarm(c *protocol.Client, w io.Writer, missionID, key string) error {
 	return nil
 }
 
-const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--account <member-id>]"
+const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]"
 
 func swarmReplaceIntegrator(args []string) error {
 	missionID, rest, err := swarmTarget(args, swarmReplaceUsage)
@@ -108,6 +108,7 @@ func swarmReplaceIntegrator(args []string) error {
 	}
 	fs := flag.NewFlagSet("swarm replace-integrator", flag.ExitOnError)
 	agent := fs.String("agent", "", "agent of the new integrator (runs in Standard mode)")
+	model := fs.String("model", "", "integrator "+modelHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: the current integrator's)")
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -116,13 +117,13 @@ func swarmReplaceIntegrator(args []string) error {
 		return errors.New(swarmReplaceUsage)
 	}
 	return withControl(func(c *protocol.Client) error {
-		return replaceSwarmIntegrator(c, os.Stdout, missionID, *agent, *account, cli.NewControlSessionID())
+		return replaceSwarmIntegrator(c, os.Stdout, missionID, *agent, *model, *account, cli.NewControlSessionID())
 	})
 }
 
 // replaceSwarmIntegrator replaces the integrator generation show reports, so
 // a replacement another human made in the meantime is not replaced again.
-func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID, agent, account, key string) error {
+func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID, agent, model, account, key string) error {
 	shown, err := showSwarm(c, missionID)
 	if err != nil {
 		return err
@@ -133,7 +134,7 @@ func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID, agent, a
 	params := protocol.MissionReplaceIntegratorParams{
 		MissionID:          missionID,
 		ExpectedGeneration: shown.Mission.IntegratorGeneration,
-		Integrator:         protocol.MissionIntegrator{AccountMemberID: account, Harness: agent, Mode: "tui"},
+		Integrator:         protocol.MissionIntegrator{AccountMemberID: account, Harness: agent, Mode: "tui", Model: model},
 		IdempotencyKey:     key,
 	}
 	var res protocol.MissionReplaceIntegratorResult

@@ -35,6 +35,7 @@ export interface Run {
   title?: string
   harness: string
   mode: string
+  model?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
   acp?: boolean
   switching?: 'tui' | 'acp'
@@ -105,6 +106,7 @@ export interface MissionExecutionChoice {
   account_member_id: string
   harness: string
   mode: string
+  model?: string
 }
 
 export type MissionIntegrator = MissionExecutionChoice
@@ -720,6 +722,9 @@ export interface GitBranchPayload {
 export interface RunTitlePayload {
   title: string
 }
+export interface RunModelPayload {
+  model: string
+}
 export interface RunProtectedPayload {
   protected: boolean
 }
@@ -926,6 +931,7 @@ export interface Template {
   task: string
   harness: string
   mode: string
+  model?: string
   params?: Record<string, string>
   budget_usd?: number
   created_at: string
@@ -1030,34 +1036,6 @@ export interface ConfigRoot {
   path: string
   runtime_ignores: string[]
   credential_names: string[]
-}
-
-export interface ConfigFile {
-  path: string
-  content_base64: string
-  mode: number
-}
-
-export interface ConfigImportParams {
-  harness: string
-  files: ConfigFile[]
-}
-
-export interface ConfigExclusion {
-  path: string
-  reason: string
-  detail?: string
-}
-
-export interface ConfigImportResult {
-  harness: string
-  files: number
-  bytes: number
-  excluded: ConfigExclusion[]
-  /** The import stopped; files and imported_paths identify confirmed writes, possibly none. */
-  error?: string
-  /** Canonical paths successfully installed before an incomplete import. */
-  imported_paths?: string[]
 }
 
 // POST /local/v1/<verb> results (internal/localgw/local.go); only a gateway

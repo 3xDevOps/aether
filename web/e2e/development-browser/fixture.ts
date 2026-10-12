@@ -122,17 +122,24 @@ export async function browserAction(page: Page, name: string): Promise<void> {
   await page.getByRole('menuitem', { name, exact: true }).click()
 }
 
-/** Fixture layout coordinates are CSS pixels in the actual remote viewport. */
-export async function clickRemote(page: Page, x: number, y: number, touch = false, clickCount = 1): Promise<void> {
-  const canvas = remotePage(page)
+/** Where a point of the remote viewport is on this screen. */
+export async function remotePoint(page: Page, x: number, y: number): Promise<{ x: number; y: number }> {
   await expectLive(page)
-  const geometry = await canvas.evaluate((element) => {
+  const geometry = await remotePage(page).evaluate((element) => {
     const rect = element.getBoundingClientRect()
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, frameWidth: (element as HTMLCanvasElement).width, frameHeight: (element as HTMLCanvasElement).height }
   })
   const scale = Math.min(1, geometry.width / geometry.frameWidth, geometry.height / geometry.frameHeight)
-  const px = geometry.left + (geometry.width - geometry.frameWidth * scale) / 2 + x * scale
-  const py = geometry.top + (geometry.height - geometry.frameHeight * scale) / 2 + y * scale
+  return {
+    x: geometry.left + (geometry.width - geometry.frameWidth * scale) / 2 + x * scale,
+    y: geometry.top + (geometry.height - geometry.frameHeight * scale) / 2 + y * scale,
+  }
+}
+
+/** Fixture layout coordinates are CSS pixels in the actual remote viewport. */
+export async function clickRemote(page: Page, x: number, y: number, touch = false, clickCount = 1): Promise<void> {
+  const canvas = remotePage(page)
+  const { x: px, y: py } = await remotePoint(page, x, y)
   // Focusable means this tab drives or nobody does, and then the press is sent.
   const driven = await canvas.getAttribute('tabindex') === '0'
   const completed = driven ? page.waitForResponse((response) => {

@@ -12,15 +12,23 @@ import type { ConfigRoot, Run, Workspace } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { type ConfigSource, type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
 import { useStore } from '@/store'
-import { configKey } from '@/store/files'
+import { configKey, type FileTreeState } from '@/store/files'
 
 type Expansion = { open: (key: string, fallback: boolean) => boolean; toggle: (key: string, fallback: boolean) => void }
 
 const ExpansionContext = createContext<Expansion>({ open: (_, fallback) => fallback, toggle: () => {} })
 
-/** Keeps folder expansion across the phone sheet remounting the tree. */
-export function TreeExpansion({ children }: { children: ReactNode }) {
+/** Keeps folder expansion across the phone sheet remounting the tree, and
+ * opens the folders above `reveal`, a file that was opened from outside it. */
+export function TreeExpansion({ reveal, children }: { reveal?: Selection | null; children: ReactNode }) {
   const [state, setState] = useState<Record<string, boolean>>({})
+  const revealed = reveal ? sourceKey(reveal, reveal.path) : null
+  useEffect(() => {
+    if (!reveal) return
+    const folders = reveal.path.split('/').slice(0, -1)
+    const above = folders.map((_, depth) => sourceKey(reveal, folders.slice(0, depth + 1).join('/')))
+    setState((s) => ({ ...s, ...Object.fromEntries([sourceKey(reveal, ''), ...above].map((key) => [key, true])) }))
+  }, [revealed])
   const value: Expansion = {
     open: (key, fallback) => state[key] ?? fallback,
     toggle: (key, fallback) => setState((s) => ({ ...s, [key]: !(s[key] ?? fallback) })),
@@ -124,14 +132,16 @@ function Disclosure({ id, label, count, children }: { id: string; label: string;
   )
 }
 
-function touchedPaths(runID: string): Set<string> {
+export function touchedPaths(runID: string): Set<string> {
   const snapshots = useStore.getState().diffs[runID]?.snapshots
   return new Set(snapshots?.[0]?.files.map((file) => file.path) ?? [])
 }
 
 const noPaths = new Set<string>()
 
-function TreeDirectory({
+const scrollToRow = (row: HTMLElement | null) => row?.scrollIntoView({ block: 'nearest' })
+
+export function TreeDirectory({
   source,
   path,
   depth,
@@ -160,6 +170,12 @@ function TreeDirectory({
   const cached = useStore((s) => s.trees[key])
   const filesEpoch = useStore((s) => s.filesEpoch)
   const identityEpoch = useStore((s) => s.identityEpoch)
+  // A run's listings are dropped whenever its checkout changes. The last one
+  // this member read stays up while the next is read, so an open folder does
+  // not blink.
+  const read = useRef<{ identity: number; tree: FileTreeState } | null>(null)
+  if (cached && !cached.loading) read.current = { identity: identityEpoch, tree: cached }
+  const listing = (!cached || cached.loading) && read.current?.identity === identityEpoch ? read.current.tree : cached
   const setTree = useStore((s) => s.setTree)
   const [expanded, toggle] = useExpanded(key, path === '' && rootOpen)
   const sourceKind = source.kind
@@ -210,9 +226,9 @@ function TreeDirectory({
       </ListRow>
       {expanded && (
         <div>
-          {cached?.loading && <p className="py-1 text-ui-sm text-muted" style={indent(depth + 2)}>Loading files…</p>}
-          {cached?.error && <p role="alert" className="py-1 text-ui-sm text-state-failed" style={indent(depth + 2)}>{cached.error}</p>}
-          {cached?.entries.map((entry) => {
+          {listing?.loading && <p className="py-1 text-ui-sm text-muted" style={indent(depth + 2)}>Loading files…</p>}
+          {listing?.error && <p role="alert" className="py-1 text-ui-sm text-state-failed" style={indent(depth + 2)}>{listing.error}</p>}
+          {listing?.entries.map((entry) => {
             const childPath = path ? `${path}/${entry.name}` : entry.name
             if (entry.kind === 'dir') {
               return <TreeDirectory key={childPath} source={source} path={childPath} depth={depth + 1} client={client} onSelect={onSelect} selected={selected} touched={touched} />
@@ -222,6 +238,7 @@ function TreeDirectory({
             return (
               <ListRow
                 key={childPath}
+                ref={isSelected ? scrollToRow : undefined}
                 selected={isSelected}
                 style={indent(depth + 1)}
                 onClick={() => onSelect(source, childPath)}

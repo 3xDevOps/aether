@@ -82,7 +82,7 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 // gone with the device waiting on one, and everything else stays.
 func TestJoinSecretMigrationDropsOpenInvitations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, 58)
+	raw := openLegacy(t, path, 59)
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
 			VALUES ('m1', 'Ada', '', '', 0, '#e6194b', 'admin', 1), ('m2', 'bob', '', '', 0, '#3cb44b', 'collaborator', 2);

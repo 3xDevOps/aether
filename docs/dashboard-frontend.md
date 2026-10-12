@@ -559,7 +559,7 @@ its end, exposing the shell or the raw connection error and window controls.
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
-`?run=<id>`, with `&view=session|terminal|changes|browser` (an old
+`?run=<id>`, with `&view=session|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`); any other
 view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
 the name is the route's, so Activity is `?page=timeline`, and Devices is
@@ -823,9 +823,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.protected` and `run.archived` follow the same fetch-first
-  rule on a run the client has never seen; `run.controller` skips an unknown
-  run, whose snapshot carries the holder.
+  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  same fetch-first rule on a run the client has never seen; `run.controller`
+  skips an unknown run, whose snapshot carries the holder.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
@@ -1359,11 +1359,11 @@ button on any surface opens one by asking the store, with no dependence on
 the palette being on screen. The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
 does not include it. It lists the active workspace's templates over
-`template.list`, shows the chosen template's agent, mode and task, and
+`template.list`, shows the chosen template's agent, mode, model and task, and
 starts the run with `template.launch`, then reveals it.
 
 The launch form lives in `components/launch/`. Its **Run** tab asks for a
-task, an agent and a mode; an account appears only when one is shared with the
+task, an agent, a mode and a model; an account appears only when one is shared with the
 caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
@@ -1394,12 +1394,23 @@ stays disabled until one is written (`runLaunch` in
 `internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
 the wire: an empty task and `tui` are the server's defaults.
 
-The form remembers a mode per agent in the persisted `launchDefaults` slice
-(`{mode, at}` keyed by agent name). It preselects the
-launchable agent launched most recently, then the agent of the newest run,
-then the first launchable one, and starts in that agent's remembered mode,
-else its `default_mode` from `agent.list`, else Standard; a remembered mode
-the agent can no longer use shows as Standard.
+**Model**, under Mode, is free text sent as `model` on `run.launch` and
+passed to the agent as is ([per-agent flags](harnesses.md#launch-argv)); the
+help line is "Optional. The agent's own default when empty." Its placeholder
+suggests values for the chosen agent: Claude Code "opus, sonnet, haiku or a
+full model id", Codex "a model id such as gpt-5-codex", OpenCode
+"provider/model, such as anthropic/claude-sonnet-4-5", pi "provider/model,
+optionally :<thinking>", oh-my-pi "opus, gpt-5.2 or openai/gpt-5.2". An
+empty field sends no `model`. A model that is not a single argument is
+refused by `run.launch` and shown under "Launch failed".
+
+The form remembers a mode and a model per agent in the persisted
+`launchDefaults` slice (`{mode, model, at}` keyed by agent name). It
+preselects the launchable agent launched most recently, then the agent of
+the newest run, then the first launchable one, and starts in that agent's
+remembered mode, else its `default_mode` from `agent.list`, else Standard,
+with its remembered model; a remembered mode the agent can no longer use
+shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -1439,25 +1450,30 @@ a client-side base refresh before trying again.
 ## Run view
 
 `src/routes/run/` is the one `run` route. Its params are `runId` and an
-optional `view` (`session`, `terminal`, `changes`, `browser`), written to the
-address as `?run=<id>&view=<view>`; the old `?view=diff` reads as `changes`.
+optional `view` (`session`, `terminal`, `changes`, `files`, `browser`),
+written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
+as `changes`.
 Every way into a run navigates to `run`: board card, sidebar row, run list,
 palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Browser is in the list for every run that has not
-finished, on a gateway that serves `dev.browser.status` (`hasBrowser` in
-`src/routes/browser/open.ts`); no browser has to be running, and opening the
-view starts none. `isRunRoute` in `views.ts` keeps a sidebar row lit across
-views.
+Terminal otherwise. Files is in the list while the run still has its
+checkout, on a gateway that serves `files.tree` (`hasFiles` in
+`src/routes/files/open.ts`): every run the Files tree lists, a completed one
+that is not yet merged or abandoned included. Browser is in the list for
+every run that has not finished, on a gateway that serves
+`dev.browser.status` (`hasBrowser` in `src/routes/browser/open.ts`); no
+browser has to be running, and opening the view starts none. `isRunRoute` in
+`views.ts` keeps a sidebar row lit across views.
 
 The frame (header, view switch, Details) stays mounted while the view
 changes; `CenterView` remounts it only for another run, identity or event
-epoch. Session, Terminal and Changes mount on first visit and stay mounted,
-laid out but `invisible` and `inert`: xterm hidden with `display: none`
-measures zero and would resize the shared PTY, and a Publish draft (commit
-message, an uncertain pull request) must survive a view switch. Browser
+epoch. Session, Terminal, Changes and Files mount on first visit and stay
+mounted, laid out but `invisible` and `inert`: xterm hidden with
+`display: none` measures zero and would resize the shared PTY, a Publish
+draft (commit message, an uncertain pull request) must survive a view switch,
+and an open file keeps its scroll position, caret and undo history. Browser
 mounts only while shown, so a hidden Browser streams no screencast.
 
 The Browser can also sit beside the other three views instead of being a tab:
@@ -1489,7 +1505,8 @@ line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
 reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
-the branch (click copies it) and the owner. Container queries on the state
+followed by the model when `run.model` is set ("Claude Code · Standard ·
+opus"), the branch (click copies it) and the owner. Container queries on the state
 line drop the branch first, then the owner, then the agent's name (the glyph
 stays), and only on a phone-width column the mode word; the reason truncates
 before any of them. The full task and the run record are in Details.
@@ -1548,8 +1565,12 @@ package names (`run.mode.switch: scheduler: `) and keeps the server's
 sentence.
 
 The view switch is a segmented `tablist` named "Run views" with manual
-activation, on its own 32px row under the header at every width. On a phone
-with the composer focused the header keeps only the title line.
+activation, on its own 32px row under the header at every width. When the
+row is too narrow for every tab, as on a phone whose run has a pull request,
+the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
+sight as the view or the room changes, and the right edge fades while more
+tabs lie past it. On a phone with the composer focused the header keeps only
+the title line.
 
 A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
@@ -1582,8 +1603,9 @@ Enhanced runs render `MultiplayerControls` (`routes/run/multiplayer-controls.tsx
 below the view switch at frame level, so Session, Terminal and Changes share
 one control surface. The Browser view leaves it out: it is about who controls
 the agent's session, and the page has a lease of its own
-([Browser view](#browser-view)). With the Browser docked beside another view
-the strip is back, above both. It shows the controller and every watcher
+([Browser view](#browser-view)). The Files view leaves it out too: reading
+and saving a file uses no lease. With the Browser docked beside Session,
+Terminal or Changes the strip is back, above both. It shows the controller and every watcher
 with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for five seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
@@ -1726,6 +1748,14 @@ One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
+
+A path the agent names opens that file in the run's
+[Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
+and inline code, in a `work` entry's command and output tail, and in a
+`DiffBlock`'s caption. A Markdown link whose target is a repository path
+opens there as well, where it used to open a dead address in a new tab.
+Fenced code blocks, a person's own messages and the entry labels, which
+toggle their detail, are left as text.
 
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
@@ -2228,11 +2258,10 @@ both what it renders and the overlap set the conflict chips read.
   near the screen, so a large diff costs the rows on screen rather than one
   DOM node per line. Lines carry old and new line numbers, which `parse.ts`
   reads from the hunk headers.
-- **The path opens the file.** Clicking a file's path opens it in Files on
-  the run's checkout (`routes/files/open.ts`): a Files tab for that run and
-  path, then the Files route. It needs `files.tree` and a run the Files tree
-  still lists. Binary files and files the current diff shows as deleted have
-  no link.
+- **The path opens the file.** Clicking a file's path opens it in the run's
+  [Files view](#files-in-a-run) (`openInFiles` in `routes/files/open.ts`),
+  without leaving the run. It needs a run that has a Files view. Binary files
+  and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
   `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
   file and scrolls to it once the diff has it. Each row of the Session view's
@@ -2446,6 +2475,12 @@ dev.browser.status: scheduler: the run has no live environment: the run is provi
   field and the empty pane list the ports there.
 - **Keyboard**, on a coarse pointer only: it opens the phone's keyboard for
   the page, which a tap on the page deliberately does not.
+- **Annotate**, a toggle; see Annotate below. A phone's row has no room for
+  one more button, so there Annotate starts from **Browser actions**, and
+  while it is on its toggle takes the place of **Keyboard**.
+- **Console and network**, a toggle that counts the rows not yet seen; see
+  Console and network below. In a pane narrower than 480px it is in **Browser
+  actions**, and that button carries a dot instead of the count.
 - **Viewport**, a menu: **Fit the pane**, **Desktop** 1280 × 800, **Tablet**
   820 × 1180, **Phone** 390 × 844. In a pane narrower than 480px the same
   choices head the **Browser actions** menu instead.
@@ -2629,7 +2664,8 @@ of the page for a keyboard user, since Tab goes to the page.
 run's agent terminal and shells. An `http(s)` link to `localhost`,
 `127.0.0.1`, `0.0.0.0` or `[::1]` is recorded in `browserRequests`; the run
 frame shows the Browser unless it is already docked, and the Browser opens
-the address as if it had been typed. Every other link opens in a new tab as
+the address as if it had been typed. A path in the run's checkout opens in
+its [Files view](#files-in-a-run). Every other link opens in a new tab as
 before, and an OAuth callback link is still intercepted first. The
 address-bar shortcut uses the same record with an empty address.
 
@@ -2645,12 +2681,100 @@ the mutation; that includes the lease released by a window blur. Cancel
 restores focus to **Browser actions**, and raw failures remain readable in
 the confirmation. Closing the run owns stopping the companion itself.
 
+**Annotate.** A person points at what is wrong instead of describing it.
+While **Annotate** is on (`annotate.tsx`), the pointer picks elements and
+sends the page nothing. Moving it outlines the element under it with a label
+such as `button#save 120 × 36`; a click, or a tap on a phone, opens a card
+beside that element. The card names the element, shows where it comes from
+(`src/components/SaveButton.tsx:12:5` when the page exposes it, its selector
+otherwise) and takes the comment. **Comment** pins a numbered marker;
+**Cancel**, or Escape in an empty card, drops it. A marker opens its note to
+read, edit or delete. Leaving the mode, by the toggle, its shortcut or `Esc`,
+keeps what an open card holds.
+
+The outline is drawn beside the canvas from the bounds `dev.browser.inspect`
+returns, one read at a time and at most ten a second, so it can trail the
+pointer by a frame. Nothing is injected into the page. Inspection is a read:
+it needs no control lease, so a page the agent is driving can be annotated
+without taking over, and annotating never takes the lease. The wheel still
+scrolls the page; keys do not reach it. Markers show while Annotate is on and
+the Browser shows the page they were made on at the same viewport size, and
+they follow the page's scroll. Picking needs a pointer; a screenshot note and
+the console rows below do not.
+
+A server without the method, or a run whose browser companion is older than
+the server, cannot annotate. The toggle is dimmed, and its tooltip and a
+notice give the reason in the server's words:
+
+```
+dev.browser.inspect: this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion: browser: invalid_request: Unknown browser operation
+```
+
 **Screenshot** calls the real capture API at its own recorded boundary, not
 a canvas copy or the last received frame, and needs no lease. It creates a
-private transient capture. **Captures…** in the run's **More** menu is where
-a member inspects it and chooses to retain it (see
-[Captures and candidate review](#captures-and-candidate-review)). Taking a
-screenshot does not publish or retain anything.
+private transient capture and a note for it, with its card open: words for
+the agent are optional, **Keep as evidence…** opens **Captures** (see
+[Captures and candidate review](#captures-and-candidate-review)), where a
+member inspects and retains it, and **Remove** takes it out of the message
+while the capture stays in the run. Taking a screenshot does not publish or
+retain anything.
+
+**Send to agent.** Once there is a confirmed note, a screenshot or a ticked
+row, a bar under the toolbar (`feedback-bar.tsx`) counts them, "2 annotations,
+1 screenshot, 1 failed request", beside **Discard** and **Send to agent**. It
+is the Changes view's review bar for a page: one message, sent under the
+Session composer's rules (`useAgentSend`), with delivery reported the same
+way. A refused send leaves everything in place under the server's reason.
+Sending first uploads each annotated element's picture through
+`terminal.image`, which returns a path inside the run. The picture is cut in
+the dashboard from the frame that was on the canvas when the element was
+picked, with 12 pixels around it. A gateway without `terminal.image` sends the
+notes without pictures. The message (`feedbackMessage` in `feedback.ts`)
+gives the page URL and viewport, then for each note what the person wrote
+followed by what the page says:
+
+````
+Feedback from the page in this run's browser: 1 annotation, 1 failed request.
+Each screenshot path is an image file inside the run; open it to see what I saw.
+Page: http://localhost:3000/settings (viewport 1280x800)
+
+1. button "Save changes"
+The label is cut off at this width.
+- Screenshot: /home/aether/.aether/terminal-images/image-4f2c.png
+- Selector: button#save
+- Source: src/components/SaveButton.tsx:12:5
+- Component: App > Toolbar > SaveButton
+- Role: button
+- Name: Save changes
+- Text: Save
+- Attributes: id="save" class="btn primary"
+- Bounds: x 40, y 30, 120 x 36
+- Styles: display: block; position: absolute; width: 120px; ...
+```html
+<button id="save" class="btn primary">Save</button>
+```
+
+Failed requests (http://localhost:3000/settings):
+- 12:01:04Z GET http://localhost:3000/api/user 500
+````
+
+A line is left out when the page has nothing for it: `Source` needs a
+development build of React 18 or earlier, `Component` any development build
+of React. HTML is trimmed to 1200 characters. No form control's value is in
+the message; see `inspect` in
+[coordination.md](coordination.md#development-terminals-browser-and-captures).
+A screenshot note names the capture's own path in the run. One message
+carries at most 20 notes. What waits to be sent is kept per run while the
+dashboard stays open, across view switches.
+
+**Console and network.** The strip under the page (`logs.tsx`) stands in for
+developer tools, which a streamed browser cannot offer. It lists what the
+server has recorded for the selected page, read every two seconds while the
+Browser is shown: console errors and warnings, uncaught errors, and requests
+that failed or answered 400 or above. `console.log` output and requests that
+succeeded are not recorded, and the empty strip says so. The toggle counts
+the rows that arrived while the strip was closed. Ticking rows, or the
+header's box for all of them, adds them to the bar above.
 
 `web/e2e/development-browser/` adds real-server Playwright scenarios using the
 existing server/SSH-gateway harness, a Node 22.14.0 app process bound only to
@@ -2659,7 +2783,8 @@ the address bar, invalid credentials, cookie-backed sign-in/logout, module
 hot replacement without logout, desktop/phone input, native Chromium
 composition, multiple touch contacts, same-page run-principal actions,
 popups, fit-to-pane and presets, silent acquisition, watch/takeover and stale
-control/viewport rejection. The app container publishes no host port.
+control/viewport rejection, and annotating an element of a page the agent is
+driving, with a failed request, into one message. The app container publishes no host port.
 Use the normal E2E binary/build prerequisites and a built `aether/browser:test`
 image, or the harness's inherited `AETHER_BROWSER_IMAGE` override. The
 deterministic harness only holds the run alive: these are not proof of an
@@ -2783,19 +2908,21 @@ work, starts a worker run per task, and combines the results." It asks for
 an objective, the **Integrator agent** (the same picker as Run, on the
 account under Options), **Integrator mode** (Standard by default; Enhanced
 when the agent supports it; Background disabled with the reason
-`mission.create` gives: it exits after one turn), **Agents for workers** (a
-checkbox row per installed agent and account, defaulting to the integrator
-account's first launchable agent) and **Worker mode**, which defaults to
-Background. Each worker choice is sent in the worker mode when its agent can
+`mission.create` gives: it exits after one turn), **Integrator model**
+(the same field as Run), **Agents for workers** (a checkbox row per
+installed agent and account, defaulting to the integrator account's first
+launchable agent; a ticked row has a model input, empty for the agent's
+default) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
 use it and in Standard otherwise; the row says so ("Runs Standard: no
 Enhanced support"). Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
-`mission.create` refuses an integrator whose exact account, `harness` and mode
-are not one of `execution_choices`, so the integrator's own choice is always
-sent; a worker choice with the same tuple is not sent twice, and the list is
-sorted by account, harness and mode, so the same set is always the same
+`mission.create` refuses an integrator whose exact account, `harness`, mode
+and `model` are not one of `execution_choices`, so the integrator's own
+choice is always sent; a worker choice with the same tuple is not sent twice,
+two choices that differ only in model are both sent, and the list is sorted
+by account, harness, mode and model, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts
 `Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
 such as `mission: coordination is unavailable`, appears in the dialog verbatim
@@ -2931,8 +3058,10 @@ integrator to continue.` Either adds `Last launch failure <time ago>:
 shows its error and is asked again on the next swarm refetch. Finished
 swarms show none of this; the server refuses a replacement there.
 
-**Replace integrator…** opens a dialog with the distinct accounts and agents
-from `execution_choices` and always sends mode `tui`, pins
+**Replace integrator…** opens a dialog with the distinct accounts and
+agent-and-model pairs from `execution_choices` (each listed as
+"<agent> · <model>" when it has a model), sends the choice's model,
+always sends mode `tui`, pins
 `expected_generation`, and reuses one idempotency key across retries.
 **Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
 when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
@@ -3177,7 +3306,9 @@ own persistent configuration roots from `config.roots`. `files.tree`,
 available through both the local SSH-backed gateway and the server-hosted
 WhoIs gateway. Directory requests are lazy and cached in
 `src/store/files.ts`; file content comes from `files.read` or `config.read`.
-A live run's file can switch from **File** to **Changes vs base**.
+A live run's file can switch from **File** to **Changes vs base**. The same
+tree and editor are a view of each run, scoped to that run's checkout: see
+[Files in a run](#files-in-a-run).
 
 The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts** and the member's configuration roots under **Agent
@@ -3197,9 +3328,10 @@ the dialog open with the error); live-run files show **Save**, changing the
 run's uncommitted checkout; configuration files show **Save**, changing only
 the authenticated member's persistent home. Base writes need the push
 permission, run writes the steer permission, and config reads and writes are
-always for the calling member and need the launch permission. A new
-configuration file accepts nested relative paths and refuses to overwrite an
-existing file.
+always for the calling member and need the launch permission. A text file
+the member may read but not change shows **Read-only** in place of the
+action. A new configuration file accepts nested relative paths and refuses to
+overwrite an existing file.
 
 Saves are explicit (**Save**, **Commit to <branch>…**, or Ctrl/Cmd-S, which
 opens the same commit dialog for a base file); there is no autosave or
@@ -3212,12 +3344,70 @@ keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
 All runs the member launches and their Environment mount one shared
-read-write persistent HOME, so accepted configuration imports and saves
-are visible to active and future runs; a tool may need to reload. Browser
-imports and Files edits do not create CLI snapshot history. Optional run
+read-write persistent HOME, so uploaded configuration and saves are
+visible to active and future runs; a tool may need to reload. Files edits
+do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
+
+A `run.diff` event drops every listing and document cached for that run,
+because its checkout changed; a save into a run's checkout causes one too.
+The tree and the editor keep what they last read until the reread lands
+(`TreeDirectory`, `FileEditor`), and `EditableDocument` then replaces only
+the span that differs, so an open folder does not blink and the caret, the
+scroll position and the marked line stay where they were. A draft started
+during the reread is still based on the revision that was on screen.
+
+### Files in a run
+
+`RunFiles` (`run-files.tsx`) is the run page's Files view: that run's
+checkout under its branch name, with the tree, the editor, the tabs and the
+phone layout of the Files route (`FilesPane`, `closeTab` in `pane.tsx`). Its
+tabs are the open files of that run; they are the same tabs the Files route
+shows under **Run checkouts**. The base branch and agent configuration stay
+on the Files route. The pane is measured: below 640px, with the Browser
+docked beside it for instance, it shows the tree until a file is open and
+then the editor with **Browse**, as a phone does.
+
+`openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
+from outside the tree. It navigates to the run route with `view: 'files'`,
+`file` and, when named, `line` and `column`; those three are not written to
+the address. The view opens the file, opens the folders above it in the tree
+and scrolls its row into view (`TreeExpansion reveal`), and the editor puts
+the caret at the line and column, scrolls the line to the middle and marks
+it with the selection colour. The mark follows edits and stays until another
+line is opened. Following the same link again is a new navigation, so it
+shows the line again. A line past the end of the file marks the last line.
+A file the checkout does not have opens with the server's `files.read` error.
+
+Three things call it: a file's header in the Changes view, a path in the
+Session view and a path in one of the run's terminals.
+
+`findPaths` (`paths.ts`) reads what could name a file: `path`, `path:line`,
+`path:line:col` and `path#L12`, relative to the repository, with a leading
+`./`, or under `/workspace/`, where every run's checkout is mounted. A lone
+word counts only with an extension or a line (`go.mod`, `Makefile:12`).
+URLs, absolute paths outside `/workspace`, `..` and `.git` segments are not
+paths.
+
+A path is a link only when it is a file in the checkout, and the dashboard
+does not ask the server about text that is merely on screen. `isRunFile`
+answers from the directory listings in `src/store/files.ts`, the cache the
+tree fills, and reads at most two it lacks: the repository root, which rules
+out prose such as "and/or" with no request of its own, and the file's
+directory. The Session view asks when the pointer reaches a path or a finger
+taps it (`FileLink` in `path-link.tsx`); a terminal asks for the line under
+the pointer (`findRunFiles`, through `useXterm`'s `findLinks`, which joins a
+wrapped line before it is searched). Each listing is fetched once however
+many paths wait on it, so every path in a directory becomes a link together,
+and a path that became a link stays one while it is on screen. A path
+that is not a file is never styled and does nothing when clicked. Until a
+path's directory has been listed it has no link style and cannot be reached
+with Tab; the tree is the keyboard's way to any file.
+
+There is no file finder: `files.tree` lists one directory, and nothing lists
+a whole checkout.
 
 ## Templates
 
@@ -3260,7 +3450,8 @@ command and an optional Enhanced command, sent through `agent.register`.
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
 member's Profile and opens it with **Set it in Profile** rather than editing
-the identity itself; **GitHub**; and **Agent config files**.
+the identity itself; **GitHub**; and **Agent config files**, a prompt that
+has an agent on the member's computer upload its configuration.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how runs
 show it**, **Install and log in** and **Check**. The first is
@@ -3379,49 +3570,32 @@ assert one string.
 
 ### Agent config files
 
-`src/components/profile-import.tsx` is the configuration importer, under the
-**Agent config files** disclosure on Agents and in onboarding's Agent step
-whenever `config.roots` and `config.import` are advertised, on both gateways,
-without a workspace. There is no separate route: typing "config files" in the
-command palette finds **Agents**, through the `keywords` its entry in
-`src/lib/surfaces.ts` carries.
+`src/components/agents/config-prompt.tsx` fills the **Agent config files**
+disclosure on Agents and in onboarding's Agent step whenever `config.roots`
+and `config.import` are advertised, on both gateways, without a workspace.
+There is no separate route: typing "config files" in the command palette
+finds **Agents**, through the `keywords` its entry in `src/lib/surfaces.ts`
+carries.
 
-`config.roots` supplies destinations such as `~/.claude` and their runtime
-exclusions. A unique basename selects the destination automatically; an
-unknown or ambiguous basename requires a choice before file bytes are read.
-Retained browser `File` handles allow the metadata preview to be recomputed
-after a destination change. Credential names in any path component and
-`*.pem` files are excluded before read; destination-specific
-`runtime_ignores` match exact root-relative paths or component prefixes
-case-sensitively.
+The browser reads and uploads nothing. The section gives the member a prompt
+to paste into a coding agent on the computer that has their configuration;
+that agent picks the files, asks the member, and uploads them with
+`aether config ls` and `aether config push`, so that computer needs the
+`aether` CLI linked to this server. The two sentences above the prompt say so and link
+the quickstart's install and link steps.
 
-The browser directory picker grants access to the directory the user selects
-even when the dashboard is server-hosted; it does not grant access to
-arbitrary local paths. The importer previews metadata and policy exclusions
-without reading file bytes. It transfers the entire eligible directory through
-sequential bounded requests, not a truncated selection. It retains at most the
-current batch's encoded payload and shows cumulative progress. Files above the
-64 MiB configuration-file ceiling and read failures are explicit errors.
-Server exclusions and exact committed paths accumulate across batches; a
-failure stops subsequent requests, distinguishing known commits from a request
-whose response was lost. A response with `error` shows committed counts,
-exact canonical `imported_paths` and the real error, and warns that copied
-files remain. A lost RPC response leaves the outcome unknown; inspect
-**Files** before importing again.
-
-After a result the user can select another directory or use **Open remote
-files**, which navigates to the `files` route. There is no automatic
-configuration sync, watcher, or import retry. Nonpersisted owner-scoped
-progress and results survive navigation; `configImportPending` serializes
-operations and protects against page unload. Each request rechecks identity
-after asynchronous reads, so a member/server switch prevents further writes
-and hides the old result. New browser-imported files use `0644`; existing
-remote modes are preserved on overwrite. The browser cannot preserve source
-executable bits or symlinks. Agent logins are separate from this import. See
+The prompt is `configPrompt` in `src/lib/config-prompt.ts`, a plain module
+so the Playwright spec can import it; the user docs print the same text byte
+for byte. It shows in a read-only, focusable monospace block that keeps its
+line breaks, wraps long lines and scrolls past 18rem. **Copy prompt** goes
+through `copyText` (`src/lib/clipboard.ts`): it toasts **Copied**, or, when
+the clipboard refuses, selects the whole prompt and toasts **Selected. Press
+Ctrl+C to copy.** **Open remote files** navigates to the `files` route, where
+the uploads show under **Agent config**. Agent logins are separate. See
 [Agent configuration](harnesses.md#agent-configuration-import-and-files) for
 the user workflow and [the
-protocol](local-gateway.md#files-and-member-configuration) for import result
-and failure semantics.
+protocol](local-gateway.md#files-and-member-configuration) for the
+`config.*` methods.
 
 ## Environment
 
@@ -4304,6 +4478,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘R` / `Ctrl+R` | browser | Reload the page |
 | `⌘[` / `Alt+←` | browser | Go back |
 | `⌘]` / `Alt+→` | browser | Go forward |
+| `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
 | `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
 | `1` to `4` | request | Pick that option of the focused Session request |
@@ -4313,8 +4488,10 @@ pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
 The scopes are `global`, `run`, `browser`, `card`, `request` and `composer`;
 `card` is the board's `a`/`r`/`o` on the focused card, `request` the option
 digits on a focused Session request, `composer` the send keys while the
-Session composer has focus and `browser` the four keys of a run's Browser
-while it is on screen. When a key matches in two live scopes, the
+Session composer has focus and `browser` the keys of a run's Browser
+while it is on screen. `Esc` is the run's, to leave it, and the table gives a
+key to one binding; while a page is being annotated the Browser answers
+`Esc` itself first and stops annotating instead. When a key matches in two live scopes, the
 innermost wins. A binding without a handler does
 nothing and is left out of the dialog: `n` is offered only to a member who
 may launch, and a `g` destination only when the gateway serves it. A run's
@@ -4406,7 +4583,7 @@ find are Ctrl on every platform, because that is what xterm binds; see
 [terminal.md](terminal.md).
 
 **Tab strips behave as tab lists.** The run view switch is a Radix `Tabs`
-(`TabsList look="segmented"`) whose panels are the four views, so Radix wires
+(`TabsList look="segmented"`) whose panels are the run's views, so Radix wires
 `aria-controls` and the `tabpanel`s. The terminal strip in the run toolbar
 (`TerminalTabs` in `routes/run/shells.tsx`, named "Terminals") and the
 Environment dock (`components/dock.tsx`) carry `role="tablist"`,
@@ -4636,8 +4813,12 @@ covers input queued across acquiring a lease, watching, wheel input, stream
 reconnection and its failure; `address.test.ts` covers the
 scheme rules; `ports.test.tsx` covers the port list in the empty pane, the
 toolbar and the address field, its polling, and opening a port on this
-computer or showing the command for it; and `src/routes/run/frame.test.tsx` covers when Browser is
-offered, the docked layout and run-local terminal links.
+computer or showing the command for it; and `src/routes/run/frame.test.tsx`
+covers when Browser and Files are offered, the docked layout and run-local
+terminal links.
+`src/routes/files/run-files.test.tsx` covers the run's Files view and path
+links in the Session view, `paths.test.ts` what reads as a path, and
+`src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
 `src/routes/settings/notifications.test.tsx` covers every state of the
 Notifications row, `src/lib/push.test.ts` the browser side behind it

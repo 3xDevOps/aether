@@ -257,6 +257,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     return e.actor_id ? <><Who id={e.actor_id} /> released control</> : 'Control released'
   },
   'run.mode': (p) => modeLine(p),
+  'run.model': (p) => <>Model set to <Quote>{bounded(p.model, 160)}</Quote></>,
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished run</>,

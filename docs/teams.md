@@ -744,6 +744,7 @@ commit captured at launch.
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
+| `aether config ls [<agent> [path]]` / `aether config push [--dry-run] <agent> <path>...` | List the agents Aether holds configuration for and what your home has for one, or upload files and directories from an agent's directory into your own home. See [quickstart.md](quickstart.md#upload-agent-configuration). |
 
 The dashboard shows each run in one of five states: **Needs you**,
 **Working**, **Paused**, **Done** or **Failed**, with a reason line. **Needs
@@ -810,16 +811,20 @@ the owner does. This is not a separate action inbox, blocker, or task model.
 
 ### Task templates and schedules
 
-A template is a saved launch: agent, task, mode, and parameters. Save one,
+A template is a saved launch: agent, task, mode, model, and parameters. Save one,
 launch it by name, or put it on a cron schedule:
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
-  [--mode standard|enhanced|background] [--param key=value] [--budget <tokens>]
+  [--mode standard|enhanced|background] [--model <model>] [--param key=value] \
+  [--budget <tokens>]
 aether template list
 aether run --template nightly-triage [--param key=value]
 aether template delete nightly-triage
 ```
+
+`template save` refuses a `--model` the agent has no model flag for, with
+`scheduler: agent "<agent>" has no model flag; launch it without a model`.
 
 ```sh
 aether schedule list
@@ -1106,15 +1111,20 @@ delivers the verified result, and reports success. No human approves the plan
 or the delivery.
 The dashboard's launch dialog creates one on its **Swarm** tab: an
 objective, the **Integrator agent**, an **Integrator mode** (Standard or
-Enhanced; Background is refused because it exits after one turn),
-**Agents for workers**, and a **Worker mode** that defaults to Background. A
+Enhanced; Background is refused because it exits after one turn), the
+**Integrator model**, **Agents for workers** with a model input on each
+ticked row, and a **Worker mode** that defaults to Background. A
 worker whose agent cannot use the worker mode runs Standard, which its row
-says. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
+says. An empty model keeps the agent's default. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
 shared account named by `--account`) with the agent `--agent` names, in
 `standard` mode, or `enhanced` with `--mode enhanced`
-([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on an
-agent, in `standard` mode unless the value ends in `:enhanced` or
-`:background`; workers may use the integrator's agent. `-` in place of the
+([enhanced-runs.md](enhanced-runs.md)), and on the model `--model` names.
+Each `--worker agent[:mode[:model]]` allows workers on an agent, in
+`standard` mode unless the mode is `enhanced` or `background` (an empty
+mode keeps `standard`, so `codex::gpt-5-codex` is a Standard worker on
+`gpt-5-codex`), on the model given or else the agent's default; workers may use the integrator's agent.
+An execution choice is an account, agent, mode and model, so a swarm can
+mix models per agent. `-` in place of the
 objective reads it from stdin. An enhanced integrator or worker is prompted
 when mail reaches its idle session, so worker reports reach an enhanced
 integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
@@ -1134,7 +1144,8 @@ not read 3 messages (12 min)").
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --worker claude:background --worker codex:background
+  --agent claude --model opus --worker claude:background \
+  --worker codex:background:gpt-5-codex
 ```
 
 ```
@@ -1207,7 +1218,8 @@ swarm moves to `cancelled`. The server refuses `cancel` on a `completed` or
 `cancelled` swarm, and refuses every one of these from anyone but the
 accountable human or an admin; see [Swarm identity and current
 authority](#swarm-identity-and-current-authority). `replace-integrator`
-starts a new integrator run on the agent `--agent` names, in `tui` mode, under the
+starts a new integrator run on the agent `--agent` names and the model
+`--model` names, in `tui` mode, under the
 current integrator's account or the one named by `--account`; both must be
 among the swarm's execution choices. It reads the swarm first, sends the
 integrator generation `show` reports, and prints the new run ID after the
@@ -1305,15 +1317,11 @@ and any scope deviation must carry an explicit disposition. The resulting
 evidence remains provenance of what Aether captured or a participant reported,
 not independent verification.
 
-Agent configuration is not watched or inventoried automatically. Open
-**Agents → Agent config files** in either dashboard to choose a local directory,
-review its files, and explicitly import or update the remote configuration.
-The onboarding Agent step uses the same importer. Known credential
-names and runtime/history defaults are skipped locally; remaining bytes are
-uploaded and server-scanned, so do not assume all secret content stays local.
-Directory-wide count and byte budgets do not truncate imports; bounded batches
-carry the full eligible selection and report progress or an explicit failure.
-The import writes the authenticated member's persistent home immediately,
+Agent configuration is not watched or inventoried automatically. Each member
+uploads their own with `aether config push`, usually run by a coding agent on
+their computer from the prompt under **Agents → Agent config files**
+([Upload agent configuration](quickstart.md#upload-agent-configuration)).
+The upload writes the authenticated member's persistent home immediately,
 including for that member's active runs. An agent may need to reload its
 configuration.
 
@@ -1328,12 +1336,9 @@ refuse overwrite. Every `config.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 
-New browser-import files are mode `0644`; existing remote permission bits are
-preserved. Local executable mode and symlinks cannot be represented by the
-browser. Imports preserve empty and arbitrary binary regular files up to
-64 MiB each, without a directory-wide file-count or aggregate-size ceiling.
-The server rejects unsafe paths, symlink components, hardlinks, and nonregular
-files. Every run a member launches, on their own or a shared account, uses
+Uploaded files keep their local permission bits when new; existing remote
+permission bits are preserved. The server rejects unsafe paths, symlink
+components, hardlinks, and nonregular files. Every run a member launches, on their own or a shared account, uses
 that member's read-write home rather than an isolated per-run copy; an account
 share never exposes it. A snapshot pin records launch provenance, not an
 isolated writable home or a promise that home edits wait for later runs.
@@ -1357,6 +1362,6 @@ aether profile push --agent claude --skip-secret <file>
 aether profile push --agent claude --allow-secret <file> --workspace <workspace>
 ```
 
-Browser imports and **Files** edits do not create profile snapshots. A manual
+`aether config push` and **Files** edits do not create profile snapshots. A manual
 push or rollback overlays snapshot files into the same persistent home; it
 does not remove unlisted files or create isolated configuration for a run.

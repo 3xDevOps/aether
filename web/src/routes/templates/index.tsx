@@ -50,6 +50,7 @@ function TemplateRow({
         <span className="truncate font-medium text-text">{template.name}</span>
         <span className="truncate text-ui-sm text-muted" title={template.task}>
           {modeLabel(template.mode)}
+          {template.model && ` · ${template.model}`}
           {schedule && ' · Scheduled'} · {template.task}
         </span>
       </div>

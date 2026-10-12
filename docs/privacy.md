@@ -221,7 +221,9 @@ deletion. Checkout cleanup and archiving do not remove them. Standard runs
 keep their terminal recording; older servers may already have trimmed history.
 
 Images selected or pasted into chat are uploaded to the run's persistent member
-home before sending. Sending an Enhanced prompt passes their bytes to the agent
+home before sending. So is the picture of each page element annotated in a
+run's Browser, when its note is sent; the note's text names that file and
+carries the element's markup and visible text as the page had them. Sending an Enhanced prompt passes their bytes to the agent
 and its configured model provider. Room records and the session item log retain
 small attachment references, not copies of the image bytes. Members with
 **View** can fetch images attached to that run's retained messages. Removing a

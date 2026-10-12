@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -34,6 +35,10 @@ func init() {
 // built first.
 type guardedRuns struct{ ssh *sshd.Config }
 
-func (g guardedRuns) Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
-	return g.ssh.Runs.Launch(ctx, workspace, member, account, task, harness, mode)
+func (g guardedRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
+	runs, ok := g.ssh.Runs.(sshd.RunLauncherWithOptions)
+	if !ok {
+		return nil, errors.New("templates: the run controller cannot launch with options")
+	}
+	return runs.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 }

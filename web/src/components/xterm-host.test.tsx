@@ -68,13 +68,13 @@ describe('xterm links', () => {
     confirm.mockRestore()
   })
 
-  it('registers a link provider so plain URLs are clickable', async () => {
+  it('registers a link provider for plain URLs and one for the links its caller finds', async () => {
     const register = vi.spyOn(Terminal.prototype, 'registerLinkProvider')
     let ready: Terminal | null = null
     const view = render(<Probe onReady={(terminal) => (ready = terminal)} />)
     await waitFor(() => expect(ready).not.toBeNull())
 
-    expect(register).toHaveBeenCalledTimes(1)
+    expect(register).toHaveBeenCalledTimes(2)
     view.unmount()
     register.mockRestore()
   })

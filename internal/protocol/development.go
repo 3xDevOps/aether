@@ -26,6 +26,7 @@ const (
 	MethodDevBrowserPages       = "dev.browser.pages"
 	MethodDevBrowserNavigate    = "dev.browser.navigate"
 	MethodDevBrowserSnapshot    = "dev.browser.snapshot"
+	MethodDevBrowserInspect     = "dev.browser.inspect"
 	MethodDevBrowserAction      = "dev.browser.action"
 	MethodDevBrowserScreenshot  = "dev.browser.screenshot"
 	MethodDevBrowserViewport    = "dev.browser.viewport"
@@ -570,6 +571,49 @@ type DevBrowserSnapshotResult struct {
 	Page      DevBrowserPage   `json:"page"`
 	Nodes     []DevBrowserNode `json:"nodes"`
 	Truncated bool             `json:"truncated"`
+}
+
+// X and Y are viewport coordinates of the frame that carried ViewportID.
+type DevBrowserInspectParams struct {
+	DevBrowserPageTarget
+	ViewportID string  `json:"viewport_id"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+}
+
+type DevBrowserRect struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+// A form control's value is never part of an element, whatever its type.
+// Component and Source are present only when the page's framework exposes
+// them, as a development build of React 18 or earlier does.
+type DevBrowserElement struct {
+	Tag        string            `json:"tag"`
+	Role       string            `json:"role,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	Text       string            `json:"text,omitempty"`
+	Selector   string            `json:"selector"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Bounds     DevBrowserRect    `json:"bounds"`
+	HTML       string            `json:"html,omitempty"`
+	Styles     map[string]string `json:"styles,omitempty"`
+	Component  string            `json:"component,omitempty"`
+	Source     string            `json:"source,omitempty"`
+	FrameURL   string            `json:"frame_url,omitempty"`
+	// ScrollX and ScrollY are the page's scroll position when it was read,
+	// for comparing with the frame the point came from.
+	ScrollX float64 `json:"scroll_x"`
+	ScrollY float64 `json:"scroll_y"`
+}
+
+// Element is absent when nothing is under the point.
+type DevBrowserInspectResult struct {
+	Page    DevBrowserPage     `json:"page"`
+	Element *DevBrowserElement `json:"element,omitempty"`
 }
 
 type DevBrowserActionParams struct {

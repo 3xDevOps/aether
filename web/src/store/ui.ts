@@ -3,8 +3,6 @@ import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import { initialRoute } from '@/lib/url-state'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type {
-  ConfigExclusion,
-  ConfigImportResult,
   LaunchMode,
   LinkRepoResult,
   RepoFastForwardResult,
@@ -79,6 +77,7 @@ export type OnboardingStep = (typeof onboardingSteps)[number]
 export interface OnboardingFirstRun {
   harness: string
   task: string
+  model?: string
 }
 
 const emptyFirstRun: OnboardingFirstRun = { harness: '', task: '' }
@@ -102,26 +101,6 @@ export function onboardingStepIndex(step: OnboardingStep): number {
 export const minSidebarWidth = 220
 export const maxSidebarWidth = 400
 export const defaultSidebarWidth = 260
-
-export interface ConfigImportCandidate {
-  path: string
-  destinationPath: string
-  file: File
-  problem?: ConfigExclusion
-}
-
-export interface ConfigImportStatus {
-  owner: string | null
-  basename: string
-  destination: string
-  totalFiles: number
-  excluded: ConfigExclusion[]
-  phase: 'reading' | 'uploading' | 'complete'
-  result: ConfigImportResult
-  unknownPaths: string[]
-  remaining: ConfigImportCandidate[]
-  errors: string[]
-}
 
 export interface UiSlice {
   theme: Theme
@@ -148,8 +127,6 @@ export interface UiSlice {
   onboardingWorkspace: string
   onboardingSource: 'local' | 'remote'
   onboardingRepo: OnboardingRepo | null
-  configImportPending: boolean
-  configImportStatus: ConfigImportStatus | null
   /** Here so a jump to another step and back keeps the draft. */
   onboardingFirstRun: OnboardingFirstRun
   onboardingAgentSkipped: boolean
@@ -160,7 +137,7 @@ export interface UiSlice {
   boardMapAllWorkspaces: boolean
   boardMapViewports: Record<string, BoardMapViewport>
   /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
-  launchDefaults: Record<string, { mode: LaunchMode; at: number }>
+  launchDefaults: Record<string, { mode: LaunchMode; model?: string; at: number }>
   route: Route
   /** The view each run was last shown in during this visit; never persisted. */
   runViewMemory: Record<string, RunView>
@@ -201,7 +178,7 @@ export interface UiSlice {
   setBoardView: (scope: string, view: BoardView) => void
   setBoardMapAllWorkspaces: (all: boolean) => void
   setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
-  rememberLaunch: (agent: string, mode: LaunchMode) => void
+  rememberLaunch: (agent: string, mode: LaunchMode, model?: string) => void
   setLaunchDefault: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
@@ -239,8 +216,6 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   onboardingWorkspace: '',
   onboardingSource: 'remote',
   onboardingRepo: null,
-  configImportPending: false,
-  configImportStatus: null,
   onboardingFirstRun: emptyFirstRun,
   onboardingAgentSkipped: false,
   activeWorkspace: '',
@@ -309,11 +284,15 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     const viewport = normalizeBoardMapViewport(value)
     if (viewport) set((s) => ({ boardMapViewports: { ...s.boardMapViewports, [scope]: viewport } }))
   },
-  rememberLaunch: (agent, mode) =>
-    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: Date.now() } } })),
+  // An omitted model keeps the remembered one; an empty model forgets it.
+  rememberLaunch: (agent, mode, model) =>
+    set((s) => {
+      const kept = model ?? s.launchDefaults[agent]?.model
+      return { launchDefaults: { ...s.launchDefaults, [agent]: { mode, ...(kept ? { model: kept } : {}), at: Date.now() } } }
+    }),
   // Keeps `at`, which ranks the agent the launch dialog preselects.
   setLaunchDefault: (agent, mode) =>
-    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { mode, at: s.launchDefaults[agent]?.at ?? 0 } } })),
+    set((s) => ({ launchDefaults: { ...s.launchDefaults, [agent]: { ...s.launchDefaults[agent], mode, at: s.launchDefaults[agent]?.at ?? 0 } } })),
   navigate: (name, params = {}) => {
     set((s) => ({
       route: { name, params },

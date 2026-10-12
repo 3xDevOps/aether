@@ -136,6 +136,15 @@ func (o *optionCatalog) syntheticID(category string) string {
 	}
 }
 
+func (o *optionCatalog) nativeModelID() string {
+	for _, option := range o.options {
+		if option.category() == "model" {
+			return option.ID
+		}
+	}
+	return ""
+}
+
 func (o *optionCatalog) render() json.RawMessage {
 	modelID, modeID := o.syntheticID("model"), o.syntheticID("mode")
 	if modelID == "" && modeID == "" {

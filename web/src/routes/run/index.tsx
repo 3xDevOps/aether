@@ -10,6 +10,8 @@ import { BrowserView } from '@/routes/browser'
 import { BrowserDock, minBesideWidth } from '@/routes/browser/dock'
 import { hasBrowser } from '@/routes/browser/open'
 import { ChangesView } from '@/routes/diff'
+import { hasFiles } from '@/routes/files/open'
+import { RunFiles } from '@/routes/files/run-files'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useAgentTerminal } from '@/routes/run/agent-terminal'
@@ -73,7 +75,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const [frameRef, frame] = useElementSize<HTMLDivElement>()
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
-  const views = runViews.filter((view) => view !== 'browser' || (browser && !docked))
+  const files = hasFiles(run, cap)
+  const views = runViews.filter((view) => (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files))
   const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
@@ -96,9 +99,17 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   useEffect(() => {
     if (browserRequest !== undefined && browser && !docked) go('browser')
   }, [browserRequest, browser, docked, go])
+  const openDialog = (kind: 'captures' | 'events') => (opener: HTMLElement | null) => {
+    returnTo.current = opener
+    setDialog(kind)
+  }
+  const openCaptures = openDialog('captures')
   const browserView = (
     <BrowserView
       runID={run.id}
+      agent={agent}
+      agentName={agentName}
+      onCaptures={openCaptures}
       split={splittable ? {
         beside: docked,
         view: runViewLabel[defaultView(run)],
@@ -157,11 +168,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     } : undefined,
   })
 
-  const openDialog = (kind: 'captures' | 'events') => (opener: HTMLElement | null) => {
-    returnTo.current = opener
-    setDialog(kind)
-  }
-  const openCaptures = openDialog('captures')
   const details = (inset: boolean) => (
     <RunDetails run={run} view={view} agent={agent} agentName={agentName} room={room} nav={nav} inset={inset} noteDraft={noteDraft} />
   )
@@ -189,7 +195,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           agentName={agentName}
           agentEntry={agentEntry}
         />
-        {run.mode === 'acp' && view !== 'browser' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
+        {run.mode === 'acp' && view !== 'browser' && view !== 'files' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
           <div className="relative min-h-0 min-w-0 flex-1">
             {visited.has('session') && (
@@ -218,6 +224,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             {visited.has('changes') && (
               <TabsContent value="changes" forceMount inert={view !== 'changes'} className={cn(panel, view !== 'changes' && 'invisible')}>
                 <ChangesView runID={run.id} agent={agent} agentName={agentName} />
+              </TabsContent>
+            )}
+            {files && visited.has('files') && (
+              <TabsContent value="files" forceMount inert={view !== 'files'} className={cn(panel, view !== 'files' && 'invisible')}>
+                <RunFiles run={run} shown={view === 'files'} />
               </TabsContent>
             )}
             {view === 'browser' && (

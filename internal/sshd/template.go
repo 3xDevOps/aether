@@ -70,7 +70,7 @@ func (s *Server) templateList(ctx context.Context, _ domain.MemberID, params jso
 	return out, nil
 }
 
-func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) templateSave(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.templates()
 	if perr != nil {
 		return nil, perr
@@ -89,8 +89,18 @@ func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params jso
 		Task:        p.Task,
 		Harness:     p.Harness,
 		Mode:        domain.LaunchMode(p.Mode),
+		Model:       p.Model,
 		Params:      p.Params,
 		BudgetUSD:   p.BudgetUSD,
+	}
+	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && p.Model != "" {
+		mode := t.Mode
+		if mode == "" {
+			mode = domain.LaunchHeadless
+		}
+		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model); err != nil {
+			return nil, invalidParams(err.Error())
+		}
 	}
 	if err := svc.Save(ctx, t); err != nil {
 		return nil, templateError(err)
@@ -240,6 +250,7 @@ func templateWire(t *store.Template) protocol.Template {
 		Task:        t.Task,
 		Harness:     t.Harness,
 		Mode:        string(t.Mode),
+		Model:       t.Model,
 		Params:      t.Params,
 		BudgetUSD:   t.BudgetUSD,
 		CreatedAt:   t.CreatedAt.UTC().Format(time.RFC3339),

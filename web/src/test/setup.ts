@@ -59,6 +59,8 @@ Element.prototype.scrollBy = () => {}
 Element.prototype.setPointerCapture = () => {}
 Element.prototype.hasPointerCapture = () => false
 Element.prototype.releasePointerCapture = () => {}
+// CodeMirror measures a line of text with a Range before it scrolls to one.
+Range.prototype.getClientRects = () => [] as unknown as DOMRectList
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}

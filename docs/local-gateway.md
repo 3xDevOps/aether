@@ -452,6 +452,16 @@ finished run, leaves it alone. It is absent on a run whose status last
 changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
+`run.launch`, `template.save` and `worker.start` take an optional `model`,
+and `mission.create` takes one on the integrator and on each of
+`execution_choices`; it is passed to the agent as is, and empty keeps the
+agent's default ([harnesses.md](harnesses.md#launch-argv)). A model with
+whitespace or control characters, a leading `-`, or more than 128 bytes is
+`-32602` with
+`model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
+Run snapshots and templates carry the `model` they launch with, omitted when
+empty.
+
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of
@@ -715,7 +725,7 @@ call is refused with `-32602`, and with a lease another session holds with
 | --- | --- | --- |
 | `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
-| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
+| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item. A model selection also updates the run's `model`, so a reopened session keeps it |
 | `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 1000 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
 | `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole; expired IDs return unavailable with an explicit retained-history expiry message, missing IDs return not-found |
 | `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |
@@ -946,18 +956,14 @@ arbitrary live-agent filesystem writers.
 `config.import` always address the authenticated member's own persistent home.
 They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
-rules as `files.write`, while `config.import` installs an explicitly selected
-directory into that home and may be used repeatedly.
-The importer sits under the **Agent config files** disclosure on **Agents**
-(the command palette finds it through **Agents**) and on onboarding's Agent
-step, whenever `config.roots` and `config.import` are advertised. It works through both gateways without a
-workspace or onboarding prerequisite. A server-hosted page can read local files
-explicitly selected in the browser directory picker.
+rules as `files.write`. `config.import` writes a batch of files into one
+agent's directory in that home; `aether config push` calls it over the SSH
+control channel ([Upload agent configuration](quickstart.md#upload-agent-configuration)).
 All runs the member launches and the environment terminal mount one shared
 read-write persistent HOME; an account share exposes only the agent login
 from it, except that an `omp` share exposes the whole `~/.omp/agent`, and a
 recipient with no installation of the agent also gets the owner's
-installation read-only ([security.md](security.md#account-sharing)). A file edit, configuration import, or
+installation read-only ([security.md](security.md#account-sharing)). A file edit, configuration upload, or
 manual CLI profile operation is therefore visible to active and future runs,
 although a tool may need to reload its configuration.
 Configuration saves and imports bind inherited permissions to the observed
@@ -970,41 +976,31 @@ These checks are optimistic, not a filesystem compare-and-swap: Aether's root
 lock coordinates its own operations, not arbitrary processes in the shared
 HOME, which can still write between the final check and rename.
 
-The browser uses the selected root's `runtime_ignores` metadata before
-reading or uploading any bytes. `runtime_ignores` contains exact,
-case-sensitive root-relative paths and component prefixes; trailing slashes
-are ignored for matching. These lists are per agent, so a runtime file
-ignored for Claude is not implicitly ignored for OMP or a member-defined
-custom agent. Known credential names wherever they occur in a path, and
-every basename ending in `.pem`, remain filtered by the existing
-destination-independent credential policy. The browser keeps raw local file
-handles so it can recompute an import when the destination changes, and
-cannot change destinations during import. After a result, the user can start
-another directory selection or choose **Open remote files** to navigate to the
-existing **Files** editor.
-The preview lists eligible paths and policy exclusions without reading file
-bytes. Directories have no file-count or decoded-total ceiling. The browser
-reads and encodes only the current batch: at most 2,000 files and a target of
-20 MiB decoded. A larger individual file is sent alone. Each `config.import`
-request permits at most 2,000 files and 64 MiB decoded, with a 64 MiB per-file
-ceiling matching configuration editing. These bounds limit a request, not the
-directory. Oversized eligible files stay visible and block import until the
-user unchecks them or chooses **Exclude unsupported files**, then confirms
-the reviewed remainder. Nothing is silently truncated. Invalid paths still
-reject preparation.
-Preparation checks canonical destination keys across the whole selection, so
-root-prefixed aliases cannot overwrite each other in separate batches.
-Accepted bytes are uploaded and server-scanned, so a secret finding does not
-mean those bytes stayed local. Empty and binary regular files are preserved;
-new browser-imported files use `0644`, while overwrites preserve existing
-remote modes. The browser cannot preserve source executable bits or symlinks.
-The server rejects unsafe paths, symlink components, hardlinks, and
-non-regular destinations.
+`config.roots` returns each agent's `runtime_ignores` and
+`credential_names`. `runtime_ignores` contains exact, case-sensitive
+root-relative paths and component prefixes; trailing slashes are ignored for
+matching. These lists are per agent, so a runtime file ignored for Claude is
+not implicitly ignored for OMP or a member-defined custom agent. Known
+credential names wherever they occur in a path, and every basename ending in
+`.pem`, remain filtered by the destination-independent credential policy.
+`aether config push` applies both lists before reading a file and runs the
+secret scanner locally, so flagged bytes are not sent; the server applies
+the same policy and scanner again.
+
+Each `config.import` request permits at most 2,000 files and 64 MiB decoded,
+with a 64 MiB per-file ceiling matching configuration editing. These bounds
+limit a request, not a directory: `aether config push` sends batches of at
+most 2,000 files and a target of 20 MiB decoded, and a larger file alone.
+Paths are slash-separated and relative to the agent's directory. `mode`
+carries permission bits for a new file, and `0` means `0644`; an overwrite
+keeps the existing remote mode. Empty and binary regular files are
+preserved. The server rejects unsafe paths, symlink components, hardlinks,
+and non-regular destinations.
 
 The result's `files` and `bytes` count
 accepted files only; `excluded` reports server-side credential, ignore,
 secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
-`rollback` remain separate manual operations; neither browser imports nor
+`rollback` remain separate manual operations; neither `config.import` nor
 **Files** edits create CLI snapshot history. The persistent HOME does not
 depend on snapshots. Snapshot pins record optional launch provenance, not
 isolated writable run copies. Manual push and rollback overlay snapshot files
@@ -1017,24 +1013,18 @@ If an import fails after writing one or more files, the response is still a
 are the exact committed counts, `imported_paths` lists the exact canonical
 paths that remain in the member's shared HOME, and `error` names the failed
 relative path and the underlying error. This is an incomplete import, not a
-successful one: the dashboard warns that copied files remain and lets the user
-inspect **Files** before retrying. The optional `error` and `imported_paths`
+successful one: `aether config push` prints those paths as `uploaded`, sends
+no further batch, and exits with the error. The optional `error` and `imported_paths`
 fields are absent from complete results and from failures before any file is
 committed.
 
 If the SSH/RPC call fails without such a result, the outcome is unknown: the
-request may have copied some files before the response was lost, so the
-dashboard says that some files may remain and directs the user to inspect
-**Files** before retrying. Cancellation can prevent the response from being
-delivered; the protocol does not claim a stronger delivery guarantee.
-
-Across batches the dashboard accumulates confirmed counts, paths, and server
-exclusions. A read failure or server-reported partial failure stops subsequent
-batches. A lost response leaves only that request's outcome unknown; earlier
-confirmed writes remain reported. Navigation retains owner-scoped progress and
-results. Before each request, including after file reads, the importer checks
-the authenticated identity and stops if it changed. An in-flight request may
-still complete for its original owner; the new identity cannot see its result.
+request may have copied some files before the response was lost.
+`aether config push` prints that request's paths as `unconfirmed`, sends no
+further batch, and exits with the error; `config.tree` shows what the home
+holds. Earlier confirmed batches remain reported. Cancellation can prevent
+the response from being delivered; the protocol does not claim a stronger
+delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
@@ -1046,7 +1036,7 @@ bodies, and retains admission through backend processing and the response.
 Excess requests receive HTTP 503 (`configuration import capacity is busy;
 retry later`) without being read. An import body must make progress within
 30 seconds and finish within 15 minutes; expired reads return HTTP 408.
-These are transfer protections, not limits on the selected directory.
+These are transfer protections, not limits on a directory.
 SSH frames exceeding 64 KiB require a separate server admission: two globally
 and one per member, retained through the response. Small control requests
 remain available. Partial-frame reads have a 30-second idle timeout and a

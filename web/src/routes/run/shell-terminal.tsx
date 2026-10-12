@@ -12,6 +12,7 @@ import type { DevController, DevControlFence, DevTerminalTarget } from '@/lib/ty
 import { phoneScreen, useMediaQuery } from '@/lib/hooks'
 import { type ConnectionState } from '@/lib/stream'
 import { openRunLink } from '@/routes/browser/open'
+import { findRunFiles } from '@/routes/files/open'
 import { type RunShells, ShellCloseItems, controllerName, shellPollMs } from '@/routes/run/shells'
 import {
   type AttachDataKind,
@@ -244,6 +245,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       dock.refusedMessage === null,
     follow: phone || !activeHasControl,
     onLink: (uri) => openRunLink(runID, uri),
+    findLinks: (line) => findRunFiles(runID, line),
     onData: (data) => {
       if (!activeTab) return
       const current = currentAttachmentRef.current

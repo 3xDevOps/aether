@@ -1,4 +1,4 @@
-import type { DevBrowserFrameMetadata } from '@/lib/types'
+import type { DevBrowserFrameMetadata, DevBrowserRect } from '@/lib/types'
 
 export interface BrowserFrame {
   metadata: DevBrowserFrameMetadata
@@ -42,6 +42,41 @@ export function framePoint(frame: DevBrowserFrameMetadata, rect: FrameRect, clie
   const y = (pixelY - (frame.offset_top ?? 0)) / pageScale
   if (pixelX < 0 || pixelY < 0 || pixelX >= frame.width || pixelY >= frame.height || x < 0 || y < 0 || x >= frame.width || y >= frame.height) return null
   return { x, y }
+}
+
+/** Where a rectangle of the page's viewport is in the frame's own pixels. */
+function framePixels(frame: DevBrowserFrameMetadata, bounds: DevBrowserRect): FrameRect {
+  const pageScale = frame.page_scale_factor ?? 1
+  return { left: bounds.x * pageScale, top: bounds.y * pageScale + (frame.offset_top ?? 0), width: bounds.width * pageScale, height: bounds.height * pageScale }
+}
+
+/** Where a rectangle of the page's viewport is painted, in CSS pixels from
+ * the canvas's top left corner: `framePoint` the other way round. */
+export function frameBox(frame: DevBrowserFrameMetadata, canvas: { width: number; height: number }, bounds: DevBrowserRect): FrameRect {
+  const scale = Math.min(1, canvas.width / frame.width, canvas.height / frame.height)
+  const pixels = framePixels(frame, bounds)
+  return {
+    left: (canvas.width - frame.width * scale) / 2 + pixels.left * scale,
+    top: (canvas.height - frame.height * scale) / 2 + pixels.top * scale,
+    width: pixels.width * scale,
+    height: pixels.height * scale,
+  }
+}
+
+/** The part of a painted frame that shows `bounds` and `margin` pixels around
+ * it, as a PNG. Null when none of it is inside the frame. */
+export function cropFrame(painted: HTMLCanvasElement, frame: DevBrowserFrameMetadata, bounds: DevBrowserRect, margin = 12): Promise<Blob | null> {
+  const pixels = framePixels(frame, bounds)
+  const left = Math.max(0, Math.floor(pixels.left - margin))
+  const top = Math.max(0, Math.floor(pixels.top - margin))
+  const width = Math.min(painted.width, Math.ceil(pixels.left + pixels.width + margin)) - left
+  const height = Math.min(painted.height, Math.ceil(pixels.top + pixels.height + margin)) - top
+  if (width <= 0 || height <= 0) return Promise.resolve(null)
+  const crop = document.createElement('canvas')
+  crop.width = width
+  crop.height = height
+  crop.getContext('2d')?.drawImage(painted, left, top, width, height, 0, 0, width, height)
+  return new Promise((resolve) => crop.toBlob(resolve, 'image/png'))
 }
 
 export function sameFrameTarget(a: DevBrowserFrameMetadata, b: DevBrowserFrameMetadata): boolean {

@@ -114,6 +114,7 @@ import {
   RotateCw as LucideRotateCw,
   Smartphone as LucideSmartphone,
   Tablet as LucideTablet,
+  Bug as LucideBug,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -256,3 +257,4 @@ export const MousePointer2 = icon(LucideMousePointer2)
 export const RotateCw = icon(LucideRotateCw)
 export const Smartphone = icon(LucideSmartphone)
 export const Tablet = icon(LucideTablet)
+export const Bug = icon(LucideBug)

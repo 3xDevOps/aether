@@ -64,6 +64,7 @@ func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMo
 		Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: harnessName, Mode: mode},
 		ExecutionChoices: []domain.MissionExecutionChoice{
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless},
+			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchHeadless, Model: "haiku"},
 			{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI},
 		},
 		IdempotencyKey:               "fixture-mission",

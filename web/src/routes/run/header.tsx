@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Camera, Lock, PanelRight, ScrollText } from '@/components/icons'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
@@ -16,6 +16,7 @@ import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -121,6 +122,11 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             {modeLabel[run.mode] ?? run.mode}
           </span>
         </span>
+        {run.model && (
+          <span className="sr-only min-w-0 truncate @3xs/state:not-sr-only" title={run.model}>
+            {` · ${run.model}`}
+          </span>
+        )}
         <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
           <span aria-hidden>·</span>
           <Button
@@ -142,11 +148,37 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   )
 }
 
-export function ViewSwitch({ views }: { views: RunView[] }) {
+/** The switch scrolls sideways when the row is too narrow for every view, a
+ * phone with a pull request beside it for instance. It keeps the shown view's
+ * tab in sight as the view or the room for it changes, and fades its right
+ * edge while more tabs lie past it. */
+export function ViewSwitch({ view, views }: { view: RunView; views: RunView[] }) {
+  const strip = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState(false)
+  const measure = () => {
+    const list = strip.current
+    if (list) setMore(list.scrollLeft + list.clientWidth < list.scrollWidth - 1)
+  }
+  useEffect(() => {
+    const list = strip.current
+    if (!list) return
+    const observer = new ResizeObserver(() => {
+      list.querySelector('[data-state=active]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      measure()
+    })
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [view])
   return (
-    <TabsList look="segmented" aria-label="Run views">
-      {views.map((view) => (
-        <TabsTrigger key={view} value={view}>{runViewLabel[view]}</TabsTrigger>
+    <TabsList
+      ref={strip}
+      look="segmented"
+      aria-label="Run views"
+      onScroll={measure}
+      className={cn('overflow-x-auto [scrollbar-width:none]', more && '[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]')}
+    >
+      {views.map((item) => (
+        <TabsTrigger key={item} value={item} className="scroll-mx-6">{runViewLabel[item]}</TabsTrigger>
       ))}
     </TabsList>
   )
@@ -231,7 +263,7 @@ export function RunHeader({
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
-          <ViewSwitch views={views} />
+          <ViewSwitch view={view} views={views} />
           {pullRequest.status}
         </div>
       )}

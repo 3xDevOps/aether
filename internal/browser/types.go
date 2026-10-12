@@ -73,6 +73,32 @@ type Snapshot struct {
 	Truncated bool   `json:"truncated"`
 }
 
+type Rect struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+// Element is what inspect reads at a viewport point. It never carries a form
+// control's value.
+type Element struct {
+	Tag        string            `json:"tag"`
+	Role       string            `json:"role,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	Text       string            `json:"text,omitempty"`
+	Selector   string            `json:"selector"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Bounds     Rect              `json:"bounds"`
+	HTML       string            `json:"html,omitempty"`
+	Styles     map[string]string `json:"styles,omitempty"`
+	Component  string            `json:"component,omitempty"`
+	Source     string            `json:"source,omitempty"`
+	FrameURL   string            `json:"frame_url,omitempty"`
+	ScrollX    float64           `json:"scroll_x"`
+	ScrollY    float64           `json:"scroll_y"`
+}
+
 type Log struct {
 	Sequence   uint64    `json:"sequence"`
 	CapturedAt time.Time `json:"captured_at"`
@@ -89,6 +115,7 @@ type Result struct {
 	Pages          []Page    `json:"pages,omitempty"`
 	Page           *Page     `json:"page,omitempty"`
 	Snapshot       *Snapshot `json:"snapshot,omitempty"`
+	Element        *Element  `json:"element,omitempty"`
 	Logs           []Log     `json:"logs,omitempty"`
 	LatestSequence uint64    `json:"latest_sequence,omitempty"`
 	Matched        bool      `json:"matched,omitempty"`

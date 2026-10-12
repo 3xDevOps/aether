@@ -103,6 +103,9 @@ export interface XtermOptions {
   onResize?: (cols: number, rows: number) => void
   /** Called synchronously before a terminal hyperlink opens. Return true to handle. */
   onLink?: (uri: string) => boolean
+  /** Finds what else in one line of output is a link, as ranges of its text,
+   * when the pointer reaches the line. Such a link opens through onLink alone. */
+  findLinks?: (line: string) => Promise<{ start: number; end: number }[]>
   /** Capture a mounted terminal's presentation before its renderer is disposed. */
   onBeforeDispose?: (terminal: Terminal) => void
 }
@@ -300,6 +303,32 @@ function paint(host: HTMLDivElement, terminal: Terminal): void {
   }
 }
 
+/** How many wrapped rows one line of output may span and still be searched for links. */
+const maxLinkRows = 32
+
+/** The line of output that buffer row `row` is part of, wrapped rows joined,
+ * with the 1-based cell each character of the text is drawn in. */
+function outputLine(terminal: Terminal, row: number): { text: string; cells: { x: number; y: number }[] } {
+  const buffer = terminal.buffer.active
+  let first = row
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first--
+  const cells: { x: number; y: number }[] = []
+  let text = ''
+  for (let y = first; y < first + maxLinkRows; y++) {
+    const line = buffer.getLine(y)
+    if (!line || (y > first && !line.isWrapped)) break
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x)
+      // The second cell of a wide character has no width and no text.
+      if (!cell || cell.getWidth() === 0) continue
+      const chars = cell.getChars() || ' '
+      text += chars
+      for (let unit = 0; unit < chars.length; unit++) cells.push({ x: x + 1, y: y + 1 })
+    }
+  }
+  return { text, cells }
+}
+
 export function useXterm({
   enabled = true,
   follow = false,
@@ -309,6 +338,7 @@ export function useXterm({
   onBinary,
   onResize,
   onLink,
+  findLinks,
   onBeforeDispose,
 }: XtermOptions = {}): XtermController {
   const [host, setHost] = useState<HTMLDivElement | null>(null)
@@ -316,6 +346,7 @@ export function useXterm({
   const onBinaryRef = useRef(onBinary)
   const onResizeRef = useRef(onResize)
   const onLinkRef = useRef(onLink)
+  const findLinksRef = useRef(findLinks)
   const onBeforeDisposeRef = useRef(onBeforeDispose)
   const [terminal, setTerminal] = useState<Terminal | null>(null)
   const liveTerminal = useRef<Terminal | null>(null)
@@ -346,6 +377,7 @@ export function useXterm({
   onBinaryRef.current = onBinary
   onResizeRef.current = onResize
   onLinkRef.current = onLink
+  findLinksRef.current = findLinks
   onBeforeDisposeRef.current = onBeforeDispose
   const noteViewportInteraction = useCallback(() => {
     viewportInteractionRevision.current++
@@ -522,6 +554,26 @@ export function useXterm({
       const fit = new FitAddon()
       created.loadAddon(fit)
       created.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)))
+      let linkAsks = 0
+      created.registerLinkProvider({
+        provideLinks: (y, callback) => {
+          const find = findLinksRef.current
+          if (!find) return callback(undefined)
+          const { text, cells } = outputLine(created, y - 1)
+          const ask = ++linkAsks
+          // xterm files a reply under the line the pointer is on now, so only
+          // the newest line's answer may reach it.
+          const current = () => ask === linkAsks && liveTerminal.current === created
+          find(text).then(
+            (ranges) => current() && callback(ranges.map(({ start, end }) => ({
+              range: { start: cells[start]!, end: cells[end - 1]! },
+              text: text.slice(start, end),
+              activate: (_event, link) => void onLinkRef.current?.(link),
+            }))),
+            () => current() && callback(undefined),
+          )
+        },
+      })
       const searchAddon = new SearchAddon()
       created.loadAddon(searchAddon)
       setSearch(searchAddon)

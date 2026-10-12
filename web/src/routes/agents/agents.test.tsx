@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { toast } from 'sonner'
 import { vi } from 'vitest'
 import { splitArgv } from '@/components/agents/add-agent'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
+import { configPrompt } from '@/lib/config-prompt'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/agents'
 import { useStore } from '@/store'
@@ -150,5 +152,48 @@ describe('agents page', () => {
     await flush()
 
     expect(screen.queryByRole('button', { name: /^Agent config files/ })).toBeNull()
+  })
+})
+
+describe('agent config files', () => {
+  const writeText = vi.fn<(text: string) => Promise<void>>()
+
+  beforeEach(() => {
+    writeText.mockReset().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  })
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'clipboard')
+    vi.restoreAllMocks()
+  })
+
+  async function open() {
+    mount()
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: /^Agent config files/ }))
+    return within(screen.getByRole('region', { name: 'Agent config files' }))
+  }
+
+  it('shows the prompt and copies exactly it', async () => {
+    const section = await open()
+    expect(section.getByLabelText('Prompt').textContent).toBe(configPrompt)
+    await act(async () => fireEvent.click(section.getByRole('button', { name: 'Copy prompt' })))
+    expect(writeText.mock.calls).toEqual([[configPrompt]])
+  })
+
+  it('selects the prompt and says so when the clipboard refuses', async () => {
+    writeText.mockRejectedValue(new DOMException('Clipboard denied', 'NotAllowedError'))
+    const info = vi.spyOn(toast, 'info')
+    const section = await open()
+    await act(async () => fireEvent.click(section.getByRole('button', { name: 'Copy prompt' })))
+    expect(info).toHaveBeenCalledWith('Selected. Press Ctrl+C to copy.')
+    expect(window.getSelection()?.toString()).toBe(configPrompt)
+  })
+
+  it('opens remote files', async () => {
+    const section = await open()
+    fireEvent.click(section.getByRole('button', { name: 'Open remote files' }))
+    expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
   })
 })

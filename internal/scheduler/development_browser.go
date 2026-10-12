@@ -16,6 +16,11 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
+// ErrBrowserInspectUnsupported means the run's companion was created from an
+// image older than this server. A companion is never replaced in place: it
+// goes when its run stops, and the next one starts from the configured image.
+var ErrBrowserInspectUnsupported = errors.New("this run's browser companion predates dev.browser.inspect; update the server's browser image, then stop and reopen the run to replace the companion")
+
 func browserPage(p *browser.Page) protocol.DevBrowserPage {
 	if p == nil {
 		return protocol.DevBrowserPage{}
@@ -225,6 +230,23 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 			}
 			return out, nil
 		}
+	case protocol.MethodDevBrowserInspect:
+		var p protocol.DevBrowserInspectParams
+		if err := decodeDevelopment(raw, &p); err != nil {
+			return nil, err
+		}
+		req = browserTarget(p.DevBrowserPageTarget)
+		req.Operation = "inspect"
+		req.ViewportID = p.ViewportID
+		req.X = p.X
+		req.Y = p.Y
+		convert = func(r browser.Result) (any, error) {
+			out := protocol.DevBrowserInspectResult{Page: browserPage(r.Page)}
+			if e := r.Element; e != nil {
+				out.Element = &protocol.DevBrowserElement{Tag: e.Tag, Role: e.Role, Name: e.Name, Text: e.Text, Selector: e.Selector, Attributes: e.Attributes, Bounds: protocol.DevBrowserRect(e.Bounds), HTML: e.HTML, Styles: e.Styles, Component: e.Component, Source: e.Source, FrameURL: e.FrameURL, ScrollX: e.ScrollX, ScrollY: e.ScrollY}
+			}
+			return out, nil
+		}
 	case protocol.MethodDevBrowserAction:
 		var p protocol.DevBrowserActionParams
 		if err := decodeDevelopment(raw, &p); err != nil {
@@ -411,6 +433,10 @@ func (s *Scheduler) developmentBrowser(ctx context.Context, id domain.RunID, p c
 		operationErr = effect()
 	}
 	if operationErr != nil {
+		var refused *browser.Error
+		if method == protocol.MethodDevBrowserInspect && errors.As(operationErr, &refused) && refused.Message == "Unknown browser operation" {
+			return nil, fmt.Errorf("%w: %w", ErrBrowserInspectUnsupported, operationErr)
+		}
 		return nil, operationErr
 	}
 	if method == protocol.MethodDevBrowserReset {

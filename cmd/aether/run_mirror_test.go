@@ -9,18 +9,18 @@ import (
 )
 
 func TestLaunchParamsCachedBaseForwarding(t *testing.T) {
-	params := launchParams("ws_1", "fix it", "claude", "headless", "mem_2", "0123456789abcdef0123456789abcdef01234567")
+	params := launchParams("ws_1", "fix it", "claude", "headless", "opus", "mem_2", "0123456789abcdef0123456789abcdef01234567")
 	if params.CachedBase != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("cached base = %q, want explicit SHA", params.CachedBase)
 	}
 	if params.WorkspaceID != "ws_1" || params.Task != "fix it" || params.Harness != "claude" ||
-		params.Mode != "headless" || params.AccountMemberID != "mem_2" {
+		params.Mode != "headless" || params.Model != "opus" || params.AccountMemberID != "mem_2" {
 		t.Fatalf("launch params = %+v, want all direct-run fields forwarded", params)
 	}
 }
 
 func TestLaunchParamsOmitEmptyCachedBase(t *testing.T) {
-	params := launchParams("ws_1", "fix it", "claude", "tui", "", "")
+	params := launchParams("ws_1", "fix it", "claude", "tui", "", "", "")
 	raw, err := json.Marshal(params)
 	if err != nil {
 		t.Fatal(err)
@@ -47,9 +47,9 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 		Code:    protocol.CodeUnavailable,
 		Message: "base capture failed: mirror offline",
 		Data:    data,
-	}, "-fix API's cache", "claude", "headless", "ws 1", "mem_2")
+	}, "-fix API's cache", "claude", "headless", "opus", "ws 1", "mem_2")
 	want := "base capture failed: mirror offline\nretry from cached " + accepted + " with:\n" +
-		"  aether run --agent claude --mode background --workspace 'ws 1' --account mem_2 --cached-base " + accepted + " -- " +
+		"  aether run --agent claude --mode background --model opus --workspace 'ws 1' --account mem_2 --cached-base " + accepted + " -- " +
 		`'-fix API'\''s cache'`
 	if got == nil || got.Error() != want {
 		t.Fatalf("retry error = %v, want %q", got, want)
@@ -58,7 +58,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 
 func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 	original := &protocol.Error{Code: protocol.CodeUnavailable, Message: "base capture failed"}
-	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "ws_1", ""); got != original {
+	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "", "ws_1", ""); got != original {
 		t.Fatalf("error without accepted commit = %v, want original error", got)
 	}
 
@@ -67,7 +67,7 @@ func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	original.Data = data
-	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "ws_1", ""); got != original {
+	if got := cachedBaseLaunchError(original, "task", "claude", "tui", "", "ws_1", ""); got != original {
 		t.Fatalf("failure without accepted commit = %v, want original error", got)
 	}
 }

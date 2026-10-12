@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
+
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -139,6 +141,125 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
 	if want := exitedFailedReasonPrefix + "1: the agent's turn ended: cancelled"; got.Reason != want {
 		t.Fatalf("reason %q, want %q", got.Reason, want)
+	}
+}
+
+func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	// No configOptions, so the model goes through session/set_model, which
+	// the mock agent does not implement.
+	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if want := exitedFailedReasonPrefix + "1: model not set: "; !strings.HasPrefix(got.Reason, want) {
+		t.Fatalf("reason %q, want prefix %q", got.Reason, want)
+	}
+	if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+		t.Fatal("the task ran on the agent's default model")
+	}
+}
+
+// A swarm worker is otherwise left running for CompleteMission; one whose
+// agent never got its task ends and frees its slot.
+func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		task, model string
+		legacy      bool
+	}{
+		"model refused":  {task: "say pong", model: "anthropic/claude-sonnet-4-5", legacy: true},
+		"prompt refused": {task: acpmock.PromptRefuse},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e, rt := newBackgroundEnv(t, enhancedAgent, true)
+			if tc.legacy {
+				rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+			}
+			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+				WorkspaceID: e.ws.ID, RunID: "unstarted-worker", Actor: e.member.ID,
+				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: tc.task,
+				Harness: enhancedAgent, Mode: domain.LaunchHeadless, Model: tc.model,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.waitStoreStatus(t, run.ID, domain.RunFailed)
+			waitFor(t, "the worker observed as retained", func() bool {
+				observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+				return err == nil && observed.State == MissionRunRetained
+			})
+			if tc.legacy && slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+				t.Fatal("the task ran on the agent's default model")
+			}
+		})
+	}
+}
+
+// The wait prompt sends no update, so the cancel ends the turn before
+// Prompt's grace runs out: the session's acceptance must still count.
+func TestBackgroundWorkerOverACPParksWhenItsStartedTurnIsCancelled(t *testing.T) {
+	t.Parallel()
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "cancelled-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
+		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the turn", func() bool {
+		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	if err = e.sched.ACPCancel(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	observed, err := e.sched.ObserveMissionRun(t.Context(), run.ID)
+	if err != nil || observed.State != MissionRunActive {
+		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
+	}
+}
+
+// A refused continuation is not an unstarted task: the worker keeps the
+// lifecycle of any failed turn and is left to CompleteMission.
+func TestBackgroundWorkerOverACPParksWhenItsResumeIsRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
+		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the turn", func() bool {
+		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rt.fixture.RefusePrompts = true
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	observed, err := s2.ObserveMissionRun(t.Context(), run.ID)
+	if err != nil || observed.State != MissionRunActive {
+		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
 	}
 }
 

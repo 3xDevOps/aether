@@ -33,6 +33,9 @@ func validateRun(r *domain.Run, op string) error {
 	if !r.Mode.Valid() {
 		return fmt.Errorf("store: %s run: invalid launch mode %q", op, r.Mode)
 	}
+	if err := domain.ValidModel(r.Model); err != nil {
+		return fmt.Errorf("store: %s run: %w", op, err)
+	}
 	return nil
 }
 func (d *DB) CreateRun(ctx context.Context, r *domain.Run) error {
@@ -97,12 +100,12 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp,
-		                   status_changed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   status_changed_at, model)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt, r.Model,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -125,7 +128,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt, &r.ACP, &r.UnansweredQuestions,
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt, &r.ACP, &r.Model, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
 	}
@@ -147,7 +150,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at, runs.acp`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at, runs.acp, runs.model`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -437,6 +440,19 @@ func (d *DB) SetRunMode(ctx context.Context, id domain.RunID, mode domain.Launch
 		`UPDATE runs SET mode = ?, acp = ? WHERE id = ?`, mode, acp, id))
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		err = fmt.Errorf("store: set run mode: %w", err)
+	}
+	return err
+}
+
+// SetRunModel updates only the run's agent model.
+func (d *DB) SetRunModel(ctx context.Context, id domain.RunID, model string) error {
+	if err := domain.ValidModel(model); err != nil {
+		return fmt.Errorf("store: set run model: %w", err)
+	}
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET model = ? WHERE id = ?`, model, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run model: %w", err)
 	}
 	return err
 }

@@ -1126,6 +1126,16 @@ describe('applyEvent', () => {
     expect(store.getState().runs.run_1.title).toBe('Fixing the login bug')
     expect(store.getState().lastSeq).toBe(6)
   })
+
+  it('updates a run model from a run.model event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+
+    await applyEvent(store, titleEvent({ id: 'evt_model', type: 'run.model', payload: { model: 'opus' } }), fakeApi())
+
+    expect(store.getState().runs.run_1.model).toBe('opus')
+    expect(store.getState().lastSeq).toBe(6)
+  })
   it('removes a run when the server publishes its deletion', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
