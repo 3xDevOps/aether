@@ -96,6 +96,32 @@ type Refused struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// ApprovalAlphabet is the alphabet of a device approval code. It leaves
+// out 0, 1, I and O, which people misread.
+const ApprovalAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// deviceIDAlphabet is the alphabet the server draws device ids from.
+const deviceIDAlphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+
+func textOver(s, alphabet string) bool {
+	return strings.Trim(s, alphabet) == ""
+}
+
+// validApprovalCode reports whether s is an approval code as the server
+// shows it: XXXX-XXXX over ApprovalAlphabet.
+func validApprovalCode(s string) bool {
+	return len(s) == 9 && s[4] == '-' && textOver(s[:4]+s[5:], ApprovalAlphabet)
+}
+
+// validDeviceID reports whether s is a device id as the server generates
+// it: "dev-" and 10 characters, or the older 26 characters.
+func validDeviceID(s string) bool {
+	if id, ok := strings.CutPrefix(s, "dev-"); ok {
+		return len(id) == 10 && textOver(id, deviceIDAlphabet)
+	}
+	return len(s) == 26 && textOver(s, deviceIDAlphabet)
+}
+
 // RefusedBy is the Refused for r, which the edge or a claim sent.
 func RefusedBy(r Refusal) *Refused {
 	kind := RefusedEdge
@@ -218,8 +244,10 @@ func (r *Refused) Banner() string {
 }
 
 // ParseRefusedBanner reads the Refused a banner from Banner carries. A
-// banner without that first line, or one whose fields carry control
-// characters, is not structured.
+// banner without that first line, one whose fields carry control
+// characters, or one whose approval code or device id is not shaped as
+// the server generates them, is not structured: Error puts both into
+// commands a person runs.
 func ParseRefusedBanner(banner string) (*Refused, bool) {
 	line, _, _ := strings.Cut(banner, "\n")
 	raw, ok := strings.CutPrefix(strings.TrimSuffix(line, "\r"), refusedBanner)
@@ -235,6 +263,9 @@ func ParseRefusedBanner(banner string) (*Refused, bool) {
 		if !validText(s, maxErrorText) {
 			return nil, false
 		}
+	}
+	if r.ApprovalCode != "" && !validApprovalCode(r.ApprovalCode) || r.DeviceID != "" && !validDeviceID(r.DeviceID) {
+		return nil, false
 	}
 	return &r, true
 }

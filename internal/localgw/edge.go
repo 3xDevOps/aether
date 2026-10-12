@@ -383,7 +383,7 @@ func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) 
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
-	if perr := g.adoptLink(result); perr != nil {
+	if perr := g.adoptLink(result, opts.Name); perr != nil {
 		return nil, perr
 	}
 	cfg := result.Config

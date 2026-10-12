@@ -13,7 +13,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { ApiError, type Api } from '@/lib/api'
 import { parseClaim, parseJoin } from '@/lib/claim-link'
 import { edgeHost, message, providerName } from '@/lib/format'
-import { shellQuote } from '@/lib/shell'
+import { isApprovalCode, shellQuote } from '@/lib/shell'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeRefusal, EdgeServer } from '@/lib/types'
 import type { HandedLink } from '@/lib/url-state'
 import { useStore } from '@/store'
@@ -365,7 +365,7 @@ function JoinPanel({
   if (pending) {
     return (
       <section aria-label="Join" role="status" className="flex min-w-0 flex-col gap-2 text-ui">
-        {pending.refusal.approval_code ? (
+        {isApprovalCode(pending.refusal.approval_code) ? (
           <p className="whitespace-pre-wrap">{pending.text}</p>
         ) : (
           <>

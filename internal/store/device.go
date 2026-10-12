@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
 
-// approvalAlphabet leaves out 0, 1, I and O, which people misread. It has
-// 32 letters, so a hash byte modulo its length is unbiased.
-const approvalAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+// approvalAlphabet has 32 letters, so a hash byte modulo its length is
+// unbiased.
+const approvalAlphabet = edgeproto.ApprovalAlphabet
 
 // approvalCodeLength is 8 characters, 40 bits.
 const approvalCodeLength = 8

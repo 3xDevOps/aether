@@ -235,7 +235,7 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
-	if perr := g.adoptLink(result); perr != nil {
+	if perr := g.adoptLink(result, params.Name); perr != nil {
 		return nil, perr
 	}
 	cfg := result.Config
@@ -251,8 +251,8 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 // so later API and WebSocket requests reach the new server. A link that
 // is still the named profile the gateway runs on is saved into that
 // profile: its top-level fields are the profile's overlay, not the
-// default link.
-func (g *Gateway) adoptLink(result cli.LinkResult) *protocol.Error {
+// default link. A requested profile of another name is saved beside it.
+func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.Error {
 	saved := result.Config
 	if name := saved.Active; name != "" {
 		var err error
@@ -263,6 +263,10 @@ func (g *Gateway) adoptLink(result cli.LinkResult) *protocol.Error {
 			} else {
 				link := &saved.Links[profile]
 				link.Addr, link.EdgeURL, link.ServerID = result.Config.Addr, result.Config.EdgeURL, result.Config.ServerID
+				added := slices.IndexFunc(result.Config.Links, func(link cli.NamedLink) bool { return link.Name == requested })
+				if requested != name && added >= 0 {
+					saved = cli.UpsertLink(saved, result.Config.Links[added])
+				}
 				result.Config.Links = saved.Links
 			}
 		}

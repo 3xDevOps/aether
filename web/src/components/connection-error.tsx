@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { isApprovalCode, shellQuote } from '@/lib/shell'
 import type { UnreachableKind } from '@/store/server'
 type ConnectionErrorProps = {
   kind: UnreachableKind | null
@@ -161,11 +162,11 @@ function copyFor({ kind, dead, edge, approvalCode }: ConnectionErrorProps): Erro
       icon: Hourglass,
       eyebrow: 'Waiting for approval',
       title: 'This computer is waiting for approval',
-      description: approvalCode ? (
+      description: isApprovalCode(approvalCode) ? (
         <>
           This server admits approved devices only, and has not approved this computer&apos;s device key. Nobody
           can approve it from the dashboard, so on the server run{' '}
-          <Cmd>{`sudo aether-server device approve ${approvalCode}`}</Cmd>, then retry.
+          <Cmd>{`sudo aether-server device approve ${shellQuote(approvalCode)}`}</Cmd>, then retry.
         </>
       ) : (
         "This server admits approved devices only, and has not approved this computer's device key: it is new, or it was registered while signing in was enough. An admin approves it from the dashboard's Needs you, or you do from a device of yours that is already approved. Then retry."

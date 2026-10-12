@@ -567,9 +567,9 @@ describe('a join link handed to the dashboard', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     handOver()
     seed()
-    const text = 'device "laptop", signed in as github account octocat, is waiting for approval. Approve it as an admin:\n  aether device approve abcd-efgh\nor on the server:\n  sudo aether-server device approve abcd-efgh'
+    const text = 'device "laptop", signed in as github account octocat, is waiting for approval. Approve it as an admin:\n  aether device approve ABCD-EFGH\nor on the server:\n  sudo aether-server device approve ABCD-EFGH'
     const pendingDevice = new ApiError(409, text, undefined, {
-      refusal: { kind: 'device-pending', server: 'build-box', device: 'laptop', fingerprint: 'SHA256:devicekeyexample', approval_code: 'abcd-efgh' },
+      refusal: { kind: 'device-pending', server: 'build-box', device: 'laptop', fingerprint: 'SHA256:devicekeyexample', approval_code: 'ABCD-EFGH' },
     })
     const client = fakeApi({
       localLinkStatus: vi.fn(async () => unlinked),
@@ -580,7 +580,7 @@ describe('a join link handed to the dashboard', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
     const waiting = await screen.findByRole('status')
-    expect(waiting.textContent).toContain('sudo aether-server device approve abcd-efgh')
+    expect(waiting.textContent).toContain('sudo aether-server device approve ABCD-EFGH')
     expect(within(waiting).queryByText(/^Waiting for an admin/)).toBeNull()
 
     await vi.advanceTimersByTimeAsync(5000)

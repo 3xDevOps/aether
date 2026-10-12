@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -288,7 +289,7 @@ func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
 	}
 	connected := selected
 	connected.EdgeURL, connected.ServerID = "https://edge.example", edgeproto.ServerID(hostKey)
-	if perr := g.adoptLink(cli.LinkResult{Config: connected}); perr != nil {
+	if perr := g.adoptLink(cli.LinkResult{Config: connected}, ""); perr != nil {
 		t.Fatalf("adoptLink: %v", perr)
 	}
 
@@ -308,5 +309,41 @@ func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
 	rec := do(g, http.MethodPost, "/local/v1/link.repo", `{"repo":`+strconv.Quote(repo)+`,"workspace_id":"ws_1"}`, true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "work", Addr: "work:2222", User: "bob"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("work")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	g := newVerbGateway(t, workspaceListBackend(""), selected)
+	connected := selected
+	connected.EdgeURL, connected.ServerID = "https://edge.example", "aaaa"
+	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
+	if perr := g.adoptLink(cli.LinkResult{Config: cli.UpsertLink(connected, requested)}, "laptop"); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.ServerID != "" {
+		t.Fatalf("default link changed: %+v", reloaded)
+	}
+	want := []cli.NamedLink{
+		{Name: "work", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID},
+		requested,
+	}
+	if !slices.Equal(reloaded.Links, want) {
+		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
 	}
 }
