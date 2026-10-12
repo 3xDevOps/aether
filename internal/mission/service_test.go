@@ -76,14 +76,61 @@ func TestCreateNamesIntegratorChoiceMissingFromExecutionChoices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Create(context.Background(), member.ID, protocol.MissionCreateParams{
-		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
-		Integrator:       protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"},
-		ExecutionChoices: []protocol.MissionExecutionChoice{{AccountMemberID: string(member.ID), Harness: "claude", Mode: "headless"}},
-	})
-	want := "integrator choice account=" + string(member.ID) + " harness=claude mode=tui must be one of execution_choices"
-	if err == nil || err.Error() != want {
-		t.Fatalf("create error = %v, want %q", err, want)
+	for name, tc := range map[string]struct {
+		integrator protocol.MissionIntegrator
+		choice     protocol.MissionExecutionChoice
+		want       string
+	}{
+		"mode": {
+			integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"},
+			choice:     protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "headless"},
+			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model= must be one of execution_choices",
+		},
+		"model": {
+			integrator: protocol.MissionIntegrator{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Model: "opus"},
+			choice:     protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui", Model: "sonnet"},
+			want:       "integrator choice account=" + string(member.ID) + " harness=claude mode=tui model=opus must be one of execution_choices",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.Create(context.Background(), member.ID, protocol.MissionCreateParams{
+				WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create-" + name,
+				Integrator: tc.integrator, ExecutionChoices: []protocol.MissionExecutionChoice{tc.choice},
+			})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("create error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRecoveryTreatsAChangedModelAsStale(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	out := f.mustCall(t, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+		DispatchKey: "haiku", Harness: "claude", Mode: string(domain.LaunchHeadless), Model: "haiku", AccountOwnerID: string(f.member.ID),
+	}).(protocol.WorkerStartResult)
+	m := f.reloadMission(t)
+	for name, req := range map[string]MissionLaunchRequest{
+		"recovered integrator assignment changed": {
+			WorkspaceID: m.WorkspaceID, MissionID: m.ID, IntegratorGeneration: m.IntegratorGeneration,
+			RunID: m.CurrentIntegratorRunID, ActorRunID: m.CurrentIntegratorRunID,
+			RunOwnerID: m.IntegratorRunOwnerID, AccountOwner: m.Integrator.AccountMemberID,
+			Task: m.Objective, Harness: m.Integrator.Harness, Mode: m.Integrator.Mode, Model: "opus",
+		},
+		"recovered worker assignment changed": {
+			WorkspaceID: m.WorkspaceID, MissionID: m.ID, AttemptID: domain.AttemptID(out.Attempt.ID),
+			IntegratorGeneration: out.Attempt.IntegratorGeneration,
+			RunID:                domain.RunID(out.Attempt.RunID), ActorRunID: domain.RunID(out.Attempt.ActorRunID),
+			RunOwnerID: domain.MemberID(out.Attempt.RunOwnerID), AccountOwner: domain.MemberID(out.Attempt.AccountOwnerID),
+			Task: task.Revision.Objective, Harness: out.Attempt.Harness, Mode: domain.LaunchMode(out.Attempt.Mode),
+		},
+	} {
+		if err := f.svc.launchRecovered(ctx, req); !errors.Is(err, store.ErrMissionStale) || !strings.Contains(err.Error(), name) {
+			t.Fatalf("recovery with a changed model = %v, want %q", err, name)
+		}
 	}
 }
 

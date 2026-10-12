@@ -315,11 +315,11 @@ request after an uncertain outcome; do not invent another delivery request.
 	"task accept":            "usage: aether-internal task accept --task-id <id> --revision <n> --expected-integrator-generation <n> --idempotency-key <key>\n",
 	"task accept-submission": "usage: aether-internal task accept-submission --submission-id <id> --expected-integrator-generation <n> --expected-accepted-set-version <n> --idempotency-key <key> [--scope-disposition <reason>]\n",
 	"task abandon":           "usage: aether-internal task abandon --task-id <id> [--revision <n>] --expected-integrator-generation <n> --idempotency-key <key>\n\nWithout --revision the whole task is abandoned; a revision drops only that pending revision.\n",
-	"worker start": `usage: aether-internal worker start --task-id <id> [--harness <name>] [--mode <mode>] [--account-owner-id <id>] [--task-revision <n>] [--dispatch-key <key>]
+	"worker start": `usage: aether-internal worker start --task-id <id> [--harness <name>] [--mode <mode>] [--model <model>] [--account-owner-id <id>] [--task-revision <n>] [--dispatch-key <key>]
 
 Start a worker on an accepted task. Pick one approved execution choice with
-any of --harness, --mode, and --account-owner-id; with a single choice none
-is needed. The task revision defaults to the current one, and the dispatch
+any of --harness, --mode, --model, and --account-owner-id; with a single
+choice none is needed. The task revision defaults to the current one, and the dispatch
 key to <task-id>-r<revision>, so repeating the same start replays it.
 The mission, run owner, and integrator generation come from this run's
 assignment; --mission-id, --run-owner-id, and
@@ -613,6 +613,9 @@ func boundedSkillExecutionChoices(values []protocol.MissionExecutionChoice) stri
 		value := "account=" + boundedSkillField(choice.AccountMemberID) +
 			" harness=" + boundedSkillField(choice.Harness) +
 			" mode=" + boundedSkillField(choice.Mode)
+		if choice.Model != "" {
+			value += " model=" + boundedSkillField(choice.Model)
+		}
 		separator := 0
 		if b.Len() > 0 {
 			separator = 2

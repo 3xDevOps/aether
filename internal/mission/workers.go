@@ -25,6 +25,9 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if p.TaskID == "" || p.TaskRevision <= 0 || p.DispatchKey == "" {
 		return nil, errors.New("mission: worker.start requires task, revision, and dispatch_key")
 	}
+	if err := domain.ValidModel(p.Model); err != nil {
+		return nil, fmt.Errorf("mission: worker.start: %w", err)
+	}
 	if !authorizationHeld {
 		s.cfg.AuthorizationMu.Lock()
 		defer s.cfg.AuthorizationMu.Unlock()
@@ -50,7 +53,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	var choice domain.MissionExecutionChoice
 	found := false
 	for _, c := range m.ExecutionChoices {
-		if c.Harness == p.Harness && string(c.Mode) == p.Mode && string(c.AccountMemberID) == p.AccountOwnerID {
+		if c.Harness == p.Harness && string(c.Mode) == p.Mode && c.Model == p.Model && string(c.AccountMemberID) == p.AccountOwnerID {
 			choice, found = c, true
 			break
 		}

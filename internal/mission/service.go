@@ -343,7 +343,8 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 		if req.AttemptID == "" {
 			if current.CurrentIntegratorRunID != req.RunID || current.IntegratorGeneration != req.IntegratorGeneration ||
 				current.Integrator.AccountMemberID != req.AccountOwner || current.Integrator.Harness != req.Harness ||
-				current.Integrator.Mode != req.Mode || current.IntegratorRunOwnerID != req.RunOwnerID {
+				current.Integrator.Mode != req.Mode || current.Integrator.Model != req.Model ||
+				current.IntegratorRunOwnerID != req.RunOwnerID {
 				return fmt.Errorf("%w: recovered integrator assignment changed", store.ErrMissionStale)
 			}
 		} else {
@@ -356,7 +357,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 				!attempt.State.HoldsConcurrency() || attempt.CancelRequestedAt != nil ||
 				attempt.RunOwnerID != req.RunOwnerID ||
 				attempt.AccountOwnerID != req.AccountOwner || attempt.Harness != req.Harness ||
-				attempt.Mode != req.Mode {
+				attempt.Mode != req.Mode || attempt.Model != req.Model {
 				return fmt.Errorf("%w: recovered worker assignment changed", store.ErrMissionStale)
 			}
 			worker = attempt
@@ -760,6 +761,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		if c.AccountMemberID == "" || c.Harness == "" || !mode.Valid() {
 			return protocol.MissionCreateResult{}, errors.New("execution choices must name account_member_id, harness, and valid mode")
 		}
+		if modelErr := domain.ValidModel(c.Model); modelErr != nil {
+			return protocol.MissionCreateResult{}, invalidMissionParams("execution choice " + modelErr.Error())
+		}
 		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode, Model: c.Model})
 	}
 	m := &domain.Mission{
@@ -917,14 +921,14 @@ func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account d
 	return nil
 }
 
-// replacementChoices offers every execution choice's account and harness as
-// an interactive integrator, whatever the choice's own mode: a mission created
-// before integrators had to be interactive may list only headless choices,
-// and its integrator must still be replaceable.
+// replacementChoices offers every execution choice's account, harness and
+// model as an interactive integrator, whatever the choice's own mode: a
+// mission created before integrators had to be interactive may list only
+// headless choices, and its integrator must still be replaceable.
 func replacementChoices(m *domain.Mission) []protocol.MissionExecutionChoice {
 	out := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
 	for _, c := range m.ExecutionChoices {
-		out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(domain.LaunchTUI)})
+		out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(domain.LaunchTUI), Model: c.Model})
 	}
 	return out
 }
@@ -937,12 +941,15 @@ func executionChoice(in protocol.MissionIntegrator, choices []protocol.MissionEx
 	if !mode.Interactive() {
 		return domain.MissionIntegrator{}, invalidMissionParams("integrator mode must be tui or acp: a headless integrator exits after one turn and cannot be asked or told")
 	}
+	if err := domain.ValidModel(in.Model); err != nil {
+		return domain.MissionIntegrator{}, invalidMissionParams("integrator " + err.Error())
+	}
 	for _, c := range choices {
-		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode {
+		if c.AccountMemberID == in.AccountMemberID && c.Harness == in.Harness && c.Mode == in.Mode && c.Model == in.Model {
 			return domain.MissionIntegrator{AccountMemberID: domain.MemberID(in.AccountMemberID), Harness: in.Harness, Mode: mode, Model: in.Model}, nil
 		}
 	}
-	return domain.MissionIntegrator{}, fmt.Errorf("integrator choice account=%s harness=%s mode=%s must be one of execution_choices", in.AccountMemberID, in.Harness, in.Mode)
+	return domain.MissionIntegrator{}, fmt.Errorf("integrator choice account=%s harness=%s mode=%s model=%s must be one of execution_choices", in.AccountMemberID, in.Harness, in.Mode, in.Model)
 }
 
 func (s *Service) List(ctx context.Context, p protocol.MissionListParams) (protocol.MissionListResult, error) {

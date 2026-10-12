@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -21,12 +22,12 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--account <member-id>] [--worker <agent>[:standard|enhanced|background]]... [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <swarm-id>\n" +
 	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
 	"   or: aether swarm cancel <swarm-id>\n" +
-	"   or: aether swarm replace-integrator <swarm-id> --agent <agent> [--account <member-id>]"
+	"   or: aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]"
 
 func runSwarm(args []string) error {
 	if len(args) == 0 {
@@ -53,6 +54,7 @@ type swarmSpec struct {
 	objective string
 	agent     string
 	mode      string
+	model     string
 	account   string
 	workspace string
 	workers   []protocol.MissionExecutionChoice
@@ -86,10 +88,11 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fs := flag.NewFlagSet("swarm create", flag.ExitOnError)
 	agent := fs.String("agent", "", "integrator agent name")
 	mode := fs.String("mode", "standard", "integrator mode: standard or enhanced")
+	model := fs.String("model", "", "integrator "+modelHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	var workers stringList
-	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode] with mode "+launchModeHelp+" (repeatable, default standard)")
+	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode keeps standard (repeatable)")
 	objective, err := parseLeadingArg(fs, args)
 	if err != nil || *agent == "" {
 		return swarmSpec{}, errors.New(swarmUsage)
@@ -105,7 +108,10 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	if integratorMode == "headless" {
 		return swarmSpec{}, errors.New("the integrator runs until the swarm ends: --mode must be standard or enhanced")
 	}
-	spec := swarmSpec{objective: objective, agent: *agent, mode: integratorMode, account: *account, workspace: *workspace}
+	if err := domain.ValidModel(*model); err != nil {
+		return swarmSpec{}, fmt.Errorf("invalid --model: %w", err)
+	}
+	spec := swarmSpec{objective: objective, agent: *agent, mode: integratorMode, model: *model, account: *account, workspace: *workspace}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
 		if parseErr != nil {
@@ -133,21 +139,25 @@ func stdinText(value, what string, stdin io.Reader) (string, error) {
 
 // The account is the integrator's, filled in by missionCreateParams.
 func parseWorker(spec string) (protocol.MissionExecutionChoice, error) {
-	harness, name, ok := strings.Cut(spec, ":")
-	if !ok {
-		name = "standard"
+	parts := strings.SplitN(spec, ":", 3)
+	name, model := "standard", ""
+	if len(parts) > 1 && parts[1] != "" {
+		name = parts[1]
+	}
+	if len(parts) > 2 {
+		model = parts[2]
 	}
 	mode, err := parseLaunchMode(name)
-	if harness == "" || err != nil {
-		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want agent or agent:mode, mode %s)", spec, launchModeHelp)
+	if parts[0] == "" || err != nil || domain.ValidModel(model) != nil {
+		return protocol.MissionExecutionChoice{}, fmt.Errorf("invalid --worker %q (want agent, agent:mode or agent:mode:model, mode %s)", spec, launchModeHelp)
 	}
-	return protocol.MissionExecutionChoice{Harness: harness, Mode: mode}, nil
+	return protocol.MissionExecutionChoice{Harness: parts[0], Mode: mode, Model: model}, nil
 }
 
 // A --worker that repeats the integrator or another worker is sent once,
 // because the store refuses duplicates.
 func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key string) protocol.MissionCreateParams {
-	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: spec.mode}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: accountID, Harness: spec.agent, Mode: spec.mode, Model: spec.model}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range spec.workers {
 		w.AccountMemberID = accountID
@@ -270,8 +280,12 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	fmt.Fprintf(&b, "swarm %s %s\n", m.ID, m.Phase)
 	fmt.Fprintf(&b, "objective: %s\n", m.Objective)
 	fmt.Fprintf(&b, "accountable human: %s\n", m.AccountableHumanID)
-	fmt.Fprintf(&b, "integrator: run %s generation %d (%s %s, account %s)\n",
-		m.CurrentIntegratorRunID, m.IntegratorGeneration, m.Integrator.Harness, modeName(m.Integrator.Mode), m.Integrator.AccountMemberID)
+	integrator := m.Integrator.Harness + " " + modeName(m.Integrator.Mode)
+	if m.Integrator.Model != "" {
+		integrator += " " + m.Integrator.Model
+	}
+	fmt.Fprintf(&b, "integrator: run %s generation %d (%s, account %s)\n",
+		m.CurrentIntegratorRunID, m.IntegratorGeneration, integrator, m.Integrator.AccountMemberID)
 	if m.IntegratorLaunchError != "" {
 		fmt.Fprintf(&b, "launch error: %s (since %s)\n", m.IntegratorLaunchError, m.IntegratorLaunchErrorAt)
 	}
