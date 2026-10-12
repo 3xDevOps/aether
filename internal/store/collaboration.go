@@ -493,13 +493,17 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 		return nil, errors.New("store: list room messages: workspace_id is required")
 	}
 	limit = normalizeCollaborationLimit(limit)
-	query := `SELECT ` + roomMessageCols + ` FROM room_messages WHERE workspace_id = ?`
+	query := `SELECT rowid, ` + roomMessageCols + ` FROM room_messages WHERE workspace_id = ?`
 	args := []any{workspace}
 	if run != "" {
 		query += ` AND run_id = ?`
 		args = append(args, run)
 	}
-	if before != "" {
+	if beforeAt, beforeRowid, ok := decodeMessageCursor(before); ok {
+		query += ` AND (created_at, rowid) < (?, ?)`
+		args = append(args, beforeAt, beforeRowid)
+	} else if before != "" {
+		// A cursor issued before cursors carried the rowid is a message ID.
 		query += ` AND (created_at, rowid) < (SELECT created_at, rowid FROM room_messages WHERE id = ?)`
 		args = append(args, before)
 	}
@@ -509,16 +513,62 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return nil, fmt.Errorf("store: list room messages: %w", err)
 	}
-	items, err := collect(rows, scanRoomMessage)
+	var rowids []int64
+	items, err := collect(rows, scanWithRowid(scanRoomMessage, &rowids))
 	if err != nil {
 		return nil, err
 	}
 	page := &RoomMessagePage{Items: items}
 	if len(items) > limit {
 		page.Items = items[:limit]
-		page.NextBefore = page.Items[len(page.Items)-1].ID
+		page.NextBefore = encodeMessageCursor(page.Items[limit-1].CreatedAt, rowids[limit-1])
 	}
 	return page, nil
+}
+
+// encodeMessageCursor carries the ordering tuple, so paging continues
+// correctly after the cursor's message is deleted with its run.
+func encodeMessageCursor(createdAt time.Time, rowid int64) string {
+	raw := "m:" + strconv.FormatInt(createdAt.UnixNano(), 10) + ":" + strconv.FormatInt(rowid, 10)
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeMessageCursor(cursor string) (int64, int64, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return 0, 0, false
+	}
+	parts := strings.Split(string(raw), ":")
+	if len(parts) != 3 || parts[0] != "m" {
+		return 0, 0, false
+	}
+	nanos, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	rowid, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return nanos, rowid, true
+}
+
+type scanFunc func(...any) error
+
+func (f scanFunc) Scan(dest ...any) error { return f(dest...) }
+
+func scanWithRowid[T any](scan func(interface{ Scan(...any) error }) (*T, error), rowids *[]int64) func(interface{ Scan(...any) error }) (*T, error) {
+	return func(row interface{ Scan(...any) error }) (*T, error) {
+		var rowid int64
+		v, err := scan(scanFunc(func(dest ...any) error {
+			return row.Scan(append([]any{&rowid}, dest...)...)
+		}))
+		if err != nil {
+			return nil, err
+		}
+		*rowids = append(*rowids, rowid)
+		return v, nil
+	}
 }
 
 // EncodeEvidenceCursor returns a self-contained cursor. It intentionally

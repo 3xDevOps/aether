@@ -42,7 +42,7 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		return nil, errors.New("store: list run messages: workspace_id is required")
 	}
 	limit := normalizeCollaborationLimit(f.Limit)
-	query := `SELECT m.id, m.workspace_id, m.mission_id, m.from_run, m.to_run, m.body, m.kind,
+	query := `SELECT m.rowid, m.id, m.workspace_id, m.mission_id, m.from_run, m.to_run, m.body, m.kind,
 			m.correlation_id, m.idempotency_key, m.delivery_token, m.created_at, m.delivered_at,
 			m.acked_at, m.retired_at, report.outcome, report.summary, report.next_action
 		FROM run_messages m
@@ -66,7 +66,11 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 		query += ` AND m.correlation_id = ?`
 		args = append(args, f.CorrelationID)
 	}
-	if f.Before != "" {
+	if beforeAt, beforeRowid, ok := decodeMessageCursor(f.Before); ok {
+		query += ` AND (m.created_at, m.rowid) < (?, ?)`
+		args = append(args, beforeAt, beforeRowid)
+	} else if f.Before != "" {
+		// A cursor issued before cursors carried the rowid holds the message ID.
 		beforeAt, beforeID, ok := decodeEvidenceCursor(f.Before)
 		if !ok {
 			return nil, fmt.Errorf("store: list run messages: %w %q", ErrInvalidCursor, f.Before)
@@ -80,15 +84,15 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 	if err != nil {
 		return nil, fmt.Errorf("store: list run messages: %w", err)
 	}
-	items, err := collect(rows, scanListedRunMessage)
+	var rowids []int64
+	items, err := collect(rows, scanWithRowid(scanListedRunMessage, &rowids))
 	if err != nil {
 		return nil, fmt.Errorf("store: list run messages: %w", err)
 	}
 	page := &RunMessagePage{Items: items}
 	if len(items) > limit {
 		page.Items = items[:limit]
-		last := page.Items[limit-1]
-		page.NextBefore = EncodeEvidenceCursor(last.CreatedAt, last.ID)
+		page.NextBefore = encodeMessageCursor(page.Items[limit-1].CreatedAt, rowids[limit-1])
 	}
 	return page, nil
 }

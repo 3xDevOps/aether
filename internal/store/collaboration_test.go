@@ -247,6 +247,56 @@ func TestSameInstantRoomMessagesKeepInsertionOrder(t *testing.T) {
 	}
 }
 
+func TestListRoomMessagesPagesPastADeletedCursorRow(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	kept := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	gone := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	var ids []string
+	for i, run := range []domain.RunID{kept.ID, kept.ID, gone.ID, kept.ID, kept.ID} {
+		msg := &RoomMessage{
+			WorkspaceID: workspace.ID, RunID: run, ActorID: member.ID, Kind: RoomMessageComment,
+			Body: "same instant", IdempotencyKey: "tie-" + strconv.Itoa(i), CreatedAt: at,
+		}
+		if err := db.CreateRoomMessage(ctx, msg); err != nil {
+			t.Fatalf("CreateRoomMessage %d: %v", i, err)
+		}
+		ids = append(ids, msg.ID)
+	}
+
+	first, err := db.ListRoomMessages(ctx, workspace.ID, "", "", 3)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	var listed []string
+	for _, msg := range first.Items {
+		listed = append(listed, msg.ID)
+	}
+	if listed[len(listed)-1] != ids[2] {
+		t.Fatalf("first page = %v, want it to end at %s, owned by the deleted run", listed, ids[2])
+	}
+	if err := db.DeleteRun(ctx, gone.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	for before := first.NextBefore; before != ""; {
+		page, err := db.ListRoomMessages(ctx, workspace.ID, "", before, 3)
+		if err != nil {
+			t.Fatalf("next page: %v", err)
+		}
+		for _, msg := range page.Items {
+			listed = append(listed, msg.ID)
+		}
+		before = page.NextBefore
+	}
+	slices.Reverse(listed)
+	if !slices.Equal(listed, ids) {
+		t.Fatalf("listed oldest first = %v, want %v", listed, ids)
+	}
+}
+
 func TestEvidencePacketExpiresAtRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
