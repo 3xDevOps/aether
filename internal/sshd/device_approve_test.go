@@ -90,3 +90,41 @@ func TestApproveDeviceByID(t *testing.T) {
 		}
 	}
 }
+
+func TestMemberApprovesOwnDeviceByID(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	approved := func(account edgeproto.Account, label string) *domain.Device {
+		t.Helper()
+		inviteAccount(t, e, domain.Invitation{Provider: "github", Login: account.Login, Role: domain.RoleCollaborator})
+		key := newSigner(t)
+		approveAsAdmin(t, e, e.refusedForApproval(t, account, key, label))
+		dev, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(key.PublicKey()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dev
+	}
+	phone, malloryPhone := approved(octo, "phone"), approved(mallory(), "mallory-phone")
+	laptop := newSigner(t)
+	e.refusedForApproval(t, octo, laptop, "laptop")
+	pending, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(protocol.MemberDeviceApproveParams{DeviceID: string(pending.ID)})
+
+	if _, perr := e.srv.dispatch(withDevice(malloryPhone.Member, malloryPhone), malloryPhone.Member, protocol.MethodMemberDeviceApprove, raw); perr == nil || perr.Code != protocol.CodeDenied {
+		t.Fatalf("collaborator approving another member's device by id = %v, want CodeDenied", perr)
+	}
+	if got := deviceStatus(t, e, laptop); got != domain.DevicePending {
+		t.Fatalf("octo's laptop after mallory's attempt = %s, want pending", got)
+	}
+	if _, perr := e.srv.dispatch(withDevice(phone.Member, phone), phone.Member, protocol.MethodMemberDeviceApprove, raw); perr != nil {
+		t.Fatalf("member approving their own device by id: %v", perr)
+	}
+	if got := deviceStatus(t, e, laptop); got != domain.DeviceApproved {
+		t.Fatalf("octo's laptop after octo approved it = %s, want approved", got)
+	}
+}

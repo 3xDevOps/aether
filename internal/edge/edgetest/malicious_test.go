@@ -194,8 +194,8 @@ func TestMaliciousEdgeApprovedDevices(t *testing.T) {
 
 	// The same forgery with the secret harvested from dave's link: the
 	// attacker's device only waits on the invitation, and no member,
-	// administrator or bound account exists until an approver types its
-	// code.
+	// administrator or bound account exists until an approver clicks
+	// Approve on its card or types its code on the console.
 	_, _, _, secret, err := edgeproto.ParseJoinLink(daveInv.Link)
 	if err != nil {
 		t.Fatal(err)
