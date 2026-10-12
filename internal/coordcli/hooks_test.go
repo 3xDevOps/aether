@@ -30,8 +30,16 @@ func hookMailbox(t *testing.T) (*coord.Service, *store.DB, string, domain.RunID)
 	return hookRun(t, nil, nil, true)
 }
 
+// outsideEnhancedRun keeps an AETHER_ENHANCED inherited from an Aether run
+// container from short-circuiting the hook under test.
+func outsideEnhancedRun(t *testing.T) {
+	t.Helper()
+	t.Setenv(coordtransport.EnhancedEnv, "")
+}
+
 func hookRun(t *testing.T, mission coord.MissionService, files []string, unread bool) (*coord.Service, *store.DB, string, domain.RunID) {
 	t.Helper()
+	outsideEnhancedRun(t)
 	dir, err := os.MkdirTemp("", "ah-")
 	if err != nil {
 		t.Fatal(err)
@@ -186,6 +194,7 @@ func TestHookDoesNotContinueAbortedOrRepeatedStops(t *testing.T) {
 }
 
 func TestHookDoesNotHideBrokenSocket(t *testing.T) {
+	outsideEnhancedRun(t)
 	socket := filepath.Join(t.TempDir(), "coord3.sock")
 	if err := os.WriteFile(socket, nil, 0o600); err != nil {
 		t.Fatal(err)
