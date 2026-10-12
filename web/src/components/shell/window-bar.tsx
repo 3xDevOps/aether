@@ -19,6 +19,8 @@ export type AetherDesktop = {
   shellVersion?: string
   /** Resolves to "" on cancel. Absent in shells built before it existed. */
   chooseFolder?: () => Promise<string>
+  /** A folder picked after `chooseFolder` rejected; absent in older shells too. */
+  onFolderChosen?: (cb: (path: string) => void) => () => void
 }
 
 export function desktopBridge(): AetherDesktop | undefined {
