@@ -44,10 +44,9 @@ const canvas = () => screen.getByLabelText('Shared browser page') as HTMLCanvasE
 const annotate = () => screen.getByRole('button', { name: 'Annotate' })
 const bar = () => screen.getByRole('group', { name: 'Feedback for the agent' })
 
-/** The Browser with one page painted at its own size, driven by the agent. */
-async function show() {
-  render(<BrowserView {...shared} runID="run_1" />)
-  await screen.findByLabelText('Shared browser page')
+/** The stream socket opens in an effect, so the canvas can be up before it. */
+async function paintFrame() {
+  await waitFor(() => expect(StubSocket.opened).not.toHaveLength(0))
   await act(async () => {
     const socket = StubSocket.last()
     socket.onopen?.()
@@ -55,6 +54,13 @@ async function show() {
     socket.onmessage?.({ data: frame() })
   })
   await waitFor(() => expect(canvas().getAttribute('aria-busy')).toBe('false'))
+}
+
+/** The Browser with one page painted at its own size, driven by the agent. */
+async function show() {
+  render(<BrowserView {...shared} runID="run_1" />)
+  await screen.findByLabelText('Shared browser page')
+  await paintFrame()
   await screen.findByText('The agent is driving')
 }
 
@@ -158,13 +164,7 @@ it('sends a free page no key and no press while its pointer picks', async () => 
   vi.mocked(api.devControlStatus).mockResolvedValue({ surface, controller: null })
   render(<BrowserView {...shared} runID="run_1" />)
   await screen.findByLabelText('Shared browser page')
-  await act(async () => {
-    const socket = StubSocket.last()
-    socket.onopen?.()
-    socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
-    socket.onmessage?.({ data: frame() })
-  })
-  await waitFor(() => expect(canvas().getAttribute('aria-busy')).toBe('false'))
+  await paintFrame()
   await userEvent.click(annotate())
   fireEvent.keyDown(screen.getByRole('textbox', { name: 'Remote browser keyboard' }), { key: 'a' })
   click(100, 50)
