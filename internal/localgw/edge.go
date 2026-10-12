@@ -1,17 +1,20 @@
 package localgw
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -373,7 +376,8 @@ func (g *Gateway) localEdgeJoin(_ *http.Request, body []byte) (any, *protocol.Er
 // linkEdge links the gateway to a server through an edge and moves every
 // later request onto it, as link.apply does for an address.
 func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) {
-	result, err := cli.Link(opts, g.local.snapshot())
+	prev := g.local.snapshot()
+	result, err := cli.Link(opts, prev)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
@@ -381,5 +385,9 @@ func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) 
 		return nil, perr
 	}
 	cfg := result.Config
+	var out bytes.Buffer
+	if _, err := localops.MoveRemote(prev, cfg, &out, &out); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("set git remote: %v: %s", err, strings.TrimSpace(out.String()))}
+	}
 	return &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}, nil
 }

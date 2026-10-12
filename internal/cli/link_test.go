@@ -160,3 +160,22 @@ func TestClaimOfTheCurrentServerKeepsItsLink(t *testing.T) {
 		t.Fatalf("claim of the current server saved %+v", got)
 	}
 }
+
+func TestClaimOfTheCurrentServerMovesItsGitRemote(t *testing.T) {
+	id := edgeproto.ServerID(mustSigner(t).PublicKey())
+	prev := Config{Addr: "srv:2222", User: "aether", Repo: "/src/repo"}
+	claimed := prev
+	claimed.ServerID = id
+	got := linkConfig(Config{User: "aether", EdgeURL: "https://edge.example", ServerID: id}, claimed, "")
+	remote := GitURL(prev.User, prev.GitHost(), "ws_1")
+	want := "ssh://aether@" + EdgeHost(id) + "/ws_1.git"
+	if moved, ok := got.MovedGitURL(prev, remote); !ok || moved != want {
+		t.Fatalf("MovedGitURL(%s) = %q, %v; want %q", remote, moved, ok, want)
+	}
+	if moved, ok := got.MovedGitURL(prev, "ssh://aether@elsewhere:2222/ws_1.git"); ok {
+		t.Fatalf("a remote of another host moved to %q", moved)
+	}
+	if moved, ok := got.MovedGitURL(got, want); ok {
+		t.Fatalf("a remote already on the edge host moved to %q", moved)
+	}
+}

@@ -20,7 +20,7 @@ export function parseClaim(input: string): { code: string; edge?: string } {
 }
 
 /** Reads the edge and ids a join link names:
- * `https://<edge host>/join/<server id>/<invitation id>#<secret>` or
+ * `<https or loopback http>://<edge host>/join/<server id>/<invitation id>#<secret>` or
  * `aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`.
  * The server checks the secret. Null when the text is neither. */
 export function parseJoin(input: string): { edge: string; server: string; invitation: string } | null {
@@ -32,11 +32,11 @@ export function parseJoin(input: string): { edge: string; server: string; invita
     return null
   }
   if (!url.hash.slice(1)) return null
-  if (url.protocol === 'https:') {
+  if (url.protocol === 'https:' || (url.protocol === 'http:' && loopback(url.hostname))) {
     const ids = /^\/join\/([^/]+)\/([^/]+)$/.exec(url.pathname)
     // URL.origin drops an explicit :443, which edgeproto.Origin keeps.
-    const host = /^https:\/\/([^/?#]+)/i.exec(text)?.[1]
-    if (ids && host) return { edge: `https://${host.toLowerCase()}`, server: ids[1], invitation: ids[2] }
+    const host = /^https?:\/\/([^/?#]+)/i.exec(text)?.[1]
+    if (ids && host) return { edge: `${url.protocol}//${host.toLowerCase()}`, server: ids[1], invitation: ids[2] }
   }
   if (url.protocol === 'aether:' && url.host === 'join') {
     const edge = url.searchParams.get('edge')

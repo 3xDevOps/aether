@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -67,7 +68,7 @@ func runEdge(args []string) error {
 	}
 	defer func() { _ = result.Conn.Close() }()
 	cfg := result.Config
-	if err := cli.Save(cfg); err != nil {
+	if err = cli.Save(cfg); err != nil {
 		return err
 	}
 	who := result.Info.Member.DisplayName
@@ -76,6 +77,13 @@ func runEdge(args []string) error {
 	}
 	fmt.Printf("connected server %s to %s as %s; this device is approved\n", cfg.ServerID, edgeHost, account)
 	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
+	url, err := localops.MoveRemote(prev, cfg, os.Stdout, os.Stderr)
+	if err != nil {
+		return err
+	}
+	if url != "" {
+		fmt.Printf("git remote aether -> %s\n", url)
+	}
 	return nil
 }
 

@@ -143,8 +143,7 @@ describe('App', () => {
       expect(await screen.findByRole('heading', { level: 1, name: 'Onboarding' })).toBeDefined()
       expect(screen.queryByRole('button', { name: 'Retry connection' })).toBeNull()
 
-      forgetHandedLink()
-      act(() => useStore.setState({ route: { name: 'board', params: {} } }))
+      act(() => forgetHandedLink())
       expect(screen.getByRole('button', { name: 'Retry connection' })).toBeDefined()
     } finally {
       app.unmount()

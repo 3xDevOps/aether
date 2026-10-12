@@ -97,9 +97,18 @@ export function onHandedLink(listener: (link: HandedLink) => void): () => void {
   }
 }
 
+const forgottenListeners = new Set<() => void>()
+
+/** Calls listener each time the handed link is forgotten. */
+export function onHandedLinkForgotten(listener: () => void): () => void {
+  forgottenListeners.add(listener)
+  return () => forgottenListeners.delete(listener)
+}
+
 export function forgetHandedLink() {
   handed = null
   clearHandedFragment()
+  for (const listener of forgottenListeners) listener()
 }
 
 function clearHandedFragment() {

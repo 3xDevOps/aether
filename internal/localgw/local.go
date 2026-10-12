@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -247,9 +248,30 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 }
 
 // adoptLink saves a new link and swaps the gateway onto its connection,
-// so later API and WebSocket requests reach the new server.
+// so later API and WebSocket requests reach the new server. A link that
+// is still the named profile the gateway runs on is saved into that
+// profile: its top-level fields are the profile's overlay, not the
+// default link.
 func (g *Gateway) adoptLink(result cli.LinkResult) *protocol.Error {
-	if err := cli.Save(result.Config); err != nil {
+	saved := result.Config
+	if name := saved.Active; name != "" {
+		var err error
+		if saved, err = cli.Load(); err == nil {
+			profile := slices.IndexFunc(saved.Links, func(link cli.NamedLink) bool { return link.Name == name })
+			if profile < 0 {
+				err = fmt.Errorf("named server %q no longer exists; restart aether gui", name)
+			} else {
+				link := &saved.Links[profile]
+				link.Addr, link.EdgeURL, link.ServerID = result.Config.Addr, result.Config.EdgeURL, result.Config.ServerID
+				result.Config.Links = saved.Links
+			}
+		}
+		if err != nil {
+			_ = result.Conn.Close()
+			return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+		}
+	}
+	if err := cli.Save(saved); err != nil {
 		_ = result.Conn.Close()
 		return &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}

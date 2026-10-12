@@ -57,8 +57,11 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
   const [known, setKnown] = useState<EdgeAccount | null>(null)
   const live = useRef(true)
   const busy = useRef(false)
-  useEffect(() => () => {
-    live.current = false
+  useEffect(() => {
+    live.current = true
+    return () => {
+      live.current = false
+    }
   }, [])
   useEffect(() => {
     client.localEdgeStatus().then(
@@ -110,9 +113,7 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
       } catch (err) {
         const refusal = err instanceof ApiError ? err.data?.refusal : undefined
         if (refusal?.kind !== 'token-revoked' && refusal?.kind !== 'not-signed-in') throw err
-        const fresh = await signIn().catch(() => {
-          throw err
-        })
+        const fresh = await signIn()
         if (live.current) setKnown(fresh)
         setPhase({ name: 'connecting', account: fresh })
         await claim()

@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func init() {
@@ -80,7 +81,7 @@ func deviceChange(method string, params any, verb string) error {
 // person answers yes.
 func deviceApprove(codeOrID string, in io.Reader, out io.Writer) error {
 	lookup := protocol.MemberDeviceLookupParams{DeviceID: codeOrID}
-	if isApprovalCode(codeOrID) {
+	if store.IsApprovalCode(codeOrID) {
 		lookup = protocol.MemberDeviceLookupParams{Code: codeOrID}
 	}
 	return withControl(func(c *protocol.Client) error {
@@ -103,23 +104,6 @@ func deviceApprove(codeOrID string, in io.Reader, out io.Writer) error {
 		_, _ = fmt.Fprintf(out, "approved device %s %q of member %s\n", res.Device.ID, res.Device.Label, res.Device.MemberID)
 		return nil
 	})
-}
-
-// isApprovalCode reports whether s has the shape the server accepts as
-// an approval code (store.ApprovalCode): 8 characters of its alphabet in
-// either case, dash optional. Device ids never do: older rows carry
-// 26-character ids without the dev- prefix.
-func isApprovalCode(s string) bool {
-	s = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), "-", ""))
-	if len(s) != 8 {
-		return false
-	}
-	for _, r := range s {
-		if !strings.ContainsRune("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", r) {
-			return false
-		}
-	}
-	return true
 }
 
 // confirmDeviceApproval prints what approving found admits and reads one

@@ -53,6 +53,13 @@ func normalizeApprovalCode(code string) string {
 	return code[:4] + "-" + code[4:]
 }
 
+// IsApprovalCode reports whether s has the shape of an approval code: its
+// alphabet in either case, dash optional. Device ids never do: older rows
+// carry 26-character ids without the dev- prefix.
+func IsApprovalCode(s string) bool {
+	return normalizeApprovalCode(s) != ""
+}
+
 const deviceCols = `id, member_id, invitation_id, provider, subject, email, login, name, credential, label, status,
 	approval_code, created_at, last_seen_at, approved_by`
 

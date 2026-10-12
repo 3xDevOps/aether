@@ -8,7 +8,7 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
-import { bindRouteToUrl, handedLink, onHandedLink } from '@/lib/url-state'
+import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -32,6 +32,7 @@ export function App() {
   const onboardingRoute = useStore((s) => s.route.name === 'onboarding')
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])
+  useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
