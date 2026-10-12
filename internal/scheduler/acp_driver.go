@@ -324,6 +324,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	d.s.mu.Lock()
 	paused, cid, coordDir, cachedSession, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.task
 	oneShot := entry.launchMode == domain.LaunchHeadless
+	marked := entry.usageLimit != ""
 	d.s.mu.Unlock()
 	if paused {
 		// Docker cannot exec into a frozen container; Resume connects.
@@ -393,7 +394,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		AutoAllow:      oneShot,
 		TitleLookup:    titleLookup,
 		OnState: func(working bool, reason string, failed error) {
-			if _, ok := acphost.UsageLimit(failed); ok {
+			if message, ok := acphost.UsageLimit(failed); ok {
+				d.s.mu.Lock()
+				d.s.setUsageLimitLocked(entry, message)
+				d.s.mu.Unlock()
 				// The move stops this session, which waits for this
 				// callback to return.
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed) })
@@ -432,6 +436,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	switch {
 	case how == openContinue:
+	case oneShot && marked:
+		// The move a persisted usage limit owes after a restart decides
+		// how the failed turn ends.
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":
@@ -473,6 +480,11 @@ func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason s
 // run continues on another account, or stops with the reason why not.
 func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error) {
 	outcome, stopped := d.s.continueLiveRun(entry, false)
+	switch outcome {
+	case usageContinued, usageShutdown:
+		return
+	}
+	d.s.clearUsageLimit(entry)
 	switch outcome {
 	case usageRefused:
 		d.turnState(entry, oneShot, false, reason, failed)

@@ -18,9 +18,10 @@ import (
 // live session it is a regular read-only client: it never affects terminal
 // geometry, and a tap that stops reading is detached (its reader fails)
 // rather than ever blocking the session pump. On a session whose process
-// already ended or was stopped, it replays that session's output from the
-// transcript and ends. The reader returns io.EOF when the session ends or is
-// stopped.
+// ended on its own before any tap read it, as a replacement agent that
+// exits at once, it replays that session's output from the transcript once
+// and ends; a session that was stopped, or already tapped, refuses with the
+// error. The reader returns io.EOF when the session ends or is stopped.
 func (h *Host) TapOutput(run domain.RunID) (io.ReadCloser, error) {
 	key := RunSession(run)
 	s := h.lookup(key)
@@ -32,11 +33,20 @@ func (h *Host) TapOutput(run domain.RunID) (io.ReadCloser, error) {
 	c.sessionReplay = true
 	err := s.addClient(c)
 	if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
-		return h.endedSessionOutput(key, s.transcriptStart)
+		s.mu.Lock()
+		unread := s.exited && !s.tapped
+		s.tapped = true
+		s.mu.Unlock()
+		if unread {
+			return h.endedSessionOutput(key, s.transcriptStart)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	s.tapped = true
+	s.mu.Unlock()
 	go func() {
 		err := c.writeLoop()
 		s.removeClient(c)

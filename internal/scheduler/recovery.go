@@ -1337,6 +1337,12 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 	entry.finalizing = true
 	moving := entry.usageLimit != "" && sc.ExitCode != 0
 	if moving {
+		// As goMove: Close cancels superCtx under s.mu before it waits.
+		if s.superCtx.Err() != nil {
+			s.mu.Unlock()
+			entry.lifecycleMu.Unlock()
+			return
+		}
 		s.wg.Add(1)
 	}
 	s.mu.Unlock()
@@ -1647,6 +1653,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 			return
 		}
 		s.startSupervision(entry)
+		s.resumeUsageMove(entry)
 		if sc.KillRequested {
 			if serr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); serr != nil {
 				slog.Warn("scheduler: re-issue persisted kill during recovery", "run", r.ID, "error", serr)

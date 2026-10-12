@@ -692,3 +692,117 @@ func TestWorkerWhoseMoveFailsFinishesWithoutRetention(t *testing.T) {
 		t.Fatalf("sidecar %v, notes %v, %d containers; want the worker gone without a move", err, notes.all(), e.containerCount())
 	}
 }
+
+// A move that cannot remove the exhausted container fails the run, which
+// keeps owning that container: it may still run with Ada's login mounted.
+func TestMoveThatCannotRemoveTheOldContainerKeepsIt(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	first := e.rt.byName(string(run.ID))
+	e.rt.mu.Lock()
+	e.rt.destroyErr = errors.New("daemon busy")
+	e.rt.mu.Unlock()
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if got.Reason != "Usage limit reached on Ada's account; continuing on Grace's account failed: remove the container on Ada's account: daemon busy" {
+		t.Fatalf("reason %q", got.Reason)
+	}
+	waitFor(t, "the old container kept for cleanup", func() bool {
+		sc, scErr := e.sched.readSidecar(run.ID)
+		return scErr == nil && sc.DestroyPending && sc.ContainerID == string(first.id)
+	})
+	if e.rt.byName(string(run.ID)) != first || len(notes.all()) != 0 {
+		t.Fatal("the old container was let go")
+	}
+}
+
+// A server that stops while a live run's move reads quota keeps the run's
+// usage limit, and the next server moves the run once it has recovered it:
+// a swarm worker whose container outlives its agent, a Standard run and an
+// Enhanced run.
+func TestRestartResumesALiveRunsMove(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []string{"worker", "standard", "enhanced"} {
+		t.Run(tc, func(t *testing.T) {
+			t.Parallel()
+			mutate := func(cfg *Config) { delete(cfg.Harnesses, "claude") }
+			if tc == "enhanced" {
+				mutate = enhancedClaude
+			}
+			e, _, notes := newFallbackEnv(t, mutate)
+			e.share(t)
+			stopped := make(chan struct{})
+			e.sched.UseUsageFallback(UsageFallback{Usage: &hookedUsage{claudeUsage: claudeUsage{e.owner.ID: 10}, during: func() {
+				go func() {
+					_ = e.sched.Close()
+					close(stopped)
+				}()
+				<-e.sched.superCtx.Done()
+			}}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			startScheduler(t, e.sched)
+			var run *domain.Run
+			var err error
+			switch tc {
+			case "worker":
+				run, err = e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+					WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
+					RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "fix it",
+					Harness: "claude", Mode: domain.LaunchHeadless,
+				})
+			case "standard":
+				run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchTUI)
+			default:
+				run, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-e.sched.RecoveryReady()
+			switch tc {
+			case "worker":
+				_, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
+					Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
+				}})
+			case "standard":
+				if err = e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, SessionID: "sess-1"}); err != nil {
+					t.Fatal(err)
+				}
+				limit, _ := agentstatus.FromClaudeHook([]byte(`{"session_id":"sess-1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"You've hit your session limit · resets 3pm (UTC)"}`))
+				err = e.sched.ReportAgentState(t.Context(), run.ID, limit)
+			default:
+				waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+				_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-stopped
+
+			row, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil || row.Status.Terminal() || row.AccountMemberID != e.member.ID {
+				t.Fatalf("run after a shutdown mid-move = %+v, %v; want it live on Ada's account", row, err)
+			}
+			if sc, scErr := e.sched.readSidecar(run.ID); scErr != nil || sc.UsageLimit == "" {
+				t.Fatalf("sidecar = %+v, %v; want the usage limit kept for recovery", sc, scErr)
+			}
+			cfg := e.cfg
+			cfg.PTY = newFakePTY()
+			cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+			s2, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s2.Close() })
+			s2.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+			startScheduler(t, s2)
+			e.assertMovedToOwner(t, run.ID, notes)
+		})
+	}
+}

@@ -30,6 +30,7 @@ type fakeRuntime struct {
 	createErr   error
 	createHook  func()
 	stopErr     error
+	destroyErr  error
 	startErr    error
 	waitErr     error
 	startHook   func(c *fakeContainer)
@@ -244,6 +245,10 @@ func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) er
 
 func (r *fakeRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	r.mu.Lock()
+	if r.destroyErr != nil {
+		r.mu.Unlock()
+		return r.destroyErr
+	}
 	c, ok := r.containers[id]
 	delete(r.containers, id)
 	r.mu.Unlock()

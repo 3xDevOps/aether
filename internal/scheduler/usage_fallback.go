@@ -189,6 +189,7 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 		!entry.killRequested && entry.reported == "" && entry.failReason == ""
 	s.mu.Unlock()
 	if !candidate {
+		s.clearUsageLimit(entry)
 		return false
 	}
 	ctx, cancel := context.WithTimeout(s.superCtx, usageMoveTimeout)
@@ -269,13 +270,10 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 	live := entry != nil && entry.launchMode == domain.LaunchHeadless && !entry.acp
 	newSession := live && domain.ValidAgentSessionID(session) && entry.agentSessionID != session
 	if live {
-		entry.usageLimit = message
 		if newSession {
 			entry.agentSessionID = session
 		}
-		if err := s.writeSidecar(entry.sidecar()); err != nil {
-			slog.Warn("scheduler: persist the usage limit", "run", run, "error", err)
-		}
+		s.setUsageLimitLocked(entry, message)
 	}
 	supervised := live && entry.missionAssigned
 	s.mu.Unlock()
@@ -285,16 +283,82 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 	if !supervised {
 		return
 	}
+	s.goMove(func() { s.continueWorker(entry) })
+}
+
+// setUsageLimitLocked records the agent's usage-limit message until a move
+// has acted on it, in the sidecar too, so a server that stops first moves
+// the run after its restart. Caller holds s.mu.
+func (s *Scheduler) setUsageLimitLocked(entry *supervised, message string) {
+	entry.usageLimit = message
+	if s.runs[entry.runID] != entry {
+		return
+	}
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		slog.Warn("scheduler: persist the usage limit", "run", entry.runID, "error", err)
+	}
+}
+
+// continueWorker moves a swarm worker whose agent stopped on its usage limit
+// while its container lives on.
+func (s *Scheduler) continueWorker(entry *supervised) {
+	outcome, reason := s.continueLiveRun(entry, false)
+	if outcome == usageContinued || outcome == usageShutdown {
+		return
+	}
+	s.clearUsageLimit(entry)
+	if outcome == usageNoFallback {
+		if err := s.ReportAgentState(context.Background(), entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: reason}); err != nil {
+			slog.Warn("scheduler: report the exhausted account", "run", entry.runID, "error", err)
+		}
+	}
+}
+
+// continueStandard moves a Standard run whose agent reported message, its
+// usage limit. A run that does not move gets the report it would have had
+// without fallback, or the reason it cannot move.
+func (s *Scheduler) continueStandard(entry *supervised, message string) {
+	outcome, stopped := s.continueLiveRun(entry, true)
+	switch outcome {
+	case usageContinued, usageShutdown:
+		return
+	}
+	s.clearUsageLimit(entry)
+	report := agentstatus.Report{State: agentstatus.Idle, Reason: message}
+	switch outcome {
+	case usageEnded:
+		return
+	case usageNoFallback:
+		report.Reason = stopped
+	}
+	if err := s.ReportAgentState(context.Background(), entry.runID, report); err != nil {
+		slog.Warn("scheduler: report the exhausted account", "run", entry.runID, "error", err)
+	}
+}
+
+// resumeUsageMove starts the move a live run's persisted usage limit still
+// owes after a restart, once recovery has reconciled the run's development
+// resources.
+func (s *Scheduler) resumeUsageMove(entry *supervised) {
+	s.mu.Lock()
+	message, mode, acp, assigned := entry.usageLimit, entry.launchMode, entry.acp, entry.missionAssigned
+	s.mu.Unlock()
+	if message == "" {
+		return
+	}
 	s.goMove(func() {
-		outcome, reason := s.continueLiveRun(entry, false)
-		if outcome == usageContinued || outcome == usageShutdown {
+		select {
+		case <-s.recoveryReady:
+		case <-s.superCtx.Done():
 			return
 		}
-		s.clearUsageLimit(entry)
-		if outcome == usageNoFallback {
-			if err := s.ReportAgentState(context.Background(), run, agentstatus.Report{State: agentstatus.Idle, Reason: reason}); err != nil {
-				slog.Warn("scheduler: report the exhausted account", "run", run, "error", err)
-			}
+		switch {
+		case acp:
+			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, "error", errors.New(message))
+		case mode == domain.LaunchTUI:
+			s.continueStandard(entry, message)
+		case assigned:
+			s.continueWorker(entry)
 		}
 	})
 }
@@ -324,6 +388,9 @@ func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, r
 	entry := s.runs[run]
 	movable := entry != nil && s.usageMovableLocked(entry, true) && !entry.finalizing && !entry.exitObserved
 	newSession := movable && s.recordReportedSessionLocked(entry, report.SessionID)
+	if movable {
+		s.setUsageLimitLocked(entry, report.Reason)
+	}
 	s.mu.Unlock()
 	if !movable {
 		return false
@@ -331,19 +398,7 @@ func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, r
 	if newSession {
 		s.recordAgentSession(ctx, entry)
 	}
-	s.goMove(func() {
-		report.UsageLimit = false
-		switch outcome, stopped := s.continueLiveRun(entry, true); outcome {
-		case usageRefused:
-		case usageNoFallback:
-			report = agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
-		default:
-			return
-		}
-		if err := s.ReportAgentState(context.Background(), run, report); err != nil {
-			slog.Warn("scheduler: report the exhausted account", "run", run, "error", err)
-		}
-	})
+	s.goMove(func() { s.continueStandard(entry, report.Reason) })
 	return true
 }
 
@@ -585,6 +640,9 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	failure := func(err error) string {
 		return fmt.Sprintf("%s%s's account; continuing on %s's account failed: %v", usageLimitReason, fromName, toName, err)
 	}
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
 	failed := func(err error) (usageOutcome, string) {
 		if s.superCtx.Err() != nil {
 			// Recovery settles the move from its marker, which stays.
@@ -592,8 +650,10 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 		s.mu.Lock()
 		entry.accountSwap = nil
-		if !entry.destroyPending {
-			// Any container the move created is destroyed.
+		if entry.containerID != cid && !entry.destroyPending {
+			// startRunContainer destroyed the replacement it created. The
+			// old container stays the run's until it is confirmed gone, so
+			// finalize keeps ownership of one that may still run.
 			entry.containerID = ""
 		}
 		if werr := s.writeSidecar(entry.sidecar()); werr != nil {
@@ -605,9 +665,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		}
 		return usageFailed, failure(err)
 	}
-	s.mu.Lock()
-	cid := entry.containerID
-	s.mu.Unlock()
+
 	// The container's name and creation key are the run's, and its login is
 	// mounted at creation, so the old container goes before the new exists.
 	if stopErr := s.entryDriver(entry).Stop(ctx, run.ID); stopErr != nil {

@@ -589,7 +589,7 @@ creates one with the new account's login, and resumes the agent's session
 there. The move has five minutes, and the run's finish afterwards gets its
 own. A server that stops mid-move never changes the run's outcome: the
 run is not failed or parked, and its usage limit and any marker below stay
-for the next server to move it.
+for the next server, whose recovery moves it as described below.
 
 | Outcome | What happens |
 | --- | --- |
@@ -597,6 +597,7 @@ for the next server to move it.
 | No account qualifies | Nothing is removed. An account whose check failed (an unreadable installation, a store error) is left out; when none qualified and a check failed, the reason is the `cannot continue` one below with those errors. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
 | Fallback is off for the run | The same, with `Usage limit reached on <owner>'s account; fallback is off for this run`. |
 | The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, the replacement is not admitted for disk or memory capacity as a launch would not be, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
+| The old container cannot be removed | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: remove the container on <A>'s account: <error>` and keeps owning that container, which may still run, as a run whose destroy failed: cleanup retries until it is gone. |
 | The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. A swarm worker has no container left to retain, so it finishes at once and its attempt settles as failed. |
 | The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>`; a Background run fails with it. No room note is posted. |
 | The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
@@ -606,15 +607,25 @@ A headless agent's usage limit is read from its output by the adapter,
 which reads only the current agent process's output: what an earlier
 process printed, before a restart or a move, is never read again. A
 replacement that prints its result and exits before the adapter attaches
-is still read, from its own part of the transcript. The limit
-is kept in the run's sidecar, so a run whose agent exited while the server
-was down still moves when recovery finalizes it; that move starts once
-recovery has finished, so the run's terminals and browser are reconciled
-first, and it does not hold up the recovery of other runs. The scheduler subscribes to usage
-limits before recovery and resubscribes with replay from the last limit it
-handled if the stream drops an event or closes. Once a move has acted on a
-limit (moved, no account, or no move possible), the limit is cleared, so a
-later unrelated exit is not taken for it.
+is still read, once, from its own part of the transcript; a session the
+scheduler stopped, or one already read, is not.
+
+Every usage limit, whichever agent reported it (headless output, a Standard
+run's hook, an Enhanced turn's error), is kept in the run's sidecar until a
+move has acted on it. After a restart, recovery starts the move it is owed
+once recovery has finished, so the run's terminals and browser are
+reconciled first, and without holding up the recovery of other runs: from
+the exit of a run whose agent exited while the server was down, and at once
+for a run whose container is still live, as a swarm worker's, a Standard
+run's or an Enhanced run's. A run that recovery then cannot move gets the
+report it would have had without fallback (a Standard run idles with the
+agent's own message, an Enhanced turn fails as without fallback), or the
+reason it cannot move as in the table above. The scheduler subscribes to
+usage limits before recovery and resubscribes with replay from the last
+limit it handled if the stream drops an event or closes. Once a move has
+acted on a limit (moved, no account, or no move possible), or the run
+finishes, the limit is cleared, so a later unrelated exit is not taken for
+it.
 
 From recording the account until the move finishes, the run's sidecar holds
 an `account_swap` marker naming both accounts, the new container once it

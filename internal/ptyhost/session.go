@@ -60,8 +60,12 @@ type session struct {
 	att        runtime.Attachment
 	tr         *castWriter
 	// transcriptStart is the incarnation the session's transcript opened
-	// with; it outlives tr, which the session's end closes.
+	// with; it outlives tr, which the session's end closes. exited is set
+	// when the process ended on its own rather than by StopSession, and
+	// tapped once an output tap has read the session.
 	transcriptStart int64
+	exited          bool
+	tapped          bool
 	checkpoint      string
 	checkpointMu    sync.Mutex
 	checkpointSeq   uint64
@@ -329,6 +333,7 @@ func (s *session) end() {
 		return
 	}
 	s.ended = true
+	s.exited = true
 	s.changedLocked()
 	s.finishDone = make(chan struct{})
 	capture, tr := s.finishLocked()
