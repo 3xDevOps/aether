@@ -238,7 +238,7 @@ func TestDiscoveryMechanisms(t *testing.T) {
 
 func TestArgv(t *testing.T) {
 	template := []string{"claude", "-p", TaskPlaceholder, "prefix-{task}-suffix"}
-	got := Argv(template, "fix the bug")
+	got := Argv(template, "fix the bug", nil)
 	want := []string{"claude", "-p", "fix the bug", "prefix-fix the bug-suffix"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Argv = %v, want %v", got, want)
@@ -254,16 +254,56 @@ func TestArgv(t *testing.T) {
 // dangling with an empty value the CLI would reject.
 func TestArgvTaskless(t *testing.T) {
 	claude, _ := Lookup("claude")
-	if got, want := Argv(claude.TUIArgs, ""), []string{"claude", "--dangerously-skip-permissions"}; !slices.Equal(got, want) {
+	if got, want := Argv(claude.TUIArgs, "", nil), []string{"claude", "--dangerously-skip-permissions"}; !slices.Equal(got, want) {
 		t.Fatalf("claude taskless argv = %v, want %v", got, want)
 	}
 	opencode, _ := Lookup("opencode")
-	if got, want := Argv(opencode.TUIArgs, ""), []string{"opencode"}; !slices.Equal(got, want) {
+	if got, want := Argv(opencode.TUIArgs, "", nil), []string{"opencode"}; !slices.Equal(got, want) {
 		t.Fatalf("opencode taskless argv = %v, want %v", got, want)
 	}
 	// A non-empty task still couples opencode's prompt into one token.
-	if got, want := Argv(opencode.TUIArgs, "do it"), []string{"opencode", "--prompt=do it"}; !slices.Equal(got, want) {
+	if got, want := Argv(opencode.TUIArgs, "do it", nil), []string{"opencode", "--prompt=do it"}; !slices.Equal(got, want) {
 		t.Fatalf("opencode argv = %v, want %v", got, want)
+	}
+}
+
+func TestArgvModel(t *testing.T) {
+	claude, _ := Lookup("claude")
+	opencode, _ := Lookup("opencode")
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"before the task", Argv(claude.TUIArgs, "do it", claude.ModelLaunchArgs("opus")),
+			[]string{"claude", "--dangerously-skip-permissions", "--model", "opus", "do it"}},
+		{"before a prompt flag", Argv(opencode.TUIArgs, "do it", opencode.ModelLaunchArgs("anthropic/claude-sonnet-4-5")),
+			[]string{"opencode", "--model", "anthropic/claude-sonnet-4-5", "--prompt=do it"}},
+		{"appended without a task", Argv(claude.TUIArgs, "", claude.ModelLaunchArgs("opus")),
+			[]string{"claude", "--dangerously-skip-permissions", "--model", "opus"}},
+		{"appended to resume", claude.ResumeCommand("s1", "opus"),
+			[]string{"claude", "--dangerously-skip-permissions", "--resume", "s1", "--model", "opus"}},
+	}
+	for _, tt := range tests {
+		if !slices.Equal(tt.got, tt.want) {
+			t.Errorf("%s: argv = %v, want %v", tt.name, tt.got, tt.want)
+		}
+	}
+}
+
+func TestEveryShippedAgentHasAModelFlag(t *testing.T) {
+	for _, p := range Profiles() {
+		count := 0
+		for _, a := range p.ModelArgs {
+			count += strings.Count(a, ModelPlaceholder)
+		}
+		want := 1
+		if p.Name == "custom" {
+			want = 0
+		}
+		if count != want {
+			t.Errorf("%s ModelArgs %v carry %d model placeholders, want %d", p.Name, p.ModelArgs, count, want)
+		}
 	}
 }
 

@@ -622,7 +622,13 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 		}
 		return nil
 	}
-	selected := value.(string) // selection checked the legacy value and type.
+	return s.setLegacy(ctx, category, value.(string), revision) // selection checked the legacy value and type.
+}
+
+// setLegacy runs under optionMu; revision is the category's legacy revision
+// read before the call.
+func (s *Session) setLegacy(ctx context.Context, category, selected string, revision uint64) error {
+	var err error
 	if category == "model" {
 		err = s.conn.setModel(ctx, selected)
 	} else {
@@ -644,6 +650,52 @@ func (s *Session) SetOption(ctx context.Context, configID string, value any) err
 		}
 	}
 	return nil
+}
+
+// SetModel sets the agent's native model option when it advertises one, and
+// calls session/set_model otherwise.
+func (s *Session) SetModel(ctx context.Context, model string) error {
+	if id := s.nativeModelID(); id != "" {
+		return s.SetOption(ctx, id, model)
+	}
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	revision := s.options.model.revision
+	s.mu.Unlock()
+	return s.setLegacy(ctx, "model", model, revision)
+}
+
+func (s *Session) nativeModelID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, option := range s.options.options {
+		if option.category() == "model" {
+			return option.ID
+		}
+	}
+	return ""
+}
+
+// Model is the session's current model, empty when the agent reports none.
+func (s *Session) Model() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, option := range s.options.options {
+		if option.category() == "model" {
+			if current, ok := option.selectValue(); ok {
+				return current
+			}
+		}
+	}
+	return s.options.model.current
+}
+
+// Notice appends a notice to the session's items.
+func (s *Session) Notice(severity, title, description string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}})
 }
 
 // SetMode switches the agent's mode for agents that expose modes but no

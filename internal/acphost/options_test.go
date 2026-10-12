@@ -400,3 +400,47 @@ func TestNativeOptionResponseDoesNotOverwriteInFlightUpdates(t *testing.T) {
 		})
 	}
 }
+
+func TestSetModelUsesTheNativeOptionElseSetModel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	requests := make(chan map[string]any, 2)
+	record := func(_ *acp.Connection, method string, raw json.RawMessage) (any, *acp.RequestError) {
+		var params map[string]any
+		_ = json.Unmarshal(raw, &params)
+		params["method"] = method
+		requests <- params
+		if method == acp.AgentMethodSessionSetConfigOption {
+			return map[string]any{"configOptions": []any{map[string]any{"id": "llm", "category": "model", "type": "select", "currentValue": params["value"], "options": []any{}}}}, nil
+		}
+		return map[string]any{}, nil
+	}
+
+	legacy := startOptionSession(t, `{"sessionId":"options",`+legacySessionOptions+`}`, record)
+	if got := legacy.Model(); got != "provider/a" {
+		t.Fatalf("legacy Model() = %q, want provider/a", got)
+	}
+	if err := legacy.SetModel(ctx, "provider/unlisted"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-requests; got["method"] != "session/set_model" || got["modelId"] != "provider/unlisted" {
+		t.Fatalf("legacy request %+v", got)
+	}
+	if got := legacy.Model(); got != "provider/unlisted" {
+		t.Fatalf("legacy Model() after SetModel = %q", got)
+	}
+
+	native := startOptionSession(t, `{"sessionId":"options",`+legacySessionOptions+`,"configOptions":[{"id":"llm","category":"model","type":"select","currentValue":"x","options":[]}]}`, record)
+	if got := native.Model(); got != "x" {
+		t.Fatalf("native Model() = %q, want x", got)
+	}
+	if err := native.SetModel(ctx, "y"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-requests; got["method"] != acp.AgentMethodSessionSetConfigOption || got["configId"] != "llm" || got["value"] != "y" {
+		t.Fatalf("native request %+v", got)
+	}
+	if got := native.Model(); got != "y" {
+		t.Fatalf("native Model() after SetModel = %q", got)
+	}
+}

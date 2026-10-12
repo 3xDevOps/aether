@@ -41,13 +41,13 @@ type RunLauncherWithOptions interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
 }
 
-var errLaunchOptionsUnsupported = errors.New("sshd: cached base retry is not supported")
+var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base or a model) are not supported")
 
 func launchWithOptions(ctx context.Context, runs RunController, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" {
+	if opts.CachedBase != "" || opts.Model != "" {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)

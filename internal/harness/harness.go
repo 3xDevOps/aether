@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"path"
@@ -17,6 +18,9 @@ import (
 
 // TaskPlaceholder is replaced by the run's task prompt in argv templates.
 const TaskPlaceholder = "{task}"
+
+// ModelPlaceholder is replaced by the run's model in ModelArgs and ModelEnv.
+const ModelPlaceholder = "{model}"
 
 // DiscoveryInstruction points to live run identity, available capabilities, and
 // any assignment. It carries no authority, identity, or task details.
@@ -292,6 +296,12 @@ type Profile struct {
 	// SteerSubmit ends a steering message written to stdin. Empty means one
 	// Enter; opencode needs a second Enter to send.
 	SteerSubmit string
+	// ModelArgs is the CLI's model flag with ModelPlaceholder; empty means
+	// the CLI has no flag and a model is refused.
+	ModelArgs []string
+	// ModelEnv carries the model in JSON configuration variables, where
+	// ModelPlaceholder is substituted JSON-escaped.
+	ModelEnv map[string]string
 	// DiscoveryArgs load the discovery hint on a taskless interactive launch.
 	DiscoveryArgs []string
 	// DiscoveryEnv is DiscoveryArgs for a harness with no startup flag for it.
@@ -364,6 +374,7 @@ var profiles = map[string]Profile{
 		ACPInstall:       claudeACP,
 		ACPMode:          "bypassPermissions",
 		ACPTitleLookup:   true,
+		ModelArgs:        []string{"--model", ModelPlaceholder},
 		ResumeArgs:       []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		ACPSessionShared: true,
 		SwitchVerified:   true,
@@ -402,6 +413,7 @@ var profiles = map[string]Profile{
 		ACPInstall:      codexACP,
 		ACPMode:         "agent-full-access",
 		ACPDefault:      true,
+		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
 		EnvPassthrough:  []string{"OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
@@ -425,6 +437,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs:       []string{"pi", "-p", TaskPlaceholder},
 		ACPArgs:            []string{piACP.Binary},
 		ACPInstall:         piACP,
+		ModelArgs:          []string{"--model", ModelPlaceholder},
 		NoPermissionPrompt: true,
 		EnvPassthrough:     []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths:    []string{".pi/agent/auth.json"},
@@ -452,6 +465,7 @@ var profiles = map[string]Profile{
 		// omp acp and the TUI read and write one session store.
 		ACPSessionShared: true,
 		ACPDefault:       true,
+		ModelArgs:        []string{"--model=" + ModelPlaceholder},
 		ResumeArgs:       []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
 		SwitchVerified:   true,
 		EnvPassthrough:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
@@ -482,6 +496,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".config/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
+		ModelArgs:       []string{"--model", ModelPlaceholder},
+		// opencode acp has no model flag, so every opencode launch also
+		// carries the model in its config.
+		ModelEnv: map[string]string{"OPENCODE_CONFIG_CONTENT": `{"model":"` + ModelPlaceholder + `"}`},
 		// The TUI accepts steered text into its editor on the first
 		// Enter and sends on the second.
 		SteerSubmit: "\r\r",
@@ -545,14 +563,44 @@ func SetupHarnesses() []Profile {
 
 // An empty task is a taskless launch: tokens carrying the placeholder are
 // dropped whole, so a prompt-only flag such as opencode's
-// "--prompt={task}" does not dangle.
-func Argv(template []string, task string) []string {
-	out := make([]string, 0, len(template))
+// "--prompt={task}" does not dangle. model goes before the task, since a
+// CLI may stop parsing options at its prompt, or last when there is none.
+func Argv(template []string, task string, model []string) []string {
+	out := make([]string, 0, len(template)+len(model))
 	for _, a := range template {
-		if task == "" && strings.Contains(a, TaskPlaceholder) {
-			continue
+		if strings.Contains(a, TaskPlaceholder) {
+			if task == "" {
+				continue
+			}
+			out = append(out, model...)
+			model = nil
+			a = strings.ReplaceAll(a, TaskPlaceholder, task)
 		}
-		out = append(out, strings.ReplaceAll(a, TaskPlaceholder, task))
+		out = append(out, a)
+	}
+	return append(out, model...)
+}
+
+func (p Profile) ModelLaunchArgs(model string) []string {
+	if len(p.ModelArgs) == 0 || model == "" {
+		return nil
+	}
+	out := make([]string, 0, len(p.ModelArgs))
+	for _, a := range p.ModelArgs {
+		out = append(out, strings.ReplaceAll(a, ModelPlaceholder, model))
+	}
+	return out
+}
+
+func (p Profile) ModelLaunchEnv(model string) map[string]string {
+	if len(p.ModelEnv) == 0 || model == "" {
+		return nil
+	}
+	quoted, _ := json.Marshal(model)
+	escaped := string(quoted[1 : len(quoted)-1])
+	out := make(map[string]string, len(p.ModelEnv))
+	for name, value := range p.ModelEnv {
+		out[name] = strings.ReplaceAll(value, ModelPlaceholder, escaped)
 	}
 	return out
 }

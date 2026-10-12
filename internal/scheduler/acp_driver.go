@@ -383,6 +383,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
 		}
 	}
+	if run.Model != "" {
+		if err := sess.SetModel(ctx, run.Model); err != nil {
+			sess.Notice("error", "Model not set", err.Error())
+		}
+	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
 	d.setRun(runID, r)
 	go d.watch(entry, r)

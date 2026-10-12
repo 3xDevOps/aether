@@ -283,7 +283,7 @@ func (m modeSwitch) recordIntent(intent *switchIntent) error {
 // writeTerminal returns the next-command file's nonce and the reporter the
 // command gives the run.
 func (m modeSwitch) writeTerminal() (string, harness.Reporter, error) {
-	argv := m.profile.ResumeCommand(m.session)
+	argv := m.profile.ResumeCommand(m.session, m.run.Model)
 	var native harness.NativeLaunch
 	if m.c.enabled && m.run.Task != "" {
 		var err error
