@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -1243,5 +1244,37 @@ func TestMoveRecordsTheReplacementsGitAuthor(t *testing.T) {
 	sc, err := e.sched.readSidecar(run.ID)
 	if err != nil || spec.Env["GIT_AUTHOR_EMAIL"] != "ada@example.com" || sc.GitAuthorEmail != "ada@example.com" {
 		t.Fatalf("replacement commits as %q, run records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
+	}
+}
+
+// A server that stops while the scheduler reads the event log's position
+// stops cleanly; a read that fails for another reason still fails Start.
+func TestStartStoppedDuringTheEventLogReadIsClean(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		read func(context.Context, context.CancelFunc) (uint64, error)
+		want string
+	}{
+		{"shutdown", func(ctx context.Context, cancel context.CancelFunc) (uint64, error) {
+			cancel()
+			return 0, fmt.Errorf("events: read last seq: %w", ctx.Err())
+		}, ""},
+		{"failed read", func(context.Context, context.CancelFunc) (uint64, error) {
+			return 0, errors.New("events: read last seq: disk I/O error")
+		}, "scheduler: read the event log's position: events: read last seq: disk I/O error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			e := newTestEnv(t, func(cfg *Config) {
+				cfg.EventSeq = func(ctx context.Context) (uint64, error) { return tc.read(ctx, cancel) }
+			})
+			err := e.sched.Start(ctx)
+			if got := fmt.Sprint(err); (tc.want == "" && err != nil) || (tc.want != "" && got != tc.want) {
+				t.Fatalf("Start = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

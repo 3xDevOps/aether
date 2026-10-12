@@ -571,14 +571,18 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		start uint64
 		err   error
 	)
+	// A shutdown during either read is a clean stop, as during recovery.
 	if s.cfg.EventSeq != nil {
 		if start, err = s.cfg.EventSeq(ctx); err != nil {
-			return fmt.Errorf("scheduler: read the event log's position: %w", err)
+			return recoveryError(fmt.Errorf("scheduler: read the event log's position: %w", err))
 		}
 	}
 	limits, err := s.subscribeUsageLimits(ctx, start, true)
+	if errors.Is(err, events.ErrBusClosed) {
+		return nil
+	}
 	if err != nil {
-		return fmt.Errorf("scheduler: subscribe to usage limits: %w", err)
+		return recoveryError(fmt.Errorf("scheduler: subscribe to usage limits: %w", err))
 	}
 	if err := s.recoverRuns(ctx); err != nil {
 		_ = limits.Close()
