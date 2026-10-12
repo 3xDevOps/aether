@@ -195,6 +195,9 @@ type Attempt struct {
 	CancellationActorRunID string  `json:"cancellation_actor_run_id,omitempty"`
 	CancellationGeneration uint64  `json:"cancellation_generation,omitempty"`
 	LastError              string  `json:"last_error,omitempty"`
+	// LaunchAccountID is the account the worker's run launches on; it
+	// differs from AccountOwnerID after a usage fallback.
+	LaunchAccountID string `json:"launch_account_id,omitempty"`
 }
 
 type SubmissionEvidence struct {
@@ -242,6 +245,10 @@ type MissionCreateParams struct {
 	Integrator         MissionIntegrator        `json:"integrator"`
 	ExecutionChoices   []MissionExecutionChoice `json:"execution_choices"`
 	IdempotencyKey     string                   `json:"idempotency_key"`
+	// FallbackAccountMemberIDs and NoFallback are the fallback policy of the
+	// integrator and every worker, as on RunLaunchParams.
+	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
+	NoFallback               bool     `json:"no_fallback,omitempty"`
 }
 
 type MissionCreateResult struct {

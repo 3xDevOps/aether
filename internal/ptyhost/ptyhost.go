@@ -407,6 +407,7 @@ func (h *Host) startSession(ctx context.Context, key SessionKey, att runtime.Att
 		resumeID:         resumeID,
 		att:              att,
 		tr:               tr,
+		transcriptStart:  tr.sessionStart,
 		checkpoint:       checkpointPath(path),
 		stdin:            att.Stdin(),
 		clients:          make(map[*client]struct{}),

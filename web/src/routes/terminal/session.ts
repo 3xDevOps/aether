@@ -175,6 +175,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
   const previousPhoneRef = useRef(phone)
   const previousStatusRef = useRef(run?.status)
   const relaunchPendingRef = useRef(false)
+  const previousAccountRef = useRef(run?.account_member_id)
   terminalRef.current = terminal
   // Render the new authority as revoked immediately; the layout cleanup below
   // makes the stored lease match before the browser can paint.
@@ -327,6 +328,14 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     [clearWriteIntent, rememberWriteIntent, runID, setTerminal, updateControl],
   )
 
+  const relaunchIfEnded = useCallback(() => {
+    const attachment = attachmentRef.current
+    if (!relaunchPendingRef.current || !attachment?.isEnded()) return
+    relaunchPendingRef.current = false
+    previousPhoneRef.current = refs.current.phone
+    attachment.reopen()
+  }, [refs])
+
   useEffect(() => {
     if (!run || !terminal || startingStatuses.includes(run.status)) return
     if (attachmentRef.current) return
@@ -434,8 +443,10 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
           }
         }
       },
-      onState: (connection) =>
-        setTerminal(runID, connection === 'offline' ? { connection, write: false } : { connection }),
+      onState: (connection) => {
+        setTerminal(runID, connection === 'offline' ? { connection, write: false } : { connection })
+        if (connection === 'offline') relaunchIfEnded()
+      },
       onRefused: (message, code) => {
         abortedReplayRef.current = false
         acceptedReplayRef.current = false
@@ -515,6 +526,7 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     onControlResult,
     refs,
     rememberControlSession,
+    relaunchIfEnded,
   ])
 
   useEffect(() => {
@@ -540,13 +552,20 @@ export function useRunTerminalSession(input: RunTerminalSessionInput): RunTermin
     previousStatusRef.current = current
     if (previous !== undefined && isEnded(previous) && current !== undefined && !isEnded(current)) {
       relaunchPendingRef.current = true
-      if (attachmentRef.current?.isEnded()) {
-        relaunchPendingRef.current = false
-        previousPhoneRef.current = phone
-        attachmentRef.current.reopen()
-      }
+      relaunchIfEnded()
     }
-  }, [phone, run?.status])
+  }, [relaunchIfEnded, run?.status])
+
+  // An account move replaces the agent's session under the same name while
+  // the run stays live; the old stream ends as "session ended", which the
+  // attachment never reconnects on its own.
+  useEffect(() => {
+    const previous = previousAccountRef.current
+    previousAccountRef.current = run?.account_member_id
+    if (previous === undefined || previous === run?.account_member_id) return
+    relaunchPendingRef.current = true
+    relaunchIfEnded()
+  }, [relaunchIfEnded, run?.account_member_id])
 
   useLayoutEffect(() => {
     const previousAuthority = previousAuthorityRef.current

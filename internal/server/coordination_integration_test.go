@@ -18,6 +18,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -200,6 +201,7 @@ type coordEnv struct {
 	serverBinary string
 	dataDir      string
 	keyPath      string
+	usage        fallback.QuotaReader
 
 	ws  *domain.Workspace
 	ada coordMember
@@ -304,6 +306,7 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		BrowserImage:         e.browserImage,
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
+		Usage:                e.usage,
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

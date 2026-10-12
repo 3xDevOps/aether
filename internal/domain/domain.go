@@ -141,6 +141,20 @@ type LaunchOptions struct {
 	Model         string
 	CachedBase    string
 	AssignedRunID RunID
+	// RequestedAccount is the account the launcher asked for, recorded on the
+	// run when a fallback launched it on another one.
+	RequestedAccount MemberID
+	Fallback         AccountFallback
+}
+
+// AccountFallback is where a launch may move when the requested account's
+// vendor usage is exhausted.
+type AccountFallback struct {
+	// Disabled keeps every launch on the requested account.
+	Disabled bool
+	// Order is the accounts to try, first to last. Empty means every account
+	// the launcher may launch on, most remaining usage first.
+	Order []MemberID
 }
 
 // Role is a member's role within the deployment.
@@ -574,6 +588,11 @@ type Run struct {
 	// the harness's login paths from this member's home and changes neither
 	// ownership nor attribution.
 	AccountMemberID MemberID
+	// RequestedAccountMemberID is the account the launcher asked for when it
+	// differs from AccountMemberID because that account's usage was
+	// exhausted; empty otherwise.
+	RequestedAccountMemberID MemberID
+	Fallback                 AccountFallback
 	// HomeMemberID is whose home the container mounts: the launcher. A
 	// handoff changes MemberID, never this. Empty on rows created before
 	// account shares were narrowed.

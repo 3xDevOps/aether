@@ -576,6 +576,92 @@ run records `failed` with `agent exited 1: <cause>`, for example
 carries the full error. A server restart mid-turn resumes the session and asks the
 agent to continue; a turn that had already ended finishes the run.
 
+### Usage limit mid-run
+
+When an agent reports that its account's usage limit stopped it
+([signals](harnesses.md#usage-limit-signals)), Aether moves the run to
+another account ([teams.md](teams.md#usage-fallback)). Under the shared
+authorization lock it reads the run again, checks that its current owner,
+and the member whose home the container mounts, may launch, and chooses the
+account. A handoff or kill while the move read quota is decided on there:
+an account the new owner cannot use is left out, and a run being killed is
+not moved. It then releases the lock, stops the agent and removes the
+container. Only once the old container is gone does it take the lock again,
+admit the owner and home member and the share once more, and record the run
+on the new account: a segment appended to `run_account_segments` and
+`runs.account_member_id` set. A handoff, revocation or kill in between fails
+the move with that reason. It then creates a container with the new
+account's login and resumes the agent's session there. The move has five minutes, and the run's finish afterwards gets its
+own. A server that stops mid-move never changes the run's outcome: the
+run is not failed or parked, and its usage limit and any marker below stay
+for the next server, whose recovery moves it as described below.
+
+| Outcome | What happens |
+| --- | --- |
+| Moved | The run carries on with the same ID, checkout, branch and room. A `run.account` event and a room note announce it. An Enhanced session gets its continuation prompt after the move has let go of the run, so a second limit moves it again, to an account it has not used. |
+| No account qualifies | Nothing is removed. An account whose check failed (an unreadable installation, a store error) is left out; when none qualified and a check failed, the reason is the `cannot continue` one below with those errors. An Enhanced or Standard run parks at `needs-attention`, and a Background run fails, with `Usage limit reached on <owner>'s account; no fallback has usage left`. A swarm's Background worker parks instead of failing. |
+| Fallback is off for the run | The same, with `Usage limit reached on <owner>'s account; fallback is off for this run`. |
+| The run cannot move | The same, with `Usage limit reached on <owner>'s account; cannot continue on another account: <reason>`. The reason is the real one: the agent has not reported a session to resume, it has no resume arguments for its mode (a member-defined agent, for instance), the run was created before account shares were narrowed to the login file, the owner may no longer launch, the replacement is not admitted for disk or memory capacity as a launch would not be, or a store or quota read failed, including recording the new account. Nothing was recorded or removed. |
+| The old container cannot be removed | The run stays recorded on its account and fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: remove the container on <A>'s account: <error>`. It keeps owning that container, which may still run, as a run whose destroy failed: cleanup retries until it is gone. A swarm worker does the same; its container is not kept for the swarm. |
+| The move fails after the old container is gone | The run fails with `Usage limit reached on <A>'s account; continuing on <B>'s account failed: <error>` and finishes like any failed run. It is not moved a second time. A swarm worker has no container left to retain, so it finishes at once and its attempt settles as failed. |
+| The Enhanced session cannot be restored on the new account | The new container stays and the run parks at `needs-attention` with `Usage limit reached on <A>'s account; the run is on <B>'s account and its session could not be restored: <error>`; a Background run fails with it. No room note is posted. |
+| A Background run's model cannot be set on the new account | The run fails with `model not set: <error>`, as at launch, rather than continue on the agent's default model. |
+| The container exits or is killed while the move is choosing | When the run does not move, it is finalized like any exit or kill. |
+| The run is paused, switching mode, being killed or closed, or finishing a reported outcome | No move: the run ends its turn or exits as it would without fallback. |
+
+A headless agent's usage limit is read from its output by the adapter,
+which reads only the current agent process's output: what an earlier
+process printed, before a restart or a move, is never read again. A
+replacement that prints its result and exits before the adapter attaches
+is still read, once, from its own part of the transcript; a session the
+scheduler stopped, or one already read, is not. If the adapter misses a
+move's `run.account` event, its next scan of running runs sees the run on
+another account than the one it read and reads the replacement.
+
+Every usage limit, whichever agent reported it (headless output, a Standard
+run's hook, an Enhanced turn's error), is kept in the run's sidecar until a
+move has acted on it. After a restart, recovery starts the move it is owed
+once recovery has finished, so the run's terminals and browser are
+reconciled first, and without holding up the recovery of other runs: from
+the exit of a run whose agent exited while the server was down, and at once
+for a run whose container is still live, as a swarm worker's, a Standard
+run's or an Enhanced run's. A run that recovery then cannot move gets the
+report it would have had without fallback (a Standard run idles with the
+agent's own message, an Enhanced turn fails as without fallback), or the
+reason it cannot move as in the table above. A second report of a limit
+while a move holds the run neither reports nor clears it, but a limit the
+replacement container reports before the move finishes is kept and followed
+when it does (an Enhanced session's pending continuation is dropped then,
+not sent later), and a move owed
+for a limit another move already acted on does nothing. The scheduler
+subscribes to usage limits before recovery, replaying from the event log's
+position, and resubscribes with replay from the last limit it handled if
+the stream drops an event or closes; a stream that keeps failing is retried
+with a growing delay, up to 30 seconds. Once a move has
+acted on a limit (moved, no account, or no move possible), or the run
+finishes, the limit is cleared, so a later unrelated exit is not taken for
+it.
+
+From choosing the account until the move finishes, the run's sidecar holds
+an `account_swap` marker naming both accounts, the new container once it
+exists, and an Enhanced session's pending continuation. Recovery after a
+crash reads it first:
+
+- **The sidecar names the new container**: the run is recovered on the new
+  account like any other surviving or lost container, and an Enhanced
+  session that was not sent its continuation is sent it.
+- **The sidecar names no container**, with or without the marker (a move
+  that failed after removing the old container clears it): the old one was
+  removed and the new one, if created, was never recorded. The run is handled
+  as one that never
+  started: a container found by its creation key is destroyed, partial work
+  is preserved, and the run is marked `interrupted`.
+- **The sidecar still names the old container**: the move recorded nothing
+  yet. The marker is dropped and the run is recovered on its old account.
+
+Recovery never creates a container for a move, so a move cannot launch
+twice.
+
 ### Resource exhaustion and agent survival
 
 Run CPU, memory and PID limits contain the container's workload; they do not
@@ -725,6 +811,11 @@ workspace, account and task:
 ```text
 aether run --cached-base <40-character-commit>
 ```
+
+The printed command also repeats the refused launch's `--agent`, `--mode`,
+`--workspace`, `--account`, its `--fallback` list or `--no-fallback`, and the
+task, so the retry keeps the same [usage fallback](teams.md#usage-fallback)
+choice.
 
 The `--cached-base` override is request-scoped: it applies only to the launch
 request where it is supplied and is never inherited by later launches.

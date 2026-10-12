@@ -3,6 +3,7 @@ package adapter
 import (
 	"encoding/json"
 
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
@@ -17,9 +18,13 @@ const maxDetail = 256
 // message, assistant messages whose content blocks include tool_use, user
 // messages carrying tool_result blocks, and a final {"type":"result"}
 // message with usage and cost totals.
-type claude struct{}
+type claude struct {
+	// rejected is set by a rate_limit_event that refused the request with no
+	// overage to fall back on, until the next result line.
+	rejected bool
+}
 
-func newClaude() Adapter { return claude{} }
+func newClaude() Adapter { return &claude{} }
 
 // claudeMsg is the envelope of one stream-json line.
 type claudeMsg struct {
@@ -29,6 +34,16 @@ type claudeMsg struct {
 	Message      claudeMessage `json:"message"`
 	TotalCostUSD float64       `json:"total_cost_usd"`
 	Usage        claudeUsage   `json:"usage"`
+	IsError      bool          `json:"is_error"`
+	Result       string        `json:"result"`
+	RateLimit    claudeLimit   `json:"rate_limit_info"`
+}
+
+// claudeLimit is the rate_limit_info of a rate_limit_event line.
+type claudeLimit struct {
+	Status         string `json:"status"`
+	OverageStatus  string `json:"overageStatus"`
+	IsUsingOverage bool   `json:"isUsingOverage"`
 }
 
 // claudeMessage is the API message inside assistant and user envelopes.
@@ -57,7 +72,7 @@ type claudeBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func (claude) ConsumeLine(line string) []events.Payload {
+func (c *claude) ConsumeLine(line string) []events.Payload {
 	if len(line) == 0 || line[0] != '{' {
 		return nil // ordinary PTY output, not a stream-json record
 	}
@@ -111,12 +126,16 @@ func (claude) ConsumeLine(line string) []events.Payload {
 			})
 		}
 		return out
+	case "rate_limit_event":
+		r := msg.RateLimit
+		c.rejected = r.Status == "rejected" && !r.IsUsingOverage &&
+			r.OverageStatus != "allowed" && r.OverageStatus != "allowed_warning"
 	case "result":
 		// Per-turn assistant usage is ignored; only the final result
 		// message is emitted, so the run's cost is counted exactly once.
 		// InputTokens folds cache creation and cache read tokens in: the
 		// total prompt-side tokens the run consumed.
-		return []events.Payload{events.RunCostPayload{
+		out := []events.Payload{events.RunCostPayload{
 			InputTokens: msg.Usage.InputTokens +
 				msg.Usage.CacheCreationInputTokens +
 				msg.Usage.CacheReadInputTokens,
@@ -124,6 +143,11 @@ func (claude) ConsumeLine(line string) []events.Payload {
 			CostUSD:      msg.TotalCostUSD,
 			Metered:      true,
 		}}
+		if c.rejected && msg.IsError && agentstatus.IsUsageLimitMessage(msg.Result) {
+			out = append(out, events.RunUsageLimitPayload{Message: msg.Result, SessionID: msg.SessionID})
+		}
+		c.rejected = false
+		return out
 	}
 	return nil
 }

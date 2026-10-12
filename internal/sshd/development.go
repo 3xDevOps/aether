@@ -8,6 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
@@ -122,7 +123,7 @@ func (s *Server) developmentAuthority(ctx context.Context, member domain.MemberI
 		if err != nil {
 			return err
 		}
-		_, err = ResolveLaunchAccount(ctx, s.cfg.Store, member, string(current.AccountMember()))
+		_, err = fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(current.AccountMember()))
 		return err
 	}
 	if err := authorize(ctx); err != nil {

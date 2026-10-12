@@ -13,6 +13,7 @@ import type {
   GitBranchPayload,
   LinkStatus,
   OverlapPayload,
+  RunAccountPayload,
   RunArchivedPayload,
   RunControllerPayload,
   RunDiffPayload,
@@ -549,6 +550,11 @@ export async function applyEvent(
       // A run this client has not loaded arrives with the holder in its snapshot.
       const p = ev.payload as RunControllerPayload
       store.getState().applyRunController(ev.run_id, p.member_id, p.last_member_id)
+      break
+    }
+    case 'run.account': {
+      const p = ev.payload as RunAccountPayload
+      store.getState().applyRunAccount(ev.run_id, p.account_member_id, p.requested_account_member_id)
       break
     }
     case 'run.archived': {

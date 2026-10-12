@@ -26,6 +26,10 @@ type Run struct {
 	ACP             bool   `json:"acp,omitempty"`
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
+	// RequestedAccountMemberID is the account the launcher asked for, set
+	// only when its usage was exhausted and the run launched on
+	// AccountMemberID instead.
+	RequestedAccountMemberID string `json:"requested_account_member_id,omitempty"`
 	// Paused has no omitempty: absence must keep meaning "gateway too old
 	// to know", never "not paused", or clients cannot seed pause state.
 	Paused bool `json:"paused"`
@@ -175,6 +179,8 @@ func RunFromDomain(r *domain.Run) Run {
 		BaseBranch:          r.BaseBranch,
 		BaseSource:          r.BaseSource,
 		BaseCheckedAt:       rfc3339ValuePtr(r.BaseCheckedAt),
+
+		RequestedAccountMemberID: string(r.RequestedAccountMemberID),
 	}
 }
 
@@ -325,6 +331,12 @@ type RunLaunchParams struct {
 	// CachedBase retries a transient base-capture failure with the accepted
 	// mirror commit; one launch consumes it.
 	CachedBase string `json:"cached_base,omitempty"`
+	// FallbackAccountMemberIDs are the accounts to launch on, in order, when
+	// the requested account's usage is exhausted; omitted means every
+	// account the caller may launch on, most remaining usage first.
+	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
+	// NoFallback keeps the launch on the requested account.
+	NoFallback bool `json:"no_fallback,omitempty"`
 }
 
 type RunListParams struct {

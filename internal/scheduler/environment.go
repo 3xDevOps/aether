@@ -528,6 +528,58 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	return SharedLaunchable, "", err
 }
 
+// FallbackLaunchable reports whether a launch in member's home of harnessName
+// in mode on account can stand in for one on requested as a usage fallback:
+// the owner's login is there to share, an enhanced launch finds its ACP
+// server, and the agent runs from member's own installation, or from the
+// image when the launch on requested would too. It never borrows the owner's
+// installation, whose executables only a launcher who picked that account
+// has agreed to run, and never moves a launch that relied on requested's
+// installation to an account where the agent is missing, nor onto a login a
+// live container holds under another uid:gid. It reads member homes and the
+// scheduler's own state only, never the runtime or the vendor.
+func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
+	state, _, err := s.CheckSharedLaunch(ctx, member, account, harnessName)
+	if err != nil || state != SharedLaunchable || s.cfg.Homes == nil {
+		return err == nil && state == SharedLaunchable, err
+	}
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return false, err
+	}
+	if mode == domain.LaunchACP {
+		installed, adapterErr := s.adapterInstalled(member, account, profile, argvs)
+		if adapterErr != nil || !installed {
+			return false, adapterErr
+		}
+	}
+	if len(profile.TUIArgs) > 0 {
+		installation, installErr := s.cfg.Homes.Installation(member, account, profile.TUIArgs[0], profile.InstallPaths)
+		if installErr != nil || (installation != "" && installation != member) {
+			return false, installErr
+		}
+		if installation == "" {
+			asked, askedErr := s.cfg.Homes.Installation(member, requested, profile.TUIArgs[0], profile.InstallPaths)
+			if askedErr != nil || asked != "" {
+				return false, askedErr
+			}
+		}
+	}
+	// A live container that holds the login under another uid:gid would
+	// refuse the launch once its run exists. The launch's user is known
+	// without asking the runtime only from member's live containers, which
+	// share one mapping; with none, the launch itself finds any conflict.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.syncRunUserReservationsLocked()
+	for reservation := range s.credentialUsers {
+		if reservation.home == member && reservation.user != "" {
+			return s.reservationConflictLocked(member, account, reservation.user, "") == nil, nil
+		}
+	}
+	return true, nil
+}
+
 // pinnedLogins mounts each login file of a PinLogin harness in member's own
 // home over itself once member shares their account, except where the plan
 // already mounts another member's login. A login path that is a directory or

@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runrepo"
@@ -100,7 +101,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 			if current.AccountMember() != account {
 				return fmt.Errorf("%w: run account changed; refresh before acting", permissions.ErrDenied)
 			}
-			_, accountErr := ResolveLaunchAccount(ctx, s.cfg.Store, member, string(account))
+			_, accountErr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(account))
 			return accountErr
 		})
 	}

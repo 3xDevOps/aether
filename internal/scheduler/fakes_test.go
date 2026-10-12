@@ -30,6 +30,8 @@ type fakeRuntime struct {
 	createErr   error
 	createHook  func()
 	stopErr     error
+	destroyErr  error
+	waitCalls   int
 	startErr    error
 	waitErr     error
 	startHook   func(c *fakeContainer)
@@ -244,6 +246,10 @@ func (r *fakeRuntime) Stop(_ context.Context, id runtime.ID, _ time.Duration) er
 
 func (r *fakeRuntime) Destroy(_ context.Context, id runtime.ID) error {
 	r.mu.Lock()
+	if r.destroyErr != nil {
+		r.mu.Unlock()
+		return r.destroyErr
+	}
 	c, ok := r.containers[id]
 	delete(r.containers, id)
 	r.mu.Unlock()
@@ -358,6 +364,7 @@ func (r *fakeRuntime) execTTYCalls() []fakeExecTTYCall {
 
 func (r *fakeRuntime) Wait(ctx context.Context, id runtime.ID) (runtime.ExitStatus, error) {
 	r.mu.Lock()
+	r.waitCalls++
 	waitErr := r.waitErr
 	r.mu.Unlock()
 	if waitErr != nil {

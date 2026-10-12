@@ -54,16 +54,23 @@ type pendingOutputEvent struct {
 // transcript history, bounded replay ring for non-run terminals, and attached
 // clients.
 type session struct {
-	run           SessionKey
-	resumeID      string
-	generation    uint64
-	att           runtime.Attachment
-	tr            *castWriter
-	checkpoint    string
-	checkpointMu  sync.Mutex
-	checkpointSeq uint64
-	stdinMu       sync.Mutex
-	stdin         io.WriteCloser
+	run        SessionKey
+	resumeID   string
+	generation uint64
+	att        runtime.Attachment
+	tr         *castWriter
+	// transcriptStart is the incarnation the session's transcript opened
+	// with; it outlives tr, which the session's end closes. exited is set
+	// when the process ended on its own rather than by StopSession, and
+	// tapped once an output tap has read the session.
+	transcriptStart int64
+	exited          bool
+	tapped          bool
+	checkpoint      string
+	checkpointMu    sync.Mutex
+	checkpointSeq   uint64
+	stdinMu         sync.Mutex
+	stdin           io.WriteCloser
 
 	mu                 sync.Mutex
 	clients            map[*client]struct{}
@@ -326,6 +333,7 @@ func (s *session) end() {
 		return
 	}
 	s.ended = true
+	s.exited = true
 	s.changedLocked()
 	s.finishDone = make(chan struct{})
 	capture, tr := s.finishLocked()
@@ -529,7 +537,7 @@ func (s *session) addClientCommitted(ctx context.Context, c *client) error {
 			if c.screen || s.development {
 				c.setReplay(s.screenSnapshotLocked().Data)
 			} else if _, isRun := s.run.Run(); isRun {
-				replay, replayBytes, err := s.tr.snapshot()
+				replay, replayBytes, err := s.tr.snapshot(c.sessionReplay)
 				if err != nil {
 					s.mu.Unlock()
 					return fmt.Errorf("ptyhost: snapshot run transcript: %w", err)

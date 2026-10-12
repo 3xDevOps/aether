@@ -11,9 +11,10 @@ import (
 func TestRenderRuns(t *testing.T) {
 	archivedAt := "2026-09-10T00:00:00Z"
 	runs := []protocol.Run{
-		{ID: "r1", Status: "running", Harness: "claude", MemberID: "m1", Title: "Title one", Task: "task one"},
-		{ID: "r2", Status: "needs-attention", Harness: "claude", MemberID: "m2", Title: "Title two", Task: "task two"},
-		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", Title: "Title three", Task: "task three",
+		{ID: "r1", Status: "running", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Title one", Task: "task one"},
+		{ID: "r2", Status: "needs-attention", Harness: "claude", MemberID: "m2", AccountMemberID: "m1", RequestedAccountMemberID: "m2",
+			Title: "Title two", Task: "task two"},
+		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
 	memberName := func(id string) string { return id }
@@ -28,15 +29,15 @@ func TestRenderRuns(t *testing.T) {
 	}{
 		{
 			name: "default hides archived runs",
-			want: "ID  STATUS     AGENT   MEMBER  OVERLAP        TITLE      TASK\n" +
-				"r1  running    claude  m1                     Title one  task one\n" +
-				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
+			want: "ID  STATUS     AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
+				"r1  running    claude  m1      m1                            Title one  task one\n" +
+				"r2  needs-you  claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n",
 		},
 		{
 			name:     "--needs-you hides archived runs",
 			needsYou: true,
-			want: "ID  STATUS     AGENT   MEMBER  OVERLAP        TITLE      TASK\n" +
-				"r2  needs-you  claude  m2      a.go with bob  Title two  task two\n",
+			want: "ID  STATUS     AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
+				"r2  needs-you  claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n",
 		},
 		{
 			name:     "--archived shows only archived runs",

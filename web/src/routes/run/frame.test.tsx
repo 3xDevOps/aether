@@ -10,6 +10,7 @@ import { useRunRoom } from '@/routes/run/room'
 import '@/routes/run'
 import { useStore } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
+import { applyEvent } from '@/store/sync'
 import { agentInfo, alice, approval, bob, fakeApi, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
@@ -80,6 +81,21 @@ describe('run frame', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'rewrite the checkout flow' })).toBeDefined()
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Claude Code · Standard'))
     expect(StubSocket.opened).toHaveLength(1)
+  })
+
+  it('names the account a usage fallback moved the run to', async () => {
+    open({ account_member_id: bob.id, requested_account_member_id: alice.id })
+    await waitFor(() => expect(screen.getByRole('banner').textContent).toContain("On Bob's account (fallback)"))
+  })
+
+  it('names the fallback account once a run.account event moves the run', async () => {
+    open({ account_member_id: alice.id })
+    await act(() => applyEvent(useStore, {
+      id: 'evt_1', seq: 1, time: '2026-08-14T11:00:00Z', workspace_id: workspace.id, run_id: 'run_1', actor_id: '',
+      type: 'run.account',
+      payload: { account_member_id: bob.id, previous_account_member_id: alice.id, requested_account_member_id: alice.id },
+    }, api))
+    await waitFor(() => expect(screen.getByRole('banner').textContent).toContain("On Bob's account (fallback)"))
   })
 
   it('names the model after the mode when the run chose one', async () => {

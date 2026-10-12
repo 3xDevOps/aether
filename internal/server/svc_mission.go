@@ -35,7 +35,7 @@ func init() {
 			Store: d.Store, Missions: ms, Runs: launcher, Cancel: launcher, Complete: launcher,
 			AuthorizationMu: d.SSH.AuthorizationMu, Cost: d.SSH.Services.Costs,
 			Evidence: d.Evidence, ScopeSnapshot: lazyMissionScope{ssh: d.SSH}.Snapshot,
-			Bus: d.Bus,
+			Bus: d.Bus, Usage: d.SSH.Services.Usage,
 			Integration: func() (sshd.IntegrationService, error) {
 				if d.SSH == nil {
 					return nil, errors.New("mission: SSH config is unavailable")
@@ -117,6 +117,9 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 		Harness:      req.Harness,
 		Mode:         req.Mode,
 		Model:        req.Model,
+
+		RequestedAccount: req.RequestedAccount,
+		Fallback:         req.Fallback,
 	})
 }
 
@@ -125,6 +128,13 @@ func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, ac
 		return errors.New("mission: scheduler unavailable")
 	}
 	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode, model)
+}
+
+func (l schedulerLauncher) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
+	if l.runs == nil {
+		return false, errors.New("mission: scheduler unavailable")
+	}
+	return l.runs.FallbackLaunchable(ctx, member, requested, account, harnessName, mode)
 }
 
 func (l schedulerLauncher) CancelMission(ctx context.Context, run domain.RunID) error {

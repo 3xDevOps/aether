@@ -1596,6 +1596,57 @@ ALTER TABLE mission_integrator_replacements ADD COLUMN model TEXT NOT NULL DEFAU
 ALTER TABLE identity_invitations ADD COLUMN secret_hash TEXT NOT NULL DEFAULT '';
 DELETE FROM identity_invitations WHERE consumed_at IS NULL;
 `,
+	// v61: usage fallback. A run records the account its launcher asked
+	// for when exhausted usage moved it to another, and the launcher's
+	// fallback policy (fallback_order is a JSON array of member IDs, empty
+	// for automatic); a swarm records the policy its runs follow; an
+	// attempt records the account its run launches on. Earlier rows read
+	// as automatic and launched on the requested account; a run's requested
+	// account is NULL unless it differs from the one it runs on.
+	`
+ALTER TABLE runs ADD COLUMN requested_account_member_id TEXT REFERENCES members(id);
+ALTER TABLE runs ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE missions ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mission_attempts ADD COLUMN launch_account_id TEXT NOT NULL DEFAULT '';
+`,
+	// v62: reactive usage fallback. A run keeps its account history as
+	// segments, appended when it moves to another account and never
+	// rewritten; a run with no rows never moved. Cost rows are kept per run
+	// and segment so cost metered before a move stays with the account that
+	// spent it; existing rows are segment 0.
+	`
+CREATE TABLE run_account_segments (
+	run_id            TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	seq               INTEGER NOT NULL,
+	account_member_id TEXT NOT NULL REFERENCES members(id),
+	reason            TEXT NOT NULL,
+	started_at        INTEGER NOT NULL,
+	PRIMARY KEY (run_id, seq)
+);
+CREATE TABLE run_costs_migrate AS SELECT * FROM run_costs;
+DROP TABLE run_costs;
+CREATE TABLE run_costs (
+	run_id        TEXT NOT NULL REFERENCES runs(id),
+	segment       INTEGER NOT NULL DEFAULT 0,
+	workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	member_id     TEXT NOT NULL REFERENCES members(id),
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd      REAL NOT NULL DEFAULT 0,
+	metered       INTEGER NOT NULL DEFAULT 0,
+	recorded_at   INTEGER NOT NULL,
+	PRIMARY KEY (run_id, segment)
+);
+INSERT INTO run_costs (run_id, workspace_id, member_id, input_tokens, output_tokens, cost_usd, metered, recorded_at)
+	SELECT run_id, workspace_id, member_id, input_tokens, output_tokens, cost_usd, metered, recorded_at
+	FROM run_costs_migrate;
+DROP TABLE run_costs_migrate;
+CREATE INDEX idx_run_costs_workspace ON run_costs(workspace_id);
+CREATE INDEX idx_run_costs_member ON run_costs(member_id);
+CREATE INDEX idx_run_costs_workspace_recorded ON run_costs(workspace_id, recorded_at, run_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -109,6 +109,8 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
   const owner = useStore((s) => s.members[run.member_id])
+  const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
+  const accountOwner = useStore((s) => s.members[accountID])
   return (
     <div className="@container/state w-full min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
@@ -126,6 +128,12 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span className="sr-only min-w-0 truncate @3xs/state:not-sr-only" title={run.model}>
             {` · ${run.model}`}
           </span>
+        )}
+        {accountID && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="min-w-0 truncate">On {accountOwner?.display_name ?? accountID}&apos;s account (fallback)</span>
+          </>
         )}
         <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
           <span aria-hidden>·</span>

@@ -11,6 +11,8 @@ export const eventLabel = {
   'run.protected': 'Run protection',
   'run.controller': 'Run control',
   'run.mode': 'Run mode',
+  'run.account': 'Account changed',
+  'run.usage_limit': 'Usage limit reached',
   'run.model': 'Run model',
   'run.archived': 'Archive',
   'run.outcome_seen': 'Result opened',

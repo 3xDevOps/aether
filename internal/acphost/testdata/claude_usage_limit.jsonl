@@ -1,0 +1,2 @@
+# synthesized fixture: claude-agent-acp 0.86.0 session/prompt error for a subscription usage limit (dist/acp-agent.js, src/tests/acp-agent.test.ts); not recorded from a live limit.
+{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: You've hit your weekly limit · resets Oct 14, 9am (UTC)","data":{"errorKind":"rate_limit"}}}

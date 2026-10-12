@@ -102,7 +102,15 @@ func (s *Service) start(ctx context.Context, run domain.RunID, raw json.RawMessa
 	if err != nil {
 		return nil, err
 	}
-	if _, admissionErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, m.AccountableHumanID, string(m.Integrator.AccountMemberID)); admissionErr != nil {
+	integrator, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	authorizer := m.IntegratorAuthorizingHumanID
+	if authorizer == "" {
+		authorizer = m.AccountableHumanID
+	}
+	if _, admissionErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, authorizer, string(integrator.AccountMember())); admissionErr != nil {
 		return nil, admissionErr
 	}
 	if _, startErr := s.cfg.Missions.StartMission(ctx, m.ID, run, p.IdempotencyKey); startErr != nil {

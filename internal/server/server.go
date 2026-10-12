@@ -18,18 +18,21 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/integration"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
+	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -82,6 +85,8 @@ type Config struct {
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
+	// Usage overrides the vendor quota reader, primarily for tests.
+	Usage fallback.QuotaReader
 	// IntegrationAdmission is the server-controlled policy seam for
 	// consequential candidate mutations. It is never populated from a
 	// request field.
@@ -338,6 +343,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Store:         s.db,
 		Runtime:       s.rt,
 		Bus:           s.bus,
+		EventSeq:      s.log.LastSeq,
 		Git:           lazyGit{s.git},
 		PTY:           s.pty,
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
@@ -418,6 +424,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	sshCfg.EdgeAccess = cfg.EdgeAccess
+	sshCfg.Services.Usage = cfg.Usage
+	if sshCfg.Services.Usage == nil {
+		sshCfg.Services.Usage = quota.New(homes)
+	}
 	// The name the edge agent announces; an unreadable one leaves refusals
 	// unnamed.
 	sshCfg.Name, _ = os.Hostname()
@@ -438,6 +448,21 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}); err != nil {
 		return nil, err
 	}
+	rooms := sshCfg.Services.Rooms
+	s.sched.UseUsageFallback(scheduler.UsageFallback{
+		Usage:           sshCfg.Services.Usage,
+		AuthorizationMu: authMu,
+		Note: func(ctx context.Context, run *domain.Run, body, key string) error {
+			if rooms == nil {
+				return errors.New("the room service is not configured")
+			}
+			_, postErr := rooms.Post(ctx, collab.MessageInput{
+				WorkspaceID: run.WorkspaceID, RunID: run.ID, ActorID: run.MemberID,
+				Kind: store.RoomMessageSystem, Body: body, IdempotencyKey: key,
+			})
+			return postErr
+		},
+	})
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
 	}

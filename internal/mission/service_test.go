@@ -117,14 +117,14 @@ func TestRecoveryTreatsAChangedModelAsStale(t *testing.T) {
 		"recovered integrator assignment changed": {
 			WorkspaceID: m.WorkspaceID, MissionID: m.ID, IntegratorGeneration: m.IntegratorGeneration,
 			RunID: m.CurrentIntegratorRunID, ActorRunID: m.CurrentIntegratorRunID,
-			RunOwnerID: m.IntegratorRunOwnerID, AccountOwner: m.Integrator.AccountMemberID,
+			RunOwnerID: m.IntegratorRunOwnerID, RequestedAccount: m.Integrator.AccountMemberID,
 			Task: m.Objective, Harness: m.Integrator.Harness, Mode: m.Integrator.Mode, Model: "opus",
 		},
 		"recovered worker assignment changed": {
 			WorkspaceID: m.WorkspaceID, MissionID: m.ID, AttemptID: domain.AttemptID(out.Attempt.ID),
 			IntegratorGeneration: out.Attempt.IntegratorGeneration,
 			RunID:                domain.RunID(out.Attempt.RunID), ActorRunID: domain.RunID(out.Attempt.ActorRunID),
-			RunOwnerID: domain.MemberID(out.Attempt.RunOwnerID), AccountOwner: domain.MemberID(out.Attempt.AccountOwnerID),
+			RunOwnerID: domain.MemberID(out.Attempt.RunOwnerID), RequestedAccount: domain.MemberID(out.Attempt.AccountOwnerID),
 			Task: task.Revision.Objective, Harness: out.Attempt.Harness, Mode: domain.LaunchMode(out.Attempt.Mode),
 		},
 	} {

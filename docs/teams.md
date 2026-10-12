@@ -1107,6 +1107,91 @@ success cache only within a 10-second request floor; failures wait at least
 same-credential successful window, reports its error and stale status, and is
 not presented as current after a reset has passed without a fresh measurement.
 
+### Usage fallback
+
+A `claude` or `codex` launch whose account has used 95% or more of its
+subscription quota starts on another account instead, when one qualifies. The server reads the
+same cached usage **Usage** shows ([harnesses.md](harnesses.md#subscription-quota)
+names the windows). An account whose usage cannot be read, such as an API-key
+login, a signed-out one, or one whose uncached vendor read takes longer than
+3 seconds, is launched on as requested; a fallback account
+needs a successful read below 95%. Other agents always launch as requested.
+
+The fallback accounts are your own and every account shared with you at that
+moment. An account qualifies only when its owner is logged in to the agent
+and the run would start the agent from your own installation, or from the
+environment image when the launch on the requested account would too: a
+fallback never runs a teammate's installation, and never lands where the
+agent is missing. By default the one with the most usage left wins, ties going to the
+lower member ID. In the launch dialog, **Options** (shown once someone shares
+with you) holds **Fall back to another account** and, under it, the
+**Fallback accounts** list: untick an account to leave it out, or reorder it
+with **Move `<name>` up** and **Move `<name>` down**. Once you change the
+list, the first ticked account with usage left, top to bottom, wins.
+Unticking **Fall back to another account**, or every account, turns fallback
+off, and the **Options** summary adds `· Fallback off`. From the CLI:
+
+```sh
+# If Grace's account is exhausted, try Lin's, then your own
+aether run "triage the failures" --agent claude --account <grace-member-id> \
+  --fallback <lin-member-id>,<your-member-id>
+
+# Launch on the requested account even when it is exhausted
+aether run "triage the failures" --agent claude --no-fallback
+```
+
+`--fallback` takes member IDs, comma separated, and never uses an account it
+does not list. Passing both flags fails with `--fallback and --no-fallback
+cannot be used together`. `aether swarm create` takes the same two flags; the
+swarm keeps that choice for its integrator and every worker it starts.
+
+When no account qualifies, the run launches on the requested account, as it
+would without fallback, and spends what usage is left there.
+
+A run that fell back keeps its launcher as owner. Its header reads
+**On `<name>`'s account (fallback)**, and `aether runs` shows the account it
+uses in the `ACCOUNT` column with ` (fallback)` appended.
+
+A run also moves mid-run when its agent reports that the account's usage
+limit stopped it: Enhanced runs of `claude` and `codex`, Background runs of
+`claude` and of `codex` over ACP, and Standard `claude` runs
+([harnesses.md](harnesses.md#usage-limit-signals) lists each signal and what
+is not covered). The next account is chosen as at launch, leaving out the
+current account and every account the run already used; after a handoff it
+must be shared with both the run's owner and the launcher, whose home the
+container mounts. Aether stops the
+agent, removes the run's container, and starts a new one with that account's
+login; the agent resumes its own session there and is told: "Your previous
+turn stopped because Grace's usage ran out. The run continues on Lin's
+account. Continue the task where you stopped." The run keeps its ID,
+checkout, branch, room and swarm attempt; processes in the old container,
+its terminals included, end. The run's room gets "Continued on Lin's
+account because Grace's usage ran out.", the header switches to Lin's
+account, and `aether runs` marks it ` (fallback)`.
+
+With no account to move to, an Enhanced or Standard run parks at
+`needs-attention` and a Background run fails (a swarm's Background worker
+parks instead), both with
+`Usage limit reached on Grace's account; no fallback has usage left`, which
+the dashboard shows as **Needs you**. With fallback off the reason ends
+`fallback is off for this run`, and a run that cannot move ends
+`cannot continue on another account: <reason>` with the real reason, such as
+`the agent has not reported a session to resume`. A move that fails once the
+old container is gone fails the run with `Usage limit reached on Grace's
+account; continuing on Lin's account failed: <error>`; an Enhanced session
+that cannot be restored on Lin's account parks the run there with
+`Usage limit reached on Grace's account; the run is on Lin's account and its
+session could not be restored: <error>`. A run that hits the limit again on Lin's account moves on to the
+next account.
+
+Metered cost stays with the account that spent it: a result counts for the
+account the run was on when the agent reported it, even when it is recorded
+after the move. `aether cost` counts a moved run once, on the account it
+launched on (as unmetered when nothing was measured there), and adds each
+stretch's usage to the account it ran on; `aether cost --runs` lists the run once,
+with its whole spend, under the account it is on now, and marks it metered
+only when its first account's stretch was measured.
+
 ### Launching a swarm
 
 A **swarm** is one objective handed to an interactive integrator
@@ -1192,11 +1277,19 @@ task-6jt9r5f3t3  Add /healthz           working
 task-0vstvmqcgn  Document the endpoint  ready    dependency task-6jt9r5f3t3
 
 attempts:
-ID              TASK             STATE    RUN
-att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5
+ID              TASK             STATE    RUN             ACCOUNT
+att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5  mem-h9zeh65yp9
 ```
 
 `show` prints the launch error, when there is one, after the integrator line.
+An attempt's `ACCOUNT` is the member ID of the account its run launched on,
+with ` (fallback)` appended when [usage fallback](#usage-fallback) launched
+it off the account the swarm declared for that worker. A worker that later
+moves to another account keeps its attempt; `aether runs` shows the account
+it is on. Workers fall back within the
+accountable human's accounts. An integrator that cannot launch for lack of
+usage leaves the swarm in place with that error, and the server retries the
+launch ([failure-handling.md](failure-handling.md#integrator-launch-failures)).
 
 The integrator's questions wait for you; nothing else does. `show` lists the
 question IDs; the commands below act on them and on the swarm, as the
@@ -1269,9 +1362,10 @@ A swarm is in one of four phases: `planning`, `active`, `completed`, or
 `cancelled`. It starts in `planning`, where the integrator may ask clarifying
 questions, proposes tasks, and runs `mission start`, which accepts every
 proposed task and moves the swarm to `active`. Start is refused while a
-question is unanswered and rechecks the swarm's own launch admission, so an
-accountable human who lost `run.launch` or the integrator's account share
-cannot carry the swarm forward. In `active` the integrator dispatches
+question is unanswered and rechecks the swarm's own launch admission, so a
+member who created the swarm or last replaced its integrator, and lost
+`run.launch` or the share of the account the integrator runs on, cannot carry
+the swarm forward. In `active` the integrator dispatches
 workers, accepts their work, adds or revises tasks and accepts them itself,
 and delivers the verified candidate. Its success report moves the swarm to
 `completed` and stops leftover workers; a failure report leaves the swarm

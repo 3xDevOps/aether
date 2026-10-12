@@ -36,6 +36,12 @@ function MemberRenamed({ member, actor, name }: { member: unknown; actor: unknow
   return <><Who id={actor} /> renamed {whom}{text(name) && <> to <Quote>{bounded(name, 80)}</Quote></>}</>
 }
 
+function AccountOf({ id }: { id: unknown }) {
+  const self = useStore((s) => s.info?.member.id)
+  const name = useStore((s) => s.members[text(id)]?.display_name)
+  return text(id) === self ? 'your account' : `${name ?? 'another member'}'s account`
+}
+
 function MissionName({ id }: { id: unknown }) {
   const objective = useStore((s) => s.missions[text(id)]?.objective)
   return objective ? `“${objective.split('\n')[0]}”` : 'a swarm'
@@ -257,6 +263,8 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
     return e.actor_id ? <><Who id={e.actor_id} /> released control</> : 'Control released'
   },
   'run.mode': (p) => modeLine(p),
+  'run.account': (p) => <>Moved from <AccountOf id={p.previous_account_member_id} /> to <AccountOf id={p.account_member_id} /></>,
+  'run.usage_limit': (p) => (text(p.message) ? `Usage limit reached: ${bounded(p.message, 160)}` : 'Usage limit reached'),
   'run.model': (p) => <>Model set to <Quote>{bounded(p.model, 160)}</Quote></>,
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,

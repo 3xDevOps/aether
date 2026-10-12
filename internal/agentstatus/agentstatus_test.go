@@ -71,6 +71,20 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 	}
 }
 
+// Claude Code 2.1.112 StopFailure payloads: a usage limit, and a transient
+// 429 that shares its error kind.
+func TestClaudeStopFailureUsageLimit(t *testing.T) {
+	limit := "You've hit your session limit · resets 3pm (UTC)"
+	got, ok := FromClaudeHook([]byte(`{"session_id":"s1","transcript_path":"/root/.claude/projects/x/s1.jsonl","cwd":"/workspace","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"` + limit + `"}`))
+	if want := (Report{State: Idle, Reason: limit, SessionID: "s1", UsageLimit: true}); !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage limit = %+v, mapped=%v; want %+v", got, ok, want)
+	}
+	got, ok = FromClaudeHook([]byte(`{"session_id":"s1","hook_event_name":"StopFailure","error":"rate_limit","last_assistant_message":"API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited"}`))
+	if want := (Report{State: Idle, Reason: "agent failed", SessionID: "s1"}); !ok || !reflect.DeepEqual(got, want) {
+		t.Fatalf("transient 429 = %+v, mapped=%v; want %+v", got, ok, want)
+	}
+}
+
 func TestCodexNotifyOnlyReportsIdle(t *testing.T) {
 	got, ok := FromCodexNotify(`{"type":"agent-turn-complete","thread-id":"0199a1b2-c3d4","turn-id":"7","last-assistant-message":"What is your password?"}`)
 	if !ok || got.State != Idle || len(got.InputUpdates) != 0 || got.SessionID != "0199a1b2-c3d4" {

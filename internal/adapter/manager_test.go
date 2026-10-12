@@ -265,6 +265,94 @@ func TestManagerStartupScan(t *testing.T) {
 	}
 }
 
+// movedTap is a run's output across an account move: the old session's
+// reader, then nothing once that session is stopped, then the replacement
+// session's reader once it exists.
+type movedTap struct {
+	mu          sync.Mutex
+	old         io.ReadCloser
+	replacement io.ReadCloser
+}
+
+func (m *movedTap) TapOutput(domain.RunID) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := m.old
+	m.old = nil
+	if next == nil {
+		next, m.replacement = m.replacement, nil
+	}
+	if next == nil {
+		return nil, io.ErrClosedPipe
+	}
+	return next, nil
+}
+
+// TestManagerScanTapsTheReplacementAfterALostAccountEvent: a move stops the
+// old session, whose tap ends, and starts the replacement later. When its
+// run.account event is lost, the next scan sees the run on another account
+// than the one it was tapped on and taps the replacement.
+func TestManagerScanTapsTheReplacementAfterALostAccountEvent(t *testing.T) {
+	data, err := os.ReadFile("testdata/claude_tty.jsonl")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	const (
+		workspace = domain.WorkspaceID("ws_1")
+		run       = domain.RunID("run_1")
+	)
+	bus := newTestBus(t)
+	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
+		run: {ID: run, WorkspaceID: workspace, MemberID: "mem_a", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+	}}
+	oldR, oldW := io.Pipe()
+	tap := &movedTap{old: oldR}
+	sub, err := bus.Subscribe(t.Context(), events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeAgentEvent, events.TypeRunCost}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+	m := NewManager(bus, runs, tap)
+	if err = m.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+
+	_ = oldW.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		m.mu.Lock()
+		ended := m.active[run] == nil
+		m.mu.Unlock()
+		if ended {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the old session's tap did not end")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Scanned before the replacement exists, and again on the same account:
+	// nothing to tap.
+	m.scan(t.Context())
+	runs.mu.Lock()
+	runs.runs[run].AccountMemberID = "mem_b"
+	runs.mu.Unlock()
+	tap.mu.Lock()
+	tap.replacement = io.NopCloser(bytes.NewReader(data))
+	tap.mu.Unlock()
+	m.scan(t.Context())
+
+	want := fixturePayloads()
+	var payloads []events.Payload
+	for _, e := range collect(t, sub, len(want), 5*time.Second) {
+		payloads = append(payloads, e.Payload)
+	}
+	assertPayloads(t, payloads, want)
+}
+
 type pipeTap struct {
 	mu sync.Mutex
 	n  int

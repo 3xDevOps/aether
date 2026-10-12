@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
 )
@@ -65,7 +66,7 @@ func usageProviderFixture() []quota.Provider {
 	}}
 }
 
-func installUsageStub(e *testEnv, reader QuotaReader) {
+func installUsageStub(e *testEnv, reader fallback.QuotaReader) {
 	e.srv.cfg.Services.Usage = reader
 }
 

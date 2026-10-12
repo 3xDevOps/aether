@@ -865,7 +865,8 @@ sent. Waiting for an answer is not being blocked: do not report an outcome
 while waiting.
 
 `mission start` is refused while a question is unanswered or when no task is
-proposed. It rechecks that the accountable human may still launch runs, then,
+proposed. It rechecks that the member who created the swarm or last replaced
+its integrator may still launch runs on the account the integrator runs on, then,
 in one transaction, accepts every proposed revision with the integrator run as
 the accepting run and moves the swarm to `active`. While the swarm is in
 `planning`, revising a task replaces the draft: the previous revision is
@@ -901,11 +902,13 @@ The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
 (`headless`) with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
-account, agent, mode, and model among the execution choices;
-`mission.replace-integrator` accepts any listed account, agent and model in
-Standard (`tui`), so a swarm whose choices are all Background can still get
-an interactive integrator; `aether swarm replace-integrator` sends the model
-`--model` names, empty for the agent's default. Both refuse, with `-32602` and `integrator harness <name> cannot
+account, agent, mode, and model among the execution choices (the run may
+still launch on another account; see the usage fallback note under `worker
+start`); `mission.replace-integrator` accepts any listed account, agent and
+model in Standard or Enhanced, so a swarm whose choices are all Background can
+still get an interactive integrator; `aether swarm replace-integrator` always
+asks for Standard (`tui`) and sends the model `--model` names, empty for the
+agent's default. Both refuse, with `-32602` and `integrator harness <name> cannot
 launch in <mode> mode: <cause>`, an agent the integrator's run owner cannot
 start in that mode on that account, such as one whose definition the run owner no
 longer has, or the run owner's own member-defined agent on another
@@ -1081,6 +1084,25 @@ key, so replaying the same start cannot create a second attempt. Worker
 retries require an explicit `--dispatch-key`. Worker cancellation requires its
 own `--idempotency-key` and the observed
 `--expected-integrator-generation`.
+
+Execution choices are matched as declared; [usage
+fallback](teams.md#usage-fallback) applies to the worker's run, never to
+the match. If the chosen account is exhausted, the run starts on another
+account the accountable human may use, under the fallback policy the swarm
+was created with (`fallback_account_member_ids`, `no_fallback`). The attempt
+keeps the declared account in `account_owner_id` and records the one its
+run launched on in `launch_account_id`; a recovered launch reuses that
+account instead of choosing again, and a replayed dispatch key returns the
+attempt unchanged. When no account qualifies, the run starts on the declared
+account. The integrator's launch, its
+replacement and its recovery relaunch fall back the same way, within the
+accounts of the member who created the swarm or last replaced its
+integrator. An integrator or worker whose agent hits its usage limit mid-run
+moves to another account like any run, under the same policy, and keeps its
+attempt and integrator generation; `launch_account_id` does not change. A
+Background worker keeps its container after its agent exits, so it moves as
+soon as the signal is read, and parks at `needs-attention` when no account
+qualifies.
 
 A worker attempt remains `launching` while its run is queued or provisioning.
 Once the scheduler confirms `running` or `needs-attention`, the attempt is
@@ -1338,6 +1360,9 @@ running `/opt/aether/aether-server report <harness>` over the same run socket.
 It is not an agent outcome, is not exposed as an `aether-internal` command, and
 has no durable evidence receipt. A lifecycle callback may fail without
 blocking the agent; the run then falls back to its normal stall handling.
+A `waiting` report with `usage_limit: true` asks to move a Standard run to
+another account ([usage fallback](teams.md#usage-fallback)); see
+[status reporting](harnesses.md#status-reporting).
 
 After an interactive success or failure `coord.report`, the next `waiting`
 (idle) hook with no input request open makes the outcome reviewable without

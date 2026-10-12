@@ -57,7 +57,7 @@ func TestCancelEndsAPlanningMissionAndStopsItsIntegrator(t *testing.T) {
 		WorkspaceID: cancelled.WorkspaceID, MissionID: cancelled.ID,
 		IntegratorGeneration: cancelled.IntegratorGeneration,
 		RunID:                cancelled.CurrentIntegratorRunID, ActorRunID: cancelled.CurrentIntegratorRunID,
-		RunOwnerID: cancelled.IntegratorRunOwnerID, AccountOwner: cancelled.Integrator.AccountMemberID,
+		RunOwnerID: cancelled.IntegratorRunOwnerID, RequestedAccount: cancelled.Integrator.AccountMemberID,
 		Task: cancelled.Objective, Harness: cancelled.Integrator.Harness, Mode: cancelled.Integrator.Mode,
 	})
 	if !errors.Is(relaunchErr, store.ErrMissionStale) {

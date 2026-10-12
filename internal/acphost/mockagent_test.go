@@ -182,6 +182,7 @@ type recorder struct {
 	states   []string
 	inputs   [][]domain.RunInputRequest
 	activity [][2]string
+	failed   error
 	idle     chan string
 	inputsCh chan []domain.RunInputRequest
 }
@@ -191,8 +192,9 @@ func newRecorder() *recorder {
 }
 
 func (r *recorder) config(c Config) Config {
-	c.OnState = func(working bool, reason string, _ error) {
+	c.OnState = func(working bool, reason string, failed error) {
 		r.mu.Lock()
+		r.failed = failed
 		if working {
 			r.states = append(r.states, "working:"+reason)
 		} else {

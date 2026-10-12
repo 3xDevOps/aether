@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -276,6 +277,10 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		BaseBranch:      base.Branch,
 		BaseSource:      source,
 		BaseCheckedAt:   base.CheckedAt,
+		Fallback:        opts.Fallback,
+	}
+	if opts.RequestedAccount != account {
+		run.RequestedAccountMemberID = opts.RequestedAccount
 	}
 	if err := createAssignedRun(ctx, s.cfg.Store, run, opts.AssignedRunID); err != nil {
 		if opts.AssignedRunID != "" {
@@ -299,23 +304,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // concurrent Kill takes the supervised path instead of transitioning the row
 // underneath the in-flight launch.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
-	// Cache ownership spans the create/sidecar gap. GC tries this lock rather
-	// than waiting behind provisioning; never acquire it under Scheduler.mu.
-	if s.cfg.Homes != nil {
-		home, account := run.HomeMember(), run.AccountMember()
-		first, second := home, account
-		if second < first {
-			first, second = second, first
-		}
-		if first != "" {
-			unlock := s.cfg.Homes.LockCaches(first)
-			defer unlock()
-		}
-		if second != "" && second != first {
-			unlock := s.cfg.Homes.LockCaches(second)
-			defer unlock()
-		}
-	}
+	defer s.lockRunCaches(run.HomeMember(), run.AccountMember())()
 	entry := &supervised{
 		runID:           run.ID,
 		workspaceID:     run.WorkspaceID,
@@ -376,32 +365,11 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)
 	}
-	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
+	plan, err := s.runPlan(ctx, entry, run, ws, actor, profile)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	entry.home = plan.Home
-	entry.loginMember = plan.LoginMember
-	s.mu.Unlock()
-	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
-		return reserveErr
-	}
-	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
-		return fmt.Errorf("apply run ownership: %w", ownErr)
-	}
-	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
-		return fmt.Errorf("apply login ownership: %w", ownErr)
-	}
 	s.updateHarness(ctx, run, plan, profile)
-	var native harness.NativeLaunch
-	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
-		run.Mode == domain.LaunchTUI && run.Task != "" {
-		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
-		if err != nil {
-			return fmt.Errorf("prepare native coordination: %w", err)
-		}
-	}
 	// Recorded before coordination is provisioned, because the co-author
 	// list written there already leaves this address out: the agent's own
 	// commits carry it, so telling the agent to credit it would make it
@@ -409,10 +377,71 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Lock()
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	s.mu.Unlock()
+	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	if derr := s.cfg.Git.StartDiffWatch(ctx, run.WorkspaceID, run.ID); derr != nil {
+		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
+		return s.failContainer(ctx, entry, cid, "start diff watch", derr)
+	}
+	s.mu.Lock()
+	if entry.killRequested {
+		err = errKillRequested
+	} else {
+		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.cfg.Git.StopDiffWatch(run.ID)
+		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
+		return s.failContainer(ctx, entry, cid, "mark running", err)
+	}
+	run.Status = domain.RunRunning
+	s.startSupervision(entry)
+	return nil
+}
+
+func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, profile harness.Profile) (*EnvironmentPlan, error) {
+	plan, err := s.BuildEnvironmentPlan(ctx, run, ws, actor, profile, EnvironmentPurposeRun)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	entry.home = plan.Home
+	entry.loginMember = plan.LoginMember
+	s.mu.Unlock()
+	if reserveErr := s.reserveRunUser(entry, plan.User, len(plan.Mounts) > 0); reserveErr != nil {
+		return nil, reserveErr
+	}
+	if ownErr := s.applyRunOwnership(ws, run, entry.memberID, plan.Mounts, plan.User); ownErr != nil {
+		return nil, fmt.Errorf("apply run ownership: %w", ownErr)
+	}
+	if ownErr := s.applyLoginOwnership(entry, plan.LoginMember, plan.Mounts, plan.User); ownErr != nil {
+		return nil, fmt.Errorf("apply login ownership: %w", ownErr)
+	}
+	return plan, nil
+}
+
+// startRunContainer is the part of a launch a move to another account
+// repeats. On failure no container of it is left running.
+func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool) (AgentDriver, error) {
+	var native harness.NativeLaunch
+	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
+		run.Mode == domain.LaunchTUI && run.Task != "" {
+		var err error
+		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
+		if err != nil {
+			return nil, fmt.Errorf("prepare native coordination: %w", err)
+		}
+	}
 	// Staging errors fail provisioning: never create a container that lacks the CLI.
 	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
 	if coordErr != nil {
-		return coordErr
+		return nil, coordErr
 	}
 	if run.ACP {
 		// The session host reports both ends of every turn itself.
@@ -428,73 +457,82 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's: what the server
 	// needs the container to have is not a preference.
-	if err = harness.MergeEnv(plan.Env, coordEnv); err != nil {
-		return err
+	if err := harness.MergeEnv(plan.Env, coordEnv); err != nil {
+		return nil, err
 	}
 	maps.Copy(plan.Env, native.Env)
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
-		return fmt.Errorf("create container: %w", err)
-	}
-	fail := func(step string, cause error) error {
-		if derr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid); derr != nil &&
-			!errors.Is(derr, runtime.ErrNotFound) {
-			s.mu.Lock()
-			entry.destroyPending = true
-			entry.cleanupError = cleanupRuntimeError
-			_ = s.writeSidecar(entry.sidecar())
-			s.mu.Unlock()
-			slog.Warn("scheduler: retain container after failed provisioning destroy", "run", run.ID, "error", derr)
-			return errors.Join(fmt.Errorf("%s: %w", step, cause),
-				fmt.Errorf("scheduler: destroy container after failed provisioning: %w", derr))
-		}
-		s.removeSidecar(run.ID)
-		return fmt.Errorf("%s: %w", step, cause)
+		return nil, fmt.Errorf("create container: %w", err)
 	}
 	s.mu.Lock()
 	entry.containerID = cid
+	if entry.accountSwap != nil {
+		entry.accountSwap.Container = string(cid)
+	}
 	killed := entry.killRequested
 	s.mu.Unlock()
 	if killed {
-		return fail("create container", errKillRequested)
+		return nil, s.failContainer(ctx, entry, cid, "create container", errKillRequested)
 	}
 	if serr := s.cfg.Runtime.Start(ctx, cid); serr != nil {
-		return fail("start container", serr)
+		return nil, s.failContainer(ctx, entry, cid, "start container", serr)
 	}
 	s.mu.Lock()
 	sc := entry.sidecar()
 	s.mu.Unlock()
 	if werr := s.writeSidecar(sc); werr != nil {
-		return fail("write sidecar", werr)
+		return nil, s.failContainer(ctx, entry, cid, "write sidecar", werr)
 	}
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
-		return fail("attach", err)
+		return nil, s.failContainer(ctx, entry, cid, "attach", err)
 	}
 	driver := s.driver(run.ACP)
 	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
-		return fail("start pty session", perr)
+		return nil, s.failContainer(ctx, entry, cid, "start pty session", perr)
 	}
-	if derr := s.cfg.Git.StartDiffWatch(ctx, run.WorkspaceID, run.ID); derr != nil {
-		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
-		return fail("start diff watch", derr)
+	return driver, nil
+}
+
+// failContainer keeps a container whose destroy is uncertain as the run's
+// destroy-pending one.
+func (s *Scheduler) failContainer(ctx context.Context, entry *supervised, cid runtime.ID, step string, cause error) error {
+	if derr := s.cfg.Runtime.Destroy(context.WithoutCancel(ctx), cid); derr != nil &&
+		!errors.Is(derr, runtime.ErrNotFound) {
+		s.mu.Lock()
+		entry.destroyPending = true
+		entry.cleanupError = cleanupRuntimeError
+		_ = s.writeSidecar(entry.sidecar())
+		s.mu.Unlock()
+		slog.Warn("scheduler: retain container after failed provisioning destroy", "run", entry.runID, "error", derr)
+		return errors.Join(fmt.Errorf("%s: %w", step, cause),
+			fmt.Errorf("scheduler: destroy container after failed provisioning: %w", derr))
 	}
-	s.mu.Lock()
-	if entry.killRequested {
-		err = errKillRequested
-	} else {
-		err = s.transitionLocked(ctx, run.ID, run.WorkspaceID, domain.RunProvisioning, domain.RunRunning, "", actor.ID)
+	return fmt.Errorf("%s: %w", step, cause)
+}
+
+// lockRunCaches holds the cache ownership of a container that mounts home
+// and account's login across the create/sidecar gap. GC tries this lock
+// rather than waiting behind provisioning; never acquire it under
+// Scheduler.mu.
+func (s *Scheduler) lockRunCaches(home, account domain.MemberID) func() {
+	if s.cfg.Homes == nil {
+		return func() {}
 	}
-	s.mu.Unlock()
-	if err != nil {
-		s.cfg.Git.StopDiffWatch(run.ID)
-		_ = driver.Stop(context.WithoutCancel(ctx), run.ID)
-		return fail("mark running", err)
+	members := slices.Compact(slices.Sorted(slices.Values([]domain.MemberID{home, account})))
+	unlocks := make([]func(), 0, len(members))
+	for _, member := range members {
+		if member != "" {
+			unlocks = append(unlocks, s.cfg.Homes.LockCaches(member))
+		}
 	}
-	run.Status = domain.RunRunning
-	s.startSupervision(entry)
-	return nil
+	return func() {
+		for _, unlock := range slices.Backward(unlocks) {
+			unlock()
+		}
+	}
 }
 
 // failProvisioning uses a fresh context so a cancelled launch still lands in

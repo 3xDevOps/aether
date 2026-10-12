@@ -1232,6 +1232,32 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		}
 		return
 	}
+	// A sidecar without a container, a failed account move's or a launch's
+	// that never recorded one, names nothing to wait on: any container is
+	// destroyed and the run interrupted.
+	if sc.ContainerID == "" {
+		s.recoverUnstarted(ctx, r)
+		return
+	}
+	// A move to another account the previous process did not finish. With
+	// the move's own container, the run is on the new account and an
+	// Enhanced session gets the continuation it is owed. With the old container on a row already
+	// moved, the container mounts a login the run no longer records, so it
+	// is destroyed and the run interrupted. Otherwise the move never
+	// recorded the account and the run carries on where it was.
+	if swap := sc.AccountSwap; swap != nil {
+		switch {
+		case sc.ContainerID == swap.Container:
+			if swap.Continuation == "" {
+				s.dropAccountSwap(r.ID, &sc)
+			}
+		case r.AccountMember() == swap.To:
+			s.didNotSurvive(ctx, r, runtime.ID(sc.ContainerID))
+			return
+		default:
+			s.dropAccountSwap(r.ID, &sc)
+		}
+	}
 	// The active row wins over a stale retained marker. An armed marker on an
 	// active row is never a reopened run's: Relaunch clears the arm first.
 	if sc.Retained || sc.RetainedUntil != nil {
@@ -1271,6 +1297,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		entry := s.adoptLiveSidecar(r, sc)
 		if entry != nil {
 			s.startSupervision(entry)
+			s.resumeUsageMove(entry)
 		}
 	}
 }
@@ -1311,9 +1338,34 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 		return
 	}
 	entry.finalizing = true
+	moving := entry.usageLimit != "" && sc.ExitCode != 0
+	if moving {
+		// As goMove: Close cancels superCtx under s.mu before it waits.
+		if s.superCtx.Err() != nil {
+			s.mu.Unlock()
+			entry.lifecycleMu.Unlock()
+			return
+		}
+		s.wg.Add(1)
+	}
 	s.mu.Unlock()
 	entry.lifecycleMu.Unlock()
-	s.finalize(entry, sc.ExitCode)
+	if !moving {
+		s.finalize(entry, sc.ExitCode)
+		return
+	}
+	// A move to another account can take minutes; the other runs' recovery
+	// does not wait for it. It starts once recovery has reconciled the run's
+	// development resources against the old container, so the move's
+	// reopenDevelopment is the last word on the new one.
+	go func() {
+		defer s.wg.Done()
+		select {
+		case <-s.recoveryReady:
+			s.finalize(entry, sc.ExitCode)
+		case <-s.superCtx.Done():
+		}
+	}()
 }
 
 func (s *Scheduler) preserveRecoveryEvidence(ctx context.Context, run *domain.Run) error {
@@ -1604,6 +1656,7 @@ func (s *Scheduler) attachAndSupervise(ctx context.Context, r *domain.Run, sc si
 			return
 		}
 		s.startSupervision(entry)
+		s.resumeUsageMove(entry)
 		if sc.KillRequested {
 			if serr := s.cfg.Runtime.Stop(ctx, cid, s.cfg.StopGrace); serr != nil {
 				slog.Warn("scheduler: re-issue persisted kill during recovery", "run", r.ID, "error", serr)
@@ -1732,6 +1785,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		agentSessionID:      sc.AgentSessionID,
 		agentExec:           sc.AgentExec,
 		switchIntent:        sc.Switch,
+		accountSwap:         sc.AccountSwap,
+		usageLimit:          sc.UsageLimit,
 		done:                make(chan struct{}),
 	}
 }

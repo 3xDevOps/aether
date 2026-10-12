@@ -1,0 +1,2 @@
+# synthesized fixture: opencode 2.0.18 ACP session/prompt error for provider.quota (packages/cli/src/acp/error.ts); not recorded from a live limit.
+{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: Go usage limit exceeded","data":{"service":"session","errorName":"provider.quota"}}}

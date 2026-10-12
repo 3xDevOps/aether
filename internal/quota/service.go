@@ -129,8 +129,8 @@ type credentials struct {
 
 // Read returns both supported provider rows, including explicit rows for
 // missing, unsupported, unavailable, or malformed credentials. Calls for an
-// account are coalesced; a cancelled waiter never cancels another caller's
-// request.
+// account are coalesced, and every caller, the first included, returns when
+// its ctx is done without cancelling the shared read.
 func (s *Service) Read(ctx context.Context, account domain.MemberID, refresh bool) ([]Provider, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -148,25 +148,30 @@ func (s *Service) Read(ctx context.Context, account domain.MemberID, refresh boo
 	key := string(account)
 
 	s.mu.Lock()
-	if existing := s.flight[key]; existing != nil {
-		s.mu.Unlock()
-		select {
-		case <-existing.done:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if existing.err != nil {
-			return nil, existing.err
-		}
-		return cloneProviders(existing.providers), nil
+	flight := s.flight[key]
+	if flight == nil {
+		flight = &readFlight{done: make(chan struct{})}
+		s.flight[key] = flight
+		go s.lead(key, account, refresh, flight)
 	}
-	flight := &readFlight{done: make(chan struct{})}
-	s.flight[key] = flight
 	s.mu.Unlock()
+	select {
+	case <-flight.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if flight.err != nil {
+		return nil, flight.err
+	}
+	return cloneProviders(flight.providers), nil
+}
 
+// lead performs one coalesced read on its own deadline, so a caller that
+// stops waiting never cancels it and its result still fills the cache.
+func (s *Service) lead(key string, account domain.MemberID, refresh bool, flight *readFlight) {
 	requestCtx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 	creds, readErr := s.readCredentials(requestCtx, account)
@@ -192,16 +197,6 @@ func (s *Service) Read(ctx context.Context, account domain.MemberID, refresh boo
 	s.mu.Lock()
 	delete(s.flight, key)
 	s.mu.Unlock()
-	if readErr != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, readErr
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return cloneProviders(providers), nil
 }
 
 func (s *Service) readLeader(ctx context.Context, account domain.MemberID, creds credentials, refresh bool) ([]Provider, error) {

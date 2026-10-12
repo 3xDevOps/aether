@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
-import { agentInfo, alice, bob, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 import { atViewport } from '@/test/viewport'
 
@@ -263,6 +263,21 @@ describe('new run', () => {
       expect(api.agentList).toHaveBeenCalledWith(bob.id)
     })
 
+    it('sends the ticked fallback accounts in the order shown once one is moved or unticked', async () => {
+      vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera, { ...alice, id: 'mem_carol', display_name: 'Carol' }], shared_with: [] })
+      await open()
+      await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
+      const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
+      expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Bob (shared)', 'Vera (shared)', 'Carol (shared)'])
+      expect(screen.getByText("The run starts on the account here with the most usage left if Alice's usage is at 95% or more at launch, and continues there if the vendor reports the limit mid-run.")).toBeDefined()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Move Carol (shared) up' }))
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Bob (shared)' }))
+      fireEvent.click(launchButton())
+
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', fallback_account_member_ids: ['mem_carol', vera.id] }))
+    })
+
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {
       const refusal = 'scheduler: memberhome: login path .claude/.credentials.json in "mem_bob" has another hard link and cannot be shared'
       vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
@@ -462,6 +477,33 @@ describe('swarm', () => {
       { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
       { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
     ])
+  })
+
+  it("lists the integrator's account as a fallback for the swarm's workers", async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    await openSwarm()
+    await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
+    const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
+    expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Alice (you)', 'Bob (shared)'])
+    await userEvent.click(screen.getByRole('button', { name: 'Move Bob (shared) up' }))
+
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.missionCreate).mock.calls[0][0].fallback_account_member_ids).toEqual([bob.id, alice.id])
+  })
+
+  it('creates the swarm with fallback off when it is turned off under Options', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    await openSwarm()
+    await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Fall back to another account' }))
+    expect(screen.getByRole('button', { name: /^Options/ }).textContent).toBe('Options· Integrator account: Alice (you) · Fallback off')
+
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.no_fallback).toBe(true)
+    expect(params.fallback_account_member_ids).toBeUndefined()
   })
 
   it('shows the server\'s refusal verbatim', async () => {

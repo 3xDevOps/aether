@@ -448,6 +448,10 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
+func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -473,11 +477,15 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.Works
 			return nil, ctx.Err()
 		}
 	}
-	return &domain.Run{
+	run := &domain.Run{
 		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account,
 		Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued,
-		CreatedAt: time.Now().UTC(),
-	}, nil
+		CreatedAt: time.Now().UTC(), Fallback: opts.Fallback,
+	}
+	if opts.RequestedAccount != account {
+		run.RequestedAccountMemberID = opts.RequestedAccount
+	}
+	return run, nil
 }
 
 func (f *fakeRuns) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {

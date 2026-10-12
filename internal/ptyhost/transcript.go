@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -95,6 +96,11 @@ type castWriter struct {
 	prefixSegments    int
 	prefixKnown       bool
 	retention         castRetention
+	// sessionStart is the incarnation this writer opened with; rotation
+	// gives later segments of the same PTY session larger ones.
+	// sessionPrefixBytes is prefixOutputBytes when the session started.
+	sessionStart       int64
+	sessionPrefixBytes uint64
 }
 
 func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
@@ -118,16 +124,18 @@ func newCastWriter(path string, cols, rows uint) (*castWriter, error) {
 	}
 	start := time.Now()
 	w := &castWriter{
-		f:                 f,
-		bw:                bufio.NewWriterSize(f, 32*1024),
-		start:             start,
-		incarnation:       start.UnixNano(),
-		stop:              make(chan struct{}),
-		path:              path,
-		retention:         retention,
-		prefixOutputBytes: prefixOutputBytes,
-		prefixSegments:    prefixSegments,
-		prefixKnown:       prefixKnown,
+		f:                  f,
+		bw:                 bufio.NewWriterSize(f, 32*1024),
+		start:              start,
+		incarnation:        start.UnixNano(),
+		stop:               make(chan struct{}),
+		path:               path,
+		retention:          retention,
+		prefixOutputBytes:  prefixOutputBytes,
+		prefixSegments:     prefixSegments,
+		prefixKnown:        prefixKnown,
+		sessionStart:       start.UnixNano(),
+		sessionPrefixBytes: prefixOutputBytes,
 	}
 	hdr, err := json.Marshal(castHeader{
 		Version:     2,
@@ -187,7 +195,10 @@ func (w *castWriter) loadPrefixLocked() error {
 		}
 		total += uint64(segment.outputBytes)
 	}
+	// Rotation loads the prefix before it seals a segment, so an unknown
+	// prefix is still the one the session started after.
 	w.prefixOutputBytes, w.prefixSegments, w.prefixKnown = total, len(segments), true
+	w.sessionPrefixBytes = total
 	return nil
 }
 
@@ -803,7 +814,9 @@ func readCastHeader(f *os.File) (castHeader, error) {
 // snapshot flushes the complete output events already accepted by the session
 // and opens an immutable replay through that boundary. The caller holds the
 // session lock, so output arriving after the boundary is queued as live data.
-func (w *castWriter) snapshot() (io.ReadCloser, int, error) {
+// With session set the replay starts where this PTY session did, leaving out
+// the run's earlier processes.
+func (w *castWriter) snapshot(session bool) (io.ReadCloser, int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
@@ -825,7 +838,13 @@ func (w *castWriter) snapshot() (io.ReadCloser, int, error) {
 	if len(segments) != w.prefixSegments+1 {
 		return nil, 0, errors.New("ptyhost: transcript lineage changed")
 	}
-	total := w.prefixOutputBytes - w.retention.OutputBytes + uint64(w.outputBytes) + uint64(len(w.pending))
+	prior := w.prefixOutputBytes - w.retention.OutputBytes
+	if session {
+		first := slices.IndexFunc(segments, func(segment castSegment) bool { return segment.incarnation >= w.sessionStart })
+		segments = segments[first:]
+		prior = w.prefixOutputBytes - w.sessionPrefixBytes
+	}
+	total := prior + uint64(w.outputBytes) + uint64(len(w.pending))
 	if total > uint64(^uint(0)>>1) {
 		return nil, 0, errors.New("ptyhost: transcript output exceeds platform limits")
 	}

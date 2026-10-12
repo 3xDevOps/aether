@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ type MissionStore interface {
 	GetAttemptByRun(context.Context, domain.RunID) (*domain.Attempt, error)
 	ListAttempts(context.Context, domain.MissionID, domain.TaskID) ([]*domain.Attempt, error)
 	BindAttemptRun(context.Context, domain.AttemptID, domain.RunID, uint64, uint64) error
+	// RecordAttemptLaunchAccount records, once, the account an unlaunched
+	// attempt's run launches on.
+	RecordAttemptLaunchAccount(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.MemberID) error
 	RequestAttemptCancellation(context.Context, domain.AttemptID, domain.RunID, uint64, string) (*domain.Attempt, bool, error)
 	UpdateAttemptState(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
 	EndObservedAttempt(context.Context, domain.AttemptID, domain.RunID, uint64, uint64, domain.AttemptState, string) error
@@ -166,11 +170,11 @@ const missionColumns = `id, workspace_id, objective, accountable_human_id,
 	integrator_generation, accepted_set_version, phase,
 	idempotency_key, created_at, updated_at,
 	integrator_launch_error, integrator_launch_error_at, integrator_run_launched, archived_at, change_seq, change_kinds,
-	integrator_model`
+	fallback_disabled, fallback_order, integrator_model`
 
 func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	var m domain.Mission
-	var choices, changes string
+	var choices, changes, fallbackOrder string
 	var runID, authorizingHumanID, runOwnerID sql.NullString
 	var created, updated int64
 	var launchErrorAt, archivedAt sql.NullInt64
@@ -180,7 +184,7 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 		&runID, &authorizingHumanID, &runOwnerID,
 		&m.IntegratorGeneration, &m.AcceptedSetVersion, &phase,
 		&m.IdempotencyKey, &created, &updated, &m.IntegratorLaunchError, &launchErrorAt, &m.IntegratorRunLaunched, &archivedAt, &m.ChangeSeq, &changes,
-		&m.Integrator.Model); err != nil {
+		&m.Fallback.Disabled, &fallbackOrder, &m.Integrator.Model); err != nil {
 		return nil, err
 	}
 	if launchErrorAt.Valid {
@@ -207,6 +211,9 @@ func scanMission(row interface{ Scan(...any) error }) (*domain.Mission, error) {
 	if err := json.Unmarshal([]byte(changes), &m.Changes); err != nil {
 		return nil, fmt.Errorf("store: decode mission changes: %w", err)
 	}
+	if err := json.Unmarshal([]byte(fallbackOrder), &m.Fallback.Order); err != nil {
+		return nil, fmt.Errorf("store: decode mission fallback order: %w", err)
+	}
 	m.CreatedAt, m.UpdatedAt = decodeTime(created), decodeTime(updated)
 	return &m, nil
 }
@@ -219,6 +226,10 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	if err != nil {
 		return fmt.Errorf("store: encode mission choices: %w", err)
 	}
+	fallbackOrder, err := missionJSON(m.Fallback.Order, "[]")
+	if err != nil {
+		return fmt.Errorf("store: encode mission fallback order: %w", err)
+	}
 	var receiptMission domain.MissionID
 	var receiptObjective string
 	var receiptAccount, receiptIntAccount, receiptHarness, receiptMode, receiptModel, receiptChoices string
@@ -230,6 +241,9 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 		existing, getErr := d.GetMission(ctx, receiptMission)
 		if getErr != nil {
 			return getErr
+		}
+		if !sameFallback(existing.Fallback, m.Fallback) {
+			return ErrMissionIdempotencyConflict
 		}
 		*m = *existing
 		return nil
@@ -273,12 +287,12 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, `INSERT INTO missions (`+missionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}', ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, 0, NULL, 0, '{}', ?, ?, ?)`,
 		id, m.WorkspaceID, m.Objective, m.AccountableHumanID,
 		m.Integrator.AccountMemberID, m.Integrator.Harness, m.Integrator.Mode,
 		choices, runID,
 		authorizingHumanID, runOwnerID, generation, m.AcceptedSetVersion,
-		domain.MissionPhasePlanning, m.IdempotencyKey, n, n, m.Integrator.Model)
+		domain.MissionPhasePlanning, m.IdempotencyKey, n, n, m.Fallback.Disabled, fallbackOrder, m.Integrator.Model)
 	if err != nil {
 		return fmt.Errorf("store: create mission: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -293,6 +307,10 @@ func (d *DB) CreateMission(ctx context.Context, m *domain.Mission) error {
 	m.Phase, m.OpenQuestions = domain.MissionPhasePlanning, 0
 	return nil
 }
+func sameFallback(a, b domain.AccountFallback) bool {
+	return a.Disabled == b.Disabled && slices.Equal(a.Order, b.Order)
+}
+
 func (d *DB) GetMissionByRun(ctx context.Context, runID domain.RunID) (*domain.Mission, error) {
 	if runID == "" {
 		return nil, ErrNotFound

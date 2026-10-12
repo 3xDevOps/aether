@@ -225,7 +225,7 @@ func (m modeSwitch) toEnhanced(ctx context.Context) error {
 	}
 	m.s.acp.switchNotice(m.entry.runID, "info", "Switched from Standard",
 		"Turns the agent took in its terminal are not shown here.")
-	if err := m.s.acp.openForSwitch(ctx, m.entry); err != nil {
+	if err := m.s.acp.openRestored(ctx, m.entry, openSwitch); err != nil {
 		m.s.acp.switchNotice(m.entry.runID, "error", "Switch to Enhanced failed", err.Error())
 		return errors.Join(err, m.restoreStandard(ctx))
 	}

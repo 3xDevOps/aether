@@ -208,3 +208,74 @@ func TestSharedLaunchIgnoresASymlinkedInstallation(t *testing.T) {
 	e.assertOwnerExposedOnlyAt(t, spec, ".claude/.credentials.json")
 	assertNoBorrowedPath(t, spec)
 }
+
+// A usage fallback never lands on an account whose installation the launcher
+// would borrow, nor on one with no login to share. Without an installation of
+// the launcher's own, an account qualifies only when the launch it replaces
+// also ran the image's agent: a launch that borrowed the requested account's
+// installation would find no agent there. The launcher's own installation
+// makes every logged-in account a fallback.
+func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	lin := e.addRecipient(t)
+	linHome, err := e.cfg.Homes.Path(lin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeHomeFiles(t, linHome, ".claude/.credentials.json")
+	launchable := func(requested, account domain.MemberID) bool {
+		t.Helper()
+		ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, requested, account, "claude", domain.LaunchTUI)
+		if err != nil {
+			t.Fatalf("FallbackLaunchable: %v", err)
+		}
+		return ok
+	}
+	installClaude(t, e.ownerHome)
+	if launchable(lin.ID, e.owner.ID) {
+		t.Fatal("an account with no login is a fallback")
+	}
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	if launchable(lin.ID, e.owner.ID) {
+		t.Fatal("an account whose installation the launcher would borrow is a fallback")
+	}
+	if launchable(e.owner.ID, lin.ID) || launchable(e.owner.ID, e.member.ID) {
+		t.Fatal("a launch that borrowed Grace's installation can fall back to an account with no agent")
+	}
+	if !launchable(e.member.ID, lin.ID) {
+		t.Fatal("a launch that ran the image's agent cannot fall back to another account that does")
+	}
+	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+	for _, account := range []domain.MemberID{e.owner.ID, lin.ID, e.member.ID} {
+		if !launchable(e.owner.ID, account) {
+			t.Fatalf("account %s with a login, launched with the launcher's own installation, is not a fallback", account)
+		}
+	}
+}
+
+// A fallback account whose login a live container holds under another
+// uid:gid would refuse the launch after its run exists, so it is no
+// fallback while that container lives. The launch's own user comes from the
+// launcher's live containers; the runtime is never asked.
+func TestFallbackLaunchableRefusesALoginHeldUnderAnotherUser(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, nil)
+	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
+	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+	held := &credentialUserReservation{home: e.owner.ID, user: "2000:2000", owner: "the owner's terminal"}
+	own := &credentialUserReservation{home: e.member.ID, user: "1000:1000", owner: "Ada's terminal"}
+	e.sched.mu.Lock()
+	e.sched.credentialUsers[held] = struct{}{}
+	e.sched.credentialUsers[own] = struct{}{}
+	e.sched.mu.Unlock()
+	if ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, e.member.ID, e.owner.ID, "claude", domain.LaunchTUI); ok || err != nil {
+		t.Fatalf("FallbackLaunchable = %v, %v; want the held login refused", ok, err)
+	}
+	e.sched.mu.Lock()
+	delete(e.sched.credentialUsers, held)
+	e.sched.mu.Unlock()
+	if ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, e.member.ID, e.owner.ID, "claude", domain.LaunchTUI); !ok || err != nil {
+		t.Fatalf("FallbackLaunchable = %v, %v; want the free login a fallback", ok, err)
+	}
+}

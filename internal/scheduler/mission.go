@@ -26,6 +26,10 @@ type MissionLaunchSpec struct {
 	Mode         domain.LaunchMode
 	Model        string
 	CachedBase   string
+	// RequestedAccount is the account the mission asked for; AccountOwner
+	// differs from it after a usage fallback.
+	RequestedAccount domain.MemberID
+	Fallback         domain.AccountFallback
 }
 
 // MissionLauncher is the optional scheduler extension consumed by mission
@@ -195,7 +199,9 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	if spec.WorkspaceID == "" || spec.RunID == "" || spec.Actor == "" || spec.RunOwner == "" || spec.AccountOwner == "" || spec.Harness == "" || !spec.Mode.Valid() {
 		return nil, errors.New("scheduler: invalid mission launch")
 	}
-	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID})
+	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{
+		Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
+	})
 }
 
 // ValidateMissionLaunch reports whether member's launch of harnessName on

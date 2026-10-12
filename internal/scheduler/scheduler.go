@@ -59,9 +59,12 @@ func (e *BaseCaptureError) Unwrap() error {
 }
 
 type Config struct {
-	Store    store.Store
-	Runtime  runtime.Runtime
-	Bus      events.Bus
+	Store   store.Store
+	Runtime runtime.Runtime
+	Bus     events.Bus
+	// EventSeq reads the newest sequence of the log behind Bus, nil when Bus
+	// keeps none. A usage-limit stream that drops events replays from it.
+	EventSeq func(context.Context) (uint64, error)
 	Git      GitEngine
 	PTY      PTYHost
 	Bases    BaseCapture
@@ -213,6 +216,7 @@ type Scheduler struct {
 	githubOAuthWG     sync.WaitGroup
 	acp               *acpDriver
 	itemLogs          acphost.ReadOnlyLogCache
+	usageFallback     *UsageFallback
 }
 
 // credentialUserReservation stops ownership changes to the member home and
@@ -357,6 +361,24 @@ type supervised struct {
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
+	// usageLimit is the agent's usage-limit message its headless output
+	// carried, and accountSwap the move to another account in progress.
+	usageLimit  string
+	accountSwap *accountSwap
+	// failReason replaces the exit code in the reason of a run finalize
+	// fails.
+	failReason string
+	// moving is set while a move holds the run's finalizing claim, and
+	// moveFrom is the container it replaces: once the entry has another, it
+	// is the replacement's. noRetain is set by a move that failed: a swarm
+	// keeps no container of it.
+	moving   bool
+	moveFrom runtime.ID
+	noRetain bool
+	// waitYielded is set when the wait for the container's exit returned
+	// because a move held the claim: nothing waits on the container until
+	// the move finalizes it or restarts supervision.
+	waitYielded bool
 }
 
 type pendingRun struct {
@@ -543,16 +565,48 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 }
 
 func (s *Scheduler) Start(ctx context.Context) error {
+	// Subscribed before recovery, so a usage limit published meanwhile
+	// waits for the run recovery brings back.
+	var (
+		start uint64
+		err   error
+	)
+	// A shutdown during either read is a clean stop, as during recovery.
+	if s.cfg.EventSeq != nil {
+		if start, err = s.cfg.EventSeq(ctx); err != nil {
+			return recoveryError(fmt.Errorf("scheduler: read the event log's position: %w", err))
+		}
+	}
+	limits, err := s.subscribeUsageLimits(ctx, start, true)
+	if errors.Is(err, events.ErrBusClosed) {
+		return nil
+	}
+	if err != nil {
+		return recoveryError(fmt.Errorf("scheduler: subscribe to usage limits: %w", err))
+	}
 	if err := s.recoverRuns(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	if err := s.recoverTerminals(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	if err := s.recoverDevelopment(ctx); err != nil {
+		_ = limits.Close()
 		return recoveryError(err)
 	}
 	s.recoveryReadyOnce.Do(func() { close(s.recoveryReady) })
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		s.watchUsageLimits(watchCtx, limits, start)
+	}()
+	defer func() {
+		stopWatch()
+		<-watched
+	}()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute
@@ -602,7 +656,9 @@ func recoveryError(err error) error {
 
 // Close stops supervision and the Start loops. Containers keep running.
 func (s *Scheduler) Close() error {
+	s.mu.Lock()
 	s.superCancel()
+	s.mu.Unlock()
 	s.closeGitHubOAuth()
 	s.wg.Wait()
 	s.acp.shutdown()
@@ -780,6 +836,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
 		profile.SwitchVerified = false
+		profile.HeadlessResumeArgs = nil
 	case inRegistry:
 		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
 	default:

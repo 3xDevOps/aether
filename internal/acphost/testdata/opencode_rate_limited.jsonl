@@ -1,0 +1,2 @@
+# synthesized fixture: opencode 2.0.18 ACP session/prompt error for provider.rate-limit, a throttle that is not a usage limit; not recorded live.
+{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"Internal error: Rate limited","data":{"service":"session","errorName":"provider.rate-limit"}}}

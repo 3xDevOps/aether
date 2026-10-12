@@ -345,11 +345,20 @@ func (s *Service) authorizeMissionTaskActor(ctx context.Context, mission *domain
 	if mission == nil {
 		return fmt.Errorf("%w: mission assignment is unavailable", store.ErrMissionStale)
 	}
-	account := mission.Integrator.AccountMemberID
+	var account domain.MemberID
 	human := mission.IntegratorAuthorizingHumanID
 	if attempt != nil {
-		account = attempt.AccountOwnerID
+		var err error
+		if account, err = s.attemptAccount(ctx, attempt); err != nil {
+			return err
+		}
 		human = attempt.AuthorizingHumanID
+	} else {
+		integrator, err := s.cfg.Store.GetRun(ctx, mission.CurrentIntegratorRunID)
+		if err != nil {
+			return err
+		}
+		account = integrator.AccountMember()
 	}
 	if account == "" || human == "" {
 		return errors.New("mission: task actor authorization is unavailable")

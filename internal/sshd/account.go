@@ -6,6 +6,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -18,7 +19,7 @@ func init() {
 // launchAccount resolves the account a caller may use. Access is opt-in and
 // directional: an admin has no implicit right to another member's credentials.
 func (s *Server) launchAccount(ctx context.Context, actor domain.MemberID, requested string) (domain.MemberID, *protocol.Error) {
-	account, err := ResolveLaunchAccount(ctx, s.cfg.Store, actor, requested)
+	account, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, actor, requested)
 	if err != nil {
 		return "", rpcError(err)
 	}

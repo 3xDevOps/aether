@@ -8,16 +8,35 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func (s *Service) workerStart(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
-	return s.workerStartInternal(ctx, run, raw, false)
+	var p protocol.WorkerStartParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	measured, err := s.measureWorker(ctx, run, p.MissionID, p.AccountOwnerID, p.Harness)
+	if err != nil {
+		return nil, err
+	}
+	return s.workerStartInternal(ctx, run, raw, measured, false)
 }
 
-func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw json.RawMessage, authorizationHeld bool) (any, error) {
+// measureWorker reads the usage a worker launch's account selection decides
+// on, before the caller takes the authorization mutex.
+func (s *Service) measureWorker(ctx context.Context, run domain.RunID, missionID, account, harness string) (fallback.Measured, error) {
+	m, err := s.integratorMission(ctx, run, missionID)
+	if err != nil {
+		return nil, err
+	}
+	return fallback.Measure(ctx, s.cfg.Store, s.cfg.Usage, m.AccountableHumanID, account, harness, m.Fallback)
+}
+
+func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw json.RawMessage, measured fallback.Measured, authorizationHeld bool) (any, error) {
 	var p protocol.WorkerStartParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
@@ -106,14 +125,18 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		s.markAttemptUnknown(ctx, attempt, err.Error())
 		return nil, err
 	}
+	account, err := s.attemptLaunchAccount(ctx, m, attempt, measured)
+	if err != nil {
+		return nil, err
+	}
 	if bindErr := s.cfg.Missions.BindAttemptRun(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration); bindErr != nil {
 		return nil, bindErr
 	}
 	attempt.State = domain.AttemptLaunching
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: attempt.RunID, ActorRunID: run,
-		RunOwnerID: attempt.RunOwnerID, AccountOwner: attempt.AccountOwnerID,
-		Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
+		RunOwnerID: attempt.RunOwnerID, RequestedAccount: attempt.AccountOwnerID, AccountOwner: account,
+		Fallback: m.Fallback, Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
 	})
 	if err != nil {
 		s.markAttemptUnknown(ctx, attempt, err.Error())
@@ -130,6 +153,27 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		return nil, publishErr
 	}
 	return protocol.WorkerStartResult{Attempt: attemptWire(attempt)}, nil
+}
+
+// attemptLaunchAccount returns the account attempt's run launches on. The
+// first launch selects it under m's fallback policy from measured usage and
+// records it, so a recovered launch reuses it instead of selecting again. The
+// caller holds the authorization mutex and, unless a launch account is
+// recorded, has admitted the attempt's declared account.
+func (s *Service) attemptLaunchAccount(ctx context.Context, m *domain.Mission, attempt *domain.Attempt, measured fallback.Measured) (domain.MemberID, error) {
+	if attempt.LaunchAccountID != "" {
+		if _, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, attempt.RunOwnerID, string(attempt.LaunchAccountID)); err != nil {
+			return "", err
+		}
+		return attempt.LaunchAccountID, nil
+	}
+	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, attempt.RunOwnerID, attempt.AccountOwnerID, m.Fallback, s.launchable(attempt.RunOwnerID, attempt.AccountOwnerID, attempt.Harness, attempt.Mode))
+	logExcluded(attempt.RunID, excluded)
+	if err := s.cfg.Missions.RecordAttemptLaunchAccount(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, account); err != nil {
+		return "", err
+	}
+	attempt.LaunchAccountID = account
+	return account, nil
 }
 
 func (s *Service) workerList(ctx context.Context, run domain.RunID, raw json.RawMessage) (any, error) {
@@ -260,6 +304,14 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	if err := json.Unmarshal(raw, &p); err != nil || p.AttemptID == "" || p.DispatchKey == "" {
 		return nil, errors.New("mission: worker.retry requires attempt_id and dispatch_key")
 	}
+	unlocked, err := s.cfg.Missions.GetAttempt(ctx, domain.AttemptID(p.AttemptID))
+	if err != nil {
+		return nil, err
+	}
+	measured, err := s.measureWorker(ctx, run, "", string(unlocked.AccountOwnerID), unlocked.Harness)
+	if err != nil {
+		return nil, err
+	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
 	m, err := s.integratorMission(ctx, run, "")
@@ -273,7 +325,9 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	if a.MissionID != m.ID || p.ExpectedIntegratorGeneration != m.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale worker authority", store.ErrMissionStale)
 	}
-	if authorizeErr := s.authorizeAttempt(ctx, m, a); authorizeErr != nil {
+	// The retry launches on the declared account or selects again, so the
+	// old attempt's fallback account needs no share.
+	if _, authorizeErr := sshd.AuthorizeLaunch(ctx, s.cfg.Store, m.AccountableHumanID, string(a.AccountOwnerID)); authorizeErr != nil {
 		return nil, authorizeErr
 	}
 	if a.State.HoldsConcurrency() {
@@ -289,7 +343,7 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 		ExpectedIntegratorGeneration: p.ExpectedIntegratorGeneration,
 	}
 	b, _ := json.Marshal(req)
-	return s.workerStartInternal(ctx, run, b, true)
+	return s.workerStartInternal(ctx, run, b, measured, true)
 }
 
 func attemptWire(a *domain.Attempt) protocol.Attempt {
@@ -298,7 +352,7 @@ func attemptWire(a *domain.Attempt) protocol.Attempt {
 		TaskRevision: a.TaskRevision, Number: a.Number, DispatchKey: a.DispatchKey,
 		Harness: a.Harness, Mode: string(a.Mode), Model: a.Model, State: string(a.State), RunID: string(a.RunID),
 		ActorRunID: string(a.ActorRunID), AuthorizingHumanID: string(a.AuthorizingHumanID),
-		RunOwnerID: string(a.RunOwnerID), AccountOwnerID: string(a.AccountOwnerID),
+		RunOwnerID: string(a.RunOwnerID), AccountOwnerID: string(a.AccountOwnerID), LaunchAccountID: string(a.LaunchAccountID),
 		AuthorityGeneration: a.AuthorityGeneration, IntegratorGeneration: a.IntegratorGeneration,
 		TakeoverActive: a.TakeoverActive, TakeoverMemberID: string(a.TakeoverMemberID),
 		TakeoverGeneration: a.TakeoverGeneration, CancellationActorRunID: string(a.CancellationActorRunID),

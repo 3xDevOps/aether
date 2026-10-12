@@ -64,8 +64,11 @@ const finalizeTimeout = time.Minute
 // supervision context ends supervision without touching the container or run.
 func (s *Scheduler) superviseWait(entry *supervised) {
 	defer s.wg.Done()
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
 	st, err := waitForExit(s.superCtx, func(ctx context.Context) (runtime.ExitStatus, error) {
-		return s.cfg.Runtime.Wait(ctx, entry.containerID)
+		return s.cfg.Runtime.Wait(ctx, cid)
 	})
 	if err != nil {
 		if s.superCtx.Err() != nil {
@@ -89,10 +92,15 @@ func (s *Scheduler) superviseWait(entry *supervised) {
 	// publish is in flight.
 	entry.lifecycleMu.Lock()
 	s.mu.Lock()
-	live, retained := s.runs[entry.runID] == entry, entry.retained
+	// A move to another account replaced the container this waited on. A
+	// wait that started before the run had a container waited on none.
+	live, retained := s.runs[entry.runID] == entry && (cid == "" || entry.containerID == cid), entry.retained
 	alreadyFinalizing := entry.finalizing
 	if live && !retained && !alreadyFinalizing {
 		entry.finalizing = true
+	}
+	if live && alreadyFinalizing && entry.moving {
+		entry.waitYielded = true
 	}
 	s.mu.Unlock()
 	if !live || alreadyFinalizing {
@@ -158,6 +166,9 @@ func (s *Scheduler) recordExitObserved(entry *supervised, code int) {
 // otherwise. The caller has already released entry.lifecycleMu; the
 // finalizing flag keeps other destructive operations from racing this work.
 func (s *Scheduler) finalize(entry *supervised, code int) {
+	if s.continueExitedRun(entry, code) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
 	defer cancel()
 
@@ -171,10 +182,11 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	if entry.status.Terminal() && entry.status != reported {
 		reported = ""
 	}
+	failReason := entry.failReason
 	s.mu.Unlock()
 
 	var detail string
-	if !killed && reported == "" && code != 0 {
+	if !killed && reported == "" && code != 0 && failReason == "" {
 		detail = s.exitDetail(ctx, entry)
 	}
 
@@ -208,6 +220,8 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 		to, reason, cause = reported, reportedClose(reported).reason, causeReported
 	case code == 0:
 		to, reason = domain.RunCompleted, exitedCompletedReason
+	case failReason != "":
+		to, reason = domain.RunFailed, failReason
 	default:
 		to, reason = domain.RunFailed, fmt.Sprintf(exitedFailedReasonPrefix+"%d", code)
 		if detail != "" {
@@ -224,7 +238,7 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 	case reported == "" && entry.reported != "" && !entry.status.Terminal():
 		to, reason, cause = entry.reported, reportedClose(entry.reported).reason, causeReported
 	}
-	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0
+	retain := entry.missionAssigned && !entry.killRequested && s.cfg.RunContainerTTL >= 0 && !entry.noRetain
 	if retain {
 		deadline := time.Now().UTC().Add(s.cfg.RunContainerTTL)
 		entry.evidenceIdentity = finishCaptureIdentity(entry.evidenceIdentity, published, committed, code)
@@ -312,8 +326,15 @@ func (s *Scheduler) finalize(entry *supervised, code int) {
 
 	// ErrInvalidTransition means the run already reached a terminal state
 	// (e.g. CloseRun raced the exit); the cleanup below still applies.
-	if destroyErr := s.cfg.Runtime.Destroy(ctx, entry.containerID); destroyErr != nil &&
-		!errors.Is(destroyErr, runtime.ErrNotFound) {
+	s.mu.Lock()
+	cid := entry.containerID
+	s.mu.Unlock()
+	var destroyErr error
+	// A failed move to another account leaves no container.
+	if cid != "" {
+		destroyErr = s.cfg.Runtime.Destroy(ctx, cid)
+	}
+	if destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
 		// Keep every ownership reference when destruction is uncertain. The
 		// expiry sweep will retry without allowing checkout/home/coordination
 		// reclamation to race a still-live container.
@@ -582,7 +603,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 	now := time.Now().UTC()
 	for _, e := range entries {
 		s.mu.Lock()
-		live := s.runs[e.runID] == e
+		live := s.runs[e.runID] == e && !e.finalizing
 		paused, status, started, acp := e.paused, e.status, e.startedAt, e.acp
 		s.mu.Unlock()
 		if !live || paused || (status != domain.RunRunning && status != domain.RunNeedsAttention) {
@@ -597,7 +618,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 		}
 
 		s.mu.Lock()
-		if s.runs[e.runID] == e && !e.paused {
+		if s.runs[e.runID] == e && !e.paused && !e.finalizing {
 			// A working report leaves no other trace, so it counts as activity.
 			if e.lastWorking.After(activity) {
 				activity, observed = e.lastWorking, true

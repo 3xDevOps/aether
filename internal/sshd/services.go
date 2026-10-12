@@ -1,5 +1,7 @@
 package sshd
 
+import "github.com/3xDevOps/Aether/internal/fallback"
+
 // Services carries the team-feature service seams the control-channel
 // handlers reach. Every field is optional: a handler whose service is nil
 // answers CodeUnavailable, the same degradation Config.Profiles uses.
@@ -36,7 +38,7 @@ type Services struct {
 	// Missions is authenticated human mission creation and inspection.
 	Missions MissionService
 	// Usage reads read-only Claude Code and Codex subscription quota.
-	Usage QuotaReader
+	Usage fallback.QuotaReader
 	// Integration exposes authenticated candidate preparation, review,
 	// verification, and delivery through the generic control gateway.
 	Integration IntegrationService

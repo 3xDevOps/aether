@@ -7,14 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
-	"github.com/3xDevOps/Aether/internal/quota"
 )
-
-// QuotaReader reads the selected account's vendor quota without exposing the
-// account's credentials or provider responses to the caller.
-type QuotaReader interface {
-	Read(ctx context.Context, account domain.MemberID, refresh bool) ([]quota.Provider, error)
-}
 
 func init() {
 	registerMethod(protocol.MethodAccountUsage, (*Server).accountUsage)

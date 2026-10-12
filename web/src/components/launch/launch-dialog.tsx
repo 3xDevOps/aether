@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
-import { AccountOptions, WorkspaceLine } from '@/components/launch/launch-options'
+import { AccountOptions, automaticFallback, fallbackParams, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
 import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
@@ -59,6 +59,7 @@ export function LaunchDialog() {
   })
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
+  const [fallback, setFallback] = useState(automaticFallback)
   const choice = useAgentChoice({ account, ownAccountID })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
@@ -150,6 +151,7 @@ export function LaunchDialog() {
       ...(mode === 'tui' ? {} : { mode }),
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
+      ...fallbackParams(fallback, accounts, account),
     })
     rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
@@ -185,6 +187,7 @@ export function LaunchDialog() {
       // follow the serialized list.
       execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
         .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '')),
+      ...fallbackParams(fallback, accounts, ''),
     }
     const serialized = JSON.stringify(contents)
     const key = swarmKeys.get(serialized) ?? idempotencyKey()
@@ -239,7 +242,7 @@ export function LaunchDialog() {
     </>
   )
   const options = accounts.length > 1 && (
-    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} />
+    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} />
   )
 
   return (

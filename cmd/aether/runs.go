@@ -41,7 +41,7 @@ func plural(n int, noun string) string {
 // renderRuns writes the table, filtering archived runs independently of status.
 func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, needsYou, archived bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\tOVERLAP\tTITLE\tTASK"); err != nil {
+	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\tACCOUNT\tOVERLAP\tTITLE\tTASK"); err != nil {
 		return err
 	}
 	for _, r := range runs {
@@ -57,8 +57,12 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		}
 		title = strings.ReplaceAll(title, "\n", " ")
 		task := strings.ReplaceAll(r.Task, "\n", " ")
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), overlapOf[r.ID], title, task); err != nil {
+		account := memberName(r.AccountMemberID)
+		if r.RequestedAccountMemberID != "" {
+			account += " (fallback)"
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.ID, displayStatus(r), r.Harness, memberName(r.MemberID), account, overlapOf[r.ID], title, task); err != nil {
 			return err
 		}
 	}

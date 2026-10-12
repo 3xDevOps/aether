@@ -130,6 +130,9 @@ type Mission struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	ArchivedAt            *time.Time
+	// Fallback is the creator's fallback policy, which the integrator and
+	// every worker launch follows.
+	Fallback AccountFallback
 }
 
 const (
@@ -317,6 +320,17 @@ type Attempt struct {
 	CancellationActorRunID RunID
 	CancellationGeneration uint64
 	LastError              string
+	// LaunchAccountID is the account the attempt's run launches on, recorded
+	// before its first launch; it differs from AccountOwnerID after a
+	// fallback. Empty on attempts reserved before it existed.
+	LaunchAccountID MemberID
+}
+
+func (a *Attempt) LaunchAccount() MemberID {
+	if a.LaunchAccountID != "" {
+		return a.LaunchAccountID
+	}
+	return a.AccountOwnerID
 }
 
 type SubmissionEvidence struct {

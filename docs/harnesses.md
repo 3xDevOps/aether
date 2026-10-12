@@ -50,6 +50,44 @@ Stale data is retained only for the same credential identity, always carries
 its error and `stale` status, and is not shown as current after its reset
 window has passed without a new measurement.
 
+[Usage fallback](teams.md#usage-fallback) reads the same cache, never
+refreshing it. An account counts as exhausted when any window a run draws on
+that has not reset is at 95% used or more (`fallback.ExhaustedPercent` in
+`internal/fallback`): `five_hour` and `seven_day` for `claude`, `primary`
+and `secondary` for `codex`. Claude's per-model weekly windows are ignored,
+because a run's model can change mid-run and an unset model is the agent's
+own choice. A row other than `ok`
+means unknown usage, never exhausted.
+
+### Usage-limit signals
+
+A run moves to another account mid-run ([teams.md](teams.md#usage-fallback))
+only when its agent reports that the account's subscription usage limit
+stopped it. Claude Code's usage-limit messages start with one of its
+exported `USAGE_LIMIT_ERROR_PREFIXES` ("You've hit your", "You've reached
+your", ...; the full list is in `internal/acphost/usagelimit.go`).
+
+| Agent | Mode | Signal | Covered |
+| --- | --- | --- | --- |
+| `claude` | Enhanced | `session/prompt` error with `data.errorKind` `rate_limit` and a usage-limit prefix after `Internal error: ` | yes |
+| `claude` | Background (`claude -p`) | A `rate_limit_event` line with `status` `rejected` and no overage in use, then an error `result` line with a usage-limit prefix | yes |
+| `claude` | Standard | `StopFailure` hook with `error` `rate_limit` and a usage-limit prefix in `last_assistant_message`, sent as `run.report` with `usage_limit:true` | yes, while [lifecycle reporting](#status-reporting) is on |
+| `codex` | Enhanced, or Background over ACP | `session/prompt` error with `data.codexErrorInfo` `usageLimitExceeded` | yes |
+| `codex` | Background (`codex exec --json`) | text only | no: Aether does not parse `codex exec` output |
+| `codex` | Standard | none: notify reports turn ends only | no |
+| `opencode` | Enhanced, or Background over ACP (V2) | `session/prompt` error with `data.errorName` `provider.quota` | matched, but Aether cannot read opencode usage, so no account qualifies and the run stops with the no-fallback reason |
+| `opencode` | V1, any mode | a generic error after retries | no |
+| `pi` | any | text headless; over ACP the error is dropped | no |
+| `omp` | any | text | no: its sessions live in the shared `~/.omp/agent`, so none can resume on another account |
+
+Transient 429s share Claude's `rate_limit` kind ("Server is temporarily
+limiting requests (not your usage limit)") and are not matched, nor is
+opencode's `provider.rate-limit`. A Background `codex`, `omp` or `opencode`
+run uses ACP when its server is installed
+([enhanced-runs.md](enhanced-runs.md#background-runs)). A signal a vendor
+changes falls back to the behaviour without fallback: the run fails or ends
+its turn with the vendor's error.
+
 ## Shipped harnesses
 
 | `--agent` | CLI | Login state | Configuration root | API key env | Launch env | Status | Steering | Env setup | Enhanced | Switch |
@@ -702,7 +740,11 @@ Every reporter uses the existing staged binary and coordination socket:
 ```
 
 Stateful extensions/plugins send `state` (`working` or the legacy `waiting`
-wire value), an optional `reason`, and `input_updates`. Claude's hooks, Codex's
+wire value), an optional `reason`, and `input_updates`. A `waiting` report
+may set `usage_limit: true`, with the agent's usage-limit message as
+`reason`, to ask for a [move to another account](teams.md#usage-fallback);
+Claude's `StopFailure` hook is the only shipped reporter that sets it, and
+it is ignored on any other state. Claude's hooks, Codex's
 notify and the pi/omp extension also carry the agent's own session id
 (`session_id`, Codex's `thread-id`), which a Standard run stores so a
 [mode switch](enhanced-runs.md#switching-a-running-agent) can resume it;
@@ -719,7 +761,7 @@ use the existing terminal or native approval/question surface.
 
 | Reporter | Execution evidence | Input request evidence and limits |
 | --- | --- | --- |
-| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports waiting unless `background_tasks` is nonempty. `StopFailure` reports waiting with a failure reason, not an input request. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
+| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports waiting unless `background_tasks` is nonempty. `StopFailure` reports waiting, not an input request: with `usage_limit` and the agent's message as the reason when `error` is `rate_limit` and the message is a usage limit ([usage fallback](teams.md#usage-fallback)), else with the reason `agent failed`. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
 | OpenCode V1 1.18.32 | Tracks all native busy sessions; one child becoming idle cannot park another active session. | `permission.asked`/`question.asked` preserve `id` and `sessionID`; replies/rejections close the matching `requestID`. Idle reconciles that session's known requests with the released `/permission` and `/question` lists, including interruption cleanup without a reply event. |
 | OpenCode V2 2.0.18 | Tracks `session.execution.started` until succeeded, failed, interrupted, or session deletion. | `permission.asked/replied` and released `form.created/replied/cancelled` preserve request and session IDs. Terminal execution and permission replies reconcile known permissions through `ctx.permission.list`. Session deletion removes only that session's requests. |
 | pi 0.87.1 | Starts report Working; `agent_settled` or confirmed idle after `agent_end` reports waiting. A late finalized message cannot restart settled execution. | Named `ask`/`AskUserQuestion` tools retain `toolCallId` until tool execution ends. The documented `ui_prompt_start/end` pair tracks blocking extension UI with one process/session-scoped ID; Pi emits this pair around the outermost dialog, including dismissal/rejection. Titles and answers are discarded. |

@@ -155,6 +155,12 @@ const rows: {
     reason: 'Worker blocked: no database access',
   },
   {
+    id: 'usage-limit',
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', reason: "Usage limit reached on Alice's account; no fallback has usage left" }),
+    ctx: {},
+    reason: "Usage limit reached on Alice's account; no fallback has usage left",
+  },
+  {
     id: 'turn-ended',
     run: record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'agent idle' }),
     ctx: {},
@@ -395,6 +401,13 @@ describe('background runs', () => {
   it('reach Needs you on a pending Aether approval', () => {
     const ctx = stateContext({ approvalsByRun: { run_1: [approval()] } })
     expect(needsYou(record({ mode: 'headless' }), ctx)?.id).toBe('permission')
+  })
+
+  it("show a usage-limit failure with the server's reason", () => {
+    const reason = "Usage limit reached on Alice's account; continuing on Bob's account failed: docker: no space left on device"
+    const failed = record({ mode: 'headless', status: 'failed', reason, finish_unopened: true })
+    expect(presentRun(failed, stateContext())).toMatchObject({ state: 'needs-you', reason })
+    expect(needsYou({ ...failed, reason: 'exit status 1' }, stateContext())).toBeUndefined()
   })
 
   it('reach Needs you on an unreviewed failure', () => {

@@ -442,6 +442,8 @@ export const api = {
     mode?: string
     model?: string
     account_member_id?: string
+    fallback_account_member_ids?: string[]
+    no_fallback?: boolean
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
@@ -535,6 +537,8 @@ export const api = {
     accountable_human_id: string
     integrator: MissionIntegrator
     execution_choices: MissionExecutionChoice[]
+    fallback_account_member_ids?: string[]
+    no_fallback?: boolean
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>
