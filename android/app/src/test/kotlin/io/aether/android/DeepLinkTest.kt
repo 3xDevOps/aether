@@ -46,6 +46,12 @@ class DeepLinkTest {
     }
 
     @Test
+    fun aClaimLinkToABracketedIpv6EdgeOpensTheConnectStep() {
+        val claim = "aether://claim?edge=https%3A%2F%2F%5B2001%3Adb8%3A%3A1%5D%3A8443&server=$SERVER#$SECRET"
+        assertEquals("$BASE#claim=${URLEncoder.encode(claim, "UTF-8")}", deepLinkUrl(BASE, claim))
+    }
+
+    @Test
     fun aJoinOrClaimLinkWithAnyPartOutOfShapeIsRefused() {
         val edge = "edge=https://edge.example.test"
         assertNull(deepLinkUrl(BASE, "aether://claim?$edge&server=$SERVER"))

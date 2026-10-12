@@ -7,15 +7,12 @@ import (
 	"strings"
 )
 
-// A join secret is 16 lowercase base32 characters (80 bits) from
-// crypto/rand, bound to one invitation. It travels only in the fragment of
-// the invitation's link and inside SSH, so the edge never sees it.
+// A join secret travels only in the fragment of the invitation's link and
+// inside SSH, so the edge never sees it.
 const joinSecretLength = 16
 
-// maxInvitationIDLength bounds an invitation id in a link or user name.
 const maxInvitationIDLength = 64
 
-// NewJoinSecret returns a fresh join secret.
 func NewJoinSecret() string {
 	var secret [joinSecretLength * 5 / 8]byte
 	_, _ = rand.Read(secret[:]) // crypto/rand.Read never returns an error.
@@ -37,15 +34,12 @@ func validInvitationID(id string) bool {
 	return true
 }
 
-// JoinLink is the link an invitation is sent as:
-// <edge origin>/join/<server id>/<invitation id>#<secret>.
 func JoinLink(edgeURL, serverID, invitationID, secret string) string {
 	return strings.TrimSuffix(edgeURL, "/") + "/join/" + serverID + "/" + invitationID + "#" + secret
 }
 
-// ClaimLink is the deep link a claim code is printed as:
-// aether://claim?edge=<relay origin>&server=<server id>#<secret>. There is
-// no claim page on the edge, since a page it serves could read the secret.
+// ClaimLink is a deep link rather than an edge page, since a page the edge
+// serves could read the secret.
 func ClaimLink(edgeURL, code string) (string, error) {
 	origin, err := Origin(edgeURL)
 	if err != nil {
@@ -58,9 +52,8 @@ func ClaimLink(edgeURL, code string) (string, error) {
 	return "aether://claim?edge=" + url.QueryEscape(origin) + "&server=" + serverID + "#" + normalized[len(serverID)+1:], nil
 }
 
-// ParseJoinLink reads a link from JoinLink, or the deep link the edge's
-// join page opens, aether://join?edge=<origin>&server=<id>&invitation=<id>#<secret>,
-// and returns the edge's origin with the parts it names.
+// ParseJoinLink also reads the aether://join deep link the edge's join
+// page opens.
 func ParseJoinLink(s string) (edgeURL, serverID, invitationID, secret string, err error) {
 	bad := func() (string, string, string, string, error) {
 		return "", "", "", "", fmt.Errorf("edgeproto: a join link looks like https://<edge host>/join/<server id>/<invitation id>#<%d-character secret>",
@@ -96,15 +89,11 @@ func ParseJoinLink(s string) (edgeURL, serverID, invitationID, secret string, er
 	return edgeURL, serverID, invitationID, secret, nil
 }
 
-// joinUserPrefix starts the SSH user name of a join connection. As with
-// claimUserPrefix, the user name is sent after the client checked the host
-// key against the server id in the link, so the edge relaying the
+// As with claimUserPrefix, the user name is sent after the client checked
+// the host key against the server id in the link, so the edge relaying the
 // connection never sees the secret.
 const joinUserPrefix = "join:"
 
-// JoinUser returns the SSH user name that presents the join secret of an
-// invitation on a connection by owner, the account the client is signed in
-// as.
 func JoinUser(invitationID, secret string, owner Principal) (string, error) {
 	if !validInvitationID(invitationID) || !validJoinSecret(secret) {
 		return "", fmt.Errorf("edgeproto: malformed invitation id or join secret")
@@ -121,9 +110,8 @@ func JoinUser(invitationID, secret string, owner Principal) (string, error) {
 	return joinUserPrefix + invitationID + ":" + secret + ":" + owner.Provider + ":" + owner.Subject, nil
 }
 
-// ParseJoinUser returns the invitation id, join secret and joining account
-// in an SSH user name, accepting only the exact form JoinUser produces. The
-// secret is a secret: never log the user name of a join connection.
+// ParseJoinUser accepts only the exact form JoinUser produces. Never log
+// the user name of a join connection: it carries the secret.
 func ParseJoinUser(user string) (invitationID, secret string, owner Principal, ok bool) {
 	rest, found := strings.CutPrefix(user, joinUserPrefix)
 	if !found {

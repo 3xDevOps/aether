@@ -421,8 +421,10 @@ function main() {
     } catch {
       return ''
     }
-    // A relay origin: https://host[:port], nothing else.
-    if (edge.protocol !== 'https:' || edge.origin !== params.get('edge')) return ''
+    // A relay origin: https://host[:port], nothing else. URL.origin drops
+    // an explicit :443, which edgeproto.Origin keeps.
+    const origin = params.get('edge')
+    if (edge.protocol !== 'https:' || (origin !== edge.origin && origin !== edge.origin + ':443')) return ''
     if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
     if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
     if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''

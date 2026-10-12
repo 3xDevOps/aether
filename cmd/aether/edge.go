@@ -79,9 +79,6 @@ func runEdge(args []string) error {
 	return nil
 }
 
-// edgeConnected is what aether edge connect prints and returns for a
-// server it does not claim: an error when the edge is off, a message when
-// the server already has an owner, and neither when it can connect.
 func edgeConnected(edge protocol.ServerEdgeResult) (string, error) {
 	switch {
 	case edge.EdgeURL == "":

@@ -87,16 +87,18 @@ function useEdgeSignIn(client: Api, edge?: string): SignIn {
         client.localEdgeStatus().then(
           (status) => {
             if (!live) return
-            // Another tab can replace this sign-in with its own.
-            const login = status.login?.edge === waitingEdge && status.login.user_code === waitingCode ? status.login : undefined
-            if (login?.state === 'signed_in' && login.account) {
+            const login = status.login
+            if (login?.edge !== waitingEdge || login.user_code !== waitingCode) {
+              setError('Sign-in was replaced by another window. Try again.')
+              setPhase({ name: 'signed-out' })
+            } else if (login.state === 'signed_in' && login.account) {
               setError(null)
               setPhase({
                 name: 'signed-in',
                 edges: [{ edge: login.edge, account: login.account }],
                 chosen: login.edge,
               })
-            } else if (login?.state === 'failed') {
+            } else if (login.state === 'failed') {
               setError(login.error ?? 'sign in failed')
               setPhase({ name: 'signed-out' })
             } else {

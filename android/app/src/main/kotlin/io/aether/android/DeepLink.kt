@@ -9,7 +9,7 @@ import java.net.URLEncoder
 // Anything else is refused rather than concatenated into the dashboard URL,
 // exactly as the desktop shell does.
 private val RUN_ID = Regex("^[0-9a-z-]{10,32}$")
-private val RELAY_ORIGIN = Regex("^https://[a-z0-9.-]+(:[0-9]{1,5})?$")
+private val RELAY_ORIGIN = Regex("^https://([a-z0-9.-]+|\\[[0-9a-f:.]+])(:[0-9]{1,5})?$")
 private val SERVER_ID = Regex("^[a-z2-7]{26}$")
 private val INVITATION_ID = Regex("^inv-[0-9a-hjkmnp-tv-z]{10}$")
 private val SECRET = Regex("^[a-z2-7]{16}$")

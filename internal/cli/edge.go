@@ -163,13 +163,11 @@ func DialClaim(cfg Config, code string) (*Conn, error) {
 	return &Conn{client: client, cfg: cfg}, nil
 }
 
-// DialJoin joins the server that link, an invitation's join link, names,
-// through the edge it names, and returns the connection the server then
-// serves. As with DialClaim, the join secret travels only in the SSH user
-// name, sent after the host key proved the server id in the link, so
-// neither the edge nor a server with another id receives it. A server
-// that admits approved devices only refuses the joining device with
-// edgeproto.RefusedDevicePending until an admin approves it.
+// DialJoin sends the join secret only in the SSH user name, after the host
+// key proved the server id in the link, so neither the edge nor a server
+// with another id receives it. A server that admits approved devices only
+// refuses the joining device with edgeproto.RefusedDevicePending until an
+// admin approves it.
 func DialJoin(cfg Config, link string) (*Conn, error) {
 	edgeURL, serverID, invitation, secret, err := edgeproto.ParseJoinLink(link)
 	if err != nil {

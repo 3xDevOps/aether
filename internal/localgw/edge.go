@@ -353,10 +353,8 @@ func (g *Gateway) localEdgeClaim(_ *http.Request, body []byte) (any, *protocol.E
 	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, EdgeURL: client.URL(), Claim: params.Code})
 }
 
-// localEdgeJoin joins the server an invitation's join link names, through
-// the edge it names, and links it, as aether link <join link> does. A
-// device waiting for approval is refused with kind device-pending each
-// time; the caller tries again.
+// localEdgeJoin refuses a device waiting for approval with kind
+// device-pending each time; the caller tries again.
 func (g *Gateway) localEdgeJoin(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Link string `json:"link"`

@@ -135,6 +135,28 @@ describe('onboarding link through an edge', () => {
     expect(client.localEdgeServers).toHaveBeenCalledWith(edge)
   })
 
+  it('stops waiting with a retry when another window replaces the sign-in', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    seed()
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi
+        .fn<() => Promise<EdgeStatus>>()
+        .mockResolvedValueOnce({ edges: [] })
+        .mockResolvedValue({ edges: [], login: { ...pending, user_code: 'QXRT-PLMN' } }),
+      localEdgeLogin: vi.fn(async () => pending),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByText('WDJB-MJHT')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(await screen.findByText('Sign-in was replaced by another window. Try again.')).toBeDefined()
+    expect((screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('resumes a sign-in still pending when the step opens again', async () => {
     seed()
     const client = fakeApi({
@@ -554,6 +576,20 @@ describe('a join link handed to the dashboard', () => {
     expect(within(command).getByText(`aether link '${joinLink}'`)).toBeDefined()
     expect(client.localLinkStatus).not.toHaveBeenCalled()
     expect(client.localEdgeJoin).not.toHaveBeenCalled()
+  })
+})
+
+describe('a claim link handed to the dashboard', () => {
+  it('shows a command that claims through the edge the link names where the dashboard has no edge.claim', async () => {
+    const custom = 'https://edge.example.test:8443'
+    const claimLink = `aether://claim?edge=${encodeURIComponent(custom)}&server=${serverID}#abcdefghijk23456`
+    window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimLink)}`)
+    seed()
+    useStore.setState({ capabilities: { ...localCaps, local: [] } })
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+
+    const command = await screen.findByRole('region', { name: 'Link from a terminal' })
+    expect(within(command).getByText(`aether link --claim ${serverID}-abcdefghijk23456 --edge ${custom}`)).toBeDefined()
   })
 })
 

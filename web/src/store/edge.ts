@@ -16,14 +16,23 @@ export const createEdgeSlice: SliceCreator<EdgeSlice> = (set) => ({
   setEdge: (edge) => set({ edge }),
 })
 
-/** Lands only for the viewer it was read for. */
+const reads = new WeakMap<RootStore, number>()
+
+/** Only the latest read lands; a failed read or one made for another viewer
+ * clears the slice. */
 export async function loadEdge(store: RootStore, client: Api): Promise<void> {
+  const read = (reads.get(store) ?? 0) + 1
+  reads.set(store, read)
   const s = store.getState()
   if (!capability(s.capabilities).hasMethod('server.edge')) {
     s.setEdge(null)
     return
   }
-  const edge = await client.serverEdge()
-  const now = store.getState()
-  if (now.identityKey === s.identityKey) now.setEdge(edge)
+  let edge: ServerEdge | null = null
+  try {
+    edge = await client.serverEdge()
+  } finally {
+    const now = store.getState()
+    if (reads.get(store) === read) now.setEdge(now.identityKey === s.identityKey ? edge : null)
+  }
 }

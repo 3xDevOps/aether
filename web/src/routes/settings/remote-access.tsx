@@ -33,7 +33,7 @@ export function RemoteAccessSection({ client }: { client: Api }) {
       <SettingRow label="Access policy" help={edge.access_policy} />
       <SettingRow label="Owner" help={edge.owner ? `${edge.owner.login} (${edge.owner.provider})` : 'none'}>
         {connectable && (local
-          ? <ConnectAccount client={client} edgeURL={edge.edge_url} />
+          ? <ConnectAccount client={client} edgeURL={edge.edge_url} serverID={edge.server_id} />
           : (
             <div className="flex min-w-0 flex-col gap-1.5 text-ui-sm text-muted">
               <p>Run aether edge connect from a linked terminal</p>
@@ -51,7 +51,7 @@ type Phase =
   | { name: 'signing-in'; login: EdgeLogin }
   | { name: 'connecting'; account: EdgeAccount }
 
-function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
+function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: string; serverID: string }) {
   const [phase, setPhase] = useState<Phase>({ name: 'idle' })
   const [error, setError] = useState<string | null>(null)
   const live = useRef(true)
@@ -69,11 +69,10 @@ function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       if (!live.current) throw new Error('left Settings before the sign-in finished')
-      const latest = (await client.localEdgeStatus()).login
-      // Another tab can replace this sign-in with its own.
-      const now = latest?.edge === login.edge && latest.user_code === login.user_code ? latest : undefined
-      if (now?.state === 'signed_in' && now.account) return now.account
-      if (now?.state === 'failed') throw new Error(now.error ?? 'sign in failed')
+      const now = (await client.localEdgeStatus()).login
+      if (now?.edge !== login.edge || now.user_code !== login.user_code) throw new Error('Sign-in was replaced by another window. Try again.')
+      if (now.state === 'signed_in' && now.account) return now.account
+      if (now.state === 'failed') throw new Error(now.error ?? 'sign in failed')
     }
   }
 
@@ -85,6 +84,8 @@ function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
       const account = await signedIn()
       setPhase({ name: 'connecting', account })
       const { code } = await client.serverEdgeClaimCode()
+      // The gateway is shared, so another tab may have relinked it since.
+      if (code.split('-')[0] !== serverID) throw new Error('The gateway now reaches another server; reload and try again.')
       await client.localEdgeClaim(code, edgeURL)
       await loadEdge(useStore, client)
     } catch (err) {

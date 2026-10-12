@@ -10,6 +10,7 @@ import type { Api } from '@/lib/api'
 import { parseClaim } from '@/lib/claim-link'
 import { edgeHost, linkTarget, message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { shellQuote } from '@/lib/shell'
 import type { EdgeLinkResult, LinkApplyResult, LinkStatus } from '@/lib/types'
 import { forgetHandedLink, handedLink, onHandedLink } from '@/lib/url-state'
 import { EdgeSignIn, JoinLink, LinkByCommand } from '@/routes/onboarding/edge-link'
@@ -90,6 +91,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   const connected = success !== null || edgeLinked !== null || status?.server_configured === true
   const choosing = status !== null && !connected
   const handedClaim = handed?.kind === 'claim' && !edgeLinked && caps.hasLocal('edge.claim')
+  const claim = handed?.kind === 'claim' ? parseClaim(handed.link) : null
 
   const summary = success ? (
     <>
@@ -126,7 +128,10 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
         <JoinLink client={client} caps={caps} link={handed.link} onLinked={(result) => void linkedThroughEdge(result)} />
       )}
       {handed?.kind === 'claim' && !caps.hasLocal('edge.claim') && (
-        <LinkByCommand link={handed.link} command={`aether link --claim ${parseClaim(handed.link).code}`} />
+        <LinkByCommand
+          link={handed.link}
+          command={`aether link --claim ${claim?.code}${claim?.edge ? ` --edge ${shellQuote(claim.edge)}` : ''}`}
+        />
       )}
       {((choosing && handed?.kind !== 'join') || handedClaim) && (
         <EdgeSignIn

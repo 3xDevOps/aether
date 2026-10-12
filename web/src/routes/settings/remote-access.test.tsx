@@ -63,3 +63,15 @@ it('claims with the code server.edge.claimcode issues and shows the new owner', 
   await waitFor(() => expect(vi.mocked(client.serverEdgeClaimCode).mock.invocationCallOrder[0])
     .toBeLessThan(vi.mocked(client.localEdgeClaim).mock.invocationCallOrder[0]))
 })
+
+it('refuses to claim when the gateway now reaches another server', async () => {
+  seed('admin', ownerless)
+  const client = fakeApi({
+    localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
+    serverEdgeClaimCode: vi.fn(async () => ({ code: 'abcdefghijklmnopqrstuvwxyz-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
+  })
+  render(<RemoteAccessSection client={client} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Connect my GitHub account' }))
+  expect(await screen.findByText('The gateway now reaches another server; reload and try again.')).toBeTruthy()
+  expect(client.localEdgeClaim).not.toHaveBeenCalled()
+})
