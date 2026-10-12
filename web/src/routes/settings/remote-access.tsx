@@ -22,7 +22,24 @@ export function RemoteAccessSection({ client }: { client: Api }) {
   const edge = useStore((s) => s.edge)
   const admin = useIsAdmin()
   const caps = useCapability()
-  if (!edge) return null
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    loadEdge(useStore, client).then(
+      () => {
+        if (live) setError(null)
+      },
+      (err: unknown) => {
+        if (live) setError(message(err))
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [client])
+  if (!edge) {
+    return error ? <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout> : null
+  }
   const connectable = admin && edge.edge_url !== '' && edge.owner === null
   const local = caps.hasLocal('edge.status') && caps.hasLocal('edge.login') && caps.hasLocal('edge.claim')
   return (
@@ -43,6 +60,7 @@ export function RemoteAccessSection({ client }: { client: Api }) {
           ))}
       </SettingRow>
       {edge.edge_url && <SettingRow label="Connection" help={connection(edge)} />}
+      {error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout>}
     </SettingsSection>
   )
 }
