@@ -77,6 +77,53 @@ func TestEdgeIdentityMigrationKeepsMembersAndCascadeChildren(t *testing.T) {
 	}
 }
 
+// TestJoinSecretMigrationDropsOpenInvitations upgrades a database from
+// before join secrets: its open invitations, which no link can join, are
+// gone with the device waiting on one, and everything else stays.
+func TestJoinSecretMigrationDropsOpenInvitations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 58)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, tailnet_login, pending, color, role, created_at)
+			VALUES ('m1', 'Ada', '', '', 0, '#e6194b', 'admin', 1), ('m2', 'bob', '', '', 0, '#3cb44b', 'collaborator', 2);
+		INSERT INTO member_identities (provider, subject, member_id, login, created_at)
+			VALUES ('github', '1', 'm1', 'ada', 1), ('github', '2', 'm2', 'bob', 2);
+		INSERT INTO identity_invitations (id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at)
+			VALUES ('inv-used', 'github', 'bob', '', 'collaborator', 'm2', 'm1', 1, 9e18, 2),
+			       ('inv-open', 'github', 'carol', '', 'viewer', NULL, 'm1', 1, 9e18, NULL);
+		INSERT INTO member_devices (id, member_id, invitation_id, provider, subject, credential, label, status, approval_code, created_at)
+			VALUES ('d1', 'm1', NULL, 'github', '1', 'c1', 'laptop', 'approved', '', 1),
+			       ('d2', NULL, 'inv-open', 'github', '3', 'c2', 'carol-laptop', 'pending', 'code', 1);
+	`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	before := rowCounts(t, raw)
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if _, err := db.GetInvitation(ctx, "inv-open"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("open invitation after migration: %v; want ErrNotFound", err)
+	}
+	if inv, err := db.GetInvitation(ctx, "inv-used"); err != nil || inv.ConsumedAt == nil {
+		t.Fatalf("consumed invitation after migration = %+v, %v", inv, err)
+	}
+	before["identity_invitations"]--
+	before["member_devices"]--
+	after := rowCounts(t, db.db)
+	for table, n := range before {
+		if after[table] != n {
+			t.Errorf("table %s has %d rows after the migration, want %d", table, after[table], n)
+		}
+	}
+}
+
 // rowCounts counts the rows of every table in db except the migration
 // bookkeeping.
 func rowCounts(t *testing.T, db *sql.DB) map[string]int {

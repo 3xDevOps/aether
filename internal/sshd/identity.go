@@ -484,7 +484,15 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 // under it too keeps any invitation from outliving its creator's role.
 // An invitation the edge directory has no room for is refused here: once
 // the directory is over the edge's limit, it stops being pushed at all.
+// The join secret is returned once, in the link, and only its hash is
+// kept.
 func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, inv *domain.Invitation, method string) (any, *protocol.Error) {
+	edge := s.currentEdgeOwner()
+	if edge == nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: method + ": this server is not enrolled with an edge (edge-url is empty)"}
+	}
+	secret := edgeproto.NewJoinSecret()
+	inv.SecretHash = edgeproto.HashToken(secret)
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
 	if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
@@ -505,7 +513,9 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	s.notifyDirectory()
 	slog.Info("sshd: invitation created", "actor", inv.CreatedBy, "invitation", inv.ID,
 		"provider", inv.Provider, "login", inv.Login, "email", inv.Email, "role", inv.Role, "link", inv.Member)
-	return protocol.MemberInvitationResult{Invitation: invitationToWire(inv)}, nil
+	serverID := edgeproto.ServerID(s.hostKey.PublicKey())
+	return protocol.MemberInvitationResult{Invitation: invitationToWire(inv), ServerID: serverID,
+		Link: edgeproto.JoinLink(edge.Origin(), serverID, string(inv.ID), secret)}, nil
 }
 
 func (s *Server) memberInvitationList(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

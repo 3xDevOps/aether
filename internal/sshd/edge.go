@@ -2,11 +2,13 @@ package sshd
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -107,17 +109,25 @@ func grantKeyCallback(grant edgeproto.Grant) func(ssh.ConnMetadata, ssh.PublicKe
 }
 
 // edgeConfig authenticates a relayed connection. Its SSH user name is
-// <provider>:<subject>, the account the client signed in as, under the
-// client's own signature: a grant naming any other account is refused
-// before anything is recorded, so an edge cannot register or bind a
-// device key it relays to an account of its choosing.
+// <provider>:<subject>, the account the client signed in as, or a join
+// user name (edgeproto.JoinUser) for that account, under the client's own
+// signature: a grant naming any other account is refused before anything
+// is recorded, so an edge cannot register or bind a device key it relays
+// to an account of its choosing. A join user name holds a secret, so
+// neither callback logs it or puts it in an error.
 func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.ServerConfig {
 	keyOK := grantKeyCallback(grant)
 	cfg := &ssh.ServerConfig{
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			if want := edgeproto.AccountUser(grant.Account); conn.User() != want {
-				return nil, refusal(fmt.Errorf("sshd: relayed connection as %q with a grant for %s", conn.User(), want),
-					&edgeproto.Refused{Kind: edgeproto.RefusedAccountMismatch, User: conn.User(),
+			want, user := edgeproto.AccountUser(grant.Account), conn.User()
+			if _, _, owner, ok := edgeproto.ParseJoinUser(user); ok {
+				user = owner.Provider + ":" + owner.Subject
+			} else if strings.HasPrefix(user, "join:") {
+				user = "join:…"
+			}
+			if user != want {
+				return nil, refusal(fmt.Errorf("sshd: relayed connection as %q with a grant for %s", user, want),
+					&edgeproto.Refused{Kind: edgeproto.RefusedAccountMismatch, User: user,
 						Account: accountName(grant.Account), Principal: want})
 			}
 			return keyOK(conn, key)
@@ -125,10 +135,11 @@ func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.Ser
 		// Runs once the client has signed with the key, so store writes
 		// here cannot be triggered by a key nobody holds, and a refusal
 		// still reaches the client as a banner.
-		VerifiedPublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+		VerifiedPublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+			invitation, secret, _, _ := edgeproto.ParseJoinUser(conn.User())
 			authCtx, cancel := context.WithTimeout(ctx, authTimeout)
 			defer cancel()
-			return s.admitEdge(authCtx, grant, key)
+			return s.admitEdge(authCtx, grant, key, invitation, secret)
 		},
 	}
 	cfg.AddHostKey(s.hostKey)
@@ -219,8 +230,9 @@ func devicePermissions(member domain.MemberID, dev *domain.Device) *ssh.Permissi
 }
 
 // admitEdge maps the grant's account to a member, then admits the device
-// under the server's access policy.
-func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey) (*ssh.Permissions, error) {
+// under the server's access policy. invitation and secret are the join the
+// connection presents, empty without one.
+func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey, invitation, secret string) (*ssh.Permissions, error) {
 	ids, err := s.identityStore()
 	if err != nil {
 		return nil, err
@@ -228,7 +240,7 @@ func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.P
 	keyLine, label := edgeproto.DeviceKeyLine(key), deviceLabel(grant, key)
 	m, err := ids.GetMemberByIdentity(ctx, grant.Account.Provider, grant.Account.Subject)
 	if errors.Is(err, store.ErrNotFound) {
-		m, err = s.edgeInvitee(ctx, ids, grant.Account, keyLine, label)
+		m, err = s.edgeInvitee(ctx, ids, grant.Account, invitation, secret, keyLine, label)
 	}
 	if err != nil {
 		return nil, err
@@ -319,20 +331,26 @@ func (s *Server) directDevice(ctx context.Context, key ssh.PublicKey) (*ssh.Perm
 	return devicePermissions(dev.Member, dev), true, nil
 }
 
-// edgeInvitee handles an account no member holds. One matching an open
-// invitation joins under account access: it becomes that invitation's
-// member. Under approved-devices the connecting device waits on the
-// invitation instead, and nothing else changes until a person approves
-// it: an edge that signs a grant for an invited account must not create a
-// member, bind an account or use up the invitation.
-func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, keyLine, label string) (*domain.Member, error) {
+// edgeInvitee handles an account no member holds. One that presents the
+// secret of an open invitation it matches joins under account access: it
+// becomes that invitation's member. Under approved-devices the connecting
+// device waits on the invitation instead, and nothing else changes until a
+// person approves it. Without the secret nothing is recorded: the edge
+// never sees it, so an edge that signs a grant for an invited account
+// cannot create a member, bind an account, record a device or use up the
+// invitation.
+func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, invitation, secret, keyLine, label string) (*domain.Member, error) {
 	notMember := refusal(fmt.Errorf("sshd: %s: %w", accountName(account), edgeproto.RefusalNotMember),
 		&edgeproto.Refused{Kind: edgeproto.RefusedNotMember, Server: s.cfg.Name, Account: accountName(account)})
-	invs, err := matchingInvitations(ctx, ids, account)
-	if err != nil {
-		return nil, err
-	}
-	if len(invs) == 0 {
+	if invitation == "" {
+		invs, err := matchingInvitations(ctx, ids, account)
+		if err != nil {
+			return nil, err
+		}
+		if len(invs) > 0 {
+			return nil, refusal(fmt.Errorf("sshd: %s is invited and presented no join secret", accountName(account)),
+				&edgeproto.Refused{Kind: edgeproto.RefusedInvitationNeedsLink, Server: s.cfg.Name, Account: accountName(account)})
+		}
 		// Another connection of this account may have accepted its
 		// invitation since admitEdge found no member.
 		m, lookupErr := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
@@ -341,15 +359,53 @@ func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, accou
 		}
 		return m, lookupErr
 	}
-	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
-		return nil, s.invitationDevice(ctx, ids, invs[0], account, keyLine, label)
+	inv, err := s.joinedInvitation(ctx, ids, account, invitation, secret)
+	if err != nil {
+		// Another connection of this account may have used the
+		// invitation since admitEdge found no member.
+		if m, lookupErr := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject); lookupErr == nil {
+			return m, nil
+		}
+		return nil, err
 	}
-	m, err := s.acceptInvitation(ctx, ids, invs[0], account)
+	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
+		return nil, s.invitationDevice(ctx, ids, inv, account, keyLine, label)
+	}
+	m, err := s.acceptInvitation(ctx, ids, inv, account)
 	if errors.Is(err, store.ErrNotFound) {
 		// Another account consumed the invitation first.
 		return nil, notMember
 	}
 	return m, err
+}
+
+// joinedInvitation returns the open invitation id when secret is its join
+// secret and account matches it now.
+func (s *Server) joinedInvitation(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, id, secret string) (*domain.Invitation, error) {
+	wrong := refusal(fmt.Errorf("sshd: %s presented a wrong join secret or a closed invitation %s", accountName(account), id),
+		&edgeproto.Refused{Kind: edgeproto.RefusedJoinWrong, Server: s.cfg.Name, Invitation: id})
+	inv, err := ids.GetInvitation(ctx, domain.InvitationID(id))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, wrong
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sshd: join invitation %s: %w", id, err)
+	}
+	now := time.Now()
+	if inv.SecretHash == "" || inv.ConsumedAt != nil || !now.Before(inv.ExpiresAt) ||
+		subtle.ConstantTimeCompare([]byte(edgeproto.HashToken(secret)), []byte(inv.SecretHash)) != 1 {
+		return nil, wrong
+	}
+	if !invitationMatches(inv, account, now) {
+		invitee := inv.Login
+		if invitee == "" {
+			invitee = inv.Email
+		}
+		return nil, refusal(fmt.Errorf("sshd: %s joined through invitation %s for %s", accountName(account), id, invitee),
+			&edgeproto.Refused{Kind: edgeproto.RefusedJoinWrong, Server: s.cfg.Name, Invitation: id,
+				User: invitee, Account: accountName(account)})
+	}
+	return inv, nil
 }
 
 // invitationDevice records the device with keyLine as waiting on inv for
@@ -411,7 +467,7 @@ func (s *Server) acceptInvitation(ctx context.Context, ids store.IdentityStore, 
 }
 
 // matchingInvitations returns the open invitations account matches now,
-// oldest first, matched exactly as the edge matches directory entries.
+// oldest first.
 func matchingInvitations(ctx context.Context, ids store.IdentityStore, account edgeproto.Account) ([]*domain.Invitation, error) {
 	invs, err := ids.ListInvitations(ctx)
 	if err != nil {
@@ -420,13 +476,19 @@ func matchingInvitations(ctx context.Context, ids store.IdentityStore, account e
 	now := time.Now()
 	var matched []*domain.Invitation
 	for _, inv := range invs {
-		entry := edgeproto.DirectoryEntry{Kind: edgeproto.EntryInvitation, Provider: inv.Provider,
-			Login: inv.Login, Email: inv.Email, ExpiresAt: inv.ExpiresAt}
-		if entry.Matches(account, now) {
+		if invitationMatches(inv, account, now) {
 			matched = append(matched, inv)
 		}
 	}
 	return matched, nil
+}
+
+// invitationMatches reports whether account matches inv at now, exactly as
+// the edge matches directory entries.
+func invitationMatches(inv *domain.Invitation, account edgeproto.Account, now time.Time) bool {
+	entry := edgeproto.DirectoryEntry{Kind: edgeproto.EntryInvitation, Provider: inv.Provider,
+		Login: inv.Login, Email: inv.Email, ExpiresAt: inv.ExpiresAt}
+	return entry.Matches(account, now)
 }
 
 // edgeDevice returns the device registered with keyLine, registering it

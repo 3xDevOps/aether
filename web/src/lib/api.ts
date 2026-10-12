@@ -36,6 +36,7 @@ import type {
   GitHubProbeResult,
   GitIdentity,
   Invitation,
+  InvitationResult,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -758,9 +759,7 @@ export const api = {
     email?: string
     role: Member['role']
   }) =>
-    call<{ invitation: Invitation }>('member.invitation.create', params).then(
-      (r) => r.invitation,
-    ),
+    call<InvitationResult>('member.invitation.create', params),
   memberInvitationRevoke: (invitationID: string) =>
     call<unknown>('member.invitation.revoke', { invitation_id: invitationID }),
   workspaceAdd: (params: {

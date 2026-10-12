@@ -997,17 +997,42 @@ func waitRole(t *testing.T, c *client, serverID, role string) {
 	})
 }
 
-func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreateParams) string {
+func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreateParams) protocol.MemberInvitationResult {
 	t.Helper()
-	return call[protocol.MemberInvitationResult](t, ctl, protocol.MethodMemberInvitationCreate, p).Invitation.ID
+	return call[protocol.MemberInvitationResult](t, ctl, protocol.MethodMemberInvitationCreate, p)
 }
 
-// inviteLogin invites u by GitHub login with role and waits until the
-// edge lists the server for u.
-func inviteLogin(t *testing.T, ctl *protocol.Client, c *client, serverID, role string) {
+// inviteLogin invites u by GitHub login with role, waits until the edge
+// lists the server for u, and returns the invitation's join link.
+func inviteLogin(t *testing.T, ctl *protocol.Client, c *client, serverID, role string) string {
 	t.Helper()
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Login: c.user.Login, Role: role})
+	link := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: c.user.Login, Role: role}).Link
 	waitRole(t, c, serverID, role)
+	return link
+}
+
+// invitation stores inv on s directly, as one made before the server had
+// an admin or edge, and returns its join link.
+func (s *serverNode) invitation(t *testing.T, inv *domain.Invitation) string {
+	t.Helper()
+	secret := edgeproto.NewJoinSecret()
+	inv.SecretHash = edgeproto.HashToken(secret)
+	if err := s.db.CreateInvitation(context.Background(), inv); err != nil {
+		t.Fatal(err)
+	}
+	return edgeproto.JoinLink(s.h.relayURL, s.id, string(inv.ID), secret)
+}
+
+// joinBy joins as c through link, an invitation's join link, as
+// `aether link <join link>` does.
+func (h *harness) joinBy(c *client, link string) (cli.LinkResult, error) {
+	res, err := as(c, func() (cli.LinkResult, error) {
+		return cli.Link(cli.LinkOptions{Join: link}, cli.Config{})
+	})
+	if err == nil {
+		h.t.Cleanup(func() { _ = res.Conn.Close() })
+	}
+	return res, err
 }
 
 // deviceIDOf is the id of the device on s whose key is c's device key.
@@ -1035,13 +1060,12 @@ func (s *serverNode) deviceStatus(t *testing.T, c *client) domain.DeviceStatus {
 }
 
 // join invites c to s by GitHub login with role through ctl, an admin's
-// control channel, and approves c's first device from it when s admits
-// approved devices only.
+// control channel, joins by the invitation's link, and approves c's first
+// device from ctl when s admits approved devices only.
 func (h *harness) join(ctl *protocol.Client, c *client, s *serverNode, role string) {
 	t := h.t
 	t.Helper()
-	inviteLogin(t, ctl, c, s.id, role)
-	_, err := h.dial(c, h.link(s))
+	_, err := h.joinBy(c, inviteLogin(t, ctl, c, s.id, role))
 	if s.policy == edgeproto.PolicyApprovedDevices {
 		approve(t, ctl, waitingCode(t, c.user.Login+"'s first device", err))
 	} else if err != nil {

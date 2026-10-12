@@ -107,7 +107,16 @@ func TestParseLinkArgsEdgeForms(t *testing.T) {
 	if opts.claim == "" || opts.addr != "" || opts.direct != "tailnet-host" {
 		t.Fatalf("claim options = %+v", opts)
 	}
+	join := "https://edge.example/join/" + testServerID + "/inv-7k2m9q4xbd#abcdefghijklmnop"
+	opts, err = parseLinkArgs([]string{join, "--addr", "tailnet-host", "--name", "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.join != join || opts.addr != "" || opts.direct != "tailnet-host" || opts.name != "work" {
+		t.Fatalf("join options = %+v", opts)
+	}
 	for _, bad := range [][]string{
+		{join, "--edge", "https://other.example"},
 		{"--claim", "code", "host"},
 		{"--claim", "code", "--invite", "x"},
 		{},

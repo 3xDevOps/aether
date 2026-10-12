@@ -858,9 +858,9 @@ go test -race ./internal/edge/edgetest/
 
 | Test | Proves |
 | --- | --- |
-| `TestAccountAccess` | Under `account` an invited person works with no approval, the device is recorded `registered`, and a registered device approves nothing |
+| `TestAccountAccess` | Under `account` an invited person joins by the invitation's link and works with no approval, the device is recorded `registered`, and a registered device approves nothing |
 | `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
-| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential; after the forged acceptance no member or administrator exists and the invitation is open |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance without the link's secret, refused with nothing recorded, not even a waiting device, and the invitation still open; a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
 | `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
 | `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
 | `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
@@ -869,7 +869,7 @@ go test -race ./internal/edge/edgetest/
 | `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner; the edge closes the server's control channel, the server drops its owner, and a fresh code claims again for the same account only |
 | `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link, and the invitee joins |
 | `TestAdminConnectsTheirAccount` | A server whose admin joined with an SSH key refuses invitations until claimed; the admin's `server.edge.claimcode` over that key claims it through the edge for their own member, approves the device and adds no member; invitations then work; a collaborator gets no code, a pending device opens no control channel, and an owned server issues none |
-| `TestInvitations` | By login and email; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
+| `TestInvitations` | By login and email, each joined by its link; an invited account without the link refused; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
 | `TestRoleChange` | A new role reaches the edge's list and the member's live connection |
 | `TestCrossServerIsolation` | A member of one server is refused on another, by the edge and, for forged grants, by the server |
 | `TestRevocationClosesLiveConnections` | Under both policies: member removal, device revocation, console revocation, `aether logout` and account deletion each close a live connection; the test logs how long each took |
@@ -890,10 +890,13 @@ go test -race ./internal/edge/edgetest/
 | `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
 | `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
 | `TestBehindTrustedProxies` | Under both policies, with the edge behind `--trusted-proxies` and its proxy reaching it from a non-loopback address of this machine (skipped on a machine with none): GitHub sign-in, a claim, an invitation and relayed `server.info` calls work; the edge records the forwarded client address, not the proxy's; `/signin/google` answers 404; a request from loopback past the proxy is refused with `403` and counted |
-| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
+| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone, then joins another server with `edge.join`, which answers `device-pending` until that server's admin approves the device by its id |
 
 Beside the suite, `internal/sshd` checks each server rule on its own,
-among them `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
+among them `TestJoinByLink` (a join by an invitation's link is admitted
+under `account` and waits under `approved-devices`; a wrong secret and a
+missing link are refused with nothing recorded),
+`TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
 an invitation until one is approved, which creates the member and removes
 the others), `TestRevokedInvitationDropsItsWaitingDevices`,
 `TestMemberIdentityListAndRemove`,

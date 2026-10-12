@@ -53,14 +53,10 @@ func runInvite(args []string) error {
 			return err
 		}
 		inv := res.Invitation
+		printInvitationLink(res)
+		fmt.Println("send them the link; they open it, sign in with GitHub and join")
+		fmt.Println("Under edge-access approved-devices, the default, their device waits until an admin approves it from the dashboard's Needs you card")
 		fmt.Printf("invited %s as %s until %s (invitation %s)\n", inviteeOf(inv), inv.Role, inv.ExpiresAt, inv.ID)
-		var edge protocol.ServerEdgeResult
-		if err := c.Call(protocol.MethodServerEdge, struct{}{}, &edge); err != nil {
-			return fmt.Errorf("read the server id for invitation %s: %w", inv.ID, err)
-		}
-		fmt.Printf("server id: %s\n", edge.ServerID)
-		fmt.Printf("they run: aether login, then aether link %s\n", edge.ServerID)
-		fmt.Println("Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>")
 		return nil
 	})
 }
@@ -75,7 +71,7 @@ const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
 func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int, error) {
 	fs := flag.NewFlagSet("invite", flag.ExitOnError)
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
-	github := fs.String("github", "", "invite this GitHub login; its first connection through the edge joins under edge-access account, and waits for aether device approve <code> under approved-devices")
+	github := fs.String("github", "", "invite this GitHub login; prints the link they join with")
 	email := fs.String("email", "", "invite the GitHub account whose verified primary email this is")
 	role := fs.String("role", "collaborator", "role of an invited account: viewer, collaborator, or admin")
 	if err := fs.Parse(args); err != nil {
@@ -122,6 +118,12 @@ func inviteList() error {
 		}
 		return tw.Flush()
 	})
+}
+
+// printInvitationLink prints the join link of a new invitation, the only
+// copy of its secret, and the server id it names.
+func printInvitationLink(res protocol.MemberInvitationResult) {
+	fmt.Printf("invite link: %s\nserver id: %s\n", res.Link, res.ServerID)
 }
 
 // inviteeOf names the account an invitation is for.

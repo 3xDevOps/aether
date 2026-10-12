@@ -660,7 +660,7 @@ retention, so a closed interactive run is unavailable to `run.relaunch` immediat
 
 ```json
 {"gateway":"local","methods":["*"],"ws":["events","attach","acp","terminal","dev/browser"],
- "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.link",
+ "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.join","edge.link",
           "edge.login","edge.logout","edge.servers","edge.status","env.agents","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
           "link.status","link.switch","pull","pull.switch","repo.fast-forward",
@@ -1323,6 +1323,7 @@ authority.
 | `edge.hostkey` | `{"server_id":"...","edge":"https://..."}` (`edge` optional) | `{"edge":"https://...","server_id":"...","fingerprint":"SHA256:..."}` |
 | `edge.link` | `{"server_id":"...","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `server_id` optional) | `{"server_id":"...","edge":"https://...","addr":"...","user":"aether","member":{...}}` |
 | `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link` |
+| `edge.join` | `{"link":"<join link>","addr":"host[:port]","name":"..."}` (`addr` and `name` optional) | as `edge.link` |
 | `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
 | `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
@@ -1361,6 +1362,7 @@ does, with the same files in the config directory:
 | `edge.hostkey` | the host key `aether link --from-edge` shows before it asks |
 | `edge.link` | `aether link <server id>` |
 | `edge.claim` | `aether link --claim <code>` |
+| `edge.join` | `aether link <join link>`, one attempt |
 | `edge.logout` | `aether logout` |
 
 - `edge` names the edge by its relay origin. Without it a verb uses the one
@@ -1387,12 +1389,20 @@ does, with the same files in the config directory:
   `edge.claim` checks the host key against the id in the code before it
   sends the code, inside SSH. `addr` is an SSH address tried before the
   edge; a claim never uses it.
+- `edge.join` takes an invitation's link, `https://<edge host>/join/<server
+  id>/<invitation id>#<secret>` or `aether://join?edge=...&server=...&invitation=...#<secret>`;
+  the edge comes from the link, and a malformed one answers `-32602`. It
+  checks the host key against the server id in the link before it sends
+  the secret, inside SSH, then saves the link as `edge.link` does. While the
+  joining device waits for an admin's approval it answers `-32002` with
+  kind `device-pending` and records nothing more; the caller calls it again
+  until it succeeds.
 - `edge.logout` revokes the device token at the edge and forgets it, and
   drops a pending `edge.login` for that edge.
 - Errors carry the client's own message. Not signed in, or an edge refusal
   with a `4xx` status such as a revoked token or a claimed server, answers
   `-32002`. An edge that cannot be reached or answers `5xx` answers
-  `-32004`. `edge.link` and `edge.claim` answer `-32002` for any failure of
+  `-32004`. `edge.link`, `edge.claim` and `edge.join` answer `-32002` for any failure of
   the SSH connection, with what the server said, such as a wrong claim code
   or a device waiting for approval. A refusal on the edge path, by the
   server, the edge, or this machine holding no sign-in, also carries

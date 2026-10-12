@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -113,7 +114,7 @@ func dialRelayed(t *testing.T, serve func(net.Conn), signer ssh.Signer, user str
 
 func (e *testEnv) mustDialEdge(t *testing.T, account edgeproto.Account, signer ssh.Signer, label string) *ssh.Client {
 	t.Helper()
-	c, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, edgeproto.AccountUser(account))
+	c, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, e.edgeUser(t, account))
 	if err != nil {
 		t.Fatalf("edge dial: %v (banner %q)", err, banner)
 	}
@@ -122,7 +123,7 @@ func (e *testEnv) mustDialEdge(t *testing.T, account edgeproto.Account, signer s
 
 func (e *testEnv) mustRefuseEdge(t *testing.T, account edgeproto.Account, signer ssh.Signer, label, wantBanner string) {
 	t.Helper()
-	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, edgeproto.AccountUser(account))
+	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, e.edgeUser(t, account))
 	if err == nil {
 		t.Fatalf("edge dial succeeded, want refusal %q", wantBanner)
 	}
@@ -140,16 +141,62 @@ func identities(t *testing.T, e *testEnv) store.IdentityStore {
 	return ids
 }
 
+// inviteAccount stores inv with a join secret the test env keeps, as if
+// its link had been sent.
 func inviteAccount(t *testing.T, e *testEnv, inv domain.Invitation) *domain.Invitation {
 	t.Helper()
 	inv.CreatedBy = e.member.ID
 	if inv.ExpiresAt.IsZero() {
 		inv.ExpiresAt = time.Now().Add(edgeproto.InvitationTTL)
 	}
+	secret := edgeproto.NewJoinSecret()
+	inv.SecretHash = edgeproto.HashToken(secret)
 	if err := identities(t, e).CreateInvitation(context.Background(), &inv); err != nil {
 		t.Fatalf("CreateInvitation: %v", err)
 	}
+	e.joinSecrets.Store(inv.ID, secret)
 	return &inv
+}
+
+// invite calls method, member.invitation.create or member.identity.link,
+// over c on a server with an edge, and keeps the secret of the link it
+// returns.
+func (e *testEnv) invite(t *testing.T, c *protocol.Client, method string, params any) protocol.MemberInvitationResult {
+	t.Helper()
+	if e.srv.currentEdgeOwner() == nil {
+		e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	}
+	var out protocol.MemberInvitationResult
+	if err := c.Call(method, params, &out); err != nil {
+		t.Fatalf("%s: %v", method, err)
+	}
+	_, _, id, secret, err := edgeproto.ParseJoinLink(out.Link)
+	if err != nil || id != out.Invitation.ID {
+		t.Fatalf("%s link %q names %q: %v", method, out.Link, id, err)
+	}
+	e.joinSecrets.Store(domain.InvitationID(id), secret)
+	return out
+}
+
+// edgeUser is the SSH user name account connects as: the join user of the
+// first open invitation it matches whose link the test env holds, as a
+// client that opened that link does, or else the account alone.
+func (e *testEnv) edgeUser(t *testing.T, account edgeproto.Account) string {
+	t.Helper()
+	invs, err := matchingInvitations(context.Background(), identities(t, e), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, inv := range invs {
+		if secret, ok := e.joinSecrets.Load(inv.ID); ok {
+			user, err := edgeproto.JoinUser(string(inv.ID), secret.(string), edgeproto.AccountPrincipal(account))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return user
+		}
+	}
+	return edgeproto.AccountUser(account)
 }
 
 // waitClosed waits for the server to close a relayed client connection.
@@ -172,7 +219,7 @@ func TestEdgeKeyMustBeTheGrantsDeviceKey(t *testing.T) {
 	e := newTestEnv(t, nil)
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	granted, offered := newSigner(t), newSigner(t)
-	_, banner, err := e.dialEdge(t, grantFor(octo, granted, "laptop"), offered, edgeproto.AccountUser(octo))
+	_, banner, err := e.dialEdge(t, grantFor(octo, granted, "laptop"), offered, e.edgeUser(t, octo))
 	if err == nil {
 		t.Fatal("a key other than the grant's device key authenticated")
 	}
@@ -239,11 +286,12 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	account.Email = "octo@example.com"
 	signer := newSigner(t)
 
+	user := e.edgeUser(t, account)
 	var wg sync.WaitGroup
 	clients := make([]*ssh.Client, 2)
 	for i := range clients {
 		wg.Go(func() {
-			clients[i], _, _ = e.dialEdge(t, grantFor(account, signer, "laptop"), signer, edgeproto.AccountUser(account))
+			clients[i], _, _ = e.dialEdge(t, grantFor(account, signer, "laptop"), signer, user)
 		})
 	}
 	wg.Wait()
@@ -268,7 +316,7 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	}
 	// The connection that loses the race looks for its invitation after the
 	// other one consumed it.
-	late, err := e.srv.edgeInvitee(context.Background(), identities(t, e), account, edgeproto.DeviceKeyLine(signer.PublicKey()), "laptop")
+	late, err := e.srv.edgeInvitee(context.Background(), identities(t, e), account, "", "", edgeproto.DeviceKeyLine(signer.PublicKey()), "laptop")
 	if err != nil || string(late.ID) != got.ID {
 		t.Fatalf("accept after the invitation was consumed = %+v, %v; want member %s", late, err, got.ID)
 	}
@@ -276,6 +324,60 @@ func TestEdgeInvitationCreatesMemberOnce(t *testing.T) {
 	// member, and the consumed invitation admits nobody else.
 	other := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "7007", Login: "someone", Email: "octo@example.com", IdentityAt: time.Now()}
 	e.mustRefuseEdge(t, other, newSigner(t), "phone", "github account someone is not a member of this server")
+}
+
+// An invitation is joined only with the secret of its link: under account
+// access the join is the whole of it, under approved-devices the device
+// waits on the invitation. A wrong secret or none records nothing.
+func TestJoinByLink(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		policy edgeproto.AccessPolicy
+		user   func(inv domain.InvitationID, secret string) string
+		want   edgeproto.RefusedKind
+	}{
+		{name: "account", policy: edgeproto.PolicyAccount},
+		{name: "approved-devices", policy: edgeproto.PolicyApprovedDevices, want: edgeproto.RefusedDevicePending},
+		{name: "wrong secret", policy: edgeproto.PolicyAccount, want: edgeproto.RefusedJoinWrong,
+			user: func(inv domain.InvitationID, _ string) string {
+				u, _ := edgeproto.JoinUser(string(inv), edgeproto.NewJoinSecret(), edgeproto.AccountPrincipal(octo))
+				return u
+			}},
+		{name: "no link", policy: edgeproto.PolicyApprovedDevices, want: edgeproto.RefusedInvitationNeedsLink,
+			user: func(domain.InvitationID, string) string { return edgeproto.AccountUser(octo) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newTestEnv(t, withPolicy(tc.policy))
+			inv := inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleCollaborator})
+			user := e.edgeUser(t, octo)
+			if tc.user != nil {
+				secret, _ := e.joinSecrets.Load(inv.ID)
+				user = tc.user(inv.ID, secret.(string))
+			}
+			signer := newSigner(t)
+			c, banner, err := e.dialEdge(t, grantFor(octo, signer, "laptop"), signer, user)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("join: %v (banner %q)", err, banner)
+				}
+				if m := serverInfoMember(t, controlClientOn(t, c)); m.Role != string(domain.RoleCollaborator) {
+					t.Fatalf("joined as %+v", m)
+				}
+				return
+			}
+			if r, ok := edgeproto.ParseRefusedBanner(banner); err == nil || !ok || r.Kind != tc.want {
+				t.Fatalf("join = %v, banner %q; want %s", err, banner, tc.want)
+			}
+			if _, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(signer.PublicKey())); errors.Is(err, store.ErrNotFound) == (tc.want == edgeproto.RefusedDevicePending) {
+				t.Fatalf("device after %s: %v", tc.want, err)
+			}
+			if left, _ := identities(t, e).ListInvitations(context.Background()); len(left) != 1 {
+				t.Fatalf("invitations after %s = %+v; want it still open", tc.want, left)
+			}
+		})
+	}
 }
 
 func TestEdgeExpiredInvitationRefused(t *testing.T) {
@@ -313,7 +415,7 @@ func approvalCode(t *testing.T, banner string) string {
 // device was shown.
 func (e *testEnv) refusedForApproval(t *testing.T, account edgeproto.Account, signer ssh.Signer, label string) string {
 	t.Helper()
-	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, edgeproto.AccountUser(account))
+	_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, e.edgeUser(t, account))
 	if err == nil {
 		t.Fatalf("device %s connected without approval", label)
 	}
@@ -600,11 +702,7 @@ func TestClaimLinksAnExistingAdmin(t *testing.T) {
 	if _, _, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(ada, key), key, claimUser(t, testClaimCode, ada)); err == nil {
 		t.Fatal("claim before the admin linked the account succeeded")
 	}
-	var link protocol.MemberInvitationResult
-	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Login: "ada"}, &link); err != nil {
-		t.Fatalf("admin link: %v", err)
-	}
+	e.invite(t, controlClient(t, e), protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"})
 	c, banner, err := e.dialClaim(t, newFakeClaimCode(), claimGrantFor(ada, key), key, claimUser(t, testClaimCode, ada))
 	if err != nil {
 		t.Fatalf("claim through the admin's link: %v (banner %q)", err, banner)
@@ -699,10 +797,8 @@ func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("viewer linking another account = %v, want CodeDenied", err)
 	}
-	if err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}, nil); err != nil {
-		t.Fatalf("invitation.create: %v", err)
-	}
+	e.invite(t, controlClient(t, e), protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"})
 	got := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
 	if got.DisplayName != "Octo Cat" || got.Role != string(domain.RoleCollaborator) {
 		t.Fatalf("octo joined as %+v, want a new collaborator from the admin's invitation", got)
@@ -715,10 +811,8 @@ func TestDemotedAdminsInvitationsAreRevoked(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	carolKey, carol := addMember(t, e, "Carol", domain.RoleAdmin, false)
-	if err := controlAs(t, e, carolKey).Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Login: "octo", Role: "admin"}, nil); err != nil {
-		t.Fatalf("invitation.create: %v", err)
-	}
+	e.invite(t, controlAs(t, e, carolKey), protocol.MethodMemberInvitationCreate,
+		protocol.MemberInvitationCreateParams{Login: "octo", Role: "admin"})
 	if err := controlClient(t, e).Call(protocol.MethodMemberRole,
 		protocol.MemberRoleParams{MemberID: string(carol.ID), Role: string(domain.RoleViewer)}, nil); err != nil {
 		t.Fatalf("member.role: %v", err)
@@ -737,6 +831,7 @@ func TestInvitationBeyondTheEdgeDirectoryIsRefused(t *testing.T) {
 	for i := range edgeproto.MaxDirectoryEntries {
 		inviteAccount(t, e, domain.Invitation{Email: fmt.Sprintf("person%d@example.com", i), Role: domain.RoleViewer})
 	}
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
 	var pe *protocol.Error
 	err := controlClient(t, e).Call(protocol.MethodMemberInvitationCreate,
 		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}, nil)
@@ -757,6 +852,11 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 	params := protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"}
 
 	var pe *protocol.Error
+	if err := admin.Call(protocol.MethodMemberInvitationCreate, params, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidState ||
+		pe.Message != protocol.MethodMemberInvitationCreate+": this server is not enrolled with an edge (edge-url is empty)" {
+		t.Fatalf("invitation.create without an edge = %v, want CodeInvalidState", err)
+	}
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
 	if err := bob.Call(protocol.MethodMemberInvitationCreate, params, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
 		t.Fatalf("collaborator invitation.create = %v, want CodeDenied", err)
 	}
@@ -769,11 +869,20 @@ func TestEdgeInvitationRPCs(t *testing.T) {
 	for len(changed) > 0 {
 		<-changed
 	}
-	var created protocol.MemberInvitationResult
-	if err := admin.Call(protocol.MethodMemberInvitationCreate, params, &created); err != nil {
-		t.Fatalf("invitation.create: %v", err)
-	}
+	created := e.invite(t, admin, protocol.MethodMemberInvitationCreate, params)
 	<-changed
+	edgeURL, serverID, _, secret, _ := edgeproto.ParseJoinLink(created.Link)
+	if edgeURL != "https://edge.example" || serverID != edgeproto.ServerID(e.srv.hostKey.PublicKey()) || created.ServerID != serverID {
+		t.Fatalf("invitation.create = %+v; want a link to this server through its edge", created)
+	}
+	if stored, err := identities(t, e).GetInvitation(context.Background(), domain.InvitationID(created.Invitation.ID)); err != nil ||
+		stored.SecretHash != edgeproto.HashToken(secret) {
+		t.Fatalf("stored invitation = %+v, %v; want only the secret's hash", stored, err)
+	}
+	var raw json.RawMessage
+	if err := admin.Call(protocol.MethodMemberInvitationList, struct{}{}, &raw); err != nil || strings.Contains(string(raw), secret) {
+		t.Fatalf("invitation.list = %s, %v; want no secret", raw, err)
+	}
 	entries, err := e.srv.EdgeDirectory(context.Background())
 	if err != nil || len(entries) != 1 || entries[0].Kind != edgeproto.EntryInvitation ||
 		entries[0].Login != "octo" || entries[0].Role != "collaborator" {
@@ -869,7 +978,7 @@ func TestEdgeDeviceKeyOnTheDirectPath(t *testing.T) {
 			if _, err := e.dialWith(laptop, nil); err == nil {
 				t.Fatal("a device key authenticated directly before the server registered it")
 			}
-			if _, _, err := e.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, edgeproto.AccountUser(octo)); (err == nil) != (policy == edgeproto.PolicyAccount) {
+			if _, _, err := e.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, e.edgeUser(t, octo)); (err == nil) != (policy == edgeproto.PolicyAccount) {
 				t.Fatalf("first relayed connection under %s: %v", policy, err)
 			}
 			var banner strings.Builder

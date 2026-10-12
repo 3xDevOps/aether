@@ -31,6 +31,8 @@ const (
 	RefusedClaimAccountTaken    RefusedKind = "claim-account-of-another-member"
 	RefusedClaimDeviceRevoked   RefusedKind = "claim-device-revoked"
 	RefusedClaimFailed          RefusedKind = "claim-failed"
+	RefusedJoinWrong            RefusedKind = "join-wrong"
+	RefusedInvitationNeedsLink  RefusedKind = "invitation-needs-link"
 )
 
 // Refusals the edge answers over HTTP, and the client's own when it holds
@@ -82,7 +84,8 @@ type Refused struct {
 	ApprovalCode string `json:"approval_code,omitempty"`
 	// User is the SSH user name the device connected as, and Principal the
 	// account the edge signed it in as, "<provider>:<subject>". For a
-	// claim, User is the account the claim names.
+	// claim, User is the account the claim names; for a join, the login or
+	// email the invitation names.
 	User      string `json:"user,omitempty"`
 	Principal string `json:"principal,omitempty"`
 	// Refusal is the edge's refusal text for the kinds that wrap one.
@@ -179,6 +182,13 @@ func (r *Refused) Error() string {
 		return fmt.Sprintf("device %q was revoked on this server; claim from another device", r.Device)
 	case RefusedClaimFailed:
 		return "the claim failed on the server: " + r.Detail
+	case RefusedJoinWrong:
+		if r.Account != "" {
+			return fmt.Sprintf("this invitation is for %s, and this device signed in as %s", r.User, r.Account)
+		}
+		return "the invitation link is not valid for this server: wrong, revoked or expired; ask the admin for a new one"
+	case RefusedInvitationNeedsLink:
+		return r.Account + " is invited to this server; open the invitation link the admin sent, or run: aether link <link>"
 	case RefusedNotSignedIn:
 		if r.Refusal == "" {
 			return "not signed in"

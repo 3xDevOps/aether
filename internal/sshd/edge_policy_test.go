@@ -87,10 +87,7 @@ func TestAccountAccessRegistersDevices(t *testing.T) {
 	// As an admin under account access, the member administers the server
 	// from a registered device, but approves no device from one (rule 4):
 	// switching to approved-devices must inherit nothing.
-	if err := laptopRPC.Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"}, nil); err != nil {
-		t.Fatalf("invitation from a registered admin device under account access: %v", err)
-	}
+	e.invite(t, laptopRPC, protocol.MethodMemberInvitationCreate, protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"})
 	code := store.ApprovalCode(edgeproto.DeviceKeyLine(phone.PublicKey()))
 	var pe *protocol.Error
 	err := approveByCode(laptopRPC, code, nil)
@@ -168,7 +165,7 @@ func TestTighteningInheritsNothing(t *testing.T) {
 	e.mustDialEdge(t, octo, laptop, "laptop")
 
 	strict := e.restartWith(t, edgeproto.PolicyApprovedDevices)
-	_, banner, err := strict.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, edgeproto.AccountUser(octo))
+	_, banner, err := strict.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, strict.edgeUser(t, octo))
 	if err == nil || !strings.Contains(banner, "admits approved devices only") {
 		t.Fatalf("registered device under approved-devices = %v, banner %q", err, banner)
 	}
@@ -200,7 +197,7 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 
 	// A newcomer's key relayed under the admin's account.
 	stray := newSigner(t)
-	_, banner, err := e.dialEdge(t, grantFor(octo, stray, "mallory-laptop"), stray, edgeproto.AccountUser(octo))
+	_, banner, err := e.dialEdge(t, grantFor(octo, stray, "mallory-laptop"), stray, e.edgeUser(t, octo))
 	if err == nil || !strings.Contains(banner, `device "mallory-laptop", signed in as github account octo, is waiting for approval`) {
 		t.Fatalf("stray key under the admin's account: %v, banner %q", err, banner)
 	}
@@ -274,9 +271,7 @@ func TestLinkedIdentityCreatesNoDevice(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", Name: "Ada", IdentityAt: time.Now()}
 	admin := controlClient(t, e)
-	if err := admin.Call(protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"}, nil); err != nil {
-		t.Fatalf("link: %v", err)
-	}
+	e.invite(t, admin, protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"})
 	laptop := newSigner(t)
 	code := e.refusedForApproval(t, ada, laptop, "laptop")
 	if m, err := identities(t, e).GetMemberByIdentity(context.Background(), ada.Provider, ada.Subject); !errors.Is(err, store.ErrNotFound) {

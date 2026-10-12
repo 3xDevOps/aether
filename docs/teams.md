@@ -54,43 +54,52 @@ aether invite --email dana@example.com --role viewer
 ```
 
 ```
-invited <account> as collaborator until <expiry> (invitation <invitation-id>)
+invite link: https://<edge host>/join/<server id>/<invitation id>#<secret>
 server id: <server id>
-they run: aether login, then aether link <server id>
-Under edge-access approved-devices, the default, their device then shows an approval code, and they join once you run: aether device approve <code>
+send them the link; they open it, sign in with GitHub and join
+Under edge-access approved-devices, the default, their device waits until an admin approves it from the dashboard's Needs you card
+invited <account> as collaborator until <expiry> (invitation <invitation-id>)
 ```
 
-No code changes hands. `--role` is `viewer`, `collaborator` (the default)
-or `admin`. An email invitation matches the account whose primary email
-GitHub reports as verified, whatever its login: use it when you know the
-address but not the login. The invitation is in the directory the server
-pushes to the edge, so the teammate sees the server in `aether servers`
-after signing in. Send them
-the server id as well: linking by an id you gave pins the right server even
-if the edge lists a false one.
+`--role` is `viewer`, `collaborator` (the default) or `admin`. An email
+invitation matches the account whose primary email GitHub reports as
+verified, whatever its login: use it when you know the address but not the
+login. The link is printed once, and the Members page's Invite dialog shows
+it once too: it carries the invitation's join secret after the `#`, and the
+server keeps only a hash of it. Send the link to the teammate. The part
+after `#` never reaches the edge: the client presents the secret inside SSH,
+after the server's host key proved the server id in the link.
+
+The teammate opens the link, or runs:
 
 ```sh
 aether login
-aether link <server id>     # the id you sent them
+aether link '<invite link>'
 ```
 
-Linking from the edge's list instead, with `aether link --from-edge <server
-id>`, shows the server's name, id and host key fingerprint and asks before
-it pins them ([edge.md](edge.md#first-link-and-server-identity)).
+`aether link` prints `joined server <server id> as <name> (<role>)`. An
+invited account that connects without the link, with `aether link <server
+id>`, is refused with `<account> is invited to this server; open the
+invitation link the admin sent, or run: aether link <link>`, and nothing is
+recorded. A wrong, revoked or expired link is refused with `the invitation
+link is not valid for this server`.
 
-Under `account`, their first connection creates their member with the
-invited role, binds it to their account, and uses the invitation up. The
-member is not pending: the invitation admitted the account. Under
-`approved-devices` that connection only records their device as waiting on
-the invitation and shows them its approval code; the member is created,
-the account bound and the invitation used up when a person approves that
-device ([Devices](#devices)). An
+Under `account`, the join creates their member with the invited role, binds
+it to their account, and uses the invitation up. The member is not pending:
+the invitation admitted the account. Under `approved-devices` the join only
+records their device as waiting on the invitation; `aether link` prints
+`waiting for an admin of <server> to approve this device (<label>,
+<fingerprint>)…` and tries again every 5 seconds until it is admitted. The
+member is created, the account bound and the invitation used up when a
+person approves that device ([Devices](#devices)). An
 invitation matches a login or email only within 24 hours of the
 teammate's last GitHub sign-in at the edge, because a login or email can
 move to someone else; past that, `aether servers` leaves it out and
 connecting is refused with `open this edge in a browser to confirm them`.
 Opening any edge page, including the one `aether login` shows, signs them
-in with GitHub again. Invitations expire after 7 days:
+in with GitHub again. Upgrading to a server with join links removes the
+invitations still open, since they carry no secret; issue them again.
+Invitations expire after 7 days:
 
 ```sh
 aether invite list

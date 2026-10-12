@@ -142,9 +142,12 @@ type MemberIdentityLinkParams struct {
 }
 
 // MemberInvitationResult is the result of member.invitation.create and
-// member.identity.link.
+// member.identity.link. Link is the join link, the only copy of its
+// secret; ServerID is the server's edge id.
 type MemberInvitationResult struct {
 	Invitation Invitation `json:"invitation"`
+	Link       string     `json:"link"`
+	ServerID   string     `json:"server_id"`
 }
 
 // MemberInvitationListResult is the result of member.invitation.list.

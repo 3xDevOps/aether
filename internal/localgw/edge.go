@@ -277,7 +277,7 @@ type edgeLinkParams struct {
 	Name string `json:"name"`
 }
 
-// edgeLinked is the answer of edge.link and edge.claim.
+// edgeLinked is the answer of edge.link, edge.claim and edge.join.
 type edgeLinked struct {
 	ServerID string          `json:"server_id"`
 	Edge     string          `json:"edge"`
@@ -351,6 +351,25 @@ func (g *Gateway) localEdgeClaim(_ *http.Request, body []byte) (any, *protocol.E
 		return nil, perr
 	}
 	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, EdgeURL: client.URL(), Claim: params.Code})
+}
+
+// localEdgeJoin joins the server an invitation's join link names, through
+// the edge it names, and links it, as aether link <join link> does. A
+// device waiting for approval is refused with kind device-pending each
+// time; the caller tries again.
+func (g *Gateway) localEdgeJoin(_ *http.Request, body []byte) (any, *protocol.Error) {
+	var params struct {
+		Link string `json:"link"`
+		Addr string `json:"addr"`
+		Name string `json:"name"`
+	}
+	if perr := decodeParams(body, &params); perr != nil {
+		return nil, perr
+	}
+	if _, _, _, _, err := edgeproto.ParseJoinLink(params.Link); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()}
+	}
+	return g.linkEdge(cli.LinkOptions{Addr: params.Addr, Name: params.Name, Join: params.Link})
 }
 
 // linkEdge links the gateway to a server through an edge and moves every

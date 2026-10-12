@@ -2,6 +2,7 @@ package edgetest
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,49 +26,55 @@ func TestInvitations(t *testing.T) {
 	h.claimServer(al, a)
 	ctl := h.control(al, a)
 
-	// By GitHub login: bob sees the server, and his first connection
-	// makes him a member with the invited role and uses the invitation up.
-	inviteLogin(t, ctl, bo, a.id, "admin")
-	if info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{}); info.Member.Role != "admin" {
-		t.Fatalf("bob joined as %+v", info.Member)
+	// By GitHub login: bob sees the server, is refused until he presents
+	// the invitation's link, and joining by it makes him a member with the
+	// invited role and uses the invitation up.
+	link := inviteLogin(t, ctl, bo, a.id, "admin")
+	_, err := h.dial(bo, h.link(a))
+	var refused *edgeproto.Refused
+	if !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedInvitationNeedsLink {
+		t.Fatalf("bob without the link: %v, want %s", err, edgeproto.RefusedInvitationNeedsLink)
+	}
+	if res, jerr := h.joinBy(bo, link); jerr != nil || res.Info.Member.Role != "admin" {
+		t.Fatalf("bob joined as %+v, %v", res.Info.Member, jerr)
 	}
 	if invs := call[protocol.MemberInvitationListResult](t, ctl, protocol.MethodMemberInvitationList, struct{}{}); len(invs.Invitations) != 0 {
 		t.Fatalf("invitations after bob joined = %+v", invs.Invitations)
 	}
 
 	// By verified email, from either provider.
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Email: ca.user.Email, Role: "viewer"})
+	link = invite(t, ctl, protocol.MemberInvitationCreateParams{Email: ca.user.Email, Role: "viewer"}).Link
 	waitRole(t, ca, a.id, "viewer")
-	h.mustDial(ca, a)
+	if _, err = h.joinBy(ca, link); err != nil {
+		t.Fatalf("carol joins by email: %v", err)
+	}
 
 	// Revoked before use.
-	id := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: da.user.Login, Role: "collaborator"})
+	revoked := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: da.user.Login, Role: "collaborator"})
 	waitRole(t, da, a.id, "collaborator")
-	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: id})
+	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: revoked.Invitation.ID})
 	waitRole(t, da, a.id, "")
-	_, err := h.dial(da, h.link(a))
+	_, err = h.joinBy(da, revoked.Link)
 	wantRefusal(t, "revoked invitation", err, edgeproto.RefusalNotMember)
 
 	// Its creator demoted: an admin's open invitations go with the role.
 	bctl := h.control(bo, a)
-	invite(t, bctl, protocol.MemberInvitationCreateParams{Login: er.user.Login, Role: "admin"})
+	link = invite(t, bctl, protocol.MemberInvitationCreateParams{Login: er.user.Login, Role: "admin"}).Link
 	waitRole(t, er, a.id, "admin")
 	call[protocol.MemberRoleResult](t, ctl, protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(a.memberOf(t, bob).ID), Role: "collaborator"})
 	waitRole(t, er, a.id, "")
-	_, err = h.dial(er, h.link(a))
+	_, err = h.joinBy(er, link)
 	wantRefusal(t, "invitation of a demoted admin", err, edgeproto.RefusalNotMember)
 
 	// Expired: the server leaves it out of the directory, so the edge
 	// refuses erin.
 	admin := a.memberOf(t, alice)
-	if err = a.db.CreateInvitation(context.Background(), &domain.Invitation{
+	link = a.invitation(t, &domain.Invitation{
 		Provider: edgeproto.ProviderGitHub, Login: er.user.Login, Role: domain.RoleCollaborator,
 		CreatedBy: admin.ID, ExpiresAt: time.Now().Add(-time.Minute),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 	from := h.proxy.mark()
-	id = invite(t, ctl, protocol.MemberInvitationCreateParams{Login: "someone-else", Role: "viewer"})
+	id := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: "someone-else", Role: "viewer"}).Invitation.ID
 	pushed := h.proxy.await(t, "a directory push", from, func(e logEntry) bool {
 		_, ok := e.msg.(edgeproto.Directory)
 		return ok && !e.fromEdge && e.serverID == a.id
@@ -77,7 +84,7 @@ func TestInvitations(t *testing.T) {
 			t.Fatalf("expired invitation pushed to the edge: %+v", e)
 		}
 	}
-	_, err = h.dial(er, h.link(a))
+	_, err = h.joinBy(er, link)
 	wantRefusal(t, "expired invitation at the edge", err, edgeproto.RefusalNotMember)
 
 	// An edge that still lists it, stale or compromised, cannot let erin
@@ -88,8 +95,8 @@ func TestInvitations(t *testing.T) {
 	})}
 	h.proxy.inject(t, a.id, stale, false)
 	waitRole(t, er, a.id, "collaborator")
-	_, err = h.dial(er, h.link(a))
-	if err == nil || !strings.Contains(err.Error(), "is not a member of this server") || strings.Contains(err.Error(), "refused: ") {
+	_, err = h.joinBy(er, link)
+	if !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedJoinWrong {
 		t.Fatalf("expired invitation at the server: %v, want the server's own refusal", err)
 	}
 	call[struct{}](t, ctl, protocol.MethodMemberInvitationRevoke, protocol.MemberInvitationRevokeParams{InvitationID: id})

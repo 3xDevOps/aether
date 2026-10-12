@@ -237,7 +237,7 @@ func TestEdgeLogoutRevokesAndForgets(t *testing.T) {
 func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	edge := newFakeEdge(t)
 	g := edgeGateway(t)
-	for _, verb := range []string{"edge.claim", "edge.hostkey", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
+	for _, verb := range []string{"edge.claim", "edge.hostkey", "edge.join", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
 		if rec := do(g, http.MethodPost, "/local/v1/"+verb, `{"edge":"`+edge.URL+`"}`, false); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without the token = %d, want 401", verb, rec.Code)
 		}
@@ -246,6 +246,7 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 		{"edge.link", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.link", `{"edge":"` + edge.URL + `"}`},
 		{"edge.claim", `{"edge":"` + edge.URL + `","code":"wrong"}`},
+		{"edge.join", `{"link":"` + edge.URL + `/join/x/y#z"}`},
 		{"edge.hostkey", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.login", `{"edge":"http://edge.example.test","label":"laptop"}`},
 		{"edge.servers", `{"edge":"https://edge.example.test/path"}`},

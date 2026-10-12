@@ -1579,6 +1579,13 @@ CREATE TABLE push_subscriptions (
 );
 CREATE INDEX idx_push_subscriptions_member ON push_subscriptions(member_id);
 `,
+	// v59: the hash of an invitation's join secret. An open invitation
+	// created before this version has none and could never be joined, so it
+	// is deleted with the devices waiting on it.
+	`
+ALTER TABLE identity_invitations ADD COLUMN secret_hash TEXT NOT NULL DEFAULT '';
+DELETE FROM identity_invitations WHERE consumed_at IS NULL;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

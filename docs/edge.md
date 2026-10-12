@@ -633,6 +633,7 @@ working.
 | Grant | Signed by the edge | 60 seconds, admitting one connection; 30 seconds of clock skew allowed | Its first use. It does not bound a connection already open |
 | Claim code | Server console | 30 minutes, 5 attempts | Its use, or a new code |
 | Invitation | Server | 7 days | `aether invite revoke`, its use, or a demotion of its creator |
+| Join secret, in the invitation's link after `#` | The link the admin sends; a SHA-256 hash on the server | Its invitation's | Its invitation's end |
 | Device status on a server | Server | Until changed | `aether device revoke`, `device review`, `aether member unlink`, removing the member, or deleting the account at the edge |
 
 `aether logout` revokes the token at the sign-in origin that issued it,

@@ -1154,6 +1154,8 @@ export interface EdgeRefusal {
     | 'claim-account-of-another-member'
     | 'claim-device-revoked'
     | 'claim-failed'
+    | 'join-wrong'
+    | 'invitation-needs-link'
     | 'not-signed-in'
     | 'token-revoked'
     | 'server-not-connected'
@@ -1257,6 +1259,14 @@ export interface Invitation {
   created_by: string
   created_at: string
   expires_at: string
+}
+
+/** member.invitation.create and member.identity.link: the invitation, and
+ * its join link, returned only here: the link holds the join secret. */
+export interface InvitationResult {
+  invitation: Invitation
+  link: string
+  server_id: string
 }
 
 /** link.apply: the server identity linked to this local gateway. */

@@ -85,6 +85,8 @@ const refusalHop: Record<EdgeRefusal['kind'], UnreachableKind> = {
   'claim-member-not-admin': 'server-refused',
   'claim-account-of-another-member': 'server-refused',
   'claim-failed': 'server-refused',
+  'join-wrong': 'server-refused',
+  'invitation-needs-link': 'server-refused',
 }
 
 /** Null when nothing on the edge path refused and the edge was reachable. */

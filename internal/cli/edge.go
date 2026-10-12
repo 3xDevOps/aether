@@ -163,6 +163,50 @@ func DialClaim(cfg Config, code string) (*Conn, error) {
 	return &Conn{client: client, cfg: cfg}, nil
 }
 
+// DialJoin joins the server that link, an invitation's join link, names,
+// through the edge it names, and returns the connection the server then
+// serves. As with DialClaim, the join secret travels only in the SSH user
+// name, sent after the host key proved the server id in the link, so
+// neither the edge nor a server with another id receives it. A server
+// that admits approved devices only refuses the joining device with
+// edgeproto.RefusedDevicePending until an admin approves it.
+func DialJoin(cfg Config, link string) (*Conn, error) {
+	edgeURL, serverID, invitation, secret, err := edgeproto.ParseJoinLink(link)
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	dir, err := Dir()
+	if err != nil {
+		return nil, err
+	}
+	edge, err := edgeclient.New(dir, edgeURL)
+	if err != nil {
+		return nil, err
+	}
+	session, err := edge.Session()
+	if err != nil {
+		return nil, fmt.Errorf("cli: join through %s: %w", edge.Host(), err)
+	}
+	user, err := edgeproto.JoinUser(invitation, secret, edgeproto.AccountPrincipal(session.Account.Account))
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	signer, err := edgeclient.DeviceSigner(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	nc, err := edge.Dial(context.Background(), serverID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := pinnedHandshake(nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the invitation link names"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.EdgeURL, cfg.ServerID = edge.URL(), serverID
+	return &Conn{client: client, cfg: cfg}, nil
+}
+
 // errHostKeyRead ends a handshake once HostKeyFingerprint has the key.
 var errHostKeyRead = errors.New("host key read")
 
