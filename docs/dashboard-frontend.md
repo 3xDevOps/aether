@@ -3557,6 +3557,54 @@ never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. With no templates the view says what one is and offers **New
 template**.
 
+Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
+closes on Save or Delete and the list shows the result at once; a saved
+schedule shows at once and its next launch arrives with the server's answer.
+A refusal puts the list back and shows the dialog again, reopened if closed,
+with what was typed and the server's error. At the deadline it shows "The
+server did not answer in 5 seconds." with **Retry**. `template.save` and `schedule.save`
+upsert by name, and a delete retry treats "not found" as deleted, so a retry
+never applies twice. A refusal or deadline puts back the last value the
+server confirmed, and only while the row still shows that action's
+prediction. A late success shows the saved row or removes the deleted one,
+and closes the dialog only if it still shows that unedited draft. If another
+dialog is open when a failure arrives, it stays as it is and a toast shows
+the error with **Reopen**, plus **Retry** at the deadline; a late refusal
+replaces that toast, and is dropped once a **Retry** of that action was
+answered. A late success of that action dismisses its toast. After the
+signed-in member changes, the toast is dismissed, its **Retry** and
+**Reopen** do nothing, a later failure of that action is not shown, and its
+late answer or rollback leaves the lists alone.
+The same toast shows a failure that arrives after you
+left Templates, or after a workspace switch, and its **Reopen** opens
+Templates in the workspace the action was sent from, with the dialog as it
+was. A form reopened before the first `template.list` read answers keeps
+what it saves.
+**Retry** in a dialog sends what the dialog shows now, so edits made after
+the deadline are not lost. A template whose save the server has not answered, past the deadline
+too, offers no **Launch**, **Delete** or **Schedule…**, since
+`template.launch` sends only the name. **Unschedule** reads "Unscheduling…", then
+"Still waiting for the server…" past the deadline; while a schedule save for
+that template in that workspace is unanswered it reads "Saving…" and is disabled, so the delete
+cannot land before the save. Both holds last across leaving Templates and
+coming back, and so do the lists, kept per workspace outside the view:
+coming back shows them at once, and an answer or rollback that arrives
+after you left still lands on them.
+When saves of one template, or of its schedule, overlap, only
+the answer to the last one sent is written; an earlier answer leaves the
+list alone. An earlier save's answer becomes the value a later pending
+save of that template, or of its schedule, puts back on a refusal or
+deadline. A `template.list` or `schedule.list` answer older than the last
+one applied in that workspace, or sent before the signed-in member
+changed, is dropped. A `template.list` or `schedule.list` read,
+on opening, on a workspace switch or after **Unschedule**, keeps the
+templates and schedules saved or removed here while it was pending, and
+those whose save is still unanswered. A
+refused delete puts the template back only if none of that name was saved
+meanwhile, and a successful delete removes the row, or its schedule, only if
+none of that name was saved after the delete was sent. An answer or rollback that arrives after the active workspace
+changed lands on the list of the workspace it was sent from, not the shown one.
+
 ## Agents
 
 An **agent** is the coding CLI a run starts, such as Claude Code or Codex.
