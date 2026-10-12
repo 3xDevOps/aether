@@ -806,3 +806,58 @@ func TestRestartResumesALiveRunsMove(t *testing.T) {
 		})
 	}
 }
+
+// droppingSub delivers one event after reporting that it dropped older ones.
+type droppingSub struct{ ch chan events.Event }
+
+func (d droppingSub) Events() <-chan events.Event { return d.ch }
+func (droppingSub) Dropped() uint64               { return 1 }
+func (droppingSub) Err() error                    { return nil }
+func (droppingSub) Close() error                  { return nil }
+
+// recordingBus answers every subscription with a dropping one and records
+// the options it was asked for.
+type recordingBus struct {
+	events.Bus
+	mu   sync.Mutex
+	opts []events.SubscribeOptions
+}
+
+func (b *recordingBus) Subscribe(_ context.Context, opts events.SubscribeOptions) (events.Subscription, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.opts = append(b.opts, opts)
+	sub := droppingSub{ch: make(chan events.Event, 1)}
+	sub.ch <- events.Event{Seq: 50}
+	return sub, nil
+}
+
+// A usage-limit stream that drops events before any was handled replays
+// from where the log stood when the stream began, not from the next event.
+func TestUsageLimitStreamReplaysADropBeforeTheFirstLimit(t *testing.T) {
+	t.Parallel()
+	bus := &recordingBus{}
+	s := &Scheduler{cfg: Config{Bus: bus, EventSeq: func(context.Context) (uint64, error) { return 41, nil }}}
+	first, err := bus.Subscribe(t.Context(), events.SubscribeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.watchUsageLimits(ctx, first, 41)
+	}()
+	waitFor(t, "the resubscription", func() bool {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		return len(bus.opts) >= 2
+	})
+	cancel()
+	<-done
+	bus.mu.Lock()
+	defer bus.mu.Unlock()
+	if got := bus.opts[1]; !got.Replay || got.AfterSeq != 41 {
+		t.Fatalf("resubscribed with %+v, want replay after 41", got)
+	}
+}

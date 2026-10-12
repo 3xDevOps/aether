@@ -59,9 +59,12 @@ func (e *BaseCaptureError) Unwrap() error {
 }
 
 type Config struct {
-	Store    store.Store
-	Runtime  runtime.Runtime
-	Bus      events.Bus
+	Store   store.Store
+	Runtime runtime.Runtime
+	Bus     events.Bus
+	// EventSeq reads the newest sequence of the log behind Bus, nil when Bus
+	// keeps none. A usage-limit stream that drops events replays from it.
+	EventSeq func(context.Context) (uint64, error)
 	Git      GitEngine
 	PTY      PTYHost
 	Bases    BaseCapture
@@ -553,7 +556,16 @@ func (s *Scheduler) RecoveryReady() <-chan struct{} {
 func (s *Scheduler) Start(ctx context.Context) error {
 	// Subscribed before recovery, so a usage limit published meanwhile
 	// waits for the run recovery brings back.
-	limits, err := s.subscribeUsageLimits(ctx, 0)
+	var (
+		start uint64
+		err   error
+	)
+	if s.cfg.EventSeq != nil {
+		if start, err = s.cfg.EventSeq(ctx); err != nil {
+			return fmt.Errorf("scheduler: read the event log's position: %w", err)
+		}
+	}
+	limits, err := s.subscribeUsageLimits(ctx, start, false)
 	if err != nil {
 		return fmt.Errorf("scheduler: subscribe to usage limits: %w", err)
 	}
@@ -574,7 +586,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	watched := make(chan struct{})
 	go func() {
 		defer close(watched)
-		s.watchUsageLimits(watchCtx, limits)
+		s.watchUsageLimits(watchCtx, limits, start)
 	}()
 	defer func() {
 		stopWatch()

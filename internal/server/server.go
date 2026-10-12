@@ -343,6 +343,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Store:         s.db,
 		Runtime:       s.rt,
 		Bus:           s.bus,
+		EventSeq:      s.log.LastSeq,
 		Git:           lazyGit{s.git},
 		PTY:           s.pty,
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),

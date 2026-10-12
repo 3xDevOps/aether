@@ -402,11 +402,11 @@ func (s *Scheduler) continueTerminalRun(ctx context.Context, run domain.RunID, r
 	return true
 }
 
-// subscribeUsageLimits replays from after when it is not zero, or from now
-// when the bus keeps no log to replay.
-func (s *Scheduler) subscribeUsageLimits(ctx context.Context, after uint64) (events.Subscription, error) {
+// subscribeUsageLimits replays from after when asked to and the bus keeps a
+// log, and otherwise subscribes from now.
+func (s *Scheduler) subscribeUsageLimits(ctx context.Context, after uint64, replay bool) (events.Subscription, error) {
 	opts := events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeRunUsageLimit}}}
-	if after > 0 {
+	if replay && s.cfg.EventSeq != nil {
 		replayed := opts
 		replayed.Replay, replayed.AfterSeq = true, after
 		if sub, err := s.cfg.Bus.Subscribe(ctx, replayed); err == nil {
@@ -419,16 +419,16 @@ func (s *Scheduler) subscribeUsageLimits(ctx context.Context, after uint64) (eve
 // watchUsageLimits marks the runs whose adapters read a usage limit in
 // their agents' output, until ctx ends. A limit must not be lost: a dropped
 // event or a closed stream resubscribes with replay from the last event
-// handled.
-func (s *Scheduler) watchUsageLimits(ctx context.Context, sub events.Subscription) {
-	var last uint64
+// handled, or from start, the log's position when sub began, before any.
+func (s *Scheduler) watchUsageLimits(ctx context.Context, sub events.Subscription, start uint64) {
+	last := start
 	for {
 		last = s.consumeUsageLimits(ctx, sub, last)
 		_ = sub.Close()
 		if ctx.Err() != nil {
 			return
 		}
-		next, err := s.subscribeUsageLimits(ctx, last)
+		next, err := s.subscribeUsageLimits(ctx, last, true)
 		if err != nil {
 			if !errors.Is(err, events.ErrBusClosed) && ctx.Err() == nil {
 				slog.Warn("scheduler: resubscribe to usage limits; headless runs will not continue on another account", "error", err)
