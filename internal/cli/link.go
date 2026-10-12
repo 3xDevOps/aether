@@ -1,12 +1,19 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -87,6 +94,13 @@ func linkKey(choice string, prev Config, name string) (string, error) {
 }
 
 func linkConfig(cfg, prev Config, name string) Config {
+	if cfg.ServerID != "" && cfg.ServerID == prev.ServerID {
+		if cfg.Addr != "" {
+			prev.Addr = cfg.Addr
+		}
+		prev.EdgeURL = cfg.EdgeURL
+		cfg = prev
+	}
 	cfg.Links = prev.Links
 	// Git remotes of an edge link name only its server id, and edge-ssh
 	// finds the link by that id: a replaced edge default stays, named by
@@ -162,7 +176,46 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		_ = conn.Close()
 		return LinkResult{}, fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
+	if cfg.ServerID != "" && prev.ServerID == "" {
+		same, err := prev.pins(cfg.ServerID)
+		if err != nil {
+			_ = conn.Close()
+			return LinkResult{}, err
+		}
+		if same {
+			prev.ServerID = cfg.ServerID
+		}
+	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
+}
+
+// pins reports whether known_hosts holds, for the address of c, a host
+// key that derives serverID.
+func (c Config) pins(serverID string) (bool, error) {
+	if c.Addr == "" {
+		return false, nil
+	}
+	body, err := os.ReadFile(c.knownHostsPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("cli: known_hosts: %w", err)
+	}
+	host := knownhosts.Normalize(c.Addr)
+	for {
+		_, hosts, key, _, rest, err := ssh.ParseKnownHosts(body)
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("cli: known_hosts %s: %w", c.knownHostsPath(), err)
+		}
+		if slices.Contains(hosts, host) && edgeproto.HostKeyMatches(key, serverID) {
+			return true, nil
+		}
+		body = rest
+	}
 }
 
 // linkDial dials a server linked by address, choosing its key and

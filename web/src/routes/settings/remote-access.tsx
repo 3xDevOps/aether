@@ -55,6 +55,7 @@ function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
   const [phase, setPhase] = useState<Phase>({ name: 'idle' })
   const [error, setError] = useState<string | null>(null)
   const live = useRef(true)
+  const busy = useRef(false)
   useEffect(() => () => {
     live.current = false
   }, [])
@@ -68,13 +69,17 @@ function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, pollMs))
       if (!live.current) throw new Error('left Settings before the sign-in finished')
-      const now = (await client.localEdgeStatus()).login
+      const latest = (await client.localEdgeStatus()).login
+      // Another tab can replace this sign-in with its own.
+      const now = latest?.edge === login.edge && latest.user_code === login.user_code ? latest : undefined
       if (now?.state === 'signed_in' && now.account) return now.account
       if (now?.state === 'failed') throw new Error(now.error ?? 'sign in failed')
     }
   }
 
   const connect = async () => {
+    if (busy.current) return
+    busy.current = true
     setError(null)
     try {
       const account = await signedIn()
@@ -85,6 +90,7 @@ function ConnectAccount({ client, edgeURL }: { client: Api; edgeURL: string }) {
     } catch (err) {
       if (live.current) setError(message(err))
     } finally {
+      busy.current = false
       if (live.current) setPhase({ name: 'idle' })
     }
   }

@@ -12,7 +12,9 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { ApiError, type Api } from '@/lib/api'
 import { parseClaim, parseJoin } from '@/lib/claim-link'
 import { edgeHost, message, providerName } from '@/lib/format'
+import { shellQuote } from '@/lib/shell'
 import type { EdgeAccount, EdgeLinkResult, EdgeLogin, EdgeRefusal, EdgeServer } from '@/lib/types'
+import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
 const pollMs = 2000
@@ -74,9 +76,10 @@ function useEdgeSignIn(client: Api, edge?: string): SignIn {
     void check()
   }, [check])
 
-  const waiting = phase.name === 'waiting'
+  const waitingEdge = phase.name === 'waiting' ? phase.login.edge : null
+  const waitingCode = phase.name === 'waiting' ? phase.login.user_code : null
   useEffect(() => {
-    if (!waiting) return
+    if (!waitingEdge) return
     let live = true
     let timer: ReturnType<typeof setTimeout>
     const poll = () => {
@@ -84,7 +87,8 @@ function useEdgeSignIn(client: Api, edge?: string): SignIn {
         client.localEdgeStatus().then(
           (status) => {
             if (!live) return
-            const login = status.login
+            // Another tab can replace this sign-in with its own.
+            const login = status.login?.edge === waitingEdge && status.login.user_code === waitingCode ? status.login : undefined
             if (login?.state === 'signed_in' && login.account) {
               setError(null)
               setPhase({
@@ -113,7 +117,7 @@ function useEdgeSignIn(client: Api, edge?: string): SignIn {
       live = false
       clearTimeout(timer)
     }
-  }, [client, waiting])
+  }, [client, waitingEdge, waitingCode])
 
   const signIn = async () => {
     setStarting(true)
@@ -239,7 +243,7 @@ export function JoinLink({
 }) {
   const join = parseJoin(link)
   if (!join) return <ErrorLine>{`${link} is not a join link`}</ErrorLine>
-  if (!caps.hasLocal('edge.join')) return <LinkByCommand link={link} command={`aether link ${link}`} />
+  if (!caps.hasLocal('edge.join')) return <LinkByCommand link={link} command={`aether link ${shellQuote(link)}`} />
   return <JoinPanel client={client} link={link} join={join} onLinked={onLinked} />
 }
 
@@ -286,7 +290,10 @@ function JoinPanel({
     setError(null)
     try {
       const result = await client.localEdgeJoin(link)
+      // The gateway now serves the joined server, so the dashboard follows
+      // it even after this panel is gone.
       if (live.current) onLinked(result)
+      else useStore.getState().reconnect()
     } catch (err) {
       if (!live.current) return
       const refusal = err instanceof ApiError ? err.data?.refusal : undefined

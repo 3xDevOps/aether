@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { EdgeLogin, EdgeServer, EdgeStatus, GatewayCapabilities, LinkStatus } from '@/lib/types'
-import { forgetHandedLink } from '@/lib/url-state'
+import { bindRouteToUrl, forgetHandedLink } from '@/lib/url-state'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore } from '@/store'
 import { fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -501,6 +501,48 @@ describe('a join link handed to the dashboard', () => {
     expect(client.localEdgeJoin).toHaveBeenCalledTimes(2)
   })
 
+  it('follows the gateway onto the joined server when the join ends after the panel closed', async () => {
+    handOver()
+    seed()
+    const reconnect = vi.fn()
+    useStore.setState({ reconnect })
+    let finish: (result: typeof linkResult) => void = () => {}
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn(() => new Promise<typeof linkResult>((resolve) => (finish = resolve))),
+    })
+    const { unmount } = render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(1)
+    unmount()
+    finish(linkResult)
+
+    await vi.waitFor(() => expect(reconnect).toHaveBeenCalledTimes(1))
+  })
+
+  it('opens a join link handed over while the dashboard is already open', async () => {
+    seed()
+    useStore.setState({ onboardingStep: 'Agent', onboardingFurthest: 'Agent' })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+    useStore.setState({ route: { name: 'board', params: {} } })
+    const unbind = bindRouteToUrl(useStore)
+    expect(screen.queryByRole('region', { name: 'Join' })).toBeNull()
+
+    handOver()
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    expect(await screen.findByRole('region', { name: 'Join' })).toBeDefined()
+    expect(useStore.getState().route.name).toBe('onboarding')
+    expect(window.location.hash).toBe('')
+    unbind()
+  })
+
   it('shows the command where the dashboard has no edge.join', async () => {
     handOver()
     seed()
@@ -509,8 +551,26 @@ describe('a join link handed to the dashboard', () => {
     render(<OnboardingRoute params={{}} client={client} />)
 
     const command = await screen.findByRole('region', { name: 'Link from a terminal' })
-    expect(within(command).getByText(`aether link ${joinLink}`)).toBeDefined()
+    expect(within(command).getByText(`aether link '${joinLink}'`)).toBeDefined()
     expect(client.localLinkStatus).not.toHaveBeenCalled()
     expect(client.localEdgeJoin).not.toHaveBeenCalled()
+  })
+})
+
+describe('a claim link handed to a linked dashboard', () => {
+  it('offers the claim form, prefilled, with the account it claims as', async () => {
+    const claimLink = `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#secret`
+    window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimLink)}`)
+    seed()
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => ({ server_configured: true, linked: true, addr: 'build-box:2222', user: 'aether', repo: '' })),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect((await screen.findByLabelText('Claim code or link') as HTMLInputElement).value).toBe(claimLink)
+    expect(screen.getByRole('form', { name: 'Add a server' }).textContent).toContain("Claiming makes octocat (GitHub) the server's admin.")
+    expect(screen.getByText(/^Linked to/)).toBeDefined()
   })
 })

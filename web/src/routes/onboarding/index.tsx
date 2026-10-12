@@ -3,7 +3,7 @@ import { Check, Minus } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { handedLink } from '@/lib/url-state'
+import { handedLink, onHandedLink } from '@/lib/url-state'
 import { cn } from '@/lib/utils'
 import { AgentStep } from '@/routes/onboarding/agent-step'
 import { ConnectStep } from '@/routes/onboarding/connect-step'
@@ -65,7 +65,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const onboardingWorkspace = useStore((s) => s.onboardingWorkspace)
   const onboardingSource = useStore((s) => s.onboardingSource)
   const workspace = useStore((s) => (onboardingWorkspace ? s.workspaces[onboardingWorkspace] ?? null : null))
-  const [handed] = useState(handedLink)
+  const [handed, setHanded] = useState(handedLink)
   const firstStep = caps.hasLocal('link.status') || handed ? 0 : onboardingStepIndex('Repository')
   const [step, setStepState] = useState(() => (handed ? 0 : Math.max(firstStep, onboardingStepIndex(persistedStep))))
   const currentStep = Math.max(firstStep, step)
@@ -81,6 +81,17 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
     setSubStep('')
     setOnboardingStep(onboardingSteps[next])
   }
+
+  useEffect(
+    () =>
+      onHandedLink((next) => {
+        setHanded(next)
+        setStepState(0)
+        setSubStep('')
+        setOnboardingStep(onboardingSteps[0])
+      }),
+    [setOnboardingStep],
+  )
 
   const back =
     currentStep > firstStep || subStep ? (

@@ -74,6 +74,29 @@ export function handedLink(): HandedLink | null {
   return handed
 }
 
+const handedListeners = new Set<(link: HandedLink) => void>()
+
+function handedOnHashChange() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (!fragment.get('join') && !fragment.get('claim')) return
+  const link = handedLink()
+  if (link) for (const listener of handedListeners) listener(link)
+}
+
+/**
+ * Calls listener with each join or claim link handed over after load. A
+ * shell whose page is already at the dashboard's address, as Android's
+ * WebView is, changes only the fragment, and nothing reloads.
+ */
+export function onHandedLink(listener: (link: HandedLink) => void): () => void {
+  if (handedListeners.size === 0) window.addEventListener('hashchange', handedOnHashChange)
+  handedListeners.add(listener)
+  return () => {
+    handedListeners.delete(listener)
+    if (handedListeners.size === 0) window.removeEventListener('hashchange', handedOnHashChange)
+  }
+}
+
 export function forgetHandedLink() {
   handed = null
   clearHandedFragment()
@@ -121,8 +144,10 @@ export function bindRouteToUrl(store: RouteStore): () => void {
     store.getState().navigate(route.name, route.params)
   }
   window.addEventListener('popstate', pop)
+  const stopHanded = onHandedLink(() => store.getState().navigate('onboarding'))
   return () => {
     stop()
+    stopHanded()
     window.removeEventListener('popstate', pop)
   }
 }

@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -134,5 +136,27 @@ func TestLinkKeyPersistsAndRelinks(t *testing.T) {
 	}
 	if _, err := linkKey(filepath.Join(home, "missing"), Config{}, ""); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("linkKey(missing) = %v, want not found", err)
+	}
+}
+
+func TestClaimOfTheCurrentServerKeepsItsLink(t *testing.T) {
+	host := mustSigner(t)
+	id := edgeproto.ServerID(host.PublicKey())
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(knownHosts, []byte(knownhosts.Line([]string{"srv:2222", "10.0.0.1:2222"}, host.PublicKey())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := Config{Addr: "srv:2222", User: "aether", Repo: "/src/repo", KnownHosts: knownHosts}
+	if other, err := prev.pins(edgeproto.ServerID(mustSigner(t).PublicKey())); err != nil || other {
+		t.Fatalf("pins(another server) = %v, %v", other, err)
+	}
+	same, err := prev.pins(id)
+	if err != nil || !same {
+		t.Fatalf("pins(%s) = %v, %v", id, same, err)
+	}
+	prev.ServerID = id
+	got := linkConfig(Config{User: "aether", EdgeURL: "https://edge.example", ServerID: id}, prev, "")
+	if got.Repo != "/src/repo" || got.Addr != "srv:2222" || got.KnownHosts != knownHosts || got.EdgeURL != "https://edge.example" || got.ServerID != id {
+		t.Fatalf("claim of the current server saved %+v", got)
 	}
 }

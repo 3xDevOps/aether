@@ -11,7 +11,7 @@ import { parseClaim } from '@/lib/claim-link'
 import { edgeHost, linkTarget, message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { EdgeLinkResult, LinkApplyResult, LinkStatus } from '@/lib/types'
-import { forgetHandedLink, handedLink } from '@/lib/url-state'
+import { forgetHandedLink, handedLink, onHandedLink } from '@/lib/url-state'
 import { EdgeSignIn, JoinLink, LinkByCommand } from '@/routes/onboarding/edge-link'
 import { GitIdentityForm } from '@/routes/onboarding/git-identity'
 import { Step } from '@/routes/onboarding/layout'
@@ -31,6 +31,15 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   const [edgeLinked, setEdgeLinked] = useState<EdgeLinkResult | null>(null)
   const [handed, setHanded] = useState(handedLink)
   const local = caps.hasLocal('link.status')
+
+  useEffect(
+    () =>
+      onHandedLink((next) => {
+        setHanded(next)
+        setEdgeLinked(null)
+      }),
+    [],
+  )
 
   const check = useCallback(async () => {
     setStatusError(null)
@@ -80,6 +89,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
   const loading = useDelayed(local && status === null && statusError === null)
   const connected = success !== null || edgeLinked !== null || status?.server_configured === true
   const choosing = status !== null && !connected
+  const handedClaim = handed?.kind === 'claim' && !edgeLinked && caps.hasLocal('edge.claim')
 
   const summary = success ? (
     <>
@@ -118,7 +128,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
       {handed?.kind === 'claim' && !caps.hasLocal('edge.claim') && (
         <LinkByCommand link={handed.link} command={`aether link --claim ${parseClaim(handed.link).code}`} />
       )}
-      {choosing && handed?.kind !== 'join' && (
+      {((choosing && handed?.kind !== 'join') || handedClaim) && (
         <EdgeSignIn
           client={client}
           claim={handed?.kind === 'claim' ? handed.link : undefined}
