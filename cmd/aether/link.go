@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -43,7 +44,8 @@ func absolutePath(path string) (string, error) {
 // linkOptions is one parsed `aether link` command line. key is the resolved
 // --key path, "auto", or empty (inherit the saved key). addr is the
 // positional argument, or the --from-edge value: an address or a server
-// id. claim, fromEdge, yes, edge and direct belong to edge links.
+// id. join is the positional argument when it is an invitation's join
+// link. claim, join, fromEdge, yes, edge and direct belong to edge links.
 type linkOptions struct {
 	addr      string
 	repo      string
@@ -52,6 +54,7 @@ type linkOptions struct {
 	name      string
 	workspace string
 	claim     string
+	join      string
 	fromEdge  bool
 	yes       bool
 	edge      string
@@ -59,6 +62,7 @@ type linkOptions struct {
 }
 
 const linkUsage = "usage: aether link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
+	"       aether link <join link> [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --from-edge <server id> [--yes] [--edge] [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --claim <code> [--edge] [--addr] [--name] [--repo] [--workspace]"
 
@@ -83,6 +87,13 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 		addr = *fromEdge
 	case err != nil || addr == "" || *claim != "" || *fromEdge != "":
 		return linkOptions{}, errors.New(linkUsage)
+	}
+	var join string
+	if _, _, _, _, joinErr := edgeproto.ParseJoinLink(addr); joinErr == nil {
+		if *invite != "" || *keyFlag != "" || *edge != "" {
+			return linkOptions{}, errors.New("link: --invite, --key and --edge do not apply to a join link, which names its edge and authenticates with the device key from aether login")
+		}
+		join, addr = addr, ""
 	}
 	if *yes && *fromEdge == "" {
 		return linkOptions{}, errors.New("link: --yes applies to --from-edge only")
@@ -113,6 +124,7 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 		name:      *name,
 		workspace: *workspace,
 		claim:     *claim,
+		join:      join,
 		fromEdge:  *fromEdge != "",
 		yes:       *yes,
 		edge:      *edge,
@@ -133,13 +145,13 @@ func runLink(args []string) error {
 	if err != nil {
 		return err
 	}
-	if linkOpts.ServerID == "" && linkOpts.Claim == "" {
+	if linkOpts.ServerID == "" && linkOpts.Claim == "" && linkOpts.Join == "" {
 		if opts.direct != "" || opts.edge != "" {
 			return fmt.Errorf("link: --edge and --addr apply to edge links, and %s is not a server id; aether servers lists them", opts.addr)
 		}
 		linkOpts = cli.LinkOptions{Addr: opts.addr, Key: opts.key, Invite: opts.invite, Name: opts.name}
 	}
-	result, err := cli.Link(linkOpts, prev)
+	result, err := linkWaiting(linkOpts, prev)
 	if err != nil {
 		return err
 	}
@@ -161,8 +173,11 @@ func runLink(args []string) error {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		who = attribution.Sprint(result.Info.Member.Color, who)
 	}
-	if opts.claim != "" {
+	switch {
+	case opts.claim != "":
 		fmt.Printf("claimed server %s\n", cfg.ServerID)
+	case opts.join != "":
+		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, result.Info.Member.Role)
 	}
 	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
 
@@ -204,7 +219,35 @@ func runLink(args []string) error {
 	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
 }
 
-// edgeLinkOptions resolves an edge link: a claim, or a server id. The zero
+// joinRetry is how often aether link tries a join again while the server
+// waits for an admin to approve the joining device.
+const joinRetry = 5 * time.Second
+
+// linkWaiting links as cli.Link does. A join refused because its device
+// waits for approval is tried again every joinRetry until it is admitted
+// or refused otherwise. The approval code is shown only when the server
+// sends one, because nobody can approve the device in the app.
+func linkWaiting(opts cli.LinkOptions, prev cli.Config) (cli.LinkResult, error) {
+	waiting := false
+	for {
+		result, err := cli.Link(opts, prev)
+		var refused *edgeproto.Refused
+		if opts.Join == "" || !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedDevicePending {
+			return result, err
+		}
+		if !waiting {
+			if refused.ApprovalCode != "" {
+				fmt.Println(refused.Error())
+			} else {
+				fmt.Printf("waiting for an admin of %s to approve this device (%s, %s)…\n", refused.Server, refused.Device, refused.Fingerprint)
+			}
+			waiting = true
+		}
+		time.Sleep(joinRetry)
+	}
+}
+
+// edgeLinkOptions resolves an edge link: a claim, a join, or a server id. The zero
 // value means opts.addr is an address, and so is every server name: a
 // server's name is whatever its admin chose, and any admin can invite any
 // account, so a bare host name such as a tailnet name must never resolve
@@ -228,6 +271,9 @@ func edgeLinkOptions(opts linkOptions) (cli.LinkOptions, error) {
 		fmt.Printf("claiming server %s as %s, the account %s reported when this device signed in\n",
 			serverID, accountName(session.Account.Account), client.Host())
 		return cli.LinkOptions{Addr: opts.direct, Name: opts.name, EdgeURL: client.URL(), Claim: opts.claim}, nil
+	}
+	if opts.join != "" {
+		return cli.LinkOptions{Addr: opts.direct, Name: opts.name, Join: opts.join}, nil
 	}
 	if opts.invite != "" || opts.key != "" || !edgeproto.ValidServerID(opts.addr) {
 		return cli.LinkOptions{}, nil

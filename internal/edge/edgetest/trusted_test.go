@@ -13,7 +13,6 @@ import (
 	"time"
 
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -73,11 +72,7 @@ func TestBehindTrustedProxies(t *testing.T) {
 			al, bo := cs[0], cs[1]
 			h.claimServer(al, s)
 			ctl := h.control(al, s)
-			inviteLogin(t, ctl, bo, s.id, "collaborator")
-			if policy == edgeproto.PolicyApprovedDevices {
-				_, err := h.dial(bo, h.link(s))
-				approve(t, ctl, waitingCode(t, "bob's first device", err))
-			}
+			h.join(ctl, bo, s, "collaborator")
 			for _, c := range []*client{al, bo} {
 				info := call[protocol.ServerInfoResult](t, h.control(c, s), protocol.MethodServerInfo, struct{}{})
 				if want := map[*client]string{al: "admin", bo: "collaborator"}[c]; info.Member.Role != want {

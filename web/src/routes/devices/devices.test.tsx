@@ -119,7 +119,7 @@ describe('devices tab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Approve' }))
     expect(await screen.findByText('Approved')).toBeDefined()
-    expect(client.memberDeviceApprove).toHaveBeenCalledWith('ABCD-EFGH', 'dev_desktop')
+    expect(client.memberDeviceApprove).toHaveBeenCalledWith('dev_desktop', 'ABCD-EFGH')
     expect(list).toHaveBeenCalledTimes(2)
   })
 

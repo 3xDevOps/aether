@@ -18,6 +18,7 @@ import {
   fakeApi,
   mission,
   otherWorkspace,
+  pendingDevice,
   roomMessage,
   run,
   serverInfo,
@@ -44,6 +45,7 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     capabilities: everyMethod,
     info: { ...serverInfo, member: self },
     members: { [alice.id]: alice, [bob.id]: bob },
+    devices: [],
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
     agentList: null,
     pausedRuns: {},
@@ -305,6 +307,23 @@ describe('Needs you actions', () => {
     await waitFor(() => expect(column('Working').getByText('still going')).toBeDefined())
     expect(api.approvalDecide).toHaveBeenCalledWith(working.id, 'apr_1', true)
     expect(toast.success).toHaveBeenCalledWith('Approved: write src/checkout.ts')
+  })
+
+  it('approves a waiting device by its id, listed ahead of the runs', async () => {
+    seed([stopped])
+    useStore.setState({ devices: [pendingDevice()] })
+    vi.mocked(api.memberDeviceApprove).mockResolvedValueOnce(pendingDevice({ status: 'approved' }))
+    renderBoard()
+
+    expect(screen.getByRole('heading', { name: 'Needs you 2' })).toBeDefined()
+    const [first] = column('Needs you').getAllByRole('article')
+    expect(first!.textContent).toContain('laptop (github mallory) wants to join as collaborator')
+    expect(first!.textContent).toContain('SHA256:examplefingerprint')
+    fireEvent.click(within(first!).getByRole('button', { name: 'Approve' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Needs you 1' })).toBeDefined())
+    expect(api.memberDeviceApprove).toHaveBeenCalledWith('dev_1')
+    expect(toast.success).toHaveBeenCalledWith('laptop approved')
   })
 
   it('says to open the terminal for a request a Standard run answers there', () => {
@@ -583,5 +602,14 @@ describe('map view', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Board' }))
     expect(screen.queryByRole('button', { name: 'other workspace' })).toBeNull()
     expect(useStore.getState().activeWorkspace).toBe(workspace.id)
+  })
+  it('shows a waiting device above the map', async () => {
+    seed([working])
+    useStore.setState({ devices: [pendingDevice()] })
+    renderBoard()
+    await userEvent.click(screen.getByRole('tab', { name: 'Map' }))
+    const waiting = screen.getByRole('region', { name: 'Devices waiting for approval' })
+    expect(within(waiting).getByText('laptop (github mallory) wants to join as collaborator')).toBeDefined()
+    expect(within(waiting).getByRole('button', { name: 'Approve' })).toBeDefined()
   })
 })

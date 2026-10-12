@@ -89,4 +89,7 @@ type Invitation struct {
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	ConsumedAt *time.Time
+	// SecretHash is edgeproto.HashToken of the join secret in the
+	// invitation's link; empty admits no join.
+	SecretHash string
 }

@@ -103,6 +103,8 @@ type Config struct {
 	// and admitted; under PolicyApprovedDevices, which empty selects, it
 	// waits until a person approves it.
 	EdgeAccess edgeproto.AccessPolicy
+	// Name is the server's host name, as its edge refusals name it.
+	Name string
 
 	// Profiles is the legacy agent-profile snapshot service. Nil disables
 	// profile.push / profile.status / profile.rollback.

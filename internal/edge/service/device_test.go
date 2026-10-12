@@ -356,3 +356,48 @@ func TestPagesRender(t *testing.T) {
 		t.Errorf("signed-out /devices: %s to %q", resp.Status, resp.Header.Get("Location"))
 	}
 }
+
+func TestJoinPage(t *testing.T) {
+	h := newHarness(t)
+	server := testServerID(t)
+	b := h.browser(t)
+	b.origin = testRelay
+	resp, page := b.get(t, "/join/"+server+"/inv-7k2m9q4xbd")
+	app := "aether://join?edge=" + url.QueryEscape(testRelay) + "&amp;server=" + server + "&amp;invitation=inv-7k2m9q4xbd"
+	for _, want := range []string{
+		"Join an Aether server",
+		`href="` + app + `"`,
+		`value="` + testRelay + "/join/" + server + `/inv-7k2m9q4xbd"`,
+		`<script src="/join.js">`,
+		"aether link &lt;link&gt;",
+		"https://github.com/3xDevOps/aether/releases/latest",
+	} {
+		if resp.StatusCode != http.StatusOK || !strings.Contains(page, want) {
+			t.Errorf("join page: %s, want it to contain %q\n%s", resp.Status, want, page)
+		}
+	}
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "script-src 'self'") {
+		t.Errorf("join page CSP = %q", csp)
+	}
+	if resp.Header.Get("Referrer-Policy") != "no-referrer" || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("join page headers = %v", resp.Header)
+	}
+	for path, want := range map[string]string{"/join.js": "location.replace", "/edge.css": "--fg"} {
+		if resp, body := b.get(t, path); resp.StatusCode != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("GET %s on the relay origin: %s\n%s", path, resp.Status, body)
+		}
+	}
+	for _, path := range []string{
+		"/join/" + server + "/inv-7K2M9Q4XBD",
+		"/join/" + server + "/inv-7k2m9q4xb",
+		"/join/" + strings.ToUpper(server) + "/inv-7k2m9q4xbd",
+		"/join/" + server,
+	} {
+		if resp, _ := b.get(t, path); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: %s, want 404", path, resp.Status)
+		}
+	}
+	if len(b.setCookies) != 0 {
+		t.Errorf("join page set cookies %q", b.setCookies)
+	}
+}

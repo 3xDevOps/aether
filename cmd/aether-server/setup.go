@@ -116,8 +116,7 @@ func reportEdge(w io.Writer, configPath string) error {
 	if err != nil {
 		return err
 	}
-	printClaimCode(w, code, expires)
-	return nil
+	return printClaimCode(w, edgeURL, code, expires)
 }
 
 // askServerOptions walks the operator through the handful of options a

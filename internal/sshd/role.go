@@ -82,9 +82,14 @@ func (s *Server) memberRole(ctx context.Context, member domain.MemberID, params 
 		if perr != nil {
 			return nil, perr
 		}
+		devs, err := ids.ListDevices(ctx, "")
+		if err != nil {
+			return nil, rpcError(err)
+		}
 		if err := ids.DeleteInvitationsBy(ctx, m.ID); err != nil {
 			return nil, rpcError(err)
 		}
+		s.publishDroppedDevices(ctx, member, ids, devs)
 	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {

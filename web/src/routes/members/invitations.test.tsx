@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
-import type { Invitation } from '@/lib/types'
+import type { Invitation, InvitationResult } from '@/lib/types'
 import { MembersRoute } from '@/routes/members'
 import { useStore } from '@/store'
 import { alice, bob, fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -17,6 +17,12 @@ function invitation(over: Partial<Invitation> = {}): Invitation {
     expires_at: '2026-10-04T10:00:00Z',
     ...over,
   }
+}
+
+const joinLink = 'https://edge.example/join/wqc4lsjvzdzrwq3k5dabdtajwj/inv-7k2m9q4xbd#abcdefghijklmnop'
+
+function result(inv: Invitation): InvitationResult {
+  return { invitation: inv, link: joinLink, server_id: 'wqc4lsjvzdzrwq3k5dabdtajwj' }
 }
 
 function seed(self = alice) {
@@ -89,7 +95,7 @@ describe('invitations', () => {
     const list = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([created])
     const client = fakeApi({
       memberInvitationList: list,
-      memberInvitationCreate: vi.fn(async () => created),
+      memberInvitationCreate: vi.fn(async () => result(created)),
     })
     render(<MembersRoute params={{}} client={client} />)
     const invitations = await section()
@@ -112,7 +118,7 @@ describe('invitations', () => {
 
   it('invites a GitHub login as a GitHub account', async () => {
     seed()
-    const client = fakeApi({ memberInvitationCreate: vi.fn(async () => invitation()) })
+    const client = fakeApi({ memberInvitationCreate: vi.fn(async () => result(invitation())) })
     render(<MembersRoute params={{}} client={client} />)
     const dialog = await inviteDialog()
 
@@ -125,6 +131,28 @@ describe('invitations', () => {
         role: 'collaborator',
       }),
     )
+  })
+
+  it('shows the invite link to send, once, until the dialog is closed', async () => {
+    seed()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const client = fakeApi({ memberInvitationCreate: vi.fn(async () => result(invitation())) })
+    render(<MembersRoute params={{}} client={client} />)
+    const dialog = await inviteDialog()
+
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: 'octocat' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Invite' }))
+
+    const link = within(await dialog.findByRole('group', { name: 'Invite link' }))
+    expect(link.getByText(joinLink)).toBeDefined()
+    expect(dialog.getByText('Send this link to octocat on GitHub. It names their GitHub account and expires in 7 days.')).toBeDefined()
+    fireEvent.click(link.getByRole('button', { name: 'Copy link' }))
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(joinLink))
+    expect(screen.getByRole('dialog', { name: 'Invite a member' })).toBeDefined()
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Invite a member' })).toBeNull())
   })
 
   it('says what an invitation admits under each access policy', async () => {

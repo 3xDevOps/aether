@@ -97,6 +97,16 @@ type Agent struct {
 	seen   map[string]time.Time
 	// live is the enrolled control connection, nil between connections.
 	live *session
+	// edgeState is the edge's last reported state for this server,
+	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+	// It is read from the state at New and recorded there on change.
+	edgeState string
+	// edgeReports counts the states recorded, so a claim records its own
+	// only when none followed the session it reported on.
+	edgeReports uint64
+	// edgeStateMu orders the records of edgeState in the state directory.
+	// It is taken before mu and the state lock, never under either.
+	edgeStateMu sync.Mutex
 }
 
 // New checks cfg and returns an agent that has not dialed yet.
@@ -113,6 +123,11 @@ func New(cfg Config) (*Agent, error) {
 		return nil, fmt.Errorf("edgeagent: %w", err)
 	}
 	state := OpenState(cfg.DataDir)
+	serverID := edgeproto.ServerID(cfg.HostKey.PublicKey())
+	edgeState, err := state.EdgeState(serverID)
+	if err != nil {
+		return nil, err
+	}
 	// The hostname only labels the server for its owner at the edge.
 	name, _ := os.Hostname()
 	// Encoding a hello now turns a hostname the edge would refuse into a
@@ -126,7 +141,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg:              cfg,
 		name:             name,
 		origin:           origin,
-		serverID:         edgeproto.ServerID(cfg.HostKey.PublicKey()),
+		serverID:         serverID,
 		policy:           policy,
 		state:            state,
 		minBackoff:       edgeproto.ReconnectMinBackoff,
@@ -138,6 +153,7 @@ func New(cfg Config) (*Agent, error) {
 		slots:            make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
 		conns:            make(map[*relayConn]struct{}),
 		seen:             make(map[string]time.Time),
+		edgeState:        edgeState,
 	}, nil
 }
 

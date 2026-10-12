@@ -123,7 +123,7 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
-			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+			return 0, "aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t1\tsigning\n", nil
 		}
 		return 0, "", nil
 	}
@@ -194,10 +194,11 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	}
 }
 
-// homeKeyFingerprint is what gh would report for the key the connect just
-// wrote into the member's home. The exec handler that calls it runs on its
-// own goroutine, so a failure is reported rather than fatal.
-func homeKeyFingerprint(t *testing.T, e *testEnv) string {
+// homeKeyMaterial is the key column gh ssh-key list would print for the
+// key the connect just wrote into the member's home. The exec handler that
+// calls it runs on its own goroutine, so a failure is reported rather than
+// fatal.
+func homeKeyMaterial(t *testing.T, e *testEnv) string {
 	t.Helper()
 	home, err := e.cfg.Homes.Path(e.member.ID)
 	if err != nil {
@@ -209,12 +210,12 @@ func homeKeyFingerprint(t *testing.T, e *testEnv) string {
 		t.Errorf("read public key: %v", err)
 		return ""
 	}
-	fingerprint, err := signingFingerprint(strings.TrimSpace(string(pub)))
-	if err != nil {
-		t.Errorf("fingerprint: %v", err)
+	fields := strings.Fields(string(pub))
+	if len(fields) < 2 {
+		t.Errorf("public key %q has no key material", pub)
 		return ""
 	}
-	return fingerprint
+	return fields[0] + " " + fields[1]
 }
 
 // A token the account no longer honors leaves gh exiting 0 with its
@@ -292,7 +293,7 @@ func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
 
 // The upload names a path the container can rewrite between the two
 // steps, so the connection is only reported once the account lists the
-// fingerprint the member's own private key produces.
+// key the member's own private key belongs to.
 func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
@@ -304,7 +305,8 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
-			return 0, "someone else\tSHA256:Ry9aBd4mNJmZQMxTS0KaCiKtGCEccCWQyPq9WLm0000\t2026-01-01\t9\tsigning\n", nil
+			return 0, "someone else\tssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAF8pjArJbfyChr37VkM1hXmEnJQ0KYQFLLae1N9MIjs\t2026-01-01T00:00:00Z\t9\tsigning\n" +
+				"aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t10\tauthentication\n", nil
 		}
 		return 0, "", nil
 	}
@@ -312,10 +314,14 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
 	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
-	if err == nil || !strings.Contains(err.Error(), "does not match this member's key") {
-		t.Fatalf("ConnectGitHub error = %v, want the fingerprint mismatch", err)
+	if err == nil || !strings.Contains(err.Error(), "does not include the signing key Aether generated") {
+		t.Fatalf("ConnectGitHub error = %v, want the signing key mismatch", err)
 	}
-	if !strings.Contains(err.Error(), homeKeyFingerprint(t, e)) {
+	fingerprint, ferr := signingFingerprint(homeKeyMaterial(t, e))
+	if ferr != nil {
+		t.Fatalf("fingerprint: %v", ferr)
+	}
+	if !strings.Contains(err.Error(), fingerprint) {
 		t.Errorf("error %q does not name the member's own fingerprint", err)
 	}
 }
@@ -408,7 +414,7 @@ func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
 		case slices.Contains(argv, "status"):
 			return 0, output, nil
 		case slices.Contains(argv, "list"):
-			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+			return 0, "aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t1\tsigning\n", nil
 		}
 		return 0, "", nil
 	}
@@ -462,7 +468,7 @@ func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
 		case slices.Contains(argv, "status"):
 			return 0, ghStatusLoggedIn, nil
 		case slices.Contains(argv, "list"):
-			return 0, "aether\t" + homeKeyFingerprint(t, e) + "\t2026-01-01\t1\tsigning\n", nil
+			return 0, "aether\t" + homeKeyMaterial(t, e) + "\t2026-01-01T00:00:00Z\t1\tsigning\n", nil
 		}
 		return 0, "", nil
 	}

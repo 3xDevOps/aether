@@ -47,8 +47,10 @@ function main() {
   let gatewayOrigin = ''
   let respawns = 0
   let quitting = false
-  // A deep link that arrived before the gateway was up.
-  let pendingRunId = ''
+  // What a deep link appends to the gateway URL, held until the gateway is
+  // up: the query &run=<id>, or the fragment #join=<link> or #claim=<link>,
+  // which keeps the link's secret out of the request to the gateway.
+  let pendingSuffix = ''
 
   // --- binary discovery ---------------------------------------------------
 
@@ -281,8 +283,8 @@ function main() {
   // --- window ---------------------------------------------------------------
 
   function openWindow() {
-    const url = pendingRunId ? gatewayURL + '&run=' + pendingRunId : gatewayURL
-    pendingRunId = ''
+    const url = gatewayURL + pendingSuffix
+    pendingSuffix = ''
     if (win && !win.isDestroyed()) {
       win.loadURL(url)
       focusWindow()
@@ -373,33 +375,67 @@ function main() {
 
   // aether://run/<id> focuses the window on that run: the SPA reads &run=<id>
   // off the gateway URL and opens that run's terminal once it has hydrated
-  // (docs/local-gateway.md).
+  // (docs/local-gateway.md). aether://join?… and aether://claim?… open the
+  // Connect step with that link as #join= or #claim=.
   function handleDeepLink(raw) {
+    const suffix = deepLinkSuffix(raw)
+    if (!suffix) return
+    if (!gatewayURL) {
+      pendingSuffix = suffix
+      return
+    }
+    if (win && !win.isDestroyed()) {
+      win.loadURL(gatewayURL + suffix)
+      focusWindow()
+    } else {
+      pendingSuffix = suffix
+      openWindow()
+    }
+  }
+
+  // Every part of a link is checked before any of it reaches the gateway
+  // URL; anything else is refused rather than concatenating
+  // attacker-shaped text into it.
+  function deepLinkSuffix(raw) {
     let parsed
     try {
       parsed = new URL(raw)
     } catch {
-      return
+      return ''
     }
-    if (parsed.protocol !== 'aether:') return
+    if (parsed.protocol !== 'aether:') return ''
     // aether://run/<id> parses as host "run", pathname "/<id>".
-    if (parsed.hostname !== 'run') return
-    const id = parsed.pathname.replace(/^\//, '')
-    // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd);
-    // refuse anything else rather than concatenating attacker-shaped text
-    // into the gateway URL.
-    if (!/^[0-9a-z-]{10,32}$/.test(id)) return
-    if (!gatewayURL) {
-      pendingRunId = id
-      return
+    if (parsed.hostname === 'run') {
+      const id = parsed.pathname.replace(/^\//, '')
+      // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd).
+      return /^[0-9a-z-]{10,32}$/.test(id) ? '&run=' + id : ''
     }
-    if (win && !win.isDestroyed()) {
-      win.loadURL(gatewayURL + '&run=' + id)
-      focusWindow()
-    } else {
-      pendingRunId = id
-      openWindow()
+    const names =
+      parsed.hostname === 'join' ? ['edge', 'server', 'invitation'] : parsed.hostname === 'claim' ? ['edge', 'server'] : null
+    if (!names || (parsed.pathname !== '' && parsed.pathname !== '/')) return ''
+    const params = parsed.searchParams
+    if ([...params.keys()].length !== names.length || names.some((name) => params.getAll(name).length !== 1)) return ''
+    let edge
+    try {
+      edge = new URL(params.get('edge'))
+    } catch {
+      return ''
     }
+    // A relay origin as edgeproto.Origin accepts it: https://host[:port], or
+    // http:// for a loopback host, nothing else. URL.origin drops an explicit
+    // default port, which edgeproto.Origin keeps.
+    const origin = params.get('edge')
+    const loopback =
+      edge.hostname === 'localhost' ||
+      edge.hostname === '[::1]' ||
+      /^127\.\d+\.\d+\.\d+$/.test(edge.hostname) ||
+      /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(edge.hostname)
+    const port = edge.protocol === 'https:' ? ':443' : edge.protocol === 'http:' && loopback ? ':80' : null
+    if (!port || (origin !== edge.origin && origin !== edge.origin + port)) return ''
+    if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
+    if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
+    if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''
+    return '#' + parsed.hostname + '=' + encodeURIComponent(parsed.href)
   }
 
   // Opens a run in the page as it stands. The dashboard keeps its route in
@@ -408,7 +444,7 @@ function main() {
   // as a load that failed, is loaded at the run instead.
   function showRun(id) {
     if (!win || win.isDestroyed()) {
-      pendingRunId = id
+      pendingSuffix = '&run=' + encodeURIComponent(id)
       openWindow()
       return
     }

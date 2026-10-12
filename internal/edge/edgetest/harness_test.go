@@ -767,8 +767,9 @@ func (s *serverNode) waitEnrolled() {
 // state is the server's edge agent state.
 func (s *serverNode) state() *edgeagent.State { return edgeagent.OpenState(s.dir) }
 
-// claimCode issues a claim code as `aether-server edge claim-code` does,
-// valid from issued for edgeproto.ClaimCodeTTL.
+// claimCode issues a claim code naming no admin, as `aether-server edge
+// claim-code` does on a server without members, valid from issued for
+// edgeproto.ClaimCodeTTL.
 func (s *serverNode) claimCode(t *testing.T, issued time.Time) string {
 	t.Helper()
 	code, _, err := s.state().IssueClaimCode(s.id, "", issued)
@@ -913,9 +914,6 @@ func (sn snapshot) admins() []domain.MemberID {
 	return out
 }
 
-// approvalCode is the code a pending device's refusal names.
-var approvalCode = regexp.MustCompile(`aether device approve (\S+)`)
-
 // approve approves the device code names through ctl as clients do: it
 // looks the code up, then approves the device the lookup named.
 func approve(t *testing.T, ctl *protocol.Client, code string) protocol.MemberDeviceResult {
@@ -925,19 +923,51 @@ func approve(t *testing.T, ctl *protocol.Client, code string) protocol.MemberDev
 		protocol.MemberDeviceApproveParams{Code: code, DeviceID: found.Device.ID})
 }
 
-// waitingCode returns the approval code in err, which must be the
-// server's refusal of a device waiting for approval.
-func waitingCode(t *testing.T, what string, err error) string {
+// waitingCode returns the approval code of the device err refuses, which
+// must be s's refusal of a device waiting for approval.
+func (s *serverNode) waitingCode(t *testing.T, what string, err error) string {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("%s: connected, want a device waiting for approval", what)
 	}
-	m := approvalCode.FindStringSubmatch(err.Error())
-	if m == nil || !strings.Contains(err.Error(), "is waiting for approval") ||
-		!strings.Contains(err.Error(), "sudo aether-server device approve "+m[1]) {
-		t.Fatalf("%s: %v, want a device waiting for approval with the commands that approve it", what, err)
+	if !strings.Contains(err.Error(), "is waiting for approval") {
+		t.Fatalf("%s: %v, want a device waiting for approval", what, err)
 	}
-	return m[1]
+	var r *edgeproto.Refused
+	if !errors.As(err, &r) {
+		t.Fatalf("%s: %v, want a structured refusal", what, err)
+	}
+	return s.pendingCode(t, what, r)
+}
+
+// pendingCode returns the approval code of the pending device r refuses:
+// the one r carries with the commands that use it, or, where r names only
+// the device id because someone can approve it in the app, the one the
+// machine's console reads.
+func (s *serverNode) pendingCode(t *testing.T, what string, r *edgeproto.Refused) string {
+	t.Helper()
+	text := r.Error()
+	if r.Kind != edgeproto.RefusedDevicePending {
+		t.Fatalf("%s: %v, want a device waiting for approval", what, text)
+	}
+	if r.ApprovalCode != "" {
+		if !strings.Contains(text, "aether device approve "+r.ApprovalCode) ||
+			!strings.Contains(text, "sudo aether-server device approve "+r.ApprovalCode) {
+			t.Fatalf("%s: %v, want the commands that approve it", what, text)
+		}
+		return r.ApprovalCode
+	}
+	if r.DeviceID == "" || !strings.Contains(text, "aether device approve "+r.DeviceID+"\n") {
+		t.Fatalf("%s: %v, want the device id to approve it by", what, text)
+	}
+	dev, err := s.console(t).GetDevice(context.Background(), domain.DeviceID(r.DeviceID))
+	if err != nil {
+		t.Fatalf("%s: device %s on the console: %v", what, r.DeviceID, err)
+	}
+	if dev.ApprovalCode == "" || strings.Contains(text, dev.ApprovalCode) {
+		t.Fatalf("%s: %v, want no approval code", what, text)
+	}
+	return dev.ApprovalCode
 }
 
 func wantRefusal(t *testing.T, what string, err error, want edgeproto.Refusal) {
@@ -996,17 +1026,42 @@ func waitRole(t *testing.T, c *client, serverID, role string) {
 	})
 }
 
-func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreateParams) string {
+func invite(t *testing.T, ctl *protocol.Client, p protocol.MemberInvitationCreateParams) protocol.MemberInvitationResult {
 	t.Helper()
-	return call[protocol.MemberInvitationResult](t, ctl, protocol.MethodMemberInvitationCreate, p).Invitation.ID
+	return call[protocol.MemberInvitationResult](t, ctl, protocol.MethodMemberInvitationCreate, p)
 }
 
-// inviteLogin invites u by GitHub login with role and waits until the
-// edge lists the server for u.
-func inviteLogin(t *testing.T, ctl *protocol.Client, c *client, serverID, role string) {
+// inviteLogin invites u by GitHub login with role, waits until the edge
+// lists the server for u, and returns the invitation's join link.
+func inviteLogin(t *testing.T, ctl *protocol.Client, c *client, serverID, role string) string {
 	t.Helper()
-	invite(t, ctl, protocol.MemberInvitationCreateParams{Login: c.user.Login, Role: role})
+	link := invite(t, ctl, protocol.MemberInvitationCreateParams{Login: c.user.Login, Role: role}).Link
 	waitRole(t, c, serverID, role)
+	return link
+}
+
+// invitation stores inv on s directly, as one made before the server had
+// an admin or edge, and returns its join link.
+func (s *serverNode) invitation(t *testing.T, inv *domain.Invitation) string {
+	t.Helper()
+	secret := edgeproto.NewJoinSecret()
+	inv.SecretHash = edgeproto.HashToken(secret)
+	if err := s.db.CreateInvitation(context.Background(), inv); err != nil {
+		t.Fatal(err)
+	}
+	return edgeproto.JoinLink(s.h.relayURL, s.id, string(inv.ID), secret)
+}
+
+// joinBy joins as c through link, an invitation's join link, as
+// `aether link <join link>` does.
+func (h *harness) joinBy(c *client, link string) (cli.LinkResult, error) {
+	res, err := as(c, func() (cli.LinkResult, error) {
+		return cli.Link(cli.LinkOptions{Join: link}, cli.Config{})
+	})
+	if err == nil {
+		h.t.Cleanup(func() { _ = res.Conn.Close() })
+	}
+	return res, err
 }
 
 // deviceIDOf is the id of the device on s whose key is c's device key.
@@ -1034,15 +1089,14 @@ func (s *serverNode) deviceStatus(t *testing.T, c *client) domain.DeviceStatus {
 }
 
 // join invites c to s by GitHub login with role through ctl, an admin's
-// control channel, and approves c's first device from it when s admits
-// approved devices only.
+// control channel, joins by the invitation's link, and approves c's first
+// device from ctl when s admits approved devices only.
 func (h *harness) join(ctl *protocol.Client, c *client, s *serverNode, role string) {
 	t := h.t
 	t.Helper()
-	inviteLogin(t, ctl, c, s.id, role)
-	_, err := h.dial(c, h.link(s))
+	_, err := h.joinBy(c, inviteLogin(t, ctl, c, s.id, role))
 	if s.policy == edgeproto.PolicyApprovedDevices {
-		approve(t, ctl, waitingCode(t, c.user.Login+"'s first device", err))
+		approve(t, ctl, s.waitingCode(t, c.user.Login+"'s first device", err))
 	} else if err != nil {
 		t.Fatalf("%s joins %s: %v", c.user.Login, s.id, err)
 	}
@@ -1073,7 +1127,7 @@ func directLink(s *serverNode) cli.Config {
 
 // approveForDirect approves c's device on s through ctl, an admin's
 // control channel, when it is not approved yet: the direct path accepts
-// approved devices only, and its refusal shows the code.
+// approved devices only.
 func (h *harness) approveForDirect(ctl *protocol.Client, c *client, s *serverNode) {
 	t := h.t
 	t.Helper()
@@ -1081,9 +1135,9 @@ func (h *harness) approveForDirect(ctl *protocol.Client, c *client, s *serverNod
 		return
 	}
 	_, err := h.dial(c, directLink(s))
-	m := approvalCode.FindStringSubmatch(errString(err))
-	if m == nil || !strings.Contains(err.Error(), "a direct connection accepts approved devices only") {
+	var r *edgeproto.Refused
+	if !errors.As(err, &r) || !strings.Contains(err.Error(), "a direct connection accepts approved devices only") {
 		t.Fatalf("%s's registered device directly: %v, want refused until approved", c.user.Login, err)
 	}
-	approve(t, ctl, m[1])
+	approve(t, ctl, s.pendingCode(t, c.user.Login+"'s registered device directly", r))
 }

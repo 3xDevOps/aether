@@ -50,7 +50,69 @@ export function hrefFor(href: string, route: Route): string {
 
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
+  if (handedLink()) return { name: 'onboarding', params: {} }
   return routeFromQuery(new URLSearchParams(window.location.search))
+}
+
+export type HandedLink = { kind: 'join' | 'claim'; link: string }
+
+let handed: HandedLink | null = null
+
+/**
+ * The join or claim link a shell handed over in the fragment as #join= or
+ * #claim=, which the browser never sends to the server. Reading takes it
+ * off the address, so the secret in it stays in neither the address bar
+ * nor history; it is kept in memory until forgetHandedLink.
+ */
+export function handedLink(): HandedLink | null {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  for (const kind of ['join', 'claim'] as const) {
+    const link = fragment.get(kind)
+    if (link) handed = { kind, link }
+  }
+  clearHandedFragment()
+  return handed
+}
+
+const handedListeners = new Set<(link: HandedLink) => void>()
+
+function handedOnHashChange() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (!fragment.get('join') && !fragment.get('claim')) return
+  const link = handedLink()
+  if (link) for (const listener of handedListeners) listener(link)
+}
+
+/** Calls listener with each join or claim link handed over after load. */
+export function onHandedLink(listener: (link: HandedLink) => void): () => void {
+  if (handedListeners.size === 0) window.addEventListener('hashchange', handedOnHashChange)
+  handedListeners.add(listener)
+  return () => {
+    handedListeners.delete(listener)
+    if (handedListeners.size === 0) window.removeEventListener('hashchange', handedOnHashChange)
+  }
+}
+
+const forgottenListeners = new Set<() => void>()
+
+/** Calls listener each time the handed link is forgotten. */
+export function onHandedLinkForgotten(listener: () => void): () => void {
+  forgottenListeners.add(listener)
+  return () => forgottenListeners.delete(listener)
+}
+
+export function forgetHandedLink() {
+  handed = null
+  clearHandedFragment()
+  for (const listener of forgottenListeners) listener()
+}
+
+function clearHandedFragment() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (!fragment.has('join') && !fragment.has('claim')) return
+  const url = new URL(window.location.href)
+  url.hash = ''
+  window.history.replaceState(window.history.state, '', url.toString())
 }
 
 /**
@@ -87,8 +149,10 @@ export function bindRouteToUrl(store: RouteStore): () => void {
     store.getState().navigate(route.name, route.params)
   }
   window.addEventListener('popstate', pop)
+  const stopHanded = onHandedLink(() => store.getState().navigate('onboarding'))
   return () => {
     stop()
+    stopHanded()
     window.removeEventListener('popstate', pop)
   }
 }

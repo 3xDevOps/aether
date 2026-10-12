@@ -209,7 +209,7 @@ func TestPolicySwitchToApprovedDevices(t *testing.T) {
 
 	for _, c := range []*client{al2, bo} {
 		_, err := h.dial(c, h.link(a))
-		code := waitingCode(t, c.user.Login+"'s registered device after the switch", err)
+		code := a.waitingCode(t, c.user.Login+"'s registered device after the switch", err)
 		if !strings.Contains(err.Error(), "admitted by signing in alone") {
 			t.Fatalf("%s's refusal does not say why: %v", c.user.Login, err)
 		}

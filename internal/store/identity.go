@@ -75,6 +75,14 @@ type IdentityStore interface {
 	// than MaxWaitingDevices may wait on it (ErrLimit). It first deletes the
 	// devices waiting on invitations expired at now.
 	RegisterInvitationDevice(ctx context.Context, d *domain.Device, now time.Time) error
+	// MoveInvitationDevice replaces the device id, pending and no
+	// member's, with a new pending device of the same key, account and
+	// label waiting on invitation, and returns it. The id is new so that
+	// an approval of the device as it was shown before finds nothing. It
+	// is ErrNotFound when the device no longer waits, invitation is not
+	// open at now or the account is a member's, and ErrLimit when
+	// MaxWaitingDevices wait on invitation already.
+	MoveInvitationDevice(ctx context.Context, id domain.DeviceID, invitation domain.InvitationID, now time.Time) (*domain.Device, error)
 	GetDevice(ctx context.Context, id domain.DeviceID) (*domain.Device, error)
 	GetDeviceByCredential(ctx context.Context, credential string) (*domain.Device, error)
 	// GetDeviceByApprovalCode finds the device awaiting approval with
@@ -273,7 +281,7 @@ func (d *DB) BindIdentity(ctx context.Context, identity *domain.Identity) error 
 	return insertIdentity(ctx, d.db, identity)
 }
 
-const invitationCols = `id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at`
+const invitationCols = `id, provider, login, email, role, member_id, created_by, created_at, expires_at, consumed_at, secret_hash`
 
 func scanInvitation(row interface{ Scan(...any) error }) (*domain.Invitation, error) {
 	var (
@@ -283,7 +291,7 @@ func scanInvitation(row interface{ Scan(...any) error }) (*domain.Invitation, er
 		consumedAt           *int64
 	)
 	if err := row.Scan(&inv.ID, &inv.Provider, &inv.Login, &inv.Email, &inv.Role, &member,
-		&inv.CreatedBy, &createdAt, &expiresAt, &consumedAt); err != nil {
+		&inv.CreatedBy, &createdAt, &expiresAt, &consumedAt, &inv.SecretHash); err != nil {
 		return nil, err
 	}
 	inv.Member = domain.MemberID(member.String)
@@ -320,8 +328,8 @@ func (d *DB) CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 		member = inv.Member
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`INSERT INTO identity_invitations (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-		id, inv.Provider, inv.Login, inv.Email, inv.Role, member, inv.CreatedBy, createdAt, expiresAt,
+		`INSERT INTO identity_invitations (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+		id, inv.Provider, inv.Login, inv.Email, inv.Role, member, inv.CreatedBy, createdAt, expiresAt, inv.SecretHash,
 	); err != nil {
 		return fmt.Errorf("store: create invitation: %w", mapConstraint(err, ErrNotFound))
 	}

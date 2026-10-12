@@ -87,10 +87,7 @@ func TestAccountAccessRegistersDevices(t *testing.T) {
 	// As an admin under account access, the member administers the server
 	// from a registered device, but approves no device from one (rule 4):
 	// switching to approved-devices must inherit nothing.
-	if err := laptopRPC.Call(protocol.MethodMemberInvitationCreate,
-		protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"}, nil); err != nil {
-		t.Fatalf("invitation from a registered admin device under account access: %v", err)
-	}
+	e.invite(t, laptopRPC, protocol.MethodMemberInvitationCreate, protocol.MemberInvitationCreateParams{Login: "someone", Role: "viewer"})
 	code := store.ApprovalCode(edgeproto.DeviceKeyLine(phone.PublicKey()))
 	var pe *protocol.Error
 	err := approveByCode(laptopRPC, code, nil)
@@ -168,7 +165,7 @@ func TestTighteningInheritsNothing(t *testing.T) {
 	e.mustDialEdge(t, octo, laptop, "laptop")
 
 	strict := e.restartWith(t, edgeproto.PolicyApprovedDevices)
-	_, banner, err := strict.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, edgeproto.AccountUser(octo))
+	_, banner, err := strict.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, strict.edgeUser(t, octo))
 	if err == nil || !strings.Contains(banner, "admits approved devices only") {
 		t.Fatalf("registered device under approved-devices = %v, banner %q", err, banner)
 	}
@@ -176,7 +173,7 @@ func TestTighteningInheritsNothing(t *testing.T) {
 		t.Fatalf("switching policy changed the device to %s", got)
 	}
 	// The admin's SSH key is independent of the edge and keeps working.
-	approveAsAdmin(t, e, approvalCode(t, banner))
+	approveAsAdmin(t, e, strict.approvalCode(t, laptop, banner))
 	strict.mustDialEdge(t, octo, laptop, "laptop")
 }
 
@@ -200,11 +197,11 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 
 	// A newcomer's key relayed under the admin's account.
 	stray := newSigner(t)
-	_, banner, err := e.dialEdge(t, grantFor(octo, stray, "mallory-laptop"), stray, edgeproto.AccountUser(octo))
+	_, banner, err := e.dialEdge(t, grantFor(octo, stray, "mallory-laptop"), stray, e.edgeUser(t, octo))
 	if err == nil || !strings.Contains(banner, `device "mallory-laptop", signed in as github account octo, is waiting for approval`) {
 		t.Fatalf("stray key under the admin's account: %v, banner %q", err, banner)
 	}
-	code := approvalCode(t, banner)
+	code := e.approvalCode(t, stray, banner)
 	var found protocol.MemberDeviceLookupResult
 	if err := admin.Call(protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{Code: code}, &found); err != nil {
 		t.Fatalf("lookup: %v", err)
@@ -226,14 +223,10 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 		t.Fatalf("lookup of the invitation's device = %+v, want a new collaborator", invited)
 	}
 
-	// An approval naming no device, or another device than the code's,
-	// commits nothing.
-	for _, id := range []string{"", invited.Device.ID} {
-		err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code, DeviceID: id}, nil)
-		var pe *protocol.Error
-		if !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, "nothing was approved") {
-			t.Fatalf("approve %s naming device %q = %v, want a conflict", code, id, err)
-		}
+	// An approval naming another device than the code's commits nothing.
+	var pe *protocol.Error
+	if err := admin.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{Code: code, DeviceID: invited.Device.ID}, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeConflict || !strings.Contains(pe.Message, "nothing was approved") {
+		t.Fatalf("approve %s naming device %q = %v, want a conflict", code, invited.Device.ID, err)
 	}
 	if deviceStatus(t, e, stray) != domain.DevicePending || deviceStatus(t, e, invitee) != domain.DevicePending {
 		t.Fatal("a refused approval approved a device")
@@ -245,6 +238,38 @@ func TestApprovalShowsWhomTheCodeAdmits(t *testing.T) {
 	}
 	if m, err := identities(t, e).GetMemberByIdentity(ctx, mallory().Provider, mallory().Subject); err != nil || m.Role != domain.RoleCollaborator {
 		t.Fatalf("mallory after approval = %+v, %v; want a collaborator", m, err)
+	}
+}
+
+// A refusal carries the approval code only where nobody can approve the
+// device in the app: the device admits as the only admin, who has no
+// approved device. A device waiting on an invitation adding a new member,
+// or one admitting as an admin beside another, names only its id.
+func TestApprovalCodeOnlyWithoutAnInAppApprover(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	refused := func(account edgeproto.Account, label string) *edgeproto.Refused {
+		t.Helper()
+		signer := newSigner(t)
+		_, banner, err := e.dialEdge(t, grantFor(account, signer, label), signer, e.edgeUser(t, account))
+		r, ok := edgeproto.ParseRefusedBanner(banner)
+		if err == nil || !ok || r.Kind != edgeproto.RefusedDevicePending || r.DeviceID == "" {
+			t.Fatalf("%s: %v, banner %q; want a device waiting for approval", label, err, banner)
+		}
+		return r
+	}
+	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", Name: "Ada", IdentityAt: time.Now()}
+	e.invite(t, controlClient(t, e), protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"})
+	if r := refused(ada, "laptop"); r.ApprovalCode == "" {
+		t.Fatalf("the only admin's own device = %+v, want its code", r)
+	}
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: mallory().Login, Role: domain.RoleAdmin})
+	if r := refused(mallory(), "mallory-laptop"); r.ApprovalCode != "" {
+		t.Fatalf("a device adding a new member = %+v, want no code", r)
+	}
+	addMember(t, e, "Bob", domain.RoleAdmin, false)
+	if r := refused(ada, "phone"); r.ApprovalCode != "" {
+		t.Fatalf("an admin's device beside another admin = %+v, want no code", r)
 	}
 }
 
@@ -278,9 +303,7 @@ func TestLinkedIdentityCreatesNoDevice(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ada := edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "3003", Login: "ada", Name: "Ada", IdentityAt: time.Now()}
 	admin := controlClient(t, e)
-	if err := admin.Call(protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"}, nil); err != nil {
-		t.Fatalf("link: %v", err)
-	}
+	e.invite(t, admin, protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "ada"})
 	laptop := newSigner(t)
 	code := e.refusedForApproval(t, ada, laptop, "laptop")
 	if m, err := identities(t, e).GetMemberByIdentity(context.Background(), ada.Provider, ada.Subject); !errors.Is(err, store.ErrNotFound) {
@@ -422,7 +445,26 @@ type fakeEdgeOwner struct {
 	mu     sync.Mutex
 	owners []edgeproto.Account
 	err    error
+	// owner is what Owner returns; nil is a server without one.
+	owner *edgeproto.Account
+	// state is what EdgeState returns; empty is an edge that has not
+	// answered.
+	state string
+	// issuedFor is the admin of the last IssueClaimCode.
+	issuedFor domain.MemberID
 }
+
+func (f *fakeEdgeOwner) IssueClaimCode(admin domain.MemberID) (string, time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issuedFor = admin
+	return testClaimCode, time.Now().Add(edgeproto.ClaimCodeTTL), nil
+}
+
+func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, nil }
+func (f *fakeEdgeOwner) Origin() string                     { return "https://edge.example" }
+func (f *fakeEdgeOwner) Connected() bool                    { return true }
+func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 	f.mu.Lock()
@@ -488,7 +530,10 @@ func TestServerOwnerTransfer(t *testing.T) {
 
 // lockedEdgeOwner is an edge agent whose state lock a claim holds: the
 // transfer waits for claim, which needs registerMu, to finish.
-type lockedEdgeOwner struct{ claim func() error }
+type lockedEdgeOwner struct {
+	*fakeEdgeOwner
+	claim func() error
+}
 
 func (o lockedEdgeOwner) TransferOwner(edgeproto.Account) error {
 	done := make(chan error, 1)
@@ -508,7 +553,7 @@ func TestOwnerTransferDuringAClaim(t *testing.T) {
 	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
 	m := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
 	key := newSigner(t)
-	e.srv.SetEdgeOwner(lockedEdgeOwner{claim: func() error {
+	e.srv.SetEdgeOwner(lockedEdgeOwner{fakeEdgeOwner: &fakeEdgeOwner{}, claim: func() error {
 		_, err := e.srv.claimServer(context.Background(), claimGrantFor(octo, key), key.PublicKey(), "")
 		return err
 	}})

@@ -6,6 +6,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { isApprovalCode, shellQuote } from '@/lib/shell'
 import type { UnreachableKind } from '@/store/server'
 type ConnectionErrorProps = {
   kind: UnreachableKind | null
@@ -13,6 +14,8 @@ type ConnectionErrorProps = {
   error: string | null
   /** The edge of the local gateway's link, when it runs through one. */
   edge?: string
+  /** Set only when nobody can approve this device in the app. */
+  approvalCode?: string | null
   onRetry: () => void
 }
 
@@ -40,7 +43,7 @@ function Cmd({ children }: { children: string }) {
  * never be described as one they can, which is why `gateway` is the desktop
  * origin only.
  */
-function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
+function copyFor({ kind, dead, edge, approvalCode }: ConnectionErrorProps): ErrorCopy {
   if (dead) {
     return {
       icon: KeyRound,
@@ -159,8 +162,26 @@ function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
       icon: Hourglass,
       eyebrow: 'Waiting for approval',
       title: 'This computer is waiting for approval',
+      description: isApprovalCode(approvalCode) ? (
+        <>
+          This server admits approved devices only, and has not approved this computer&apos;s device key. Nobody
+          can approve it from the dashboard, so on the server run{' '}
+          <Cmd>{`sudo aether-server device approve ${shellQuote(approvalCode)}`}</Cmd>, then retry.
+        </>
+      ) : (
+        "This server admits approved devices only, and has not approved this computer's device key: it is new, or it was registered while signing in was enough. An admin approves it from the dashboard's Needs you, or you do from a device of yours that is already approved. Then retry."
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'server-refused') {
+    return {
+      icon: ShieldOff,
+      eyebrow: 'Refused by the server',
+      title: 'Your server refused this computer',
       description:
-        "This server admits approved devices only, and has not approved this computer's device key: it is new, or it was registered while signing in was enough. From a device you already use, as an admin, or on the server, run the approve command in the details below, then retry.",
+        "The server answered and refused this computer's device key. The details below carry the server's reason and, where there is one, the command that resolves it.",
       action: 'Retry connection',
     }
   }
@@ -228,8 +249,8 @@ function copyFor({ kind, dead, edge }: ConnectionErrorProps): ErrorCopy {
  * rather than sitting inside it: an empty sidebar and an empty board around
  * a toast tell the user nothing about what broke or what to do next.
  */
-export function ConnectionError({ kind, dead, error, edge, onRetry }: ConnectionErrorProps) {
-  const content = copyFor({ kind, dead, error, edge, onRetry })
+export function ConnectionError({ kind, dead, error, edge, approvalCode, onRetry }: ConnectionErrorProps) {
+  const content = copyFor({ kind, dead, error, edge, approvalCode, onRetry })
   const Icon = content.icon
 
   return (

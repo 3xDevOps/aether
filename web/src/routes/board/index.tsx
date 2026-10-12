@@ -10,12 +10,13 @@ import { belowLg, useDelayed, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
+import { DeviceCard } from '@/routes/board/device-card'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
 import { finishedRuns, useBoard, workspaceRuns, type BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
-import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
+import { useCapability, useDeviceNeeds, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
 export function Board() {
   const { columns, archivedCards, hiddenByMine } = useBoard()
@@ -37,7 +38,8 @@ export function Board() {
     if (archivedCards.length === 0) setShowArchived(false)
   }, [archivedCards.length])
 
-  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length
+  const devices = useDeviceNeeds()
+  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   const placeholder: Placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
@@ -48,7 +50,16 @@ export function Board() {
 
   let body: ReactNode
   if (view === 'map') {
-    body = <BoardMap agentNames={agentNames} />
+    body = (
+      <>
+        {devices.length > 0 && (
+          <div aria-label="Devices waiting for approval" role="region" className="grid max-h-[40%] shrink-0 grid-cols-1 gap-2 overflow-y-auto border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
+            {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
+          </div>
+        )}
+        <BoardMap agentNames={agentNames} />
+      </>
+    )
   } else if (unreachable && total === 0) {
     body = (
       <div className="p-4">
@@ -68,7 +79,7 @@ export function Board() {
       <div
         className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
       >
-        <Column column={column('needs-you')} placeholder={placeholder} agentNames={agentNames} />
+        <Column column={column('needs-you')} devices={devices} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
         <Column
           key={stacked ? 'stacked' : 'wide'}

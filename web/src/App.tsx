@@ -8,7 +8,7 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
-import { bindRouteToUrl } from '@/lib/url-state'
+import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
 
@@ -21,12 +21,17 @@ export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
   const unreachable = useStore((s) => s.unreachable)
+  const approvalCode = useStore((s) => s.approvalCode)
   const edge = useStore((s) => s.linkStatus?.edge_url)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const epoch = useStore((s) => s.connectionEpoch)
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
+  const onboardingRoute = useStore((s) => s.route.name === 'onboarding')
+  const [handed, setHanded] = useState(handedLink)
+  useEffect(() => onHandedLink(setHanded), [])
+  useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
   useEffect(() => {
     if (typeof window === 'undefined') return
     const dirty = Object.values(drafts).some((draft) => draft.content !== draft.baseContent || draft.saving)
@@ -48,7 +53,9 @@ export function App() {
   useEffect(() => bindRouteToUrl(useStore), [])
 
   // An in-app update restarts the gateway on purpose, so it is not a total failure.
-  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting
+  // A handed link's Connect step talks only to the local gateway, so a saved
+  // server that cannot answer must not hide it.
+  const blocked = !hydrated && hydrationError !== null && !gatewayRestarting && !(handed && onboardingRoute)
 
   useEffect(() => {
     if (!hydrationError || blocked) return
@@ -75,6 +82,7 @@ export function App() {
               dead={streamDead}
               error={hydrationError}
               edge={edge}
+              approvalCode={approvalCode}
               onRetry={retry}
             />
           ) : (

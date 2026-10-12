@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -21,8 +22,22 @@ func init() {
 type EdgeOwner interface {
 	// TransferOwner records owner as the server's owner and reports it to
 	// the edge. It refuses when the server has no owner: only a claim
-	// code from the machine's console gives it one.
+	// code from the machine's console, or one server.edge.claimcode issued
+	// to an admin, gives it one.
 	TransferOwner(owner edgeproto.Account) error
+	// Owner returns the server's owner at its edge, nil when it has none.
+	Owner() (*edgeproto.Account, error)
+	// Origin is the edge's https origin.
+	Origin() string
+	// Connected reports whether the control connection to the edge is up.
+	Connected() bool
+	// EdgeState is the edge's last reported state for this server,
+	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
+	EdgeState() string
+	// IssueClaimCode replaces any claim code with a fresh one whose
+	// claim binds the claiming account to the existing admin member
+	// admin.
+	IssueClaimCode(admin domain.MemberID) (code string, expires time.Time, err error)
 }
 
 // SetEdgeOwner connects the edge agent that records ownership. Call it

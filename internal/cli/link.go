@@ -1,12 +1,19 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -18,10 +25,13 @@ type LinkOptions struct {
 	Key    string
 	// EdgeURL and ServerID link a server through an edge; Addr is then
 	// optional. Claim, a claim code, claims the server it names through
-	// EdgeURL and links it: ServerID is then the code's.
+	// EdgeURL and links it: ServerID is then the code's. Join, an
+	// invitation's join link, joins the server it names through the edge
+	// it names and links it: EdgeURL and ServerID are then the link's.
 	EdgeURL  string
 	ServerID string
 	Claim    string
+	Join     string
 }
 
 // LinkResult is an unsaved link and its live server connection.
@@ -84,6 +94,13 @@ func linkKey(choice string, prev Config, name string) (string, error) {
 }
 
 func linkConfig(cfg, prev Config, name string) Config {
+	if cfg.ServerID != "" && cfg.ServerID == prev.ServerID {
+		if cfg.Addr != "" {
+			prev.Addr = cfg.Addr
+		}
+		prev.EdgeURL = cfg.EdgeURL
+		cfg = prev
+	}
 	cfg.Links = prev.Links
 	// Git remotes of an edge link name only its server id, and edge-ssh
 	// finds the link by that id: a replaced edge default stays, named by
@@ -116,7 +133,8 @@ func namedLink(name string, cfg Config) NamedLink {
 // live connection. The caller owns the connection and must close it or adopt it.
 // With a server id the link goes through DialLinked: no SSH key is
 // resolved or generated, and Addr, when set, is the direct address tried
-// before the edge. A claim goes through DialClaim.
+// before the edge. A claim goes through DialClaim, a join through
+// DialJoin.
 func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 	cfg := Config{Addr: normalizeAddr(opts.Addr), User: "aether", EdgeURL: opts.EdgeURL, ServerID: opts.ServerID}
 	var (
@@ -124,11 +142,34 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		keyGenerated string
 		err          error
 	)
+	serverID := opts.ServerID
+	switch {
+	case opts.Claim != "":
+		_, serverID, err = edgeproto.ParseClaimCode(opts.Claim)
+	case opts.Join != "":
+		_, serverID, _, _, err = edgeproto.ParseJoinLink(opts.Join)
+	}
+	if err != nil {
+		return LinkResult{}, fmt.Errorf("cli: %w", err)
+	}
+	// Checked before the dial: a claim dial spends its code, so nothing
+	// after it may fail on local state.
+	samePrev := false
+	if serverID != "" && prev.ServerID == "" {
+		if samePrev, err = prev.pins(serverID); err != nil {
+			return LinkResult{}, err
+		}
+	}
 	switch {
 	case opts.Claim != "":
 		conn, err = DialClaim(cfg, opts.Claim)
 		if err == nil {
 			cfg.ServerID = conn.cfg.ServerID
+		}
+	case opts.Join != "":
+		conn, err = DialJoin(cfg, opts.Join)
+		if err == nil {
+			cfg.EdgeURL, cfg.ServerID = conn.cfg.EdgeURL, conn.cfg.ServerID
 		}
 	case cfg.ServerID != "":
 		conn, err = Dial(cfg)
@@ -153,7 +194,55 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		_ = conn.Close()
 		return LinkResult{}, fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
+	if samePrev {
+		prev.ServerID = cfg.ServerID
+	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
+}
+
+// pins reports whether the direct dial to the address of c would accept
+// a host key that derives serverID from known_hosts.
+func (c Config) pins(serverID string) (bool, error) {
+	if c.Addr == "" {
+		return false, nil
+	}
+	path := c.knownHostsPath()
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("cli: known_hosts: %w", err)
+	}
+	var keys []ssh.PublicKey
+	for {
+		marker, _, key, _, rest, parseErr := ssh.ParseKnownHosts(body)
+		if errors.Is(parseErr, io.EOF) {
+			break
+		}
+		if parseErr != nil {
+			return false, fmt.Errorf("cli: known_hosts %s: %w", path, parseErr)
+		}
+		if marker == "" && edgeproto.HostKeyMatches(key, serverID) {
+			keys = append(keys, key)
+		}
+		body = rest
+	}
+	if len(keys) == 0 {
+		return false, nil
+	}
+	// The callback matches hashed and wildcard hosts and refuses revoked
+	// keys; it prefers the address over the remote, which goes unused.
+	accepts, err := knownhosts.New(path)
+	if err != nil {
+		return false, fmt.Errorf("cli: known_hosts %s: %w", path, err)
+	}
+	for _, key := range keys {
+		if accepts(c.Addr, &net.TCPAddr{}, key) == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // linkDial dials a server linked by address, choosing its key and

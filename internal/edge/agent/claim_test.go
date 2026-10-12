@@ -567,6 +567,9 @@ func TestStateWrittenAsRootBelongsToTheDataDirOwner(t *testing.T) {
 	if err = s.writeOwner(testOwner); err != nil {
 		t.Fatal(err)
 	}
+	if err = s.writeEdgeState("server", edgeproto.StateClaimed); err != nil {
+		t.Fatal(err)
+	}
 	issue(t, s, time.Now())
 	err = filepath.WalkDir(s.dir, func(path string, _ fs.DirEntry, err error) error {
 		if err != nil {

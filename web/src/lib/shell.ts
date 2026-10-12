@@ -24,3 +24,14 @@ export function shellQuote(value: string): string {
 export function shellPath(path: string): string {
   return shellQuote(path.startsWith('-') ? `./${path}` : path)
 }
+
+const approvalCode = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/
+
+/**
+ * Whether a server-supplied value is a device approval code as the server
+ * generates it. A refusal's code goes into a command the user runs, so
+ * anything else is not shown as one.
+ */
+export function isApprovalCode(value: string | null | undefined): value is string {
+  return !!value && approvalCode.test(value)
+}

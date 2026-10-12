@@ -145,6 +145,9 @@ func TestFailedClaimRecordRecovers(t *testing.T) {
 		}
 		return ownerErr
 	})
+	if state, serr := a.state().EdgeState(a.id); serr != nil || state != edgeproto.StateUnclaimed {
+		t.Fatalf("edge state after the edge refused the claim = %q, %v; want unclaimed", state, serr)
+	}
 
 	// As `aether-server edge claim-code` does, now that the server is
 	// unclaimed.
@@ -187,19 +190,13 @@ func TestClaimKeepsTheDirectoryPushedWithIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	expires := time.Now().Add(time.Hour)
-	for _, inv := range []*domain.Invitation{
-		{Provider: edgeproto.ProviderGitHub, Login: al.user.Login, Member: admin.ID, CreatedBy: admin.ID, ExpiresAt: expires},
-		{Provider: edgeproto.ProviderGitHub, Login: bo.user.Login, Role: domain.RoleCollaborator, CreatedBy: admin.ID, ExpiresAt: expires},
-	} {
-		if err := a.db.CreateInvitation(ctx, inv); err != nil {
-			t.Fatal(err)
-		}
-	}
+	a.invitation(t, &domain.Invitation{Provider: edgeproto.ProviderGitHub, Login: al.user.Login, Member: admin.ID, CreatedBy: admin.ID, ExpiresAt: expires})
+	link := a.invitation(t, &domain.Invitation{Provider: edgeproto.ProviderGitHub, Login: bo.user.Login, Role: domain.RoleCollaborator,
+		CreatedBy: admin.ID, ExpiresAt: expires})
 	h.claimServer(al, a)
 	waitRole(t, bo, a.id, "collaborator")
-	info := call[protocol.ServerInfoResult](t, h.control(bo, a), protocol.MethodServerInfo, struct{}{})
-	if info.Member.Role != string(domain.RoleCollaborator) {
-		t.Fatalf("bob joined as %+v", info.Member)
+	if res, err := h.joinBy(bo, link); err != nil || res.Info.Member.Role != string(domain.RoleCollaborator) {
+		t.Fatalf("bob joined as %+v, %v", res.Info.Member, err)
 	}
 }
 

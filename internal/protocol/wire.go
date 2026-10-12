@@ -443,10 +443,12 @@ type SubscribeRequest struct {
 }
 
 // On failure the server sends OK false with a code and closes the channel.
+// Data is the failing Error's data; the local gateway sets it.
 type SubscribeResponse struct {
-	OK    bool   `json:"ok"`
-	Code  int    `json:"code,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK    bool            `json:"ok"`
+	Code  int             `json:"code,omitempty"`
+	Error string          `json:"error,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // TerminalEpoch identifies one logical terminal incarnation. An empty epoch

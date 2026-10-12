@@ -2,11 +2,13 @@ package sshd
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -73,7 +75,8 @@ func (s *Server) ServeEdgeConn(ctx context.Context, nc net.Conn, grant edgeproto
 // code. Its refusals are the edgeproto claim refusals. On success the
 // grant's account is an admin's identity and the device key is approved,
 // under either access policy, because the code came from this machine's
-// console. The connection then continues as that member's.
+// console or from server.edge.claimcode, which answers only an approved
+// admin. The connection then continues as that member's.
 func (s *Server) ServeEdgeClaim(ctx context.Context, nc net.Conn, grant edgeproto.Grant, attempt func(code string, claim func(admin string) error) error) {
 	if grant.Kind != edgeproto.KindClaim {
 		slog.Warn("sshd: relayed claim refused: grant is not for a claim", "kind", grant.Kind)
@@ -99,40 +102,47 @@ func (s *Server) serveRelayed(ctx context.Context, nc net.Conn, cfg *ssh.ServerC
 func grantKeyCallback(grant edgeproto.Grant) func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
 	return func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 		if !edgeproto.DeviceKeyMatches(grant.DeviceKey, key) {
-			return nil, &ssh.BannerError{
-				Err:     errors.New("sshd: offered key is not the grant's device key"),
-				Message: "the key offered is not the device key the edge signed this connection in with\n",
-			}
+			return nil, refusal(errors.New("sshd: offered key is not the grant's device key"),
+				&edgeproto.Refused{Kind: edgeproto.RefusedGrantKeyMismatch})
 		}
 		return &ssh.Permissions{}, nil
 	}
 }
 
 // edgeConfig authenticates a relayed connection. Its SSH user name is
-// <provider>:<subject>, the account the client signed in as, under the
-// client's own signature: a grant naming any other account is refused
-// before anything is recorded, so an edge cannot register or bind a
-// device key it relays to an account of its choosing.
+// <provider>:<subject>, the account the client signed in as, or a join
+// user name (edgeproto.JoinUser) for that account, under the client's own
+// signature: a grant naming any other account is refused before anything
+// is recorded, so an edge cannot register or bind a device key it relays
+// to an account of its choosing. A join or claim user name holds a
+// secret, so neither callback logs it or puts it in an error.
 func (s *Server) edgeConfig(ctx context.Context, grant edgeproto.Grant) *ssh.ServerConfig {
 	keyOK := grantKeyCallback(grant)
 	cfg := &ssh.ServerConfig{
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			if want := edgeproto.AccountUser(grant.Account); conn.User() != want {
-				return nil, &ssh.BannerError{
-					Err: fmt.Errorf("sshd: relayed connection as %q with a grant for %s", conn.User(), want),
-					Message: fmt.Sprintf("this device connects as %q, but the edge signed the connection in as %s (%s); nothing was recorded\n",
-						conn.User(), accountName(grant.Account), want),
-				}
+			want, user := edgeproto.AccountUser(grant.Account), conn.User()
+			if _, _, owner, ok := edgeproto.ParseJoinUser(user); ok {
+				user = owner.Provider + ":" + owner.Subject
+			} else if strings.HasPrefix(user, "join:") {
+				user = "join:…"
+			} else if strings.HasPrefix(user, "claim:") {
+				user = "claim:…"
+			}
+			if user != want {
+				return nil, refusal(fmt.Errorf("sshd: relayed connection as %q with a grant for %s", user, want),
+					&edgeproto.Refused{Kind: edgeproto.RefusedAccountMismatch, User: user,
+						Account: accountName(grant.Account), Principal: want})
 			}
 			return keyOK(conn, key)
 		},
 		// Runs once the client has signed with the key, so store writes
 		// here cannot be triggered by a key nobody holds, and a refusal
 		// still reaches the client as a banner.
-		VerifiedPublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+		VerifiedPublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey, _ *ssh.Permissions, _ string) (*ssh.Permissions, error) {
+			invitation, secret, _, _ := edgeproto.ParseJoinUser(conn.User())
 			authCtx, cancel := context.WithTimeout(ctx, authTimeout)
 			defer cancel()
-			return s.admitEdge(authCtx, grant, key)
+			return s.admitEdge(authCtx, grant, key, invitation, secret)
 		},
 	}
 	cfg.AddHostKey(s.hostKey)
@@ -151,17 +161,13 @@ func (s *Server) claimConfig(ctx context.Context, grant edgeproto.Grant, attempt
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			_, owner, ok := edgeproto.ParseClaimUser(conn.User())
 			if !ok {
-				return nil, &ssh.BannerError{
-					Err:     errors.New("sshd: claim connection without a claim user name"),
-					Message: "this connection claims the server: its SSH user name must carry the claim code and the claiming account\n",
-				}
+				return nil, refusal(errors.New("sshd: claim connection without a claim user name"),
+					&edgeproto.Refused{Kind: edgeproto.RefusedClaimUserMissing})
 			}
 			if owner != edgeproto.AccountPrincipal(grant.Account) {
-				return nil, &ssh.BannerError{
-					Err: fmt.Errorf("sshd: claim for %s %s relayed with a grant for %s", owner.Provider, owner.Subject, accountName(grant.Account)),
-					Message: fmt.Sprintf("this device claims as %s account %s, but the edge signed the connection in as %s; the claim was not attempted\n",
-						owner.Provider, owner.Subject, accountName(grant.Account)),
-				}
+				return nil, refusal(fmt.Errorf("sshd: claim for %s %s relayed with a grant for %s", owner.Provider, owner.Subject, accountName(grant.Account)),
+					&edgeproto.Refused{Kind: edgeproto.RefusedClaimAccountMismatch,
+						User: owner.Provider + " account " + owner.Subject, Account: accountName(grant.Account)})
 			}
 			return keyOK(conn, key)
 		},
@@ -187,16 +193,22 @@ func (s *Server) claimConfig(ctx context.Context, grant edgeproto.Grant, attempt
 	return cfg
 }
 
+// refusal refuses authentication with r as the banner; err is for the
+// server's log.
+func refusal(err error, r *edgeproto.Refused) *ssh.BannerError {
+	return &ssh.BannerError{Err: err, Message: r.Banner()}
+}
+
 func claimRefusal(err error) error {
 	var banner *ssh.BannerError
 	if errors.As(err, &banner) {
 		return err
 	}
-	var refusal edgeproto.Refusal
-	if errors.As(err, &refusal) {
-		return &ssh.BannerError{Err: fmt.Errorf("sshd: claim refused: %w", err), Message: string(refusal) + "\n"}
+	var refused edgeproto.Refusal
+	if errors.As(err, &refused) {
+		return refusal(fmt.Errorf("sshd: claim refused: %w", err), edgeproto.RefusedBy(refused))
 	}
-	return &ssh.BannerError{Err: fmt.Errorf("sshd: claim: %w", err), Message: "the claim failed on the server: " + err.Error() + "\n"}
+	return refusal(fmt.Errorf("sshd: claim: %w", err), &edgeproto.Refused{Kind: edgeproto.RefusedClaimFailed, Detail: err.Error()})
 }
 
 func edgeConnIdentity(_ context.Context, sconn *ssh.ServerConn) (connIdentity, error) {
@@ -221,8 +233,9 @@ func devicePermissions(member domain.MemberID, dev *domain.Device) *ssh.Permissi
 }
 
 // admitEdge maps the grant's account to a member, then admits the device
-// under the server's access policy.
-func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey) (*ssh.Permissions, error) {
+// under the server's access policy. invitation and secret are the join the
+// connection presents, empty without one.
+func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.PublicKey, invitation, secret string) (*ssh.Permissions, error) {
 	ids, err := s.identityStore()
 	if err != nil {
 		return nil, err
@@ -230,7 +243,7 @@ func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.P
 	keyLine, label := edgeproto.DeviceKeyLine(key), deviceLabel(grant, key)
 	m, err := ids.GetMemberByIdentity(ctx, grant.Account.Provider, grant.Account.Subject)
 	if errors.Is(err, store.ErrNotFound) {
-		m, err = s.edgeInvitee(ctx, ids, grant.Account, keyLine, label)
+		m, err = s.edgeInvitee(ctx, ids, grant.Account, invitation, secret, keyLine, label)
 	}
 	if err != nil {
 		return nil, err
@@ -239,7 +252,7 @@ func (s *Server) admitEdge(ctx context.Context, grant edgeproto.Grant, key ssh.P
 	if err != nil {
 		return nil, err
 	}
-	if err := s.deviceRefusal(dev, true); err != nil {
+	if err := s.deviceRefusal(ctx, ids, dev, true); err != nil {
 		return nil, err
 	}
 	if err := ids.TouchDevice(ctx, dev.ID, time.Now().UTC()); err != nil {
@@ -267,38 +280,72 @@ func (s *Server) deviceAdmitted(dev *domain.Device, relayed bool) bool {
 		(relayed && dev.Status.AwaitsApproval() && s.cfg.EdgeAccess == edgeproto.PolicyAccount)
 }
 
-func (s *Server) deviceRefusal(dev *domain.Device, relayed bool) error {
+func (s *Server) deviceRefusal(ctx context.Context, ids store.IdentityStore, dev *domain.Device, relayed bool) error {
 	switch {
 	case s.deviceAdmitted(dev, relayed):
 		return nil
 	case dev.Status == domain.DeviceRevoked:
-		return &ssh.BannerError{
-			Err:     errors.New("sshd: device revoked"),
-			Message: fmt.Sprintf("device %q was revoked on this server\n", dev.Label),
-		}
+		return refusal(errors.New("sshd: device revoked"), &edgeproto.Refused{Kind: edgeproto.RefusedDeviceRevoked,
+			Device: dev.Label, Fingerprint: fingerprintOf(dev.Credential)})
 	}
-	return &ssh.BannerError{Err: fmt.Errorf("sshd: device %s", dev.Status), Message: approvalBanner(dev, relayed)}
+	pending, err := s.approvalRefusal(ctx, ids, dev, relayed)
+	if err != nil {
+		return err
+	}
+	return refusal(fmt.Errorf("sshd: device %s", dev.Status), pending)
 }
 
-// approvalBanner shows a device awaiting approval its code and the
-// account it signed in as, which decides the member approving admits it
-// as. The code is shown here, inside SSH, and in no list.
-func approvalBanner(dev *domain.Device, relayed bool) string {
-	state := "is waiting for approval"
-	switch {
-	case dev.Status == domain.DeviceRegistered && relayed:
-		state = "was admitted by signing in alone and is waiting for approval: this server now admits approved devices only"
-	case dev.Status == domain.DeviceRegistered:
-		state = "is not approved, and a direct connection accepts approved devices only"
+// approvalRefusal shows a device awaiting approval its id, the account
+// it signed in as, and the member and role approving admits it as, which
+// that account decides. Its code is shown only where nobody can approve
+// it in the app, here, inside SSH, and in no list.
+func (s *Server) approvalRefusal(ctx context.Context, ids store.IdentityStore, dev *domain.Device, relayed bool) (*edgeproto.Refused, error) {
+	r := &edgeproto.Refused{Kind: edgeproto.RefusedDevicePending, Server: s.cfg.Name, Device: dev.Label, DeviceID: string(dev.ID),
+		Fingerprint: fingerprintOf(dev.Credential), Invitation: string(dev.Invitation),
+		Account:    accountName(edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Login: dev.Login, Email: dev.Email}),
+		Registered: dev.Status == domain.DeviceRegistered, Direct: !relayed}
+	member, name, role, err := s.admitsAs(ctx, ids, dev)
+	if err != nil {
+		return nil, fmt.Errorf("sshd: device %s: %w", dev.ID, err)
 	}
-	who := "from an approved device, SSH key or tailnet connection of this account, or as an admin"
-	if dev.Invitation != "" {
-		who = "as an admin, or as the member an account link names; approving it accepts the invitation"
+	r.MemberID, r.MemberName, r.Role = string(member), name, string(role)
+	lone, err := s.loneApprover(ctx, ids, member, role)
+	if err != nil {
+		return nil, fmt.Errorf("sshd: device %s: %w", dev.ID, err)
 	}
-	account := accountName(edgeproto.Account{Provider: dev.Provider, Subject: dev.Subject, Login: dev.Login, Email: dev.Email})
-	return fmt.Sprintf("device %q, signed in as %s, %s. Approve it %s:\n"+
-		"  aether device approve %s\nor on the server:\n  sudo aether-server device approve %s\n",
-		dev.Label, account, state, who, dev.ApprovalCode, dev.ApprovalCode)
+	if lone {
+		r.ApprovalCode = dev.ApprovalCode
+	}
+	return r, nil
+}
+
+// loneApprover reports whether nobody can approve a device admitting as
+// member in the app: member is an admin, no other admin exists,
+// and member has no approved device. A device adding a new member (member
+// empty) always has one, the admin who invited it.
+func (s *Server) loneApprover(ctx context.Context, ids store.IdentityStore, member domain.MemberID, role domain.Role) (bool, error) {
+	if member == "" || role != domain.RoleAdmin {
+		return false, nil
+	}
+	members, err := s.cfg.Store.ListMembers(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range members {
+		if m.ID != member && m.Role == domain.RoleAdmin {
+			return false, nil
+		}
+	}
+	devs, err := ids.ListDevices(ctx, member)
+	if err != nil {
+		return false, err
+	}
+	for _, d := range devs {
+		if d.Status == domain.DeviceApproved {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // directDevice admits an edge device key on a direct or tailnet
@@ -317,28 +364,32 @@ func (s *Server) directDevice(ctx context.Context, key ssh.PublicKey) (*ssh.Perm
 	if err != nil {
 		return nil, false, fmt.Errorf("sshd: resolve device key: %w", err)
 	}
-	if err := s.deviceRefusal(dev, false); err != nil {
+	if err := s.deviceRefusal(ctx, ids, dev, false); err != nil {
 		return nil, true, err
 	}
 	return devicePermissions(dev.Member, dev), true, nil
 }
 
-// edgeInvitee handles an account no member holds. One matching an open
-// invitation joins under account access: it becomes that invitation's
-// member. Under approved-devices the connecting device waits on the
-// invitation instead, and nothing else changes until a person approves
-// it: an edge that signs a grant for an invited account must not create a
-// member, bind an account or use up the invitation.
-func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, keyLine, label string) (*domain.Member, error) {
-	notMember := &ssh.BannerError{
-		Err:     fmt.Errorf("sshd: %s: %w", accountName(account), edgeproto.RefusalNotMember),
-		Message: accountName(account) + " is not a member of this server\n",
-	}
-	invs, err := matchingInvitations(ctx, ids, account)
-	if err != nil {
-		return nil, err
-	}
-	if len(invs) == 0 {
+// edgeInvitee handles an account no member holds. One that presents the
+// secret of an open invitation it matches joins under account access: it
+// becomes that invitation's member. Under approved-devices the connecting
+// device waits on the invitation instead, and nothing else changes until a
+// person approves it. Without the secret nothing is recorded: the edge
+// never sees it, so an edge that signs a grant for an invited account
+// cannot create a member, bind an account, record a device or use up the
+// invitation.
+func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, invitation, secret, keyLine, label string) (*domain.Member, error) {
+	notMember := refusal(fmt.Errorf("sshd: %s: %w", accountName(account), edgeproto.RefusalNotMember),
+		&edgeproto.Refused{Kind: edgeproto.RefusedNotMember, Server: s.cfg.Name, Account: accountName(account)})
+	if invitation == "" {
+		invs, err := matchingInvitations(ctx, ids, account)
+		if err != nil {
+			return nil, err
+		}
+		if len(invs) > 0 {
+			return nil, refusal(fmt.Errorf("sshd: %s is invited and presented no join secret", accountName(account)),
+				&edgeproto.Refused{Kind: edgeproto.RefusedInvitationNeedsLink, Server: s.cfg.Name, Account: accountName(account)})
+		}
 		// Another connection of this account may have accepted its
 		// invitation since admitEdge found no member.
 		m, lookupErr := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
@@ -347,10 +398,19 @@ func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, accou
 		}
 		return m, lookupErr
 	}
-	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
-		return nil, s.invitationDevice(ctx, ids, invs[0], account, keyLine, label)
+	inv, err := s.joinedInvitation(ctx, ids, account, invitation, secret)
+	if err != nil {
+		// Another connection of this account may have used the
+		// invitation since admitEdge found no member.
+		if m, lookupErr := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject); lookupErr == nil {
+			return m, nil
+		}
+		return nil, err
 	}
-	m, err := s.acceptInvitation(ctx, ids, invs[0], account)
+	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
+		return nil, s.invitationDevice(ctx, ids, inv, account, keyLine, label)
+	}
+	m, err := s.acceptInvitation(ctx, ids, inv, account)
 	if errors.Is(err, store.ErrNotFound) {
 		// Another account consumed the invitation first.
 		return nil, notMember
@@ -358,9 +418,39 @@ func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, accou
 	return m, err
 }
 
+// joinedInvitation returns the open invitation id when secret is its join
+// secret and account matches it now.
+func (s *Server) joinedInvitation(ctx context.Context, ids store.IdentityStore, account edgeproto.Account, id, secret string) (*domain.Invitation, error) {
+	wrong := refusal(fmt.Errorf("sshd: %s presented a wrong join secret or a closed invitation %s", accountName(account), id),
+		&edgeproto.Refused{Kind: edgeproto.RefusedJoinWrong, Server: s.cfg.Name, Invitation: id})
+	inv, err := ids.GetInvitation(ctx, domain.InvitationID(id))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, wrong
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sshd: join invitation %s: %w", id, err)
+	}
+	now := time.Now()
+	if inv.SecretHash == "" || inv.ConsumedAt != nil || !now.Before(inv.ExpiresAt) ||
+		subtle.ConstantTimeCompare([]byte(edgeproto.HashToken(secret)), []byte(inv.SecretHash)) != 1 {
+		return nil, wrong
+	}
+	if !invitationMatches(inv, account, now) {
+		invitee := inv.Login
+		if invitee == "" {
+			invitee = inv.Email
+		}
+		return nil, refusal(fmt.Errorf("sshd: %s joined through invitation %s for %s", accountName(account), id, invitee),
+			&edgeproto.Refused{Kind: edgeproto.RefusedJoinWrong, Server: s.cfg.Name, Invitation: id,
+				User: invitee, Account: accountName(account)})
+	}
+	return inv, nil
+}
+
 // invitationDevice records the device with keyLine as waiting on inv for
-// account, when it is new, and returns the device's refusal: the code
-// that approves it, or its revocation.
+// account, when it is new or waits on another invitation of account, and
+// returns the device's refusal: the code that approves it, or its
+// revocation.
 func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, inv *domain.Invitation, account edgeproto.Account, keyLine, label string) error {
 	dev := &domain.Device{Invitation: inv.ID, Provider: account.Provider, Subject: account.Subject,
 		Email: account.Email, Login: account.Login, Name: account.Name,
@@ -374,6 +464,7 @@ func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, 
 	case err == nil:
 		slog.Info("sshd: edge device waiting on an invitation", "invitation", inv.ID, "device", dev.ID,
 			"provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
+		s.publishDevice(ctx, "", dev.ID, dev.Status)
 	}
 	if err != nil {
 		return fmt.Errorf("sshd: invitation device: %w", err)
@@ -381,24 +472,32 @@ func (s *Server) invitationDevice(ctx context.Context, ids store.IdentityStore, 
 	if dev.Member != "" || dev.Provider != account.Provider || dev.Subject != account.Subject {
 		return errKeyOfAnotherAccount
 	}
-	return s.deviceRefusal(dev, true)
+	if dev.Status == domain.DevicePending && dev.Invitation != inv.ID {
+		moved, err := ids.MoveInvitationDevice(ctx, dev.ID, inv.ID, time.Now())
+		if errors.Is(err, store.ErrLimit) {
+			return tooManyWaiting(err, account)
+		}
+		if err != nil {
+			return fmt.Errorf("sshd: invitation device: %w", err)
+		}
+		slog.Info("sshd: edge device replaced on the invitation it joined with", "invitation", inv.ID, "was", dev.Invitation,
+			"device", moved.ID, "replaced", dev.ID, "provider", account.Provider, "subject", account.Subject, "key", fingerprintOf(keyLine))
+		s.publishDevice(ctx, "", dev.ID, domain.DeviceRevoked)
+		s.publishDevice(ctx, "", moved.ID, moved.Status)
+		dev = moved
+	}
+	return s.deviceRefusal(ctx, ids, dev, true)
 }
 
 // tooManyWaiting refuses a new device of account once
 // store.MaxWaitingDevices wait for approval.
 func tooManyWaiting(err error, account edgeproto.Account) error {
-	return &ssh.BannerError{
-		Err: fmt.Errorf("sshd: %s: %w", accountName(account), err),
-		Message: fmt.Sprintf("%d devices of %s are waiting for approval on this server already, so no new one is recorded. "+
-			"An admin approves or revokes them with:\n  aether device list\nor on the server:\n  sudo aether-server device review\n",
-			store.MaxWaitingDevices, accountName(account)),
-	}
+	return refusal(fmt.Errorf("sshd: %s: %w", accountName(account), err),
+		&edgeproto.Refused{Kind: edgeproto.RefusedTooManyWaiting, Account: accountName(account), Waiting: store.MaxWaitingDevices})
 }
 
-var errKeyOfAnotherAccount = &ssh.BannerError{
-	Err:     errors.New("sshd: device key registered to another account"),
-	Message: "this device key is registered to another account on this server\n",
-}
+var errKeyOfAnotherAccount = refusal(errors.New("sshd: device key registered to another account"),
+	&edgeproto.Refused{Kind: edgeproto.RefusedKeyOfAnotherAccount})
 
 // acceptInvitation binds account through inv, creating the member unless
 // inv links an existing one. It creates no device: the device connecting
@@ -422,7 +521,7 @@ func (s *Server) acceptInvitation(ctx context.Context, ids store.IdentityStore, 
 }
 
 // matchingInvitations returns the open invitations account matches now,
-// oldest first, matched exactly as the edge matches directory entries.
+// oldest first.
 func matchingInvitations(ctx context.Context, ids store.IdentityStore, account edgeproto.Account) ([]*domain.Invitation, error) {
 	invs, err := ids.ListInvitations(ctx)
 	if err != nil {
@@ -431,13 +530,19 @@ func matchingInvitations(ctx context.Context, ids store.IdentityStore, account e
 	now := time.Now()
 	var matched []*domain.Invitation
 	for _, inv := range invs {
-		entry := edgeproto.DirectoryEntry{Kind: edgeproto.EntryInvitation, Provider: inv.Provider,
-			Login: inv.Login, Email: inv.Email, ExpiresAt: inv.ExpiresAt}
-		if entry.Matches(account, now) {
+		if invitationMatches(inv, account, now) {
 			matched = append(matched, inv)
 		}
 	}
 	return matched, nil
+}
+
+// invitationMatches reports whether account matches inv at now, exactly as
+// the edge matches directory entries.
+func invitationMatches(inv *domain.Invitation, account edgeproto.Account, now time.Time) bool {
+	entry := edgeproto.DirectoryEntry{Kind: edgeproto.EntryInvitation, Provider: inv.Provider,
+		Login: inv.Login, Email: inv.Email, ExpiresAt: inv.ExpiresAt}
+	return entry.Matches(account, now)
 }
 
 // edgeDevice returns the device registered with keyLine, registering it
@@ -466,6 +571,7 @@ func (s *Server) edgeDevice(ctx context.Context, ids store.IdentityStore, member
 		case err == nil:
 			slog.Info("sshd: edge device registered", "member", member, "device", dev.ID,
 				"status", dev.Status, "key", fingerprintOf(keyLine))
+			s.publishDevice(ctx, "", dev.ID, dev.Status)
 		}
 	}
 	if err != nil {
@@ -553,23 +659,24 @@ func (s *Server) claimServer(ctx context.Context, grant edgeproto.Grant, key ssh
 func (s *Server) recoverAdmin(ctx context.Context, ids store.IdentityStore, admin domain.MemberID, account edgeproto.Account) (*domain.Member, error) {
 	m, err := s.cfg.Store.GetMember(ctx, admin)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, &ssh.BannerError{Err: fmt.Errorf("sshd: claim for member %s: %w", admin, err),
-			Message: fmt.Sprintf("the claim code names member %s, which no longer exists; get a new code on the server\n", admin)}
+		return nil, refusal(fmt.Errorf("sshd: claim for member %s: %w", admin, err),
+			&edgeproto.Refused{Kind: edgeproto.RefusedClaimMemberGone, MemberID: string(admin)})
 	}
 	if err != nil {
 		return nil, fmt.Errorf("sshd: claim: %w", err)
 	}
 	if m.Role != domain.RoleAdmin {
-		return nil, &ssh.BannerError{Err: fmt.Errorf("sshd: claim for member %s, who is %s", admin, m.Role),
-			Message: fmt.Sprintf("the claim code names member %s, who is %s, not an admin; the claim was refused\n", admin, m.Role)}
+		return nil, refusal(fmt.Errorf("sshd: claim for member %s, who is %s", admin, m.Role),
+			&edgeproto.Refused{Kind: edgeproto.RefusedClaimMemberNotAdmin, MemberID: string(admin), Role: string(m.Role)})
 	}
 	bound, err := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
 	switch {
 	case err == nil && bound.ID == m.ID:
 		return m, nil
 	case err == nil:
-		return nil, &ssh.BannerError{Err: fmt.Errorf("sshd: claim for member %s by an account of member %s", admin, bound.ID),
-			Message: fmt.Sprintf("%s belongs to member %s on this server, not to %s; the claim was refused\n", accountName(account), bound.ID, admin)}
+		return nil, refusal(fmt.Errorf("sshd: claim for member %s by an account of member %s", admin, bound.ID),
+			&edgeproto.Refused{Kind: edgeproto.RefusedClaimAccountTaken, Account: accountName(account),
+				MemberID: string(admin), BoundMember: string(bound.ID)})
 	case !errors.Is(err, store.ErrNotFound):
 		return nil, fmt.Errorf("sshd: claim: %w", err)
 	}
@@ -639,15 +746,18 @@ func (s *Server) claimDevice(ctx context.Context, ids store.IdentityStore, membe
 	}
 	switch dev.Status {
 	case domain.DeviceRevoked:
-		return nil, &ssh.BannerError{
-			Err:     errors.New("sshd: claim: device revoked"),
-			Message: fmt.Sprintf("device %q was revoked on this server; claim from another device\n", dev.Label),
-		}
+		return nil, refusal(errors.New("sshd: claim: device revoked"),
+			&edgeproto.Refused{Kind: edgeproto.RefusedClaimDeviceRevoked, Device: dev.Label, Fingerprint: fingerprintOf(dev.Credential)})
 	case domain.DeviceRegistered, domain.DevicePending:
 		if err := ids.ApproveDevice(ctx, dev.ID, ""); err != nil {
 			return nil, fmt.Errorf("sshd: claim: approve device: %w", err)
 		}
-		return ids.GetDevice(ctx, dev.ID)
+		approved, err := ids.GetDevice(ctx, dev.ID)
+		if err != nil {
+			return nil, fmt.Errorf("sshd: claim: %w", err)
+		}
+		s.publishDevice(ctx, "", approved.ID, approved.Status)
+		return approved, nil
 	}
 	return dev, nil
 }
@@ -673,6 +783,9 @@ func (s *Server) EdgeAccountDeleted(ctx context.Context, provider, subject strin
 	}
 	s.closeConns(func(id connIdentity) bool { return slices.Contains(devices, id.device) })
 	s.notifyDirectory()
+	for _, id := range devices {
+		s.publishDevice(ctx, "", id, domain.DeviceRevoked)
+	}
 	slog.Info("sshd: edge account deleted; removed its identity and edge devices",
 		"member", member, "provider", provider, "subject", subject, "devices", len(devices))
 	return nil

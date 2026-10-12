@@ -17,6 +17,7 @@ import type {
   DiskUsage,
   EdgeHostKey,
   EdgeLinkResult,
+  EdgeRefusal,
   EdgeLogin,
   EdgeServer,
   EdgeStatus,
@@ -33,6 +34,7 @@ import type {
   GitHubProbeResult,
   GitIdentity,
   Invitation,
+  InvitationResult,
   LinkApplyResult,
   LinkRepoResult,
   LinkStatus,
@@ -68,6 +70,8 @@ import type {
   Run,
   RunPatch,
   Schedule,
+  ServerEdge,
+  ServerEdgeClaimCode,
   ServerInfo,
   ServerUpdateResult,
   ServerUpdateStatus,
@@ -245,12 +249,16 @@ async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: 
   return result
 }
 
+/** A JSON-RPC error's data. The local gateway sets `refusal` on every
+ * failure on the edge path; other fields belong to the method. */
+export type ApiErrorData = { refusal?: EdgeRefusal } & Record<string, unknown>
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly code?: number,
-    readonly data?: unknown,
+    readonly data?: ApiErrorData,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -370,10 +378,10 @@ export interface LocalForwardStatusResult {
 // Failures carry the JSON-RPC error object: {"error":{"code":-32001,...}}.
 async function failure(
   res: Response,
-): Promise<{ message: string; code?: number; data?: unknown }> {
+): Promise<{ message: string; code?: number; data?: ApiErrorData }> {
   try {
     const body = (await res.json()) as {
-      error?: { code?: unknown; message?: unknown; data?: unknown }
+      error?: { code?: unknown; message?: unknown; data?: ApiErrorData }
     }
     if (body.error) {
       return {
@@ -408,6 +416,8 @@ export function browserStreamURL(params: DevBrowserStreamRequest): string {
 
 export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
+  serverEdge: () => call<ServerEdge>('server.edge'),
+  serverEdgeClaimCode: () => call<ServerEdgeClaimCode>('server.edge.claimcode'),
   memberList: () =>
     call<{ members: Member[] }>('member.list').then((r) => r.members),
   accountList: () => call<AccountAccess>('account.list'),
@@ -731,10 +741,10 @@ export const api = {
   memberDeviceList: () =>
     call<{ devices: Device[] }>('member.device.list').then((r) => r.devices),
   memberDeviceLookup: (code: string) => call<DeviceLookup>('member.device.lookup', { code }),
-  /** Approves the device member.device.lookup named for code; the server
-   * refuses a code that now names another. */
-  memberDeviceApprove: (code: string, deviceID: string) =>
-    call<{ device: Device }>('member.device.approve', { code, device_id: deviceID }).then(
+  /** Approves the device by id. With a code, the server refuses it unless
+   * the code still names that device. */
+  memberDeviceApprove: (deviceID: string, code?: string) =>
+    call<{ device: Device }>('member.device.approve', { device_id: deviceID, code }).then(
       (r) => r.device,
     ),
   memberDeviceRevoke: (deviceID: string) =>
@@ -748,9 +758,7 @@ export const api = {
     email?: string
     role: Member['role']
   }) =>
-    call<{ invitation: Invitation }>('member.invitation.create', params).then(
-      (r) => r.invitation,
-    ),
+    call<InvitationResult>('member.invitation.create', params),
   memberInvitationRevoke: (invitationID: string) =>
     call<unknown>('member.invitation.revoke', { invitation_id: invitationID }),
   workspaceAdd: (params: {
@@ -914,7 +922,7 @@ export const api = {
   // process start, so it answers the restart instruction as an error.
   localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
   /** Starts a sign-in at the edge; edge.status reports how it ends. */
-  localEdgeLogin: () => local<EdgeLogin>('edge.login'),
+  localEdgeLogin: (edge?: string) => local<EdgeLogin>('edge.login', edge ? { edge } : {}),
   localEdgeStatus: () => local<EdgeStatus>('edge.status'),
   localEdgeServers: (edge: string) =>
     local<{ edge: string; servers: EdgeServer[] }>('edge.servers', { edge }),
@@ -924,6 +932,9 @@ export const api = {
     local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
   localEdgeClaim: (code: string, edge: string) =>
     local<EdgeLinkResult>('edge.claim', { code, edge }),
+  /** Joins with a join link's secret. A `device-pending` refusal means the
+   * device is recorded and waits for an admin. */
+  localEdgeJoin: (link: string) => local<EdgeLinkResult>('edge.join', { link }),
   localGitIdentity: () => local<GitIdentity>('git.identity'),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localPullSwitch: (runID: string) =>

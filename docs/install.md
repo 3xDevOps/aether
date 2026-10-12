@@ -695,7 +695,9 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 Optional: an Electron shell that launches `aether gui` for you and shows the
 dashboard in its own frameless window, with a notification that names a run
 when it needs attention and opens it when clicked, a needs-attention badge,
-and `aether://run/<id>` deep links. The notification shows only while the app
+and deep links: `aether://run/<id>` opens a run, and an edge invitation's
+`aether://join?…` and setup's `aether://claim?…` open onboarding's Connect
+step to join or claim ([edge.md](edge.md#the-dashboard)). The notification shows only while the app
 is open; a phone gets one through the server-hosted dashboard
 ([networking.md](networking.md#notifications)). It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
@@ -862,8 +864,10 @@ on screen, which names what actually failed, with a **Server address** button
 on it. That screen also carries the link to [privacy.md](privacy.md), the
 only place the app itself shows one.
 
-`aether://run/<id>` opens the app on that run, the same link the desktop shell
-handles.
+The app opens only `aether://run/<id>`, on that run, the same link the
+desktop shell handles. Open a join or claim link on a computer, with the
+desktop app or `aether link`: the app reaches servers over a tailnet, not an
+edge, and the dashboard it shows is served by the server it points at.
 
 The back gesture walks the dashboard's history and then sends the app to the
 background instead of closing it, so a terminal keeps its scrollback. Links
@@ -1081,8 +1085,8 @@ it asks who may reach the server through it, `1` (account access) or `2`
 ([edge.md](edge.md#access-policies)). Setup is the only thing that turns
 the edge on: `edge-url` is empty unless the config file or a flag names an
 edge, so an upgrade never enrolls an existing server. With the edge on,
-setup ends by printing the server id and a claim code for `aether link
---claim <code>`.
+setup ends by printing the server id and a claim link for the Aether
+app, with the claim code inside it for `aether link --claim <code>`.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 

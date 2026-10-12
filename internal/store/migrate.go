@@ -1589,7 +1589,14 @@ ALTER TABLE missions ADD COLUMN integrator_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE mission_create_receipts ADD COLUMN integrator_model TEXT NOT NULL DEFAULT '';
 ALTER TABLE mission_integrator_replacements ADD COLUMN model TEXT NOT NULL DEFAULT '';
 `,
-	// v60: usage fallback. A run records the account its launcher asked
+	// v60: the hash of an invitation's join secret. An open invitation
+	// created before this version has none and could never be joined, so it
+	// is deleted with the devices waiting on it.
+	`
+ALTER TABLE identity_invitations ADD COLUMN secret_hash TEXT NOT NULL DEFAULT '';
+DELETE FROM identity_invitations WHERE consumed_at IS NULL;
+`,
+	// v61: usage fallback. A run records the account its launcher asked
 	// for when exhausted usage moved it to another, and the launcher's
 	// fallback policy (fallback_order is a JSON array of member IDs, empty
 	// for automatic); a swarm records the policy its runs follow; an
@@ -1604,7 +1611,7 @@ ALTER TABLE missions ADD COLUMN fallback_disabled INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE missions ADD COLUMN fallback_order TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE mission_attempts ADD COLUMN launch_account_id TEXT NOT NULL DEFAULT '';
 `,
-	// v61: reactive usage fallback. A run keeps its account history as
+	// v62: reactive usage fallback. A run keeps its account history as
 	// segments, appended when it moves to another account and never
 	// rewritten; a run with no rows never moved. Cost rows are kept per run
 	// and segment so cost metered before a move stays with the account that

@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -237,7 +241,7 @@ func TestEdgeLogoutRevokesAndForgets(t *testing.T) {
 func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	edge := newFakeEdge(t)
 	g := edgeGateway(t)
-	for _, verb := range []string{"edge.claim", "edge.hostkey", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
+	for _, verb := range []string{"edge.claim", "edge.hostkey", "edge.join", "edge.link", "edge.login", "edge.logout", "edge.servers", "edge.status"} {
 		if rec := do(g, http.MethodPost, "/local/v1/"+verb, `{"edge":"`+edge.URL+`"}`, false); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without the token = %d, want 401", verb, rec.Code)
 		}
@@ -246,6 +250,7 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 		{"edge.link", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.link", `{"edge":"` + edge.URL + `"}`},
 		{"edge.claim", `{"edge":"` + edge.URL + `","code":"wrong"}`},
+		{"edge.join", `{"link":"` + edge.URL + `/join/x/y#z"}`},
 		{"edge.hostkey", `{"edge":"` + edge.URL + `","server_id":"not-an-id"}`},
 		{"edge.login", `{"edge":"http://edge.example.test","label":"laptop"}`},
 		{"edge.servers", `{"edge":"https://edge.example.test/path"}`},
@@ -256,5 +261,89 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	}
 	if n := edge.count(); n != 0 {
 		t.Fatalf("the edge received %d requests", n)
+	}
+}
+
+func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr: "default:2222",
+		User: "alice",
+		Links: []cli.NamedLink{
+			{Name: "work", Addr: "work:2222"},
+		},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("work")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	g := newVerbGateway(t, workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`), selected)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostKey, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected := selected
+	connected.EdgeURL, connected.ServerID = "https://edge.example", edgeproto.ServerID(hostKey)
+	if perr := g.adoptLink(cli.LinkResult{Config: connected}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.EdgeURL != "" || reloaded.ServerID != "" {
+		t.Fatalf("default link changed: %+v", reloaded)
+	}
+	work, ok := reloaded.Named("work")
+	if !ok || work.Addr != "work:2222" || work.EdgeURL != connected.EdgeURL || work.ServerID != connected.ServerID {
+		t.Fatalf("reloaded named link = %+v, present %v", work, ok)
+	}
+	repo := t.TempDir()
+	localGit(t, repo, "init")
+	rec := do(g, http.MethodPost, "/local/v1/link.repo", `{"repo":`+strconv.Quote(repo)+`,"workspace_id":"ws_1"}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		User:  "alice",
+		Links: []cli.NamedLink{{Name: "work", Addr: "work:2222", User: "bob"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("work")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	g := newVerbGateway(t, workspaceListBackend(""), selected)
+	connected := selected
+	connected.EdgeURL, connected.ServerID = "https://edge.example", "aaaa"
+	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
+	if perr := g.adoptLink(cli.LinkResult{Config: cli.UpsertLink(connected, requested)}, "laptop"); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.ServerID != "" {
+		t.Fatalf("default link changed: %+v", reloaded)
+	}
+	want := []cli.NamedLink{
+		{Name: "work", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID},
+		requested,
+	}
+	if !slices.Equal(reloaded.Links, want) {
+		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
 	}
 }

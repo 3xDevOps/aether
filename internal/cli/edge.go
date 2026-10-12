@@ -76,8 +76,14 @@ func DialLinked(ctx context.Context, cfg Config, user string) (*ssh.Client, erro
 		// The edge admits a device that the direct path refuses until it is
 		// approved, under account access; the refusal's approval demand
 		// would repeat on every command and git operation.
-		var refused *refusalError
-		if errors.As(directErr, &refused) {
+		var (
+			refused    *refusalError
+			structured *edgeproto.Refused
+		)
+		switch {
+		case errors.As(directErr, &structured):
+			directErr = fmt.Errorf("%s refused this device: %s", cfg.Addr, structured.Kind)
+		case errors.As(directErr, &refused):
 			directErr = refused.err
 		}
 		fmt.Fprintf(os.Stderr, "aether: %v\naether: reached server %s through %s instead\n", directErr, cfg.ServerID, cfg.EdgeURL)
@@ -157,6 +163,48 @@ func DialClaim(cfg Config, code string) (*Conn, error) {
 	return &Conn{client: client, cfg: cfg}, nil
 }
 
+// DialJoin sends the join secret only in the SSH user name, after the host
+// key proved the server id in the link, so neither the edge nor a server
+// with another id receives it. A server that admits approved devices only
+// refuses the joining device with edgeproto.RefusedDevicePending until an
+// admin approves it.
+func DialJoin(cfg Config, link string) (*Conn, error) {
+	edgeURL, serverID, invitation, secret, err := edgeproto.ParseJoinLink(link)
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	dir, err := Dir()
+	if err != nil {
+		return nil, err
+	}
+	edge, err := edgeclient.New(dir, edgeURL)
+	if err != nil {
+		return nil, err
+	}
+	session, err := edge.Session()
+	if err != nil {
+		return nil, fmt.Errorf("cli: join through %s: %w", edge.Host(), err)
+	}
+	user, err := edgeproto.JoinUser(invitation, secret, edgeproto.AccountPrincipal(session.Account.Account))
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	signer, err := edgeclient.DeviceSigner(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cli: %w", err)
+	}
+	nc, err := edge.Dial(context.Background(), serverID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := pinnedHandshake(nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the invitation link names"))
+	if err != nil {
+		return nil, err
+	}
+	cfg.EdgeURL, cfg.ServerID = edge.URL(), serverID
+	return &Conn{client: client, cfg: cfg}, nil
+}
+
 // errHostKeyRead ends a handshake once HostKeyFingerprint has the key.
 var errHostKeyRead = errors.New("host key read")
 
@@ -200,16 +248,24 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 }
 
 // pinnedHandshake runs the SSH handshake over nc, accepting only a host
-// key pin accepts, and closes nc when it fails. What the server said in
-// authentication banners is part of the error, line by line, because it
-// holds the commands that fix a refusal, such as approving a device.
+// key pin accepts, and closes nc when it fails. A structured refusal in an
+// authentication banner is the error itself, an *edgeproto.Refused. An
+// older server's prose banner is part of the error, line by line, because
+// it holds the commands that fix a refusal, such as approving a device.
 func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh.HostKeyCallback) (*ssh.Client, error) {
-	var said []string
+	var (
+		said    []string
+		refused *edgeproto.Refused
+	)
 	conf := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: pin,
 		BannerCallback: func(message string) error {
+			if r, ok := edgeproto.ParseRefusedBanner(message); ok {
+				refused = r
+				return nil
+			}
 			said = append(said, bannerLines(message)...)
 			return nil
 		},
@@ -221,6 +277,9 @@ func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh
 	cc, chans, reqs, err := ssh.NewClientConn(nc, where, conf)
 	if err != nil {
 		_ = nc.Close()
+		if refused != nil {
+			return nil, refused
+		}
 		err = fmt.Errorf("ssh handshake with %s: %w", where, err)
 		if len(said) > 0 {
 			err = &refusalError{err: err, said: said}

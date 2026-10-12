@@ -109,6 +109,30 @@ describe('ConnectionError', () => {
       expect(screen.queryByText(/Tailscale/)).toBeNull()
     })
 
+    it('shows a pending device the approval command only when the refusal carries a code', () => {
+      const { rerender } = render(<ConnectionError kind="device-pending" dead={false} error={null} onRetry={vi.fn()} />)
+      expect(screen.getByText(/approves it from the dashboard's Needs you/)).toBeDefined()
+      expect(screen.queryByText(/aether-server device approve/)).toBeNull()
+
+      rerender(<ConnectionError kind="device-pending" dead={false} error={null} approvalCode="ABCD-EFGH" onRetry={vi.fn()} />)
+      expect(screen.getByText('sudo aether-server device approve ABCD-EFGH')).toBeDefined()
+    })
+
+    it('shows no approval command for a code that is not shaped like one', () => {
+      render(
+        <ConnectionError
+          kind="device-pending"
+          dead={false}
+          error={null}
+          approvalCode="ABCD-EFGH; sudo touch /tmp/x;#"
+          onRetry={vi.fn()}
+        />,
+      )
+      expect(screen.getByText(/approves it from the dashboard's Needs you/)).toBeDefined()
+      expect(screen.queryByText(/aether-server device approve/)).toBeNull()
+      expect(screen.queryByText(/touch/)).toBeNull()
+    })
+
     it('does not send an edge outage to the server', () => {
       render(<ConnectionError kind="edge" dead={false} error={null} onRetry={vi.fn()} />)
 

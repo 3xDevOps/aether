@@ -6,13 +6,13 @@ const (
 	// MethodMemberDeviceList lists the caller's devices; an admin sees
 	// every member's.
 	MethodMemberDeviceList = "member.device.list"
-	// MethodMemberDeviceLookup describes the device an approval code names
-	// and whom approving it admits, without approving it: the callers
-	// member.device.approve accepts.
+	// MethodMemberDeviceLookup describes the device an approval code or a
+	// device id names and whom approving it admits, without approving it:
+	// the callers member.device.approve accepts.
 	MethodMemberDeviceLookup = "member.device.lookup"
 	// MethodMemberDeviceApprove approves a device awaiting approval by its
-	// approval code and the id member.device.lookup gave for it: its own
-	// member or an admin, on a connection that did not sign in with a
+	// id, and when a code is given, only if the code names that device: its
+	// own member or an admin, on a connection that did not sign in with a
 	// device awaiting approval.
 	MethodMemberDeviceApprove = "member.device.approve"
 	// MethodMemberDeviceRevoke revokes a device and closes its
@@ -48,9 +48,10 @@ const (
 // Provider and Account name the edge account the device signed in as:
 // its login, else its email, else its subject. A device waiting on an
 // invitation has InvitationID and no MemberID. Fingerprint is the SHA256
-// fingerprint of its device key. It never carries the approval code of a
-// device awaiting approval: only that device shows it, so approving with
-// it proves the approver saw that device.
+// fingerprint of its device key. A device awaiting approval carries
+// DisplayName and Role as member.device.lookup gives them: whom approving
+// it admits it as. It never carries the approval code: only that device
+// shows it.
 type Device struct {
 	ID           string `json:"id"`
 	MemberID     string `json:"member_id"`
@@ -63,6 +64,8 @@ type Device struct {
 	CreatedAt    string `json:"created_at"`
 	LastSeenAt   string `json:"last_seen_at,omitempty"`
 	ApprovedBy   string `json:"approved_by,omitempty"`
+	DisplayName  string `json:"display_name,omitempty"`
+	Role         string `json:"role,omitempty"`
 }
 
 // MemberDeviceListResult is the result of member.device.list.
@@ -70,9 +73,11 @@ type MemberDeviceListResult struct {
 	Devices []Device `json:"devices"`
 }
 
-// MemberDeviceLookupParams are the params of member.device.lookup.
+// MemberDeviceLookupParams are the params of member.device.lookup:
+// DeviceID, or else Code.
 type MemberDeviceLookupParams struct {
-	Code string `json:"code"`
+	Code     string `json:"code,omitempty"`
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 // MemberDeviceLookupResult is the result of member.device.lookup: the
@@ -88,11 +93,11 @@ type MemberDeviceLookupResult struct {
 }
 
 // MemberDeviceApproveParams are the params of member.device.approve.
-// DeviceID is the device member.device.lookup described for Code; the
-// server refuses a code that names another, so what is approved is what
+// DeviceID is the device to approve. Code is optional; when given, the
+// server refuses it unless it names DeviceID, so what is approved is what
 // the approver was shown.
 type MemberDeviceApproveParams struct {
-	Code     string `json:"code"`
+	Code     string `json:"code,omitempty"`
 	DeviceID string `json:"device_id"`
 }
 
@@ -139,9 +144,12 @@ type MemberIdentityLinkParams struct {
 }
 
 // MemberInvitationResult is the result of member.invitation.create and
-// member.identity.link.
+// member.identity.link. Link is the join link, the only copy of its
+// secret; ServerID is the server's edge id.
 type MemberInvitationResult struct {
 	Invitation Invitation `json:"invitation"`
+	Link       string     `json:"link"`
+	ServerID   string     `json:"server_id"`
 }
 
 // MemberInvitationListResult is the result of member.invitation.list.

@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func init() {
@@ -21,7 +22,7 @@ func init() {
 }
 
 func runDevice(args []string) error {
-	const usage = "usage: aether device <list|approve <code>|revoke <device-id>>"
+	const usage = "usage: aether device <list|approve <code or device-id>|revoke <device-id>>"
 	if len(args) < 1 {
 		return fmt.Errorf("%s", usage)
 	}
@@ -75,12 +76,17 @@ func deviceChange(method string, params any, verb string) error {
 	})
 }
 
-// deviceApprove shows the device code names and whom approving admits it
-// as, and approves that device once the person answers yes.
-func deviceApprove(code string, in io.Reader, out io.Writer) error {
+// deviceApprove shows the device an approval code or a device id names
+// and whom approving admits it as, and approves that device once the
+// person answers yes.
+func deviceApprove(codeOrID string, in io.Reader, out io.Writer) error {
+	lookup := protocol.MemberDeviceLookupParams{DeviceID: codeOrID}
+	if store.IsApprovalCode(codeOrID) {
+		lookup = protocol.MemberDeviceLookupParams{Code: codeOrID}
+	}
 	return withControl(func(c *protocol.Client) error {
 		var found protocol.MemberDeviceLookupResult
-		if err := c.Call(protocol.MethodMemberDeviceLookup, protocol.MemberDeviceLookupParams{Code: code}, &found); err != nil {
+		if err := c.Call(protocol.MethodMemberDeviceLookup, lookup, &found); err != nil {
 			return err
 		}
 		ok, err := confirmDeviceApproval(in, out, found)
@@ -91,7 +97,7 @@ func deviceApprove(code string, in io.Reader, out io.Writer) error {
 			return errors.New("device approve: not approved")
 		}
 		var res protocol.MemberDeviceResult
-		params := protocol.MemberDeviceApproveParams{Code: code, DeviceID: found.Device.ID}
+		params := protocol.MemberDeviceApproveParams{Code: lookup.Code, DeviceID: found.Device.ID}
 		if err := c.Call(protocol.MethodMemberDeviceApprove, params, &res); err != nil {
 			return err
 		}

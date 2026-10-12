@@ -878,9 +878,9 @@ go test -race ./internal/edge/edgetest/
 
 | Test | Proves |
 | --- | --- |
-| `TestAccountAccess` | Under `account` an invited person works with no approval, the device is recorded `registered`, and a registered device approves nothing |
+| `TestAccountAccess` | Under `account` an invited person joins by the invitation's link and works with no approval, the device is recorded `registered`, and a registered device approves nothing |
 | `TestApprovedDevices` | Under `approved-devices` every new device, a member's first included, waits: approved from the member's approved device, an admin's, or the console; a waiting device, an admin's included, opens no control channel |
-| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance, a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential; after the forged acceptance no member or administrator exists and the invitation is open |
+| `TestMaliciousEdgeApprovedDevices` | With the edge's key, against `approved-devices`: a grant for the admin with the attacker's key, whose code an approver's lookup shows admits alice's admin member; a grant naming another account on a victim's approved key and on a victim's new key, refused with nothing recorded; a forged invitation acceptance without the link's secret, refused with nothing recorded, not even a waiting device, and the invitation still open; the same acceptance with the link's harvested secret, which only leaves the device pending on the invitation, with no member, no bound account and the invitation still open; a replayed open, an altered policy and directory, and forged claimed, transferred, ownerless and account-deleted messages end without access and without an approved admin credential |
 | `TestMaliciousEdgeSubstitutesTheClaimingAccount` | Under both policies a claim whose grant names another account is refused before the code is tried; no member, owner or spent attempt |
 | `TestMaliciousEdgeAccountAccess` | Against `account` the same forged admin grant is admitted with the admin's role: what that policy trusts the edge with. A key registered to one account still serves no other |
 | `TestTakenOverProviderAccount` | A taken-over GitHub account signs in on its own machine: access under `account`, a waiting device under `approved-devices` |
@@ -888,13 +888,14 @@ go test -race ./internal/edge/edgetest/
 | `TestTransferStandsOnlyOnceTheEdgeRecordsIt` | `server.owner.transfer` whose answer is lost, which the edge refuses, or with the edge unreachable fails with the reason and keeps the server's owner; after the lost answer the edge records the server's owner again when it reconnects |
 | `TestFailedClaimRecordRecovers` | The edge's database refuses to record the owner; the edge closes the server's control channel, the server drops its owner, and a fresh code claims again for the same account only |
 | `TestClaimKeepsTheDirectoryPushedWithIt` | A server with an admin and an open invitation is claimed through the admin's link, and the invitee joins |
-| `TestInvitations` | By login and email; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
+| `TestAdminConnectsTheirAccount` | A server whose admin joined with an SSH key refuses invitations until claimed; the admin's `server.edge.claimcode` over that key claims it through the edge for their own member, approves the device and adds no member; invitations then work; a collaborator gets no code, another device of the claiming account still waits for approval, and an owned server issues none |
+| `TestInvitations` | By login and email, each joined by its link; an invited account without the link refused; revoked, expired and a demoted creator's invitations refused; an edge still listing an expired one overruled by the server |
 | `TestRoleChange` | A new role reaches the edge's list and the member's live connection |
 | `TestCrossServerIsolation` | A member of one server is refused on another, by the edge and, for forged grants, by the server |
 | `TestRevocationClosesLiveConnections` | Under both policies: member removal, device revocation, console revocation, `aether logout` and account deletion each close a live connection; the test logs how long each took |
 | `TestRevocationWhileTheEdgeIsDown` | Revocations made on the server while the edge is down hold once it is back |
 | `TestDeleteAccountAfterTransfer` | `server.owner.transfer`, then deletion: the server keeps its new owner and every member and role |
-| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; the console recovers it |
+| `TestDeleteAccountLeavesTheServerOwnerless` | Under both policies: deletion without a transfer leaves the server enrolled and ownerless with its members, roles and workspaces; a collaborator's claim makes no admin; an admin's `member.identity.link` links their account again; `claim-code --admin` recovers it |
 | `TestAccountDeletionReachesAnOfflineServer` | A deletion reaches a server that was offline when it next enrolls |
 | `TestLostAccountDeletionIsSentAgain` | A deletion dropped on its way to the server stays owed at the edge, is sent again when the server reconnects and is forgotten only on the server's answer; the identity and edge devices are then gone, the device key no longer connects directly, and a repeated notice changes nothing |
 | `TestConsoleRecoveryOfAnAdminWithoutAnAccount` | Under both policies: the only admin, reachable only through the edge, deletes their account; a claim code from `claim-code --admin` binds the account they sign in with again to the same member and approves the device; a code naming a collaborator claims nothing; no member or admin is added |
@@ -909,20 +910,43 @@ go test -race ./internal/edge/edgetest/
 | `TestServerRemovedWhileOffline` | A server removed on the edge's Servers page while disconnected comes back unclaimed and is claimed again |
 | `TestBlockedServerStatusSaysWhy` | A blocked server's status for `aether-server edge status` carries the edge's reason |
 | `TestBehindTrustedProxies` | Under both policies, with the edge behind `--trusted-proxies` and its proxy reaching it from a non-loopback address of this machine (skipped on a machine with none): GitHub sign-in, a claim, an invitation and relayed `server.info` calls work; the edge records the forwarded client address, not the proxy's; `/signin/google` answers 404; a request from loopback past the proxy is refused with `403` and counted |
-| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone |
+| `TestGatewaySignsInClaimsAndLinks` | The desktop onboarding wizard signs in, claims and links a server through the local gateway alone, then joins another server with `edge.join`, which answers `device-pending` until that server's admin approves the device by its id |
 
-Beside the suite, `internal/sshd` checks each server rule on its own,
-among them `TestInvitationWaitsUntilOneDeviceIsApproved` (devices wait on
-an invitation until one is approved, which creates the member and removes
-the others), `TestRevokedInvitationDropsItsWaitingDevices`,
-`TestMemberIdentityListAndRemove`,
-`TestClaimCodeForAnAdminRecoversThatAdmin`,
-`TestApprovalShowsWhomTheCodeAdmits` (a lookup names the member and role
-before approving, and an approval naming another device commits nothing),
-`TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount` and
-`TestWaitingDevicesAreBounded`; `internal/edge/agent` has
-`TestPinAndOwnerFollowTheEdgeKey`, `TestEarlierLayoutPinIsNotSilentlyReplaced`,
-`TestTransferOwner` and `TestOwnerIsReportedAgainAtEnrollment`. The integration suite's
+Beside the suite, each package checks its own rules:
+
+| Test | Proves |
+| --- | --- |
+| `TestJoinByLink` (`internal/sshd`) | An invitation's link joins under `account` and leaves the device waiting under `approved-devices`; a wrong secret under either policy, another invitation's secret, a used invitation, the right secret from an account the invitation does not name, and no link at all are refused with nothing recorded |
+| `TestJoinByAnotherLinkMovesTheWaitingDevice` (`internal/sshd`) | Under `approved-devices`, a device waiting on one invitation that joins with another invitation's link becomes a new device, with a new id and the same approval code, on that one: approving the earlier id is not found, approving by code with the earlier id is a conflict, the console's approval of the copy it read is not found, none creates a member, and approving the new device gives that invitation's role and leaves the first open |
+| `TestApprovalAfterTheDeviceMovedIsRefused` (`internal/store`) | `MoveInvitationDevice` replaces the device with a new id for the same key, account and label; approving the earlier id is `ErrNotFound`: no member, no bound account, both invitations open, the new device still pending. A move to an invitation with 10 waiting devices is `ErrLimit` and keeps the device |
+| `TestInvitationWaitsUntilOneDeviceIsApproved` (`internal/sshd`) | Devices wait on an invitation until one is approved, which creates the member and removes the others |
+| `TestRevokedInvitationDropsItsWaitingDevices` (`internal/sshd`) | Revoking an invitation removes the devices waiting on it, and only an admin approves a device whose invitation creates a member |
+| `TestMemberIdentityListAndRemove` (`internal/sshd`) | `member.identity.remove` unbinds one account, revokes its devices and closes their connections, and keeps the member |
+| `TestUnclaimedServerRefusesInvitationsAndOwnerlessOneDoesNot` (`internal/sshd`) | While the edge reports the server unclaimed, invitations and account links are refused before anything is stored; an ownerless claimed server makes them |
+| `TestServerEdge` (`internal/sshd`) | Any member reads `server.edge`, which carries no claim code, token or key, and of the owner only the provider and login |
+| `TestServerEdgeClaimCode` (`internal/sshd`) | An admin on an approved connection gets a claim code bound to their own member, and claiming with it binds the account to that admin; a collaborator, a pending or registered device, and an owned server get none |
+| `TestClaimCodeForAnAdminRecoversThatAdmin` (`internal/sshd`) | A console code for an existing admin binds the claiming account to that admin and approves the device; a code naming a member who is not an admin, or an account of another member, is refused |
+| `TestApproveDeviceByID` (`internal/sshd`) | An admin approves a device by id after `member.device.list` or a lookup by id showed whom it admits; a connection signed in with a pending device cannot; recording and approving publish `member.device` under the workspace id `server` |
+| `TestApprovalCodeOnlyWithoutAnInAppApprover` (`internal/sshd`) | A refusal carries the approval code only for a device admitting as the only admin, who has no approved device; a device adding a new member, or an admin's beside another admin, names only its id |
+| `TestApprovalShowsWhomTheCodeAdmits` (`internal/sshd`) | A lookup names the member and role before approving, and an approval naming another device commits nothing |
+| `TestRelayedConnectionThroughAnEdgeThatSubstitutesTheAccount` (`internal/sshd`) | A device key relayed with a grant for another account is refused before any device is recorded |
+| `TestWaitingDevicesAreBounded` (`internal/sshd`) | At most 10 devices wait per account and per invitation; approving one makes room |
+| `TestPinAndOwnerFollowTheEdgeKey`, `TestEarlierLayoutPinIsNotSilentlyReplaced`, `TestTransferOwner`, `TestOwnerIsReportedAgainAtEnrollment` (`internal/edge/agent`) | The pin and the owner follow the edge's key; an earlier layout's pin is not replaced silently; transfers, and the owner reported again at each enrollment |
+| `TestEdgeStateSurvivesARestart` (`internal/edge/agent`) | The edge's last `unclaimed` report is read back from `edge_state.json` after a restart, and not by a server whose host key, and so its server id, changed |
+| `TestJoinLink`, `TestClaimLink`, `TestJoinUser` (`internal/edge/proto`) | Join links in both forms parse and every other shape is refused; a claim link carries the code split around `#`; the `join:` SSH user name round-trips and refuses malformed parts |
+| `TestParseRefusedBanner` (`internal/edge/proto`) | A banner is structured only by its `aether-refusal/1` first line, and only when no field carries a control character and its approval code and device id have the shapes the server generates |
+| `TestJoinPage` (`internal/edge/service`) | The relay origin serves the join page with its `aether://join` link, `/join.js`, the CSP with `script-src 'self'`, `no-referrer` and `no-store`, and no cookie; ids of the wrong shape get 404 |
+| `TestEdgeRefusalCarriesTheServersMessage`, `TestEdgeRefusalOfAnOlderServerKeepsItsBanner` (`internal/cli`) | A refusal is the server's prose with its commands, without the failed handshake; an older server's prose banner is shown line by line |
+| `TestClaimOfTheCurrentServerKeepsItsLink` (`internal/cli`) | Claiming the server the current link already reaches keeps that link's address, clone and `known_hosts`, and adds the edge |
+| `TestEdgeRefusalCarriesItsKind` (`internal/localgw`) | A refusal on the edge path reaches the dashboard as `data.refusal` on the API and on the events refusal frame |
+| `TestJoinSecretMigrationDropsOpenInvitations` (`internal/store`) | Upgrading removes open invitations, which have no join secret, with the devices waiting on them, and keeps everything else |
+| `TestClaimFailsOnUnreadableKnownHostsBeforeTheCodeIsSpent`, `TestClaimOfTheCurrentServerMovesItsGitRemote` (`internal/cli`) | A claim whose `known_hosts` cannot be read fails before anything is dialed, so its code is not spent; a link that gains the server id moves a remote on the old address to the edge host and leaves other remotes alone |
+| `TestEdgeChangeOfANamedProfileIsSavedIntoIt`, `TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth` (`internal/localgw`) | An edge link on a gateway serving a named profile is saved into that profile and leaves the default link alone; under another name both are saved |
+| `TestMemberApprovesOwnDeviceByID` (`internal/sshd`) | A member approves their own pending device by id; another member's attempt, and a lookup of it, are denied |
+| `TestEdgeConnectArgs`, `TestEdgeConnected` (`cmd/aether`) | `aether edge connect` takes no other argument, refuses with the edge off, and prints the owner of a server that has one |
+| `TestEdgeStatusAndClaimCode`, `TestClaimCodeForAnAdmin` (`cmd/aether-server`) | `claim-code` prints the claim link and the `aether link --claim` line; without `--admin` it is refused on a server with members, listing its admins, and issues no code |
+
+The integration suite's
 `TestIntegrationUpgradeFromMainWithoutTheEdge` starts this build on a
 database at main's schema version and a configuration without edge keys:
 any outbound HTTP request fails it, and its SSH key and tailnet members

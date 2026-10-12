@@ -201,13 +201,11 @@ func TestHostKeyFingerprintStopsBeforeAuthentication(t *testing.T) {
 	}
 }
 
-// A device the server does not admit yet fails with the server's own
-// words, commands included, line by line and with control characters
-// replaced. Git and the sync daemon dial through DialLinked too.
-func TestEdgeRefusalCarriesTheServersMessage(t *testing.T) {
+// edgeRefusal is DialLinked's error through a relay to a server that
+// refuses every key with banner.
+func edgeRefusal(t *testing.T, banner string) error {
+	t.Helper()
 	w := newEdgeWorld(t)
-	banner := "device \"laptop\" is waiting for approval. From a device this account already uses, or as an admin, run:\n" +
-		"  aether device approve ABCD-EFGH\nor on the server:\n  sudo aether-server device approve ABCD-EFGH\x1b[2J\n"
 	r := w.relay(t, func(*relay) *ssh.ServerConfig {
 		conf := &ssh.ServerConfig{
 			PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
@@ -222,6 +220,31 @@ func TestEdgeRefusalCarriesTheServersMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("DialLinked succeeded for a pending device")
 	}
+	return err
+}
+
+// A device the server does not admit yet fails with the server's
+// refusal itself, whose text is the prose with the commands that fix it
+// and nothing of the failed handshake. Git and the sync daemon dial
+// through DialLinked too.
+func TestEdgeRefusalCarriesTheServersMessage(t *testing.T) {
+	want := &edgeproto.Refused{Kind: edgeproto.RefusedDevicePending, Device: "laptop",
+		Account: "github account octo", ApprovalCode: "ABCD-EFGH"}
+	err := edgeRefusal(t, want.Banner())
+	var refused *edgeproto.Refused
+	if !errors.As(err, &refused) || *refused != *want {
+		t.Fatalf("DialLinked = %#v, want the server's refusal %#v", err, want)
+	}
+	if msg := err.Error(); msg != want.Error() || !strings.Contains(msg, "\n  aether device approve ABCD-EFGH\n") {
+		t.Fatalf("error %q, want the refusal's prose %q alone", msg, want.Error())
+	}
+}
+
+// An older server's prose banner is shown line by line, with control
+// characters replaced.
+func TestEdgeRefusalOfAnOlderServerKeepsItsBanner(t *testing.T) {
+	err := edgeRefusal(t, "device \"laptop\" is waiting for approval. From a device this account already uses, or as an admin, run:\n"+
+		"  aether device approve ABCD-EFGH\nor on the server:\n  sudo aether-server device approve ABCD-EFGH\x1b[2J\n")
 	msg := err.Error()
 	for _, want := range []string{
 		"server said:",
