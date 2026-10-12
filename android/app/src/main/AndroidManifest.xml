@@ -50,6 +50,8 @@
                 <data
                     android:host="run"
                     android:scheme="aether" />
+                <data android:host="join" />
+                <data android:host="claim" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"

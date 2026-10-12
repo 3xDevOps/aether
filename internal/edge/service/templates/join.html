@@ -1,0 +1,8 @@
+{{define "join"}}{{template "top" .}}
+<p><a class="button" id="open" href="{{.Data.App}}">Open in Aether</a></p>
+<p><label for="link">Join link</label>
+<input id="link" readonly size="60" value="{{.Data.Link}}"> <button type="button" id="copy">Copy</button></p>
+<p>Paste it into the Connect page of the Aether app, or run: <code>aether link &lt;link&gt;</code></p>
+<p>No Aether app yet? <a href="https://github.com/3xDevOps/aether/releases/latest">Download the desktop app</a>.</p>
+<script src="/join.js"></script>
+{{template "bottom" .}}{{end}}

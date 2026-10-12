@@ -571,9 +571,14 @@ and back and forward navigate to the entry's route, so reload, back, `Esc`
 and a shared link agree. Other query parameters and the hash are kept; the
 token is removed on first load as before.
 
-`?run=<id>` is the whole deep-link contract for both shells:
-`aether://run/<id>` loads `<dashboard>?run=<id>`, which opens the run's
-default view (see [Run view](#run-view)). When the first
+Both shells deliver three deep links: `aether://run/<id>` loads
+`<dashboard>?run=<id>`, and `aether://join?…#<secret>` and
+`aether://claim?…#<secret>` load `<dashboard>?join=<link>` and
+`?claim=<link>` with the whole link URL-encoded
+([local-gateway.md](local-gateway.md#running-it)). `handedLink()` in
+`src/lib/url-state.ts` takes `join` and `claim` off the address on first
+load and holds the link in memory for the Connect step. `?run=<id>` opens
+the run's default view (see [Run view](#run-view)). When the first
 hydration does not find the run, the dashboard opens the board instead, or
 onboarding for a member who has not finished it. A `?page=` name with no
 view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
@@ -4001,6 +4006,18 @@ distinguishes no configured server from a linked one, shows **Continue** only
 once a server is configured, and refreshes on Retry and when the window
 regains focus, so a separate `aether link` command appears without
 restarting the GUI.
+
+A handed-over link opens Connect at any step. A claim link fills **Claim code
+or link** and opens its disclosure. A join link replaces the sign-in with a
+**Join** panel: `Join <server id> as the invited account?` with the account
+`edge.status` reports for the link's edge, signing in to that edge first if
+needed, and **Join** sends the link to `edge.join`. On a `device-pending`
+refusal it shows `Waiting for an admin of <server> to approve this device`
+with the device label and key fingerprint, never an approval code, and calls
+`edge.join` again every 5 seconds until it links or is refused otherwise. A
+gateway without `edge.join` or `edge.claim`, such as the Android app's
+tailnet dashboard, shows the link and the `aether link` command to copy
+instead, with **Continue**.
 
 The Agent step opens with the two Standard and Enhanced cards
 (`ModeOverview`), then the agent list, **Add agent…** and the extras

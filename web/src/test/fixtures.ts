@@ -775,6 +775,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     localEdgeHostKey: vi.fn(async () => needsOverride('localEdgeHostKey')),
     localEdgeLink: vi.fn(async () => needsOverride('localEdgeLink')),
     localEdgeClaim: vi.fn(async () => needsOverride('localEdgeClaim')),
+    localEdgeJoin: vi.fn(async () => needsOverride('localEdgeJoin')),
     localPull: vi.fn(async () => ({
       branch: 'aether/run-1-checkout',
       ref: 'refs/heads/aether/run-1-checkout',

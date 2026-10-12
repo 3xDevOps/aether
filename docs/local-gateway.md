@@ -76,6 +76,15 @@ deliver an `aether://run/<id>` deep link - the desktop shell
 (`desktop/main.js`) and the Android app (`android/`) append it to the
 dashboard URL and load that.
 
+`join` and `claim` carry the other two deep links,
+`aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`
+and `aether://claim?edge=<relay origin>&server=<server id>#<secret>`
+([edge.md](edge.md#join-page)). Each shell checks every part of the link
+and refuses any other shape, then appends the whole link URL-encoded as
+`?join=` or `?claim=`. The dashboard removes the parameter from the address
+on first load (`replaceState`), so the secret stays in neither the address
+bar nor history, and opens onboarding's Connect step with the link.
+
 Onboarding is an initial landing page, not a reconnect redirect. Choosing
 **Manage workspaces** during startup keeps that route, and linking a clone
 must not erase an in-progress wizard's workspace or first-run draft. Public

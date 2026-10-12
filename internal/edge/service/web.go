@@ -41,9 +41,15 @@ func serveCSS(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, templateFS, "templates/edge.css")
 }
 
+func serveJoinScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFileFS(w, r, templateFS, "templates/join.js")
+}
+
+const pageCSP = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+
 // pageHeaders sets the headers every page carries.
-func (s *Service) pageHeaders(next http.Handler) http.Handler {
-	csp := "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+func (s *Service) pageHeaders(csp string, next http.Handler) http.Handler {
 	hsts := strings.HasPrefix(s.signinOrigin, "https://")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()

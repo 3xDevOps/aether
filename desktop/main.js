@@ -47,8 +47,9 @@ function main() {
   let gatewayOrigin = ''
   let respawns = 0
   let quitting = false
-  // A deep link that arrived before the gateway was up.
-  let pendingRunId = ''
+  // The query a deep link adds to the gateway URL, held until the gateway
+  // is up: &run=<id>, &join=<link> or &claim=<link>.
+  let pendingQuery = ''
 
   // --- binary discovery ---------------------------------------------------
 
@@ -281,8 +282,8 @@ function main() {
   // --- window ---------------------------------------------------------------
 
   function openWindow() {
-    const url = pendingRunId ? gatewayURL + '&run=' + pendingRunId : gatewayURL
-    pendingRunId = ''
+    const url = gatewayURL + pendingQuery
+    pendingQuery = ''
     if (win && !win.isDestroyed()) {
       win.loadURL(url)
       focusWindow()
@@ -373,33 +374,58 @@ function main() {
 
   // aether://run/<id> focuses the window on that run: the SPA reads &run=<id>
   // off the gateway URL and opens that run's terminal once it has hydrated
-  // (docs/local-gateway.md).
+  // (docs/local-gateway.md). aether://join?… and aether://claim?… open the
+  // Connect step with that link as &join= or &claim=.
   function handleDeepLink(raw) {
+    const query = deepLinkQuery(raw)
+    if (!query) return
+    if (!gatewayURL) {
+      pendingQuery = query
+      return
+    }
+    if (win && !win.isDestroyed()) {
+      win.loadURL(gatewayURL + query)
+      focusWindow()
+    } else {
+      pendingQuery = query
+      openWindow()
+    }
+  }
+
+  // Every part of a link is checked before any of it reaches the gateway
+  // URL; anything else is refused rather than concatenating
+  // attacker-shaped text into it.
+  function deepLinkQuery(raw) {
     let parsed
     try {
       parsed = new URL(raw)
     } catch {
-      return
+      return ''
     }
-    if (parsed.protocol !== 'aether:') return
+    if (parsed.protocol !== 'aether:') return ''
     // aether://run/<id> parses as host "run", pathname "/<id>".
-    if (parsed.hostname !== 'run') return
-    const id = parsed.pathname.replace(/^\//, '')
-    // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd);
-    // refuse anything else rather than concatenating attacker-shaped text
-    // into the gateway URL.
-    if (!/^[0-9a-z-]{10,32}$/.test(id)) return
-    if (!gatewayURL) {
-      pendingRunId = id
-      return
+    if (parsed.hostname === 'run') {
+      const id = parsed.pathname.replace(/^\//, '')
+      // Run IDs are lowercase letters, digits, and hyphens (run-7k2m9q4xbd).
+      return /^[0-9a-z-]{10,32}$/.test(id) ? '&run=' + id : ''
     }
-    if (win && !win.isDestroyed()) {
-      win.loadURL(gatewayURL + '&run=' + id)
-      focusWindow()
-    } else {
-      pendingRunId = id
-      openWindow()
+    const names =
+      parsed.hostname === 'join' ? ['edge', 'server', 'invitation'] : parsed.hostname === 'claim' ? ['edge', 'server'] : null
+    if (!names || (parsed.pathname !== '' && parsed.pathname !== '/')) return ''
+    const params = parsed.searchParams
+    if ([...params.keys()].length !== names.length || names.some((name) => params.getAll(name).length !== 1)) return ''
+    let edge
+    try {
+      edge = new URL(params.get('edge'))
+    } catch {
+      return ''
     }
+    // A relay origin: https://host[:port], nothing else.
+    if (edge.protocol !== 'https:' || edge.origin !== params.get('edge')) return ''
+    if (!/^[a-z2-7]{26}$/.test(params.get('server'))) return ''
+    if (names.includes('invitation') && !/^inv-[0-9a-hjkmnp-tv-z]{10}$/.test(params.get('invitation'))) return ''
+    if (!/^#[a-z2-7]{16}$/.test(parsed.hash)) return ''
+    return '&' + parsed.hostname + '=' + encodeURIComponent(parsed.href)
   }
 
   // Opens a run in the page as it stands. The dashboard keeps its route in
@@ -408,7 +434,7 @@ function main() {
   // as a load that failed, is loaded at the run instead.
   function showRun(id) {
     if (!win || win.isDestroyed()) {
-      pendingRunId = id
+      pendingQuery = '&run=' + encodeURIComponent(id)
       openWindow()
       return
     }

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { EdgeLogin, EdgeServer, EdgeStatus, GatewayCapabilities, LinkStatus } from '@/lib/types'
+import { forgetHandedLink } from '@/lib/url-state'
 import { OnboardingRoute } from '@/routes/onboarding'
 import { useStore } from '@/store'
 import { fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -12,7 +13,7 @@ const localCaps: GatewayCapabilities = {
   gateway: 'local',
   methods: ['*'],
   ws: ['events', 'attach', 'terminal'],
-  local: ['link.status', 'edge.login', 'edge.status', 'edge.servers', 'edge.hostkey', 'edge.link', 'edge.claim'],
+  local: ['link.status', 'edge.login', 'edge.status', 'edge.servers', 'edge.hostkey', 'edge.link', 'edge.claim', 'edge.join'],
 }
 
 const unlinked: LinkStatus = {
@@ -75,6 +76,8 @@ function seed() {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
+  forgetHandedLink()
+  window.history.replaceState(null, '', '/')
 })
 
 describe('onboarding link through an edge', () => {
@@ -323,12 +326,34 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `${edge}/claim/${serverID}#secret` },
+      target: { value: `aether://claim?edge=${encodeURIComponent(edge)}&server=${serverID}#secret` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
     expect(await screen.findByText(/^Linked to/)).toBeDefined()
     expect(client.localEdgeClaim).toHaveBeenCalledWith(`${serverID}-secret`, edge)
+  })
+
+  it('opens the Join panel for a join link pasted into the claim form', async () => {
+    seed()
+    const joinLink = `${edge}/join/${serverID}/inv-7k2m9q4xbd#abcdefghijk23456`
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeServers: vi.fn(async () => ({ edge, servers: [] })),
+      localEdgeJoin: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
+    fireEvent.change(screen.getByLabelText('Claim code or link'), { target: { value: ` ${joinLink} ` } })
+    fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
+
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    fireEvent.click(await join.findByRole('button', { name: 'Join' }))
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeJoin).toHaveBeenCalledWith(joinLink)
+    expect(client.localEdgeClaim).not.toHaveBeenCalled()
   })
 
   it('refuses a pasted claim link that names another edge', async () => {
@@ -343,7 +368,7 @@ describe('onboarding link through an edge', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Other ways to link' }))
     fireEvent.change(screen.getByLabelText('Claim code or link'), {
-      target: { value: `https://edge.other.test/claim/${serverID}#secret` },
+      target: { value: `aether://claim?edge=https%3A%2F%2Fedge.other.test&server=${serverID}#secret` },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Claim and link' }))
 
@@ -413,5 +438,78 @@ describe('onboarding link through an edge', () => {
 
     expect(await screen.findByText(refusal)).toBeDefined()
     expect(screen.getByLabelText('Claim code or link')).toBeDefined()
+  })
+})
+
+describe('a join link handed to the dashboard', () => {
+  const joinLink = `aether://join?edge=${encodeURIComponent(edge)}&server=${serverID}&invitation=inv-7k2m9q4xbd#abcdefghijk23456`
+
+  function handOver() {
+    window.history.replaceState(null, '', `/?token=t&join=${encodeURIComponent(joinLink)}`)
+  }
+
+  it('shows the account it joins as, then joins, and takes the link off the address', async () => {
+    handOver()
+    seed()
+    useStore.setState({ onboardingStep: 'Agent', onboardingFurthest: 'Agent' })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn(async () => linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    expect(window.location.search).toBe('?token=t')
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    expect(join.getByText(/as the invited account\?/).textContent).toBe(`Join ${serverID} as the invited account?`)
+    expect((await join.findByText(/This device is signed in/)).textContent).toContain('edge.example.test as octocat (GitHub)')
+    expect(client.localEdgeJoin).not.toHaveBeenCalled()
+    fireEvent.click(join.getByRole('button', { name: 'Join' }))
+
+    expect((await screen.findByText(/^Linked to/)).textContent).toBe(
+      `Linked to ${serverID} through edge.example.test as Octo (admin).`,
+    )
+    expect(client.localEdgeJoin).toHaveBeenCalledWith(joinLink)
+    expect(screen.queryByRole('region', { name: 'Join' })).toBeNull()
+  })
+
+  it('waits for an admin while the device is pending, then joins', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    handOver()
+    seed()
+    const pendingDevice = new ApiError(409, 'edge.join: this device waits for an admin', undefined, {
+      refusal: { kind: 'device-pending', server: 'build-box', device: 'laptop', fingerprint: 'SHA256:devicekeyexample' },
+    })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn().mockRejectedValueOnce(pendingDevice).mockResolvedValue(linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    const waiting = await screen.findByRole('status')
+    expect(within(waiting).getByText('Waiting for an admin of build-box to approve this device')).toBeDefined()
+    expect(waiting.textContent).toContain('laptop')
+    expect(waiting.textContent).toContain('SHA256:devicekeyexample')
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the command where the dashboard has no edge.join', async () => {
+    handOver()
+    seed()
+    useStore.setState({ capabilities: { ...localCaps, local: [] } })
+    const client = fakeApi()
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    const command = await screen.findByRole('region', { name: 'Link from a terminal' })
+    expect(within(command).getByText(`aether link ${joinLink}`)).toBeDefined()
+    expect(client.localLinkStatus).not.toHaveBeenCalled()
+    expect(client.localEdgeJoin).not.toHaveBeenCalled()
   })
 })

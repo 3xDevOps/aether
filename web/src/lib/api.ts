@@ -935,6 +935,9 @@ export const api = {
     local<EdgeLinkResult>('edge.link', { server_id: serverID, edge }),
   localEdgeClaim: (code: string, edge: string) =>
     local<EdgeLinkResult>('edge.claim', { code, edge }),
+  /** Joins with a join link's secret. A `device-pending` refusal means the
+   * device is recorded and waits for an admin. */
+  localEdgeJoin: (link: string) => local<EdgeLinkResult>('edge.join', { link }),
   localGitIdentity: () => local<GitIdentity>('git.identity'),
   localPull: (runID: string) => local<PullResult>('pull', { run_id: runID }),
   localPullSwitch: (runID: string) =>

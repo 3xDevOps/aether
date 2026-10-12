@@ -695,7 +695,8 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 Optional: an Electron shell that launches `aether gui` for you and shows the
 dashboard in its own frameless window, with a notification that names a run
 when it needs attention and opens it when clicked, a needs-attention badge,
-and `aether://run/<id>` deep links. The notification shows only while the app
+and `aether://run/<id>`, `aether://join?…` and `aether://claim?…` deep
+links ([local-gateway.md](local-gateway.md)). The notification shows only while the app
 is open; a phone gets one through the server-hosted dashboard
 ([networking.md](networking.md#notifications)). It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
@@ -863,7 +864,9 @@ on it. That screen also carries the link to [privacy.md](privacy.md), the
 only place the app itself shows one.
 
 `aether://run/<id>` opens the app on that run, the same link the desktop shell
-handles.
+handles. `aether://join?…` and `aether://claim?…` open the Connect step, which
+shows the link and the `aether link` command to run on a computer: the app
+reaches servers over a tailnet, not an edge.
 
 The back gesture walks the dashboard's history and then sends the app to the
 background instead of closing it, so a terminal keeps its scrollback. Links

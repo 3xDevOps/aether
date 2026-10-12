@@ -41,7 +41,7 @@ An edge answers on two origins, served by one process:
 | Origin | Project's edge | Serves |
 | --- | --- | --- |
 | Sign-in | `https://auth.onaether.dev` | Sign-in pages, OAuth callbacks, the edge's session cookie, the Devices, Servers and Account pages, and the client API: device sign-in, logout, server list, account deletion |
-| Relay | `https://edge.onaether.dev` | Server enrollment and control connections, client connections, and the edge's metadata, `GET /v1/edge` |
+| Relay | `https://edge.onaether.dev` | Server enrollment and control connections, client connections, the edge's metadata, `GET /v1/edge`, and the [join page](#join-page) |
 
 Clients and servers are configured with the relay origin. A client reads
 the sign-in origin from the metadata when you run `aether login`. A path
@@ -887,6 +887,35 @@ its policy.
 
 Invitations by GitHub login or email, device approval and revocation are
 in [teams.md](teams.md#through-an-edge).
+
+### Join page
+
+An invitation's link is
+`https://<relay host>/join/<server id>/<invitation id>#<secret>`. The relay
+origin answers `GET /join/<server id>/<invitation id>` with a page whose
+**Open in Aether** button, and its script on load, open
+`aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`
+in the desktop app. It also shows the link to paste into the app's Connect
+step or run as `aether link <link>`, and links the desktop download. Ids of
+the wrong shape get 404. The page sets no cookie and keeps no session.
+
+The secret is the link's fragment, which a browser never sends, so no
+request to the edge carries it. The page's one script, `/join.js`, reads
+it from `location.hash` and puts it only into the `aether://` link and the
+copy field; it posts no form and makes no request. A compromised edge could
+serve a script that reads it. That gives it nothing the tables in
+[What an attacker can do](#what-an-attacker-can-do) do not already grant:
+under `account` it can already accept an open invitation for a login it
+forges; under `approved-devices` the result is a pending device an admin
+must approve. A claim secret would give a compromised edge the server, so
+there is no claim page: a claim link is only the deep link
+`aether://claim?edge=<relay origin>&server=<server id>#<secret>`.
+
+The page carries the sign-in pages' headers with `script-src 'self'`
+added: `Content-Security-Policy: default-src 'none'; style-src 'self';
+img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action
+'self'; script-src 'self'`, `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`.
 
 ## The dashboard
 

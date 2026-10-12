@@ -114,16 +114,23 @@ As found in the code:
    name> to approve this device` and retries until admitted. No code is
    shown and nothing is sent back. An invitation always names a GitHub
    account; there is no anonymous link.
-7. **Join and claim pages.** The edge serves `GET
-   /join/{server_id}/{invitation_id}` and `GET /claim/{server_id}` on the
-   relay origin, with no session and no cookie. Each opens
+7. **Join page and deep links.** The edge serves `GET
+   /join/{server_id}/{invitation_id}` on the relay origin, with no session
+   and no cookie. It opens
    `aether://join?edge=<relay origin>&server=<id>&invitation=<id>#<secret>`
-   or `aether://claim?edge=<relay origin>&server=<id>#<secret>` from a
-   one-file script allowed by a page-specific `script-src 'self'`, shows
-   the link text for pasting, and links the downloads. The fragment stays
-   in the browser. The desktop shell's `handleDeepLink` accepts `join` and
-   `claim` beside `run` and hands them to the dashboard as `?join=` and
-   `?claim=`. The Android shell accepts them the same way; the Android app
+   from a one-file script allowed by a page-specific `script-src 'self'`,
+   shows the link text for pasting, and links the downloads. The fragment
+   never reaches the edge over HTTP, but a compromised edge's script could
+   read it; with a join secret that gains it nothing beyond what "What an
+   attacker can do" in `docs/edge.md` already grants: under `account` it
+   can already accept an open invitation for a login it forges, and under
+   `approved-devices` the result is a pending device an admin must
+   approve. There is no claim page: a claim secret read by a compromised
+   edge would let it claim the server for its own account, so the claim
+   link is the deep link only,
+   `aether://claim?edge=<relay origin>&server=<id>#<secret>`. The desktop
+   shell's `handleDeepLink` accepts `join` and `claim` beside `run` and
+   hands them to the dashboard as `?join=` and `?claim=`. The Android shell accepts them the same way; the Android app
    reaches servers over a tailnet, not the edge, so its dashboard shows the
    link and the CLI command. The dashboard's Connect step accepts a pasted
    join or claim link, or a bare claim code.
@@ -148,8 +155,9 @@ Admin:
 
 1. Runs `sudo aether-server setup`, chooses the access policy, and sees the
    claim link and the `aether link --claim <code>` line.
-2. Opens the link on their computer. The page opens the desktop app at the
-   claim; without the app, it offers the download and the link to paste.
+2. Opens the link on their computer, which opens the desktop app at the
+   claim; without the app, they paste the link or run the
+   `aether link --claim` line.
 3. Signs in with GitHub if the app is not signed in, sees the account the
    claim is made for, and clicks **Claim and link**. The server makes them
    admin and owner and approves this device.
@@ -233,7 +241,7 @@ Rows added to or changed in "Who must fail for access to be gained" and
 | Invited account without the link | Refused with the kind that names the link | The same; nothing is recorded |
 | Edge forges a grant for an invited login | Refused without the secret, which the edge never sees | The same: not even a pending device |
 | Edge forges a `claimed` report | Fails: an owner is recorded only from a claim connection opened for that account (rule unchanged) | The same |
-| Edge serves the join or claim page | The page carries no secret; the fragment never reaches the edge | The same |
+| Edge serves the join page | The fragment never reaches the edge over HTTP. A compromised edge's script could read it and gains nothing more: it can already accept an open invitation for a login it forges | The same, and the result is a pending device an admin must approve. There is no claim page: a claim secret would give a compromised edge the server, so the claim link is the `aether://claim` deep link only |
 | Own-device approval | Not needed | One click from an approved device of that member; a pending device still completes no handshake |
 | `server.edge.claimcode` | Accepted only from an approved device, member SSH key or tailnet identity of an admin; a registered device cannot mint one | The same; a pending device cannot connect at all. The bar matches `member.device.approve` |
 | Approval code | Unused | 40 bits; a code naming two waiting devices approves neither (`GetDeviceByApprovalCode`). Only on the fallback paths |
@@ -247,7 +255,7 @@ Rows added to or changed in "Who must fail for access to be gained" and
 | `internal/protocol` | `server.edge`, `server.edge.claimcode` methods and types; `member.device.list` member and role for pending devices; optional `code` on approve |
 | `internal/store` | Migration adding `secret_hash` to `identity_invitations` |
 | `internal/edge/agent` | Claim code for an admin issued from an RPC |
-| `internal/edge/service` | `GET /join/{server_id}/{invitation_id}` and `GET /claim/{server_id}` with their script and CSP |
+| `internal/edge/service` | `GET /join/{server_id}/{invitation_id}` with its script and CSP |
 | `internal/cli` | Refusal parsing in place of `refusalError` wrapping; `DialJoin` |
 | `internal/localgw` | `edge.join`; refusal in the JSON-RPC error `data`; the `server.edge.claimcode` then `edge.claim` flow |
 | `cmd/aether` | `invite` prints the link and server id; `link` accepts a join or claim link; `edge connect`; `device approve <id>` |
@@ -285,7 +293,7 @@ Greptile's PR review.
 | Phase | Contents |
 | --- | --- |
 | 1 | This plan; invite prints the server id and refuses on a server the edge has not recorded; `claim-code` refusal; structured refusals; pending-device cards; pasted claim link; signing-key fix |
-| 2 | Join secret and link; join and claim pages; `aether://join`; the waiting state; Connect my GitHub account and `aether edge connect` |
+| 2 | Join secret and link; join page; `aether://join`; the waiting state; Connect my GitHub account and `aether edge connect` |
 | 3 | Own-device one-click approval; claim link from setup; code only on fallback paths; docs pass |
 
 ## 8. Testing

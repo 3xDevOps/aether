@@ -50,7 +50,35 @@ export function hrefFor(href: string, route: Route): string {
 
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
+  if (handedLink()) return { name: 'onboarding', params: {} }
   return routeFromQuery(new URLSearchParams(window.location.search))
+}
+
+export type HandedLink = { kind: 'join' | 'claim'; link: string }
+
+let handed: HandedLink | null = null
+
+/**
+ * The join or claim link a shell handed over as ?join= or ?claim=. Reading
+ * takes it off the address, so the secret in it stays in neither the address
+ * bar nor history; it is kept in memory until forgetHandedLink.
+ */
+export function handedLink(): HandedLink | null {
+  const url = new URL(window.location.href)
+  for (const kind of ['join', 'claim'] as const) {
+    const link = url.searchParams.get(kind)
+    if (link) handed = { kind, link }
+  }
+  if (url.searchParams.has('join') || url.searchParams.has('claim')) {
+    url.searchParams.delete('join')
+    url.searchParams.delete('claim')
+    window.history.replaceState(window.history.state, '', url.toString())
+  }
+  return handed
+}
+
+export function forgetHandedLink() {
+  handed = null
 }
 
 /**
