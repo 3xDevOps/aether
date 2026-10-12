@@ -1,24 +1,31 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { toast } from 'sonner'
+import { toast, type Action } from 'sonner'
+import type { Mock } from 'vitest'
 import { RunActions } from '@/components/run-actions'
-import { api } from '@/lib/api'
+import { api, codeInvalidState } from '@/lib/api'
+import type * as apiModule from '@/lib/api'
 import type { GatewayCapabilities, Member, PullResult, Run } from '@/lib/types'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { toRecord } from '@/store/runs'
 import type { RunRecord } from '@/store/runs'
 import { alice, bob, run, serverInfo, vera, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
-vi.mock('@/lib/api', async () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
   // Vitest hoists this factory before static fixture imports initialize.
   const { fakeApi } = await import('@/test/fixtures')
-  return { api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
+  return { ...actual, api: fakeApi(), API_BASE: '/api/v1', ApiError: Error }
 })
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
 }))
+
+/** A JSON-RPC refusal; an error with no code reads as a request the server never answered. */
+const refusal = (text: string) => Object.assign(new Error(text), { code: -32001 })
 
 const every: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
 
@@ -48,6 +55,7 @@ function seed(
     hydrated: true,
     paletteDialog: null,
     paletteRunID: null,
+    predicting: {},
   })
   return record
 }
@@ -106,7 +114,9 @@ test.each(['Kill run', 'Delete run'])('%s waits for explicit confirmation before
   fireEvent.click(dialog.getByRole('button', { name }))
   if (name === 'Kill run') {
     await waitFor(() => expect(api.runKill).toHaveBeenCalledWith(record.id))
-    expect(useStore.getState().runs[record.id]?.status).toBe('running')
+    expect(useStore.getState().runs[record.id]?.status).toBe('abandoned')
+    act(() => useStore.getState().applyRunStatus(record.id, 'abandoned', 'killed', '2020-08-14T10:00:00Z'))
+    expect(useStore.getState().runs[record.id]?.stateChangedAt).toBe('2020-08-14T10:00:00Z')
   } else {
     await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
     await waitFor(() => expect(useStore.getState().runs[record.id]).toBeUndefined())
@@ -236,7 +246,7 @@ test.each([
 
 test('release confirms, keeps the run, and shows the real gateway error', async () => {
   const record = seed({ run: { status: 'merged', reason: 'closed; retained container' } })
-  vi.mocked(api.runRelease).mockRejectedValueOnce(new Error('evidence is still pending'))
+  vi.mocked(api.runRelease).mockRejectedValueOnce(refusal('evidence is still pending'))
   render(<RunActions run={record} />)
   await selectMore('Free container…')
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Free container' }))
@@ -285,4 +295,454 @@ test.each([{ run: { protected: true } }, { steerOthers: 'admins_only' }])('prote
   render(<RunActions run={seed({ paused: false, members: [alice, bob], self: bob, ...policy })} />)
   const menu = await openMore()
   for (const name of ['Pause run', 'Kill run', 'Delete run', 'Close run…', 'Hand off…', 'Protect run']) expect(menu.queryByRole('menuitem', { name })).toBeNull()
+})
+
+type State = ReturnType<typeof useStore.getState>
+const runOne = (s: State) => s.runs.run_1
+
+const verbs: {
+  name: string
+  confirm?: string
+  method: 'runPause' | 'runResume' | 'runKill' | 'runRelease' | 'runArchive' | 'runProtect'
+  done: string
+  over: Parameters<typeof seed>[0]
+  read: (s: State) => unknown
+  from: unknown
+  to: unknown
+}[] = [
+  { name: 'Pause run', method: 'runPause', done: 'Paused', over: { paused: false }, read: (s) => s.pausedRuns.run_1, from: false, to: true },
+  { name: 'Resume run', method: 'runResume', done: 'Resumed', over: { paused: true }, read: (s) => s.pausedRuns.run_1, from: true, to: false },
+  { name: 'Kill run', confirm: 'Kill run', method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
+  {
+    name: 'Free container…', confirm: 'Free container', method: 'runRelease', done: 'Freed container',
+    over: { run: { status: 'merged', container_retained_until: '2030-01-01T00:00:00Z' } },
+    read: (s) => runOne(s).container_retained_until, from: '2030-01-01T00:00:00Z', to: undefined,
+  },
+  { name: 'Archive run', method: 'runArchive', done: 'Archived', over: { run: { status: 'merged' } }, read: (s) => Boolean(runOne(s).archived_at), from: false, to: true },
+  {
+    name: 'Restore run', method: 'runArchive', done: 'Restored', over: { run: { status: 'merged', archived_at: '2020-08-14T10:00:00Z' } },
+    read: (s) => Boolean(runOne(s).archived_at), from: true, to: false,
+  },
+  { name: 'Protect run', method: 'runProtect', done: 'Protected', over: {}, read: (s) => Boolean(runOne(s).protected), from: false, to: true },
+  { name: 'Unprotect run', method: 'runProtect', done: 'Unprotected', over: { run: { protected: true } }, read: (s) => Boolean(runOne(s).protected), from: true, to: false },
+]
+
+async function choose(verb: (typeof verbs)[number]) {
+  await selectMore(verb.name)
+  if (verb.confirm) fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: verb.confirm }))
+}
+
+test.each(verbs)('$name shows its result before the server answers and toasts on confirm', async (verb) => {
+  const { promise, resolve } = Promise.withResolvers<unknown>()
+  ;(api[verb.method] as Mock).mockReturnValueOnce(promise)
+  render(<RunActions run={seed(verb.over)} />)
+  await choose(verb)
+  await waitFor(() => expect(verb.read(useStore.getState())).toBe(verb.to))
+  expect(toast.success).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'More' }).getAttribute('aria-disabled')).toBeNull()
+  await act(async () => resolve({}))
+  expect(toast.success).toHaveBeenCalledWith(verb.done)
+  expect(verb.read(useStore.getState())).toBe(verb.to)
+})
+
+test.each(verbs)('$name reverts on refusal and shows the server error', async (verb) => {
+  ;(api[verb.method] as Mock).mockRejectedValueOnce(refusal('run.verb: refused by policy'))
+  render(<RunActions run={seed(verb.over)} />)
+  await choose(verb)
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`${verb.done} failed: refused by policy`))
+  expect(verb.read(useStore.getState())).toBe(verb.from)
+  expect(toast.success).not.toHaveBeenCalled()
+})
+
+test('a refusal leaves a state the server sent while the verb was pending', async () => {
+  const { promise, reject } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  await choose(verbs[2])
+  await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
+  act(() => useStore.getState().applyRunStatus('run_1', 'failed', 'exited 1', new Date().toISOString()))
+  await act(async () => reject(refusal('run is finishing')))
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
+  expect(runOne(useStore.getState()).status).toBe('failed')
+})
+
+test('an unanswered verb reverts with a lasting Retry, and a late answer dismisses it without a second toast', async () => {
+  const { promise, resolve } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(promise)
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' }))
+  vi.mocked(toast.error).mockReturnValueOnce('timeout')
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' }))
+    expect(runOne(useStore.getState()).protected).toBe(true)
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    await act(async () => {})
+  } finally {
+    vi.useRealTimers()
+  }
+  expect(runOne(useStore.getState()).protected).toBeFalsy()
+  expect(toast.error).toHaveBeenCalledWith('Protected failed: The server did not answer in 5 seconds.', {
+    duration: Infinity,
+    action: { label: 'Retry', onClick: expect.any(Function) },
+  })
+  await act(async () => resolve({}))
+  expect(runOne(useStore.getState()).protected).toBe(true)
+  expect(toast.dismiss).toHaveBeenCalledWith('timeout')
+  expect(toast.success).not.toHaveBeenCalled()
+
+  const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
+  await act(async () => retry.onClick(new MouseEvent('click') as never))
+  expect(api.runProtect).toHaveBeenNthCalledWith(2, 'run_1', true)
+  expect(runOne(useStore.getState()).protected).toBe(true)
+  expect(toast.success).toHaveBeenCalledTimes(1)
+})
+
+test('a refusal puts back a kill even when the agent wrote to the run meanwhile', async () => {
+  const { promise, reject } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  await choose(verbs[2])
+  await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
+  act(() => useStore.getState().applyLastCommit('run_1', 'b'.repeat(40), new Date().toISOString()))
+  await act(async () => reject(refusal('run is finishing')))
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
+  expect(runOne(useStore.getState())).toMatchObject({ status: 'running', last_commit: 'b'.repeat(40) })
+  expect(runOne(useStore.getState()).stateChangedAtPredicted).toBeUndefined()
+})
+
+async function pastDeadline(press: () => void) {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    press()
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    await act(async () => {})
+  } finally {
+    vi.useRealTimers()
+  }
+  await act(async () => {})
+}
+
+test.each([
+  { reread: 'shows the prediction', read: () => Promise.resolve(run({ id: 'run_1', protected: true })), protect: true },
+  { reread: 'fails', read: () => Promise.reject(new Error('Failed to fetch')), protect: false },
+])('an unanswered verb whose re-read $reread', async ({ read, protect }) => {
+  vi.mocked(api.runProtect).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockImplementationOnce(read)
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  expect(api.runGet).toHaveBeenCalledWith('run_1')
+  expect(Boolean(runOne(useStore.getState()).protected)).toBe(protect)
+  if (protect) {
+    expect(toast.success).toHaveBeenCalledWith('Protected')
+    expect(toast.error).not.toHaveBeenCalled()
+  } else {
+    expect(toast.error).toHaveBeenCalledWith('Protected failed: The server did not answer in 5 seconds.', expect.anything())
+  }
+})
+
+test('a deadline re-read answered after a newer event keeps the event and still confirms the press', async () => {
+  const read = Promise.withResolvers<Run>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  act(() => useStore.getState().applyRunTitle('run_1', 'renamed'))
+  await act(async () => read.resolve(run({ id: 'run_1', protected: true })))
+  expect(runOne(useStore.getState())).toMatchObject({ title: 'renamed', protected: true })
+  expect(toast.success).toHaveBeenCalledWith('Protected')
+})
+
+test('a deadline re-read answered after a newer event keeps the event and reverts a press the server lacks', async () => {
+  const read = Promise.withResolvers<Run>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  act(() => useStore.getState().applyRunTitle('run_1', 'renamed'))
+  await act(async () => read.resolve(run({ id: 'run_1', protected: false })))
+  expect(runOne(useStore.getState())).toMatchObject({ title: 'renamed' })
+  expect(runOne(useStore.getState()).protected).toBeFalsy()
+  expect(toast.success).not.toHaveBeenCalled()
+  expect(toast.error).toHaveBeenCalledWith('Protected failed: The server did not answer in 5 seconds.', expect.objectContaining({
+    action: { label: 'Retry', onClick: expect.any(Function) },
+  }))
+})
+
+test('an unanswered unprotect counts a re-read that omits protected as applied', async () => {
+  vi.mocked(api.runProtect).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' }))
+  render(<RunActions run={seed({ run: { protected: true } })} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Unprotect run' })))
+  expect(runOne(useStore.getState()).protected).toBeFalsy()
+  expect(toast.success).toHaveBeenCalledWith('Unprotected')
+  expect(toast.error).not.toHaveBeenCalled()
+})
+
+test('a retry never reverts what the first attempt\'s late success confirmed', async () => {
+  const first = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(first.promise).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' })).mockRejectedValueOnce(new Error('Failed to fetch'))
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  expect(runOne(useStore.getState()).protected).toBeFalsy()
+  const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
+  await pastDeadline(() => {
+    retry.onClick(new MouseEvent('click') as never)
+    expect(runOne(useStore.getState()).protected).toBe(true)
+    first.resolve({})
+  })
+  expect(api.runProtect).toHaveBeenCalledTimes(2)
+  expect(runOne(useStore.getState()).protected).toBe(true)
+})
+
+test('a verb\'s late answer leaves the lock of the verb pressed after it', async () => {
+  const protect = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(protect.promise)
+  vi.mocked(api.runPause).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' }))
+  seed({ paused: false })
+  render(<RunActions run={runOne(useStore.getState())} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+  await selectMore('Pause run')
+  await waitFor(() => expect(useStore.getState().pausedRuns.run_1).toBe(true))
+  await act(async () => protect.resolve({}))
+  expect(useStore.getState().predicting.run_1).toBeDefined()
+})
+
+test('an open More menu offers predicted verbs again once the pending one is answered', async () => {
+  const { promise, resolve } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  await selectMore('Protect run')
+  const menu = await openMore()
+  expect(menu.queryByRole('menuitem', { name: 'Pause run' })).toBeNull()
+  await act(async () => resolve({}))
+  expect(menu.getByRole('menuitem', { name: 'Pause run' })).toBeTruthy()
+})
+
+test('a status event keeps the estimated change time of a run no verb predicted', () => {
+  const record = seed({ run: { status: 'running', status_changed_at: undefined } })
+  expect(record.stateChangedAtEstimated).toBe(true)
+  act(() => useStore.getState().applyRunStatus('run_1', 'running', undefined, '2030-01-01T00:00:00Z'))
+  expect(runOne(useStore.getState()).stateChangedAt).toBe(record.stateChangedAt)
+})
+
+test('a pending kill offers no predicted verb until it is answered', async () => {
+  const { promise, resolve } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  seed({ paused: false })
+  const Live = () => <RunActions run={useStore((s) => s.runs.run_1)} />
+  render(<Live />)
+  await choose(verbs[2])
+  await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
+  expect(names(await openMore())).toEqual(['Close run…', 'Delete run'])
+  await userEvent.keyboard('{Escape}')
+  await act(async () => resolve({}))
+  expect((await openMore()).getByRole('menuitem', { name: 'Archive run' })).toBeTruthy()
+})
+
+test.each([
+  { paused: true, toast: 'success' },
+  { paused: false, toast: 'error' },
+] as const)('an invalid-state refusal applies the re-read run, paused $paused', async ({ paused, toast: kind }) => {
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', paused }))
+  render(<RunActions run={seed({ paused: false })} />)
+  await selectMore('Pause run')
+  await waitFor(() => expect(toast[kind]).toHaveBeenCalled())
+  expect(api.runGet).toHaveBeenCalledWith('run_1')
+  expect(useStore.getState().pausedRuns.run_1).toBe(paused)
+  if (kind === 'success') expect(toast.error).not.toHaveBeenCalled()
+  else expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused')
+})
+
+async function confirmPastDeadline(verb: (typeof verbs)[number]) {
+  await selectMore(verb.name)
+  const button = within(await screen.findByRole('alertdialog')).getByRole('button', { name: verb.confirm })
+  await pastDeadline(() => fireEvent.click(button))
+}
+
+test.each([verbs[2], verbs[3]])('$name waits past the deadline and confirms a late success silently', async (verb) => {
+  const { promise, resolve } = Promise.withResolvers<unknown>()
+  ;(api[verb.method] as Mock).mockReturnValueOnce(promise)
+  render(<RunActions run={seed(verb.over)} />)
+  await confirmPastDeadline(verb)
+  expect(verb.read(useStore.getState())).toBe(verb.to)
+  expect(api.runGet).not.toHaveBeenCalled()
+  expect(toast.error).not.toHaveBeenCalled()
+  expect((await openMore()).getByRole('menuitem', { name: 'Still waiting for the server…' })).toBeTruthy()
+  await userEvent.keyboard('{Escape}')
+  await act(async () => resolve({}))
+  expect(verb.read(useStore.getState())).toBe(verb.to)
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+  expect(toast.success).not.toHaveBeenCalled()
+  expect(toast.error).not.toHaveBeenCalled()
+})
+
+test('a kill refused past the deadline is put back and shows the refusal', async () => {
+  const { promise, reject } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmPastDeadline(verbs[2])
+  await act(async () => reject(refusal('run is finishing')))
+  expect(runOne(useStore.getState()).status).toBe('running')
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing', { id: undefined, action: undefined, duration: undefined })
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+})
+
+test('a kill that fails with no answer past the deadline shows the real error', async () => {
+  const { promise, reject } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1' }))
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmPastDeadline(verbs[2])
+  await act(async () => reject(new Error('Failed to fetch')))
+  expect(runOne(useStore.getState()).status).toBe('running')
+  expect(toast.error).toHaveBeenCalledWith('Killed failed: Failed to fetch', {
+    duration: Infinity,
+    action: { label: 'Retry', onClick: expect.any(Function) },
+  })
+})
+
+test('an invalid-state refusal still being checked at the deadline reports once it is checked', async () => {
+  const read = Promise.withResolvers<Run>()
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+  vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  const menu = await openMore()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    await act(async () => {})
+    expect(api.runGet).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    await act(async () => {})
+  } finally {
+    vi.useRealTimers()
+  }
+  expect(api.runGet).toHaveBeenCalledTimes(1)
+  await act(async () => read.resolve(run({ id: 'run_1', paused: false })))
+  expect(toast.error).toHaveBeenCalledTimes(1)
+  expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused', expect.objectContaining({ action: undefined }))
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+})
+
+test('ignores an invalid-state re-read that answers after the deadline re-read confirmed the press', async () => {
+  const pause = Promise.withResolvers<unknown>()
+  const deadlineRead = Promise.withResolvers<Run>()
+  const refusalRead = Promise.withResolvers<Run>()
+  vi.mocked(api.runPause).mockReturnValueOnce(pause.promise)
+  vi.mocked(api.runGet).mockReturnValueOnce(deadlineRead.promise).mockReturnValueOnce(refusalRead.promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  const menu = await openMore()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    await act(async () => {})
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    await act(async () => {})
+  } finally {
+    vi.useRealTimers()
+  }
+  await act(async () => pause.reject(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState })))
+  expect(api.runGet).toHaveBeenCalledTimes(2)
+  await act(async () => deadlineRead.resolve(run({ id: 'run_1', paused: true })))
+  act(() => useStore.getState().setPaused('run_1', false))
+  await act(async () => refusalRead.resolve(run({ id: 'run_1', paused: true })))
+
+  expect(useStore.getState().pausedRuns.run_1).toBe(false)
+})
+
+test('an invalid-state refusal whose re-read never answers reports the refusal and frees the run', async () => {
+  vi.mocked(api.runPause).mockRejectedValueOnce(Object.assign(new Error('run.pause: run is already paused'), { code: codeInvalidState }))
+  vi.mocked(api.runGet).mockReturnValueOnce(new Promise(() => {}))
+  render(<RunActions run={seed({ paused: false })} />)
+  const menu = await openMore()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Pause run' }))
+    await act(async () => {})
+    act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+    await act(async () => {})
+  } finally {
+    vi.useRealTimers()
+  }
+  expect(toast.error).toHaveBeenCalledWith('Paused failed: run is already paused', expect.objectContaining({ action: undefined }))
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+})
+
+test('a re-read served before the commit never overrides the success that answered first', async () => {
+  const answer = Promise.withResolvers<unknown>()
+  const read = Promise.withResolvers<Run>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(answer.promise)
+  vi.mocked(api.runGet).mockReturnValueOnce(read.promise)
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  await act(async () => answer.resolve({}))
+  await act(async () => read.resolve(run({ id: 'run_1', protected: false })))
+  expect(runOne(useStore.getState()).protected).toBe(true)
+  expect(toast.success).toHaveBeenCalledWith('Protected')
+  expect(toast.error).not.toHaveBeenCalled()
+})
+
+test('Retry waits while another verb is pending on the run', async () => {
+  vi.mocked(api.runProtect).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runPause).mockReturnValueOnce(new Promise(() => {}))
+  vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
+  render(<RunActions run={seed({ paused: false })} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
+  await selectMore('Pause run')
+  const marker = useStore.getState().predicting.run_1
+  expect(marker).toBeDefined()
+
+  act(() => retry.onClick(new MouseEvent('click') as never))
+  expect(api.runProtect).toHaveBeenCalledTimes(1)
+  expect(toast.error).toHaveBeenLastCalledWith('Protected not retried: another action on this run is still waiting for the server.')
+  expect(useStore.getState().predicting.run_1).toBe(marker)
+})
+
+test('a late refusal of an earlier attempt is dropped once a retry succeeded', async () => {
+  const first = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(first.promise).mockResolvedValueOnce({})
+  vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
+  await act(async () => retry.onClick(new MouseEvent('click') as never))
+  expect(toast.success).toHaveBeenCalledWith('Protected')
+  await act(async () => first.reject(refusal('run is protected by policy')))
+  expect(toast.error).toHaveBeenCalledTimes(1)
+  expect(runOne(useStore.getState()).protected).toBe(true)
+})
+
+test('a sign-in switch dismisses an unanswered verb\'s Retry and drops its late answer', async () => {
+  const first = Promise.withResolvers<unknown>()
+  vi.mocked(api.runProtect).mockReturnValueOnce(first.promise)
+  vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
+  vi.mocked(toast.error).mockReturnValueOnce('timeout')
+  render(<RunActions run={seed()} />)
+  const menu = await openMore()
+  await pastDeadline(() => fireEvent.click(menu.getByRole('menuitem', { name: 'Protect run' })))
+  const retry = vi.mocked(toast.error).mock.calls[0][1]?.action as Action
+  act(() => useStore.setState({ identityKey: crypto.randomUUID() }))
+  expect(toast.dismiss).toHaveBeenCalledWith('timeout')
+  act(() => retry.onClick(new MouseEvent('click') as never))
+  expect(api.runProtect).toHaveBeenCalledTimes(1)
+  await act(async () => first.resolve({}))
+  expect(runOne(useStore.getState()).protected).toBeFalsy()
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
+  expect(toast.success).not.toHaveBeenCalled()
 })

@@ -1338,8 +1338,56 @@ all workspaces**, **New run…**, **New swarm…**, **Launch from a template…*
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the run's More menu and
-the palette. Deletion removes the confirmed run locally; archive, restore,
-protect and free do not overwrite the server's events with an RPC response.
+the palette. Pause, resume, kill, free, archive, restore, protect and
+unprotect follow [Actions](#actions): the command's `predict` names the
+fields the server's success certainly sets (`pausedRuns`; `status`
+`abandoned` with reason `killed`; cleared `container_retained_until` and
+`cleanup_pending`; `archived_at`; `protected`), the runner shows them at
+once, and the success toast waits for the answer. A refusal puts back each
+predicted field that still holds its predicted value; a field anything else
+wrote meanwhile stays. With no answer by the deadline, or a failure that
+carries none, the runner does not guess: it re-reads the run with `run.get`
+(bounded by the same deadline) and applies the server's record. If the
+run's record or pause state changed while the read was pending, that change
+is newer than the read, so the read only replaces the predicted fields that
+still hold their predicted value. If the read's record shows the predicted
+state, the verb counts as confirmed (a field the
+wire omits at its zero value, such as `protected`, reads as false) and toasts
+its success; otherwise the toast reads "The server did not answer in 5
+seconds." with **Retry**. If the re-read fails too, the predicted fields
+still on screen are put back and the same toast shows. The toast keeps
+**Retry** until it is pressed or the late answer arrives: a late success
+dismisses it, a late refusal replaces it. While another predicted verb is
+pending on the run, **Retry** sends nothing, stays, and a second toast says
+why. Each **Retry** is a new attempt
+with its own captured state. Once any attempt of the verb succeeds, no
+other attempt puts it back, a re-read answered before the commit is
+ignored, and an earlier attempt's late refusal is dropped. Once the
+signed-in member changes, the toast is dismissed, its **Retry** sends
+nothing, and the press's late answer, re-read or refusal changes and shows
+nothing. Kill and free
+(`slow` on the command) skip the deadline, because the server answers only
+after the container stops: `run.kill` waits out the runtime's stop grace,
+10 seconds by default. Past the deadline their prediction stays, More
+shows a disabled "Still waiting for the server…" entry (`waiting` on the
+run's `predicting` marker), a late success clears it without a toast, and
+a refusal puts the prediction back and toasts the server's error. A failure
+that carries no answer still re-reads the run, and if the re-read does not
+show the result, toasts that failure's own error with **Retry**. Kill's predicted change time carries
+`stateChangedAtPredicted`, so the server's `run.status` event replaces it
+even when the status is unchanged; any other estimated time stays. While a
+predicted verb is pending on a run (`predicting` in `store/runs.ts`, held
+by that attempt's marker so a late answer clears only its own lock), More
+and the palette offer no other predicted verb for that run, because one
+offered from the predicted state, such as Archive after Kill, could re-read
+the run and overwrite the prediction. Both subscribe to the lock, so an open
+menu shows the verbs again once the answer lands. An invalid-state refusal
+(`codeInvalidState`, such as "run is already paused" after a retry) re-reads
+the run with `run.get` instead, bounded by the deadline and applied on the
+same condition, and toasts only if the run does not show the
+predicted state. Deletion removes the
+confirmed run locally; archive, restore, protect and free do not overwrite
+the server's events with an RPC response.
 
 - **Forward a port…** opens `forward-dialog.tsx` over the local `forward.*`
   verbs. It forwards the port typed to the same port on this machine and
@@ -1376,9 +1424,9 @@ palette, with Cancel initially focused. **Close run…** opens its own dialog,
 which asks whether the work was merged or abandoned. Palette confirmations
 capture the authenticated identity with the run and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
-another account. More locks while a verb is in flight and shows a spinner in
-place of its icon, which also stops a second click racing a branch pull over
-SSH.
+another account. More locks while an unpredicted verb is in flight and shows
+a spinner in place of its icon, which also stops a second click racing a
+branch pull over SSH.
 
 **The command palette** (`src/components/palette/`) opens from **Search** in
 the sidebar or the phone top bar, `⌘K` on macOS or `Ctrl+K` elsewhere;

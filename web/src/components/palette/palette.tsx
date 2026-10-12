@@ -55,6 +55,7 @@ export function PaletteBody({
   const route = useStore((s) => s.route)
   const navigate = useStore((s) => s.navigate)
   const pausedRuns = useStore((s) => s.pausedRuns)
+  const predicting = useStore((s) => s.predicting)
   const cap = useCapability()
   const self = useSelf()
   const [search, setSearch] = useState('')
@@ -119,6 +120,7 @@ export function PaletteBody({
   const focusedContext = focused && {
     run: focused,
     paused: pausedRuns[focused.id],
+    predicting: Boolean(predicting[focused.id]),
     cap,
     members,
     self,

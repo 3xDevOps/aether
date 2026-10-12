@@ -10,6 +10,7 @@ import type { Command, RunCommandContext } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
+import { stillWaiting } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 
 const replaced = new Set(['inject'])
@@ -26,6 +27,8 @@ export interface ExtraItem {
 
 export function RunActions({ run, extra = [], compact = false }: { run: RunRecord; extra?: ExtraItem[]; compact?: boolean }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
+  const predicting = useStore((s) => Boolean(s.predicting[run.id]))
+  const waiting = useStore((s) => s.predicting[run.id]?.waiting === true)
   const members = useStore((s) => s.members)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
@@ -40,7 +43,7 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
   const trigger = useRef<HTMLButtonElement>(null)
   const openingDialog = useRef(false)
 
-  const context: RunCommandContext = { run, paused, cap, members, self, steerOthers }
+  const context: RunCommandContext = { run, paused, cap, members, self, steerOthers, predicting }
   const commands = runCommands(context).filter((command) => !replaced.has(command.id))
   const handoffs = handoffCommands(context)
   const everyday = commands.filter((command) => !closing.has(command.id))
@@ -48,6 +51,10 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
 
   const start = (command: Command) => {
     if (inFlight.current || command.disabled) return
+    if (command.predict) {
+      void perform(command)
+      return
+    }
     inFlight.current = true
     setRunning(command.id)
     void perform(command).finally(() => {
@@ -107,6 +114,11 @@ export function RunActions({ run, extra = [], compact = false }: { run: RunRecor
             event.preventDefault()
           }}
         >
+          {waiting && (
+            <MenuItem disabled icon={<LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}>
+              {stillWaiting}
+            </MenuItem>
+          )}
           {everyday.map(item)}
           {handoffs.length > 0 && (
             <MenuItem
