@@ -76,15 +76,16 @@ deliver an `aether://run/<id>` deep link - the desktop shell
 (`desktop/main.js`) and the Android app (`android/`) append it to the
 dashboard URL and load that.
 
-`join` and `claim` carry the other two deep links,
+The fragment keys `join` and `claim` carry the other two deep links,
 `aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`
 and `aether://claim?edge=<relay origin>&server=<server id>#<secret>`
 ([edge.md](edge.md#join-page)). Each shell checks every part of the link
 and refuses any other shape, then appends the whole link URL-encoded as
-the fragment `#join=` or `#claim=`, which the browser does not send to the
-dashboard's server. The dashboard removes the fragment from the address on
-first load (`replaceState`), so the secret stays in neither the address
-bar nor history, and opens onboarding's Connect step with the link.
+`#join=<link>` or `#claim=<link>`; a browser never sends a fragment to the
+dashboard's server. The dashboard takes the fragment off the address
+(`replaceState`) on first load, or on `hashchange` when the page is
+already open, so the secret stays in neither the address bar nor history,
+and opens onboarding's Connect step with the link.
 
 Onboarding is an initial landing page, not a reconnect redirect. Choosing
 **Manage workspaces** during startup keeps that route, and linking a clone
@@ -1352,8 +1353,8 @@ subsequent API and WebSocket requests use the new server without a restart. If
 no SSH key is offered and the server requires one, it may create
 `~/.ssh/id_ed25519` and its `.pub` file.
 
-The `edge.*` verbs let the onboarding wizard reach a server through an
-[edge](edge.md) without a terminal. Each does what the command beside it
+The `edge.*` verbs let the onboarding wizard, and Settings › Remote
+access, reach a server through an [edge](edge.md) without a terminal. Each does what the command beside it
 does, with the same files in the config directory:
 
 | Verb | Command |
@@ -1396,44 +1397,57 @@ does, with the same files in the config directory:
   checks the host key against the server id in the link before it sends
   the secret, inside SSH, then saves the link as `edge.link` does. While the
   joining device waits for an admin's approval it answers `-32002` with
-  kind `device-pending` and records nothing more; the caller calls it again
-  until it succeeds.
+  `data.refusal.kind` `device-pending` and records nothing more; the caller
+  calls it again until it succeeds. `edge.claim` takes the claim code; the
+  dashboard turns a pasted or handed claim link into one.
 - `edge.logout` revokes the device token at the edge and forgets it, and
   drops a pending `edge.login` for that edge.
 - Errors carry the client's own message. Not signed in, or an edge refusal
   with a `4xx` status such as a revoked token or a claimed server, answers
   `-32002`. An edge that cannot be reached or answers `5xx` answers
-  `-32004`. `edge.link`, `edge.claim` and `edge.join` answer `-32002` for any failure of
-  the SSH connection, with what the server said, such as a wrong claim code
-  or a device waiting for approval. A refusal on the edge path, by the
-  server, the edge, or this machine holding no sign-in, also carries
-  `data: {"refusal": {"kind": "device-pending", ...}}` with the kind and
-  fields of `Refused` in `internal/edge/proto/refused.go`; so does the
-  `-32004` `server unreachable: ...` answer of `/api/v1/*` and of the
-  `/ws/events` subscribe refusal when the gateway's connection to the
-  server fails that way.
+  `-32004`. `edge.link`, `edge.claim` and `edge.join` answer `-32002` for
+  any failure of the SSH connection, with the server's refusal text, such
+  as a wrong claim code or a device waiting for approval. A refusal on the
+  edge path, by the server, the edge, or this machine holding no sign-in,
+  also carries `data: {"refusal": {"kind": "device-pending", ...}}` with
+  the kind and fields of `Refused` in `internal/edge/proto/refused.go`; so
+  does the `-32004` `server unreachable: ...` answer of `/api/v1/*` and of
+  the `/ws/events` subscribe refusal when the gateway's connection to the
+  server fails that way. The dashboard reads `kind`, never the message.
 
 The member's devices and edge invitations are control-channel methods, so
 the dashboard calls them through `POST /api/v1/<method>` like any other:
-`member.device.list`, `member.device.lookup` (`{"code":"..."}` or
-`{"device_id":"..."}`),
-`member.device.approve` (`{"device_id":"...","code":"..."}`; `code` is
-optional and, when given, must name that device),
-`member.device.revoke` (`{"device_id":"..."}`),
-`member.invitation.create`, `member.invitation.list`,
-`member.invitation.revoke` (`{"invitation_id":"..."}`),
-`member.identity.link`, `member.identity.list` (`{"member_id":"..."}`),
-`member.identity.remove`
-(`{"member_id":"...","provider":"github","subject":"..."}`),
-`server.owner.transfer` (`{"member_id":"..."}`) and `server.edge`, which
-any member calls for the edge URL, server id, access policy, the owner's
-provider and login or `null`, whether the server is connected, and whether
-the edge last reported it claimed, and `server.edge.claimcode`, which
-issues the calling admin a claim code bound to their own member,
-`{"code":"...","expires_at":"..."}`, for the dashboard to pass straight
-to `edge.claim`. Their shapes are in
-`internal/protocol/identity.go` and `internal/protocol/edge.go`,
-and [edge.md](edge.md) describes what each does.
+
+- `member.device.list`; a device awaiting approval also carries
+  `display_name` and `role`, whom approving admits it as (no
+  `display_name` for a new member).
+- `member.device.lookup` (`{"device_id":"..."}` or `{"code":"..."}`).
+- `member.device.approve` (`{"device_id":"...","code":"..."}`): approves
+  by id; `code` is optional and, when given, must name that device.
+- `member.device.revoke` (`{"device_id":"..."}`).
+- `member.invitation.create` and `member.identity.link`, which answer
+  `{"invitation":{...},"link":"https://<edge host>/join/<server id>/<invitation id>#<secret>","server_id":"..."}`:
+  the link is the only copy of the join secret.
+- `member.invitation.list`, `member.invitation.revoke`
+  (`{"invitation_id":"..."}`), `member.identity.list`
+  (`{"member_id":"..."}`), `member.identity.remove`
+  (`{"member_id":"...","provider":"github","subject":"..."}`) and
+  `server.owner.transfer` (`{"member_id":"..."}`).
+- `server.edge`, for any member:
+  `{"edge_url":"https://...","server_id":"...","access_policy":"approved-devices","owner":{"provider":"github","login":"..."},"connected":bool,"claimed":bool}`;
+  `edge_url` is empty with the edge off, `owner` is `null` without one, and
+  `claimed` is whether the edge last reported the server claimed.
+- `server.edge.claimcode`, for an admin on an approved device, member SSH
+  key or tailnet connection: `{"code":"...","expires_at":"..."}`, a claim
+  code bound to the caller's own member, for the dashboard to pass straight
+  to `edge.claim`.
+
+A device recorded pending, approved or revoked is published as the
+`member.device` event, `{"device_id":"...","status":"..."}`, under the
+workspace id `server`, which names no workspace, so a server without
+workspaces still reports it. The shapes are in
+`internal/protocol/identity.go` and `internal/protocol/edge.go`, and
+[edge.md](edge.md) describes what each does.
 
 `workspace.selection` stores only the last selected workspace ID in
 `workspace-selection/<hash>.json` beside the CLI's `config.json`. The hash

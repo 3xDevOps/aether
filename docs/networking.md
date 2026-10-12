@@ -137,17 +137,17 @@ An edge is a relay both the server and your client dial out to, so neither
 needs an open port, a tailnet or a copied SSH key. The project runs one at
 `https://edge.onaether.dev`, and `aether-server setup` turns it on when the
 host has no tailscaled. SSH still runs end to end: the edge splices bytes and
-cannot read them. You sign in once with GitHub and link the server
-by its id:
+cannot read them. You sign in once with GitHub and link the server with
+the link you were given, which the desktop app also opens:
 
 ```sh
 aether login
-aether link --claim <code>     # the owner, with the code aether-server setup printed
-aether link <server id>        # anyone the owner invited, with the id the owner sent them
+aether link --claim <code>        # the owner, with the code inside the claim link aether-server setup printed
+aether link '<invite link>'       # anyone an admin invited, with the link the admin sent
 ```
 
 A bare name such as `my-server` is always an SSH address, as on a tailnet;
-only a server id goes through the edge.
+only a server id, a claim code or a join link goes through the edge.
 
 The server's host key is checked against its id on every connection, and
 each device holds its own key. The server's owner chooses, on the machine,

@@ -1,9 +1,9 @@
 # Edge onboarding
 
-**Status:** In progress. It revises [Edge remote
+**Status:** Implemented in PR #344
+(https://github.com/3xDevOps/aether/pull/344). It revises [Edge remote
 access](2026-09-27-edge-remote-access.md) and [Edge access
-policies](2026-09-28-edge-access-policies.md); `docs/edge.md` and
-`docs/teams.md` are updated with each phase.
+policies](2026-09-28-edge-access-policies.md).
 
 **Goal:** Two people add one admin or member to a server through the edge
 with one link and one click each. The app carries every secret. An admin's
@@ -68,17 +68,22 @@ As found in the code:
    | --- | --- | --- |
    | Admin | Waiting on an invitation | `<label> (github <login>) wants to join as <role>` |
    | Admin | A member's | `<label> (github <login>) signed in as <member>` |
+   | Admin | Registered under `account`, on a server now under `approved-devices` | `<label> (github <login>) signed in as <member> and is not approved` |
    | Member | Their own | `New device <label> signed in as you` |
 
-   The sidebar's Needs you count includes them.
+   The event is published once under the workspace id `server`, so a
+   server without workspaces still reports it. The sidebar's Needs you
+   count includes the cards, and a sidebar row and the Map view show them.
 4. **The server reports its edge.** A new `server.edge` control method
    returns the edge URL, server id, access policy, the owner's provider
    and login or none, whether it is connected, and whether the edge last
-   reported it claimed. `aether invite` prints the server id from it; the
-   dashboard's new Settings › Remote access section shows it.
-   `member.invitation.create` and `member.identity.link` refuse on a server
-   the edge has not recorded, because the edge relays nothing and keeps no
-   directory for it, and name **Connect my GitHub account** and
+   reported it claimed; the server keeps that report in `edge_state.json`
+   across restarts. The dashboard's new Settings › Remote access section
+   shows it. `member.invitation.create` and `member.identity.link` return
+   the server id beside the join link, and `aether invite` prints both.
+   They refuse while the edge reports the server unclaimed, which means
+   the edge has not recorded it, because the edge relays nothing and keeps
+   no directory for it, and name **Connect my GitHub account** and
    `aether edge connect`. An ownerless server the edge has recorded keeps
    relaying for its members and accepts both.
 5. **Connect my GitHub account.** A new admin-only control method,
@@ -88,7 +93,8 @@ As found in the code:
    through `IssueClaimCode` with the admin set. It is refused while the
    server has an owner or the edge is off. The dashboard, through the
    local gateway (`edge.login` if not signed in, then `edge.claim` with
-   that code), and `aether edge connect` use the code at once. The claim
+   that code), and `aether edge connect`, after `aether login`, use the
+   code at once and never show it. The claim
    binds the signed-in GitHub account to the admin's member
    (`recoverAdmin`), approves the device, and the server reports `claimed`
    on its own control connection, so the edge's rule that an owner is
@@ -97,9 +103,9 @@ As found in the code:
    a server with members and lists its admins, so a code that cannot work
    is never issued. Console recovery stays for an admin with no other way
    in.
-6. **Invitations carry a join secret.** `member.invitation.create`
-   generates it, stores its hash as `claim.json` stores the claim code's,
-   and returns it once, in the link
+6. **Invitations carry a join secret.** `member.invitation.create` and
+   `member.identity.link` generate it, store its hash in the invitation's
+   `secret_hash`, and return it once, in the link
    `https://<edge host>/join/<server id>/<invitation id>#<secret>`. The
    secret is in the fragment, so the edge never receives it. The joiner's
    client presents `join:<invitation id>:<secret>:github:<subject>` as the
@@ -111,9 +117,11 @@ As found in the code:
    Under `approved-devices` the device is recorded pending on the
    invitation, with the bounds unchanged (10 per account, 10 per
    invitation); the joiner's app shows `Waiting for an admin of <server
-   name> to approve this device` and retries until admitted. No code is
-   shown and nothing is sent back. An invitation always names a GitHub
-   account; there is no anonymous link.
+   name> to approve this device` and retries every 5 seconds until
+   admitted. No code is shown unless decision 9 allows it, and nothing is
+   sent back. An invitation always names a GitHub account; there is no
+   anonymous link. The migration that adds `secret_hash` deletes the open
+   invitations, which have none, with the devices waiting on them.
 7. **Join page and deep links.** The edge serves `GET
    /join/{server_id}/{invitation_id}` on the relay origin, with no session
    and no cookie. It opens
@@ -121,27 +129,31 @@ As found in the code:
    from a one-file script allowed by a page-specific `script-src 'self'`,
    shows the link text for pasting, and links the downloads. The fragment
    never reaches the edge over HTTP, but a compromised edge's script could
-   read it; with a join secret that gains it nothing beyond what "What an
-   attacker can do" in `docs/edge.md` already grants: under `account` it
-   can already accept an open invitation for a login it forges, and under
-   `approved-devices` the result is a pending device an admin must
-   approve. There is no claim page: a claim secret read by a compromised
-   edge would let it claim the server for its own account, so the claim
-   link is the deep link only,
+   read it, and with it accept that one invitation for the login it names:
+   under `account` with its role, under `approved-devices` as a pending
+   device an admin must approve. There is no claim page: a claim secret
+   read by a compromised edge would let it claim the server for its own
+   account, so the claim link is the deep link only,
    `aether://claim?edge=<relay origin>&server=<id>#<secret>`. The desktop
    shell's `handleDeepLink` accepts `join` and `claim` beside `run` and
-   hands them to the dashboard as `?join=` and `?claim=`. The Android shell accepts them the same way; the Android app
-   reaches servers over a tailnet, not the edge, so its dashboard shows the
-   link and the CLI command. The dashboard's Connect step accepts a pasted
-   join or claim link, or a bare claim code.
+   hands them to the dashboard in the fragment, `#join=<link>` and
+   `#claim=<link>`, so the secret never reaches the gateway; the dashboard
+   removes it from the address on read. The Android shell accepts them the
+   same way; the Android app reaches servers over a tailnet, not the edge,
+   so its dashboard shows the link and the CLI command. The dashboard's
+   Connect step accepts a pasted join or claim link, or a bare claim code.
 8. **Setup prints a link.** `aether-server setup` prints the claim link in
    place of the bare code, with the same `<server id>-<secret>` inside it,
    and the `aether link --claim <code>` line for terminals.
 9. **The approval code stays on the fallback paths only:** `sudo
    aether-server device approve <code>` and `aether device approve <code>`.
    A refusal carries the code only when the server sees no in-app
-   approver: the device's member is the only admin and has no approved
-   device. `aether device approve` also accepts a device id.
+   approver (`loneApprover` in `internal/sshd/edge.go`): the member
+   approving the device admits it as is an admin, no other admin exists,
+   and that member has no approved device. A device adding a new member
+   never qualifies: the admin who invited it can approve it. `aether
+   device approve` also accepts a device id, told apart by its `dev-`
+   prefix.
 10. **The edge store does not change.** An ownerless server that was once
     claimed keeps its row and directory and keeps relaying for its members.
     A server the edge has not recorded is claimed by its admin through
@@ -178,7 +190,7 @@ Admin, on a tailnet, SSH key or approved-device connection:
 Admin:
 
 1. Runs `aether invite --github <login> --role <role>`, or uses Members ›
-   Invite. A server without an edge owner refuses and names decision 5.
+   Invite. A server the edge has not recorded refuses and names decision 5.
 2. Sees the join link and the server id, and sends the link.
 
 ### Join under `account`
@@ -223,10 +235,10 @@ Same member, on an approved device:
 
 ### The fallback with a code
 
-When the device's member is the only admin and has no approved device:
+When the device admits as the only admin, who has no approved device:
 
-1. The refusal carries the approval code and `sudo aether-server device
-   approve <code>`.
+1. The refusal carries the approval code, `aether device approve <code>`
+   and `sudo aether-server device approve <code>`.
 2. The machine's administrator runs it, sees what the code admits, and
    answers `y`.
 
@@ -237,28 +249,28 @@ Rows added to or changed in "Who must fail for access to be gained" and
 
 | Case | `account` | `approved-devices` |
 | --- | --- | --- |
-| Stolen GitHub account plus the join link | The whole join, as a signed-in invited account is today | A pending device; access also needs an admin's click after seeing device, account, fingerprint, member and role |
-| Invited account without the link | Refused with the kind that names the link | The same; nothing is recorded |
-| Edge forges a grant for an invited login | Refused without the secret, which the edge never sees | The same: not even a pending device |
+| Stolen GitHub account plus the join link | The whole join, with the invited role | A pending device; access also needs an admin's click after seeing its label, account, fingerprint, member and role |
+| Invited account without the link | Refused with `invitation-needs-link`; nothing is recorded (`TestInvitations`) | The same (`TestJoinByLink`) |
+| Edge forges a grant for an invited login | Refused without the secret, which the edge never receives (`TestJoinByLink`) | The same: not even a pending device (`TestMaliciousEdgeApprovedDevices`) |
 | Edge forges a `claimed` report | Fails: an owner is recorded only from a claim connection opened for that account (rule unchanged) | The same |
-| Edge serves the join page | The fragment never reaches the edge over HTTP. A compromised edge's script could read it and gains nothing more: it can already accept an open invitation for a login it forges | The same, and the result is a pending device an admin must approve. There is no claim page: a claim secret would give a compromised edge the server, so the claim link is the `aether://claim` deep link only |
-| Own-device approval | Not needed | One click from an approved device of that member; a pending device still completes no handshake |
-| `server.edge.claimcode` | Accepted only from an approved device, member SSH key or tailnet identity of an admin; a registered device cannot mint one | The same; a pending device cannot connect at all. The bar matches `member.device.approve` |
-| Approval code | Unused | 40 bits; a code naming two waiting devices approves neither (`GetDeviceByApprovalCode`). Only on the fallback paths |
+| Edge serves the join page | The fragment never reaches the edge over HTTP. A compromised edge's script could read it and then accept that invitation with its role | The same, and the result is a pending device an admin must approve. There is no claim page: a claim secret would give a compromised edge the server, so the claim link is the `aether://claim` deep link only |
+| Own-device approval | Not needed | One click from an approved device of the same member; a pending device completes no handshake, so it cannot approve itself (`TestApproveDeviceByID`) |
+| `server.edge.claimcode` | Answered only for an admin on an approved device, member SSH key or tailnet connection; a registered device gets no code (`TestServerEdgeClaimCode`) | The same; a pending device cannot connect at all (`TestAdminConnectsTheirAccount`). The bar matches `member.device.approve` |
+| Approval code | Unused | 40 bits; a code naming two waiting devices approves neither (`GetDeviceByApprovalCode`). Shown only when nobody can approve in the app (`TestApprovalCodeOnlyWithoutAnInAppApprover`) |
 
 ## 5. What changes where
 
 | Package or file | Change |
 | --- | --- |
 | `internal/edge/proto` | Structured refusal type and its prose renderer; `join:` user name builder and parser beside `ClaimUser`; join and claim link builders |
-| `internal/sshd` | Structured banners; `server.edge`; `server.edge.claimcode`; `member.device.approve` by id; join secret check; `member.device` event; claimed check in `member.invitation.create` and `member.identity.link` |
-| `internal/protocol` | `server.edge`, `server.edge.claimcode` methods and types; `member.device.list` member and role for pending devices; optional `code` on approve |
-| `internal/store` | Migration adding `secret_hash` to `identity_invitations` |
-| `internal/edge/agent` | Claim code for an admin issued from an RPC |
+| `internal/sshd` | Structured banners; `server.edge`; `server.edge.claimcode`; `member.device.approve` and `member.device.lookup` by id; join secret check; `member.device` event; claimed check in `member.invitation.create` and `member.identity.link`; the code in a refusal only per decision 9 |
+| `internal/protocol` | `server.edge`, `server.edge.claimcode` methods and types; `member.device.list` member and role for pending devices; optional `code` on approve; `link` and `server_id` in `MemberInvitationResult`; `data` on the subscribe refusal |
+| `internal/store` | Migration adding `secret_hash` to `identity_invitations` and deleting open invitations |
+| `internal/edge/agent` | Claim code for an admin issued from an RPC; the edge's last reported state kept in `edge_state.json` |
 | `internal/edge/service` | `GET /join/{server_id}/{invitation_id}` with its script and CSP |
 | `internal/cli` | Refusal parsing in place of `refusalError` wrapping; `DialJoin` |
 | `internal/localgw` | `edge.join`; refusal in the JSON-RPC error `data`; the `server.edge.claimcode` then `edge.claim` flow |
-| `cmd/aether` | `invite` prints the link and server id; `link` accepts a join or claim link; `edge connect`; `device approve <id>` |
+| `cmd/aether` | `invite` and `member link` print the link and server id; `link` accepts a join link and retries while the device waits; `edge connect`; `device approve <id>` |
 | `cmd/aether-server` | `edge claim-code` refusal on a server with members; claim link from `setup` |
 | `internal/scheduler/github.go` | Compare key material (section 6) |
 | `web/` | Refusal kinds in `sync.ts`; device cards in `needs-you.ts`; Settings › Remote access; join and claim links on the Connect step; the join waiting state |
@@ -300,10 +312,11 @@ Greptile's PR review.
 
 | Suite | Pins |
 | --- | --- |
-| `internal/edge/edgetest` | Existing: `TestInvitations`, `TestClaim`, `TestApprovedDevices`, `TestMaliciousEdgeApprovedDevices`, `TestTakenOverProviderAccount`, `TestConsoleRecoveryOfAnAdminWithoutAnAccount`, `TestGatewaySignsInClaimsAndLinks`. New: a join by link under each policy; an invited account without the secret refused; a forged grant for an invited login without the secret recording nothing; a server with an admin connected through `server.edge.claimcode`; the structured refusal reaching the gateway |
-| `internal/sshd` | `TestInvitationWaitsUntilOneDeviceIsApproved`, `TestWaitingDevicesAreBounded`, `TestApprovalShowsWhomTheCodeAdmits`, `TestClaimCodeForAnAdminRecoversThatAdmin` |
-| `internal/cli` | `TestEdgeRefusalCarriesTheServersMessage` (`claim_test.go`) |
+| `internal/edge/edgetest` | `TestAccountAccess` and `TestInvitations` join by link, and an invited account without it is refused; `TestMaliciousEdgeApprovedDevices` forges a grant for an invited login, without the secret recording nothing and with it only a pending device; `TestAdminConnectsTheirAccount` connects a server with an SSH-key admin through `server.edge.claimcode`; `TestGatewaySignsInClaimsAndLinks` joins through `edge.join`, waits on `device-pending` and is approved by id. Also `TestClaim`, `TestApprovedDevices`, `TestTakenOverProviderAccount`, `TestConsoleRecoveryOfAnAdminWithoutAnAccount`, `TestDeleteAccountLeavesTheServerOwnerless` |
+| `internal/sshd` | `TestJoinByLink`, `TestServerEdge`, `TestServerEdgeClaimCode`, `TestUnclaimedServerRefusesInvitationsAndOwnerlessOneDoesNot`, `TestApproveDeviceByID`, `TestApprovalCodeOnlyWithoutAnInAppApprover`, `TestInvitationWaitsUntilOneDeviceIsApproved`, `TestWaitingDevicesAreBounded`, `TestApprovalShowsWhomTheCodeAdmits`, `TestClaimCodeForAnAdminRecoversThatAdmin` |
+| `internal/edge/proto`, `internal/edge/service`, `internal/edge/agent` | `TestJoinLink`, `TestClaimLink`, `TestJoinUser`, `TestParseRefusedBanner`; `TestJoinPage`; `TestEdgeStateSurvivesARestart` |
+| `internal/cli`, `internal/localgw`, `internal/store` | `TestEdgeRefusalCarriesTheServersMessage`, `TestEdgeRefusalOfAnOlderServerKeepsItsBanner`, `TestClaimOfTheCurrentServerKeepsItsLink`; `TestEdgeRefusalCarriesItsKind`; `TestJoinSecretMigrationDropsOpenInvitations` |
 | `internal/scheduler` | `github_test.go`, with gh's real list output |
-| `cmd/aether-server` | `edge_test.go`: `claim-code` refusal, setup link |
+| `cmd/aether`, `cmd/aether-server` | `TestEdgeConnectArgs`, `TestEdgeConnected`; `TestEdgeStatusAndClaimCode` (the claim link), `TestClaimCodeForAnAdmin` (the refusal without `--admin`) |
 | `web/src/store/edge-sync.test.ts` | Classification by kind instead of wording |
 | `web/src/lib/needs-you.test.ts` | Device cards for an admin and for a member |

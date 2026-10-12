@@ -577,8 +577,9 @@ Both shells deliver three deep links: `aether://run/<id>` loads
 `#claim=<link>` with the whole link URL-encoded in the fragment, which
 never reaches the server ([local-gateway.md](local-gateway.md#running-it)).
 `handedLink()` in `src/lib/url-state.ts` takes `join` and `claim` off the
-address on first load and holds the link in memory for the Connect step. `?run=<id>` opens
-the run's default view (see [Run view](#run-view)). When the first
+address on first load, `onHandedLink` does the same on `hashchange` for a
+page already open, and the link is held in memory for the Connect step.
+`?run=<id>` opens the run's default view (see [Run view](#run-view)). When the first
 hydration does not find the run, the dashboard opens the board instead, or
 onboarding for a member who has not finished it. A `?page=` name with no
 view, or a page the gates in `src/lib/surfaces.ts` do not offer this gateway
@@ -749,17 +750,19 @@ Removal also repairs the selection and open route before any refresh awaits.
   origin, where that process can be restarted; on the server gateway it is
   `tailnet`, because the page came over the tailnet and there is no local
   process to blame and no wifi advice to give. A refusal on the edge path
-  arrives as `data.refusal` on the gateway's `503`, and its `kind` picks the
-  class: `edge-server` (the server is not connected to the edge),
-  `edge-refused`, `signed-out` (no valid device token; gives the
-  `aether login --edge` command), `not-member`, `device-revoked`,
+  arrives as `data.refusal` on the gateway's `503`, and `refusalHop` in
+  `src/store/sync.ts` maps its `kind` to a class, never its wording:
+  `edge-server` (the server is not connected to the edge), `edge-refused`
+  (the edge's other refusals), `signed-out` (no valid device token; gives
+  the `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.
-  The `device-pending` page sends the member to Needs you, and shows
-  `sudo aether-server device approve <code>` only when the refusal carries
-  `approval_code`.
-  An edge that did not answer refused nothing; on a link through an edge,
-  an error naming its host is `edge`. `src/store/edge-sync.test.ts` pins
-  the class of each kind. The capabilities probe records
+  The `device-pending` page says an admin approves the device from Needs
+  you, or the member from an approved device, and shows `sudo aether-server
+  device approve <code>` only when the refusal carries `approval_code`. A
+  failure without a refusal on a link through an edge is `edge` when the
+  error names the edge's host: the edge did not answer, so it refused
+  nothing. `src/store/edge-sync.test.ts` pins the class of each kind. The
+  capabilities probe records
   which gateway serves the page before hydration runs, so the first failure
   is classified too. The gateway's message appears in an initially open
   "Technical details" disclosure, and the page suppresses the toast that
@@ -1078,19 +1081,23 @@ first that applies:
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
 into a card for that member. The store's `devices` come from
-`member.device.list`, read at hydration, on each `member.device` event, and
-whenever the tab returns to the foreground or the browser comes back online,
-which catches a failed read and an approval made with
+`member.device.list`, which names whom approving admits each waiting
+device as. It is read at hydration, on each `member.device` event (published
+under the workspace id `server`, so the event's unknown workspace does not
+drop it), and whenever the tab returns to the foreground or the browser
+comes back online, which catches a failed read and an approval made with
 `sudo aether-server device approve`, which publishes no event:
 
 | Device | Who it needs | Reason line | Actions |
 | --- | --- | --- | --- |
 | Pending, waiting on an invitation | an admin | laptop (github mallory) wants to join as collaborator | **Approve** (`member.device.approve {device_id}`), **Deny** (`member.device.revoke`) |
 | Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
+| Registered under `account`, on a server now under `approved-devices` (from `server.edge`) | an admin | laptop (github bob) signed in as Bob and is not approved | the same |
 | Pending, the viewer's own | the member, not an admin | New device laptop signed in as you | the same |
 
 The card shows the account, the key fingerprint and whom approving admits
-it as, and waits since the device was recorded. Device cards list before
+it as, and waits since the device was recorded. No card carries an
+approval code. Device cards list before
 runs in the board's Needs you and above the Map. The sidebar's Needs you
 counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
@@ -3506,25 +3513,27 @@ admins see **Open invitations** with **Revoke**.
 
 **Invite…** in the header is the one way to invite. Its dialog has two tabs
 when the gateway serves both: **Account** invites a GitHub login or an email
-with a role (`member.invitation.create`), and **Invite code** mints a
-one-time code for an SSH-key join (`member.invite`), shown only there. The
-server records every new invitation for a GitHub account; an email
-invitation an earlier version stored for another provider shows that
-provider, such as `dana@example.com on google`. **Learn more** says what an
-invitation admits under each policy, because `server.info` does not report
-the policy: under `account` the first connection makes the account a member;
-under `approved-devices` its device waits until approved with its code.
+with a role (`member.invitation.create`) and then shows the invitation's
+join link once, with **Copy link**; **Invite code** mints a one-time code
+for an SSH-key join (`member.invite`), shown only there. The server records
+every new invitation for a GitHub account; an email invitation an earlier
+version stored for another provider shows that provider, such as
+`dana@example.com on google`. **Learn more** says what the link admits
+under each policy: under `account` opening it makes the account a member;
+under `approved-devices` its device waits until an admin approves it from
+Needs you.
 
 **Devices** (`src/routes/devices/`) lists the computers members reach the
 server with through an edge: the member's own, or every member's for an
 admin, with status **Approved**, **Pending**, **Registered** (admitted by
 signing in under `edge-access account`) or **Revoked**, and the key
-fingerprint. It approves a pending or registered device only by the
-code typed in from that device, which no row shows: **Review** looks the code
-up with `member.device.lookup`, and a dialog shows the device, its account,
-its fingerprint, and the member and role approving admits it as, before
-**Approve** sends `member.device.approve`. It revokes a device too, and shows
-every server refusal verbatim.
+fingerprint. Approving by id is the Needs you card's
+([Run state](#run-state)); this tab approves by an approval code typed in
+from that device, which no row shows: **Review** looks the code up with
+`member.device.lookup`, and a dialog shows the device, its account, its
+fingerprint, and the member and role approving admits it as, before
+**Approve** sends `member.device.approve` with the device id and the code.
+It revokes a device too, and shows every server refusal verbatim.
 
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
@@ -3752,15 +3761,16 @@ through either gateway:
 - **Remote access**, when the server answers `server.edge` (the `edge`
   store slice, read at hydration): the **Edge** URL or `off`, the copyable
   **Server id**, the **Access policy**, the **Owner** (`<login> (github)`
-  or `none`) and the **Connection**. For an admin of a server with no
-  owner, a dashboard with the local verbs `edge.status`, `edge.login` and
-  `edge.claim` shows **Connect my GitHub account**: it signs in at the
-  server's edge if this machine is not signed in there, calls
-  `server.edge.claimcode`, passes the code to `edge.claim`, and reads
-  `server.edge` again. Without those verbs it shows `aether edge connect`
-  to copy ([edge.md](edge.md#server-id-and-claiming)). Under
-  `approved-devices`, Needs you also lists devices still `registered`
-  from `account`.
+  or `none`) and the **Connection**: `connected`, `not connected`, or `the
+  edge has not recorded this server` while the edge reports it unclaimed.
+  For an admin of a server with no owner, a dashboard with the local verbs
+  `edge.status`, `edge.login` and `edge.claim` shows **Connect my GitHub
+  account**: it signs in at the server's edge if this machine is not signed
+  in there, showing the sign-in code, calls `server.edge.claimcode`, passes
+  the code to `edge.claim` unless it names another server than the one shown
+  (`The gateway now reaches another server; reload and try again.`), and
+  reads `server.edge` again. Without those verbs it shows `aether edge
+  connect` to copy ([edge.md](edge.md#server-id-and-claiming)).
 - **Usage**: the subscription usage of your account, or of an account
   shared with you.
 
@@ -4004,22 +4014,27 @@ claim then pass that edge to the gateway, as `--edge` does on the command
 line. A server picked from the list opens a **Confirm server** panel with its
 id and the host key fingerprint `edge.hostkey` read, and links only on **Link
 and pin**, because that id comes from the edge. **Other ways to link** holds
-**Server id from your admin**, which the edge cannot substitute, and the
-claim code `aether-server setup` printed. **Link by address** is a second
+**Server id from your admin**, which the edge cannot substitute, and
+**Claim code or link**, which takes the claim link or code `aether-server
+setup` printed and refuses a claim link naming another edge than the one
+signed in; a join link pasted there opens the Join panel below. **Link by
+address** is a second
 disclosure below the sign-in, for a tailnet or SSH server. Connect
 distinguishes no configured server from a linked one, shows **Continue** only
 once a server is configured, and refreshes on Retry and when the window
 regains focus, so a separate `aether link` command appears without
 restarting the GUI.
 
-A handed-over link opens Connect at any step. A claim link fills **Claim code
-or link** and opens its disclosure. A join link replaces the sign-in with a
-**Join** panel: `Join <server id> as the invited account?` with the account
-`edge.status` reports for the link's edge, signing in to that edge first if
-needed, and **Join** sends the link to `edge.join`. On a `device-pending`
-refusal it shows `Waiting for an admin of <server> to approve this device`
-with the device label and key fingerprint, never an approval code, and calls
-`edge.join` again every 5 seconds until it links or is refused otherwise. A
+A link a shell hands over ([URL state](#url-state)) opens
+Connect at any step. A claim link fills **Claim code or link** and opens
+its disclosure. A join link replaces the sign-in with a **Join** panel:
+`Join <server id> as the invited account?` with the account `edge.status`
+reports for the link's edge, signing in to that edge first if needed, and
+**Join** sends the link to `edge.join`. On a `device-pending` refusal it
+shows `Waiting for an admin of <server> to approve this device` with the
+device label and key fingerprint, never an approval code, and calls
+`edge.join` again every 5 seconds until it links or is refused otherwise;
+the admin's side is the Needs you card ([Run state](#run-state)). A
 gateway without `edge.join` or `edge.claim`, such as the Android app's
 tailnet dashboard, shows the link and the `aether link` command to copy
 instead, with **Continue**.
@@ -4541,7 +4556,8 @@ disclosure: every group starts expanded and closes when its header is pressed.
 They also cover an unopened finish: the row and a nested worker keep the text
 colour and say so in their names until `finish_unopened` clears. They also
 cover a run row's age, owner mark, people stack and details box.
-`src/lib/needs-you.test.ts` has one case per Needs you condition.
+`src/lib/needs-you.test.ts` has one case per Needs you condition, and the
+device cards an admin and a member see.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,

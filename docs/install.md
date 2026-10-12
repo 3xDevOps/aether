@@ -695,8 +695,9 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the rest of the toolchain.
 Optional: an Electron shell that launches `aether gui` for you and shows the
 dashboard in its own frameless window, with a notification that names a run
 when it needs attention and opens it when clicked, a needs-attention badge,
-and `aether://run/<id>`, `aether://join?…` and `aether://claim?…` deep
-links ([local-gateway.md](local-gateway.md)). The notification shows only while the app
+and deep links: `aether://run/<id>` opens a run, and an edge invitation's
+`aether://join?…` and setup's `aether://claim?…` open onboarding's Connect
+step to join or claim ([edge.md](edge.md#the-dashboard)). The notification shows only while the app
 is open; a phone gets one through the server-hosted dashboard
 ([networking.md](networking.md#notifications)). It is the same SPA
 with the same full SSH authority, just without a browser tab to lose. No
