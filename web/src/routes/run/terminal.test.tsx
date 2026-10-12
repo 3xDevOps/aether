@@ -784,6 +784,18 @@ describe('terminal view', () => {
     view.unmount()
   })
 
+  it('reattaches the replacement session after a run.account move', async () => {
+    const view = mount({}, { status: 'running', account_member_id: alice.id })
+    attached()
+    act(() => StubSocket.last().onclose?.({ code: 1000, reason: 'session ended' }))
+    expect(StubSocket.opened).toHaveLength(1)
+
+    act(() => useStore.getState().applyRunAccount('run_1', bob.id, alice.id))
+
+    await waitFor(() => expect(StubSocket.opened).toHaveLength(2))
+    view.unmount()
+  })
+
   it('coalesces a relaunch with a simultaneous phone follow change', async () => {
     const resize = atViewport(1024, { height: 844, pointer: 'coarse' })
     const view = mount({}, { status: 'completed' })

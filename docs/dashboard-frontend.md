@@ -1936,6 +1936,9 @@ A same-incarnation resume, when the current surface is still mounted, supplies
 only the bounded gap. An invalid cursor, ring, geometry, or incarnation falls
 back to a compact current-screen bootstrap through the hidden serial
 transaction. A finished run stays read-only until that same run is reopened.
+A reopened run reattaches its agent terminal once the old stream ends with
+`session ended`. A `run.account` move does the same, because the replacement
+session keeps the same name while the run stays live.
 
 Find replaces the toolbar strip's contents while it is open, so it never
 obscures a matched terminal line; closing it returns focus to the terminal.
