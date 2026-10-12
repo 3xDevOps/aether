@@ -1266,6 +1266,11 @@ func TestHarnessDefinitionUpsertOverwrites(t *testing.T) {
 	if err := db.UpsertHarnessDefinition(ctx, first); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
+	if _, err := db.db.ExecContext(ctx,
+		`UPDATE harness_definitions SET updated_at = ? WHERE member_id = ? AND name = ?`,
+		first.CreatedAt.UnixNano(), m.ID, "mytool"); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
 	second := &HarnessDefinition{MemberID: m.ID, Name: "mytool", Definition: []byte(`{"Executable":"v2"}`)}
 	if err := db.UpsertHarnessDefinition(ctx, second); err != nil {
 		t.Fatalf("second upsert: %v", err)
@@ -1280,8 +1285,8 @@ func TestHarnessDefinitionUpsertOverwrites(t *testing.T) {
 	if !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Fatalf("created_at = %v, want preserved %v", got.CreatedAt, first.CreatedAt)
 	}
-	if !got.UpdatedAt.After(first.UpdatedAt) {
-		t.Fatalf("updated_at = %v, want bumped past %v", got.UpdatedAt, first.UpdatedAt)
+	if !got.UpdatedAt.After(first.CreatedAt) {
+		t.Fatalf("updated_at = %v, want bumped past %v", got.UpdatedAt, first.CreatedAt)
 	}
 }
 
@@ -1504,6 +1509,14 @@ func TestRunStatusChangedAt(t *testing.T) {
 	}
 	step := func(what string, moves bool, write func() error) {
 		t.Helper()
+		if moves {
+			if _, err := db.db.ExecContext(ctx,
+				`UPDATE runs SET status_changed_at = status_changed_at - 1 WHERE id = ?`, run.ID); err != nil {
+				t.Fatalf("%s: backdate status_changed_at: %v", what, err)
+			}
+			backdated := last.Add(-time.Nanosecond)
+			last = &backdated
+		}
 		if err := write(); err != nil {
 			t.Fatalf("%s: %v", what, err)
 		}

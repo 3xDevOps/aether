@@ -144,6 +144,10 @@ func TestWorkspaceMirrorUpsertChangesResult(t *testing.T) {
 	if err := db.SetWorkspaceMirror(ctx, first); err != nil {
 		t.Fatalf("first SetWorkspaceMirror: %v", err)
 	}
+	if _, err := db.db.ExecContext(ctx,
+		`UPDATE workspace_mirrors SET updated_at = updated_at - 1 WHERE workspace_id = ?`, ws.ID); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
 	before, err := db.GetWorkspaceMirror(ctx, ws.ID)
 	if err != nil {
 		t.Fatalf("first GetWorkspaceMirror: %v", err)
