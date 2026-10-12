@@ -87,6 +87,9 @@ type acpRun struct {
 	err      error
 	stopping bool
 	ended    bool
+	// untried marks a first task sent but not yet accepted, so a refusal
+	// fails a worker whichever of startOneShot or the turn end reports it.
+	untried bool
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {
@@ -429,8 +432,20 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 			return
 		}
 	}
+	d.mu.Lock()
+	r := d.runs[entry.runID]
+	if r != nil && prompt != oneShotResume {
+		r.untried = true
+	}
+	d.mu.Unlock()
 	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
-		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
+		return
+	}
+	if r != nil {
+		d.mu.Lock()
+		r.untried = false
+		d.mu.Unlock()
 	}
 }
 
@@ -451,6 +466,8 @@ func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentst
 	live := r != nil && r.session != nil
 	if !skip {
 		r.ended = true
+		untried = untried || (!ok && r.untried)
+		r.untried = false
 	}
 	d.mu.Unlock()
 	if skip {

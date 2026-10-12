@@ -50,6 +50,8 @@ type Fixture struct {
 	} `json:"load"`
 	// List holds successive session/list results; the last one repeats.
 	List []json.RawMessage `json:"list"`
+	// RefusePrompts makes the agent refuse every prompt with authRequired.
+	RefusePrompts bool `json:"-"`
 }
 
 func Load(name string) (Fixture, error) {
@@ -252,6 +254,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	cancelTurn := a.cancelTurn
 	a.mu.Unlock()
 	defer cancelTurn()
+	if a.fix.RefusePrompts {
+		return nil, acp.NewAuthRequired(nil)
+	}
 	switch text {
 	case PromptAskPermission:
 		a.mu.Lock()

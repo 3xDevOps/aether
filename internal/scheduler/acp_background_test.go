@@ -200,6 +200,43 @@ func TestBackgroundWorkerOverACPEndsWhenItsTaskNeverStarted(t *testing.T) {
 	}
 }
 
+// A refused continuation is not an unstarted task: the worker keeps the
+// lifecycle of any failed turn and is left to CompleteMission.
+func TestBackgroundWorkerOverACPParksWhenItsResumeIsRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "resumed-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: acpmock.PromptWait,
+		Harness: enhancedAgent, Mode: domain.LaunchHeadless,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the turn", func() bool {
+		return e.sched.acp.session(run.ID) != nil && e.sched.acp.session(run.ID).State().TurnInFlight
+	})
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rt.fixture.RefusePrompts = true
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	observed, err := s2.ObserveMissionRun(t.Context(), run.ID)
+	if err != nil || observed.State != MissionRunActive {
+		t.Fatalf("observed %+v, %v; want the attempt still active", observed, err)
+	}
+}
+
 func TestBackgroundRunOverACPContinuesAfterRestart(t *testing.T) {
 	t.Parallel()
 	e, _ := newBackgroundEnv(t, enhancedAgent, true)
