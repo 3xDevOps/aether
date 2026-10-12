@@ -180,20 +180,16 @@ export class AgentStep extends Step {
     return this.button('Skip for now')
   }
 
-  async configuration(): Promise<ConfigurationImport> {
+  async configuration(): Promise<ConfigurationPrompt> {
     await this.expand('Agent config files')
-    return new ConfigurationImport(this.page)
+    return new ConfigurationPrompt(this.page)
   }
 
 }
 
 
-/**
- * One explicit browser directory import. The input is scoped to its section
- * so another file picker in the page cannot be mistaken for the
- * configuration source.
- */
-export class ConfigurationImport {
+/** The Agent config files section: the prompt for an agent on the member's own computer. */
+export class ConfigurationPrompt {
   constructor(private readonly page: Page) {}
 
   get section(): Locator {
@@ -203,27 +199,16 @@ export class ConfigurationImport {
     })
   }
 
-  directoryInput(): Locator {
-    return this.section.getByLabel('Choose configuration directory')
+  prompt(): Locator {
+    return this.section.getByLabel('Prompt', { exact: true })
   }
 
-  async chooseDirectory(path: string): Promise<void> {
-    await this.directoryInput().setInputFiles(path)
+  copy(): Locator {
+    return this.section.getByRole('button', { name: 'Copy prompt', exact: true })
   }
 
-  preview(): Locator {
-    return this.section.getByText('Preview', { exact: true })
-  }
-
-  destination(): Locator {
-    return this.section.getByLabel('Configuration destination')
-  }
-
-  import(): Locator {
-    return this.section.getByRole('button', {
-      name: 'Import configuration',
-      exact: true,
-    })
+  openRemoteFiles(): Locator {
+    return this.section.getByRole('button', { name: 'Open remote files', exact: true })
   }
 }
 

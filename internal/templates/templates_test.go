@@ -16,14 +16,16 @@ import (
 )
 
 type recordingLauncher struct {
-	mu    sync.Mutex
-	tasks []string
+	mu     sync.Mutex
+	tasks  []string
+	models []string
 }
 
-func (l *recordingLauncher) Launch(_ context.Context, workspace domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (l *recordingLauncher) LaunchWithOptions(_ context.Context, workspace domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.tasks = append(l.tasks, task)
+	l.models = append(l.models, opts.Model)
 	return &domain.Run{
 		ID:            "run_1",
 		WorkspaceID:   workspace,
@@ -268,7 +270,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 
 	ready := &store.Template{
 		WorkspaceID: ws.ID, Name: "sweep", Task: "sweep {{ecosystem}}",
-		Params: map[string]string{"ecosystem": "go"}, Harness: "claude",
+		Params: map[string]string{"ecosystem": "go"}, Harness: "claude", Model: "sonnet",
 	}
 	if err = svc.Save(ctx, ready); err != nil {
 		t.Fatalf("save defaulted template: %v", err)
@@ -288,9 +290,19 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	}
 	runs.mu.Lock()
 	tasks := append([]string(nil), runs.tasks...)
+	models := append([]string(nil), runs.models...)
 	runs.mu.Unlock()
-	if len(tasks) != 1 || tasks[0] != "sweep go" {
-		t.Fatalf("fired tasks = %v, want exactly [\"sweep go\"]", tasks)
+	if len(tasks) != 1 || tasks[0] != "sweep go" || models[0] != "sonnet" {
+		t.Fatalf("fired tasks = %v with models %v, want exactly [\"sweep go\"] with sonnet", tasks, models)
+	}
+	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	runs.mu.Lock()
+	models = append([]string(nil), runs.models...)
+	runs.mu.Unlock()
+	if len(models) != 2 || models[1] != "sonnet" {
+		t.Fatalf("launched models = %v, want sonnet for the manual launch too", models)
 	}
 
 	// Editing the scheduled template into an undefaulted placeholder would

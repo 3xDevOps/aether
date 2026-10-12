@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ProfileImport } from '@/components/profile-import'
+import { ConfigPrompt } from '@/components/agents/config-prompt'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { Api } from '@/lib/api'
@@ -59,8 +59,8 @@ export function AgentExtras({
         )}
       </Extra>
       {caps.hasMethod('config.roots') && caps.hasMethod('config.import') && (
-        <Extra title="Agent config files" summary="Copy ~/.claude, ~/.codex and similar to the server">
-          <ProfileImport client={client} />
+        <Extra title="Agent config files" summary="Have your agent upload ~/.claude, ~/.codex and similar">
+          <ConfigPrompt />
         </Extra>
       )}
     </div>

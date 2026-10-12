@@ -182,6 +182,32 @@ func noticeTitled(title string) func([]acphost.Item) bool {
 	}
 }
 
+func TestSwitchToStandardKeepsTheRunsModel(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "omp", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sup.run = run.ID
+	waitItems(t, e.sched, run.ID, "the task's turn", assistantSaid("pong"))
+	// Recorded after SwitchMode reads the run row, as a composer change
+	// racing the switch would be.
+	admit := func(f func() error) error {
+		if err := e.db.SetRunModel(t.Context(), run.ID, "sonnet"); err != nil {
+			return err
+		}
+		return f()
+	}
+	if err := e.sched.SwitchMode(t.Context(), run.ID, e.member.ID, domain.LaunchTUI, admit); err != nil {
+		t.Fatalf("switch to Standard: %v", err)
+	}
+	session := e.rt.fixture.SessionID()
+	if bodies := e.sup.ran(); len(bodies) != 1 || !strings.Contains(bodies[0], "'--resume="+session+"' '--model=sonnet'") {
+		t.Fatalf("supervisor ran %q, want the resume command with --model=sonnet", bodies)
+	}
+}
+
 func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 	t.Parallel()
 	e := newSwitchEnv(t)

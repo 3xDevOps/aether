@@ -44,6 +44,9 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if p.TaskID == "" || p.TaskRevision <= 0 || p.DispatchKey == "" {
 		return nil, errors.New("mission: worker.start requires task, revision, and dispatch_key")
 	}
+	if err := domain.ValidModel(p.Model); err != nil {
+		return nil, fmt.Errorf("mission: worker.start: %w", err)
+	}
 	if !authorizationHeld {
 		s.cfg.AuthorizationMu.Lock()
 		defer s.cfg.AuthorizationMu.Unlock()
@@ -69,7 +72,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	var choice domain.MissionExecutionChoice
 	found := false
 	for _, c := range m.ExecutionChoices {
-		if c.Harness == p.Harness && string(c.Mode) == p.Mode && string(c.AccountMemberID) == p.AccountOwnerID {
+		if c.Harness == p.Harness && string(c.Mode) == p.Mode && c.Model == p.Model && string(c.AccountMemberID) == p.AccountOwnerID {
 			choice, found = c, true
 			break
 		}
@@ -97,7 +100,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	defer s.dispatchMu.Unlock()
 	attempt, replayed, err := s.cfg.Missions.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: m.ID, TaskID: task.ID, TaskRevision: p.TaskRevision,
-		DispatchKey: p.DispatchKey, Harness: choice.Harness, Mode: choice.Mode,
+		DispatchKey: p.DispatchKey, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
 		ActorRunID: run, AuthorizingHumanID: m.AccountableHumanID,
 		RunOwnerID: m.AccountableHumanID, AccountOwnerID: choice.AccountMemberID,
 		AuthorityGeneration: m.IntegratorGeneration, IntegratorGeneration: m.IntegratorGeneration,
@@ -133,7 +136,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: attempt.RunID, ActorRunID: run,
 		RunOwnerID: attempt.RunOwnerID, RequestedAccount: attempt.AccountOwnerID, AccountOwner: account,
-		Fallback: m.Fallback, Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode,
+		Fallback: m.Fallback, Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
 	})
 	if err != nil {
 		s.markAttemptUnknown(ctx, attempt, err.Error())
@@ -335,7 +338,7 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	}
 	req := protocol.WorkerStartParams{
 		MissionID: string(m.ID), TaskID: string(a.TaskID), TaskRevision: a.TaskRevision,
-		DispatchKey: p.DispatchKey, Harness: a.Harness, Mode: string(a.Mode),
+		DispatchKey: p.DispatchKey, Harness: a.Harness, Mode: string(a.Mode), Model: a.Model,
 		AccountOwnerID: string(a.AccountOwnerID), RunOwnerID: string(a.RunOwnerID),
 		ExpectedIntegratorGeneration: p.ExpectedIntegratorGeneration,
 	}
@@ -347,7 +350,7 @@ func attemptWire(a *domain.Attempt) protocol.Attempt {
 	out := protocol.Attempt{
 		ID: string(a.ID), MissionID: string(a.MissionID), TaskID: string(a.TaskID),
 		TaskRevision: a.TaskRevision, Number: a.Number, DispatchKey: a.DispatchKey,
-		Harness: a.Harness, Mode: string(a.Mode), State: string(a.State), RunID: string(a.RunID),
+		Harness: a.Harness, Mode: string(a.Mode), Model: a.Model, State: string(a.State), RunID: string(a.RunID),
 		ActorRunID: string(a.ActorRunID), AuthorizingHumanID: string(a.AuthorizingHumanID),
 		RunOwnerID: string(a.RunOwnerID), AccountOwnerID: string(a.AccountOwnerID), LaunchAccountID: string(a.LaunchAccountID),
 		AuthorityGeneration: a.AuthorityGeneration, IntegratorGeneration: a.IntegratorGeneration,

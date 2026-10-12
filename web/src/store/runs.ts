@@ -70,6 +70,7 @@ export interface RunsSlice {
   applyLastCommit: (runID: string, commit: string, time: string) => void
   applyAgentEvent: (runID: string, payload: AgentPayload, time: string) => void
   applyRunTitle: (runID: string, title: string) => void
+  applyRunModel: (runID: string, model: string) => void
   applyUnackedMessages: (runID: string, unread: Pick<Run, 'unacked_messages' | 'oldest_unacked_at'>) => void
   applyRunProtected: (runID: string, isProtected: boolean) => void
   applyRunController: (runID: string, memberID: string, lastMemberID?: string) => void
@@ -185,6 +186,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const current = s.runs[runID]
       if (!current || current.title === title) return {}
       return { runs: { ...s.runs, [runID]: { ...current, title } } }
+    }),
+  applyRunModel: (runID, model) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || current.model === model) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, model } } }
     }),
   applyUnackedMessages: (runID, { unacked_messages, oldest_unacked_at }) =>
     set((s) => {

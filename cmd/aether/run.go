@@ -26,6 +26,7 @@ func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	agent := fs.String("agent", "", "agent name")
 	mode := fs.String("mode", "standard", launchModeHelp)
+	model := fs.String("model", "", modelHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
@@ -48,8 +49,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --account, --cached-base, --fallback, and --no-fallback")
+		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, and --no-fallback")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -63,7 +64,7 @@ func runRun(args []string) error {
 		return err
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)
@@ -71,7 +72,7 @@ func runRun(args []string) error {
 			return err
 		}
 		var res protocol.RunResult
-		params := launchParams(wsID, task, *agent, *mode, *account, *cachedBase)
+		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
 		if err := c.Call(protocol.MethodRunLaunch, params, &res); err != nil {
 			return cachedBaseLaunchError(err, params)
@@ -81,12 +82,13 @@ func runRun(args []string) error {
 	})
 }
 
-func launchParams(workspace, task, agent, mode, account, cachedBase string) protocol.RunLaunchParams {
+func launchParams(workspace, task, agent, mode, model, account, cachedBase string) protocol.RunLaunchParams {
 	return protocol.RunLaunchParams{
 		WorkspaceID:     workspace,
 		Task:            task,
 		Harness:         agent,
 		Mode:            mode,
+		Model:           model,
 		AccountMemberID: account,
 		CachedBase:      cachedBase,
 	}
@@ -137,13 +139,14 @@ func cachedBaseLaunchError(err error, params protocol.RunLaunchParams) error {
 	if json.Unmarshal(rpcErr.Data, &failure) != nil || failure.AcceptedCommit == "" {
 		return err
 	}
-	args := []string{
-		"aether", "run",
-		"--agent", shellquote.Quote(params.Harness),
-		"--mode", modeName(params.Mode),
+	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness), "--mode", modeName(params.Mode)}
+	if params.Model != "" {
+		args = append(args, "--model", shellquote.Quote(params.Model))
+	}
+	args = append(args,
 		"--workspace", shellquote.Quote(params.WorkspaceID),
 		"--account", shellquote.Quote(params.AccountMemberID),
-	}
+	)
 	if len(params.FallbackAccountMemberIDs) > 0 {
 		args = append(args, "--fallback", shellquote.Quote(strings.Join(params.FallbackAccountMemberIDs, ",")))
 	}

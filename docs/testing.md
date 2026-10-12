@@ -10,7 +10,7 @@ Layers, per the design spec's testing strategy:
   copy of one migrated once per test binary: applying every migration costs
   seconds per database under the race detector. The `scripts` job runs
   `make test-scripts` and `make test-native-hooks`, and `lint` runs the
-  advisory `make vulncheck`. Permission matrices, budget math, configuration import
+  advisory `make vulncheck`. Permission matrices, budget math, configuration upload
   and file revision rules, tailnet auth edge cases, scheduler transitions, and
   the local gateway's own behaviors are proven there, once, and the E2E suite
   does not restate them.
@@ -1202,7 +1202,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `keyboard-focus` | Escape closes a dialog or the sidebar footer menu on a run without leaving the run; focused shell controls paint the app's outline with computed style and 3:1 contrast against the actual background; the sidebar resizes by pointer delta and by keyboard, and at its minimum width keeps Search, New run and Mine inside it |
 | `mission-candidate-review` | A swarm created from **Swarms > New swarm** with a shell-fixture integrator: the integrator's question answered from **Questions for you** and folded to `Answered by`, a task proposed and started without a human plan gate, a worker taken with **Take control** on its run and freed with **Release control** on the swarm page, and, without a reload, the worker's report listed under **Agent messages** and the integrator-prepared candidate shown read-only under **Integration**. Attaches `mission candidate progress surface` |
 | `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on Enhanced from `enhanced_default` before the adapter is installed, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to **Run Codex**. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output |
-| `onboarding-configuration` | An explicit browser directory import from the Agent step's collapsed **Agent config files** disclosure: unknown basename destination selection, switching from OMP exclusions to Claude's narrower policy without losing valid files, an empty file preserved, a server-side secret exclusion shown, accepted files written to the member's persistent home, and the `config.read`/`config.write` revision path |
+| `onboarding-configuration` | The Agent step's collapsed **Agent config files** disclosure: the prompt shown byte for byte, **Copy prompt** putting exactly that text on the browser's real clipboard, and **Open remote files** reaching Files, where a configuration file written through `config.write` in place of an agent's `aether config push` shows under **Agent config** |
 | `onboarding-first-member` | A fresh server through the steps Connect, Repository, Agent and First run: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the agent exits, and closing the run as **Merged** from **More > Close run…**; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
 | `onboarding-github` | Administrator device connection and private read-only import, actual observed revision acceptance, Agent/Settings connection reuse, paginated second repository on `trunk`, cancellation/denial recovery, failed-fetch retry without duplicate import, and nonadmin UI/RPC denial. Uses the real standard image and test-only provider harness described above; attaches six checkpoint screenshots. No live GitHub approval |
@@ -1258,9 +1258,12 @@ duplicating the browser smoke path:
   reads, revision conflicts, import exclusions and unsafe-file preflight.
 - `internal/sshd/config_test.go` covers authenticated own-member config RPC
   authorization and lifecycle behavior.
-- `web/src/routes/onboarding/agent-step.test.tsx` covers the import UI's
-  explicit action, destination selection and excluded-file reporting, and the
-  Agent step's setup, Run and Add agent paths.
+- `web/src/routes/onboarding/agent-step.test.tsx` covers the Agent step's
+  setup, Run and Add agent paths and the prompt behind its **Agent config
+  files** disclosure. `web/src/routes/agents/agents.test.tsx` covers
+  **Copy prompt** writing exactly the prompt, a refused clipboard selecting
+  it, **Open remote files**, and the section hidden without `config.roots`
+  and `config.import`.
 - `web/src/components/agents/agent-setup.test.tsx` covers the Standard and
   Enhanced comparison, `agent.install` with and without the adapter, the
   install failure, and the login wording.
@@ -1274,9 +1277,10 @@ duplicating the browser smoke path:
   and a run whose checkout is gone. `paths.test.ts` covers what reads as a
   path, and `web/src/routes/run/terminal-links.test.tsx` a path link in a
   terminal, across a wrapped line.
-- `web/e2e/onboarding-configuration.spec.ts` covers the browser import and
-  config read/write path; `web/e2e/files-browser.mobile.spec.ts` covers the
-  narrow viewport tree/viewer round trip.
+- `web/e2e/onboarding-configuration.spec.ts` covers the prompt, its copy to
+  the real clipboard and the way to Files;
+  `web/e2e/files-browser.mobile.spec.ts` covers the narrow viewport
+  tree/viewer round trip.
 
 ### The phone project
 

@@ -718,7 +718,10 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 // command resolves argv and profile for one launch by member on account's
 // shared account, with the profile from launchProfile. An acp launch has no
 // argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task string) (argv []string, profile harness.Profile, acp bool, err error) {
+func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
+	if err = domain.ValidModel(model); err != nil {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
+	}
 	task = s.withCoAuthorInstruction(task)
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
@@ -739,10 +742,13 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	if len(argv) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
+	if model != "" && len(profile.ModelArgs) == 0 {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
+	}
 	if acp {
 		return nil, profile, true, nil
 	}
-	return harness.Argv(argv, task), profile, false, nil
+	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }
 
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {

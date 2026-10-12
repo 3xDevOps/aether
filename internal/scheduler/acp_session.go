@@ -11,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 )
 
 var ErrACPItemNotFound = errors.New("scheduler: no such session item")
@@ -180,7 +181,30 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 	if err != nil {
 		return err
 	}
-	return sess.SetOption(ctx, optionID, value)
+	isModel := optionID == sess.ModelOptionID()
+	if err = sess.SetOption(ctx, optionID, value); err != nil {
+		return err
+	}
+	model := sess.Model()
+	if !isModel || model == "" {
+		return nil
+	}
+	stored, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return fmt.Errorf("scheduler: load run to record its model: %w", err)
+	}
+	if model == stored.Model {
+		return nil
+	}
+	if err = domain.ValidModel(model); err != nil {
+		sess.Notice("error", "Model not recorded", err.Error())
+		return nil
+	}
+	if err = s.cfg.Store.SetRunModel(ctx, run, model); err != nil {
+		return fmt.Errorf("scheduler: record the run's model: %w", err)
+	}
+	s.publish(ctx, events.Event{WorkspaceID: stored.WorkspaceID, RunID: run, Payload: events.RunModelPayload{Model: model}})
+	return nil
 }
 
 var errACPBusy = errors.New("scheduler: the enhanced session is busy")

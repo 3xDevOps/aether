@@ -54,6 +54,8 @@ type Fixture struct {
 	} `json:"load"`
 	// List holds successive session/list results; the last one repeats.
 	List []json.RawMessage `json:"list"`
+	// RefusePrompts makes the agent refuse every prompt with authRequired.
+	RefusePrompts bool `json:"-"`
 }
 
 func Load(name string) (Fixture, error) {
@@ -85,6 +87,7 @@ type Agent struct {
 	session string
 	methods []string
 	listed  int
+	options []map[string]any
 	// turn ends at a session/cancel that follows the latest session/prompt
 	// on the wire.
 	turn       context.Context
@@ -222,9 +225,31 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 			Value    any    `json:"value"`
 		}
 		_ = json.Unmarshal(params, &o)
-		return map[string]any{"configOptions": []any{map[string]any{"id": o.ConfigID, "currentValue": o.Value}}}, nil
+		return map[string]any{"configOptions": a.setOption(o.ConfigID, o.Value)}, nil
 	}
 	return nil, acp.NewMethodNotFound(method)
+}
+
+// setOption returns the session's full option catalog with the change
+// applied, as a real agent does, starting from the fixture's session/new.
+func (a *Agent) setOption(id string, value any) []map[string]any {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.options == nil {
+		var r struct {
+			ConfigOptions []map[string]any `json:"configOptions"`
+		}
+		_ = json.Unmarshal(a.fix.SessionNew, &r)
+		a.options = r.ConfigOptions
+	}
+	for _, option := range a.options {
+		if option["id"] == id {
+			option["currentValue"] = value
+			return a.options
+		}
+	}
+	a.options = append(a.options, map[string]any{"id": id, "currentValue": value})
+	return a.options
 }
 
 func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError) {
@@ -233,6 +258,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	cancelTurn := a.cancelTurn
 	a.mu.Unlock()
 	defer cancelTurn()
+	if a.fix.RefusePrompts {
+		return nil, acp.NewAuthRequired(nil)
+	}
 	switch text {
 	case PromptAskPermission:
 		a.mu.Lock()

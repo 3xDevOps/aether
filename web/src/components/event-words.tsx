@@ -258,6 +258,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.mode': (p) => modeLine(p),
   'run.account': (p) => <>Moved from <AccountOf id={p.previous_account_member_id} /> to <AccountOf id={p.account_member_id} /></>,
   'run.usage_limit': (p) => (text(p.message) ? `Usage limit reached: ${bounded(p.message, 160)}` : 'Usage limit reached'),
+  'run.model': (p) => <>Model set to <Quote>{bounded(p.model, 160)}</Quote></>,
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished run</>,

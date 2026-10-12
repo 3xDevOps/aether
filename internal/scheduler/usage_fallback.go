@@ -793,9 +793,9 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	switch {
 	case run.ACP:
 	case run.Mode == domain.LaunchTUI:
-		argv = append(profile.ResumeCommand(session), continuationPrompt(fromName, toName))
+		argv = append(profile.ResumeCommand(session, run.Model), continuationPrompt(fromName, toName))
 	default:
-		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName))
+		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName), run.Model)
 	}
 	unlockCaches := s.lockRunCaches(home.ID, to)
 	plan, err := s.runPlan(ctx, entry, &next, ws, home, profile)

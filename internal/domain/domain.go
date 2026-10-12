@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -119,11 +120,25 @@ func (m LaunchMode) Interactive() bool {
 	return m == LaunchTUI || m == LaunchACP
 }
 
-// LaunchOptions carries one-shot launch controls that are not part of the
-// strict Launch seam. CachedBase pins a retry to the exact accepted mirror
-// commit returned by a prior base-capture failure. AssignedRunID is reserved
-// by durable mission state and is never exposed through generic run.launch.
+// ValidModel reports whether model can reach an agent CLI as one argument.
+// Empty is valid and keeps the agent's default.
+func ValidModel(model string) error {
+	bad := len(model) > 128 || strings.HasPrefix(model, "-") || strings.ContainsFunc(model, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+	if !bad {
+		return nil
+	}
+	return fmt.Errorf("model %q must be a single argument: no whitespace or control characters, not starting with \"-\", at most 128 bytes", model)
+}
+
+// LaunchOptions carries launch controls that are not part of the strict
+// Launch seam. Model is the run's agent model; empty keeps the agent's
+// default. CachedBase pins a retry to the exact accepted mirror commit
+// returned by a prior base-capture failure. AssignedRunID is reserved by
+// durable mission state and is never exposed through generic run.launch.
 type LaunchOptions struct {
+	Model         string
 	CachedBase    string
 	AssignedRunID RunID
 	// RequestedAccount is the account the launcher asked for, recorded on the
@@ -589,6 +604,9 @@ type Run struct {
 	Title   string
 	Harness string
 	Mode    LaunchMode
+	// Model is the agent's model for this run; empty keeps the agent's
+	// default.
+	Model string
 	// ACP is true when the server drives the agent over the Agent Client
 	// Protocol: every LaunchACP run, and a LaunchHeadless run whose agent
 	// serves ACP. Such a run has a session item log.

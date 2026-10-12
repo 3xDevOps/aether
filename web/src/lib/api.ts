@@ -8,8 +8,6 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
-  ConfigImportParams,
-  ConfigImportResult,
   ConfigRoot,
   CoordMessagesListResult,
   DaemonInstallResult,
@@ -42,6 +40,8 @@ import type {
   Mission,
   MissionCancelResult,
   MissionCreateResult,
+  MissionExecutionChoice,
+  MissionIntegrator,
   MissionListResult,
   MissionQuestionResult,
   MissionReplaceIntegratorResult,
@@ -426,6 +426,7 @@ export const api = {
     task?: string
     harness: string
     mode?: string
+    model?: string
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
@@ -520,16 +521,8 @@ export const api = {
     workspace_id: string
     objective: string
     accountable_human_id: string
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
-    execution_choices: Array<{
-      account_member_id: string
-      harness: string
-      mode: string
-    }>
+    integrator: MissionIntegrator
+    execution_choices: MissionExecutionChoice[]
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
     idempotency_key: string
@@ -541,11 +534,7 @@ export const api = {
   missionReplaceIntegrator: (params: {
     mission_id: string
     expected_generation: number
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
+    integrator: MissionIntegrator
     idempotency_key: string
   }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
   missionQuestionAnswer: (params: {
@@ -841,6 +830,7 @@ export const api = {
     task: string
     harness: string
     mode?: string
+    model?: string
   }) =>
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,
@@ -904,8 +894,6 @@ export const api = {
     call<FileRead>('config.read', params),
   configWrite: (params: { harness: string; path: string; content: string; revision: string }) =>
     call<FileRead>('config.write', params),
-  configImport: (params: ConfigImportParams) =>
-    call<ConfigImportResult>('config.import', params),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),

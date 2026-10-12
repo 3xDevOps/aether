@@ -59,6 +59,32 @@ func TestWorkerStartReturnsConfirmedLifecycle(t *testing.T) {
 	}
 }
 
+func TestWorkerStartPicksTheChoiceWithTheModel(t *testing.T) {
+	f := newMissionFixture(t)
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	start := func(model, key string) (any, error) {
+		return f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+			MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+			DispatchKey: key, Harness: "claude", Mode: string(domain.LaunchHeadless), Model: model, AccountOwnerID: string(f.member.ID),
+		})
+	}
+	if _, err := start("opus", "no-such-model"); err == nil || err.Error() != "mission: worker choice is not authorized" {
+		t.Fatalf("worker.start with a model no choice has = %v, want not authorized", err)
+	}
+	out, err := start("haiku", "haiku")
+	if err != nil {
+		t.Fatalf("worker.start with model haiku: %v", err)
+	}
+	attempt := out.(protocol.WorkerStartResult).Attempt
+	run, err := f.db.GetRun(context.Background(), domain.RunID(attempt.RunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempt.Model != "haiku" || run.Model != "haiku" {
+		t.Fatalf("attempt model %q, run model %q, want haiku", attempt.Model, run.Model)
+	}
+}
+
 func TestReconcilePromotesOnlyConfirmedLiveWorkers(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -55,21 +55,21 @@ func (p Profile) Switchable() bool {
 	return p.ACPSessionShared && p.SwitchVerified && len(p.ResumeArgs) > 0 && len(p.ACPArgs) > 0
 }
 
-func (p Profile) ResumeCommand(session string) []string {
+func (p Profile) ResumeCommand(session, model string) []string {
 	out := make([]string, len(p.ResumeArgs))
 	for i, a := range p.ResumeArgs {
 		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
 	}
-	return out
+	return append(out, p.ModelLaunchArgs(model)...)
 }
 
 // HeadlessResumeCommand continues session as a headless run with prompt.
-func (p Profile) HeadlessResumeCommand(session, prompt string) []string {
+func (p Profile) HeadlessResumeCommand(session, prompt, model string) []string {
 	out := make([]string, len(p.HeadlessResumeArgs))
 	for i, a := range p.HeadlessResumeArgs {
 		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
 	}
-	return Argv(out, prompt)
+	return Argv(out, prompt, p.ModelLaunchArgs(model))
 }
 
 // InstallCommand is the shell command that installs the agent into the member home.

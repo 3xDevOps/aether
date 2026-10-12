@@ -37,6 +37,7 @@ const (
 	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
 	TypeRunMode       Type = "run.mode"
+	TypeRunModel      Type = "run.model"
 	// TypeRunArchived carries a run's archive state: a nil ArchivedAt means
 	// the run was restored.
 	TypeRunArchived Type = "run.archived"
@@ -200,6 +201,15 @@ type RunModePayload struct {
 func (RunModePayload) EventType() Type { return TypeRunMode }
 
 func init() { registerPayload[RunModePayload](TypeRunMode) }
+
+// RunModelPayload reports the model a run's agent now uses.
+type RunModelPayload struct {
+	Model string `json:"model"`
+}
+
+func (RunModelPayload) EventType() Type { return TypeRunModel }
+
+func init() { registerPayload[RunModelPayload](TypeRunModel) }
 
 // RunArchivedPayload reports a run's archive state as RFC3339. A nil
 // ArchivedAt means the run was restored.

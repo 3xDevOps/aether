@@ -194,7 +194,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
-	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, task)
+	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, task, opts.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			requested := &domain.Run{
 				ID: opts.AssignedRunID, WorkspaceID: workspace,
 				MemberID: member, AccountMemberID: account, Task: task,
-				Harness: harness, Mode: mode,
+				Harness: harness, Mode: mode, Model: opts.Model,
 			}
 			if !sameReservedRun(existing, requested) || (opts.CachedBase != "" && opts.CachedBase != existing.BaseCommit) {
 				return nil, errors.New("scheduler: reserved run does not match launch request")
@@ -270,6 +270,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Task:            task,
 		Harness:         harness,
 		Mode:            mode,
+		Model:           opts.Model,
 		ACP:             acp,
 		Status:          domain.RunQueued,
 		BaseCommit:      base.Commit,

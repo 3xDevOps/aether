@@ -15,12 +15,14 @@ type MissionExecutionChoice struct {
 	AccountMemberID MemberID   `json:"account_member_id"`
 	Harness         string     `json:"harness"`
 	Mode            LaunchMode `json:"mode"`
+	Model           string     `json:"model,omitempty"`
 }
 
 type MissionIntegrator struct {
 	AccountMemberID MemberID   `json:"account_member_id"`
 	Harness         string     `json:"harness"`
 	Mode            LaunchMode `json:"mode"`
+	Model           string     `json:"model,omitempty"`
 }
 
 // MissionPhase is where a mission is in its life. A mission starts in
@@ -279,6 +281,7 @@ type AttemptReservation struct {
 	DispatchKey          string
 	Harness              string
 	Mode                 LaunchMode
+	Model                string
 	AssignedRunID        RunID
 	ActorRunID           RunID
 	AuthorizingHumanID   MemberID
@@ -297,6 +300,7 @@ type Attempt struct {
 	DispatchKey            string
 	Harness                string
 	Mode                   LaunchMode
+	Model                  string
 	State                  AttemptState
 	RunID                  RunID
 	ActorRunID             RunID

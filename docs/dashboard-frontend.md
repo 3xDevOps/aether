@@ -810,12 +810,12 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.protected` and `run.archived` follow the same fetch-first
-  rule on a run the client has never seen; `run.controller` skips an unknown
-  run, whose snapshot carries the holder. `run.account` likewise skips an
-  unknown run, and on a known one replaces `account_member_id` and
-  `requested_account_member_id` with the payload's, so the header names the
-  new account at once.
+  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  same fetch-first rule on a run the client has never seen; `run.controller`
+  skips an unknown run, whose snapshot carries the holder. `run.account`
+  likewise skips an unknown run, and on a known one replaces
+  `account_member_id` and `requested_account_member_id` with the payload's, so
+  the header names the new account at once.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or
@@ -1327,11 +1327,11 @@ button on any surface opens one by asking the store, with no dependence on
 the palette being on screen. The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
 does not include it. It lists the active workspace's templates over
-`template.list`, shows the chosen template's agent, mode and task, and
+`template.list`, shows the chosen template's agent, mode, model and task, and
 starts the run with `template.launch`, then reveals it.
 
 The launch form lives in `components/launch/`. Its **Run** tab asks for a
-task, an agent and a mode; an account appears only when one is shared with the
+task, an agent, a mode and a model; an account appears only when one is shared with the
 caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
@@ -1362,12 +1362,23 @@ stays disabled until one is written (`runLaunch` in
 `internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
 the wire: an empty task and `tui` are the server's defaults.
 
-The form remembers a mode per agent in the persisted `launchDefaults` slice
-(`{mode, at}` keyed by agent name). It preselects the
-launchable agent launched most recently, then the agent of the newest run,
-then the first launchable one, and starts in that agent's remembered mode,
-else its `default_mode` from `agent.list`, else Standard; a remembered mode
-the agent can no longer use shows as Standard.
+**Model**, under Mode, is free text sent as `model` on `run.launch` and
+passed to the agent as is ([per-agent flags](harnesses.md#launch-argv)); the
+help line is "Optional. The agent's own default when empty." Its placeholder
+suggests values for the chosen agent: Claude Code "opus, sonnet, haiku or a
+full model id", Codex "a model id such as gpt-5-codex", OpenCode
+"provider/model, such as anthropic/claude-sonnet-4-5", pi "provider/model,
+optionally :<thinking>", oh-my-pi "opus, gpt-5.2 or openai/gpt-5.2". An
+empty field sends no `model`. A model that is not a single argument is
+refused by `run.launch` and shown under "Launch failed".
+
+The form remembers a mode and a model per agent in the persisted
+`launchDefaults` slice (`{mode, model, at}` keyed by agent name). It
+preselects the launchable agent launched most recently, then the agent of
+the newest run, then the first launchable one, and starts in that agent's
+remembered mode, else its `default_mode` from `agent.list`, else Standard,
+with its remembered model; a remembered mode the agent can no longer use
+shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -1480,8 +1491,9 @@ agent's last terminal or Enhanced session title,
 line, else the task's first line cut at 120 characters, with a lock for a
 protected run), then a state line with the
 `StatusDot` (it pulses while Working, and stops under reduced motion), the
-reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`),
-"On `<name>`'s account (fallback)" when the run carries
+reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`)
+followed by the model when `run.model` is set ("Claude Code · Standard ·
+opus"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
 a `run.account` event updates it live when the run moves),
 the branch (click copies it) and the owner. Container queries on the state
@@ -2889,19 +2901,21 @@ work, starts a worker run per task, and combines the results." It asks for
 an objective, the **Integrator agent** (the same picker as Run, on the
 account under Options), **Integrator mode** (Standard by default; Enhanced
 when the agent supports it; Background disabled with the reason
-`mission.create` gives: it exits after one turn), **Agents for workers** (a
-checkbox row per installed agent and account, defaulting to the integrator
-account's first launchable agent) and **Worker mode**, which defaults to
-Background. Each worker choice is sent in the worker mode when its agent can
+`mission.create` gives: it exits after one turn), **Integrator model**
+(the same field as Run), **Agents for workers** (a checkbox row per
+installed agent and account, defaulting to the integrator account's first
+launchable agent; a ticked row has a model input, empty for the agent's
+default) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
 use it and in Standard otherwise; the row says so ("Runs Standard: no
 Enhanced support"). Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
-`mission.create` refuses an integrator whose exact account, `harness` and mode
-are not one of `execution_choices`, so the integrator's own choice is always
-sent; a worker choice with the same tuple is not sent twice, and the list is
-sorted by account, harness and mode, so the same set is always the same
+`mission.create` refuses an integrator whose exact account, `harness`, mode
+and `model` are not one of `execution_choices`, so the integrator's own
+choice is always sent; a worker choice with the same tuple is not sent twice,
+two choices that differ only in model are both sent, and the list is sorted
+by account, harness, mode and model, so the same set is always the same
 request. **Create swarm** starts the integrator, not the workers, toasts
 `Swarm created` and navigates to `missions/<server-issued-id>`; a refusal,
 such as `mission: coordination is unavailable`, appears in the dialog verbatim
@@ -3037,8 +3051,10 @@ integrator to continue.` Either adds `Last launch failure <time ago>:
 shows its error and is asked again on the next swarm refetch. Finished
 swarms show none of this; the server refuses a replacement there.
 
-**Replace integrator…** opens a dialog with the distinct accounts and agents
-from `execution_choices` and always sends mode `tui`, pins
+**Replace integrator…** opens a dialog with the distinct accounts and
+agent-and-model pairs from `execution_choices` (each listed as
+"<agent> · <model>" when it has a model), sends the choice's model,
+always sends mode `tui`, pins
 `expected_generation`, and reuses one idempotency key across retries.
 **Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
 when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
@@ -3326,9 +3342,9 @@ keeps the draft and its error. On a conflict, **Reload from server** replaces
 the document and discards that draft. **Discard edits** restores the last
 successfully loaded or saved content without fetching.
 All runs the member launches and their Environment mount one shared
-read-write persistent HOME, so accepted configuration imports and saves
-are visible to active and future runs; a tool may need to reload. Browser
-imports and Files edits do not create CLI snapshot history. Optional run
+read-write persistent HOME, so uploaded configuration and saves are
+visible to active and future runs; a tool may need to reload. Files edits
+do not create CLI snapshot history. Optional run
 snapshot pins are provenance, not isolated writable copies. Manual profile
 push and rollback overlay snapshot files into that same HOME without removing
 paths absent from the snapshot; rollback is not an exact-tree restore.
@@ -3432,7 +3448,8 @@ command and an optional Enhanced command, sent through `agent.register`.
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
 member's Profile and opens it with **Set it in Profile** rather than editing
-the identity itself; **GitHub**; and **Agent config files**.
+the identity itself; **GitHub**; and **Agent config files**, a prompt that
+has an agent on the member's computer upload its configuration.
 
 **Set up** opens `agent-setup.tsx`, three numbered steps: **Choose how runs
 show it**, **Install and log in** and **Check**. The first is
@@ -3551,49 +3568,32 @@ assert one string.
 
 ### Agent config files
 
-`src/components/profile-import.tsx` is the configuration importer, under the
-**Agent config files** disclosure on Agents and in onboarding's Agent step
-whenever `config.roots` and `config.import` are advertised, on both gateways,
-without a workspace. There is no separate route: typing "config files" in the
-command palette finds **Agents**, through the `keywords` its entry in
-`src/lib/surfaces.ts` carries.
+`src/components/agents/config-prompt.tsx` fills the **Agent config files**
+disclosure on Agents and in onboarding's Agent step whenever `config.roots`
+and `config.import` are advertised, on both gateways, without a workspace.
+There is no separate route: typing "config files" in the command palette
+finds **Agents**, through the `keywords` its entry in `src/lib/surfaces.ts`
+carries.
 
-`config.roots` supplies destinations such as `~/.claude` and their runtime
-exclusions. A unique basename selects the destination automatically; an
-unknown or ambiguous basename requires a choice before file bytes are read.
-Retained browser `File` handles allow the metadata preview to be recomputed
-after a destination change. Credential names in any path component and
-`*.pem` files are excluded before read; destination-specific
-`runtime_ignores` match exact root-relative paths or component prefixes
-case-sensitively.
+The browser reads and uploads nothing. The section gives the member a prompt
+to paste into a coding agent on the computer that has their configuration;
+that agent picks the files, asks the member, and uploads them with
+`aether config ls` and `aether config push`, so that computer needs the
+`aether` CLI linked to this server. The two sentences above the prompt say so and link
+the quickstart's install and link steps.
 
-The browser directory picker grants access to the directory the user selects
-even when the dashboard is server-hosted; it does not grant access to
-arbitrary local paths. The importer previews metadata and policy exclusions
-without reading file bytes. It transfers the entire eligible directory through
-sequential bounded requests, not a truncated selection. It retains at most the
-current batch's encoded payload and shows cumulative progress. Files above the
-64 MiB configuration-file ceiling and read failures are explicit errors.
-Server exclusions and exact committed paths accumulate across batches; a
-failure stops subsequent requests, distinguishing known commits from a request
-whose response was lost. A response with `error` shows committed counts,
-exact canonical `imported_paths` and the real error, and warns that copied
-files remain. A lost RPC response leaves the outcome unknown; inspect
-**Files** before importing again.
-
-After a result the user can select another directory or use **Open remote
-files**, which navigates to the `files` route. There is no automatic
-configuration sync, watcher, or import retry. Nonpersisted owner-scoped
-progress and results survive navigation; `configImportPending` serializes
-operations and protects against page unload. Each request rechecks identity
-after asynchronous reads, so a member/server switch prevents further writes
-and hides the old result. New browser-imported files use `0644`; existing
-remote modes are preserved on overwrite. The browser cannot preserve source
-executable bits or symlinks. Agent logins are separate from this import. See
+The prompt is `configPrompt` in `src/lib/config-prompt.ts`, a plain module
+so the Playwright spec can import it; the user docs print the same text byte
+for byte. It shows in a read-only, focusable monospace block that keeps its
+line breaks, wraps long lines and scrolls past 18rem. **Copy prompt** goes
+through `copyText` (`src/lib/clipboard.ts`): it toasts **Copied**, or, when
+the clipboard refuses, selects the whole prompt and toasts **Selected. Press
+Ctrl+C to copy.** **Open remote files** navigates to the `files` route, where
+the uploads show under **Agent config**. Agent logins are separate. See
 [Agent configuration](harnesses.md#agent-configuration-import-and-files) for
 the user workflow and [the
-protocol](local-gateway.md#files-and-member-configuration) for import result
-and failure semantics.
+protocol](local-gateway.md#files-and-member-configuration) for the
+`config.*` methods.
 
 ## Environment
 

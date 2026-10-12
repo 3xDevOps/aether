@@ -64,7 +64,8 @@ describe('templates view', () => {
     const dialog = within(await screen.findByRole('dialog'))
     fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep the flaky tests' } })
-    await pickOption(dialog.getByLabelText(/^Mode/), 'Standard')
+    await pickOption(dialog.getByLabelText(/^Mode$/), 'Standard')
+    fireEvent.change(dialog.getByLabelText(/^Model/), { target: { value: 'sonnet' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.templateSave).toHaveBeenCalledWith({
@@ -73,6 +74,7 @@ describe('templates view', () => {
       task: 'sweep the flaky tests',
       harness: 'claude',
       mode: 'tui',
+      model: 'sonnet',
     })
   })
 

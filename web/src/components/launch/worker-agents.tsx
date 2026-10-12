@@ -1,16 +1,18 @@
 import { launchable } from '@/components/launch/agent-picker'
+import { modelHints } from '@/components/launch/models'
 import { agentLabel, modeRefusal } from '@/components/launch/modes'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { AgentInfo, LaunchMode, Member } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
-export type WorkerChoice = { account_member_id: string; harness: string }
+export type WorkerChoice = { account_member_id: string; harness: string; model?: string }
 
 export function sameWorker(a: WorkerChoice, b: WorkerChoice): boolean {
-  return a.account_member_id === b.account_member_id && a.harness === b.harness
+  return a.account_member_id === b.account_member_id && a.harness === b.harness && (a.model ?? '') === (b.model ?? '')
 }
 
 function refusal(member: Member, agent: AgentInfo): string | null {
@@ -26,6 +28,7 @@ export function WorkerAgents({
   choices,
   mode,
   onToggle,
+  onModel,
 }: {
   accounts: Member[]
   agentsByAccount: Record<string, AgentInfo[]> | null
@@ -33,6 +36,7 @@ export function WorkerAgents({
   choices: WorkerChoice[]
   mode: LaunchMode
   onToggle: (choice: WorkerChoice, on: boolean) => void
+  onModel: (choice: WorkerChoice, model: string) => void
 }) {
   const rows = accounts.flatMap((member) => (agentsByAccount?.[member.id] ?? []).map((agent) => ({ member, agent })))
   return (
@@ -49,15 +53,15 @@ export function WorkerAgents({
       ) : (
         <ul className="flex flex-col">
           {rows.map(({ member, agent }) => {
-            const choice = { account_member_id: member.id, harness: agent.name }
-            const checked = choices.some((item) => sameWorker(item, choice))
+            const picked = choices.find((item) => item.account_member_id === member.id && item.harness === agent.name)
+            const checked = picked !== undefined
             const refused = refusal(member, agent)
             const fallback = checked ? modeRefusal(agent, agent.name, mode) : null
             const name = accounts.length > 1 ? `${member.display_name} · ${agentLabel(agent, agent.name)}` : agentLabel(agent, agent.name)
             return (
               <li key={`${member.id}:${agent.name}`}>
                 <label className={cn('flex min-h-7 min-w-0 items-center gap-2 rounded-control px-2 text-ui coarse:min-h-11', refused ? 'cursor-not-allowed text-muted' : 'cursor-pointer hover:bg-hover-chrome')}>
-                  <Checkbox checked={checked} disabled={!launchable(agent)} onCheckedChange={(on) => onToggle(choice, on === true)} />
+                  <Checkbox checked={checked} disabled={!launchable(agent)} onCheckedChange={(on) => onToggle(picked ?? { account_member_id: member.id, harness: agent.name }, on === true)} />
                   <AgentGlyph agent={agent.glyph ?? agent.name} colored={!refused} className="size-4" />
                   <span className="shrink-0">{name}</span>
                   {(refused || fallback) && (
@@ -66,6 +70,18 @@ export function WorkerAgents({
                     </span>
                   )}
                 </label>
+                {picked && (
+                  <div className="pr-2 pb-1 pl-8">
+                    <Input
+                      aria-label={`Model for ${name}`}
+                      placeholder={modelHints(agent.name).placeholder}
+                      value={picked.model ?? ''}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) => onModel(picked, event.target.value)}
+                    />
+                  </div>
+                )}
               </li>
             )
           })}

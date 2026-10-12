@@ -22,6 +22,7 @@ type Run struct {
 	Title           string `json:"title,omitempty"`
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
+	Model           string `json:"model,omitempty"`
 	ACP             bool   `json:"acp,omitempty"`
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
@@ -151,6 +152,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Title:               r.Title,
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
+		Model:               r.Model,
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
 		Reason:              r.Reason,
@@ -322,6 +324,8 @@ type RunLaunchParams struct {
 	Task        string `json:"task,omitempty"`
 	Harness     string `json:"harness"`
 	Mode        string `json:"mode,omitempty"`
+	// Model is passed to the agent as is; empty keeps the agent's default.
+	Model string `json:"model,omitempty"`
 	// Empty means the caller's own account.
 	AccountMemberID string `json:"account_member_id,omitempty"`
 	// CachedBase retries a transient base-capture failure with the accepted

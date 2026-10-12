@@ -124,6 +124,11 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             {modeLabel[run.mode] ?? run.mode}
           </span>
         </span>
+        {run.model && (
+          <span className="sr-only min-w-0 truncate @3xs/state:not-sr-only" title={run.model}>
+            {` · ${run.model}`}
+          </span>
+        )}
         {accountID && (
           <>
             <span aria-hidden>·</span>

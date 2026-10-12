@@ -103,7 +103,7 @@ export function TemplateDialog({ onClose }: { onClose: () => void }) {
             <div className="flex flex-col gap-1 rounded-panel bg-chrome px-3 py-2">
               <p className="flex items-center gap-1.5 text-ui-sm text-muted">
                 <AgentGlyph agent={selected.harness} />
-                {selected.harness} · {modeLabel(selected.mode)}
+                {selected.harness} · {modeLabel(selected.mode)}{selected.model && ` · ${selected.model}`}
               </p>
               <p className="max-h-32 overflow-y-auto text-ui break-words whitespace-pre-wrap text-text">{selected.task}</p>
             </div>

@@ -794,7 +794,8 @@ launch is refused and leaves no run row.
 
 When a strict mirror capture fails after a commit was already accepted, the
 error may include that exact accepted commit. The CLI can print the explicit
-retry:
+retry, which repeats the launch's agent, mode, `--model` when one was given,
+workspace, account and task:
 
 ```text
 aether run --cached-base <40-character-commit>

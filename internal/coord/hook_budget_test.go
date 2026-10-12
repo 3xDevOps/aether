@@ -20,6 +20,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
+// outsideEnhancedRun keeps an AETHER_ENHANCED inherited from an Aether run
+// container from short-circuiting the coordcli hooks under test.
+func outsideEnhancedRun(t *testing.T) {
+	t.Helper()
+	t.Setenv(coordtransport.EnhancedEnv, "")
+}
+
 func runContextHook(t *testing.T, socket string) (int, error) {
 	t.Helper()
 	return coordcli.Run(context.Background(), []string{"hook", "generic", "context"}, coordcli.Config{
@@ -44,6 +51,7 @@ func requireTransportConflict(t *testing.T, err error) {
 // Exercise the production CLI hook, not just the new wire method. The fixed
 // service clock prevents real elapsed time from replenishing either budget.
 func TestNativeHookBurstPreservesExplicitCoordination(t *testing.T) {
+	outsideEnhancedRun(t)
 	h := newHarness(t, 2, func(cfg *Config) {
 		cfg.Evidence = &coordReportEvidenceCapture{id: "after-hooks-evidence"}
 		cfg.WakeAdmission = allowHookWake
