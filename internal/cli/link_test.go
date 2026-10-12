@@ -161,6 +161,32 @@ func TestClaimOfTheCurrentServerKeepsItsLink(t *testing.T) {
 	}
 }
 
+func TestClaimFailsOnUnreadableKnownHostsBeforeTheCodeIsSpent(t *testing.T) {
+	w := newEdgeWorld(t)
+	r := w.relay(t, w.serverConfig(w.host))
+	w.signIn(t, r.URL)
+	code, _ := claimCode(t, w.serverID())
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(knownHosts, []byte("srv:2222 ssh-ed25519 not-base64!\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := Config{Addr: "srv:2222", User: "aether", KnownHosts: knownHosts}
+
+	res, err := Link(LinkOptions{Claim: code, EdgeURL: r.URL}, prev)
+	if err == nil {
+		_ = res.Conn.Close()
+		t.Fatal("Link claimed past a known_hosts it could not read")
+	}
+	if !strings.Contains(err.Error(), "known_hosts "+knownHosts) {
+		t.Fatalf("Link = %v, want the known_hosts error", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.requests) != 0 || len(r.users) != 0 {
+		t.Fatalf("the claim dialed before the check: requests %q, users %q", r.requests, r.users)
+	}
+}
+
 func TestClaimOfTheCurrentServerMovesItsGitRemote(t *testing.T) {
 	id := edgeproto.ServerID(mustSigner(t).PublicKey())
 	prev := Config{Addr: "srv:2222", User: "aether", Repo: "/src/repo"}

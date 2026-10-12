@@ -142,6 +142,24 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		keyGenerated string
 		err          error
 	)
+	serverID := opts.ServerID
+	switch {
+	case opts.Claim != "":
+		_, serverID, err = edgeproto.ParseClaimCode(opts.Claim)
+	case opts.Join != "":
+		_, serverID, _, _, err = edgeproto.ParseJoinLink(opts.Join)
+	}
+	if err != nil {
+		return LinkResult{}, fmt.Errorf("cli: %w", err)
+	}
+	// Checked before the dial: a claim dial spends its code, so nothing
+	// after it may fail on local state.
+	samePrev := false
+	if serverID != "" && prev.ServerID == "" {
+		if samePrev, err = prev.pins(serverID); err != nil {
+			return LinkResult{}, err
+		}
+	}
 	switch {
 	case opts.Claim != "":
 		conn, err = DialClaim(cfg, opts.Claim)
@@ -176,15 +194,8 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		_ = conn.Close()
 		return LinkResult{}, fmt.Errorf("protocol version %q is not %q", info.ProtocolVersion, protocol.Version)
 	}
-	if cfg.ServerID != "" && prev.ServerID == "" {
-		same, err := prev.pins(cfg.ServerID)
-		if err != nil {
-			_ = conn.Close()
-			return LinkResult{}, err
-		}
-		if same {
-			prev.ServerID = cfg.ServerID
-		}
+	if samePrev {
+		prev.ServerID = cfg.ServerID
 	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
 }

@@ -609,6 +609,38 @@ describe('a join link handed to the dashboard', () => {
     expect(join.queryByRole('button', { name: 'Join' })).toBeNull()
   })
 
+  it('offers a new sign-in when the invitation is for another account, then joins with it', async () => {
+    handOver()
+    seed()
+    const other = { ...account, id: 'acct_bbbbbbbbbbbbbbbbbbbbbbbbbb', login: 'hubot' }
+    const wrong = new ApiError(403, 'this invitation is for octocat, and this device signed in as hubot', undefined, {
+      refusal: { kind: 'join-wrong', user: 'octocat', account: 'hubot' },
+    })
+    const localEdgeStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ edges: [{ edge, account: other }] })
+      .mockResolvedValue({ edges: [{ edge, account }], login: { ...pending, state: 'signed_in', account } })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus,
+      localEdgeLogin: vi.fn(async () => pending),
+      localEdgeJoin: vi.fn().mockRejectedValueOnce(wrong).mockResolvedValue(linkResult),
+    })
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    expect((await join.findByRole('alert')).textContent).toContain('this invitation is for octocat')
+    expect(join.queryByRole('button', { name: 'Join' })).toBeNull()
+    fireEvent.click(join.getByRole('button', { name: 'Sign in with another account' }))
+
+    expect(client.localEdgeLogin).toHaveBeenCalledWith(edge)
+    expect((await join.findByText(/This device is signed in/, undefined, { timeout: 3000 })).textContent).toContain('as octocat')
+    fireEvent.click(join.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+  })
+
   it('follows the gateway onto the joined server when the join ends after the panel closed', async () => {
     handOver()
     seed()

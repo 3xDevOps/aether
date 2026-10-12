@@ -323,6 +323,7 @@ function JoinPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<{ refusal: EdgeRefusal; text: string } | null>(null)
+  const [wrongAccount, setWrongAccount] = useState(false)
   const live = useRef(true)
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -334,9 +335,14 @@ function JoinPanel({
     }
   }, [])
 
+  useEffect(() => {
+    if (phase.name === 'waiting') setWrongAccount(false)
+  }, [phase.name])
+
   const attempt = async () => {
     setBusy(true)
     setError(null)
+    setWrongAccount(false)
     try {
       const result = await client.localEdgeJoin(link)
       if (result.remote_error) toast.error(result.remote_error)
@@ -353,6 +359,7 @@ function JoinPanel({
         return
       }
       setPending(null)
+      if (refusal?.kind === 'join-wrong' && refusal.user && refusal.account) setWrongAccount(true)
       if (refusal?.kind === 'not-signed-in' || refusal?.kind === 'token-revoked') setPhase({ name: 'signed-out' })
       setError(message(err))
     } finally {
@@ -391,7 +398,14 @@ function JoinPanel({
         Join <span className="font-code">{join.server}</span> as the invited account?
       </p>
       {error && <ErrorLine>{error}</ErrorLine>}
-      {account ? (
+      {account && wrongAccount ? (
+        <>
+          <SignInProgress signIn={signIn} />
+          <Button size="sm" disabled={signIn.starting} onClick={() => void signIn.signIn()}>
+            {signIn.starting ? 'Signing in…' : 'Sign in with another account'}
+          </Button>
+        </>
+      ) : account ? (
         <>
           <p>
             This device is signed in to <span className="font-code">{edgeHost(join.edge)}</span> as{' '}
