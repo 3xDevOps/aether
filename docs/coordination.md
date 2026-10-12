@@ -901,11 +901,11 @@ The integrator always runs in Standard or Enhanced mode (`tui` or `acp`):
 (`headless`) with `-32602` and
 `integrator mode must be tui or acp: a headless integrator exits after one
 turn and cannot be asked or told`. `mission.create` needs the integrator's exact
-account, agent, and mode among the execution choices;
-`mission.replace-integrator` accepts any listed account and agent in Standard
-or Enhanced, so a swarm whose choices are all Background can still get an
-interactive integrator; `aether swarm replace-integrator` always asks for
-Standard (`tui`). Both refuse, with `-32602` and `integrator harness <name> cannot
+account, agent, mode, and model among the execution choices;
+`mission.replace-integrator` accepts any listed account, agent and model in
+Standard (`tui`), so a swarm whose choices are all Background can still get
+an interactive integrator; `aether swarm replace-integrator` sends the model
+`--model` names, empty for the agent's default. Both refuse, with `-32602` and `integrator harness <name> cannot
 launch in <mode> mode: <cause>`, an agent the integrator's run owner cannot
 start in that mode on that account, such as one whose definition the run owner no
 longer has, or the run owner's own member-defined agent on another
@@ -1069,9 +1069,12 @@ above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
 /usr/local/bin/aether-internal worker start --task-id task-example --harness claude
 ```
 
-`--harness`, `--mode`, and `--account-owner-id` select one approved execution
-choice and may be omitted when only one choice matches; an ambiguous selection
-is refused with every choice listed. The mission, integrator generation, and
+An execution choice is the tuple account, agent, mode, and model.
+`--harness`, `--mode`, `--account-owner-id`, and `--model` select one
+approved execution choice and may be omitted when only one choice matches;
+an ambiguous selection is refused with every choice listed. The worker runs
+the chosen choice's model, passed to the agent as is; an empty model keeps
+the agent's default. The mission, integrator generation, and
 current task revision are read from the assignment, and the dispatch key
 defaults to `<task-id>-r<revision>`. The dispatch key is also the idempotency
 key, so replaying the same start cannot create a second attempt. Worker

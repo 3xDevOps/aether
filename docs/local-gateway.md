@@ -439,6 +439,16 @@ finished run, leaves it alone. It is absent on a run whose status last
 changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
+`run.launch`, `template.save` and `worker.start` take an optional `model`,
+and `mission.create` takes one on the integrator and on each of
+`execution_choices`; it is passed to the agent as is, and empty keeps the
+agent's default ([harnesses.md](harnesses.md#launch-argv)). A model with
+whitespace or control characters, a leading `-`, or more than 128 bytes is
+`-32602` with
+`model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes`.
+Run snapshots and templates carry the `model` they launch with, omitted when
+empty.
+
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of
@@ -702,7 +712,7 @@ call is refused with `-32602`, and with a lease another session holds with
 | --- | --- | --- |
 | `run.input.answer` | `{run_id, request_id, option_id, values, control_session_id, control_generation}`; `values` is the form answer object for `accept` on a form question, omitted otherwise | `{}`; a request already answered or cancelled is `-32003` with `data.reason` `already_answered` |
 | `run.acp.cancel` | `{run_id, control_session_id, control_generation}` | `{}`; pending requests are answered `cancelled` |
-| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item |
+| `run.acp.set_option` | `{run_id, option_id, value, control_session_id, control_generation}`; `value` is a value id string or a boolean | `{}`; the agent's new option list arrives as a `config_options` item. A model selection also updates the run's `model`, so a reopened session keeps it |
 | `run.acp.history` | `{run_id, before_seq, limit}` (View); `before_seq` 0 reads from the newest, `limit` at most 1000 | `{frames: [...], oldest_seq, truncated_before?}`, oldest first, cut like stream frames; metadata and items are one atomic retained page |
 | `run.acp.item` | `{run_id, seq}` (View) | `{item: {...}}`, whole; expired IDs return unavailable with an explicit retained-history expiry message, missing IDs return not-found |
 | `run.mode.switch` | `{run_id, mode, control_session_id, control_generation}`; `mode` is `tui` (Standard) or `acp` (Enhanced); the lease may be omitted while nobody holds the run's control | `{run: {...}}` once the switch is done; see [Switching a running agent](enhanced-runs.md#switching-a-running-agent) |

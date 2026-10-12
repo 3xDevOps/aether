@@ -1025,6 +1025,38 @@ instruction overlays are merged over both. pi never asks.
 `TestEveryShippedAgentRunsWithoutPermissionPrompts` in `internal/harness`
 names each agent's setting.
 
+A **model** chosen at launch (`aether run --model <model>`, the **Model**
+field in the dashboard) is passed to the agent as is; empty keeps the agent's
+default. Each agent's flags, read from its CLI help on 2026-10-11:
+
+| `--agent` | Standard, Background, resume | Enhanced |
+| --- | --- | --- |
+| `claude` | `--model <model>` (alias such as `opus`, `sonnet`, or a full name) | `model` option, else `session/set_model` |
+| `codex` | `-m, --model <MODEL>` on `codex`, `codex exec`, `codex resume` | `model` option, else `session/set_model` |
+| `pi` | `--model <pattern>` (`provider/id`, optional `:<thinking>`) | `model` option, else `session/set_model` |
+| `omp` | `--model=<value>` (fuzzy: `opus`, `gpt-5.2`, `openai/gpt-5.2`) | `omp acp` has no model flag; `model` option, else `session/set_model` |
+| `opencode` | `-m, --model provider/model` on `opencode` and `opencode run`, plus `model` in `OPENCODE_CONFIG_CONTENT` | `model` in `OPENCODE_CONFIG_CONTENT`, then the session option |
+| custom definition, `fake` | refused | refused |
+
+The flag goes into argv before the task, so a CLI that stops parsing options
+at the prompt still reads it; a resume command has no task, so the flag is
+appended. `opencode acp` has no model flag, so every `opencode` launch also
+gets `model` in `OPENCODE_CONFIG_CONTENT`, merged after the workspace's
+variables: a per-run model beats a workspace default. An Enhanced run sets
+the model over ACP after the session opens; see
+[Enhanced runs](enhanced-runs.md#launch-one). A custom definition or `fake`
+has no model flag, and a launch with a model is refused:
+
+```text
+scheduler: agent "custom" has no model flag; launch it without a model
+```
+
+A model that is not a single argument is refused before launch:
+
+```text
+model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
+```
+
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
 `--verbose` comes with it. If a launch fails with the CLI rejecting its own
@@ -1035,7 +1067,8 @@ An argv override replaces the shipped template wholesale, so a registry fix
 never reaches it: a deployment's `--agent-definitions` entry that redefines
 a shipped agent has to be updated on its own. It keeps the registry's key
 passthrough, launch env, OpenCode's permission overlay and Enhanced starting
-mode for that name, since none is part of the command line.
+mode for that name, since none is part of the command line. It also keeps
+that agent's model flag, since the override runs the same CLI.
 
 ## Setting up an agent
 
@@ -1245,7 +1278,8 @@ name the executable and provide both Standard (`TUIArgs`) and Background
 is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
-configured. Deny names are basenames only.
+configured. Deny names are basenames only. A definition under a name Aether
+does not ship has no model flag, so a launch of it with a model is refused.
 
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,
