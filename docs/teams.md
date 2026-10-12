@@ -745,6 +745,9 @@ aether run --template nightly-triage [--param key=value]
 aether template delete nightly-triage
 ```
 
+`template save` refuses a `--model` the agent has no model flag for, with
+`scheduler: agent "<agent>" has no model flag; launch it without a model`.
+
 ```sh
 aether schedule list
 aether schedule set nightly-triage "0 6 * * *"

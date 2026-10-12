@@ -70,7 +70,7 @@ func (s *Server) templateList(ctx context.Context, _ domain.MemberID, params jso
 	return out, nil
 }
 
-func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) templateSave(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.templates()
 	if perr != nil {
 		return nil, perr
@@ -92,6 +92,15 @@ func (s *Server) templateSave(ctx context.Context, _ domain.MemberID, params jso
 		Model:       p.Model,
 		Params:      p.Params,
 		BudgetUSD:   p.BudgetUSD,
+	}
+	if validator, ok := s.cfg.Runs.(LaunchValidator); ok && p.Model != "" {
+		mode := t.Mode
+		if mode == "" {
+			mode = domain.LaunchHeadless
+		}
+		if err := validator.ValidateMissionLaunch(ctx, member, member, t.Harness, mode, t.Model); err != nil {
+			return nil, invalidParams(err.Error())
+		}
 	}
 	if err := svc.Save(ctx, t); err != nil {
 		return nil, templateError(err)

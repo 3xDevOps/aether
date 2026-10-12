@@ -41,6 +41,12 @@ type RunLauncherWithOptions interface {
 	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
 }
 
+// LaunchValidator is implemented by schedulers that can resolve a launch
+// without starting it.
+type LaunchValidator interface {
+	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model string) error
+}
+
 var errLaunchOptionsUnsupported = errors.New("sshd: launch options (a cached base or a model) are not supported")
 
 func launchWithOptions(ctx context.Context, runs RunController, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {

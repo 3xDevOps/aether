@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -48,9 +49,12 @@ func (l capturedLauncher) LaunchWithOptions(ctx context.Context, workspace domai
 	return run, err
 }
 
-func templateEnv(t *testing.T, clock *testClock) *testEnv {
+func templateEnv(t *testing.T, clock *testClock, mods ...func(*Config)) *testEnv {
 	t.Helper()
 	return newTestEnv(t, func(c *Config) {
+		for _, mod := range mods {
+			mod(c)
+		}
 		svc, err := templates.New(templates.Config{
 			Store:    c.Store,
 			Bus:      c.Bus,
@@ -197,6 +201,48 @@ func TestTemplateLaunchedByHandAndByScheduleWithCapturedProvenance(t *testing.T)
 	}
 	if calls := e.runs.Calls(); len(calls) != 3 {
 		t.Fatalf("calls after demotion = %v, want no further launches", calls)
+	}
+}
+
+// validatingRuns refuses a model for the "fake" agent the way the scheduler
+// refuses a model for an agent with no model flag.
+type validatingRuns struct {
+	*fakeRuns
+}
+
+func (validatingRuns) ValidateMissionLaunch(_ context.Context, _, _ domain.MemberID, harness string, _ domain.LaunchMode, model string) error {
+	if harness == "fake" && model != "" {
+		return fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harness)
+	}
+	return nil
+}
+
+func TestTemplateSaveRefusesModelTheAgentCannotTake(t *testing.T) {
+	t.Parallel()
+	clock := &testClock{now: time.Date(2026, 8, 13, 3, 0, 0, 0, time.UTC)}
+	e := templateEnv(t, clock, func(c *Config) {
+		c.Runs = validatingRuns{fakeRuns: c.Runs.(*fakeRuns)}
+	})
+	control := controlAs(t, e, e.signer)
+	save := protocol.TemplateSaveParams{
+		WorkspaceID: string(e.ws.ID),
+		Name:        "nightly",
+		Task:        "triage",
+		Harness:     "fake",
+		Mode:        "headless",
+		Model:       "opus",
+	}
+
+	var pe *protocol.Error
+	err := control.Call(protocol.MethodTemplateSave, save, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams ||
+		pe.Message != `scheduler: agent "fake" has no model flag; launch it without a model` {
+		t.Fatalf("template.save with a model = %v, want the no-model-flag refusal", err)
+	}
+
+	save.Model = ""
+	if err := control.Call(protocol.MethodTemplateSave, save, nil); err != nil {
+		t.Fatalf("template.save without a model: %v", err)
 	}
 }
 
