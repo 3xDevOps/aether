@@ -864,10 +864,10 @@ on screen, which names what actually failed, with a **Server address** button
 on it. That screen also carries the link to [privacy.md](privacy.md), the
 only place the app itself shows one.
 
-`aether://run/<id>` opens the app on that run, the same link the desktop shell
-handles. `aether://join?…` and `aether://claim?…` open the Connect step, which
-shows the link and the `aether link` command to run on a computer: the app
-reaches servers over a tailnet, not an edge.
+The app opens only `aether://run/<id>`, on that run, the same link the
+desktop shell handles. Open a join or claim link on a computer, with the
+desktop app or `aether link`: the app reaches servers over a tailnet, not an
+edge, and the dashboard it shows is served by the server it points at.
 
 The back gesture walks the dashboard's history and then sends the app to the
 background instead of closing it, so a terminal keeps its scrollback. Links

@@ -24,22 +24,36 @@ export function parseClaim(input: string): { code: string; edge?: string } {
  * `aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`.
  * The server checks the secret. Null when the text is neither. */
 export function parseJoin(input: string): { edge: string; server: string; invitation: string } | null {
+  const text = input.trim()
   let url: URL
   try {
-    url = new URL(input.trim())
+    url = new URL(text)
   } catch {
     return null
   }
   if (!url.hash.slice(1)) return null
   if (url.protocol === 'https:') {
     const ids = /^\/join\/([^/]+)\/([^/]+)$/.exec(url.pathname)
-    if (ids) return { edge: url.origin, server: ids[1], invitation: ids[2] }
+    // URL.origin drops an explicit :443, which edgeproto.Origin keeps.
+    const host = /^https:\/\/([^/?#]+)/i.exec(text)?.[1]
+    if (ids && host) return { edge: `https://${host.toLowerCase()}`, server: ids[1], invitation: ids[2] }
   }
   if (url.protocol === 'aether:' && url.host === 'join') {
     const edge = url.searchParams.get('edge')
     const server = url.searchParams.get('server')
     const invitation = url.searchParams.get('invitation')
-    if (edge && server && invitation) return { edge, server, invitation }
+    if (edge && relayOrigin(edge) && server && invitation) return { edge, server, invitation }
   }
   return null
+}
+
+/** Whether edge is https://host[:port] and nothing else, as desktop/main.js
+ * checks. URL.origin drops an explicit :443, which edgeproto.Origin keeps. */
+function relayOrigin(edge: string): boolean {
+  try {
+    const url = new URL(edge)
+    return url.protocol === 'https:' && (edge === url.origin || edge === `${url.origin}:443`)
+  } catch {
+    return false
+  }
 }

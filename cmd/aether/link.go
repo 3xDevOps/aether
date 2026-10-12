@@ -225,8 +225,8 @@ const joinRetry = 5 * time.Second
 
 // linkWaiting links as cli.Link does. A join refused because its device
 // waits for approval is tried again every joinRetry until it is admitted
-// or refused otherwise; the approval code is never shown, since an admin
-// approves the device from the dashboard.
+// or refused otherwise. The approval code is shown only when the server
+// sends one, because nobody can approve the device in the app.
 func linkWaiting(opts cli.LinkOptions, prev cli.Config) (cli.LinkResult, error) {
 	waiting := false
 	for {
@@ -236,7 +236,11 @@ func linkWaiting(opts cli.LinkOptions, prev cli.Config) (cli.LinkResult, error) 
 			return result, err
 		}
 		if !waiting {
-			fmt.Printf("waiting for an admin of %s to approve this device (%s, %s)…\n", refused.Server, refused.Device, refused.Fingerprint)
+			if refused.ApprovalCode != "" {
+				fmt.Println(refused.Error())
+			} else {
+				fmt.Printf("waiting for an admin of %s to approve this device (%s, %s)…\n", refused.Server, refused.Device, refused.Fingerprint)
+			}
 			waiting = true
 		}
 		time.Sleep(joinRetry)

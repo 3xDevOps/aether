@@ -54,11 +54,22 @@ type Phase =
 function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: string; serverID: string }) {
   const [phase, setPhase] = useState<Phase>({ name: 'idle' })
   const [error, setError] = useState<string | null>(null)
+  const [known, setKnown] = useState<EdgeAccount | null>(null)
   const live = useRef(true)
   const busy = useRef(false)
   useEffect(() => () => {
     live.current = false
   }, [])
+  useEffect(() => {
+    client.localEdgeStatus().then(
+      (status) => {
+        if (live.current) setKnown(status.edges.find((e) => e.edge === edgeURL)?.account ?? null)
+      },
+      (err: unknown) => {
+        if (live.current) setError(message(err))
+      },
+    )
+  }, [client, edgeURL])
 
   const signedIn = async (): Promise<EdgeAccount> => {
     const status = await client.localEdgeStatus()
@@ -82,6 +93,7 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
     setError(null)
     try {
       const account = await signedIn()
+      if (live.current) setKnown(account)
       setPhase({ name: 'connecting', account })
       const { code } = await client.serverEdgeClaimCode()
       // The gateway is shared, so another tab may have relinked it since.
@@ -99,7 +111,9 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
   return (
     <div className="flex min-w-0 flex-col items-start gap-2 text-ui-sm">
       {phase.name === 'idle' && (
-        <Button size="sm" onClick={() => void connect()}>Connect my GitHub account</Button>
+        <Button size="sm" onClick={() => void connect()}>
+          {known ? `Connect my GitHub account (${known.login ?? known.subject})` : 'Connect my GitHub account'}
+        </Button>
       )}
       {phase.name === 'signing-in' && (
         <p>

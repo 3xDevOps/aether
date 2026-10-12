@@ -521,6 +521,52 @@ describe('a join link handed to the dashboard', () => {
     expect(client.localEdgeJoin).toHaveBeenCalledTimes(2)
   })
 
+  it('shows the console command when nobody can approve in the app, and keeps asking', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    handOver()
+    seed()
+    const text = 'device "laptop", signed in as github account octocat, is waiting for approval. Approve it as an admin:\n  aether device approve abcd-efgh\nor on the server:\n  sudo aether-server device approve abcd-efgh'
+    const pendingDevice = new ApiError(409, text, undefined, {
+      refusal: { kind: 'device-pending', server: 'build-box', device: 'laptop', fingerprint: 'SHA256:devicekeyexample', approval_code: 'abcd-efgh' },
+    })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn().mockRejectedValueOnce(pendingDevice).mockResolvedValue(linkResult),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    const waiting = await screen.findByRole('status')
+    expect(waiting.textContent).toContain('sudo aether-server device approve abcd-efgh')
+    expect(within(waiting).queryByText(/^Waiting for an admin/)).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(2)
+  })
+
+  it('offers Sign in again when the edge revoked the saved token', async () => {
+    handOver()
+    seed()
+    const revoked = new ApiError(503, 'the edge revoked this device token; sign in again', undefined, {
+      refusal: { kind: 'token-revoked' },
+    })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn().mockRejectedValue(revoked),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    expect(await join.findByRole('button', { name: 'Sign in' })).toBeDefined()
+    expect(join.getByRole('alert').textContent).toContain('the edge revoked this device token')
+    expect(join.queryByRole('button', { name: 'Join' })).toBeNull()
+  })
+
   it('follows the gateway onto the joined server when the join ends after the panel closed', async () => {
     handOver()
     seed()

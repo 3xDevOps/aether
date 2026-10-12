@@ -131,7 +131,7 @@ connection.
 | --- | --- | --- |
 | A stolen GitHub account plus the join link sent to it | The whole join, with the invited role | A pending device; access also needs an admin's click after seeing its label, account, fingerprint, member and role |
 | A stolen GitHub account without the link | Refused with `<account> is invited to this server; open the invitation link the admin sent, or run: aether link <link>`; nothing is recorded (`TestInvitations`) | The same (`TestJoinByLink` in `internal/sshd`) |
-| Own-device approval | Not needed | One click from an approved device of the same member; a pending device completes no handshake, so it cannot approve itself (`TestApproveDeviceByID` in `internal/sshd`) |
+| Own-device approval | Not needed | One click from an approved device of the same member; a pending device completes no handshake, so it cannot approve itself (`TestApproveDeviceByID` and, for a member approving their own device, `TestMemberApprovesOwnDeviceByID`, both in `internal/sshd`) |
 | `server.edge.claimcode` | Answered only for an admin on an approved device, member SSH key or tailnet connection; a registered device gets no code (`TestServerEdgeClaimCode` in `internal/sshd`) | The same; a pending device cannot connect at all (`TestAdminConnectsTheirAccount`) |
 
 Neither policy rests on OAuth being weaker or SSH keys stronger. The
@@ -148,7 +148,7 @@ With a member's GitHub account, the edge honest:
 | As an admin | Invite accounts, mint invite codes, change roles, link accounts, transfer ownership. Not approve a device: a registered device approves nothing (`TestAccountAccess`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
 | Accept an invitation addressed to the member | Only with its join link, which the admin sends outside the edge; with it, yes, with its role (`TestInvitations`) | Only with the link, and then the device waits on the invitation. No member is created, no account bound and the invitation stays open until an admin approves the device (`TestJoinByLink`, `TestInvitationWaitsUntilOneDeviceIsApproved` in `internal/sshd`) |
 | Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a GitHub account](#recovering-a-github-account)) | A pending device and a device token remain, with no access |
-| Get a device approved | Not needed | Only by an admin's, or the member's own, click on its Needs you card, which shows the device label, account, key fingerprint, and the member and role it admits as. Its code reaches the device only when it admits as the only admin, who has no approved device; the machine's administrator who types it is shown the same before answering `y` (`TestApprovalCodeOnlyWithoutAnInAppApprover` in `internal/sshd`) |
+| Get a device approved | Not needed | Only by an admin's, or the member's own, click on its Needs you card, which shows the device label, account, key fingerprint, and the member and role it admits as. Its code reaches the device only when it admits as the only admin, who has no approved device; the machine's administrator who types it is shown the same before answering `y` (`TestApprovalCodeOnlyWithoutAnInAppApprover` in `internal/sshd`). The code is 40 bits, and a code naming two waiting devices approves neither (`GetDeviceByApprovalCode` in `internal/store`) |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
 | Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Members > Devices tab and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
 
@@ -169,6 +169,7 @@ With the edge, or its signing key:
 | Impersonate a server to a linked client | No: the host key must derive the linked id (`TestEnrollmentSignatureIsNotAHostSignature`) | No |
 | Send a client that is linking for the first time to another server | Yes, by listing a false id, unless the person links by a join or claim link, or by an id from the server's admin ([First link](#first-link-and-server-identity)) | The same |
 | Take a claim | No: the code travels inside SSH, and the server refuses a claim whose grant names another account than the client's (`TestClaim`, `TestMaliciousEdgeSubstitutesTheClaimingAccount`). An edge that also lied to the client at sign-in about which account it is could claim for its own account; `aether login`, `aether link --claim` and the dashboard's claim form show the account the edge reported before the code is sent | The same |
+| Forge a `claimed` report | Fails: an owner is recorded only from a claim connection opened for that account (`TestClaimReportNeedsTheServersOwnClaimConnection` in `internal/edge/relay`) | The same |
 | Learn who connects to which server, when, from where; deny service | Yes | Yes |
 
 Tests named without a package are in `internal/edge/edgetest` ([testing.md](testing.md#the-edge-suite)).
@@ -972,9 +973,10 @@ link goes through one ([local-gateway.md](local-gateway.md)).
 
 The desktop app opens `aether://join` and `aether://claim` links at
 onboarding's Connect step, which joins with the local gateway's
-`edge.join` or claims with `edge.claim`. The Android app's dashboard has no
-local gateway, so the same links show the link and the `aether link`
-command to run on a computer
+`edge.join` or claims with `edge.claim`. The Android app opens only
+`aether://run/<id>`: its dashboard is served by the server the phone points
+at, which must not read a secret meant for another server. Open a join or
+claim link on a computer, with the desktop app or `aether link`
 ([dashboard-frontend.md](dashboard-frontend.md#onboarding-wizard)).
 
 ## Running an edge

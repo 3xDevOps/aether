@@ -161,17 +161,12 @@ func deviceByCode(ctx context.Context, ids store.IdentityStore, code string) (*d
 	return dev, nil
 }
 
-// deviceByID returns the device id names, which must await approval.
-func deviceByID(ctx context.Context, ids store.IdentityStore, id string) (*domain.Device, *protocol.Error) {
-	dev, err := ids.GetDevice(ctx, domain.DeviceID(id))
-	if err != nil {
-		return nil, rpcError(err)
+func awaitingApproval(dev *domain.Device) *protocol.Error {
+	if dev.Status.AwaitsApproval() {
+		return nil
 	}
-	if !dev.Status.AwaitsApproval() {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-			"device %s is %s, not waiting for approval", dev.ID, dev.Status)}
-	}
-	return dev, nil
+	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+		"device %s is %s, not waiting for approval", dev.ID, dev.Status)}
 }
 
 // memberDeviceLookup shows the approver of a code or a device id which
@@ -193,14 +188,19 @@ func (s *Server) memberDeviceLookup(ctx context.Context, member domain.MemberID,
 	}
 	var dev *domain.Device
 	if p.DeviceID != "" {
-		dev, perr = deviceByID(ctx, ids, p.DeviceID)
-	} else {
-		dev, perr = deviceByCode(ctx, ids, p.Code)
-	}
-	if perr != nil {
+		var err error
+		if dev, err = ids.GetDevice(ctx, domain.DeviceID(p.DeviceID)); err != nil {
+			return nil, rpcError(err)
+		}
+	} else if dev, perr = deviceByCode(ctx, ids, p.Code); perr != nil {
 		return nil, perr
 	}
+	// The status is checked only once the caller may act on the device, so
+	// it is not revealed for another member's device.
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceLookup); perr != nil {
+		return nil, perr
+	}
+	if perr := awaitingApproval(dev); perr != nil {
 		return nil, perr
 	}
 	id, name, role, err := s.admitsAs(ctx, ids, dev)
@@ -237,8 +237,11 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		if dev, perr = deviceByCode(ctx, ids, p.Code); perr != nil {
 			return nil, perr
 		}
-	} else if dev, perr = deviceByID(ctx, ids, p.DeviceID); perr != nil {
-		return nil, perr
+	} else {
+		var err error
+		if dev, err = ids.GetDevice(ctx, domain.DeviceID(p.DeviceID)); err != nil {
+			return nil, rpcError(err)
+		}
 	}
 	invitation := dev.Invitation
 	if invitation != "" {
@@ -248,6 +251,9 @@ func (s *Server) memberDeviceApprove(ctx context.Context, member domain.MemberID
 		defer s.registerMu.Unlock()
 	}
 	if perr := s.actingOnDevice(ctx, ids, member, dev, protocol.MethodMemberDeviceApprove); perr != nil {
+		return nil, perr
+	}
+	if perr := awaitingApproval(dev); perr != nil {
 		return nil, perr
 	}
 	if string(dev.ID) != p.DeviceID {

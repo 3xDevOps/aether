@@ -75,7 +75,8 @@ func (s *Server) ServeEdgeConn(ctx context.Context, nc net.Conn, grant edgeproto
 // code. Its refusals are the edgeproto claim refusals. On success the
 // grant's account is an admin's identity and the device key is approved,
 // under either access policy, because the code came from this machine's
-// console. The connection then continues as that member's.
+// console or from server.edge.claimcode, which answers only an approved
+// admin. The connection then continues as that member's.
 func (s *Server) ServeEdgeClaim(ctx context.Context, nc net.Conn, grant edgeproto.Grant, attempt func(code string, claim func(admin string) error) error) {
 	if grant.Kind != edgeproto.KindClaim {
 		slog.Warn("sshd: relayed claim refused: grant is not for a claim", "kind", grant.Kind)

@@ -127,4 +127,8 @@ func TestMemberApprovesOwnDeviceByID(t *testing.T) {
 	if got := deviceStatus(t, e, laptop); got != domain.DeviceApproved {
 		t.Fatalf("octo's laptop after octo approved it = %s, want approved", got)
 	}
+	lookup, _ := json.Marshal(protocol.MemberDeviceLookupParams{DeviceID: string(pending.ID)})
+	if _, perr := e.srv.dispatch(withDevice(malloryPhone.Member, malloryPhone), malloryPhone.Member, protocol.MethodMemberDeviceLookup, lookup); perr == nil || perr.Code != protocol.CodeDenied {
+		t.Fatalf("collaborator looking up another member's approved device by id = %v, want CodeDenied", perr)
+	}
 }

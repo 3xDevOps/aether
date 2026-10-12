@@ -79,8 +79,10 @@ dashboard URL and load that.
 The fragment keys `join` and `claim` carry the other two deep links,
 `aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`
 and `aether://claim?edge=<relay origin>&server=<server id>#<secret>`
-([edge.md](edge.md#join-page)). Each shell checks every part of the link
-and refuses any other shape, then appends the whole link URL-encoded as
+([edge.md](edge.md#join-page)). Only the desktop shell handles them; the
+Android app's dashboard is served by the server it points at, not a local
+gateway. The desktop shell checks every part of the link and refuses any
+other shape, then appends the whole link URL-encoded as
 `#join=<link>` or `#claim=<link>`; a browser never sends a fragment to the
 dashboard's server. The dashboard takes the fragment off the address
 (`replaceState`) on first load, or on `hashchange` when the page is

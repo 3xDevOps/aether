@@ -56,7 +56,7 @@ it('claims with the code server.edge.claimcode issues and shows the new owner', 
     serverEdge: vi.fn(async () => ({ ...ownerless, owner: { provider: 'github', login: 'octo' }, claimed: true })),
   })
   render(<RemoteAccessSection client={client} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Connect my GitHub account' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
   await screen.findByText('octo (github)')
   expect(client.localEdgeLogin).not.toHaveBeenCalled()
   expect(client.localEdgeClaim).toHaveBeenCalledWith('wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', edgeURL)
@@ -71,7 +71,7 @@ it('refuses to claim when the gateway now reaches another server', async () => {
     serverEdgeClaimCode: vi.fn(async () => ({ code: 'abcdefghijklmnopqrstuvwxyz-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
   })
   render(<RemoteAccessSection client={client} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Connect my GitHub account' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
   expect(await screen.findByText('The gateway now reaches another server; reload and try again.')).toBeTruthy()
   expect(client.localEdgeClaim).not.toHaveBeenCalled()
 })

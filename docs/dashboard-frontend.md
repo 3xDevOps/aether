@@ -571,9 +571,9 @@ and back and forward navigate to the entry's route, so reload, back, `Esc`
 and a shared link agree. Other query parameters and the hash are kept; the
 token is removed on first load as before.
 
-Both shells deliver three deep links: `aether://run/<id>` loads
-`<dashboard>?run=<id>`, and `aether://join?…#<secret>` and
-`aether://claim?…#<secret>` load `<dashboard>#join=<link>` and
+Both shells deliver `aether://run/<id>` as `<dashboard>?run=<id>`. The
+desktop shell alone delivers `aether://join?…#<secret>` and
+`aether://claim?…#<secret>`, as `<dashboard>#join=<link>` and
 `#claim=<link>` with the whole link URL-encoded in the fragment, which
 never reaches the server ([local-gateway.md](local-gateway.md#running-it)).
 `handedLink()` in `src/lib/url-state.ts` takes `join` and `claim` off the
@@ -3765,8 +3765,9 @@ through either gateway:
   edge has not recorded this server` while the edge reports it unclaimed.
   For an admin of a server with no owner, a dashboard with the local verbs
   `edge.status`, `edge.login` and `edge.claim` shows **Connect my GitHub
-  account**: it signs in at the server's edge if this machine is not signed
-  in there, showing the sign-in code, calls `server.edge.claimcode`, passes
+  account**, followed by `(<login>)` when `edge.status` reports this
+  machine signed in at the server's edge: it signs in there first if not,
+  showing the sign-in code, calls `server.edge.claimcode`, passes
   the code to `edge.claim` unless it names another server than the one shown
   (`The gateway now reaches another server; reload and try again.`), and
   reads `server.edge` again. Without those verbs it shows `aether edge
@@ -4032,7 +4033,9 @@ its disclosure. A join link replaces the sign-in with a **Join** panel:
 reports for the link's edge, signing in to that edge first if needed, and
 **Join** sends the link to `edge.join`. On a `device-pending` refusal it
 shows `Waiting for an admin of <server> to approve this device` with the
-device label and key fingerprint, never an approval code, and calls
+device label and key fingerprint, or, when the refusal carries an
+`approval_code` because nobody can approve in the app, the refusal's
+message with the console command, and calls
 `edge.join` again every 5 seconds until it links or is refused otherwise;
 the admin's side is the Needs you card ([Run state](#run-state)). A
 gateway without `edge.join` or `edge.claim`, such as the Android app's

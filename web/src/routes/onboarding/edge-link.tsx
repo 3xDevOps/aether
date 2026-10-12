@@ -286,7 +286,7 @@ function JoinPanel({
   const { phase, setPhase } = signIn
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<EdgeRefusal | null>(null)
+  const [pending, setPending] = useState<{ refusal: EdgeRefusal; text: string } | null>(null)
   const live = useRef(true)
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -311,12 +311,12 @@ function JoinPanel({
       if (!live.current) return
       const refusal = err instanceof ApiError ? err.data?.refusal : undefined
       if (refusal?.kind === 'device-pending') {
-        setPending(refusal)
+        setPending({ refusal, text: message(err) })
         retry.current = setTimeout(() => void attempt(), joinRetryMs)
         return
       }
       setPending(null)
-      if (refusal?.kind === 'not-signed-in') setPhase({ name: 'signed-out' })
+      if (refusal?.kind === 'not-signed-in' || refusal?.kind === 'token-revoked') setPhase({ name: 'signed-out' })
       setError(message(err))
     } finally {
       if (live.current) setBusy(false)
@@ -328,13 +328,21 @@ function JoinPanel({
   if (pending) {
     return (
       <section aria-label="Join" role="status" className="flex min-w-0 flex-col gap-2 text-ui">
-        <p className="font-medium">Waiting for an admin of {pending.server ?? join.server} to approve this device</p>
-        <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
-          <dt className="text-muted">Device</dt>
-          <dd className="min-w-0 break-all">{pending.device}</dd>
-          <dt className="text-muted">Device key</dt>
-          <dd className="min-w-0 break-all font-code">{pending.fingerprint}</dd>
-        </dl>
+        {pending.refusal.approval_code ? (
+          <p className="whitespace-pre-wrap">{pending.text}</p>
+        ) : (
+          <>
+            <p className="font-medium">
+              Waiting for an admin of {pending.refusal.server ?? join.server} to approve this device
+            </p>
+            <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
+              <dt className="text-muted">Device</dt>
+              <dd className="min-w-0 break-all">{pending.refusal.device}</dd>
+              <dt className="text-muted">Device key</dt>
+              <dd className="min-w-0 break-all font-code">{pending.refusal.fingerprint}</dd>
+            </dl>
+          </>
+        )}
         <p className="text-muted">This page asks again every {joinRetryMs / 1000} seconds.</p>
       </section>
     )

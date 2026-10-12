@@ -101,7 +101,9 @@ the invitation admitted the account. Under `approved-devices` the join only
 records their device as waiting on the invitation. The app shows `Waiting
 for an admin of <server> to approve this device` with the device label and
 key fingerprint; `aether link` prints `waiting for an admin of <server> to
-approve this device (<label>, <fingerprint>)…`. Both try again every 5
+approve this device (<label>, <fingerprint>)…`. When nobody can approve
+the device in the app, both show the server's refusal instead, which names
+`sudo aether-server device approve <code>`. Both try again every 5
 seconds until the device is admitted. Each admin's dashboard shows a Needs
 you card, `<label> (github <login>) wants to join as <role>`, and **Approve**
 there creates the member, binds the account and uses the invitation up

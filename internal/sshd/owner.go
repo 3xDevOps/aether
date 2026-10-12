@@ -22,7 +22,8 @@ func init() {
 type EdgeOwner interface {
 	// TransferOwner records owner as the server's owner and reports it to
 	// the edge. It refuses when the server has no owner: only a claim
-	// code from the machine's console gives it one.
+	// code from the machine's console, or one server.edge.claimcode issued
+	// to an admin, gives it one.
 	TransferOwner(owner edgeproto.Account) error
 	// Owner returns the server's owner at its edge, nil when it has none.
 	Owner() (*edgeproto.Account, error)

@@ -138,9 +138,11 @@ As found in the code:
    shell's `handleDeepLink` accepts `join` and `claim` beside `run` and
    hands them to the dashboard in the fragment, `#join=<link>` and
    `#claim=<link>`, so the secret never reaches the gateway; the dashboard
-   removes it from the address on read. The Android shell accepts them the
-   same way; the Android app reaches servers over a tailnet, not the edge,
-   so its dashboard shows the link and the CLI command. The dashboard's
+   removes it from the address on read. The Android shell handles only
+   `run`: its dashboard is served by the server the phone points at, with
+   no local gateway, so handing it a link would let that server's operator
+   read a secret meant for another server. A join or claim link is opened
+   on a computer, with the desktop app or `aether link`. The dashboard's
    Connect step accepts a pasted join or claim link, or a bare claim code.
 8. **Setup prints a link.** `aether-server setup` prints the claim link in
    place of the bare code, with the same `<server id>-<secret>` inside it,
@@ -275,7 +277,6 @@ Rows added to or changed in "Who must fail for access to be gained" and
 | `internal/scheduler/github.go` | Compare key material (section 6) |
 | `web/` | Refusal kinds in `sync.ts`; device cards in `needs-you.ts`; Settings › Remote access; join and claim links on the Connect step; the join waiting state |
 | `desktop/main.js` | `join` and `claim` in `handleDeepLink` |
-| `android/…/DeepLink.kt` | `join` and `claim` deep links |
 | `docs/` | `edge.md`, `teams.md`, `quickstart.md`, `install.md`, `local-gateway.md`, `dashboard-frontend.md`, `testing.md` |
 
 ## 6. The GitHub signing-key check

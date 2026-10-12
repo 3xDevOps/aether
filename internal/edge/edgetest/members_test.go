@@ -15,6 +15,7 @@ import (
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestInvitations(t *testing.T) {
@@ -34,6 +35,22 @@ func TestInvitations(t *testing.T) {
 	var refused *edgeproto.Refused
 	if !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedInvitationNeedsLink {
 		t.Fatalf("bob without the link: %v, want %s", err, edgeproto.RefusedInvitationNeedsLink)
+	}
+	ctx := context.Background()
+	if m, gerr := a.db.GetMemberByIdentity(ctx, edgeproto.ProviderGitHub, bob.account().Subject); !errors.Is(gerr, store.ErrNotFound) {
+		t.Fatalf("bob without the link is member %+v, %v; want none", m, gerr)
+	}
+	devs, err := a.db.ListDevices(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range devs {
+		if d.Subject == bob.account().Subject {
+			t.Fatalf("bob without the link recorded device %+v", d)
+		}
+	}
+	if invs, ierr := a.db.ListInvitations(ctx); ierr != nil || len(invs) != 1 || invs[0].Login != bob.Login {
+		t.Fatalf("invitations after bob without the link = %+v, %v; want bob's open", invs, ierr)
 	}
 	if res, jerr := h.joinBy(bo, link); jerr != nil || res.Info.Member.Role != "admin" {
 		t.Fatalf("bob joined as %+v, %v", res.Info.Member, jerr)
