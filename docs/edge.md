@@ -345,6 +345,7 @@ aether edge connect
 connecting server <server id> as <login> (github), the account <edge host> reported when this device signed in
 connected server <server id> to <edge host> as <login> (github); this device is approved
 linked to server <server id> at <addr>, then through <edge host> as <name> (admin)
+git remote aether -> <git url>
 ```
 
 Both call `server.edge.claimcode`, which issues a claim code bound to the
@@ -354,8 +355,14 @@ device, a member SSH key or the tailnet, and refuses it while the server
 has an owner or the edge is off. The claim binds the signed-in GitHub
 account to that admin, approves the device, and adds no member and
 changes no role. `aether edge connect` keeps the current link and adds
-the edge to it, with the link's address still tried first; on a server
-that already has an owner it prints `this server is already connected to
+the edge to it, with the link's address still tried first, and moves the
+clone's `aether` remote from the address to the edge host, printing the
+last line above when it did. A remote that cannot be moved does not undo
+the connection: the command ends with `the link is saved, but the clone's
+aether remote was not updated: ...` after the success lines, and the
+dashboard shows the same text as `remote_error`. Under a named profile the
+change is saved into that profile. On a server that already has an owner
+it prints `this server is already connected to
 <edge url> as github <login>` and changes nothing. An admin with no other
 way in uses [Console recovery](#console-recovery). Without `--admin`,
 `claim-code` on such a server is refused and lists its admins:

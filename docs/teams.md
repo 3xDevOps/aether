@@ -191,7 +191,9 @@ device gets depends on the server's `edge-access` policy
   with the invited role, or binds the account to the linked member, and
   uses the invitation up. Several devices may wait on one invitation, such
   as one an edge forged for the same login; approving one deletes the
-  others. Only an admin approves a device waiting on an invitation, or the
+  others. A device that joins with another valid invitation's link moves to
+  that invitation; an approval made against the earlier one is refused with
+  `device <id> now waits on another invitation; nothing was approved`. Only an admin approves a device waiting on an invitation, or the
   member a link names. Revoking the invitation deletes its waiting devices;
   once it expires they are no longer listed or approvable. A new or rotated
   key is a new device.

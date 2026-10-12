@@ -1378,7 +1378,10 @@ does, with the same files in the config directory:
   and asks for a confirmation; a server id typed from the admin links
   without one.
 - `edge.link` and `edge.claim` save the link and swap the gateway connection
-  in place, as `link.apply` does. `server_id` must be a server id, and the
+  in place, as `link.apply` does; under `aether gui --server <name>` the
+  change is saved into that named profile. They move the clone's `aether`
+  remote from the previous git host to the new one, and report a remote
+  that could not be moved as `remote_error` without failing the call. `server_id` must be a server id, and the
   server's SSH host key is checked against it before anything is sent.
   `edge.claim` checks the host key against the id in the code before it
   sends the code, inside SSH. `addr` is an SSH address tried before the
@@ -1399,7 +1402,8 @@ does, with the same files in the config directory:
   `-32002`. An edge that cannot be reached or answers `5xx` answers
   `-32004`. `edge.link`, `edge.claim` and `edge.join` answer `-32002` for
   any failure of the SSH connection, with the server's refusal text, such
-  as a wrong claim code or a device waiting for approval. A refusal on the
+  as a wrong claim code or a device waiting for approval; an invitation that
+  names another account is `data.refusal.kind` `join-wrong`. A refusal on the
   edge path, by the server, the edge, or this machine holding no sign-in,
   also carries `data: {"refusal": {"kind": "device-pending", ...}}` with
   the kind and fields of `Refused` in `internal/edge/proto/refused.go`; so

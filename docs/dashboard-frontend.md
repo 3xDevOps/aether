@@ -3944,7 +3944,8 @@ through either gateway:
   showing the sign-in code, calls `server.edge.claimcode`, passes
   the code to `edge.claim` unless it names another server than the one shown
   (`The gateway now reaches another server; reload and try again.`), and
-  reads `server.edge` again. Without those verbs it shows `aether edge
+  reads `server.edge` again. A `token-revoked` or `not-signed-in` refusal
+from the claim signs in again and repeats it once. Without those verbs it shows `aether edge
   connect` to copy ([edge.md](edge.md#server-id-and-claiming)).
 - **Usage**: the subscription usage of your account, or of an account
   shared with you.
@@ -4194,7 +4195,11 @@ and pin**, because that id comes from the edge. **Other ways to link** holds
 setup` printed and refuses a claim link naming another edge than the one
 signed in; a join link pasted there opens the Join panel below. **Link by
 address** is a second
-disclosure below the sign-in, for a tailnet or SSH server. Connect
+disclosure below the sign-in, for a tailnet or SSH server. While no edge is
+signed in, below **Link by address**, **Have an invitation or claim link?**
+takes either link and **Open link** opens it as a handed-over link, so a
+join or claim link can be given before signing in; anything else answers
+`That is not an invitation or claim link.` Connect
 distinguishes no configured server from a linked one, shows **Continue** only
 once a server is configured, and refreshes on Retry and when the window
 regains focus, so a separate `aether link` command appears without
@@ -4211,7 +4216,12 @@ device label and key fingerprint, or, when the refusal carries an
 `approval_code` because nobody can approve in the app, the refusal's
 message with the console command, and calls
 `edge.join` again every 5 seconds until it links or is refused otherwise;
-the admin's side is the Needs you card ([Run state](#run-state)). A
+a `token-revoked` or `not-signed-in` refusal signs the panel out and offers
+**Sign in**, and a `join-wrong` refusal, an invitation that names another
+account, offers **Sign in with another account**;
+the admin's side is the Needs you card ([Run state](#run-state)). A join
+or claim that succeeds but could not move the clone's `aether` remote
+shows the gateway's `remote_error` as an error toast; the link stays. A
 gateway without `edge.join` or `edge.claim`, such as the Android app's
 tailnet dashboard, shows the link and the `aether link` command to copy
 instead, with **Continue**.
