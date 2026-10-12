@@ -966,7 +966,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Invite code **Generate code** | Generating… | No: each call mints a new code |
 | Roster **Remove** (confirm dialog) | Removing… | Closes the dialog, as for Device **Approve** |
 | Giving up your own admin role (confirm dialog) | Becoming *role*… | Closes the dialog, as for Device **Approve** |
-| Invitation **Invite** | The new row reads Creating… | No, and no **Retry**: the row stays until the server answers. A refusal drops it and reopens the dialog with the error; a failure with no answer re-reads `member.invitation.list` once and shows the invitation if the server holds it, else drops the row and reopens the dialog with the error |
+| Invitation **Invite** | Inviting…, and the new row reads Creating… | No, and no **Retry**: the row stays until the server answers, and the answer carries the join link. The dialog's **Cancel** closes it while the request keeps going; the answer then shows as a toast. A refusal drops the row and shows the error; a failure with no answer re-reads `member.invitation.list` once and keeps the invitation if the server holds it, else drops the row |
 
 ## Board
 
@@ -3850,9 +3850,10 @@ before that share lack the in-place mount of Claude Code's login file
 ([security.md](security.md#account-sharing)), so when the store's
 `envTerminal.status`, re-read with `terminal.status` at the share, says the
 container is running, or that re-read fails, **Agent account sharing** says
-so and offers **Stop environment**. A share while another grant already
-exists shows nothing, because the page cannot tell whether the container
-predates the first one.
+so and offers **Stop environment**. The advice follows the first share the
+server answered while no other grant was saved; a later share shows
+nothing, because the page cannot tell whether the container predates the
+first one.
 
 ## Members, devices and Profile
 
@@ -3868,6 +3869,39 @@ menu; giving up your own admin role, and removing anyone, ask first. Members
 waiting for approval are listed above the roster with **Approve**. Below it,
 admins see **Open invitations** with **Revoke**.
 
+A role change, **Approve**, and a confirmed **Revoke** follow
+[Actions](#actions): the radio moves, the member joins the roster, or the
+invitation row goes at once. A refusal puts it back and shows the server's
+error above the roster or the invitations. At the deadline the change is put
+back with "The server did not answer in 5 seconds." and **Retry**, which
+resends the same call, unless a server record for that member arrived
+meanwhile; your own name and colour in the header then follow that record.
+When overlapping changes of one field all fail, the field returns to the
+last value the server confirmed. Starting an action clears only that
+action's earlier error, such as the same member's role or the same
+invitation's revoke. A retried revoke that is refused as not found counts
+as revoked, because the first `member.invitation.revoke` landed; a first
+revoke refused as not found, such as of an invitation already accepted,
+puts the row back and shows the server's error. A late
+success applies the change again and clears its error; a late refusal shows
+its error even after newer actions, unless a **Retry** of that action was
+answered, and an older answer never overwrites a newer one, and writes only
+the field that action changed, also across closing and reopening Profile
+(`nextMemberOrder` in `store/members.ts`). A `member.list` read keeps the
+record of a member changed anywhere since the read was sent, Profile
+included; for a member with a change still pending it keeps only the
+fields that change touches and takes the rest from the read. This holds
+for every `member.list` read, including the read after **Remove**, the reads a `member.changed` event or
+an unknown actor triggers, and the reconnect snapshot unless the signed-in
+member changed. The `member.invitation.list` read made
+when the section mounts keeps rows created or revoked while it was pending,
+and rows whose create or revoke is still unanswered, so switching tabs and
+back keeps a **Creating…** row and leaves a revoked row out. An answer that arrives
+after the signed-in member changed leaves the invitations alone. **Remove**
+and giving up your admin role read "Removing…" and "Becoming *role*…", then
+"Still waiting for the server…" past the deadline, when the dialog can be
+closed and the request goes on.
+
 **Invite…** in the header is the one way to invite. Its dialog has two tabs
 when the gateway serves both: **Account** invites a GitHub login or an email
 with a role (`member.invitation.create`) and then shows the invitation's
@@ -3879,6 +3913,27 @@ version stored for another provider shows that provider, such as
 under each policy: under `account` opening it makes the account a member;
 under `approved-devices` its device waits until an admin approves it from
 Needs you.
+
+**Invite** on the Account tab lists the invitation at once with
+**Creating…** in place of its expiry, then swaps in the server's row. The
+join link comes only in the server's answer, so the dialog stays open and
+**Invite** reads "Inviting…", then "Still waiting for the server…", until
+the answer shows the link. `member.invitation.create` takes no idempotency
+key, so nothing offers a resend that could create a second invitation. A
+refusal, early or late, drops the row and shows the server's error in the
+dialog, with what was typed. A failure with no answer, such as `Failed to
+fetch`, re-reads `member.invitation.list` once: an invitation the server
+holds for that account and role replaces the row, and the error says its
+link was lost with the answer, so revoke it and invite again. Otherwise, or
+if that read fails too, the row goes and the error warns that the
+invitation may have been created, since the create may still be running;
+nothing resends it. If that dialog was closed, or you have left Members, a
+toast shows the error with **Reopen**, which opens Members with the dialog
+as it was, or shows `Invited <account>` with **Show link**, which opens the
+dialog on the link. Once the signed-in member changes, that toast is
+dismissed, its action does nothing, and a later answer to that invite is
+not shown. **Generate code** reads
+"Generating…", then "Still waiting for the server…".
 
 **Devices** (`src/routes/devices/`) lists the computers members reach the
 server with through an edge: the member's own, or every member's for an
@@ -3895,13 +3950,31 @@ It revokes a device too, and shows every server refusal verbatim.
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
 the member's name and role, **Display name** (an input with **Save**, sent
-as `member.rename`; the header, roster and every avatar take the new name
-from the saved member and a fresh `member.list`, and a refusal shows under
-the field verbatim), **Colour**, **Git identity** (the name and email
+as `member.rename`), **Colour**, **Git identity** (the name and email
 the member's agents commit as, saved with `member.git`; the same form
 onboarding shows) and **Agent account sharing** (**Share account** or
 **Revoke access** per teammate, with the omp warning behind **Learn more**).
 Profile is the one place that edits the git identity; Agents links to it.
+
+Display name, colour, and share or revoke follow [Actions](#actions): the
+header, roster and avatars take the new name or colour, and the teammate's
+row flips, at once; that row's button stays disabled until the server
+answers. A refusal restores the earlier value, keeps the typed name in the
+field, and shows the server's error under the section. A share or revoke
+goes back to the last grant the server confirmed for that teammate, which
+a late answer to an earlier press may have changed. At the deadline the
+change is put back with "The server did not answer in 5 seconds." and
+**Retry**, which resends the same call; each is idempotent by nature. A late
+success shows the change again unless a newer one for the same field or
+teammate has started, and a late refusal shows its error even after a newer
+change saved, unless a **Retry** of that change was answered. A failure that arrives after Profile closed shows as a toast
+with the server's error, **Retry** at the deadline, and for the display name
+**Reopen**, which opens Profile with the typed name and the error. Once the
+signed-in member changes, that toast is dismissed, its **Retry** and
+**Reopen** do nothing, and the action's later failures are not shown, so
+nothing is resent as the new member.
+The `account.list` read made when Profile opens keeps the shown state of a
+teammate shared or revoked since it was sent.
 A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 

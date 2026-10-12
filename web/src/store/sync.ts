@@ -117,11 +117,13 @@ export async function hydrate(
   if (signal?.aborted) return false
   const s = store.getState()
   try {
-    const [info, workspaces, members, runs, overlaps, capabilities] =
+    const memberRead = client.memberList()
+    const [info, workspaces, members, keptMembers, runs, overlaps, capabilities] =
       await Promise.all([
         client.serverInfo(),
         client.workspaceListFull(),
-        client.memberList(),
+        memberRead,
+        s.readMembers(memberRead),
         client.runList(),
         // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
@@ -148,7 +150,8 @@ export async function hydrate(
       }
     }
     const previousIdentity = store.getState().identityKey
-    if (previousIdentity && previousIdentity !== incomingIdentity) {
+    const identityChanged = Boolean(previousIdentity) && previousIdentity !== incomingIdentity
+    if (identityChanged) {
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
       store.getState().resetNotes()
@@ -158,7 +161,7 @@ export async function hydrate(
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
-    s.setMembers(members)
+    s.setMembers(identityChanged ? members : keptMembers)
     s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
@@ -343,7 +346,7 @@ export async function applyEvent(
 
   // A new teammate has no event of their own; without this they render as a raw ID.
   if (ev.actor_id && !store.getState().members[ev.actor_id]) {
-    await client.memberList().then(store.getState().setMembers).catch(ignore)
+    await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
   }
 
   if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
@@ -422,7 +425,7 @@ export async function applyEvent(
       break
     case 'member.changed': {
       const p = ev.payload as { member_id: string; display_name: string }
-      await client.memberList().then(store.getState().setMembers).catch(ignore)
+      await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
       const info = store.getState().info
       if (info && info.member.id === p.member_id) {
         store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })

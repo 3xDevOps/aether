@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { Member } from '@/lib/types'
 import { CenterView } from '@/components/shell/center-view'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { alice, bob, fakeApi, serverInfo, vera, workspace } from '@/test/fixtures'
 
 const pendingCara: Member = {
@@ -63,22 +64,26 @@ describe('members page', () => {
     expect(within(row('Alice')).getByText('Offline')).toBeDefined()
   })
 
-  it('approves a pending member through the gateway and refetches', async () => {
-    const memberList = vi
-      .fn()
-      .mockResolvedValueOnce([alice, bob, pendingCara])
-      .mockResolvedValue([alice, bob, { ...pendingCara, pending: false }])
-    const client = fakeApi({ memberList, memberApprove: vi.fn(async () => ({ ...pendingCara, pending: false })) })
+  it('shows a pending member approved before the server answers, with no second Approve', async () => {
+    let answer: (member: Member) => void = () => {}
+    const client = fakeApi({
+      memberList: vi.fn(async () => [alice, bob, pendingCara]),
+      memberApprove: vi.fn(() => new Promise<Member>((resolve) => (answer = resolve))),
+    })
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }))
 
-    expect(await within(screen.getByRole('region', { name: 'Roster' })).findByText('Cara')).toBeDefined()
-    expect(client.memberApprove).toHaveBeenCalledWith(pendingCara.id)
+    expect(within(screen.getByRole('region', { name: 'Roster' })).getByText('Cara')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
+    expect(client.memberApprove).toHaveBeenCalledTimes(1)
+    await act(async () => answer({ ...pendingCara, pending: false }))
+    expect(within(screen.getByRole('region', { name: 'Roster' })).getByText('Cara')).toBeDefined()
+    expect(client.memberList).toHaveBeenCalledTimes(1)
   })
 
-  it('renders the server refusal verbatim when approve is denied', async () => {
+  it('takes a refused approval back and renders the server refusal verbatim', async () => {
     const client = fakeApi({
       memberList: vi.fn(async () => [alice, bob, pendingCara]),
       memberApprove: vi.fn(async () => {
@@ -92,6 +97,7 @@ describe('members page', () => {
 
     expect(await screen.findByText('member.approve requires the admin role')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDefined()
+    expect(within(screen.getByRole('region', { name: 'Roster' })).queryByText('Cara')).toBeNull()
   })
 
   it('shows the one-time invite code from the server', async () => {
@@ -124,20 +130,21 @@ describe('members page', () => {
     await waitFor(() => expect(document.activeElement).toBe(invite))
   })
 
-  it('lets an admin change another member role from the row menu', async () => {
-    const bobAdmin: Member = { ...bob, role: 'admin' }
-    const memberList = vi.fn().mockResolvedValueOnce([alice, bob]).mockResolvedValue([alice, bobAdmin])
-    const client = fakeApi({ memberList, memberRole: vi.fn(async () => bobAdmin) })
+  it('moves another member to a new role from the row menu before the server answers', async () => {
+    let answer: (member: Member) => void = () => {}
+    const client = fakeApi({ memberRole: vi.fn(() => new Promise<Member>((resolve) => (answer = resolve))) })
     seed()
     render(<MembersRoute params={{}} client={client} />)
 
     await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
 
-    await waitFor(() => expect(client.memberRole).toHaveBeenCalledWith(bob.id, 'admin'))
-    await waitFor(() => expect(within(row('Bob')).getByText('Admin')).toBeDefined())
+    expect(within(row('Bob')).getByText('Admin')).toBeDefined()
+    expect(client.memberRole).toHaveBeenCalledWith(bob.id, 'admin')
+    await act(async () => answer({ ...bob, role: 'admin' }))
+    expect(within(row('Bob')).getByText('Admin')).toBeDefined()
   })
 
-  it('renders the server refusal verbatim when a role change is denied', async () => {
+  it('takes a refused role change back and renders the server refusal verbatim', async () => {
     const client = fakeApi({
       memberRole: vi.fn(async () => {
         throw new ApiError(409, 'refusing to demote the last admin')
@@ -149,6 +156,153 @@ describe('members page', () => {
     await pickMenu('Actions for Bob', 'Viewer', 'menuitemradio')
 
     expect(await screen.findByText('refusing to demote the last admin')).toBeDefined()
+    expect(within(row('Bob')).getByText('Collaborator')).toBeDefined()
+  })
+
+  it('keeps a role the server already sent when the change goes unanswered', async () => {
+    const client = fakeApi({ memberRole: vi.fn(() => new Promise<Member>(() => {})) })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+    screen.getByRole('button', { name: 'Actions for Bob' }).focus()
+    await userEvent.keyboard('{Enter}')
+    const menu = await screen.findByRole('menu')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'Admin' }))
+      act(() => useStore.getState().setMembers([alice, { ...bob, role: 'admin' }]))
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      await act(async () => {})
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(within(row('Bob')).getByText('Admin')).toBeDefined()
+  })
+
+  it('keeps the newer role when an older role change is answered after it', async () => {
+    let answerFirst: (member: Member) => void = () => {}
+    const client = fakeApi({
+      memberRole: vi.fn()
+        .mockReturnValueOnce(new Promise<Member>((resolve) => (answerFirst = resolve)))
+        .mockResolvedValueOnce({ ...bob, role: 'viewer' }),
+    })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+
+    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    await pickMenu('Actions for Bob', 'Viewer', 'menuitemradio')
+    await waitFor(() => expect(client.memberRole).toHaveBeenCalledTimes(2))
+    await act(async () => answerFirst({ ...bob, role: 'admin' }))
+
+    expect(within(row('Bob')).getByText('Viewer')).toBeDefined()
+  })
+
+  it('keeps a confirmed role when the roster read sent before it answers later', async () => {
+    let list: (members: Member[]) => void = () => {}
+    const client = fakeApi({
+      memberList: vi.fn(() => new Promise<Member[]>((resolve) => (list = resolve))),
+      memberRole: vi.fn(async () => ({ ...bob, role: 'admin' as const })),
+    })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+
+    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
+    await act(async () => list([alice, bob]))
+
+    expect(within(row('Bob')).getByText('Admin')).toBeDefined()
+  })
+
+  it('keeps a colour Profile saved while a roster read was pending', async () => {
+    let list: (members: Member[]) => void = () => {}
+    const client = fakeApi({ memberList: vi.fn(() => new Promise<Member[]>((resolve) => (list = resolve))) })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+    await waitFor(() => expect(client.memberList).toHaveBeenCalled())
+
+    const { patchMember, confirmMember } = useStore.getState()
+    act(() => void confirmMember(alice.id, { color: '#3cb44b' }, patchMember(alice.id, { color: '#3cb44b' })))
+    await act(async () => list([alice, bob]))
+
+    expect(useStore.getState().members[alice.id].color).toBe('#3cb44b')
+  })
+
+  it('keeps a pending role over the roster re-read after a removal', async () => {
+    const client = fakeApi({
+      memberList: vi.fn().mockResolvedValueOnce([alice, bob, vera]).mockResolvedValue([alice, bob]),
+      memberRole: vi.fn(() => new Promise<Member>(() => {})),
+    })
+    seed({ members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera } })
+    render(<MembersRoute params={{}} client={client} />)
+    await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(1))
+
+    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    await pickMenu('Actions for Vera', 'Remove…')
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: 'Remove Vera?' })).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(screen.queryByText('Vera')).toBeNull())
+
+    expect(within(row('Bob')).getByText('Admin')).toBeDefined()
+  })
+
+  it('takes a member from a later roster read once its role change was answered', async () => {
+    const client = fakeApi({ memberRole: vi.fn(async () => ({ ...bob, role: 'admin' as const })) })
+    seed()
+    const { rerender } = render(<MembersRoute params={{}} client={client} />)
+    await waitFor(() => expect(client.memberList).toHaveBeenCalledTimes(1))
+
+    await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
+    await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
+    rerender(<MembersRoute params={{}} client={fakeApi({ memberList: vi.fn(async () => [alice, { ...bob, role: 'viewer' as const }]) })} />)
+
+    await waitFor(() => expect(within(row('Bob')).getByText('Viewer')).toBeDefined())
+  })
+
+  it('takes a teammate\'s own rename from a roster read while their role change is pending, and still reverts the role', async () => {
+    seed()
+    const { patchMember, readMembers, setMembers, revertMember } = useStore.getState()
+    const patch = patchMember(bob.id, { role: 'admin' })
+    setMembers(await readMembers(Promise.resolve([alice, { ...bob, display_name: 'Robert' }])))
+    expect(useStore.getState().members[bob.id]).toMatchObject({ role: 'admin', display_name: 'Robert' })
+    revertMember(bob.id, patch)
+
+    expect(useStore.getState().members[bob.id]).toMatchObject({ role: bob.role, display_name: 'Robert' })
+  })
+
+  it('puts your own header name back from a roster read that landed while your refused rename was pending', () => {
+    seed()
+    const { patchMember, setMembers, revertMember } = useStore.getState()
+    const patch = patchMember(alice.id, { display_name: 'Alicia' })
+    setMembers([alice, bob])
+    revertMember(alice.id, patch)
+
+    expect(useStore.getState().info?.member.display_name).toBe('Alice')
+  })
+
+  it('goes back to the confirmed name when two overlapping renames are refused in the order they started', () => {
+    seed()
+    const { patchMember, revertMember } = useStore.getState()
+    const first = patchMember(alice.id, { display_name: 'Alicia' })
+    const second = patchMember(alice.id, { display_name: 'Ali' })
+    revertMember(alice.id, first)
+    expect(useStore.getState().members[alice.id].display_name).toBe('Ali')
+    revertMember(alice.id, second)
+
+    expect(useStore.getState().members[alice.id].display_name).toBe('Alice')
+    expect(useStore.getState().info?.member.display_name).toBe('Alice')
+  })
+
+  it('labels the removal confirm while the server answers', async () => {
+    const client = fakeApi({ memberRemove: vi.fn(() => new Promise<never>(() => {})) })
+    seed()
+    render(<MembersRoute params={{}} client={client} />)
+
+    await pickMenu('Actions for Bob', 'Remove…')
+    const dialog = within(await screen.findByRole('alertdialog', { name: 'Remove Bob?' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Remove' }))
+
+    expect(dialog.getByRole('button', { name: 'Removing…' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('confirms a removal and keeps a refusal in the dialog', async () => {

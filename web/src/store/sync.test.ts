@@ -1717,6 +1717,18 @@ describe('applyEvent', () => {
     expect(store.getState().devices).toEqual([])
   })
 
+  it('keeps a pending member change over the list a member.changed event reads', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().patchMember(bob.id, { color: '#911eb4' })
+    const client = fakeApi({ memberList: vi.fn(async () => [alice, { ...bob, display_name: 'Robert' }]) })
+    await applyEvent(store, statusEvent({
+      run_id: '', type: 'member.changed', actor_id: bob.id, payload: { member_id: bob.id, display_name: 'Robert' },
+    }), client)
+
+    expect(store.getState().members[bob.id].color).toBe('#911eb4')
+  })
+
   it('follows a server update and never moves it backwards', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

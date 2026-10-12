@@ -8,6 +8,7 @@ import { Callout } from '@/components/ui/callout'
 import { Code } from '@/components/ui/code'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { FailureCallout } from '@/components/ui/failure-callout'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,39 +16,127 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { Api } from '@/lib/api'
+import { ApiError, codeNotFound, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
-import { message, providerName, timeAgo } from '@/lib/format'
+import { errorSentence, message, providerName, timeAgo } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
 import type { Invitation, InvitationResult, Member } from '@/lib/types'
+import { draftKey, useFailure } from '@/components/failure'
 import { roleLabel, roles } from '@/routes/members/roster'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import type { ListedInvitation } from '@/store/members'
+import { optimistic, refusedByServer, stillWaiting, usePastDeadline } from '@/store/optimistic'
 
-function invitee(invitation: Invitation): string {
+export function invitee(invitation: Invitation): string {
   if (invitation.login) return `${invitation.login} on GitHub`
   if (!invitation.provider) return invitation.email ?? ''
   return `${invitation.email} on ${providerName[invitation.provider] ?? invitation.provider}`
 }
 
-export function InvitationsSection({ client, version }: { client: Api; version: number }) {
+export interface InviteDraft {
+  by: 'login' | 'email'
+  who: string
+  role: Member['role']
+}
+
+/** `member.invitation.create` carries no idempotency key, so an unanswered create is never resent. */
+export function createInvitation(client: Api, draft: InviteDraft): Promise<InvitationResult> {
+  const { addInvitation, dropInvitation, info } = useStore.getState()
+  const same = sameIdentity()
+  const target = draft.by === 'login' ? { login: draft.who.trim() } : { email: draft.who.trim() }
+  const now = new Date().toISOString()
+  const provisional: ListedInvitation = {
+    id: crypto.randomUUID(),
+    provider: 'github',
+    ...target,
+    role: draft.role,
+    created_by: info?.member.id ?? '',
+    created_at: now,
+    expires_at: now,
+    provisional: true,
+  }
+  addInvitation(provisional)
+  const drop = () => same() && dropInvitation(provisional.id)
+  return client.memberInvitationCreate({ ...target, role: draft.role }).then(
+    (created) => {
+      if (same()) addInvitation(created.invitation, provisional.id)
+      return created
+    },
+    (cause: unknown) => {
+      if (refusedByServer(cause)) {
+        drop()
+        throw cause
+      }
+      const unsure = new Error(`${errorSentence(cause)} The invitation may have been created; check Open invitations before you invite again.`)
+      return client.memberInvitationList().then(
+        (list) => {
+          const held = list.find((i) => i.login === target.login && i.email === target.email && i.role === draft.role)
+          if (!held) {
+            drop()
+            throw unsure
+          }
+          if (same()) addInvitation(held, provisional.id)
+          throw new Error(`${errorSentence(cause)} The server created the invitation, but its link came only in the answer that was lost; revoke it and invite again.`)
+        },
+        () => {
+          drop()
+          throw unsure
+        },
+      )
+    },
+  )
+}
+
+function Creating() {
+  return usePastDeadline(true) ? ` · ${stillWaiting}` : ' · Creating…'
+}
+
+export function InvitationsSection({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
-  const [invitations, setInvitations] = useState<Invitation[] | null>(null)
+  const invitations = useStore((s) => s.invitations)
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<Invitation | null>(null)
-
-  const refetch = () => client.memberInvitationList().then(setInvitations, (err: unknown) => setError(message(err)))
+  const { failures, run } = useFailure()
 
   useEffect(() => {
     let live = true
-    client.memberInvitationList().then(
-      (list) => live && setInvitations(list),
+    const { invitations: since, readInvitations } = useStore.getState()
+    readInvitations(client.memberInvitationList()).then(
+      (list) => live && useStore.getState().setInvitations(list, since),
       (err: unknown) => live && setError(message(err)),
     )
     return () => {
       live = false
     }
-  }, [client, version])
+  }, [client])
+
+  const revoke = (invitation: Invitation) => {
+    const { addInvitation, dropInvitation, setRevokingInvitation } = useStore.getState()
+    const same = sameIdentity()
+    let attempts = 0
+    void run((answered) => optimistic({
+      apply: () => {
+        setRevokingInvitation(invitation.id, true)
+        dropInvitation(invitation.id)
+      },
+      send: () => {
+        const retried = attempts++ > 0
+        return client.memberInvitationRevoke(invitation.id).catch((cause: unknown) => {
+          if (!(retried && cause instanceof ApiError && cause.code === codeNotFound)) throw cause
+        })
+      },
+      confirm: () => {
+        answered()
+        setRevokingInvitation(invitation.id, false)
+        if (same()) dropInvitation(invitation.id)
+      },
+      revert: () => {
+        setRevokingInvitation(invitation.id, false)
+        if (same()) addInvitation(invitation)
+      },
+    }), { onDone: () => toast.success(`Invitation for ${invitee(invitation)} revoked`), key: invitation.id })
+  }
 
   const memberName = (id: string) => members[id]?.display_name ?? id
 
@@ -55,6 +144,7 @@ export function InvitationsSection({ client, version }: { client: Api; version: 
     <section aria-label="Invitations" className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h2">Open invitations</SectionLabel>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      {failures.map((failure) => <FailureCallout key={failure.id} error={failure.error} onRetry={failure.retry} />)}
       {invitations?.length === 0 && <p className="text-ui text-muted">No open invitations.</p>}
       {invitations && invitations.length > 0 && (
         <ul aria-label="Open invitations" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
@@ -65,12 +155,14 @@ export function InvitationsSection({ client, version }: { client: Api; version: 
                 <span className="truncate text-ui-sm text-muted">
                   {invitation.member_id ? `Links to ${memberName(invitation.member_id)}` : invitation.role && roleLabel[invitation.role]}
                   {' · invited by '}{memberName(invitation.created_by)}
-                  {' · expires '}<RelativeTime at={invitation.expires_at} />
+                  {invitation.provisional ? <Creating /> : <>{' · expires '}<RelativeTime at={invitation.expires_at} /></>}
                 </span>
               </span>
-              <Button size="sm" variant="ghost" aria-label={`Revoke invitation for ${invitee(invitation)}`} onClick={() => setRevoking(invitation)}>
-                Revoke
-              </Button>
+              {!invitation.provisional && (
+                <Button size="sm" variant="ghost" aria-label={`Revoke invitation for ${invitee(invitation)}`} onClick={() => setRevoking(invitation)}>
+                  Revoke
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -82,11 +174,8 @@ export function InvitationsSection({ client, version }: { client: Api; version: 
             ? `${invitee(revoking)} can no longer connect through the edge as ${memberName(revoking.member_id)}.`
             : `${invitee(revoking)} can no longer join this server by signing in to the edge.`}
           action="Revoke"
-          onConfirm={() => client.memberInvitationRevoke(revoking.id)}
-          onDone={() => {
-            toast.success(`Invitation for ${invitee(revoking)} revoked`)
-            void refetch()
-          }}
+          onConfirm={async () => revoke(revoking)}
+          onDone={() => {}}
           onClose={() => setRevoking(null)}
         />
       )}
@@ -94,7 +183,15 @@ export function InvitationsSection({ client, version }: { client: Api; version: 
   )
 }
 
-export function InviteDialog({ client, onClose, onInvited }: { client: Api; onClose: () => void; onInvited: () => void }) {
+export function InviteDialog({ client, draft, error, pending = false, created, onClose, onInvite }: {
+  client: Api
+  draft?: InviteDraft
+  error?: string
+  pending?: boolean
+  created?: InvitationResult
+  onClose: () => void
+  onInvite: (draft: InviteDraft) => void
+}) {
   const caps = useCapability()
   const byAccount = caps.hasMethod('member.invitation.create')
   const byCode = caps.hasMethod('member.invite')
@@ -118,7 +215,13 @@ export function InviteDialog({ client, onClose, onInvited }: { client: Api; onCl
               <TabsTrigger value="code">Invite code</TabsTrigger>
             </TabsList>
           )}
-          {byAccount && <TabsContent value="account" className="pt-3"><AccountInvite client={client} onClose={onClose} onInvited={onInvited} /></TabsContent>}
+          {byAccount && (
+            <TabsContent value="account" className="pt-3">
+              {created
+                ? <InviteLink created={created} onClose={onClose} />
+                : <AccountInvite key={draftKey(draft)} draft={draft} error={error} pending={pending} onClose={onClose} onInvite={onInvite} />}
+            </TabsContent>
+          )}
           {byCode && <TabsContent value="code" className="pt-3"><CodeInvite client={client} onClose={onClose} /></TabsContent>}
         </Tabs>
       </DialogContent>
@@ -126,27 +229,17 @@ export function InviteDialog({ client, onClose, onInvited }: { client: Api; onCl
   )
 }
 
-function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: () => void; onInvited: () => void }) {
-  const [by, setBy] = useState<'login' | 'email'>('login')
-  const [who, setWho] = useState('')
-  const [role, setRole] = useState<Member['role']>('collaborator')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [created, setCreated] = useState<InvitationResult | null>(null)
-
-  const invite = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      setCreated(await client.memberInvitationCreate(by === 'login' ? { login: who.trim(), role } : { email: who.trim(), role }))
-      onInvited()
-    } catch (err) {
-      setError(message(err))
-      setBusy(false)
-    }
-  }
-
-  if (created) return <InviteLink created={created} onClose={onClose} />
+function AccountInvite({ draft, error, pending, onClose, onInvite }: {
+  draft?: InviteDraft
+  error?: string
+  pending: boolean
+  onClose: () => void
+  onInvite: (draft: InviteDraft) => void
+}) {
+  const [by, setBy] = useState(draft?.by ?? 'login')
+  const [who, setWho] = useState(draft?.who ?? '')
+  const [role, setRole] = useState<Member['role']>(draft?.role ?? 'collaborator')
+  const late = usePastDeadline(pending)
 
   return (
     <form
@@ -154,7 +247,7 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
       className="flex min-w-0 flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
-        void invite()
+        onInvite({ by, who, role })
       }}
     >
       <div className="grid min-w-0 gap-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
@@ -174,7 +267,6 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
             autoComplete="off"
             placeholder={by === 'login' ? 'octocat' : 'dev@example.com'}
             value={who}
-            disabled={busy}
             onChange={(e) => setWho(e.target.value)}
           />
         </FormField>
@@ -205,7 +297,7 @@ function AccountInvite({ client, onClose, onInvited }: { client: Api; onClose: (
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <DialogFooter>
         <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={busy || !who.trim()}>Invite</Button>
+        <Button type="submit" disabled={pending || !who.trim()}>{late ? stillWaiting : pending ? 'Inviting…' : 'Invite'}</Button>
       </DialogFooter>
     </form>
   )
@@ -242,6 +334,7 @@ function CodeInvite({ client, onClose }: { client: Api; onClose: () => void }) {
   const [result, setResult] = useState<{ code: string; expires_at: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const late = usePastDeadline(busy)
 
   const generate = async () => {
     setBusy(true)
@@ -268,7 +361,11 @@ function CodeInvite({ client, onClose }: { client: Api; onClose: () => void }) {
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <DialogFooter>
         <Button variant="secondary" onClick={onClose}>{result ? 'Done' : 'Cancel'}</Button>
-        {!result && <Button disabled={busy} onClick={() => void generate()}>Generate code</Button>}
+        {!result && (
+          <Button disabled={busy} onClick={() => void generate()}>
+            {late ? stillWaiting : busy ? 'Generating…' : 'Generate code'}
+          </Button>
+        )}
       </DialogFooter>
     </div>
   )
