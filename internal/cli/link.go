@@ -200,33 +200,49 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
 }
 
-// pins reports whether known_hosts holds, for the address of c, a host
-// key that derives serverID.
+// pins reports whether the direct dial to the address of c would accept
+// a host key that derives serverID from known_hosts.
 func (c Config) pins(serverID string) (bool, error) {
 	if c.Addr == "" {
 		return false, nil
 	}
-	body, err := os.ReadFile(c.knownHostsPath())
+	path := c.knownHostsPath()
+	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("cli: known_hosts: %w", err)
 	}
-	host := knownhosts.Normalize(c.Addr)
+	var keys []ssh.PublicKey
 	for {
-		_, hosts, key, _, rest, err := ssh.ParseKnownHosts(body)
-		if errors.Is(err, io.EOF) {
-			return false, nil
+		marker, _, key, _, rest, parseErr := ssh.ParseKnownHosts(body)
+		if errors.Is(parseErr, io.EOF) {
+			break
 		}
-		if err != nil {
-			return false, fmt.Errorf("cli: known_hosts %s: %w", c.knownHostsPath(), err)
+		if parseErr != nil {
+			return false, fmt.Errorf("cli: known_hosts %s: %w", path, parseErr)
 		}
-		if slices.Contains(hosts, host) && edgeproto.HostKeyMatches(key, serverID) {
-			return true, nil
+		if marker == "" && edgeproto.HostKeyMatches(key, serverID) {
+			keys = append(keys, key)
 		}
 		body = rest
 	}
+	if len(keys) == 0 {
+		return false, nil
+	}
+	// The callback matches hashed and wildcard hosts and refuses revoked
+	// keys; it prefers the address over the remote, which goes unused.
+	accepts, err := knownhosts.New(path)
+	if err != nil {
+		return false, fmt.Errorf("cli: known_hosts %s: %w", path, err)
+	}
+	for _, key := range keys {
+		if accepts(c.Addr, &net.TCPAddr{}, key) == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // linkDial dials a server linked by address, choosing its key and

@@ -52,8 +52,10 @@ it('offers Connect my GitHub account only to an admin of a server with no owner'
 })
 
 it('claims with the code server.edge.claimcode issues and shows the new owner', async () => {
-  seed('admin', ownerless)
+  seed('admin', ownerless, [...desktop, 'link.status'])
+  useStore.setState({ linkStatus: null })
   const client = fakeApi({
+    localLinkStatus: vi.fn(async () => ({ server_configured: true, linked: true, addr: 'edge.example:22', user: 'aether', repo: '', edge_url: edgeURL })),
     localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
     serverEdgeClaimCode: vi.fn(async () => ({ code: 'wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
     localEdgeClaim: vi.fn(async () => ({ server_id: ownerless.server_id, edge: edgeURL, user: 'aether', member: { id: 'mem_1', display_name: 'Alice', role: 'admin' } })),
@@ -63,6 +65,7 @@ it('claims with the code server.edge.claimcode issues and shows the new owner', 
   fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
   await screen.findByText('octo (github)')
   expect(client.localEdgeLogin).not.toHaveBeenCalled()
+  await waitFor(() => expect(useStore.getState().linkStatus?.edge_url).toBe(edgeURL))
   expect(client.localEdgeClaim).toHaveBeenCalledWith('wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', edgeURL)
   await waitFor(() => expect(vi.mocked(client.serverEdgeClaimCode).mock.invocationCallOrder[0])
     .toBeLessThan(vi.mocked(client.localEdgeClaim).mock.invocationCallOrder[0]))

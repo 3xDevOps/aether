@@ -154,6 +154,19 @@ func TestClaimOfTheCurrentServerKeepsItsLink(t *testing.T) {
 	if err != nil || !same {
 		t.Fatalf("pins(%s) = %v, %v", id, same, err)
 	}
+	line := knownhosts.Line([]string{knownhosts.HashHostname("[srv]:2222")}, host.PublicKey())
+	for body, want := range map[string]bool{
+		line + "\n":                        true,
+		line + "\n@revoked " + line + "\n": false,
+		knownhosts.Line([]string{knownhosts.HashHostname("[other]:2222")}, host.PublicKey()) + "\n": false,
+	} {
+		if err := os.WriteFile(knownHosts, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if same, err := prev.pins(id); err != nil || same != want {
+			t.Fatalf("pins with known_hosts %q = %v, %v; want %v", body, same, err, want)
+		}
+	}
 	prev.ServerID = id
 	got := linkConfig(Config{User: "aether", EdgeURL: "https://edge.example", ServerID: id}, prev, "")
 	if got.Repo != "/src/repo" || got.Addr != "srv:2222" || got.KnownHosts != knownHosts || got.EdgeURL != "https://edge.example" || got.ServerID != id {

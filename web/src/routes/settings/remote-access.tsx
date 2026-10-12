@@ -56,6 +56,7 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
   const [phase, setPhase] = useState<Phase>({ name: 'idle' })
   const [error, setError] = useState<string | null>(null)
   const [known, setKnown] = useState<EdgeAccount | null>(null)
+  const caps = useCapability()
   const live = useRef(true)
   const busy = useRef(false)
   useEffect(() => {
@@ -121,6 +122,7 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
         await claim()
       }
       await loadEdge(useStore, client)
+      if (caps.hasLocal('link.status')) useStore.getState().setLinkStatus(await client.localLinkStatus())
     } catch (err) {
       if (live.current) setError(message(err))
     } finally {
