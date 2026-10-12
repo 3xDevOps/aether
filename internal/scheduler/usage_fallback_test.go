@@ -1222,3 +1222,26 @@ func TestFollowUpMoveDropsTheContinuationItSupersedes(t *testing.T) {
 		t.Fatalf("the superseded session was prompted: %v", prompts)
 	}
 }
+
+// A launcher who changed their git email since launch gets a replacement
+// that commits under the new address, and the run records that address as
+// its own, so it is not also listed as a co-author.
+func TestMoveRecordsTheReplacementsGitAuthor(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if err = e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	spec := e.assertMovedToOwner(t, run.ID, notes)
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || spec.Env["GIT_AUTHOR_EMAIL"] != "ada@example.com" || sc.GitAuthorEmail != "ada@example.com" {
+		t.Fatalf("replacement commits as %q, run records %q, %v; want both the new address", spec.Env["GIT_AUTHOR_EMAIL"], sc.GitAuthorEmail, err)
+	}
+}

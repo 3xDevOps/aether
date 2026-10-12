@@ -834,6 +834,11 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	default:
 		argv = profile.HeadlessResumeCommand(session, continuationPrompt(fromName, toName), run.Model)
 	}
+	// As at launch: the replacement authors commits as home is now, and the
+	// co-author list written for it leaves that address out.
+	s.mu.Lock()
+	entry.gitAuthorEmail = home.GitIdentity().Email
+	s.mu.Unlock()
 	unlockCaches := s.lockRunCaches(home.ID, to)
 	plan, err := s.runPlan(ctx, entry, &next, ws, home, profile)
 	if err != nil {
