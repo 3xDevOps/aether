@@ -5,6 +5,7 @@ import { ApiError } from '@/lib/api'
 import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
+import { loadDevices } from '@/store/devices'
 import { configKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { stateContextOf } from '@/store/selectors'
@@ -1588,6 +1589,23 @@ describe('applyEvent', () => {
     }), client)
 
     await vi.waitFor(() => expect(store.getState().devices).toEqual([pendingDevice()]))
+  })
+
+  it('drops the previous viewer devices when the new viewer read fails', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ memberDeviceList: vi.fn(async () => [pendingDevice()]) }))
+    expect(store.getState().devices).toEqual([pendingDevice()])
+
+    store.getState().setIdentityKey('server:bob')
+    let fail!: (err: Error) => void
+    const read = loadDevices(store, fakeApi({
+      memberDeviceList: vi.fn(() => new Promise<never>((_, reject) => { fail = reject })),
+    }))
+    expect(store.getState().devices).toEqual([])
+
+    fail(new Error('member.device.list: server unreachable'))
+    await expect(read).rejects.toThrow('server unreachable')
+    expect(store.getState().devices).toEqual([])
   })
 
   it('follows a server update and never moves it backwards', async () => {
