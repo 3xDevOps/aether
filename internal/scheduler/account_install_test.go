@@ -256,15 +256,18 @@ func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
 
 // A fallback account whose login a live container holds under another
 // uid:gid would refuse the launch after its run exists, so it is no
-// fallback while that container lives.
+// fallback while that container lives. The launch's own user comes from the
+// launcher's live containers; the runtime is never asked.
 func TestFallbackLaunchableRefusesALoginHeldUnderAnotherUser(t *testing.T) {
 	t.Parallel()
-	e := newShareEnv(t, withImageUsers(map[string]string{launcherImage: "1000:1000"}))
+	e := newShareEnv(t, nil)
 	writeHomeFiles(t, e.ownerHome, ".claude/.credentials.json")
 	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
 	held := &credentialUserReservation{home: e.owner.ID, user: "2000:2000", owner: "the owner's terminal"}
+	own := &credentialUserReservation{home: e.member.ID, user: "1000:1000", owner: "Ada's terminal"}
 	e.sched.mu.Lock()
 	e.sched.credentialUsers[held] = struct{}{}
+	e.sched.credentialUsers[own] = struct{}{}
 	e.sched.mu.Unlock()
 	if ok, err := e.sched.FallbackLaunchable(t.Context(), e.member.ID, e.member.ID, e.owner.ID, "claude", domain.LaunchTUI); ok || err != nil {
 		t.Fatalf("FallbackLaunchable = %v, %v; want the held login refused", ok, err)

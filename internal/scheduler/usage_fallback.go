@@ -105,9 +105,12 @@ const (
 	// usageFailed: the move failed with the run's container gone; the
 	// caller finalizes the run with the reason.
 	usageFailed
-	// usageEnded: the run was finalized, or the server stopped mid-move and
-	// left the marker for recovery; there is nothing left to do.
+	// usageEnded: the run was finalized; there is nothing left to do.
 	usageEnded
+	// usageShutdown: the server is stopping. The move changed nothing that
+	// decides the run's outcome, and leaves its usage-limit mark and any
+	// marker for recovery.
+	usageShutdown
 )
 
 // continueLiveRun moves a run whose live agent hit its usage limit to the
@@ -129,7 +132,7 @@ func (s *Scheduler) continueLiveRun(entry *supervised, terminal bool) (usageOutc
 	defer cancel()
 	outcome, reason := s.moveAccount(ctx, entry)
 	switch outcome {
-	case usageContinued, usageEnded:
+	case usageContinued, usageEnded, usageShutdown:
 		return outcome, ""
 	case usageFailed:
 		s.finalizeWithReason(entry, reason)
@@ -190,20 +193,24 @@ func (s *Scheduler) continueExitedRun(entry *supervised, code int) bool {
 	}
 	ctx, cancel := context.WithTimeout(s.superCtx, usageMoveTimeout)
 	defer cancel()
-	if !s.awaitUsageLimit(ctx, entry) {
+	if !s.awaitUsageLimit(entry) {
 		return false
 	}
-	defer s.clearUsageLimit(entry)
 	s.mu.Lock()
 	movable := s.usageMovableLocked(entry, false)
 	s.mu.Unlock()
 	if !movable {
+		s.clearUsageLimit(entry)
 		return false
 	}
+	// A successful move already dropped the old container's mark; a mark
+	// left now is the new container's.
 	outcome, reason := s.moveAccount(ctx, entry)
-	if outcome == usageContinued || outcome == usageEnded {
+	switch outcome {
+	case usageContinued, usageShutdown:
 		return true
 	}
+	s.clearUsageLimit(entry)
 	s.mu.Lock()
 	entry.failReason = reason
 	s.mu.Unlock()
@@ -232,8 +239,8 @@ func (s *Scheduler) clearUsageLimit(entry *supervised) {
 // awaitUsageLimit reports whether the run's adapter saw the usage limit. The
 // adapter reads the agent's output beside the exit, so for a harness with
 // an adapter it waits briefly for the mark.
-func (s *Scheduler) awaitUsageLimit(ctx context.Context, entry *supervised) bool {
-	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
+func (s *Scheduler) awaitUsageLimit(entry *supervised) bool {
+	run, err := s.cfg.Store.GetRun(context.Background(), entry.runID)
 	if err != nil {
 		return false
 	}
@@ -280,7 +287,7 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 	}
 	s.goMove(func() {
 		outcome, reason := s.continueLiveRun(entry, false)
-		if outcome == usageContinued {
+		if outcome == usageContinued || outcome == usageShutdown {
 			return
 		}
 		s.clearUsageLimit(entry)
@@ -293,8 +300,14 @@ func (s *Scheduler) markUsageLimit(run domain.RunID, message, session string) {
 }
 
 // goMove runs a move its trigger cannot wait for, a hook or a session
-// callback, where Close waits for it.
+// callback, where Close waits for it. Close cancels superCtx under s.mu, so
+// no move starts once it waits.
 func (s *Scheduler) goMove(move func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.superCtx.Err() != nil {
+		return
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -402,6 +415,14 @@ func (s *Scheduler) finalizeWithReason(entry *supervised, reason string) {
 // run where it is, with the reason it stops with; usageFailed means its
 // container is gone and the reason is what it fails with.
 func (s *Scheduler) moveAccount(ctx context.Context, entry *supervised) (usageOutcome, string) {
+	outcome, reason := s.tryMove(ctx, entry)
+	if outcome != usageContinued && s.superCtx.Err() != nil {
+		return usageShutdown, ""
+	}
+	return outcome, reason
+}
+
+func (s *Scheduler) tryMove(ctx context.Context, entry *supervised) (usageOutcome, string) {
 	run, err := s.cfg.Store.GetRun(ctx, entry.runID)
 	if err != nil {
 		return usageNoFallback, cannotContinueReason("the run", "load the run: "+err.Error())
@@ -463,6 +484,8 @@ func (s *Scheduler) moveAccount(ctx context.Context, entry *supervised) (usageOu
 		return stop(excluded.Error())
 	case to == "":
 		return usageNoFallback, noFallbackReason(fromName)
+	case excluded != nil:
+		slog.Warn("scheduler: fallback accounts left out of a move", "run", run.ID, "error", excluded)
 	}
 	return s.replaceContainer(ctx, entry, f, run, from, to, seq, session)
 }
@@ -558,9 +581,8 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	failed := func(err error) (usageOutcome, string) {
 		if s.superCtx.Err() != nil {
-			// The server is stopping: recovery settles the move from its
-			// marker, which stays.
-			return usageEnded, ""
+			// Recovery settles the move from its marker, which stays.
+			return usageShutdown, ""
 		}
 		s.mu.Lock()
 		entry.accountSwap = nil

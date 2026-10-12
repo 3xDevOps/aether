@@ -249,7 +249,10 @@ so a revoked share leaves the pool at once. A fallback account is never one
 whose agent installation the launcher would borrow, so fallback never runs a
 teammate's executables for a launcher who did not pick that account, and
 never one with no login to share, nor one whose login a live container holds
-under another uid:gid. Without an installation of the launcher's
+under another uid:gid than the launcher's own live containers use. Choosing
+reads only member homes and the scheduler's state, never the container
+runtime or a vendor, so nothing slow runs under the launch authorization
+lock. Without an installation of the launcher's
 own, an account qualifies only when the requested launch would also have run
 the image's agent, so a launch that relied on the requested account's
 installation never lands where the agent is missing. An admin gains nothing, and a

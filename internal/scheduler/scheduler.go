@@ -629,7 +629,9 @@ func recoveryError(err error) error {
 
 // Close stops supervision and the Start loops. Containers keep running.
 func (s *Scheduler) Close() error {
+	s.mu.Lock()
 	s.superCancel()
+	s.mu.Unlock()
 	s.closeGitHubOAuth()
 	s.wg.Wait()
 	s.acp.shutdown()

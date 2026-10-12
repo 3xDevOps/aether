@@ -594,3 +594,57 @@ func TestMoveDecidesOnTheRunAsItIsWhenItRecords(t *testing.T) {
 		})
 	}
 }
+
+// A server that stops while a move reads quota leaves the run as it was:
+// not failed, its usage limit kept, so the next server moves it.
+func TestShutdownDuringAMoveLeavesTheRunForRecovery(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, func(cfg *Config) { delete(cfg.Harnesses, "claude") })
+	e.share(t)
+	stopped := make(chan struct{})
+	usage := &hookedUsage{claudeUsage: claudeUsage{e.owner.ID: 10}, during: func() {
+		go func() {
+			_ = e.sched.Close()
+			close(stopped)
+		}()
+		<-e.sched.superCtx.Done()
+	}}
+	e.sched.UseUsageFallback(UsageFallback{Usage: usage, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	startScheduler(t, e.sched)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix it", "claude", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	<-e.sched.RecoveryReady()
+	if _, err = e.bus.Publish(t.Context(), events.Event{WorkspaceID: e.ws.ID, RunID: run.ID, Payload: events.RunUsageLimitPayload{
+		Message: "You've hit your session limit · resets 3pm (UTC)", SessionID: "sess-1",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the usage limit recorded", func() bool {
+		sc, scErr := e.sched.readSidecar(run.ID)
+		return scErr == nil && sc.UsageLimit != ""
+	})
+	e.rt.byName(string(run.ID)).exitNow(1)
+	<-stopped
+
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || row.Status != domain.RunRunning {
+		t.Fatalf("run after a shutdown mid-move = %+v, %v; want it still running", row, err)
+	}
+	if sc, scErr := e.sched.readSidecar(run.ID); scErr != nil || sc.UsageLimit == "" {
+		t.Fatalf("sidecar = %+v, %v; want the usage limit kept for recovery", sc, scErr)
+	}
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	s2.UseUsageFallback(UsageFallback{Usage: claudeUsage{e.owner.ID: 10}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	startScheduler(t, s2)
+	e.assertMovedToOwner(t, run.ID, notes)
+}

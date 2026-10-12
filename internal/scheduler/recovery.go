@@ -1346,10 +1346,16 @@ func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc 
 		return
 	}
 	// A move to another account can take minutes; the other runs' recovery
-	// does not wait for it.
+	// does not wait for it. It starts once recovery has reconciled the run's
+	// development resources against the old container, so the move's
+	// reopenDevelopment is the last word on the new one.
 	go func() {
 		defer s.wg.Done()
-		s.finalize(entry, sc.ExitCode)
+		select {
+		case <-s.recoveryReady:
+			s.finalize(entry, sc.ExitCode)
+		case <-s.superCtx.Done():
+		}
 	}()
 }
 

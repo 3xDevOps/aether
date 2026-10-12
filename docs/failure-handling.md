@@ -587,7 +587,9 @@ cannot use is left out, and a run being killed is not recorded anywhere
 new. It then releases the lock, stops the agent, removes the container,
 creates one with the new account's login, and resumes the agent's session
 there. The move has five minutes, and the run's finish afterwards gets its
-own. A server that stops mid-move leaves the marker below for recovery.
+own. A server that stops mid-move never changes the run's outcome: the
+run is not failed or parked, and its usage limit and any marker below stay
+for the next server to move it.
 
 | Outcome | What happens |
 | --- | --- |
@@ -604,8 +606,9 @@ A headless agent's usage limit is read from its output by the adapter,
 which reads only the current agent process's output: what an earlier
 process printed, before a restart or a move, is never read again. The limit
 is kept in the run's sidecar, so a run whose agent exited while the server
-was down still moves when recovery finalizes it; that move runs beside the
-recovery of other runs, not before it. The scheduler subscribes to usage
+was down still moves when recovery finalizes it; that move starts once
+recovery has finished, so the run's terminals and browser are reconciled
+first, and it does not hold up the recovery of other runs. The scheduler subscribes to usage
 limits before recovery and resubscribes with replay from the last limit it
 handled if the stream drops an event or closes. Once a move has acted on a
 limit (moved, no account, or no move possible), the limit is cleared, so a

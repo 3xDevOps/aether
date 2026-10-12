@@ -531,8 +531,8 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 // installation, whose executables only a launcher who picked that account
 // has agreed to run, and never moves a launch that relied on requested's
 // installation to an account where the agent is missing, nor onto a login a
-// live container holds under another uid:gid. It reads member homes, the
-// member's row and the image's user, never the vendor.
+// live container holds under another uid:gid. It reads member homes and the
+// scheduler's own state only, never the runtime or the vendor.
 func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
 	state, _, err := s.CheckSharedLaunch(ctx, member, account, harnessName)
 	if err != nil || state != SharedLaunchable || s.cfg.Homes == nil {
@@ -561,23 +561,18 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 		}
 	}
 	// A live container that holds the login under another uid:gid would
-	// refuse the launch once its run exists.
-	owner, err := s.cfg.Store.GetMember(ctx, member)
-	if err != nil {
-		return false, err
-	}
-	image := owner.Image
-	if image == "" {
-		image = s.cfg.StandardImage
-	}
-	user, err := s.resolveContainerUser(ctx, image, profile)
-	if err != nil || user == "" {
-		return err == nil, err
-	}
+	// refuse the launch once its run exists. The launch's user is known
+	// without asking the runtime only from member's live containers, which
+	// share one mapping; with none, the launch itself finds any conflict.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncRunUserReservationsLocked()
-	return s.reservationConflictLocked(member, account, user, "") == nil, nil
+	for reservation := range s.credentialUsers {
+		if reservation.home == member && reservation.user != "" {
+			return s.reservationConflictLocked(member, account, reservation.user, "") == nil, nil
+		}
+	}
+	return true, nil
 }
 
 // pinnedLogins mounts each login file of a PinLogin harness in member's own
