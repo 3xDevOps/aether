@@ -11,15 +11,15 @@ export type Fallback = { off: boolean; order: string[] | null; excluded: string[
 
 export const automaticFallback: Fallback = { off: false, order: null, excluded: [] }
 
-function candidates(fallback: Fallback, accounts: Member[], account: string): string[] {
+function candidates(fallback: Fallback, accounts: Member[], skip: string): string[] {
   const order = fallback.order ?? []
-  return [...order, ...accounts.map((member) => member.id).filter((id) => !order.includes(id))].filter((id) => id !== account)
+  return [...order, ...accounts.map((member) => member.id).filter((id) => !order.includes(id))].filter((id) => id !== skip)
 }
 
-export function fallbackParams(fallback: Fallback, accounts: Member[], account: string): { fallback_account_member_ids?: string[]; no_fallback?: boolean } {
+export function fallbackParams(fallback: Fallback, accounts: Member[], skip: string): { fallback_account_member_ids?: string[]; no_fallback?: boolean } {
   if (fallback.off) return { no_fallback: true }
   if (!fallback.order) return {}
-  const ids = candidates(fallback, accounts, account).filter((id) => !fallback.excluded.includes(id))
+  const ids = candidates(fallback, accounts, skip).filter((id) => !fallback.excluded.includes(id))
   // An empty list reads as automatic on the server, so unticking every account means off.
   return ids.length ? { fallback_account_member_ids: ids } : { no_fallback: true }
 }
@@ -27,17 +27,19 @@ export function fallbackParams(fallback: Fallback, accounts: Member[], account: 
 function FallbackList({
   accounts,
   account,
+  skip,
   accountName,
   fallback,
   onChange,
 }: {
   accounts: Member[]
   account: string
+  skip: string
   accountName: (member: Member) => string
   fallback: Fallback
   onChange: (fallback: Fallback) => void
 }) {
-  const ids = candidates(fallback, accounts, account)
+  const ids = candidates(fallback, accounts, skip)
   const owner = accounts.find((member) => member.id === account)?.display_name ?? account
   const move = (index: number, by: number) => {
     const order = [...ids]
@@ -94,6 +96,7 @@ export function AccountOptions({
   onChange,
   fallback,
   onFallback,
+  swarm = false,
 }: {
   label: string
   accounts: Member[]
@@ -102,7 +105,10 @@ export function AccountOptions({
   onChange: (account: string) => void
   fallback: Fallback
   onFallback: (fallback: Fallback) => void
+  swarm?: boolean
 }) {
+  // A swarm's list is every worker's policy too; the server skips each run's current account.
+  const skip = swarm ? '' : account
   const accountName = (member: Member) => `${member.display_name}${member.id === ownAccountID ? ' (you)' : ' (shared)'}`
   const chosen = accounts.find((member) => member.id === account)
   const shared = account !== '' && account !== ownAccountID
@@ -110,7 +116,7 @@ export function AccountOptions({
     <Collapsible defaultOpen={shared}>
       <CollapsibleTrigger>
         <span className="font-medium">Options</span>
-        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, account).no_fallback && ' · Fallback off'}</span>}
+        {chosen && <span className="min-w-0 truncate text-muted">· {label}: {accountName(chosen)}{fallbackParams(fallback, accounts, skip).no_fallback && ' · Fallback off'}</span>}
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-1 pt-2 pl-5">
         <Label htmlFor="launch-account">{label}</Label>
@@ -131,7 +137,7 @@ export function AccountOptions({
             ? `Uses ${chosen?.display_name ?? account}'s agent login and vendor quota in your own environment, with your GitHub login. You remain its owner and actor.`
             : 'A teammate who shares their agent account appears here.'}
         </p>
-        <FallbackList accounts={accounts} account={account} accountName={accountName} fallback={fallback} onChange={onFallback} />
+        <FallbackList accounts={accounts} account={account} skip={skip} accountName={accountName} fallback={fallback} onChange={onFallback} />
       </CollapsibleContent>
     </Collapsible>
   )

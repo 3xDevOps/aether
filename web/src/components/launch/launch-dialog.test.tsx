@@ -452,6 +452,19 @@ describe('swarm', () => {
     ])
   })
 
+  it("lists the integrator's account as a fallback for the swarm's workers", async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    await openSwarm()
+    await userEvent.click(screen.getByRole('button', { name: /^Options/ }))
+    const fallbacks = screen.getByRole('list', { name: 'Fallback accounts' })
+    expect(within(fallbacks).getAllByRole('checkbox').map((box) => box.closest('label')?.textContent)).toEqual(['Alice (you)', 'Bob (shared)'])
+    await userEvent.click(screen.getByRole('button', { name: 'Move Bob (shared) up' }))
+
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.missionCreate).mock.calls[0][0].fallback_account_member_ids).toEqual([bob.id, alice.id])
+  })
+
   it('creates the swarm with fallback off when it is turned off under Options', async () => {
     vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
     await openSwarm()

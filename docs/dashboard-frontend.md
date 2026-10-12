@@ -1393,7 +1393,7 @@ owner's when the caller has none.
 Below the select, **Options** holds the [usage
 fallback](teams.md#usage-fallback) controls (`launch-options.tsx`): a
 **Fall back to another account** checkbox and the **Fallback accounts** list,
-every listed account except the selected one, each with a checkbox and
+each account with a checkbox and
 **Move `<name>` up** / **Move `<name>` down**. A hint names the rule: "The
 run starts on the account here with the most usage left if `<owner>`'s
 usage is at 95% or more at launch, and continues there if the vendor
@@ -1404,7 +1404,10 @@ form sends neither field and the server orders by usage left. After a
 reorder or untick it sends the ticked accounts in order as
 `fallback_account_member_ids`; with the checkbox off, or every account
 unticked, it sends `no_fallback: true` and the summary adds "· Fallback
-off". The Swarm tab sends the same fields on `mission.create`.
+off". On the Run tab the list leaves out the selected account. On the Swarm
+tab it includes the integrator's account, because the list is also every
+worker's policy; the server skips whichever account a run is already on.
+The Swarm tab sends the same fields on `mission.create`.
 
 Neither launch form asks which workspace to launch into: both take
 `activeWorkspace` and say where the run will land, naming the workspace and its

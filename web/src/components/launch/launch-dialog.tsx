@@ -174,7 +174,7 @@ export function LaunchDialog() {
       // follow the serialized list.
       execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
         .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode)),
-      ...fallbackParams(fallback, accounts, account),
+      ...fallbackParams(fallback, accounts, ''),
     }
     const serialized = JSON.stringify(contents)
     const key = swarmKeys.get(serialized) ?? idempotencyKey()
@@ -229,7 +229,7 @@ export function LaunchDialog() {
     </>
   )
   const options = accounts.length > 1 && (
-    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} />
+    <AccountOptions label={accountField} accounts={accounts} ownAccountID={ownAccountID} account={account} onChange={setAccount} fallback={fallback} onFallback={setFallback} swarm={kind === 'swarm'} />
   )
 
   return (
