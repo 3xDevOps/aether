@@ -289,10 +289,10 @@ func TestSharedLaunchCustomHarness(t *testing.T) {
 	if e.containerCount() != 0 {
 		t.Fatal("a container was created for the refused launch")
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
+	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.owner.ID, "aider", domain.LaunchHeadless, ""); err == nil || !strings.Contains(err.Error(), "runs only on your own account") {
 		t.Fatalf("ValidateMissionLaunch = %v, want refusal", err)
 	}
-	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless); err != nil {
+	if err = e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, ""); err != nil {
 		t.Fatalf("ValidateMissionLaunch on the member's own account: %v", err)
 	}
 

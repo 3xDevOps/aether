@@ -118,6 +118,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if !mode.Valid() {
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
+	if err := domain.ValidModel(p.Model); err != nil {
+		return nil, invalidParams(err.Error())
+	}
 	// A taskless launch opens the agent's TUI with no prompt; headless has no
 	// interactive surface, so it still needs a task.
 	if p.Task == "" && mode == domain.LaunchHeadless {
@@ -133,10 +136,10 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, rpcError(err)
 	}
 	account := admission.Account.ID
-	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{CachedBase: p.CachedBase})
+	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{CachedBase: p.CachedBase, Model: p.Model})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: cached base retry is not supported by this server"}
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.launch: launch options (a cached base or a model) are not supported by this server"}
 		}
 		return nil, rpcError(err)
 	}

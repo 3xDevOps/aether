@@ -68,7 +68,7 @@ var ErrInvalidDefinition = errors.New("templates: invalid definition")
 // guarded controller its RPC handlers use, so a template launch and a
 // cron fire are admitted against the workspace budget like any other run.
 type Launcher interface {
-	Launch(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error)
+	LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error)
 }
 
 // Config wires the service. Store, Bus, and Runs are required.
@@ -195,6 +195,9 @@ func (s *Service) Save(ctx context.Context, t *store.Template) error {
 	if !t.Mode.Valid() {
 		return fmt.Errorf("%w: invalid mode %q", ErrInvalidDefinition, t.Mode)
 	}
+	if err := domain.ValidModel(t.Model); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDefinition, err)
+	}
 	if err := checkParams(t.Task, t.Params); err != nil {
 		return err
 	}
@@ -255,7 +258,7 @@ func (s *Service) launch(ctx context.Context, t *store.Template, member domain.M
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	run, err := s.runs.Launch(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode)
+	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model})
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}

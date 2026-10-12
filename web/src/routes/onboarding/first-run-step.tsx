@@ -64,16 +64,21 @@ export function FirstRunStep({
   const setDraft = useStore((s) => s.setOnboardingFirstRun)
   const caps = useCapability()
   const launchable = canLaunch({ cap: caps, role: useSelfRole() })
-  const choice = useAgentChoice({ account: '', ownAccountID: '', preferred: draft.harness, client })
+  const choice = useAgentChoice({ account: '', ownAccountID: '', preferred: draft.harness, preferredModel: draft.model, client })
   const source = useSourceCheck(client, workspace?.id)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const { harness, mode, agentError, noAgents } = choice
+  const { harness, mode, model, agentError, noAgents } = choice
 
   useEffect(() => {
     const current = useStore.getState().onboardingFirstRun
     if (harness && harness !== current.harness) setDraft({ ...current, harness })
   }, [harness, setDraft])
+
+  useEffect(() => {
+    const current = useStore.getState().onboardingFirstRun
+    if (harness && model !== (current.model ?? '')) setDraft({ ...current, model })
+  }, [harness, model, setDraft])
 
   const goToBoard = () => {
     setOnboarded(true)
@@ -99,13 +104,15 @@ export function FirstRunStep({
     setError(null)
     try {
       const task = draft.task.trim()
+      const chosenModel = model.trim()
       const run = await client.runLaunch({
         workspace_id: workspace.id,
         harness,
         ...(task ? { task } : {}),
         ...(mode === 'tui' ? {} : { mode }),
+        ...(chosenModel ? { model: chosenModel } : {}),
       })
-      rememberLaunch(harness, mode)
+      rememberLaunch(harness, mode, chosenModel)
       upsertRun(run)
       setOnboarded(true)
       navigate('run', { runId: run.id })

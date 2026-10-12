@@ -26,6 +26,7 @@ func runRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	agent := fs.String("agent", "", "agent name")
 	mode := fs.String("mode", "standard", launchModeHelp)
+	model := fs.String("model", "", modelHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
 	template := fs.String("template", "", "launch a saved task template instead of a prompt")
@@ -46,8 +47,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *account != "" || *cachedBase != "" {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --account, and --cached-base")
+		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, and --cached-base")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -57,7 +58,7 @@ func runRun(args []string) error {
 	}
 	*mode = wireMode
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--workspace] [--account <member-id>] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	return withControl(func(c *protocol.Client) error {
 		wsID, err := resolveWorkspace(c, *workspace)
@@ -65,20 +66,21 @@ func runRun(args []string) error {
 			return err
 		}
 		var res protocol.RunResult
-		if err := c.Call(protocol.MethodRunLaunch, launchParams(wsID, task, *agent, *mode, *account, *cachedBase), &res); err != nil {
-			return cachedBaseLaunchError(err, task, *agent, *mode, wsID, *account)
+		if err := c.Call(protocol.MethodRunLaunch, launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase), &res); err != nil {
+			return cachedBaseLaunchError(err, task, *agent, *mode, *model, wsID, *account)
 		}
 		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
 		return nil
 	})
 }
 
-func launchParams(workspace, task, agent, mode, account, cachedBase string) protocol.RunLaunchParams {
+func launchParams(workspace, task, agent, mode, model, account, cachedBase string) protocol.RunLaunchParams {
 	return protocol.RunLaunchParams{
 		WorkspaceID:     workspace,
 		Task:            task,
 		Harness:         agent,
 		Mode:            mode,
+		Model:           model,
 		AccountMemberID: account,
 		CachedBase:      cachedBase,
 	}
@@ -98,7 +100,7 @@ func setupOutput(err error) string {
 
 // cachedBaseLaunchError turns a structured base-capture refusal into an
 // explicit, copyable retry without changing ordinary RPC error handling.
-func cachedBaseLaunchError(err error, task, agent, mode, workspace, account string) error {
+func cachedBaseLaunchError(err error, task, agent, mode, model, workspace, account string) error {
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || rpcErr == nil || len(rpcErr.Data) == 0 {
 		return err
@@ -107,16 +109,17 @@ func cachedBaseLaunchError(err error, task, agent, mode, workspace, account stri
 	if json.Unmarshal(rpcErr.Data, &failure) != nil || failure.AcceptedCommit == "" {
 		return err
 	}
-	command := strings.Join([]string{
-		"aether", "run",
-		"--agent", shellquote.Quote(agent),
-		"--mode", modeName(mode),
+	argv := []string{"aether", "run", "--agent", shellquote.Quote(agent), "--mode", modeName(mode)}
+	if model != "" {
+		argv = append(argv, "--model", shellquote.Quote(model))
+	}
+	command := strings.Join(append(argv,
 		"--workspace", shellquote.Quote(workspace),
 		"--account", shellquote.Quote(account),
 		"--cached-base", shellquote.Quote(failure.AcceptedCommit),
 		"--",
 		shellquote.Quote(task),
-	}, " ")
+	), " ")
 	return fmt.Errorf("%s\nretry from cached %s with:\n  %s",
 		rpcErr.Message, failure.AcceptedCommit, command)
 }

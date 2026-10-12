@@ -3,6 +3,7 @@ package coordcli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -226,6 +227,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 	dispatchKey := fs.String("dispatch-key", "", "stable identity for this worker start")
 	harness := fs.String("harness", "", "worker harness")
 	mode := fs.String("mode", "", "worker launch mode")
+	model := fs.String("model", "", "worker model, when the approved choice names one")
 	accountOwner := fs.String("account-owner-id", "", "account owner ID")
 	runOwner := fs.String("run-owner-id", "", "run owner ID")
 	generation := fs.String("expected-integrator-generation", "", "integrator generation observed by the caller")
@@ -254,20 +256,31 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 		if assignment == nil || assignment.Role != "integrator" {
 			return protocol.WorkerStartResult{}, usageError("worker start: this run is not a mission integrator")
 		}
+		modelGiven := false
+		fs.Visit(func(f *flag.Flag) { modelGiven = modelGiven || f.Name == "model" })
 		var matches []protocol.MissionExecutionChoice
+		anyModel := false
 		for _, choice := range assignment.ExecutionChoices {
-			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
+			anyModel = anyModel || choice.Model != ""
+			if (*harness == "" || choice.Harness == *harness) && (*mode == "" || choice.Mode == *mode) && (!modelGiven || choice.Model == *model) && (*accountOwner == "" || choice.AccountMemberID == *accountOwner) {
 				matches = append(matches, choice)
 			}
 		}
 		if len(matches) != 1 {
 			var listed []string
 			for _, choice := range assignment.ExecutionChoices {
-				listed = append(listed, fmt.Sprintf("--harness %s --mode %s --account-owner-id %s", choice.Harness, choice.Mode, choice.AccountMemberID))
+				line := fmt.Sprintf("--harness %s --mode %s --account-owner-id %s", choice.Harness, choice.Mode, choice.AccountMemberID)
+				switch {
+				case choice.Model != "":
+					line += " --model " + choice.Model
+				case anyModel:
+					line += ` --model ""`
+				}
+				listed = append(listed, line)
 			}
 			return protocol.WorkerStartResult{}, usageError(fmt.Sprintf("worker start: %d approved execution choices match; select exactly one of: %s", len(matches), strings.Join(listed, "; ")))
 		}
-		*harness, *mode, *accountOwner = matches[0].Harness, matches[0].Mode, matches[0].AccountMemberID
+		*harness, *mode, *model, *accountOwner = matches[0].Harness, matches[0].Mode, matches[0].Model, matches[0].AccountMemberID
 		if *missionID == "" {
 			*missionID = assignment.MissionID
 		}
@@ -287,7 +300,7 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 		// it instead of launching a second worker.
 		*dispatchKey = fmt.Sprintf("%s-r%d", *taskID, *taskRevision)
 	}
-	p := protocol.WorkerStartParams{MissionID: *missionID, TaskID: *taskID, TaskRevision: *taskRevision, DispatchKey: *dispatchKey, Harness: *harness, Mode: *mode, AccountOwnerID: *accountOwner, RunOwnerID: *runOwner, ExpectedIntegratorGeneration: gen}
+	p := protocol.WorkerStartParams{MissionID: *missionID, TaskID: *taskID, TaskRevision: *taskRevision, DispatchKey: *dispatchKey, Harness: *harness, Mode: *mode, Model: *model, AccountOwnerID: *accountOwner, RunOwnerID: *runOwner, ExpectedIntegratorGeneration: gen}
 	var out protocol.WorkerStartResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodWorkerStart, p, &out); err != nil {
 		return out, err

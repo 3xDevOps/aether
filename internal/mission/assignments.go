@@ -156,7 +156,7 @@ func (s *Service) Assignment(ctx context.Context, run domain.RunID) (protocol.Co
 	}
 	choices := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
 	for _, choice := range m.ExecutionChoices {
-		choices = append(choices, protocol.MissionExecutionChoice{AccountMemberID: string(choice.AccountMemberID), Harness: choice.Harness, Mode: string(choice.Mode)})
+		choices = append(choices, protocol.MissionExecutionChoice{AccountMemberID: string(choice.AccountMemberID), Harness: choice.Harness, Mode: string(choice.Mode), Model: choice.Model})
 	}
 	out := protocol.CoordMissionAssignment{
 		MissionID:            string(m.ID),

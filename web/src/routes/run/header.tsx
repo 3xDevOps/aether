@@ -122,6 +122,11 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             {modeLabel[run.mode] ?? run.mode}
           </span>
         </span>
+        {run.model && (
+          <span className="sr-only min-w-0 truncate @3xs/state:not-sr-only" title={run.model}>
+            {` · ${run.model}`}
+          </span>
+        )}
         <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
           <span aria-hidden>·</span>
           <Button

@@ -69,7 +69,8 @@ func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.C
 
 func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
-		"-", "--agent", "claude", "--worker", "codex:background", "--worker", "claude", "--worker", "codex:background",
+		"-", "--agent", "claude", "--model", "opus", "--worker", "codex:background:gpt-5-codex", "--worker", "claude",
+		"--worker", "codex:background:gpt-5-codex", "--worker", "claude:standard:opus", "--worker", "codex:background", "--worker", "codex::gpt-5-codex",
 		"--workspace", "ws-name",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
@@ -88,10 +89,13 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	want := protocol.MissionCreateParams{
 		WorkspaceID: "ws1",
 		Objective:   "ship the swarm CLI",
-		Integrator:  protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
+		Integrator:  protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus"},
 		ExecutionChoices: []protocol.MissionExecutionChoice{
+			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui", Model: "opus"},
+			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless", Model: "gpt-5-codex"},
 			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless"},
+			{AccountMemberID: "mem1", Harness: "codex", Mode: "tui", Model: "gpt-5-codex"},
 		},
 		IdempotencyKey: "key-1",
 	}
@@ -123,6 +127,8 @@ func TestSwarmCreateRejectsBadInputBeforeAnyRPC(t *testing.T) {
 		"no agent":              {args: []string{"objective"}, want: "usage: aether swarm create"},
 		"bad worker mode":       {args: []string{"objective", "--agent", "claude", "--worker", "codex:headless"}, want: `invalid --worker "codex:headless"`},
 		"empty worker":          {args: []string{"objective", "--agent", "claude", "--worker", ":standard"}, want: `invalid --worker ":standard"`},
+		"bad worker model":      {args: []string{"objective", "--agent", "claude", "--worker", "codex:background:bad model"}, want: `invalid --worker "codex:background:bad model"`},
+		"bad integrator model":  {args: []string{"objective", "--agent", "claude", "--model", "-opus"}, want: "invalid --model"},
 		"background integrator": {args: []string{"objective", "--agent", "claude", "--mode", "background"}, want: "--mode must be standard or enhanced"},
 	} {
 		t.Run(name, func(t *testing.T) {

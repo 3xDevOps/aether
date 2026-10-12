@@ -55,12 +55,12 @@ func (p Profile) Switchable() bool {
 	return p.ACPSessionShared && p.SwitchVerified && len(p.ResumeArgs) > 0 && len(p.ACPArgs) > 0
 }
 
-func (p Profile) ResumeCommand(session string) []string {
+func (p Profile) ResumeCommand(session, model string) []string {
 	out := make([]string, len(p.ResumeArgs))
 	for i, a := range p.ResumeArgs {
 		out[i] = strings.ReplaceAll(a, SessionPlaceholder, session)
 	}
-	return out
+	return append(out, p.ModelLaunchArgs(model)...)
 }
 
 // InstallCommand is the shell command that installs the agent into the member home.

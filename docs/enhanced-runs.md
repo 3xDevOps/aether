@@ -63,11 +63,13 @@ the adapter in the same `agent.install` call. The **Agents** page keeps a
 
 ```sh
 aether run "fix the flaky login test" --agent codex --mode enhanced
+aether run "fix the flaky login test" --agent claude --mode enhanced --model opus
 ```
 
 `--mode` takes `standard`, `enhanced` or `background` on `aether run` and
 `aether template save`. On `aether swarm create`, `--mode standard|enhanced`
-sets the integrator and `--worker codex:enhanced` allows enhanced workers;
+sets the integrator and `--worker codex:enhanced` (or `codex:enhanced:<model>`)
+allows enhanced workers;
 a worker's report wakes an enhanced integrator like any other mail
 ([Mail](#mail)). The task, when given, is the session's first prompt.
 An agent with no ACP command is refused:
@@ -75,6 +77,20 @@ An agent with no ACP command is refused:
 ```
 scheduler: harness "custom" has no command for mode "acp"
 ```
+
+`--model` is set over ACP after the session opens, through the agent's
+native `model` config option when it advertises one, else
+`session/set_model` ([per-agent flags](harnesses.md#launch-argv)). If the
+agent rejects it, the Session view shows a **Model not set** error notice
+with the agent's error. A model picked later from the composer menu becomes
+the run's recorded model, so reopening the session, a server restart and a
+switch to Standard keep it.
+The recorded value is the id the agent reports over ACP, and a switch to
+Standard passes it to the agent's CLI as is, so an agent whose ACP ids differ
+from its CLI's model names refuses the resume and the switch fails with the
+CLI's error. An id Aether cannot store (whitespace, control characters, a
+leading `-`, or over 128 bytes) shows a **Model not recorded** error notice
+in the Session view.
 
 ## What runs in the container
 
@@ -213,7 +229,8 @@ The menus under the box set the agent's mode, model and effort
 provider groups across every model the harness advertises; arrow keys and
 Enter select, and Escape closes it. Aether does not curate a shorter catalog.
 The harness's login, configuration and adapter policies determine which models
-it advertises. `/` lists the agent's commands and `@` completes a path in the
+it advertises. The picked model is recorded on the run and applied again when
+the session reopens. `/` lists the agent's commands and `@` completes a path in the
 run's checkout. Immediate steering, answering, interruption and changing
 options need the run's control lease: the owner's desktop tab takes it when
 it first shows Session and nobody holds it. On any screen, the owner of a
@@ -263,7 +280,8 @@ the agent offered, plus `values` for an accepted form question
 ([local-gateway.md](local-gateway.md)). The first answer wins; a later one gets `CodeConflict` with
 `data.reason: "already_answered"`. Cancelling the turn (`run.acp.cancel`)
 answers every pending request `cancelled`. `run.acp.set_option` changes a
-config option the agent lists, such as its mode or model. Agents that advertise
+config option the agent lists, such as its mode or model; a model selection
+also updates the run's recorded `model`. Agents that advertise
 separate ACP `models` or `modes` instead of config selectors get the same
 controls: Aether routes those selections to `session/set_model` or
 `session/set_mode`. Native config selectors take precedence.
@@ -562,7 +580,9 @@ like any background run: commit, publish, `completed` or `failed` with
 `agent exited; results committed` or `agent exited 1: <cause>`, the cause
 being the session's failure or stop reason. The notice in the item log
 carries the full error. A swarm worker keeps its container and parks
-at `needs-attention` instead, as its headless agent's exit does. A server
+at `needs-attention` instead, as its headless agent's exit does, unless the
+agent never got the task (the model or the prompt was refused): then it
+fails and its retained container frees its worker slot. A server
 restart mid-turn resumes the session and prompts the agent to continue
 where it stopped. Mail does not wake a background run.
 

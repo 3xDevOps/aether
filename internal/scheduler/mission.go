@@ -24,6 +24,7 @@ type MissionLaunchSpec struct {
 	Task         string
 	Harness      string
 	Mode         domain.LaunchMode
+	Model        string
 	CachedBase   string
 }
 
@@ -158,7 +159,8 @@ func sameReservedRun(existing, requested *domain.Run) bool {
 		existing.AccountMember() == requested.AccountMember() &&
 		existing.Task == requested.Task &&
 		existing.Harness == requested.Harness &&
-		existing.Mode == requested.Mode
+		existing.Mode == requested.Mode &&
+		existing.Model == requested.Model
 }
 
 // CancelMission stops an assigned worker without attributing a human action.
@@ -193,14 +195,14 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	if spec.WorkspaceID == "" || spec.RunID == "" || spec.Actor == "" || spec.RunOwner == "" || spec.AccountOwner == "" || spec.Harness == "" || !spec.Mode.Valid() {
 		return nil, errors.New("scheduler: invalid mission launch")
 	}
-	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{CachedBase: spec.CachedBase, AssignedRunID: spec.RunID})
+	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID})
 }
 
 // ValidateMissionLaunch reports whether member's launch of harnessName on
 // account has a command for mode, resolving it exactly as a launch would, so
 // a mission never records an integrator the scheduler cannot start.
-func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode) error {
-	_, _, _, err := s.command(ctx, member, account, harnessName, mode, "task")
+func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
+	_, _, _, err := s.command(ctx, member, account, harnessName, mode, "task", model)
 	return err
 }
 

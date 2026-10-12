@@ -60,14 +60,18 @@ func runTemplate(args []string) error {
 			return err
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tMODE\tPARAMS\tBUDGET\tTASK")
+		_, _ = fmt.Fprintln(tw, "NAME\tAGENT\tMODE\tMODEL\tPARAMS\tBUDGET\tTASK")
 		for _, t := range res.Templates {
 			budget := "-"
 			if t.BudgetUSD > 0 {
 				budget = fmt.Sprintf("$%.2f", t.BudgetUSD)
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				t.Name, t.Harness, modeName(t.Mode), formatParams(t.Params), budget, firstLine(t.Task))
+			model := t.Model
+			if model == "" {
+				model = "-"
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				t.Name, t.Harness, modeName(t.Mode), model, formatParams(t.Params), budget, firstLine(t.Task))
 		}
 		return tw.Flush()
 	})
@@ -78,13 +82,14 @@ func templateSave(args []string) error {
 	agent := fs.String("agent", "", "agent name")
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
 	mode := fs.String("mode", "background", launchModeHelp)
+	model := fs.String("model", "", modelHelp)
 	budget := fs.Float64("budget", 0, "advisory cost hint in USD per run")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	params := kvFlag{}
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" || *task == "" || *agent == "" {
-		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--param k=v] [--budget] [--workspace]")
+		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--param k=v] [--budget] [--workspace]")
 	}
 	wireMode, err := parseLaunchMode(*mode)
 	if err != nil {
@@ -103,12 +108,17 @@ func templateSave(args []string) error {
 			Task:        *task,
 			Harness:     *agent,
 			Mode:        *mode,
+			Model:       *model,
 			Params:      params,
 			BudgetUSD:   *budget,
 		}, &res); err != nil {
 			return err
 		}
-		fmt.Printf("template %s (%s, %s)\n", res.Template.Name, res.Template.Harness, modeName(res.Template.Mode))
+		summary := res.Template.Harness + ", " + modeName(res.Template.Mode)
+		if res.Template.Model != "" {
+			summary += ", " + res.Template.Model
+		}
+		fmt.Printf("template %s (%s)\n", res.Template.Name, summary)
 		return nil
 	})
 }

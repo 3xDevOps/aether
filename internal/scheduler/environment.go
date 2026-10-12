@@ -100,6 +100,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if err != nil {
 		return nil, err
 	}
+	if run != nil {
+		if err := harness.MergeEnv(env, profile.ModelLaunchEnv(run.Model)); err != nil {
+			return nil, fmt.Errorf("scheduler: apply the run's model over the workspace variables: %w", err)
+		}
+	}
 	env["HOME"] = home
 	env["TERM"] = "xterm-256color"
 	localBin := filepath.Join(home, ".local", "bin")

@@ -42,6 +42,8 @@ import type {
   Mission,
   MissionCancelResult,
   MissionCreateResult,
+  MissionExecutionChoice,
+  MissionIntegrator,
   MissionListResult,
   MissionQuestionResult,
   MissionReplaceIntegratorResult,
@@ -426,6 +428,7 @@ export const api = {
     task?: string
     harness: string
     mode?: string
+    model?: string
     account_member_id?: string
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
@@ -518,16 +521,8 @@ export const api = {
     workspace_id: string
     objective: string
     accountable_human_id: string
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
-    execution_choices: Array<{
-      account_member_id: string
-      harness: string
-      mode: string
-    }>
+    integrator: MissionIntegrator
+    execution_choices: MissionExecutionChoice[]
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>
@@ -537,11 +532,7 @@ export const api = {
   missionReplaceIntegrator: (params: {
     mission_id: string
     expected_generation: number
-    integrator: {
-      account_member_id: string
-      harness: string
-      mode: string
-    }
+    integrator: MissionIntegrator
     idempotency_key: string
   }) => call<MissionReplaceIntegratorResult>('mission.replace-integrator', params),
   missionQuestionAnswer: (params: {
@@ -837,6 +828,7 @@ export const api = {
     task: string
     harness: string
     mode?: string
+    model?: string
   }) =>
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,

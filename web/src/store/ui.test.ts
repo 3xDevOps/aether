@@ -229,6 +229,20 @@ describe('run view memory', () => {
   })
 })
 
+describe('launch defaults', () => {
+  it('remembers the model per agent until a launch clears it', () => {
+    const state = useStore.getState()
+    state.rememberLaunch('claude', 'acp', 'opus')
+    state.setLaunchDefault('claude', 'tui')
+    state.rememberLaunch('claude', 'headless')
+    expect(useStore.getState().launchDefaults.claude).toMatchObject({ mode: 'headless', model: 'opus' })
+
+    state.rememberLaunch('claude', 'tui', '')
+    expect(useStore.getState().launchDefaults.claude).not.toHaveProperty('model')
+    useStore.setState({ launchDefaults: {} })
+  })
+})
+
 // The resume point is persisted by name because a wizard grows steps.
 // Versions 0 and 1 wrote an index into a step list without "Git identity" in
 // it, so every one of those numbers has to keep meaning the step it named

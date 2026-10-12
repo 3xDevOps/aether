@@ -733,16 +733,20 @@ the owner does. This is not a separate action inbox, blocker, or task model.
 
 ### Task templates and schedules
 
-A template is a saved launch: agent, task, mode, and parameters. Save one,
+A template is a saved launch: agent, task, mode, model, and parameters. Save one,
 launch it by name, or put it on a cron schedule:
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
-  [--mode standard|enhanced|background] [--param key=value] [--budget <tokens>]
+  [--mode standard|enhanced|background] [--model <model>] [--param key=value] \
+  [--budget <tokens>]
 aether template list
 aether run --template nightly-triage [--param key=value]
 aether template delete nightly-triage
 ```
+
+`template save` refuses a `--model` the agent has no model flag for, with
+`scheduler: agent "<agent>" has no model flag; launch it without a model`.
 
 ```sh
 aether schedule list
@@ -1029,15 +1033,20 @@ delivers the verified result, and reports success. No human approves the plan
 or the delivery.
 The dashboard's launch dialog creates one on its **Swarm** tab: an
 objective, the **Integrator agent**, an **Integrator mode** (Standard or
-Enhanced; Background is refused because it exits after one turn),
-**Agents for workers**, and a **Worker mode** that defaults to Background. A
+Enhanced; Background is refused because it exits after one turn), the
+**Integrator model**, **Agents for workers** with a model input on each
+ticked row, and a **Worker mode** that defaults to Background. A
 worker whose agent cannot use the worker mode runs Standard, which its row
-says. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
+says. An empty model keeps the agent's default. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
 shared account named by `--account`) with the agent `--agent` names, in
 `standard` mode, or `enhanced` with `--mode enhanced`
-([enhanced-runs.md](enhanced-runs.md)). Each `--worker` allows workers on an
-agent, in `standard` mode unless the value ends in `:enhanced` or
-`:background`; workers may use the integrator's agent. `-` in place of the
+([enhanced-runs.md](enhanced-runs.md)), and on the model `--model` names.
+Each `--worker agent[:mode[:model]]` allows workers on an agent, in
+`standard` mode unless the mode is `enhanced` or `background` (an empty
+mode keeps `standard`, so `codex::gpt-5-codex` is a Standard worker on
+`gpt-5-codex`), on the model given or else the agent's default; workers may use the integrator's agent.
+An execution choice is an account, agent, mode and model, so a swarm can
+mix models per agent. `-` in place of the
 objective reads it from stdin. An enhanced integrator or worker is prompted
 when mail reaches its idle session, so worker reports reach an enhanced
 integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
@@ -1057,7 +1066,8 @@ not read 3 messages (12 min)").
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
-  --agent claude --worker claude:background --worker codex:background
+  --agent claude --model opus --worker claude:background \
+  --worker codex:background:gpt-5-codex
 ```
 
 ```
@@ -1130,7 +1140,8 @@ swarm moves to `cancelled`. The server refuses `cancel` on a `completed` or
 `cancelled` swarm, and refuses every one of these from anyone but the
 accountable human or an admin; see [Swarm identity and current
 authority](#swarm-identity-and-current-authority). `replace-integrator`
-starts a new integrator run on the agent `--agent` names, in `tui` mode, under the
+starts a new integrator run on the agent `--agent` names and the model
+`--model` names, in `tui` mode, under the
 current integrator's account or the one named by `--account`; both must be
 among the swarm's execution choices. It reads the swarm first, sends the
 integrator generation `show` reports, and prints the new run ID after the

@@ -735,6 +735,7 @@ In the dashboard, **New run** asks for the task, the agent and the **Mode**:
 messages, approvals and progress as native controls
 ([enhanced-runs.md](enhanced-runs.md)), and **Background** runs the task once
 with no interaction. The CLI takes `--mode enhanced` or `--mode background`.
+`--model <model>` picks the agent's model; omit it for the agent's default.
 
 ```
 run run-d6ay38tj8j running

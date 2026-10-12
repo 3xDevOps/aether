@@ -19,8 +19,12 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
 import { agentLabel } from '@/components/launch/modes'
-import type { AgentInfo, Mission } from '@/lib/types'
+import type { AgentInfo, Mission, MissionExecutionChoice } from '@/lib/types'
 import { useStore } from '@/store'
+
+function agentKey(choice: MissionExecutionChoice): string {
+  return JSON.stringify([choice.harness, choice.model ?? ''])
+}
 
 function newKey(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -39,16 +43,17 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
   const members = useStore((s) => s.members)
   const choices = mission.execution_choices.filter(
     (choice, index, all) =>
-      all.findIndex((other) => other.account_member_id === choice.account_member_id && other.harness === choice.harness) === index,
+      all.findIndex((other) => other.account_member_id === choice.account_member_id && agentKey(other) === agentKey(choice)) === index,
   )
   const accountIDs = [...new Set(choices.map((choice) => choice.account_member_id))]
   const current =
     choices.find(
-      (choice) => choice.account_member_id === mission.integrator.account_member_id && choice.harness === mission.integrator.harness,
+      (choice) => choice.account_member_id === mission.integrator.account_member_id && agentKey(choice) === agentKey(mission.integrator),
     ) ?? choices[0]
   const [account, setAccount] = useState(current?.account_member_id ?? '')
-  const [harness, setHarness] = useState(current?.harness ?? '')
-  const harnesses = choices.filter((choice) => choice.account_member_id === account).map((choice) => choice.harness)
+  const [agent, setAgent] = useState(current ? agentKey(current) : '')
+  const options = choices.filter((choice) => choice.account_member_id === account)
+  const chosen = options.find((choice) => agentKey(choice) === agent)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const returnFocus = useReturnFocus()
@@ -56,11 +61,10 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
 
   const chooseAccount = (next: string) => {
     setAccount(next)
-    setHarness((value) =>
-      choices.some((choice) => choice.account_member_id === next && choice.harness === value)
-        ? value
-        : choices.find((choice) => choice.account_member_id === next)?.harness ?? '',
-    )
+    setAgent((value) => {
+      const first = choices.find((choice) => choice.account_member_id === next)
+      return choices.some((choice) => choice.account_member_id === next && agentKey(choice) === value) ? value : first ? agentKey(first) : ''
+    })
   }
 
   const submit = async () => {
@@ -70,7 +74,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
       await client.missionReplaceIntegrator({
         mission_id: mission.id,
         expected_generation: mission.integrator_generation,
-        integrator: { account_member_id: account, harness, mode: 'tui' },
+        integrator: { account_member_id: account, harness: chosen?.harness ?? '', mode: 'tui', ...(chosen?.model ? { model: chosen.model } : {}) },
         idempotency_key: key.current,
       })
       toast.success('Integrator replaced')
@@ -101,19 +105,23 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
           </Select>
         </FormField>
         <FormField label="Agent">
-          <Select value={harness} onValueChange={setHarness}>
-            <SelectTrigger disabled={!harnesses.length}>
+          <Select value={agent} onValueChange={setAgent}>
+            <SelectTrigger disabled={!options.length}>
               <SelectValue placeholder="Choose an agent" />
             </SelectTrigger>
             <SelectContent>
-              {harnesses.map((name) => <SelectItem key={name} value={name}>{agentLabel(agents?.find((agent) => agent.name === name), name)}</SelectItem>)}
+              {options.map((choice) => (
+                <SelectItem key={agentKey(choice)} value={agentKey(choice)}>
+                  {agentLabel(agents?.find((info) => info.name === choice.harness), choice.harness)}{choice.model ? ` · ${choice.model}` : ''}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </FormField>
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => void submit()} disabled={saving || !account || !harness}>Replace</Button>
+          <Button onClick={() => void submit()} disabled={saving || !account || !chosen}>Replace</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -37,12 +37,14 @@ type MissionExecutionChoice struct {
 	AccountMemberID string `json:"account_member_id"`
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
+	Model           string `json:"model,omitempty"`
 }
 
 type MissionIntegrator struct {
 	AccountMemberID string `json:"account_member_id"`
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
+	Model           string `json:"model,omitempty"`
 }
 
 type Mission struct {
@@ -173,6 +175,7 @@ type Attempt struct {
 	DispatchKey            string  `json:"dispatch_key"`
 	Harness                string  `json:"harness"`
 	Mode                   string  `json:"mode"`
+	Model                  string  `json:"model,omitempty"`
 	State                  string  `json:"state"`
 	RunID                  string  `json:"run_id"`
 	ActorRunID             string  `json:"actor_run_id,omitempty"`
@@ -408,6 +411,7 @@ type WorkerStartParams struct {
 	DispatchKey                  string `json:"dispatch_key"`
 	Harness                      string `json:"harness"`
 	Mode                         string `json:"mode"`
+	Model                        string `json:"model,omitempty"`
 	AccountOwnerID               string `json:"account_owner_id"`
 	RunOwnerID                   string `json:"run_owner_id"`
 	ExpectedIntegratorGeneration uint64 `json:"expected_integrator_generation"`
@@ -448,14 +452,14 @@ type WorkerMutationResult struct {
 }
 
 func MissionFromDomain(m *domain.Mission) Mission {
-	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode)}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, ChangeSeq: m.ChangeSeq, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
+	out := Mission{ID: string(m.ID), WorkspaceID: string(m.WorkspaceID), Objective: m.Objective, AccountableHumanID: string(m.AccountableHumanID), Integrator: MissionIntegrator{AccountMemberID: string(m.Integrator.AccountMemberID), Harness: m.Integrator.Harness, Mode: string(m.Integrator.Mode), Model: m.Integrator.Model}, CurrentIntegratorRunID: string(m.CurrentIntegratorRunID), IntegratorAuthorizingHumanID: string(m.IntegratorAuthorizingHumanID), IntegratorRunOwnerID: string(m.IntegratorRunOwnerID), IntegratorGeneration: m.IntegratorGeneration, AcceptedSetVersion: m.AcceptedSetVersion, Phase: string(m.Phase), OpenQuestions: m.OpenQuestions, IntegratorLaunchError: m.IntegratorLaunchError, IntegratorRunLaunched: m.IntegratorRunLaunched, ChangeSeq: m.ChangeSeq, CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt)}
 	if m.IntegratorLaunchErrorAt != nil {
 		out.IntegratorLaunchErrorAt = rfc3339(*m.IntegratorLaunchErrorAt)
 	}
 	out.ArchivedAt = rfc3339Ptr(m.ArchivedAt)
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
-		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode)}
+		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode), Model: c.Model}
 	}
 	return out
 }

@@ -81,6 +81,7 @@ func TestHookWakeUnsupportedStopsReceiver(t *testing.T) {
 }
 
 func TestHookWakeSuppressedContext(t *testing.T) {
+	outsideEnhancedRun(t)
 	peer := newCLISocket(t, func(protocol.Request) protocol.Response {
 		return protocol.Response{Result: json.RawMessage(`{"wait_supported":true,"wake_admitted":false,"unread_message_ids":["msg-1"],"unread":1,"task":"UNTRUSTED","assignment":{"role":"integrator","mission_id":"UNTRUSTED"},"peers":[{"files":["UNTRUSTED"]}]}`)}
 	})
@@ -152,6 +153,7 @@ func TestHookWakeWaitOutlivesContextHookDeadline(t *testing.T) {
 }
 
 func TestHookWakeUnavailableIsNotEmptySuccess(t *testing.T) {
+	outsideEnhancedRun(t)
 	for _, event := range []string{"context", "wake"} {
 		var out bytes.Buffer
 		code, err := Run(t.Context(), []string{"hook", "generic", event}, Config{Socket: "/nonexistent/coord3.sock", In: strings.NewReader(`{}`), Out: &out})
@@ -166,6 +168,7 @@ func TestHookWakeUnavailableIsNotEmptySuccess(t *testing.T) {
 }
 
 func TestHookWakeFailureClassification(t *testing.T) {
+	outsideEnhancedRun(t)
 	for _, tc := range []struct {
 		name    string
 		rpcCode int

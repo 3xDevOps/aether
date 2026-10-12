@@ -274,11 +274,11 @@ func smokeBothModes(t *testing.T, name string, env map[string]string) {
 		t.Fatalf("Lookup(%q) missing", name)
 	}
 	t.Run("tui", func(t *testing.T) {
-		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask), env)
+		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask, nil), env)
 		assertArgvAccepted(t, name, "tui", out)
 	})
 	t.Run("headless", func(t *testing.T) {
-		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), env)
+		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask, nil), env)
 		assertArgvAccepted(t, name, "headless", out)
 	})
 }
@@ -321,11 +321,11 @@ func TestSmokeCodexFlags(t *testing.T) {
 	env := passthroughEnv(p)
 
 	t.Run("tui", func(t *testing.T) {
-		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask), env)
+		out := runSmoke(t, image, Argv(p.TUIArgs, smokeTask, nil), env)
 		assertArgvAccepted(t, "codex", "tui", out)
 	})
 	t.Run("headless-json", func(t *testing.T) {
-		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask), env)
+		out := runSmoke(t, image, Argv(p.HeadlessArgs, smokeTask, nil), env)
 		assertArgvAccepted(t, "codex", "headless", out)
 		if !strings.Contains(out, "{") {
 			t.Fatalf("codex headless produced no JSON:\n%s", out)
@@ -358,7 +358,7 @@ func TestSmokeHeadlessNoLogin(t *testing.T) {
 				t.Fatalf("Lookup(%q) missing", name)
 			}
 			want := noLoginProofs[name]
-			out, exit := runSmokeToExit(t, image, Argv(p.HeadlessArgs, smokeTask), launchEnv(p))
+			out, exit := runSmokeToExit(t, image, Argv(p.HeadlessArgs, smokeTask, nil), launchEnv(p))
 			assertArgvAccepted(t, name, "headless-no-login", out)
 			lower := strings.ToLower(out)
 			started := slices.ContainsFunc(want.output, func(m string) bool { return strings.Contains(lower, m) })
