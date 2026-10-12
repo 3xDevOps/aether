@@ -49,34 +49,39 @@ function useEdgeSignIn(client: Api, edge?: string): SignIn {
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
 
-  const check = useCallback(async () => {
+  useEffect(() => {
+    let ignore = false
+    setPhase({ name: 'checking' })
     setError(null)
-    try {
-      const status = await client.localEdgeStatus()
-      const login = !edge || status.login?.edge === edge ? status.login : undefined
-      if (login?.state === 'pending') {
-        setPhase({ name: 'waiting', login })
-        return
+    void (async () => {
+      try {
+        const status = await client.localEdgeStatus()
+        if (ignore) return
+        const login = !edge || status.login?.edge === edge ? status.login : undefined
+        if (login?.state === 'pending') {
+          setPhase({ name: 'waiting', login })
+          return
+        }
+        if (login?.state === 'failed' && login.error) setError(login.error)
+        const edges = status.edges.filter((e) => !edge || e.edge === edge)
+        const signedIn = edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
+        if (signedIn.length > 0) {
+          setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
+          return
+        }
+        const unreadable = edges.find((e) => e.error)?.error
+        if (unreadable) setError(unreadable)
+        setPhase({ name: 'signed-out' })
+      } catch (err) {
+        if (ignore) return
+        setError(message(err))
+        setPhase({ name: 'signed-out' })
       }
-      if (login?.state === 'failed' && login.error) setError(login.error)
-      const edges = status.edges.filter((e) => !edge || e.edge === edge)
-      const signedIn = edges.flatMap((e) => (e.account ? [{ edge: e.edge, account: e.account }] : []))
-      if (signedIn.length > 0) {
-        setPhase({ name: 'signed-in', edges: signedIn, chosen: signedIn.length === 1 ? signedIn[0].edge : null })
-        return
-      }
-      const unreadable = edges.find((e) => e.error)?.error
-      if (unreadable) setError(unreadable)
-      setPhase({ name: 'signed-out' })
-    } catch (err) {
-      setError(message(err))
-      setPhase({ name: 'signed-out' })
+    })()
+    return () => {
+      ignore = true
     }
   }, [client, edge])
-
-  useEffect(() => {
-    void check()
-  }, [check])
 
   const waitingEdge = phase.name === 'waiting' ? phase.login.edge : null
   const waitingCode = phase.name === 'waiting' ? phase.login.user_code : null
@@ -323,7 +328,7 @@ function JoinPanel({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<{ refusal: EdgeRefusal; text: string } | null>(null)
-  const [wrongAccount, setWrongAccount] = useState(false)
+  const [resign, setResign] = useState<string | null>(null)
   const live = useRef(true)
   const retry = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -336,13 +341,13 @@ function JoinPanel({
   }, [])
 
   useEffect(() => {
-    if (phase.name === 'waiting') setWrongAccount(false)
+    if (phase.name === 'waiting') setResign(null)
   }, [phase.name])
 
   const attempt = async () => {
     setBusy(true)
     setError(null)
-    setWrongAccount(false)
+    setResign(null)
     try {
       const result = await client.localEdgeJoin(link)
       if (result.remote_error) toast.error(result.remote_error)
@@ -359,7 +364,8 @@ function JoinPanel({
         return
       }
       setPending(null)
-      if (refusal?.kind === 'join-wrong' && refusal.user && refusal.account) setWrongAccount(true)
+      if (refusal?.kind === 'join-wrong' && refusal.user && refusal.account) setResign('Sign in with another account')
+      if (refusal?.kind === 'identity-stale') setResign('Sign in again')
       if (refusal?.kind === 'not-signed-in' || refusal?.kind === 'token-revoked') setPhase({ name: 'signed-out' })
       setError(message(err))
     } finally {
@@ -398,11 +404,11 @@ function JoinPanel({
         Join <span className="font-code">{join.server}</span> as the invited account?
       </p>
       {error && <ErrorLine>{error}</ErrorLine>}
-      {account && wrongAccount ? (
+      {account && resign ? (
         <>
           <SignInProgress signIn={signIn} />
           <Button size="sm" disabled={signIn.starting} onClick={() => void signIn.signIn()}>
-            {signIn.starting ? 'Signing in…' : 'Sign in with another account'}
+            {signIn.starting ? 'Signing in…' : resign}
           </Button>
         </>
       ) : account ? (

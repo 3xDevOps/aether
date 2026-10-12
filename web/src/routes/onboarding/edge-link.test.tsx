@@ -641,6 +641,36 @@ describe('a join link handed to the dashboard', () => {
     expect(await screen.findByText(/^Linked to/)).toBeDefined()
   })
 
+  it('offers a fresh sign-in when the edge says the login is stale, then joins again', async () => {
+    handOver()
+    seed()
+    const stale = new ApiError(403, 'your login and email were last confirmed over 24 hours ago', undefined, {
+      refusal: { kind: 'identity-stale' },
+    })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi
+        .fn()
+        .mockResolvedValueOnce(signedIn)
+        .mockResolvedValue({ edges: [{ edge, account }], login: { ...pending, state: 'signed_in', account } }),
+      localEdgeLogin: vi.fn(async () => pending),
+      localEdgeJoin: vi.fn().mockRejectedValueOnce(stale).mockResolvedValue(linkResult),
+    })
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    expect((await join.findByRole('alert')).textContent).toContain('last confirmed over 24 hours ago')
+    expect(join.queryByRole('button', { name: 'Join' })).toBeNull()
+    fireEvent.click(join.getByRole('button', { name: 'Sign in again' }))
+
+    expect(client.localEdgeLogin).toHaveBeenCalledWith(edge)
+    expect((await join.findByText(/This device is signed in/, undefined, { timeout: 3000 })).textContent).toContain('as octocat')
+    fireEvent.click(join.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByText(/^Linked to/)).toBeDefined()
+  })
+
   it('follows the gateway onto the joined server when the join ends after the panel closed', async () => {
     handOver()
     seed()
@@ -739,6 +769,31 @@ describe('a claim link handed to the dashboard', () => {
 
     const command = await screen.findByRole('region', { name: 'Link from a terminal' })
     expect(within(command).getByText(`aether link --claim ${serverID}-abcdefghijk23456 --edge ${custom}`)).toBeDefined()
+  })
+
+  it('keeps the later edge when status reads resolve out of order', async () => {
+    const custom = 'https://edge.custom.test:8443'
+    const claimTo = (to: string) => `aether://claim?edge=${encodeURIComponent(to)}&server=${serverID}#abcdefghijk23456`
+    window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimTo(edge))}`)
+    seed()
+    let first: (status: EdgeStatus) => void = () => {}
+    const localEdgeStatus = vi
+      .fn<() => Promise<EdgeStatus>>()
+      .mockReturnValueOnce(new Promise((resolve) => (first = resolve)))
+      .mockResolvedValue({ edges: [] })
+    const client = fakeApi({ localLinkStatus: vi.fn(async () => unlinked), localEdgeStatus })
+    render(<OnboardingRoute params={{}} client={client} />)
+    await vi.waitFor(() => expect(localEdgeStatus).toHaveBeenCalledTimes(1))
+
+    window.history.replaceState(null, '', `/?token=t#claim=${encodeURIComponent(claimTo(custom))}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    const section = within(await screen.findByRole('region', { name: 'Sign in' }))
+    expect(await section.findByRole('button', { name: 'Sign in' })).toBeDefined()
+
+    first(signedIn)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getByRole('region', { name: 'Sign in' })).toBeDefined()
+    expect(screen.queryByText(/octocat/)).toBeNull()
   })
 
   it('signs in to the custom edge the link names and claims through it', async () => {
