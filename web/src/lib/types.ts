@@ -1190,6 +1190,8 @@ export interface EdgeLinkResult {
   addr?: string
   user: string
   member: { id: string; display_name: string; role: string }
+  /** The link is saved, but the clone's aether remote was not updated. */
+  remote_error?: string
 }
 
 /** member.device.list: a client install a member reaches the server through

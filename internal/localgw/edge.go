@@ -287,6 +287,8 @@ type edgeLinked struct {
 	Addr     string          `json:"addr,omitempty"`
 	User     string          `json:"user"`
 	Member   protocol.Member `json:"member"`
+	// RemoteError is set when the link succeeded but the clone's aether remote could not be moved.
+	RemoteError string `json:"remote_error,omitempty"`
 }
 
 func (g *Gateway) localEdgeLink(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -386,8 +388,9 @@ func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) 
 	}
 	cfg := result.Config
 	var out bytes.Buffer
+	linked := &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}
 	if _, err := localops.MoveRemote(prev, cfg, &out, &out); err != nil {
-		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("set git remote: %v: %s", err, strings.TrimSpace(out.String()))}
+		linked.RemoteError = fmt.Sprintf("the link is saved, but the clone's aether remote was not updated: %v: %s", err, strings.TrimSpace(out.String()))
 	}
-	return &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}, nil
+	return linked, nil
 }

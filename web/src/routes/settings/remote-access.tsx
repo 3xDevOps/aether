@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -97,7 +98,8 @@ function ConnectAccount({ client, edgeURL, serverID }: { client: Api; edgeURL: s
     const { code } = await client.serverEdgeClaimCode()
     // The gateway is shared, so another tab may have relinked it since.
     if (code.split('-')[0] !== serverID) throw new Error('The gateway now reaches another server; reload and try again.')
-    await client.localEdgeClaim(code, edgeURL)
+    const { remote_error } = await client.localEdgeClaim(code, edgeURL)
+    if (remote_error) toast.error(remote_error)
   }
 
   const connect = async () => {

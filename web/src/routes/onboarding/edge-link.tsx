@@ -2,6 +2,7 @@
 // this screen never sees it.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -303,6 +304,7 @@ function JoinPanel({
     setError(null)
     try {
       const result = await client.localEdgeJoin(link)
+      if (result.remote_error) toast.error(result.remote_error)
       // The gateway now serves the joined server, so the dashboard follows
       // it even after this panel is gone.
       if (live.current) onLinked(result)
@@ -462,7 +464,9 @@ function ServerPicker({
     setBusy(true)
     setError(null)
     try {
-      onLinked(await run())
+      const result = await run()
+      if (result.remote_error) toast.error(result.remote_error)
+      onLinked(result)
     } catch (err) {
       setError(message(err))
     } finally {

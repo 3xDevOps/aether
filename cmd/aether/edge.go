@@ -79,7 +79,7 @@ func runEdge(args []string) error {
 	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
 	url, err := localops.MoveRemote(prev, cfg, os.Stdout, os.Stderr)
 	if err != nil {
-		return err
+		return fmt.Errorf("the link is saved, but the clone's aether remote was not updated: %w", err)
 	}
 	if url != "" {
 		fmt.Printf("git remote aether -> %s\n", url)

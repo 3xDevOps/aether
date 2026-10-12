@@ -1,9 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { ApiError } from '@/lib/api'
 import type { ServerEdge } from '@/lib/types'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { useStore } from '@/store'
 import { fakeApi, serverInfo } from '@/test/fixtures'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 const edgeURL = 'https://edge.example'
 const ownerless: ServerEdge = {
@@ -101,4 +104,24 @@ it('signs in afresh when the edge revoked the saved token, then claims', async (
   expect(client.localEdgeLogin).toHaveBeenCalledWith(edgeURL)
   expect(client.localEdgeClaim).toHaveBeenCalledTimes(2)
   expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('refreshes the owner and shows remote_error when the clone remote was not updated', async () => {
+  seed('admin', ownerless)
+  const client = fakeApi({
+    localEdgeStatus: vi.fn(async () => ({ edges: [{ edge: edgeURL, account: { id: 'acct_1', provider: 'github', subject: '1001', login: 'octo' } }] })),
+    serverEdgeClaimCode: vi.fn(async () => ({ code: 'wqc4lsjvzdzrwq3k5dabdtajwj-abcdefghijklmnop', expires_at: '2026-10-12T10:30:00Z' })),
+    localEdgeClaim: vi.fn(async () => ({
+      server_id: ownerless.server_id,
+      edge: edgeURL,
+      user: 'aether',
+      member: { id: 'mem_1', display_name: 'Alice', role: 'admin' },
+      remote_error: 'the link is saved, but the clone\'s aether remote was not updated: no such directory',
+    })),
+    serverEdge: vi.fn(async () => ({ ...ownerless, owner: { provider: 'github', login: 'octo' }, claimed: true })),
+  })
+  render(<RemoteAccessSection client={client} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect my GitHub account (octo)' }))
+  await screen.findByText('octo (github)')
+  expect(toast.error).toHaveBeenCalledWith("the link is saved, but the clone's aether remote was not updated: no such directory")
 })
