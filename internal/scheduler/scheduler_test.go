@@ -1560,6 +1560,9 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	if prof.LocalRoot != "/home/aether/.aider" || len(prof.CredentialPaths) != 1 {
 		t.Fatalf("profile = %+v", prof)
 	}
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x", "opus"); err == nil || err.Error() != `scheduler: agent "aider" has no model flag; launch it without a model` {
+		t.Fatalf("custom command with a model = %v", err)
+	}
 }
 
 func TestValidateMissionLaunchResolvesTheHarnessForTheAccount(t *testing.T) {

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 )
 
@@ -136,5 +138,44 @@ func TestEnhancedRunReportsAModelTheAgentRefused(t *testing.T) {
 	})
 	if !slices.Contains(rt.all()[0].agent.Methods(), "session/set_model") {
 		t.Fatal("the agent was never sent session/set_model")
+	}
+}
+
+func TestComposerModelChoiceIsRecorded(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withMockClaude)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	sub := e.subscribe(t)
+	if err = e.sched.ACPSetOption(t.Context(), run.ID, "mode", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil || row.Model != "" {
+		t.Fatalf("after a mode change the run's model is %q (%v), want none", row.Model, err)
+	}
+	if err = e.sched.ACPSetOption(t.Context(), run.ID, "model", "opus"); err != nil {
+		t.Fatal(err)
+	}
+	if row, err = e.db.GetRun(t.Context(), run.ID); err != nil || row.Model != "opus" {
+		t.Fatalf("after a model change the run's model is %q (%v), want opus", row.Model, err)
+	}
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-sub.Events():
+			if p, ok := ev.Payload.(events.RunModelPayload); ok && ev.RunID == run.ID {
+				if p.Model != "opus" {
+					t.Fatalf("run.model event = %q, want opus", p.Model)
+				}
+				return
+			}
+		case <-timer.C:
+			t.Fatal("no run.model event")
+		}
 	}
 }

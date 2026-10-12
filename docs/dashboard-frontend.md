@@ -810,9 +810,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   hydration would otherwise render as a raw ID forever. A
   `workspace.timeline` entry of kind `handoff` re-reads its run the same way,
   because a handoff publishes no `run.status` event to carry the new owner.
-  `run.title`, `run.protected` and `run.archived` follow the same fetch-first
-  rule on a run the client has never seen; `run.controller` skips an unknown
-  run, whose snapshot carries the holder.
+  `run.title`, `run.model`, `run.protected` and `run.archived` follow the
+  same fetch-first rule on a run the client has never seen; `run.controller`
+  skips an unknown run, whose snapshot carries the holder.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or

@@ -655,7 +655,10 @@ func (s *Session) setLegacy(ctx context.Context, category, selected string, revi
 // SetModel sets the agent's native model option when it advertises one, and
 // calls session/set_model otherwise.
 func (s *Session) SetModel(ctx context.Context, model string) error {
-	if id := s.nativeModelID(); id != "" {
+	s.mu.Lock()
+	id := s.options.nativeModelID()
+	s.mu.Unlock()
+	if id != "" {
 		return s.SetOption(ctx, id, model)
 	}
 	s.optionMu.Lock()
@@ -666,15 +669,16 @@ func (s *Session) SetModel(ctx context.Context, model string) error {
 	return s.setLegacy(ctx, "model", model, revision)
 }
 
-func (s *Session) nativeModelID() string {
+// ModelOptionID is the id SetOption takes to change the model: the native
+// model option, else the selector synthesized from the agent's model list,
+// else empty.
+func (s *Session) ModelOptionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, option := range s.options.options {
-		if option.category() == "model" {
-			return option.ID
-		}
+	if id := s.options.nativeModelID(); id != "" {
+		return id
 	}
-	return ""
+	return s.options.syntheticID("model")
 }
 
 // Model is the session's current model, empty when the agent reports none.

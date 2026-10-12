@@ -722,6 +722,9 @@ export interface GitBranchPayload {
 export interface RunTitlePayload {
   title: string
 }
+export interface RunModelPayload {
+  model: string
+}
 export interface RunProtectedPayload {
   protected: boolean
 }

@@ -383,9 +383,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			slog.Warn("scheduler: set the agent's mode", "run", runID, "mode", mode, "error", err)
 		}
 	}
+	var modelErr error
 	if run.Model != "" {
-		if err := sess.SetModel(ctx, run.Model); err != nil {
-			sess.Notice("error", "Model not set", err.Error())
+		if modelErr = sess.SetModel(ctx, run.Model); modelErr != nil {
+			sess.Notice("error", "Model not set", modelErr.Error())
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
@@ -395,6 +396,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		c.svc.EnhancedSessionOpened(ctx, runID)
 	}
 	switch {
+	case oneShot && modelErr != nil:
+		// Unattended, the task would otherwise run on the agent's default model.
+		d.endOneShot(entry, false, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
 	case oneShot:
 		d.startOneShot(ctx, entry, sess, fresh, task)
 	case fresh && task != "":

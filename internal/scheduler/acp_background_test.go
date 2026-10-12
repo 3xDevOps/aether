@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
+
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -139,6 +141,25 @@ func TestBackgroundRunOverACPFailsOnAnotherStop(t *testing.T) {
 	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
 	if want := exitedFailedReasonPrefix + "1: the agent's turn ended: cancelled"; got.Reason != want {
 		t.Fatalf("reason %q, want %q", got.Reason, want)
+	}
+}
+
+func TestBackgroundRunOverACPFailsWhenTheModelIsRefused(t *testing.T) {
+	t.Parallel()
+	e, rt := newBackgroundEnv(t, enhancedAgent, true)
+	// No configOptions, so the model goes through session/set_model, which
+	// the mock agent does not implement.
+	rt.fixture.SessionNew = json.RawMessage(`{"sessionId":"legacy"}`)
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", enhancedAgent, domain.LaunchHeadless, domain.LaunchOptions{Model: "anthropic/claude-sonnet-4-5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunFailed)
+	if want := exitedFailedReasonPrefix + "1: model not set: "; !strings.HasPrefix(got.Reason, want) {
+		t.Fatalf("reason %q, want prefix %q", got.Reason, want)
+	}
+	if slices.Contains(rt.all()[0].agent.Methods(), acp.AgentMethodSessionPrompt) {
+		t.Fatal("the task ran on the agent's default model")
 	}
 }
 
