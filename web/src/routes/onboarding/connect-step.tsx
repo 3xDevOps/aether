@@ -125,7 +125,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
       )}
       {connected && <Callout tone="done" title="Connected">{summary}</Callout>}
       {handed?.kind === 'join' && !edgeLinked && (
-        <JoinLink client={client} caps={caps} link={handed.link} onLinked={(result) => void linkedThroughEdge(result)} />
+        <JoinLink key={handed.link} client={client} caps={caps} link={handed.link} onLinked={(result) => void linkedThroughEdge(result)} />
       )}
       {handed?.kind === 'claim' && !caps.hasLocal('edge.claim') && (
         <LinkByCommand

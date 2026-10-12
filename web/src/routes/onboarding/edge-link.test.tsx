@@ -609,6 +609,37 @@ describe('a join link handed to the dashboard', () => {
     unbind()
   })
 
+  it('replaces a waiting join with a second handed join link and stops asking for the first', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    handOver()
+    seed()
+    const pendingDevice = new ApiError(409, 'edge.join: this device waits for an admin', undefined, {
+      refusal: { kind: 'device-pending', server: 'build-box', device: 'laptop', fingerprint: 'SHA256:devicekeyexample' },
+    })
+    const client = fakeApi({
+      localLinkStatus: vi.fn(async () => unlinked),
+      localEdgeStatus: vi.fn(async () => signedIn),
+      localEdgeJoin: vi.fn().mockRejectedValue(pendingDevice),
+    })
+    render(<OnboardingRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Join' }))
+    expect(await screen.findByRole('status')).toBeDefined()
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(1)
+
+    const otherServer = 'zyxwvutsrqponmlkjihgfedcba'
+    const second = joinLink.replace(serverID, otherServer)
+    window.history.replaceState(null, '', `/?token=t#join=${encodeURIComponent(second)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    const join = within(await screen.findByRole('region', { name: 'Join' }))
+    expect(join.getByText(/as the invited account\?/).textContent).toBe(`Join ${otherServer} as the invited account?`)
+    expect(screen.queryByRole('status')).toBeNull()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(client.localEdgeJoin).toHaveBeenCalledTimes(1)
+    expect(client.localEdgeJoin).toHaveBeenCalledWith(joinLink)
+  })
+
   it('shows the command where the dashboard has no edge.join', async () => {
     handOver()
     seed()

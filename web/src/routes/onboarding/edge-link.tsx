@@ -226,7 +226,7 @@ export function EdgeSignIn({
       )}
       {picked && (
         <ServerPicker
-          key={picked.edge}
+          key={`${picked.edge} ${claim ?? ''}`}
           client={client}
           edge={picked.edge}
           account={picked.account}
