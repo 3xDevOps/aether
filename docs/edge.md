@@ -1281,10 +1281,22 @@ for you and for the provider's browser SSH, and the way back in is a
 rebuild from a snapshot unless the provider has an out-of-band console.
 Limit who reaches port 22 in the provider's firewall instead, such as an
 AWS security group or a Lightsail firewall, which you change from the
-provider's console without logging in. With port 22 open to every address,
-SSH must refuse passwords: `sudo sshd -T | grep passwordauthentication`
-prints `passwordauthentication no`. Before closing the session that ran
-`ufw enable`, open a second SSH connection to check port 22 still answers.
+provider's console without logging in.
+
+With port 22 open to every address, SSH must refuse passwords. Both lines
+must end in `no`:
+
+```sh
+sudo sshd -T | grep -E '^(password|kbdinteractive)authentication'
+```
+
+```
+passwordauthentication no
+kbdinteractiveauthentication no
+```
+
+Before closing the session that ran `ufw enable`, open a second SSH
+connection to check port 22 still answers.
 
 Without a reverse proxy, leave port 80 closed.
 
