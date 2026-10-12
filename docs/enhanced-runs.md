@@ -85,6 +85,12 @@ agent rejects it, the Session view shows a **Model not set** error notice
 with the agent's error. A model picked later from the composer menu becomes
 the run's recorded model, so reopening the session, a server restart and a
 switch to Standard keep it.
+The recorded value is the id the agent reports over ACP, and a switch to
+Standard passes it to the agent's CLI as is, so an agent whose ACP ids differ
+from its CLI's model names refuses the resume and the switch fails with the
+CLI's error. An id Aether cannot store (whitespace, control characters, a
+leading `-`, or over 128 bytes) shows a **Model not recorded** error notice
+in the Session view.
 
 ## What runs in the container
 
