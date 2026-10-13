@@ -1496,11 +1496,12 @@ Edits stay as in-memory dirty tabs while you navigate. Save explicitly with
 force-save. Browser navigation warns before unloading dirty buffers.
 
 Configuration files are complete UTF-8 text up to 64 MiB. Binary and oversized
-files are read-only. A new file never overwrites an existing one. A later push does not replace an already
+files are read-only. A new file never overwrites an existing one. A later
+push does not replace an already
 open editor buffer. Use **Reload from server** when you want current remote
 bytes, including after a stale save; it deliberately discards the local draft.
-Every `config.*` method requires `Launch` and addresses only the authenticated
-member's own home; an admin cannot select another member.
+Every `config.*` and `home.*` method requires `Launch` and addresses only the
+authenticated member's own home; an admin cannot select another member.
 
 For workspace files, **Commit to <branch>** makes a one-file commit on the
 workspace base branch and does not push upstream. Live-run writes change the

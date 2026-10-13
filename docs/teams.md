@@ -1431,8 +1431,8 @@ files. It has explicit **Save** or
 dirty tabs that survive navigation, unload warnings, and no autosave or
 force-save. A failed or stale save keeps the draft; **Reload from server**
 deliberately discards it. Configuration files are complete UTF-8 text up to 64
-MiB. Binary and oversized files are read-only. New configuration files accept nested relative paths and
-refuse overwrite. Every `config.*` method
+MiB. Binary and oversized files are read-only. A new file never overwrites
+an existing one. Every `config.*` and `home.*` method
 requires `Launch` and targets only the authenticated member's own home; an
 admin cannot select another member.
 
