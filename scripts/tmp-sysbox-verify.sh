@@ -1,6 +1,7 @@
 #!/bin/sh
 # TEMPORARY: CI verification of Docker inside runs; removed before merge.
 set -eux
+docker ps -q | xargs -r docker stop
 sudo sh scripts/install-sysbox.sh
 sudo sh scripts/install-sysbox.sh
 sudo env "PATH=$PATH" "HOME=$HOME" AETHER_NESTED_DOCKER_TEST_IMAGE=aether-standard:ci \
