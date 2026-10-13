@@ -216,20 +216,6 @@ func claudeMeta(meta map[string]any) (parent, toolName string) {
 	return parent, toolName
 }
 
-// subagentLabel reads the fields that name a subagent from the input of an
-// Agent or Task tool call.
-func subagentLabel(rawInput any) *Subagent {
-	in, _ := rawInput.(map[string]any)
-	description, _ := in["description"].(string)
-	kind, _ := in["subagent_type"].(string)
-	if description == "" && kind == "" {
-		return nil
-	}
-	description, _ = cutTail(description, maxLinkBytes)
-	kind, _ = cutTail(kind, maxLinkBytes)
-	return &Subagent{Description: description, Type: kind}
-}
-
 // chunk appends streamed text to the open message, starting a new one when
 // the kind, role, message id or subagent changes.
 func (p *projector) chunk(kind Kind, role, id, parent string, block acp.ContentBlock) {
@@ -358,9 +344,13 @@ func (p *projector) tool(id string, patch toolPatch) {
 		c.RawInput, cut = capRaw(patch.rawInput, maxRawBytes)
 		st.truncated = st.truncated || cut
 	}
-	if c.ToolName == "Agent" || c.ToolName == "Task" {
-		if label := subagentLabel(patch.rawInput); label != nil {
-			c.Subagent = label
+	if in, ok := patch.rawInput.(map[string]any); ok && (c.ToolName == "Agent" || c.ToolName == "Task") {
+		description, _ := in["description"].(string)
+		kind, _ := in["subagent_type"].(string)
+		if description != "" || kind != "" {
+			description, _ = cutTail(description, maxLinkBytes)
+			kind, _ = cutTail(kind, maxLinkBytes)
+			c.Subagent = &Subagent{Description: description, Type: kind}
 		}
 	}
 	if patch.rawOutput != nil {
@@ -384,7 +374,8 @@ func (p *projector) tool(id string, patch toolPatch) {
 	}
 
 	final := c.Status == string(acp.ToolCallStatusCompleted) || c.Status == string(acp.ToolCallStatusFailed)
-	if !known || final || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
+	// No later endTurn writes what a call that outlived its turn holds back.
+	if !known || final || st.ended || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
 		len(st.output) >= toolOutputGrowth || st.skipped+1 >= toolSkipLimit {
 		p.emitTool(st)
 		if !final {
@@ -423,6 +414,7 @@ func (p *projector) endTurn() {
 	if drop := len(p.toolOrder) - maxKeptTools; drop > 0 {
 		for _, id := range p.toolOrder[:drop] {
 			delete(p.tools, id)
+			delete(p.plans, id)
 		}
 		p.toolOrder = slices.Delete(p.toolOrder, 0, drop)
 	}

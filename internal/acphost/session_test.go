@@ -441,15 +441,15 @@ func TestToolUpdateAfterTheTurnMergesIntoItsSnapshot(t *testing.T) {
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
-	newest := func(status string) *ToolCall {
+	newest := func(status, output string) *ToolCall {
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			tools := ofKind(items(t, s), KindToolCall)
-			if n := len(tools); n > 0 && tools[n-1].ToolCall.Status == status {
+			if n := len(tools); n > 0 && tools[n-1].ToolCall.Status == status && tools[n-1].ToolCall.Output == output {
 				return tools[n-1].ToolCall
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("no %s tool item in %+v", status, tools)
+				t.Fatalf("no %s tool item with output %q in %+v", status, output, tools)
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -458,8 +458,11 @@ func TestToolUpdateAfterTheTurnMergesIntoItsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
+	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1",
+		"_meta": map[string]any{"terminal_output": map[string]any{"terminal_id": "t1", "data": "late\n"}}})
+	newest("in_progress", "late\n")
 	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
-	tc := newest("completed")
+	tc := newest("completed", "")
 	if tc.Title != "Map the module" || tc.ToolKind != "think" || tc.ParentID != "outer" || tc.ToolName != "Agent" ||
 		tc.Subagent == nil || tc.Subagent.Description != "Map the module" {
 		t.Fatalf("late update lost the snapshot: %+v", tc)
@@ -468,7 +471,7 @@ func TestToolUpdateAfterTheTurnMergesIntoItsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
-	tc = newest("pending")
+	tc = newest("pending", "")
 	if tc.Title != "Second" || tc.ParentID != "" || tc.ToolName != "" || tc.Subagent != nil {
 		t.Fatalf("reused id kept the old snapshot: %+v", tc)
 	}
