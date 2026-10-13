@@ -350,6 +350,9 @@ func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 		protocol.MethodMemberApprove:          protocol.MemberApproveParams{MemberID: string(e.member.ID)},
 		protocol.MethodMemberInvite:           protocol.MemberInviteParams{},
 		protocol.MethodServerOwnerTransfer:    protocol.ServerOwnerTransferParams{MemberID: string(e.member.ID)},
+		protocol.MethodMemberMergeStart:       struct{}{},
+		protocol.MethodMemberMergePreview:     protocol.MemberMergePreviewParams{Code: "AAAA-BBBB-CCCC-DDDD"},
+		protocol.MethodMemberMergeConfirm:     protocol.MemberMergeConfirmParams{Code: "AAAA-BBBB-CCCC-DDDD"},
 	}
 	for method, params := range calls {
 		raw, _ := json.Marshal(params)

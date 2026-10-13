@@ -17,14 +17,14 @@ import (
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, change the role of, link, list or unlink the edge accounts of, transfer server ownership to, or remove members",
+		short: "list, approve, color, set the git identity of, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|identities|unlink|transfer|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|identities|unlink|merge|merges|transfer|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -54,6 +54,10 @@ func runMember(args []string) error {
 		return memberIdentities(args[1])
 	case "unlink":
 		return memberUnlink(args[1:])
+	case "merge":
+		return memberMerge(args[1:])
+	case "merges":
+		return memberMerges()
 	case "transfer":
 		return memberTransfer(args[1:])
 	default:
@@ -106,9 +110,9 @@ func memberRemove(id string) error {
 	})
 }
 
-// memberLink binds a GitHub account at the edge to your own member, which
-// must be an admin: that account connects through the edge as you and can
-// claim this server with a claim code.
+// memberLink binds a GitHub account at the edge to your own member once
+// that account opens the join link: it then connects through the edge as
+// you, and an admin's can claim this server with a claim code.
 func memberLink(args []string) error {
 	fs := flag.NewFlagSet("member link", flag.ExitOnError)
 	github := fs.String("github", "", "your GitHub login")
@@ -117,7 +121,7 @@ func memberLink(args []string) error {
 		return err
 	}
 	if (*github == "") == (*email == "") || fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nadmins only; anyone else is invited by an admin with aether invite --github or --email")
+		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use aether member merge start")
 	}
 	params := protocol.MemberIdentityLinkParams{Login: *github, Email: *email}
 	return withControl(func(c *protocol.Client) error {

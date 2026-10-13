@@ -28,7 +28,8 @@ const (
 	// creator or an admin.
 	MethodMemberInvitationRevoke = "member.invitation.revoke"
 	// MethodMemberIdentityLink names an edge account the caller signs in
-	// with, as an invitation bound to the caller's own member: admin only.
+	// with, as an invitation bound to the caller's own member: any approved
+	// member, for themself only.
 	MethodMemberIdentityLink = "member.identity.link"
 	// MethodMemberIdentityList lists a member's edge identities and the
 	// devices that signed in with each: the member or an admin.

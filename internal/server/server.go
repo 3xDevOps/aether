@@ -418,6 +418,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TailnetRequireKey: cfg.TailnetRequireKey,
 		TailnetHostname:   node.DNSName,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
+		MergedDir:         filepath.Join(cfg.DataDir, "merged"),
 		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
 		AuthorizationMu:   authMu,

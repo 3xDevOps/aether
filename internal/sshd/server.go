@@ -97,6 +97,10 @@ type Config struct {
 	// InvitesDir holds one-time invite files (<data>/invites). Empty
 	// disables member.invite and invite-code joins.
 	InvitesDir string
+	// MergedDir receives the home of each member a merge absorbs, in
+	// <MergedDir>/<merge id>/home (<data>/merged). Empty leaves homes in
+	// place.
+	MergedDir string
 
 	// EdgeAccess is the access policy for connections an edge relays:
 	// under PolicyAccount a signed-in member's new device is registered

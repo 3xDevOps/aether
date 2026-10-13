@@ -393,14 +393,13 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	return s.createInvitation(ctx, ids, inv, protocol.MethodMemberInvitationCreate)
 }
 
-// memberIdentityLink binds the edge account an admin names to the admin's
-// own member. Nothing proves the caller holds that account, so a link, like
-// an invitation, is an admin's to make: from any member it would bind
-// someone else's account to theirs.
+// memberIdentityLink names an edge account to bind to the caller's own
+// member, never another's. Naming it proves nothing: the account is bound
+// only when the join link is opened while signed in with it, and under
+// approved-devices only once that device is approved. A new link replaces
+// the caller's open ones unless the caller is an admin, so no member
+// fills the edge directory.
 func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberIdentityLink); perr != nil {
-		return nil, perr
-	}
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, false); perr != nil {
 		return nil, perr
 	}
@@ -508,9 +507,11 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	return out, nil
 }
 
-// createInvitation stores inv while its creator is an admin. member.role
-// revokes a demoted admin's invitations under registerMu, so checking
-// under it too keeps any invitation from outliving its creator's role.
+// createInvitation stores inv while its creator is an admin; a link to a
+// non-admin creator's own member replaces their open links instead.
+// member.role revokes a demoted admin's invitations under registerMu, so
+// checking under it too keeps any invitation from outliving its
+// creator's role.
 // An invitation the edge directory has no room for is refused here: once
 // the directory is over the edge's limit, it stops being pushed at all.
 // The join secret is returned once, in the link, and only its hash is
@@ -524,8 +525,14 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	inv.SecretHash = edgeproto.HashToken(secret)
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
-	if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
-		return nil, perr
+	if inv.Member == "" {
+		if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
+			return nil, perr
+		}
+	} else if s.requireAdmin(ctx, inv.CreatedBy, method) != nil {
+		if err := ids.DeleteInvitationsBy(ctx, inv.CreatedBy); err != nil {
+			return nil, rpcError(err)
+		}
 	}
 	entries, err := s.EdgeDirectory(ctx)
 	if err != nil {

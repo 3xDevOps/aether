@@ -903,23 +903,23 @@ func TestGrantKindIsServedOnlyAsItself(t *testing.T) {
 	}
 }
 
-// Nothing proves a link's caller holds the account it names, so a member
-// who is not an admin cannot bind another person's account to their own
-// member ahead of that person's invitation.
+// A link binds an account only through its join link, so a member who
+// is not an admin can name another person's account but not take it: that
+// person, joining with an admin's invitation, becomes a member of their
+// own.
 func TestMemberCannotLinkAnotherAccount(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
-	carolKey, _ := addMember(t, e, "Carol", domain.RoleViewer, false)
-	var pe *protocol.Error
-	err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
-		protocol.MemberIdentityLinkParams{Login: "octo"}, nil)
-	if !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("viewer linking another account = %v, want CodeDenied", err)
+	carolKey, carol := addMember(t, e, "Carol", domain.RoleViewer, false)
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	if err := controlAs(t, e, carolKey).Call(protocol.MethodMemberIdentityLink,
+		protocol.MemberIdentityLinkParams{Login: "octo"}, nil); err != nil {
+		t.Fatalf("viewer linking an account to themself: %v", err)
 	}
 	e.invite(t, controlClient(t, e), protocol.MethodMemberInvitationCreate,
 		protocol.MemberInvitationCreateParams{Login: "octo", Role: "collaborator"})
 	got := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, newSigner(t), "laptop")))
-	if got.DisplayName != "Octo Cat" || got.Role != string(domain.RoleCollaborator) {
+	if got.ID == string(carol.ID) || got.DisplayName != "Octo Cat" || got.Role != string(domain.RoleCollaborator) {
 		t.Fatalf("octo joined as %+v, want a new collaborator from the admin's invitation", got)
 	}
 }

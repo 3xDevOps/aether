@@ -118,7 +118,7 @@ func TestMergeMigrationUpgradesV62(t *testing.T) {
 		t.Fatalf("run after upgrade = %+v, %v", r, err)
 	}
 	now := time.Now()
-	if err := db.CreateMergeCode(ctx, "m1", "hash", now, now.Add(time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, "m1", "hash", false, now, now.Add(time.Minute)); err != nil {
 		t.Fatalf("CreateMergeCode after upgrade: %v", err)
 	}
 	if merges, err := db.ListMerges(ctx, ""); err != nil || len(merges) != 0 {
@@ -181,7 +181,7 @@ func TestConfirmMergeRewritesEveryReference(t *testing.T) {
 		INSERT INTO events (id, ts, workspace_id, run_id, actor_id, type, payload) VALUES ('ev1', 1, ?5, ?4, ?2, 'run.status', '{}');
 	`, runC.ID, b.ID, a.ID, runB.ID, w.ID)
 
-	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(10*time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, a.ID, "code", false, now, now.Add(10*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := db.PlanMerge(ctx, "code", b.ID, now)
@@ -274,7 +274,7 @@ func TestPlanMergeRefusals(t *testing.T) {
 	if err := db.CreateMember(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, a.ID, "code", false, now, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.PlanMerge(ctx, "nope", b.ID, now); !isRefusal(err, "unknown") {

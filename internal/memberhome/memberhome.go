@@ -120,3 +120,49 @@ func validateMemberID(id string) error {
 	}
 	return nil
 }
+
+// Archive moves member's home to dest, creating dest's parent owner-only,
+// and reports whether the member had a home. dest must not exist.
+func (m *Manager) Archive(member domain.MemberID, dest string) (bool, error) {
+	if err := validateMemberID(string(member)); err != nil {
+		return false, fmt.Errorf("memberhome: member %q: %w", member, err)
+	}
+	defer m.lock(string(member))()
+	home := filepath.Join(m.root, string(member))
+	if _, err := os.Lstat(home); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("memberhome: archive home %q: %w", home, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return false, fmt.Errorf("memberhome: archive home %q: %w", home, err)
+	}
+	if err := os.Rename(home, dest); err != nil {
+		return false, fmt.Errorf("memberhome: archive home %q: %w", home, err)
+	}
+	return true, nil
+}
+
+// Unarchive moves a home Archive moved to src back to member's home.
+func (m *Manager) Unarchive(member domain.MemberID, src string) error {
+	if err := validateMemberID(string(member)); err != nil {
+		return fmt.Errorf("memberhome: member %q: %w", member, err)
+	}
+	defer m.lock(string(member))()
+	if err := os.Rename(src, filepath.Join(m.root, string(member))); err != nil {
+		return fmt.Errorf("memberhome: restore home from %q: %w", src, err)
+	}
+	return nil
+}
+
+// HasHome reports whether member has a home on the server.
+func (m *Manager) HasHome(member domain.MemberID) (bool, error) {
+	if err := validateMemberID(string(member)); err != nil {
+		return false, fmt.Errorf("memberhome: member %q: %w", member, err)
+	}
+	_, err := os.Lstat(filepath.Join(m.root, string(member)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}

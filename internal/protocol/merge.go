@@ -5,8 +5,9 @@ package protocol
 // other proves the same person holds both.
 const (
 	// MethodMemberMergeStart mints a merge code for the caller's member,
-	// replacing its open one: any approved member, on a connection that
-	// did not sign in with a device no person approved.
+	// replacing its open one: any approved member, and under
+	// approved-devices not on a connection that signed in with a device no
+	// person approved.
 	MethodMemberMergeStart = "member.merge.start"
 	// MethodMemberMergePreview shows what confirming a merge code from the
 	// caller's member would do, without changing anything.
@@ -19,6 +20,13 @@ const (
 	// admin sees every one.
 	MethodMemberMergeList = "member.merge.list"
 )
+
+// MemberMergeStartParams are the params of member.merge.start. KeepAdmin,
+// for an admin only, consents to the merged member staying admin when the
+// other member confirms with keep_admin.
+type MemberMergeStartParams struct {
+	KeepAdmin bool `json:"keep_admin,omitempty"`
+}
 
 // MemberMergeStartResult is the result of member.merge.start. Code is
 // shown once; the server keeps only its hash.
@@ -93,18 +101,21 @@ type MergeChoice struct {
 // merged member's role: the lower of the two. RoleWithKeepAdmin is admin
 // when one of them is, the role keep_admin asks for, and
 // KeepAdminRequired is set when only keep_admin keeps an admin on the
-// server. SignIns are every way the merged member will reach the server.
+// server. KeepAdminConsented is set when the admin side asked for it:
+// the caller is the admin, or the admin minted the code with keep_admin;
+// confirm honours keep_admin only then. SignIns are every way the merged member will reach the server.
 // PlanDigest names the state the plan was computed from; confirm refuses
 // once it changed.
 type MemberMergePlan struct {
-	Minted            MergeMember   `json:"minted"`
-	Confirming        MergeMember   `json:"confirming"`
-	Role              string        `json:"role"`
-	RoleWithKeepAdmin string        `json:"role_with_keep_admin,omitempty"`
-	KeepAdminRequired bool          `json:"keep_admin_required,omitempty"`
-	SignIns           []string      `json:"sign_ins"`
-	Choices           []MergeChoice `json:"choices"`
-	PlanDigest        string        `json:"plan_digest"`
+	Minted             MergeMember   `json:"minted"`
+	Confirming         MergeMember   `json:"confirming"`
+	Role               string        `json:"role"`
+	RoleWithKeepAdmin  string        `json:"role_with_keep_admin,omitempty"`
+	KeepAdminRequired  bool          `json:"keep_admin_required,omitempty"`
+	KeepAdminConsented bool          `json:"keep_admin_consented,omitempty"`
+	SignIns            []string      `json:"sign_ins"`
+	Choices            []MergeChoice `json:"choices"`
+	PlanDigest         string        `json:"plan_digest"`
 }
 
 // MemberMergeConfirmParams are the params of member.merge.confirm.
