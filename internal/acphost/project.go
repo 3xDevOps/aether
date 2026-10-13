@@ -1,6 +1,7 @@
 package acphost
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/json"
 	"maps"
@@ -37,8 +38,7 @@ type projector struct {
 
 	text  *openText
 	tools map[string]*toolState
-	// toolOrder lists the keys of tools oldest first.
-	toolOrder []string
+	clock uint64
 	// plans holds the last plan of the main agent ("") and of each subagent,
 	// by the ID of the tool call that launched it.
 	plans map[string][]PlanEntry
@@ -62,8 +62,9 @@ type toolState struct {
 	emittedStatus string
 	emittedTitle  string
 	skipped       int
-	// ended is set once the turn that opened the call is over.
-	ended bool
+	updated       uint64
+	// ended is set when a turn ends; late, once the call has updated since.
+	ended, late bool
 }
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
@@ -301,21 +302,21 @@ func (p *projector) tool(id string, patch toolPatch) {
 	if known && patch.opens && st.ended {
 		known = false
 		delete(p.plans, id)
-		p.toolOrder = slices.DeleteFunc(p.toolOrder, func(kept string) bool { return kept == id })
 	}
 	if !known {
 		p.closeText()
 		st = &toolState{call: ToolCall{ID: id}}
 		p.tools[id] = st
-		p.toolOrder = append(p.toolOrder, id)
 	}
+	p.clock++
+	st.updated = p.clock
 	c := &st.call
 	// A later update of a subagent's tool call can omit the link.
 	parent, toolName := claudeMeta(patch.meta)
-	if parent != "" {
+	if parent != "" && parent != id {
 		c.ParentID = parent
 	}
-	if toolName != "" {
+	if toolName != "" && c.ToolName == "" {
 		c.ToolName = toolName
 	}
 	if patch.title != nil {
@@ -376,7 +377,9 @@ func (p *projector) tool(id string, patch toolPatch) {
 
 	final := c.Status == string(acp.ToolCallStatusCompleted) || c.Status == string(acp.ToolCallStatusFailed)
 	// No later endTurn writes what a call that outlived its turn holds back.
-	if !known || final || st.ended || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
+	afterTurn := st.ended && !st.late
+	st.late = st.ended
+	if !known || final || afterTurn || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
 		len(st.output) >= toolOutputGrowth || st.skipped+1 >= toolSkipLimit {
 		p.emitTool(st)
 		if !final {
@@ -401,8 +404,9 @@ func (p *projector) emitTool(st *toolState) {
 }
 
 // endTurn closes the open message and writes every tool call update that
-// was held back. The newest tool calls stay known: a background subagent
-// reports on its tool calls after the turn that started them.
+// was held back. Finished calls are forgotten; the most recently updated
+// in-progress ones stay known, because a background subagent reports on its
+// tool calls after the turn that started them.
 func (p *projector) endTurn() {
 	p.closeText()
 	for _, id := range slices.Sorted(maps.Keys(p.tools)) {
@@ -410,14 +414,19 @@ func (p *projector) endTurn() {
 		if st.skipped > 0 || st.output != "" {
 			p.emitTool(st)
 		}
-		st.ended = true
+		if st.call.Status == string(acp.ToolCallStatusCompleted) || st.call.Status == string(acp.ToolCallStatusFailed) {
+			delete(p.tools, id)
+			delete(p.plans, id)
+			continue
+		}
+		st.ended, st.late = true, false
 	}
-	if drop := len(p.toolOrder) - maxKeptTools; drop > 0 {
-		for _, id := range p.toolOrder[:drop] {
+	if drop := len(p.tools) - maxKeptTools; drop > 0 {
+		ids := slices.SortedFunc(maps.Keys(p.tools), func(a, b string) int { return cmp.Compare(p.tools[a].updated, p.tools[b].updated) })
+		for _, id := range ids[:drop] {
 			delete(p.tools, id)
 			delete(p.plans, id)
 		}
-		p.toolOrder = slices.Delete(p.toolOrder, 0, drop)
 	}
 }
 

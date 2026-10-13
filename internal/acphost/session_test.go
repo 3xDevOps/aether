@@ -497,6 +497,130 @@ func TestPlanIsReplacedWhole(t *testing.T) {
 	}
 }
 
+func TestLongRunningSubagentCallSurvivesLaterTurns(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	turns := 0
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		turns++
+		if turns == 1 {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "bg", "title": "Audit", "status": "in_progress",
+				"rawInput": map[string]any{"description": "Audit", "subagent_type": "explorer"},
+				"_meta":    map[string]any{"claudeCode": map[string]any{"toolName": "Agent", "parentToolUseId": "outer"}}})
+		} else {
+			for i := range 150 {
+				id := fmt.Sprintf("c%d-%d", turns, i)
+				m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "title": id, "status": "in_progress"})
+				if i%3 != 0 {
+					m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed"})
+				}
+			}
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	for _, text := range []string{"start", "more", "more"} {
+		if _, err := s.Prompt(context.Background(), textPrompt(text), false, nil); err != nil {
+			t.Fatal(err)
+		}
+		rec.waitIdle(t)
+	}
+	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "bg", "status": "completed"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tools := ofKind(items(t, s), KindToolCall)
+		if tc := tools[len(tools)-1].ToolCall; tc.ID == "bg" && tc.Status == "completed" {
+			if tc.Title != "Audit" || tc.ToolName != "Agent" || tc.ParentID != "outer" || tc.Subagent == nil || tc.Subagent.Type != "explorer" {
+				t.Fatalf("final update lost the call: %+v", tc)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no final update of bg in %d tool items", len(tools))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestToolNameAndParentAreKept(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		meta := func(name, parent string) map[string]any {
+			return map[string]any{"claudeCode": map[string]any{"toolName": name, "parentToolUseId": parent}}
+		}
+		m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "x", "status": "in_progress", "_meta": meta("Agent", "t1")})
+		m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed", "_meta": meta("Bash", "")})
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	tools := ofKind(items(t, s), KindToolCall)
+	tc := tools[len(tools)-1].ToolCall
+	if tc.ToolName != "Agent" || tc.ParentID != "" {
+		t.Fatalf("tool name %q, parent %q", tc.ToolName, tc.ParentID)
+	}
+}
+
+func TestToolUpdatesAfterTheTurnAreThrottled(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "x", "status": "in_progress"})
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	for range 6 {
+		m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1"})
+	}
+	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tools := ofKind(items(t, s), KindToolCall)
+		if tools[len(tools)-1].ToolCall.Status == "completed" {
+			if len(tools) != 3 {
+				t.Fatalf("%d tool items, want the open, the first update after the turn and the completion", len(tools))
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no completion in %d tool items", len(tools))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestPlansDedupePerParent(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		plan := func(content, parent string) map[string]any {
+			u := map[string]any{"sessionUpdate": "plan", "entries": []any{map[string]any{"content": content, "priority": "high", "status": "pending"}}}
+			if parent != "" {
+				u["_meta"] = map[string]any{"claudeCode": map[string]any{"parentToolUseId": parent}}
+			}
+			return u
+		}
+		m.update(plan("L1", ""))
+		m.update(plan("L2", "task-1"))
+		m.update(plan("L1", ""))
+		m.update(plan("L2", "task-1"))
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("plan"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	plans := ofKind(items(t, s), KindPlan)
+	if len(plans) != 2 || plans[0].PlanParentID != "" || plans[1].PlanParentID != "task-1" {
+		t.Fatalf("plans: %+v", plans)
+	}
+}
+
 func (m *mockAgent) permissionRequest() map[string]any {
 	return map[string]any{
 		"sessionId": m.sessionID(),

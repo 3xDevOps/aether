@@ -623,14 +623,16 @@ main agent's.
 |---|---|
 | `tool_call.parent_id` | A subagent's tool call: the `id` of the `Agent` or `Task` tool call that launched the subagent. Nested subagents chain through it. |
 | `message.parent_id` | A subagent's message or thought segment. A change of parent starts a new segment. |
-| `plan_parent_id` | A subagent's plan. Each subagent keeps its own plan, apart from the main agent's. |
-| `tool_call.tool_name` | Every tool call: Claude Code's tool name, such as `Bash` or `Agent`. |
+| `plan_parent_id` | The agent that published the plan. Each agent keeps its own plan, apart from the main agent's. With Claude's `Task*` tools the published list is the session-wide task list, not a per-subagent plan. |
+| `tool_call.tool_name` | A tool call whose agent sends `_meta.claudeCode.toolName`: Claude Code's tool name, such as `Bash` or `Agent`. The first name sent is kept. |
 | `tool_call.subagent` | An `Agent` or `Task` tool call: `description` and `type` (the input's `subagent_type`), each at most 128 bytes. The full prompt stays in `raw_input`. |
 
 These fields are kept when an item is cut to fit a size limit, so a
 dashboard can place and label every item. A later update that omits the
 parent keeps the one already recorded, and an update that arrives after its
-turn ended merges into that tool call's last snapshot. Codex, pi, omp and
+turn ended merges into the last snapshot of a call that was still in progress.
+The server forgets finished calls at each turn end and, past 256 in-progress
+calls, the least recently updated; it also forgets all of them on restart. Codex, pi, omp and
 opencode send no parent or tool name, so these fields stay empty for them.
 
 A dashboard that opens the run receives the newest 200 items and pages
