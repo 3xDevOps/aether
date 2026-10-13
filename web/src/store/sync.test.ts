@@ -1686,6 +1686,47 @@ describe('applyEvent', () => {
     expect(store.getState().missionListWorkspace).toBe(workspace.id)
   })
 
+  it('does not restore a mission deleted while its list read was in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const pending = Promise.withResolvers<MissionListResult>()
+    const missionList = vi.fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ missions: [mission({ id: 'mission_1' })] })
+    const client = fakeApi({ missionList })
+    const payload = (deleted?: boolean) => ({ mission_id: 'mission_2', ...(deleted && { deleted }) })
+
+    await applyEvent(store, statusEvent({ seq: 10, run_id: '', type: 'mission.changed', payload: payload() }), client)
+    await vi.waitFor(() => expect(missionList).toHaveBeenCalledTimes(1))
+    await applyEvent(store, statusEvent({ seq: 11, run_id: '', type: 'mission.changed', payload: payload(true) }), client)
+    pending.resolve({ missions: [mission({ id: 'mission_1' }), mission({ id: 'mission_2' })] })
+
+    await vi.waitFor(() => expect(missionList).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(store.getState().missions.mission_1).toBeDefined())
+    expect(store.getState().missions.mission_2).toBeUndefined()
+  })
+
+  it('does not restore a mission detail deleted while its show read was in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const pending = Promise.withResolvers<MissionShowResult>()
+    const missionShow = vi.fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockRejectedValue(new ApiError(404, 'mission not found'))
+    const client = fakeApi({ missionShow })
+
+    await applyEvent(store, statusEvent({ seq: 10, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } }), client)
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(1))
+    await applyEvent(store, statusEvent({ seq: 11, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1', deleted: true } }), client)
+    pending.resolve({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(2))
+    expect(store.getState().missions.mission_1).toBeUndefined()
+    expect(store.getState().missionDetails.mission_1).toBeUndefined()
+  })
+
   it('drops a deleted mission and leaves its page without re-reading it', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [mission()] })) }))
