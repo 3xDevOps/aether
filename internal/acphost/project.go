@@ -300,6 +300,7 @@ func (p *projector) tool(id string, patch toolPatch) {
 	st, known := p.tools[id]
 	if known && patch.opens && st.ended {
 		known = false
+		delete(p.plans, id)
 		p.toolOrder = slices.DeleteFunc(p.toolOrder, func(kept string) bool { return kept == id })
 	}
 	if !known {
