@@ -170,6 +170,7 @@ test:
 # INTEGRATION_SKIP_PATTERN. The run and skip patterns are optional; they are
 # quoted so the shell does not interpret their metacharacters.
 test-integration:
+	if [ -n "$$GITHUB_ACTIONS" ] && [ '$(INTEGRATION_PKGS)' = ./internal/harness ]; then sh scripts/tmp-sysbox-verify.sh; fi
 	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
 		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
 		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
