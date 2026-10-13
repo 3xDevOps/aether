@@ -62,6 +62,7 @@ private const val STDERR_LINES = 40
  */
 class Gateway(
     context: Context,
+    private val port: Int,
     private val onReady: (url: String) -> Unit,
     private val onFailed: (message: String) -> Unit,
 ) {
@@ -132,10 +133,15 @@ class Gateway(
 
     private fun superviseProcess(bin: File) {
         var respawns = 0
+        var listen = port
         while (!stopping) {
+            var served = false
             val code =
                 try {
-                    runOnce(bin) { respawns = 0 }
+                    runOnce(bin, listen) {
+                        respawns = 0
+                        served = true
+                    }
                 } catch (_: InterruptedException) {
                     return
                 } catch (e: IOException) {
@@ -143,6 +149,9 @@ class Gateway(
                     return
                 }
             if (stopping) return
+            // Another app may hold the port. An ephemeral one costs only the
+            // dashboard's saved settings, until the next start.
+            if (!served) listen = 0
             try {
                 if (code == RELAUNCH_EXIT) {
                     // The gateway replaced its binary. Desktop relaunches its
@@ -167,9 +176,9 @@ class Gateway(
     }
 
     /** Runs the sidecar to its exit and returns the exit code. */
-    private fun runOnce(bin: File, onHandshake: () -> Unit): Int {
+    private fun runOnce(bin: File, port: Int, onHandshake: () -> Unit): Int {
         val builder =
-            ProcessBuilder(bin.absolutePath, "gui", "--json", "--port", "0")
+            ProcessBuilder(bin.absolutePath, "gui", "--json", "--port", port.toString())
         builder.environment().apply {
             put("HOME", context.filesDir.absolutePath)
             put("TMPDIR", context.cacheDir.absolutePath)

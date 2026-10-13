@@ -433,6 +433,7 @@ class MainActivity : ComponentActivity() {
         gateway =
             Gateway(
                 this,
+                gatewayPort(),
                 onReady = { url ->
                     gatewayUrl = url
                     // A new address is a new origin: what the old one has in
