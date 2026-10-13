@@ -103,6 +103,8 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatalf("home.write create: %v", err)
 	}
 	err = c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: "notes/todo.md", Content: "again\n"}, nil)
+	wantHomeError(t, err, protocol.CodeConflict, "notes/todo.md already exists")
+	err = c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: "notes/todo.md", Content: "again\n", Revision: "stale"}, nil)
 	wantHomeError(t, err, protocol.CodeConflict, "notes/todo.md changed on the server; reload it and try again")
 	if err = c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: "notes/todo.md", Content: "two\n", Revision: read.Revision}, &read); err != nil {
 		t.Fatalf("home.write save: %v", err)

@@ -184,6 +184,9 @@ func (m *Manager) HomeWrite(member domain.MemberID, raw string, content []byte, 
 			return refuseLocked(rel, "edit")
 		}
 		out, err = writeConfigFile(home, home, rel, content, expected)
+		if expected == "" && errors.Is(err, ErrConfigConflict) {
+			return refuse(ErrConfigConflict, "%s already exists", rel)
+		}
 		return err
 	})
 	return out, err
