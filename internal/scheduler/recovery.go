@@ -1038,8 +1038,12 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 			}
 		}
 	} else {
+		reason := "server restarted"
+		if entry.exitObserved {
+			reason = fmt.Sprintf("server restarted: container exited %d", entry.exitCode)
+		}
 		if err := s.transitionLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status,
-			domain.RunInterrupted, "server restarted", ""); err != nil {
+			domain.RunInterrupted, reason, ""); err != nil {
 			s.recordCleanupErrorLocked(entry, cleanupStateError)
 			s.mu.Unlock()
 			return err
@@ -1268,7 +1272,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 	}
 	cid := runtime.ID(sc.ContainerID)
 	if sc.ExitObserved {
-		s.finalizeObservedExit(ctx, r, sc)
+		s.finishRecoveredExit(ctx, r, sc)
 		return
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
@@ -1281,7 +1285,7 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 		if werr := s.writeSidecar(sc); werr != nil {
 			slog.Warn("scheduler: persist exit_observed during recovery", "run", r.ID, "error", werr)
 		}
-		s.finalizeObservedExit(ctx, r, sc)
+		s.finishRecoveredExit(ctx, r, sc)
 		return
 	case errors.Is(waitErr, runtime.ErrNotFound):
 		s.didNotSurvive(ctx, r, cid)
@@ -1300,6 +1304,18 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 			s.resumeUsageMove(entry)
 		}
 	}
+}
+
+// finishRecoveredExit settles an exit no earlier server finalized. A code
+// above 128 is a signal's, or the 255 Docker records for a container it lost
+// in a host crash. Unless a kill, a report or a usage limit explains it, the
+// host or the runtime stopped the run, which did not survive the restart.
+func (s *Scheduler) finishRecoveredExit(ctx context.Context, r *domain.Run, sc sidecar) {
+	if sc.ExitCode > 128 && !sc.KillRequested && sc.ReportedOutcome == "" && sc.UsageLimit == "" {
+		s.didNotSurvive(ctx, r, runtime.ID(sc.ContainerID))
+		return
+	}
+	s.finalizeObservedExit(ctx, r, sc)
 }
 
 func (s *Scheduler) finalizeObservedExit(ctx context.Context, r *domain.Run, sc sidecar) {

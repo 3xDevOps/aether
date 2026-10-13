@@ -325,6 +325,62 @@ func TestIntegrationChaosRebootLostContainer(t *testing.T) {
 
 }
 
+// TestIntegrationChaosRebootStoppedContainer is the host going down with
+// the server: Docker stops the run's container instead of losing it, so it
+// is still listed, exited on the run supervisor's SIGTERM. The run was cut
+// off, so it is interrupted with that exit code, not failed as though its
+// agent had exited.
+func TestIntegrationChaosRebootStoppedContainer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	env := newChaosEnv(ctx, t)
+
+	ctrl, client := env.connect(t)
+	var launched protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+		WorkspaceID: string(env.ws.ID), Task: "chaos reboot stopped", Harness: "fake",
+		Mode: string(domain.LaunchTUI),
+	}, &launched); err != nil {
+		t.Fatalf("run.launch: %v", err)
+	}
+	runID := launched.Run.ID
+	branch := launched.Run.Branch
+	env.sweepContainer(t, runID)
+
+	att := openAttach(t, client, runID)
+	waitOutput(t, att, "agent-ready")
+	att.close()
+
+	env.hardKill(t)
+	if out, err := exec.Command("docker", "stop", containerName(runID)).CombinedOutput(); err != nil {
+		t.Fatalf("docker stop %s: %v (%s)", containerName(runID), err, out)
+	}
+	env.start(t)
+
+	ctrl, _ = env.connect(t)
+	env.waitStatus(t, ctrl, runID, domain.RunInterrupted)
+	var got protocol.RunResult
+	if err := ctrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: runID}, &got); err != nil {
+		t.Fatalf("run.get: %v", err)
+	}
+	if want := "server restarted: container exited 143"; got.Run.Reason != want {
+		t.Errorf("interrupted reason = %q, want %q", got.Run.Reason, want)
+	}
+
+	head := env.fetchBranch(t, branch)
+	if !strings.HasPrefix(head.message, "wip:") {
+		t.Errorf("run branch head message = %q, want a \"wip:\" commit preserving the partial work",
+			head.message)
+	}
+	if head.files["progress.txt"] != "partial work\n" {
+		t.Errorf("progress.txt on the published branch = %q, want the work the agent had already done",
+			head.files["progress.txt"])
+	}
+	if out, err := exec.Command("docker", "inspect", "-f", "{{.Id}}", containerName(runID)).CombinedOutput(); err == nil {
+		t.Errorf("stopped container %s is still listed after recovery", strings.TrimSpace(string(out)))
+	}
+}
+
 // chaosEnv is a real aether-server child process on a fixed data directory.
 // The scenarios here need a process they can SIGKILL, which an in-process
 // server cannot give them: the point is that nothing on the shutdown path

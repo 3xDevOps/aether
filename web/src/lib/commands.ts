@@ -141,7 +141,7 @@ export function isRetainedRun(run: RunRecord): boolean {
 }
 
 /** Reopen is explicit and only available while an interactive runtime is retained. */
-export function canReopenRun(run: RunRecord): boolean {
+export function canReopenRun(run: Pick<Run, 'mode' | 'status' | 'reason'>): boolean {
   return (run.mode === 'tui' || run.mode === 'acp') &&
     (run.reason === 'closed; retained container'
       ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'

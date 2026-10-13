@@ -155,6 +155,7 @@ describe('plainReason', () => {
     ['agent exited; results committed', 'Agent exited and its changes were committed'],
     ['agent exited 1: relation "invoices" does not exist', 'Agent exited with code 1: relation "invoices" does not exist'],
     ['retained container expired', 'Its container was removed when it expired'],
+    ['server restarted: container exited 143', 'Its container had stopped with exit code 143 when the server restarted'],
     ['stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
     ["the agent's turn ended: max_tokens", 'The agent hit its output limit'],
     ['review retained evidence', "Review the worker's saved results"],
