@@ -42,6 +42,8 @@ export function NameRow({
 
   return (
     <form
+      className="flex min-w-0 items-start gap-2 pr-1"
+      style={indent(depth)}
       onSubmit={(event) => {
         event.preventDefault()
         if (committing.current) return
@@ -54,11 +56,9 @@ export function NameRow({
         })
       }}
     >
-      <div
-        className="flex h-7 min-w-0 items-center gap-2 pr-1 coarse:h-11 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted"
-        style={indent(depth)}
-      >
-        {leading}
+      <span className="flex h-7 shrink-0 items-center gap-2 coarse:h-11 [&_svg]:size-3.5 [&_svg]:text-muted">{leading}</span>
+      {/* Pulled left by the field's own inset, so the name sits where the row's label does. */}
+      <span className="-ml-2 flex min-w-0 flex-1 flex-col">
         <Input
           ref={input}
           aria-label={label}
@@ -67,7 +67,6 @@ export function NameRow({
           autoCapitalize="none"
           autoComplete="off"
           spellCheck={false}
-          className="min-w-0 flex-1"
           value={name}
           onChange={(event) => {
             setName(event.target.value)
@@ -80,12 +79,12 @@ export function NameRow({
             if (!committing.current) onCancel()
           }}
         />
-      </div>
-      {error !== null && (
-        <p id={errorID} role="alert" className="pb-1 pr-2 text-ui-sm text-state-failed" style={indent(depth + 2)}>
-          {error}
-        </p>
-      )}
+        {error !== null && (
+          <p id={errorID} role="alert" className="px-2 py-1 text-ui-sm text-state-failed">
+            {error}
+          </p>
+        )}
+      </span>
     </form>
   )
 }

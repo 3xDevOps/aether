@@ -258,10 +258,14 @@ describe('Home upload', () => {
     const dataTransfer = {
       types: ['Files'],
       dropEffect: 'none',
-      items: [folder('pics', [leaf('a.png'), folder('raw', [leaf('b.png')])]), leaf('c.txt')].map((entry) => ({
-        kind: 'file',
-        webkitGetAsEntry: () => entry,
-      })),
+      items: [
+        ...[folder('pics', [leaf('a.png'), folder('raw', [leaf('b.png')])]), leaf('c.txt')].map((entry) => ({
+          kind: 'file',
+          webkitGetAsEntry: () => entry,
+        })),
+        { kind: 'file', webkitGetAsEntry: () => null, getAsFile: () => named('d.txt') },
+        { kind: 'string', webkitGetAsEntry: () => null, getAsFile: () => null },
+      ],
     }
 
     const over = createEvent.dragOver(planned, { dataTransfer })
@@ -271,9 +275,18 @@ describe('Home upload', () => {
 
     fireEvent.drop(planned, { dataTransfer })
     await waitFor(() =>
-      expect(homeUpload.mock.calls.map(([path]: unknown[]) => path)).toEqual(['notes/pics/a.png', 'notes/pics/raw/b.png', 'notes/c.txt']),
+      expect(homeUpload.mock.calls.map(([path]: unknown[]) => path)).toEqual(['notes/pics/a.png', 'notes/pics/raw/b.png', 'notes/c.txt', 'notes/d.txt']),
     )
     expect(planned.closest('[data-home-dir]')?.className).not.toContain('bg-accent-soft')
+  })
+
+  it('unfolds a folder the drag rests on', async () => {
+    const client = homeApi()
+    await openHome(client)
+
+    fireEvent.dragOver(row('notes'), { dataTransfer: { types: ['Files'], dropEffect: 'none' } })
+    expect(row('notes').getAttribute('aria-expanded')).toBe('false')
+    expect(await tree().findByRole('button', { name: 'plan.md' }, { timeout: 2000 })).toBeDefined()
   })
 
   it('keeps a file dropped outside the tree from replacing the dashboard', async () => {

@@ -19,6 +19,8 @@ const linkHint = 'Symlink. Files does not follow links; use the Environment term
 
 const fileSpacer = <span className="w-3.5 shrink-0" />
 
+const dropTargetClass = 'bg-accent-soft outline-1 -outline-offset-1 outline-accent'
+
 /** The member's whole persistent home under one root, with the file
  * operations the other trees do not have. */
 export function HomeTree({ onSelect, selected }: { onSelect: SelectFile; selected: Selection | null }) {
@@ -48,7 +50,7 @@ function HomeDirectory({
   const creating = home.naming !== null && home.naming.kind !== 'rename' && home.naming.parent === path ? home.naming.kind : null
   const root = path === ''
   return (
-    <div data-home-dir={path} className={cn('rounded-control', root && 'flex-1', home.dropTarget === path && 'bg-accent-soft')}>
+    <div data-home-dir={path} className={cn('rounded-control', root && 'flex-1', home.dropTarget === path && dropTargetClass)}>
       <HomeRow
         path={path}
         kind={root ? 'root' : 'dir'}

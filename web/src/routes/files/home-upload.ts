@@ -42,12 +42,18 @@ async function walk(entry: FileSystemEntry, dir: string, out: Upload[]): Promise
 }
 
 /** The files of a drop, with dropped folders walked so their structure is
- * kept. The entries are taken before the first await: a drop's items are
- * gone once its handler returns. */
+ * kept. A file dragged out of another application has no entry, only its
+ * bytes. Both are taken before the first await: a drop's items are gone once
+ * its handler returns. */
 export async function droppedUploads(data: DataTransfer): Promise<Upload[]> {
-  const entries = [...data.items].filter((item) => item.kind === 'file').map((item) => item.webkitGetAsEntry())
+  const dropped = [...data.items]
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.webkitGetAsEntry() ?? item.getAsFile())
   const out: Upload[] = []
-  for (const entry of entries) if (entry) await walk(entry, '', out)
+  for (const item of dropped) {
+    if (item instanceof File) out.push({ file: item, path: item.name })
+    else if (item) await walk(item, '', out)
+  }
   return out
 }
 
