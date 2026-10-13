@@ -93,7 +93,7 @@ func (m *Manager) inHome(member domain.MemberID, raw string, allowRoot bool, op 
 		return err
 	}
 	defer func() { _ = home.Close() }()
-	defer m.lock(string(member) + "\x00")()
+	defer m.lock(string(member))()
 	return homeRefusal(rel, op(home, rel))
 }
 

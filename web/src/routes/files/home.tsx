@@ -148,11 +148,13 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
     commitName,
     remove: (path, dir) => setRemoving({ path, dir }),
     download: (path) => {
+      const same = sameIdentity()
       setDownloading(path)
       void client
         .homeDownload(path)
         .then(
           (result) => {
+            if (!same()) return
             const bytes = Uint8Array.from(atob(result.content_base64), (char) => char.charCodeAt(0))
             const link = document.createElement('a')
             link.href = URL.createObjectURL(new Blob([bytes]))
@@ -200,12 +202,7 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
         if (dir === null) return
         event.preventDefault()
         if (dragged.current !== null) setMoving({ from: dragged.current, dir })
-        else {
-          void droppedUploads(event.dataTransfer).then(
-            (dropped) => uploader.upload(dir, dropped),
-            (err) => toast.error(errorSentence(err)),
-          )
-        }
+        else uploader.upload(dir, droppedUploads(event.dataTransfer))
       },
     },
   }

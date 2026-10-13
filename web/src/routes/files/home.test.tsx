@@ -246,7 +246,7 @@ describe('Home upload', () => {
     const first = Promise.withResolvers<unknown>()
     const big = named('big.bin')
     Object.defineProperty(big, 'size', { value: 64 * 2 ** 20 + 1 })
-    const homeUpload = vi.fn(async (path: string, _file: File, overwrite: boolean) => {
+    const homeUpload = vi.fn(async (path: string, _content: string, overwrite: boolean) => {
       if (path === 'notes/a.txt') return first.promise
       if (path === 'notes/b.txt' && !overwrite) throw new ApiError(409, 'home.upload: notes/b.txt already exists')
       if (path === 'notes/c.txt') throw new ApiError(503, 'home.upload: no space left on device')
@@ -261,7 +261,8 @@ describe('Home upload', () => {
       target: { files: [named('a.txt'), named('b.txt'), named('c.txt'), big] },
     })
     expect((await tree().findByRole('status')).textContent).toBe('Uploading 1 of 4 · a.txt')
-    expect(homeUpload).toHaveBeenCalledTimes(1)
+    // The file is read before it is sent.
+    await waitFor(() => expect(homeUpload).toHaveBeenCalledTimes(1))
     first.resolve({})
 
     const dialog = within(await screen.findByRole('alertdialog', { name: 'Replace 1 file?' }))
@@ -269,7 +270,7 @@ describe('Home upload', () => {
     expect(homeUpload.mock.calls.map(([path]) => path)).toEqual(['notes/a.txt', 'notes/b.txt', 'notes/c.txt'])
 
     fireEvent.click(dialog.getByRole('button', { name: 'Replace' }))
-    await waitFor(() => expect(homeUpload).toHaveBeenLastCalledWith('notes/b.txt', expect.any(File), true))
+    await waitFor(() => expect(homeUpload).toHaveBeenLastCalledWith('notes/b.txt', 'eA==', true))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
 
     const failures = within(tree().getByRole('alert'))

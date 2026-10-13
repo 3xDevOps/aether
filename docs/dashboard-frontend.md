@@ -3667,7 +3667,11 @@ pinned to the bottom of the tree pane. A file over 64 MiB fails without being
 read. Files the server already has are collected and asked about once at the
 end, **Replace 2 files?** with **Replace** and **Skip**; replacing sends
 them again with `overwrite: true`. Each file that failed is listed with the
-server's error until dismissed. One batch uploads at a time. While the
+server's error until dismissed. One batch uploads at a time: a drop is
+taken, and a second one refused, before its folders are walked, while the
+status reads **Reading dropped files…**. An upload or download started as
+one member stops when another signs in, before any byte is sent or saved.
+While the
 route is mounted, a file dropped anywhere else on the page is refused, so
 it cannot replace the dashboard.
 

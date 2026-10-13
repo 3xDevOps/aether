@@ -142,4 +142,17 @@ describe('files cache', () => {
     s().refreshHome()
     expect(Object.keys(s().trees)).toEqual([filesKey('ws-1', '', '')])
   })
+
+  it('does not carry a request in flight to the new path', () => {
+    const s = createRootStore().getState
+    s().setTree(homeKey('notes'), { entries: [], loading: true })
+    s().setDocument(homeKey('notes/a.md'), { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: true })
+    s().setDraft(homeKey('notes/b.md'), { content: 'draft\n', saving: true })
+
+    s().moveHomePath('notes', 'archive')
+    // Their answers arrive for the old keys, so each reader asks again.
+    expect(s().trees).toEqual({})
+    expect(s().documents).toEqual({})
+    expect(s().drafts[homeKey('archive/b.md')]).toMatchObject({ content: 'draft\n', saving: false })
+  })
 })

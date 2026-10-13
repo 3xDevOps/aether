@@ -80,18 +80,17 @@ type ConfigRead struct {
 	Writable  bool
 }
 
-// LockConfigRoot serializes Aether writes for one member/profile root. The
-// lock is intentionally shared with profile materialization so legacy profile
-// operations cannot race an editor save.
+// LockConfigRoot serializes Aether's own writes to one member's home. The
+// config.* methods, the home.* methods and profile materialization share it,
+// whichever root they name, so none of them can race another's save.
 func (m *Manager) LockConfigRoot(member domain.MemberID, localRoot string) (func(), error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	root, err := configRootPath(localRoot)
-	if err != nil {
+	if _, err := configRootPath(localRoot); err != nil {
 		return nil, err
 	}
-	return m.lock(string(member) + "\x00" + root), nil
+	return m.lock(string(member)), nil
 }
 
 func (m *Manager) lock(key string) func() {

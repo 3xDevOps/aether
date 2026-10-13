@@ -208,7 +208,7 @@ function isTerminalImageType(type: string): type is TerminalImageType {
   return (TERMINAL_IMAGE_TYPES as readonly string[]).includes(type)
 }
 
-function readFileBase64(file: File): Promise<string> {
+export function readFileBase64(file: File): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>()
   const reader = new FileReader()
   reader.onload = () => {
@@ -905,9 +905,8 @@ export const api = {
   homeMkdir: (path: string) => call<unknown>('home.mkdir', { path }),
   homeRename: (from: string, to: string) => call<unknown>('home.rename', { from, to }),
   homeRemove: (path: string) => call<unknown>('home.remove', { path }),
-  /** Safari reads an empty file as a data URL with no payload separator. */
-  homeUpload: async (path: string, file: File, overwrite: boolean) =>
-    call<unknown>('home.upload', { path, content_base64: file.size === 0 ? '' : await readFileBase64(file), overwrite }),
+  homeUpload: (path: string, contentBase64: string, overwrite: boolean) =>
+    call<unknown>('home.upload', { path, content_base64: contentBase64, overwrite }),
   homeDownload: (path: string) =>
     call<{ content_base64: string; size: number }>('home.download', { path }),
   filesDiff: (runID: string, path: string) =>

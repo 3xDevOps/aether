@@ -132,6 +132,12 @@ function relocateKeys<T>(values: Record<string, T>, from: string, to?: string): 
   return out
 }
 
+/** A request in flight answers for the old path. A listing or a read is
+ * dropped so its reader asks again; a save is settled, its draft still unsaved. */
+function withoutPending<T extends { loading?: boolean }>(values: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(Object.entries(values).filter(([key, value]) => homePath(key) === null || !value.loading))
+}
+
 function relocateHome(s: FilesSlice, from: string, to?: string): Partial<FilesSlice> {
   const fileTabs = s.fileTabs.flatMap((tab): FileTab[] => {
     if (tab.kind !== 'home') return [tab]
@@ -143,9 +149,11 @@ function relocateHome(s: FilesSlice, from: string, to?: string): Partial<FilesSl
   return {
     fileTabs,
     activeFileKey: activePath === null ? s.activeFileKey : active === null ? fileTabs.at(-1)?.key ?? null : homeKey(active),
-    trees: relocateKeys(s.trees, from, to),
-    documents: relocateKeys(s.documents, from, to),
-    drafts: relocateKeys(s.drafts, from, to),
+    trees: withoutPending(relocateKeys(s.trees, from, to)),
+    documents: withoutPending(relocateKeys(s.documents, from, to)),
+    drafts: Object.fromEntries(
+      Object.entries(relocateKeys(s.drafts, from, to)).map(([key, draft]) => [key, homePath(key) !== null && draft.saving ? { ...draft, saving: false } : draft]),
+    ),
   }
 }
 

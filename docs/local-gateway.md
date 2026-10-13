@@ -1043,8 +1043,10 @@ one hard link. New files and directories are owned like the home. The
 credential, runtime-ignore, and secret-scanner exclusions of `config.import`
 do not apply: they decide what `aether config push` uploads, not what a
 member may see or change in their own home. One lock per member serializes
-`home.*` calls; like configuration saves, they are not atomic against other
-processes writing the home.
+`home.*` and `config.*` calls and profile materialization, so a Files save
+and an `aether config push` of the same file cannot both pass their revision
+check; like configuration saves, they are not atomic against other processes
+writing the home.
 
 `home.*` error messages carry no method prefix:
 

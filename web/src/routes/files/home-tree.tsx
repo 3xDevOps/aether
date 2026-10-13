@@ -193,7 +193,9 @@ function HomeRow({
 export function HomeStatus() {
   const { uploads, downloading, dismissFailures } = useHomeFiles()
   const progress = uploads.progress
-    ? `Uploading ${uploads.progress.at} of ${uploads.progress.of} · ${uploads.progress.name}`
+    ? uploads.progress.of === 0
+      ? 'Reading dropped files…'
+      : `Uploading ${uploads.progress.at} of ${uploads.progress.of} · ${uploads.progress.name}`
     : downloading && `Downloading ${baseName(downloading)}`
   if (!progress && uploads.failures.length === 0) return null
   return (
