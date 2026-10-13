@@ -314,7 +314,7 @@ func (m *Manager) HomeDownload(member domain.MemberID, raw string) ([]byte, erro
 		if homeLocked(rel) {
 			return refuseLocked(rel, "read")
 		}
-		out, err = readConfigBytes(home, rel, ConfigMaxFileBytes)
+		out, err = readConfigBytes(home, rel)
 		if err == nil && len(out) > ConfigMaxFileBytes {
 			err = ErrConfigTooLarge
 		}

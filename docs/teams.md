@@ -749,7 +749,7 @@ commit captured at launch.
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
 | `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base and live-run files, and manages every file in your own persistent home. |
-| `aether config ls [<agent> [path]]` / `aether config push [--dry-run] <agent> <path>...` | List the agents Aether holds configuration for and what your home has for one, or upload files and directories from an agent's directory into your own home. See [quickstart.md](quickstart.md#upload-agent-configuration). |
+| `aether config ls [-r] [<agent> [path]]` / `aether config cat <agent> <path>` / `aether config push [--dry-run] [--overwrite] <agent> <path>... [--from <file>]` | List the agents Aether holds configuration for and what your home has for one, print one of its files, or upload files and directories from an agent's directory into your own home. A push replaces a differing file only with `--overwrite`. See [quickstart.md](quickstart.md#upload-agent-configuration). |
 
 The dashboard shows each run in one of five states: **Needs you**,
 **Working**, **Paused**, **Done** or **Failed**, with a reason line. **Needs

@@ -962,16 +962,20 @@ reads no local files. The CLI reads the agent's root from `config.roots`
 and refuses an unknown agent and any path outside the agent's directory.
 The root's `credential_names` combines shared denials and the agent's
 `DenyNames`; names match any path component case-insensitively. Those
-names, `*.pem` files, `.aether-profile-ignore`, and the root's
-`runtime_ignores` (exact, root-relative paths or component prefixes,
-case-sensitive, trailing slashes trimmed) are left out before the CLI reads a
-file. Symlinks are not followed, special files are skipped, and files over
+names, `*.pem`, `.env`, and `.env.*` files, `.aether-profile-ignore`, and the
+root's `runtime_ignores` (case-sensitive patterns anchored at the agent's
+directory, each covering a path and everything below it, with `*` matching
+within one name) are left out before the CLI reads a file. Symlinks are not followed, special files are skipped, and files over
 64 MiB are never read. The CLI then runs the server's secret scanner on each
 remaining file and does not send a flagged one; there is no override. None
 of these client checks replaces server validation: the server enforces the
 same credential, runtime, and `.aether-profile-ignore` policy and scans every
-uploaded file again. There is no watcher, automatic configuration
-synchronization, or automatic retry.
+uploaded file again. A push does not replace a server file with different
+content unless it is run with `--overwrite`, and the server refuses such a
+file from any request that does not set `overwrite`; `aether config cat`
+prints the server's copy first, subject to the same credential and runtime
+policy. There is no watcher, automatic configuration synchronization, or
+automatic retry.
 
 A `config.import` request carries at most 2,000 files and 64 MiB decoded,
 and each file at most 64 MiB; the CLI sends batches of about 20 MiB. A
@@ -1022,9 +1026,9 @@ member acts on their own home deliberately, as they can in its terminal.
 
 Credential files are listed in Files and locked: `home.read`,
 `home.download`, and `home.write` refuse a path with a credential name of
-any shipped agent or a `.pem` suffix in any component, anything under
-`~/.ssh` except `*.pub`, and `~/.config/gh/hosts.yml`, `~/.git-credentials`,
-and `~/.netrc`. The lock keeps credential bytes out of the browser and out
+any shipped agent, the name `.env` or `.env.*`, or a `.pem` suffix in any
+component, anything under `~/.ssh` except `*.pub`, and
+`~/.config/gh/hosts.yml`, `~/.git-credentials`, and `~/.netrc`. The lock keeps credential bytes out of the browser and out
 of downloads. `home.rename` refuses a locked file, and a folder that holds
 one of those fixed paths, because a renamed copy would be served;
 `home.remove` and `home.upload` work on a locked file, since neither returns

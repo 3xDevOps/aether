@@ -56,11 +56,21 @@ type ConfigExcluded struct {
 }
 
 // ConfigImportResult reports files installed in a member's persistent home.
+// Replaced lists the written files that took the place of different content.
 type ConfigImportResult struct {
 	Files         int
 	Bytes         int64
 	Excluded      []ConfigExcluded
+	Replaced      []string
 	ImportedPaths []string
+}
+
+// ConfigStat is the size and exact-byte revision of one existing file.
+// Revision is empty for a file over ConfigMaxFileBytes.
+type ConfigStat struct {
+	Path     string
+	Size     int64
+	Revision string
 }
 
 // ConfigTreeEntry is one immediate child of a profile directory.
@@ -372,6 +382,73 @@ func readConfigFile(ctx context.Context, root *os.Root, rel string) (ConfigRead,
 	return out, nil
 }
 
+// ConfigStat reports which of paths exist as readable files under
+// localRoot. A path that is absent, not a regular file, or one config.read
+// would refuse is left out.
+func (m *Manager) ConfigStat(ctx context.Context, member domain.MemberID, harnessName, localRoot string, paths []string, deny []string) ([]ConfigStat, error) {
+	if len(paths) > ConfigImportMaxFiles {
+		return nil, fmt.Errorf("%w: too many paths", ErrConfigTooLarge)
+	}
+	unlock, err := m.LockConfigRoot(member, localRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	rootRel, err := configRootPath(localRoot)
+	if err != nil {
+		return nil, err
+	}
+	home, err := m.openHome(member)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = home.Close() }()
+	profileRoot, err := openProfileRoot(home, rootRel, false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []ConfigStat{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = profileRoot.Close() }()
+	out := make([]ConfigStat, 0, len(paths))
+	for _, raw := range paths {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		rel, err := configPath(rootRel, raw, false)
+		if err != nil {
+			return nil, err
+		}
+		if profilesvc.DeniedBasename(rel, deny) || isDefaultIgnored(harnessName, rel) {
+			continue
+		}
+		f, info, err := openConfigFile(profileRoot, rel)
+		if errors.Is(err, ErrConfigNotFound) || errors.Is(err, ErrConfigDenied) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		stat := ConfigStat{Path: raw, Size: info.Size()}
+		// No upload can equal a file past the upload limit, so it is not
+		// read; one that grows past it while it is read gets no revision.
+		if stat.Size <= ConfigMaxFileBytes {
+			sum := sha256.New()
+			var n int64
+			if n, err = io.Copy(sum, io.LimitReader(f, ConfigMaxFileBytes+1)); err == nil && n <= ConfigMaxFileBytes {
+				stat.Revision = hex.EncodeToString(sum.Sum(nil))
+			}
+		}
+		_ = f.Close()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stat)
+	}
+	return out, nil
+}
+
 // ConfigWrite replaces one editor file after checking its exact-byte revision.
 // An empty revision is accepted only when the file does not yet exist.
 func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harnessName, localRoot, rel string, content []byte, expected string, deny []string) (ConfigRead, error) {
@@ -429,7 +506,7 @@ func writeConfigFile(home, root *os.Root, rel string, content []byte, expected s
 	case !info.Mode().IsRegular():
 		return ConfigRead{}, ErrConfigDenied
 	default:
-		current, readErr := readConfigBytes(root, rel, ConfigMaxFileBytes)
+		current, readErr := readConfigBytes(root, rel)
 		if readErr != nil {
 			return ConfigRead{}, readErr
 		}
@@ -450,11 +527,12 @@ func writeConfigFile(home, root *os.Root, rel string, content []byte, expected s
 	return ConfigRead{Content: append([]byte(nil), content...), Size: int64(len(content)), Revision: revision(content), Writable: true}, nil
 }
 
-// ConfigImport validates every browser file and every existing destination
-// before the first mutation. Credentials, runtime/history defaults, and
-// scanner findings are reported as exclusions; arbitrary regular bytes are
-// preserved under the per-request import bounds.
-func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harnessName, localRoot string, files []ConfigFile, deny []string) (ConfigImportResult, error) {
+// ConfigImport validates every file and every existing destination before the
+// first mutation. Credentials, runtime/history defaults, scanner findings, a
+// destination that already holds the same bytes, and, unless overwrite is
+// set, one that holds different bytes are reported as exclusions; arbitrary
+// regular bytes are preserved under the per-request import bounds.
+func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harnessName, localRoot string, files []ConfigFile, overwrite bool, deny []string) (ConfigImportResult, error) {
 	if len(files) > ConfigImportMaxFiles {
 		return ConfigImportResult{}, fmt.Errorf("%w: import contains too many files", ErrConfigTooLarge)
 	}
@@ -526,36 +604,50 @@ func (m *Manager) ConfigImport(ctx context.Context, member domain.MemberID, harn
 			return result, openErr
 		}
 		defer func() { _ = profileRoot.Close() }()
-		importFailure := func(index int, cause error) (ConfigImportResult, error) {
-			if index > 0 {
-				result.ImportedPaths = make([]string, index)
-				for i := range result.ImportedPaths {
-					result.ImportedPaths[i] = candidates[i].Path
-				}
-			}
+		var written []string
+		importFailure := func(file ConfigFile, cause error) (ConfigImportResult, error) {
+			result.ImportedPaths = written
 			sort.Slice(result.Excluded, func(i, j int) bool { return result.Excluded[i].Path < result.Excluded[j].Path })
-			return result, fmt.Errorf("config import %q: %w", candidates[index].Path, cause)
+			return result, fmt.Errorf("config import %q: %w", file.Path, cause)
 		}
-		for i, file := range candidates {
+		for _, file := range candidates {
 			if err = ctx.Err(); err != nil {
-				return importFailure(i, err)
+				return importFailure(file, err)
 			}
 			mode := os.FileMode(file.Mode & 0o777)
 			info, statErr := configTargetInfo(profileRoot, file.Path)
+			replaces := false
 			switch {
 			case errors.Is(statErr, fs.ErrNotExist):
 			case statErr != nil:
-				return importFailure(i, statErr)
+				return importFailure(file, statErr)
 			case !info.Mode().IsRegular():
-				return importFailure(i, ErrConfigDenied)
+				return importFailure(file, ErrConfigDenied)
 			default:
 				mode = info.Mode().Perm()
+				current, readErr := readConfigBytes(profileRoot, file.Path)
+				if readErr != nil && !errors.Is(readErr, ErrConfigTooLarge) {
+					return importFailure(file, readErr)
+				}
+				if readErr == nil && bytes.Equal(current, file.Content) {
+					result.Excluded = append(result.Excluded, ConfigExcluded{Path: file.Path, Reason: "identical", Detail: "identical on the server"})
+					continue
+				}
+				if !overwrite {
+					result.Excluded = append(result.Excluded, ConfigExcluded{Path: file.Path, Reason: "differs", Detail: fmt.Sprintf("the server has a different file (%d bytes)", info.Size())})
+					continue
+				}
+				replaces = true
 			}
 			if err := ensureDirPathOwned(home, profileRoot, path.Dir(file.Path), true); err != nil {
-				return importFailure(i, err)
+				return importFailure(file, err)
 			}
 			if err := atomicConfigWrite(home, profileRoot, file.Path, file.Content, mode, "", info); err != nil {
-				return importFailure(i, err)
+				return importFailure(file, err)
+			}
+			written = append(written, file.Path)
+			if replaces {
+				result.Replaced = append(result.Replaced, file.Path)
 			}
 			result.Files++
 			result.Bytes += int64(len(file.Content))
@@ -811,19 +903,16 @@ func openConfigFile(root *os.Root, name string) (*os.File, fs.FileInfo, error) {
 	return f, opened, nil
 }
 
-func readConfigBytes(root *os.Root, name string, limit int64) ([]byte, error) {
+func readConfigBytes(root *os.Root, name string) ([]byte, error) {
 	f, info, err := openConfigFile(root, name)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	if limit > 0 && info.Size() > limit {
+	if info.Size() > ConfigMaxFileBytes {
 		return nil, ErrConfigTooLarge
 	}
-	if limit > 0 {
-		return io.ReadAll(io.LimitReader(f, limit+1))
-	}
-	return io.ReadAll(f)
+	return io.ReadAll(io.LimitReader(f, ConfigMaxFileBytes+1))
 }
 
 func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode os.FileMode, expected string, expectedTarget fs.FileInfo) error {
@@ -874,7 +963,7 @@ func atomicConfigWrite(owner, root *os.Root, name string, content []byte, mode o
 			return err
 		}
 		if expected != "" {
-			current, checkErr := readConfigBytes(parent, target, ConfigMaxFileBytes)
+			current, checkErr := readConfigBytes(parent, target)
 			if checkErr != nil || revision(current) != expected {
 				_ = parent.Remove(tmp)
 				return ErrConfigConflict
@@ -909,16 +998,7 @@ func revision(content []byte) string {
 
 func isDefaultIgnored(harnessName, rel string) bool {
 	clean := path.Clean(rel)
-	if clean == ".aether-profile-ignore" {
-		return true
-	}
-	for _, pattern := range profilesvc.DefaultIgnores(harnessName) {
-		ignored := strings.TrimSuffix(pattern, "/")
-		if clean == ignored || strings.HasPrefix(clean, ignored+"/") {
-			return true
-		}
-	}
-	return false
+	return clean == ".aether-profile-ignore" || profilesvc.Ignored(profilesvc.ConfigIgnores(harnessName), clean)
 }
 func isConfigBinary(content []byte) bool {
 	return bytes.IndexByte(content, 0) >= 0 || !utf8.Valid(content)

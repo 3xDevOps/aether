@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	profilesvc "github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -433,6 +434,21 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 			},
 		},
 		{
+			name: "codex",
+			files: []memberhome.ConfigFile{
+				{Path: "state_5.sqlite", Content: []byte{}},
+				{Path: "state_5.sqlite-wal", Content: []byte{}},
+				{Path: "plugins/cache/p/index.js", Content: []byte{}},
+				{Path: "skills/notes/index.sqlite", Content: []byte{}},
+				{Path: ".env.local", Content: []byte{}},
+			},
+			accepted: []string{"skills/notes/index.sqlite"},
+			excluded: map[string]string{
+				"state_5.sqlite": "ignored", "state_5.sqlite-wal": "ignored",
+				"plugins/cache/p/index.js": "ignored", ".env.local": "credential",
+			},
+		},
+		{
 			name: "mybot",
 			files: []memberhome.ConfigFile{
 				{Path: "projects/transcript.json", Content: []byte{}},
@@ -448,7 +464,7 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := backend.Import(ctx, e.member.ID, tc.name, tc.files)
+			result, err := backend.Import(ctx, e.member.ID, tc.name, tc.files, false)
 			if err != nil {
 				t.Fatalf("config import: %v", err)
 			}
@@ -462,13 +478,10 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 				if want, ok := tc.excluded[excluded.Path]; !ok || excluded.Reason != want {
 					t.Errorf("excluded %q reason = %q, want %q", excluded.Path, excluded.Reason, want)
 				}
-				matched := false
-				for _, pattern := range byHarness[tc.name].RuntimeIgnores {
-					prefix := strings.TrimSuffix(pattern, "/")
-					matched = matched || excluded.Path == prefix || strings.HasPrefix(excluded.Path, prefix+"/")
-				}
+				matched := profilesvc.Ignored(byHarness[tc.name].RuntimeIgnores, excluded.Path)
 				if excluded.Reason == "credential" {
 					for component := range strings.SplitSeq(excluded.Path, "/") {
+						matched = matched || strings.HasPrefix(component, ".env")
 						for _, name := range byHarness[tc.name].CredentialNames {
 							matched = matched || strings.EqualFold(component, name)
 						}

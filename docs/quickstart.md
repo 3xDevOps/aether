@@ -609,23 +609,25 @@ upload, asks you, and uploads it with the `aether config` CLI:
 2. Paste the prompt into Claude Code, Codex, opencode, or another agent on
    that computer. It needs the `aether` CLI linked to the server
    ([step 3](#3-link-from-your-machine)).
-3. Approve or change the list of what it will upload and leave behind. When it
-   finishes, run the commands it lists for you in `aether terminal`.
+3. Approve or change its plan: what it will upload, which server files it
+   would replace, what it leaves behind, and the commands it will run on the
+   server afterwards.
 
 The prompt:
 
 ```text
 Move my coding-agent configuration from this computer to my Aether server, so agents I run there behave the way they do here. The server runs Linux. Use the `aether` CLI, which is linked to it.
 
-1. Run `aether config ls`. It lists each agent Aether can hold configuration for, its directory (the same path here and on the server, such as ~/.claude), and the files Aether always leaves out.
-2. For each listed directory that exists here, look through it and decide what belongs on the server:
+1. Run `aether config help`. If `config` is an unknown command or the help does not list `config cat`, run `aether update`, which prints the path of the binary it updated. If the help still lacks it, a different `aether` comes first in PATH; update that one.
+2. Run `aether config ls`. It lists each agent Aether can hold configuration for, its directory (the same path here and on the server, such as ~/.claude), whether the agent is installed on the server, and what Aether always leaves out. Run `aether terminal exec 'echo $HOME; uname -sm'` for the server's home directory and platform.
+3. For each listed directory that exists here, look through it and decide what belongs on the server:
    - Upload: settings, instruction files such as CLAUDE.md or AGENTS.md, custom commands, subagents, skills, hooks, and MCP or plugin configuration.
    - Leave behind: logins, tokens, and API keys; session history, transcripts, caches, and logs; anything that only works on this computer, such as hooks or MCP servers that run programs at local absolute paths, or macOS-only tools.
-   Run `aether config ls <agent>` to see what the server already has; a push replaces a server file at the same path.
-3. Show me what you will upload and what you will leave behind, with a one-line reason for each, and wait for my approval. Point out files that would need an edit to work on the server. Do not edit my local files.
-4. Upload the approved files and directories with `aether config push <agent> <path>...`. Each path is a file or directory inside the agent's directory, relative to it; a directory uploads everything in it, and `.` uploads the whole directory. Run it with --dry-run first to see what Aether itself will leave out.
-5. Report what was uploaded, and every file Aether left out with its reason.
-6. End with a list of what I still need to do myself, each with its exact command: for example, reinstalling a plugin or MCP server whose configuration you uploaded, logging in to an agent, or fixing a file that needs a server-side path. Those commands run on the server, in `aether terminal`.
+4. Run `aether config push --dry-run <agent> <path>...` on what you chose. Each path is a file or directory inside the agent's directory, relative to it; a directory takes everything in it. The dry run uploads nothing and says what a push would do with each file: `would create` it, `would skip` it because the server's copy is identical, `would refuse` it because the server has a different file, or `would leave out` a file Aether never uploads. Read the server's copy of every refused file with `aether config cat <agent> <path>` and compare it with mine.
+5. Show me the plan and wait for my approval. List separately: new files; files that would replace a different server file, with what differs and whether you recommend replacing it; what you leave behind; and the commands you will run on the server afterwards. Give a one-line reason for each. When a file mixes settings that belong on the server with ones that only work here, write an edited copy to a temporary file and show me the change. Do not edit my local files.
+6. Upload what I approved with `aether config push <agent> <path>...`. A push never replaces a different server file without `--overwrite`; pass it only in a push that names exactly the replacements I approved. Upload an edited copy with `aether config push <agent> <path> --from <temporary file>`.
+7. Finish on the server with `aether terminal exec '<command>'`, which runs one command in the Environment where my agents are installed: for example, reinstall a plugin or MCP server whose configuration you uploaded, then check that it loads.
+8. Report what was created, replaced, skipped, and left out, with Aether's reason for each file it left out. End with what I still need to do myself and its exact command, such as logging in to an agent, which needs `aether terminal`.
 
 Never print, copy, or upload a credential.
 ```
@@ -634,31 +636,37 @@ The agent runs these commands; you can run them yourself:
 
 ```sh
 aether config ls
-aether config ls claude
-aether config ls claude skills/deploy
+aether config ls -r claude
+aether config cat claude settings.json
 aether config push --dry-run claude settings.json CLAUDE.md skills commands
-aether config push claude settings.json CLAUDE.md skills commands
+aether config push claude CLAUDE.md skills commands
+aether config push --overwrite claude settings.json
+aether config push claude settings.json --from /tmp/settings.server.json
 ```
 
 `aether config ls` prints one entry per agent: its name for the other
 commands, its directory (the same home-relative path on this computer and on
-the server), whether that directory exists on this computer, and what is
-always left out:
+the server), whether that directory exists on this computer, whether the
+agent is installed on the server, and what is always left out:
 
 ```text
-claude (Claude Code): ~/.claude, exists on this computer
-  always left out, credentials: .credentials.json, credentials.json, credentials, .claude.json, auth.json, keychain, token.json, tokens.json, oauth.json, agent.db, agent.db-wal, agent.db-shm, *.pem
-  always left out, runtime and history: projects/, shell-snapshots/, statsig/, todos/, file-history/, history.jsonl, daemon/
-codex (Codex): ~/.codex, does not exist on this computer
+claude (Claude Code): ~/.claude, exists on this computer, installed on the server
+  always left out, credentials: .credentials.json, credentials.json, credentials, .claude.json, auth.json, keychain, token.json, tokens.json, oauth.json, agent.db, agent.db-wal, agent.db-shm, *.pem, .env, .env.*
+  always left out, runtime and history: projects/, shell-snapshots/, statsig/, todos/, file-history/, history.jsonl, daemon/, transcripts/, sessions/, session-env/, cache/, backups/, plugins/cache/, plugins/marketplaces/, plugins/synced/, skills/synced/
+codex (Codex): ~/.codex, does not exist on this computer, not installed on the server
 ...
 always left out, every agent: symlinks, special files, files over 64 MiB, .aether-profile-ignore, and files the secret scanner flags
 ```
 
 An agent you registered is listed when its definition sets `ProfileRoot`
 ([custom agents](harnesses.md#custom-agents)).
-`aether config ls <agent> [path]` lists what the server already has in that
+
+`aether config ls <agent> [path]` lists what the server has in that
 directory, in the `aether files ls` format: `dir<TAB><name>` and
-`file<TAB><size><TAB><name>`.
+`file<TAB><size><TAB><name>`. With `-r` it also lists every directory below,
+with names relative to the one you asked for. `aether config cat <agent>
+<path>` prints one of the server's text files. Neither shows a path that is
+always left out.
 
 `aether config push <agent> <path>...` uploads files and directories. A
 relative path resolves against the agent's directory, not the current one; an
@@ -667,10 +675,10 @@ whole directory. Directories are walked recursively. Before reading a file,
 the push leaves out:
 
 - credential names in any path component, matched case-insensitively, and
-  every `*.pem`
+  every `*.pem`, `.env`, and `.env.*`
 - `.aether-profile-ignore`
-- the agent's runtime and history paths, matched exactly and case-sensitively
-  from the directory root
+- the agent's runtime and history paths, matched case-sensitively from the
+  directory root, where `*` stands for any run of characters in one name
 - symlinks, which are not followed, and sockets, FIFOs, and devices; a path
   you name that runs through a symlink is left out whole, as in
   `left out skills/linked/SKILL.md: symlink skills/linked, not followed`
@@ -679,37 +687,55 @@ the push leaves out:
 
 It then runs the server's secret scanner on each remaining file and leaves
 out every flagged file, so its bytes never leave your computer. There is no
-override. The server applies the same rules, so a dry run lists exactly what
-the server keeps. Each file gets one line:
+override. What is left is compared with the server's copy:
+
+- a file the server does not have is created
+- a file that is identical on the server is skipped
+- a file the server has with different content is refused, and the server's
+  file stays; `--overwrite` replaces it instead
+
+The server applies the same rules, so a dry run lists exactly what a push
+does. Each file gets one line:
 
 ```text
 left out .credentials.json: credential
 left out history.jsonl: runtime or history path
 left out projects/: runtime or history path
 left out skills/linked: symlink, not followed
+created CLAUDE.md
+skipped commands/review.md: identical on the server
+refused settings.json: the server has a different file (1108 bytes, 40769 here); --overwrite replaces it
+created skills/deploy/SKILL.md
 left out skills/deploy/notes.md: secret detected at 0:27 (generic-api-key)
-uploaded CLAUDE.md
-uploaded commands/review.md
-uploaded settings.json
-uploaded skills/deploy/SKILL.md
-uploaded 4 files (42 bytes) to ~/.claude; left out 5
+created 2, replaced 0, skipped 1 identical, refused 1, left out 5 in ~/.claude (42 bytes uploaded)
 ```
 
-`--dry-run` sends nothing and prints `would upload <path>` and
-`would leave out <path>: <reason>`, then
-`would upload 4 files (42 bytes) to ~/.claude; would leave out 5`.
+A push that refused a file still uploads the rest, then exits non-zero. Read
+the server's file with `aether config cat`, then push that path again with
+`--overwrite`, which prints `replaced settings.json`. `--overwrite` applies
+to every path in the command, so name only the files you mean to replace.
 
-A push replaces a server file at the same path and deletes nothing. A new
-file gets the local permission bits, so scripts stay executable; a replaced
-file keeps its server mode. From Windows, new files are `0644`. Files travel
-in requests of at most 2,000 files and about 20 MiB; the directory itself has
-no size or file-count limit. If the server fails partway through a request,
-the push prints `uploaded <path>` for what it wrote and exits with the
-server's error. If a request gets no answer, the push prints
-`unconfirmed <path>` for each file in it and exits with the error;
-`aether config ls <agent>` shows what the server has. Running the same push
-again is safe. The command exits 0 when the server confirmed every request,
-even if files were left out.
+`--dry-run` uploads nothing and prints the same lines as `would create`,
+`would skip`, `would refuse` (`would replace` with `--overwrite`), and
+`would leave out`, then
+`would create 2, replace 0, skip 1 identical, refuse 1, leave out 5 in ~/.claude (42 bytes to upload)`.
+
+`--from <file>` uploads that file as the one `<path>` you name; the path need
+not exist on this computer, and your own file at that path is not read. Use
+it for a copy you edited for the server, such as a `settings.json` without
+the hooks that only work locally. Every rule above applies to it.
+
+A push deletes nothing. A new file gets the local permission bits, so
+scripts stay executable; a replaced file keeps its server mode. From Windows,
+new files are `0644`. Files travel in requests of at most 2,000 files and
+about 20 MiB; the directory itself has no size or file-count limit. If the
+server fails partway through a request, the push prints `created <path>` or
+`replaced <path>` for what it wrote and exits with the server's error. If a
+request gets no answer, the push prints `unconfirmed <path>` for each file in
+it and exits with the error; `aether config ls -r <agent>` shows what the
+server has. Running the same push again is safe. The command exits 0 when
+the server confirmed every request and nothing was refused, even if files
+were left out.
 
 An upload writes your home at once: your Environment and active and future
 runs see it, and a running agent may need to reload. Nothing watches the

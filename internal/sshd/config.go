@@ -27,8 +27,9 @@ type ConfigBackend interface {
 	Roots(ctx context.Context, member domain.MemberID) ([]protocol.ConfigRoot, error)
 	Tree(ctx context.Context, member domain.MemberID, harnessName, path string) ([]protocol.ConfigTreeEntry, error)
 	Read(ctx context.Context, member domain.MemberID, harnessName, path string) (protocol.ConfigFileReadResult, error)
+	Stat(ctx context.Context, member domain.MemberID, harnessName string, paths []string) ([]protocol.ConfigStatEntry, error)
 	Write(ctx context.Context, member domain.MemberID, harnessName, path, content, revision string) (protocol.ConfigFileReadResult, error)
-	Import(ctx context.Context, member domain.MemberID, harnessName string, files []memberhome.ConfigFile) (protocol.ConfigImportResult, error)
+	Import(ctx context.Context, member domain.MemberID, harnessName string, files []memberhome.ConfigFile, overwrite bool) (protocol.ConfigImportResult, error)
 }
 
 // HomeConfigBackend resolves harness definitions from the caller's own member
@@ -46,6 +47,7 @@ func init() {
 	registerGuarded(protocol.MethodConfigRoots, permissions.Launch, nil, (*Server).configRoots)
 	registerGuarded(protocol.MethodConfigTree, permissions.Launch, nil, (*Server).configTree)
 	registerGuarded(protocol.MethodConfigRead, permissions.Launch, nil, (*Server).configRead)
+	registerGuarded(protocol.MethodConfigStat, permissions.Launch, nil, (*Server).configStat)
 	registerGuarded(protocol.MethodConfigWrite, permissions.Launch, nil, (*Server).configWrite)
 	registerGuarded(protocol.MethodConfigImport, permissions.Launch, nil, (*Server).configImport)
 }
@@ -84,7 +86,7 @@ func displayRoot(localRoot string) string {
 }
 
 func configRuntimeIgnores(name string) []string {
-	runtimeIgnores := profilesvc.DefaultIgnores(name)
+	runtimeIgnores := profilesvc.ConfigIgnores(name)
 	if runtimeIgnores == nil {
 		runtimeIgnores = []string{}
 	}
@@ -168,6 +170,25 @@ func (b *HomeConfigBackend) Read(ctx context.Context, member domain.MemberID, na
 	return configReadResult(read), nil
 }
 
+func (b *HomeConfigBackend) Stat(ctx context.Context, member domain.MemberID, name string, paths []string) ([]protocol.ConfigStatEntry, error) {
+	if b.homes == nil {
+		return nil, memberhome.ErrConfigNotFound
+	}
+	p, err := b.profile(ctx, member, name)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := b.homes.ConfigStat(ctx, member, name, p.LocalRoot, paths, p.DenyNames)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.ConfigStatEntry, 0, len(stats))
+	for _, stat := range stats {
+		out = append(out, protocol.ConfigStatEntry{Path: stat.Path, Size: stat.Size, Revision: stat.Revision})
+	}
+	return out, nil
+}
+
 func (b *HomeConfigBackend) Write(ctx context.Context, member domain.MemberID, name, reqPath, content, revision string) (protocol.ConfigFileReadResult, error) {
 	if b.homes == nil {
 		return protocol.ConfigFileReadResult{}, memberhome.ErrConfigNotFound
@@ -183,7 +204,7 @@ func (b *HomeConfigBackend) Write(ctx context.Context, member domain.MemberID, n
 	return configReadResult(read), nil
 }
 
-func (b *HomeConfigBackend) Import(ctx context.Context, member domain.MemberID, name string, files []memberhome.ConfigFile) (protocol.ConfigImportResult, error) {
+func (b *HomeConfigBackend) Import(ctx context.Context, member domain.MemberID, name string, files []memberhome.ConfigFile, overwrite bool) (protocol.ConfigImportResult, error) {
 	if b.homes == nil {
 		return protocol.ConfigImportResult{}, memberhome.ErrConfigNotFound
 	}
@@ -191,8 +212,8 @@ func (b *HomeConfigBackend) Import(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return protocol.ConfigImportResult{}, err
 	}
-	result, err := b.homes.ConfigImport(ctx, member, name, p.LocalRoot, files, p.DenyNames)
-	out := protocol.ConfigImportResult{Harness: name, Files: result.Files, Bytes: result.Bytes, Excluded: make([]protocol.ConfigExcluded, 0, len(result.Excluded))}
+	result, err := b.homes.ConfigImport(ctx, member, name, p.LocalRoot, files, overwrite, p.DenyNames)
+	out := protocol.ConfigImportResult{Harness: name, Files: result.Files, Bytes: result.Bytes, Replaced: result.Replaced, Excluded: make([]protocol.ConfigExcluded, 0, len(result.Excluded))}
 	for _, excluded := range result.Excluded {
 		out.Excluded = append(out.Excluded, protocol.ConfigExcluded{Path: excluded.Path, Reason: excluded.Reason, Detail: excluded.Detail})
 	}
@@ -270,6 +291,24 @@ func (s *Server) configRead(ctx context.Context, member domain.MemberID, params 
 	return read, nil
 }
 
+func (s *Server) configStat(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.ConfigStatParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.Harness == "" {
+		return nil, invalidParams("harness is required")
+	}
+	if s.cfg.Config == nil {
+		return nil, configUnavailable()
+	}
+	entries, err := s.cfg.Config.Stat(ctx, member, p.Harness, p.Paths)
+	if err != nil {
+		return nil, configError(err)
+	}
+	return protocol.ConfigStatResult{Entries: entries}, nil
+}
+
 func (s *Server) configWrite(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.ConfigWriteParams](params)
 	if perr != nil {
@@ -290,8 +329,9 @@ func (s *Server) configWrite(ctx context.Context, member domain.MemberID, params
 
 func (s *Server) configImport(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	var raw struct {
-		Harness string          `json:"harness"`
-		Files   json.RawMessage `json:"files"`
+		Harness   string          `json:"harness"`
+		Files     json.RawMessage `json:"files"`
+		Overwrite bool            `json:"overwrite"`
 	}
 	if err := json.Unmarshal(params, &raw); err != nil {
 		return nil, invalidParams("invalid params: " + err.Error())
@@ -306,7 +346,7 @@ func (s *Server) configImport(ctx context.Context, member domain.MemberID, param
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	result, err := s.cfg.Config.Import(ctx, member, raw.Harness, files)
+	result, err := s.cfg.Config.Import(ctx, member, raw.Harness, files, raw.Overwrite)
 	if err != nil {
 		return nil, configError(err)
 	}

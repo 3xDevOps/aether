@@ -29,8 +29,8 @@ import (
 
 const configMember = domain.MemberID("member-1")
 
-// configControl serves config.roots, config.tree and config.import from
-// backend over a pipe, and records every config.import.
+// configControl serves the config methods from backend over a pipe, reports
+// claude as the one installed agent, and records every config.import.
 func configControl(t *testing.T, backend sshd.ConfigBackend) (*protocol.Client, *[]protocol.ConfigImportParams) {
 	t.Helper()
 	imports := &[]protocol.ConfigImportParams{}
@@ -60,6 +60,18 @@ func configControl(t *testing.T, backend sshd.ConfigBackend) (*protocol.Client, 
 				var entries []protocol.ConfigTreeEntry
 				entries, err = backend.Tree(ctx, configMember, p.Harness, p.Path)
 				result = protocol.ConfigTreeResult{Entries: entries}
+			case protocol.MethodConfigRead:
+				var p protocol.ConfigReadParams
+				_ = json.Unmarshal(req.Params, &p)
+				result, err = backend.Read(ctx, configMember, p.Harness, p.Path)
+			case protocol.MethodConfigStat:
+				var p protocol.ConfigStatParams
+				_ = json.Unmarshal(req.Params, &p)
+				var entries []protocol.ConfigStatEntry
+				entries, err = backend.Stat(ctx, configMember, p.Harness, p.Paths)
+				result = protocol.ConfigStatResult{Entries: entries}
+			case protocol.MethodAgentList:
+				result = protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true}, {Name: "codex"}}}
 			case protocol.MethodConfigImport:
 				var p protocol.ConfigImportParams
 				_ = json.Unmarshal(req.Params, &p)
@@ -69,7 +81,7 @@ func configControl(t *testing.T, backend sshd.ConfigBackend) (*protocol.Client, 
 					content, _ := base64.StdEncoding.DecodeString(f.ContentBase64)
 					files = append(files, memberhome.ConfigFile{Path: f.Path, Content: content, Mode: f.Mode})
 				}
-				result, err = backend.Import(ctx, configMember, p.Harness, files)
+				result, err = backend.Import(ctx, configMember, p.Harness, files, p.Overwrite)
 			default:
 				err = fmt.Errorf("unexpected method %s", req.Method)
 			}
@@ -111,7 +123,7 @@ type configImportReply struct {
 	reply func(files []memberhome.ConfigFile) (protocol.ConfigImportResult, error)
 }
 
-func (b configImportReply) Import(_ context.Context, _ domain.MemberID, _ string, files []memberhome.ConfigFile) (protocol.ConfigImportResult, error) {
+func (b configImportReply) Import(_ context.Context, _ domain.MemberID, _ string, files []memberhome.ConfigFile, _ bool) (protocol.ConfigImportResult, error) {
 	return b.reply(files)
 }
 
@@ -153,6 +165,8 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 		"skills/deploy/run.sh":   {"#!/bin/sh\necho deploy\n", 0o755},
 		"skills/deploy/key.pem":  {"not read\n", 0o600},
 		".credentials.json":      {"not read\n", 0o600},
+		".env":                   {"not read\n", 0o600},
+		"plugins/cache/p/x.js":   {"not read\n", 0o644},
 		".aether-profile-ignore": {"*.log\n", 0o644},
 		"history.jsonl":          {"{}\n", 0o644},
 		"projects/abc/s.jsonl":   {"{}\n", 0o644},
@@ -199,9 +213,12 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 		t.Fatalf("config ls: %v", err)
 	}
 	for _, want := range []string{
-		"claude (Claude Code): ~/.claude, exists on this computer\n",
-		"codex (Codex): ~/.codex, does not exist on this computer\n",
-		"  always left out, runtime and history: projects/, shell-snapshots/, statsig/, todos/, file-history/, history.jsonl, daemon/\n",
+		"claude (Claude Code): ~/.claude, exists on this computer, installed on the server\n",
+		"codex (Codex): ~/.codex, does not exist on this computer, not installed on the server\n",
+		"agent.db-shm, *.pem, .env, .env.*\n",
+		"  always left out, runtime and history: projects/, shell-snapshots/, statsig/, todos/, file-history/, history.jsonl, daemon/, transcripts/, sessions/, session-env/, cache/, backups/, plugins/cache/, plugins/marketplaces/, plugins/synced/, skills/synced/\n",
+		"*.sqlite, *.sqlite-shm, *.sqlite-wal\n",
+		"  always left out, runtime and history: node_modules/, .git/\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("config ls output lacks %q:\n%s", want, out.String())
@@ -211,30 +228,45 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 	localLeftOut := []string{
 		".aether-profile-ignore: Aether profile ignore file\n",
 		".credentials.json: credential\n",
+		".env: credential\n",
 		"big.bin: 68157440 bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal\n",
 		"fifo: not a regular file\n",
 		"history.jsonl: runtime or history path\n",
 		"link.md: symlink, not followed\n",
+		"plugins/cache/: runtime or history path\n",
 		"projects/: runtime or history path\n",
 		"skills/deploy/key.pem: credential\n",
 		"skills/linked: symlink, not followed\n",
 	}
 	uploadBytes := len(`{"model":"opus"}`) + len("# Instructions\n") + len("Review the diff.\n") + len("# Deploy\n") + len("#!/bin/sh\necho deploy\n")
-
-	out.Reset()
-	if err = configPush(c, &out, "claude", []string{"."}, true); err != nil {
-		t.Fatalf("config push --dry-run .: %v", err)
+	push := func(want string, opts configPushOptions, paths ...string) error {
+		t.Helper()
+		out.Reset()
+		pushErr := configPush(c, &out, "claude", paths, opts)
+		if out.String() != want {
+			t.Errorf("config push %v %+v printed:\n%s\nwant:\n%s", paths, opts, out.String(), want)
+		}
+		return pushErr
 	}
-	want := "would leave out " + strings.Join(localLeftOut, "would leave out ") +
-		"would upload CLAUDE.md\n" +
-		"would upload commands/review.md\n" +
-		"would leave out " + secretLine +
-		"would upload settings.json\n" +
-		"would upload skills/deploy/SKILL.md\n" +
-		"would upload skills/deploy/run.sh\n" +
-		fmt.Sprintf("would upload 5 files (%d bytes) to ~/.claude; would leave out 10\n", uploadBytes)
-	if out.String() != want {
-		t.Errorf("dry-run output:\n%s\nwant:\n%s", out.String(), want)
+	serverFile := func(rel string) string {
+		t.Helper()
+		content, readErr := os.ReadFile(filepath.Join(serverHome, ".claude", filepath.FromSlash(rel)))
+		if readErr != nil {
+			t.Fatalf("server copy of %s: %v", rel, readErr)
+		}
+		return string(content)
+	}
+
+	if err = push("would leave out "+strings.Join(localLeftOut, "would leave out ")+
+		"would create CLAUDE.md\n"+
+		"would create commands/review.md\n"+
+		"would leave out "+secretLine+
+		"would create settings.json\n"+
+		"would create skills/deploy/SKILL.md\n"+
+		"would create skills/deploy/run.sh\n"+
+		fmt.Sprintf("would create 5, replace 0, skip 0 identical, refuse 0, leave out 12 in ~/.claude (%d bytes to upload)\n", uploadBytes),
+		configPushOptions{dryRun: true}, "."); err != nil {
+		t.Fatalf("config push --dry-run .: %v", err)
 	}
 	if len(*imports) != 0 {
 		t.Fatalf("--dry-run sent %d config.import requests", len(*imports))
@@ -243,17 +275,13 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 		t.Fatalf("--dry-run created the server directory: %v", err)
 	}
 
-	out.Reset()
-	if err = configPush(c, &out, "claude", []string{"skills"}, false); err != nil {
+	if err = push("left out skills/deploy/key.pem: credential\n"+
+		"left out skills/linked: symlink, not followed\n"+
+		"created skills/deploy/SKILL.md\n"+
+		"created skills/deploy/run.sh\n"+
+		fmt.Sprintf("created 2, replaced 0, skipped 0 identical, refused 0, left out 2 in ~/.claude (%d bytes uploaded)\n", len("# Deploy\n")+len("#!/bin/sh\necho deploy\n")),
+		configPushOptions{}, "skills"); err != nil {
 		t.Fatalf("config push skills: %v", err)
-	}
-	want = "left out skills/deploy/key.pem: credential\n" +
-		"left out skills/linked: symlink, not followed\n" +
-		"uploaded skills/deploy/SKILL.md\n" +
-		"uploaded skills/deploy/run.sh\n" +
-		fmt.Sprintf("uploaded 2 files (%d bytes) to ~/.claude; left out 2\n", len("# Deploy\n")+len("#!/bin/sh\necho deploy\n"))
-	if out.String() != want {
-		t.Errorf("push skills output:\n%s\nwant:\n%s", out.String(), want)
 	}
 	for rel, mode := range map[string]os.FileMode{"skills/deploy/run.sh": 0o755, "skills/deploy/SKILL.md": 0o644} {
 		info, statErr := os.Stat(filepath.Join(serverHome, ".claude", filepath.FromSlash(rel)))
@@ -265,76 +293,131 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 		}
 	}
 
-	out.Reset()
-	if err = configPush(c, &out, "claude", []string{filepath.Join(claude, "commands"), "commands/review.md"}, false); err != nil {
+	if err = push(fmt.Sprintf("created commands/review.md\ncreated 1, replaced 0, skipped 0 identical, refused 0, left out 0 in ~/.claude (%d bytes uploaded)\n", len("Review the diff.\n")),
+		configPushOptions{}, filepath.Join(claude, "commands"), "commands/review.md"); err != nil {
 		t.Fatalf("config push of an absolute path: %v", err)
-	}
-	if want = fmt.Sprintf("uploaded commands/review.md\nuploaded 1 file (%d bytes) to ~/.claude; left out 0\n", len("Review the diff.\n")); out.String() != want {
-		t.Errorf("push commands output:\n%s\nwant:\n%s", out.String(), want)
 	}
 	if last := (*imports)[len(*imports)-1]; len(last.Files) != 1 || last.Files[0].Path != ".claude/commands/review.md" {
 		t.Errorf("overlapping paths sent %+v, want .claude/commands/review.md once", last.Files)
 	}
 
-	out.Reset()
-	if err = configPush(c, &out, "claude", []string{"."}, false); err != nil {
+	if err = push("left out "+strings.Join(localLeftOut, "left out ")+
+		"created CLAUDE.md\n"+
+		"skipped commands/review.md: identical on the server\n"+
+		"left out "+secretLine+
+		"created settings.json\n"+
+		"skipped skills/deploy/SKILL.md: identical on the server\n"+
+		"skipped skills/deploy/run.sh: identical on the server\n"+
+		fmt.Sprintf("created 2, replaced 0, skipped 3 identical, refused 0, left out 12 in ~/.claude (%d bytes uploaded)\n", len("# Instructions\n")+len(`{"model":"opus"}`)),
+		configPushOptions{}, "."); err != nil {
 		t.Fatalf("config push .: %v", err)
 	}
-	want = "left out " + strings.Join(localLeftOut, "left out ") +
-		"left out " + secretLine +
-		"uploaded CLAUDE.md\n" +
-		"uploaded commands/review.md\n" +
-		"uploaded settings.json\n" +
-		"uploaded skills/deploy/SKILL.md\n" +
-		"uploaded skills/deploy/run.sh\n" +
-		fmt.Sprintf("uploaded 5 files (%d bytes) to ~/.claude; left out 10\n", uploadBytes)
-	if out.String() != want {
-		t.Errorf("push . output:\n%s\nwant:\n%s", out.String(), want)
+	if len(*imports) != 3 || len((*imports)[2].Files) != 2 {
+		t.Errorf("three pushes sent %d config.import requests, the last with %d files; want 3 and only the 2 new files", len(*imports), len((*imports)[len(*imports)-1].Files))
 	}
-	if len(*imports) != 3 {
-		t.Errorf("three pushes sent %d config.import requests", len(*imports))
-	}
-	for _, f := range (*imports)[len(*imports)-1].Files {
+	for _, f := range (*imports)[0].Files {
 		if f.Path == ".claude/skills/deploy/run.sh" && f.Mode != 0o755 {
 			t.Errorf("run.sh sent with mode %o, want 755", f.Mode)
 		}
 	}
 
 	out.Reset()
-	if err = configTree(c, &out, "claude", ""); err != nil {
+	if err = configTree(c, &out, "claude", "", false); err != nil {
 		t.Fatalf("config ls claude: %v", err)
 	}
-	want = fmt.Sprintf("file\t%d\tCLAUDE.md\ndir\tcommands\nfile\t%d\tsettings.json\ndir\tskills\n", len("# Instructions\n"), len(`{"model":"opus"}`))
+	want := fmt.Sprintf("file\t%d\tCLAUDE.md\ndir\tcommands\nfile\t%d\tsettings.json\ndir\tskills\n", len("# Instructions\n"), len(`{"model":"opus"}`))
 	if out.String() != want {
 		t.Errorf("config ls claude:\n%s\nwant:\n%s", out.String(), want)
 	}
+	out.Reset()
+	if err = configTree(c, &out, "claude", "skills/", true); err != nil {
+		t.Fatalf("config ls -r claude skills/: %v", err)
+	}
+	if want = "dir\tdeploy\nfile\t9\tdeploy/SKILL.md\nfile\t22\tdeploy/run.sh\n"; out.String() != want {
+		t.Errorf("config ls -r claude skills/:\n%s\nwant:\n%s", out.String(), want)
+	}
 
 	out.Reset()
-	if err = configPush(c, &out, "claude", []string{"skills/linked/notes.md", "link.md", "skills/linked"}, false); err != nil {
-		t.Fatalf("config push through symlinks: %v", err)
+	if err = configCat(c, &out, "claude", "settings.json"); err != nil || out.String() != `{"model":"opus"}` {
+		t.Errorf("config cat claude settings.json = %q, %v", out.String(), err)
 	}
-	want = "left out skills/linked/notes.md: symlink skills/linked, not followed\n" +
-		"left out link.md: symlink link.md, not followed\n" +
-		"left out skills/linked: symlink skills/linked, not followed\n" +
-		"uploaded 0 files (0 bytes) to ~/.claude; left out 3\n"
-	if out.String() != want {
-		t.Errorf("push through symlinks output:\n%s\nwant:\n%s", out.String(), want)
+	if err = configCat(c, &out, "claude", ".credentials.json"); err == nil {
+		t.Error("config cat printed a credential file")
+	}
+
+	writeConfigFile(t, filepath.Join(claude, "settings.json"), `{"model":"sonnet"}`)
+	different := "settings.json: the server has a different file (16 bytes, 18 here)"
+	if err = push("would refuse "+different+"; --overwrite replaces it\n"+
+		"would skip CLAUDE.md: identical on the server\n"+
+		"would create 0, replace 0, skip 1 identical, refuse 1, leave out 0 in ~/.claude (0 bytes to upload)\n",
+		configPushOptions{dryRun: true}, "settings.json", "CLAUDE.md"); err != nil {
+		t.Fatalf("config push --dry-run of a differing file: %v", err)
+	}
+	err = push("refused "+different+"; --overwrite replaces it\n"+
+		"created 0, replaced 0, skipped 0 identical, refused 1, left out 0 in ~/.claude (0 bytes uploaded)\n",
+		configPushOptions{}, "settings.json")
+	if err == nil || !strings.Contains(err.Error(), "refused 1") || !strings.Contains(err.Error(), "aether config cat claude <path>") {
+		t.Errorf("push of a differing file: %v, want a refusal", err)
+	}
+	if got := serverFile("settings.json"); got != `{"model":"opus"}` || len(*imports) != 3 {
+		t.Errorf("a refused push left the server with %q after %d requests, want the old file and no new request", got, len(*imports))
+	}
+	if err = push("would replace "+different+"\n"+
+		"would create 0, replace 1, skip 0 identical, refuse 0, leave out 0 in ~/.claude (18 bytes to upload)\n",
+		configPushOptions{dryRun: true, overwrite: true}, "settings.json"); err != nil {
+		t.Fatalf("config push --dry-run --overwrite: %v", err)
+	}
+	if err = push("replaced settings.json\n"+
+		"created 0, replaced 1, skipped 0 identical, refused 0, left out 0 in ~/.claude (18 bytes uploaded)\n",
+		configPushOptions{overwrite: true}, "settings.json"); err != nil {
+		t.Fatalf("config push --overwrite: %v", err)
+	}
+	if got := serverFile("settings.json"); got != `{"model":"sonnet"}` {
+		t.Errorf("--overwrite left the server with %q", got)
+	}
+
+	edited := filepath.Join(home, "edited.json")
+	writeConfigFile(t, edited, `{"model":"haiku"}`)
+	if err = push("created settings.local.json\n"+
+		"created 1, replaced 0, skipped 0 identical, refused 0, left out 0 in ~/.claude (17 bytes uploaded)\n",
+		configPushOptions{from: edited}, "settings.local.json"); err != nil {
+		t.Fatalf("config push --from: %v", err)
+	}
+	if got := serverFile("settings.local.json"); got != `{"model":"haiku"}` {
+		t.Errorf("--from left the server with %q", got)
+	}
+	if _, err = os.Stat(filepath.Join(claude, "settings.local.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("--from wrote the agent's directory on this computer: %v", err)
+	}
+	if err = push("left out auth.json: credential\n"+
+		"created 0, replaced 0, skipped 0 identical, refused 0, left out 1 in ~/.claude (0 bytes uploaded)\n",
+		configPushOptions{from: edited}, "auth.json"); err != nil {
+		t.Fatalf("config push --from to a credential path: %v", err)
+	}
+	sentBefore := len(*imports)
+
+	if err = push("left out skills/linked/notes.md: symlink skills/linked, not followed\n"+
+		"left out link.md: symlink link.md, not followed\n"+
+		"left out skills/linked: symlink skills/linked, not followed\n"+
+		"created 0, replaced 0, skipped 0 identical, refused 0, left out 3 in ~/.claude (0 bytes uploaded)\n",
+		configPushOptions{}, "skills/linked/notes.md", "link.md", "skills/linked"); err != nil {
+		t.Fatalf("config push through symlinks: %v", err)
 	}
 
 	for _, path := range []string{"../outside.md", filepath.Join(home, "outside.md")} {
-		err = configPush(c, &out, "claude", []string{"settings.json", path}, false)
+		err = configPush(c, &out, "claude", []string{"settings.json", path}, configPushOptions{})
 		if err == nil || !strings.Contains(err.Error(), path+" is outside ~/.claude") {
 			t.Errorf("push of %s: %v, want an outside-the-directory error", path, err)
 		}
 	}
-	if err = configPush(c, &out, "claude", []string{"missing.md"}, false); !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), "missing.md") {
+	if err = configPush(c, &out, "claude", []string{"missing.md"}, configPushOptions{}); !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), "missing.md") {
 		t.Errorf("push of a missing path: %v", err)
 	}
-	if err = configPush(c, &out, "nope", []string{"."}, false); err == nil || !strings.Contains(err.Error(), `agent "nope"`) || !strings.Contains(err.Error(), "aether config ls") {
+	if err = configPush(c, &out, "nope", []string{"."}, configPushOptions{}); err == nil || !strings.Contains(err.Error(), `agent "nope"`) || !strings.Contains(err.Error(), "aether config ls") {
 		t.Errorf("push for an unknown agent: %v", err)
 	}
-	if len(*imports) != 3 {
-		t.Errorf("failed pushes sent config.import requests: %d total", len(*imports))
+	if len(*imports) != sentBefore {
+		t.Errorf("failed pushes sent %d config.import requests", len(*imports)-sentBefore)
 	}
 }
 
@@ -346,10 +429,10 @@ func TestConfigPushKeepsADirectoryNamedLikeTheAgentDirectory(t *testing.T) {
 	c, _ := configControl(t, backend)
 
 	var out bytes.Buffer
-	if err := configPush(c, &out, "claude", []string{"settings.json", ".claude"}, false); err != nil {
+	if err := configPush(c, &out, "claude", []string{"settings.json", ".claude"}, configPushOptions{}); err != nil {
 		t.Fatalf("config push: %v", err)
 	}
-	want := "uploaded settings.json\nuploaded .claude/settings.json\nuploaded 2 files (34 bytes) to ~/.claude; left out 0\n"
+	want := "created settings.json\ncreated .claude/settings.json\ncreated 2, replaced 0, skipped 0 identical, refused 0, left out 0 in ~/.claude (34 bytes uploaded)\n"
 	if out.String() != want {
 		t.Errorf("push output:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -361,7 +444,7 @@ func TestConfigPushKeepsADirectoryNamedLikeTheAgentDirectory(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := configTree(c, &out, "claude", ".claude"); err != nil {
+	if err := configTree(c, &out, "claude", ".claude", false); err != nil {
 		t.Fatalf("config ls claude .claude: %v", err)
 	}
 	if want = "file\t18\tsettings.json\n"; out.String() != want {
@@ -406,10 +489,10 @@ func TestConfigPushSplitsRequestsAndStopsAtTheFirstFailure(t *testing.T) {
 		backend, _ := configServer(t)
 		c, imports := configControl(t, configImportReply{backend, configImported})
 		var out bytes.Buffer
-		if err := configPush(c, &out, "claude", []string{"many"}, false); err != nil {
+		if err := configPush(c, &out, "claude", []string{"many"}, configPushOptions{}); err != nil {
 			t.Fatalf("config push many: %v", err)
 		}
-		if want := lines("uploaded ", many) + "uploaded 2002 files (4004 bytes) to ~/.claude; left out 0\n"; out.String() != want {
+		if want := lines("created ", many) + "created 2002, replaced 0, skipped 0 identical, refused 0, left out 0 in ~/.claude (4004 bytes uploaded)\n"; out.String() != want {
 			t.Errorf("push output ends:\n%s", out.String()[max(0, out.Len()-200):])
 		}
 		requests := sent(*imports)
@@ -427,14 +510,14 @@ func TestConfigPushSplitsRequestsAndStopsAtTheFirstFailure(t *testing.T) {
 		backend, _ := configServer(t)
 		c, imports := configControl(t, backend)
 		var out bytes.Buffer
-		if err := configPush(c, &out, "claude", []string{"big"}, false); err != nil {
+		if err := configPush(c, &out, "claude", []string{"big"}, configPushOptions{}); err != nil {
 			t.Fatalf("config push big: %v", err)
 		}
 		want := [][]string{{"big/a.md"}, {"big/b.md"}, {"big/c.md", "big/d.md"}}
 		if got := sent(*imports); !slices.EqualFunc(got, want, slices.Equal) {
 			t.Errorf("requests %v, want %v", got, want)
 		}
-		if want := fmt.Sprintf("uploaded 4 files (%d bytes) to ~/.claude; left out 0\n", 22<<20+4); !strings.HasSuffix(out.String(), want) {
+		if want := fmt.Sprintf("created 4, replaced 0, skipped 0 identical, refused 0, left out 0 in ~/.claude (%d bytes uploaded)\n", 22<<20+4); !strings.HasSuffix(out.String(), want) {
 			t.Errorf("push output:\n%s\nwant it to end with:\n%s", out.String(), want)
 		}
 	})
@@ -448,11 +531,11 @@ func TestConfigPushSplitsRequestsAndStopsAtTheFirstFailure(t *testing.T) {
 			}, nil
 		}})
 		var out bytes.Buffer
-		err := configPush(c, &out, "claude", []string{"many"}, false)
+		err := configPush(c, &out, "claude", []string{"many"}, configPushOptions{})
 		if err == nil || err.Error() != `upload to ~/.claude stopped: config import "many/0002.md": no space left on device` {
 			t.Errorf("push error: %v", err)
 		}
-		if want := lines("uploaded ", many[:2]); out.String() != want {
+		if want := lines("created ", many[:2]); out.String() != want {
 			t.Errorf("push output:\n%s\nwant:\n%s", out.String(), want)
 		}
 		if len(*imports) != 1 {
@@ -468,7 +551,7 @@ func TestConfigPushSplitsRequestsAndStopsAtTheFirstFailure(t *testing.T) {
 			return protocol.ConfigImportResult{}, nil
 		}})
 		var out bytes.Buffer
-		err := configPush(c, &out, "claude", []string{"many"}, false)
+		err := configPush(c, &out, "claude", []string{"many"}, configPushOptions{})
 		if err == nil || !strings.Contains(err.Error(), "the 2000 unconfirmed files may or may not be on the server") {
 			t.Errorf("push error: %v", err)
 		}
@@ -491,11 +574,12 @@ func TestConfigPushSplitsRequestsAndStopsAtTheFirstFailure(t *testing.T) {
 			return configImported(files)
 		}})
 		var out bytes.Buffer
-		if err := configPush(c, &out, "claude", []string{"many"}, false); err != nil {
+		if err := configPush(c, &out, "claude", []string{"many"}, configPushOptions{}); err != nil {
 			t.Fatalf("config push many: %v", err)
 		}
-		want := lines("uploaded ", many[:2000]) + "left out many/2001.md: 68157440 bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal\n" +
-			"uploaded many/2000.md\nuploaded 2001 files (4002 bytes) to ~/.claude; left out 1\n"
+		want := lines("created ", many[:2000]) + "created many/2000.md\n" +
+			"left out many/2001.md: 68157440 bytes is over the 64 MiB upload limit; copy it onto the server from aether terminal\n" +
+			"created 2001, replaced 0, skipped 0 identical, refused 0, left out 1 in ~/.claude (4002 bytes uploaded)\n"
 		if out.String() != want {
 			t.Errorf("push output ends:\n%s", out.String()[max(0, out.Len()-400):])
 		}
