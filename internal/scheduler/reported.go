@@ -26,6 +26,7 @@ const (
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"
 	blockedReasonPrefix           = "blocked: "
+	needsInputReasonPrefix        = "needs input: "
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
 )
@@ -380,7 +381,16 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 // Same-turn Working callbacks do not erase it; the first resume after it is
 // shown does. The shared watermark fences replays, older reports and relaunches.
 func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
-	reason := blockedReasonPrefix + summary
+	return s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report")
+}
+
+// ReportNeedsInput records an agent's question for its user like
+// ReportBlocked.
+func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error {
+	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report")
+}
+
+func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string) error {
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
 		reason = string(runes[:maxPublicRunStatusReason])
 	}
@@ -390,10 +400,10 @@ func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportI
 		if entry.status.Terminal() || entry.reported != "" {
 			return nil
 		}
-		return s.recordIdleReportLocked(ctx, entry, reportID, reason, reportedAt)
+		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}
 	s.mu.Unlock()
-	return s.requireFinished(ctx, run, "blocked report")
+	return s.requireFinished(ctx, run, what)
 }
 
 // requireFinished is the answer for a run with no supervised owner: done

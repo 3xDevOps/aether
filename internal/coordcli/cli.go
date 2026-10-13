@@ -248,7 +248,7 @@ Use task propose --help or task revise --help for revision JSON and required fla
 Worker mutations use the mission authority on the run socket. Dispatch keys
 are explicit identities for retry-safe starts and retries.
 `,
-	"report": `usage: aether-internal report --outcome <success|failure|blocked> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+	"report": `usage: aether-internal report --outcome <success|failure|blocked|needs-input> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
 Submit a durable outcome after verification and required evidence collection.
 Interactive non-worker Standard/TUI and Enhanced/ACP runs stay open: report
@@ -261,6 +261,14 @@ Background runs have one success/failure report per launch; assigned workers
 have one per attempt. Further new keys conflict. Blocked is nonterminal, may
 repeat, and shows the summary as the Needs you reason at turn end, not while
 input is open. It is not a way to wait for a peer or human.
+Needs-input is nonterminal: the summary is the question shown to the user as
+the Needs you reason at turn end. Ask one specific question, then end your
+turn; the user's reply arrives as your next prompt. It takes no --evidence-ref
+and is refused for mission workers, who ask their integrator with ask.
+You MUST report before ending a turn: success or failure when the task is done
+or cannot be done, blocked when an external blocker stops you, needs-input with
+your question as the summary when you need the user's decision or information.
+Never end a turn silently.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
 Mission integrator: success completes an active mission and stops leftover
@@ -460,6 +468,7 @@ only after finishing with required evidence, failure only if irrecoverable.
 Verify the changed behavior and collect required screenshots/evidence BEFORE
 reporting: a terminal worker report can clean up its development resources.
 Blocked is a nonterminal durable observation, not a submission or a way to wait.
+Workers cannot report needs-input: ask your integrator with ask.
 Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
 `
@@ -474,6 +483,12 @@ in this session. Only an explicit user Close normally shuts it down.
 A Background integrator finishes when its turn ends and takes no new work.
 Blocked is a nonterminal durable observation, not a way to wait. Do not report
 while idle or waiting on workers. Use a new idempotency key for a later outcome.
+Needs-input is nonterminal; its summary is your question for the user, shown as
+the Needs you reason at turn end. Ask one specific question, then end your turn.
+You MUST report before ending a turn: success or failure when done or unable,
+blocked when an external blocker stops you, needs-input with your question as
+the summary when you need the user's decision or information. Never end a turn
+silently.
 `
 
 const ordinaryOutcomes = `Report success only after finishing with required evidence, failure only if
@@ -490,6 +505,13 @@ per launch and take no new work afterwards.
 Blocked shows your summary as the Needs you reason at turn end, not while input
 is open. It may repeat; it is not a way to wait. Do not report while idle or
 waiting on a peer or human.
+Needs-input is nonterminal; its summary is your question for the user, shown as
+the Needs you reason at turn end. Ask one specific question, then end your turn;
+the user's reply arrives as your next prompt.
+You MUST report before ending a turn: success or failure when the task is done
+or cannot be done, blocked when an external blocker stops you, needs-input with
+your question as the summary when you need the user's decision or information.
+Never end a turn silently.
 `
 
 const skillRetry = `For an uncertain mutation, retry identical inputs with the same idempotency
@@ -776,7 +798,7 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 
 func report(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordReportResult, error) {
 	fs := newFlags("report")
-	outcome := fs.String("outcome", "", "success, failure, or blocked")
+	outcome := fs.String("outcome", "", "success, failure, blocked, or needs-input")
 	summary := fs.String("summary", "", "bounded outcome summary")
 	summaryFile := fs.String("summary-file", "", "read summary from a file, or - for stdin")
 	key := fs.String("idempotency-key", "", "stable key used to replay this mutation")

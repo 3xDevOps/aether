@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -138,6 +139,14 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
+	for _, tool := range tools.Tools {
+		if tool.Name == toolReport && !strings.Contains(tool.Description, "needs-input") {
+			t.Fatalf("%s description lacks needs-input: %s", tool.Name, tool.Description)
+		}
+		if tool.Name == toolAsk && !strings.Contains(tool.Description, "aether_report") {
+			t.Fatalf("%s description does not point to aether_report for asking the user: %s", tool.Name, tool.Description)
+		}
+	}
 	wantTools := []string{toolAsk, toolInbox, toolReply, toolReport, toolSend, toolStatus}
 	if !slices.Equal(names, wantTools) {
 		t.Fatalf("tools = %v, want exactly %v", names, wantTools)

@@ -875,7 +875,8 @@ state means idle; generic turn completion, interruption, silence, and prose
 do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
 turn parks at its end with `blocked: <summary>` instead of `agent idle`,
-until it resumes. The execution report is recovered through a server
+until it resumes. `--outcome needs-input` does the same with
+`needs input: <question>` when the agent needs a user decision. The execution report is recovered through a server
 restart.
 
 How such a run comes back depends on how much its agent can say. Where the

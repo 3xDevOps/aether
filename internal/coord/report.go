@@ -29,13 +29,44 @@ type ReportSink interface {
 
 // OutcomeSink receives an ordinary run's published coord.report. Success and
 // failure park an interactive run or finish a background run; a blocked summary
-// becomes its needs-attention reason. reportedAt and reportID let the scheduler
+// becomes its needs-attention reason, as does a needs-input question. reportedAt and reportID let the scheduler
 // reject stale or replayed reports independently of native execution updates.
 // A run that is already terminal or gone is not an error; any error leaves the
 // publication pending for retry.
 type OutcomeSink interface {
 	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
 	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
+	ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error
+}
+
+// reportNeedsInput hands the question straight to the scheduler. It is not a
+// durable report: nothing is reserved, no evidence is captured, and the
+// terminal slot stays free. The id is derived from the idempotency key so a
+// retry is fenced by the scheduler.
+func (s *Service) reportNeedsInput(ctx context.Context, run domain.RunID, p protocol.CoordReportParams, question string) (protocol.CoordReportResult, *protocol.Error) {
+	const method = protocol.MethodCoordReport
+	if len(p.EvidenceRefs) > 0 {
+		return protocol.CoordReportResult{}, invalidParams(method, "needs-input takes no evidence_refs")
+	}
+	if s.cfg.Mission != nil {
+		assignment, err := s.cfg.Mission.Assignment(ctx, run)
+		if err != nil {
+			return protocol.CoordReportResult{}, missionRPCError(method, err)
+		}
+		if assignment.Role == "worker" {
+			return protocol.CoordReportResult{}, invalidParams(method, "a mission worker cannot report needs-input; ask your integrator with `aether-internal ask`")
+		}
+	}
+	if s.cfg.Outcomes == nil {
+		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
+	}
+	id := fmt.Sprintf("needs-input:%s:%s", run, p.IdempotencyKey)
+	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportReason(question), time.Now().UTC()); err != nil {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	return protocol.CoordReportResult{
+		Outcome: protocol.CoordOutcomeNeedsInput, Summary: question, NextAction: "answer the agent's question",
+	}, nil
 }
 
 // applyRunOutcome hands a run's report to the scheduler before the

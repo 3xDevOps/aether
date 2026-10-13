@@ -47,6 +47,9 @@ var (
 	// ErrNoEvidenceCapture is returned when coord.report is used without the
 	// mandatory automatic evidence callback.
 	ErrNoEvidenceCapture = errors.New("coord: no evidence capture service is attached")
+	// ErrNoOutcomeSink is returned when a needs-input report arrives with no
+	// scheduler behind it.
+	ErrNoOutcomeSink = errors.New("coord: no run outcome sink is attached")
 )
 
 // EvidenceCapture is the narrow evidence seam needed by coord.report.

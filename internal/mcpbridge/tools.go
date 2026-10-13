@@ -111,7 +111,8 @@ func registerTools(srv *mcp.Server, socket string, g *gate) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolAsk,
-		Description: "Ask an authorized peer a durable, correlated question. " +
+		Description: "Ask an authorized peer run a durable, correlated question; this does not ask the user. " +
+			"To ask the user, call aether_report with outcome needs-input. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original question_id.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordAskParams) (*mcp.CallToolResult, protocol.CoordAskResult, error) {
 		var out protocol.CoordAskResult
@@ -135,7 +136,9 @@ func registerTools(srv *mcp.Server, socket string, g *gate) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: toolReport,
-		Description: "Submit one durable success, failure, or blocked outcome with bounded evidence references. " +
+		Description: "Submit one success, failure, blocked, or needs-input outcome; all but needs-input are durable and take bounded evidence references. " +
+			"needs-input is nonterminal, takes no evidence_refs, and its summary is your question for the user, shown as the Needs you reason at turn end; ask one specific question, then end your turn. " +
+			"You MUST report before ending a turn: success or failure when done or unable, blocked when an external blocker stops you, needs-input when you need the user's decision or information. Never end a turn silently. " +
 			"Interactive non-worker Standard/TUI and Enhanced/ACP sessions stay open: report, end your turn, and await follow-up; use a new key for a later task. " +
 			"Background runs finish on success/failure with one terminal report per launch; swarm workers keep one per attempt. " +
 			"Integrator success still completes the active mission; blocked shows the summary as the Needs you reason at turn end. " +

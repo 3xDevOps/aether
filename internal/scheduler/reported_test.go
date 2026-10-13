@@ -1461,3 +1461,49 @@ func TestNoReporterDeadlineRespectsInputAndRunMode(t *testing.T) {
 		})
 	}
 }
+
+// TestNeedsInputReasonParksAtTurnEndAndClearsOnResume: the question is shown
+// as the Needs you reason like a blocked summary, and a replay of its id
+// does not bring it back after the agent resumes.
+func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	report := func(r agentstatus.Report) {
+		t.Helper()
+		if err := e.sched.ReportAgentState(ctx, run.ID, r); err != nil {
+			t.Fatalf("report %s: %v", r.State, err)
+		}
+	}
+	reason := func() string {
+		t.Helper()
+		r, err := e.db.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		return r.Reason
+	}
+	at := time.Now()
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at); err != nil {
+		t.Fatalf("ReportNeedsInput: %v", err)
+	}
+	report(agentstatus.Report{State: agentstatus.Working})
+	report(waitingForInput)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got := reason(); got != "needs input: which region?" {
+		t.Fatalf("parked reason = %q, want the question", got)
+	}
+
+	report(agentstatus.Report{State: agentstatus.Working})
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at); err != nil {
+		t.Fatalf("replayed ReportNeedsInput: %v", err)
+	}
+	report(waitingForInput)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got := reason(); got != agentstatus.ReasonIdle {
+		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
+	}
+}
