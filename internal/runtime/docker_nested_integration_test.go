@@ -5,7 +5,9 @@ package runtime_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,12 +16,14 @@ import (
 	"github.com/moby/moby/client"
 )
 
-const nestedGateProbe = `docker version >/tmp/main-docker-version 2>&1; echo $? >/tmp/main-docker-status; exec sleep 3600`
+// The status file is renamed into place last, so its existence means the
+// version output and the optional /m write are complete.
+const nestedGateProbe = `docker version >/tmp/v.tmp 2>&1; s=$?; [ ! -d /m ] || touch /m/main-wrote; mv /tmp/v.tmp /tmp/main-docker-version; echo $s >/tmp/s.tmp; mv /tmp/s.tmp /tmp/main-docker-status; exec sleep 3600`
 
-func startNestedDocker(t *testing.T, ctx context.Context, docker *runtime.Docker, image, user string) runtime.ID {
+func startNestedDocker(t *testing.T, ctx context.Context, docker *runtime.Docker, image, user string, mounts ...runtime.Mount) runtime.ID {
 	t.Helper()
 	id, err := docker.Create(ctx, runtime.Spec{
-		Image: image, User: user, NestedDocker: true,
+		Image: image, User: user, NestedDocker: true, Mounts: mounts,
 		CPULimit: 2, MemoryLimitBytes: 2 << 30,
 		Command: []string{"/bin/sh", "-c", nestedGateProbe},
 	})
@@ -40,6 +44,23 @@ func execOK(t *testing.T, ctx context.Context, docker *runtime.Docker, id runtim
 		t.Fatalf("exec %q: exit %d, err %v\nstdout: %s\nstderr: %s", script, code, err, stdout, stderr)
 	}
 	return stdout
+}
+
+// mainDockerStatus waits for the gated main process to publish the exit code
+// of its `docker version`.
+func mainDockerStatus(t *testing.T, ctx context.Context, docker *runtime.Docker, id runtime.ID) string {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		code, stdout, _, err := docker.Exec(ctx, id, []string{"cat", "/tmp/main-docker-status"}, "/tmp")
+		if err == nil && code == 0 {
+			return strings.TrimSpace(stdout)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("main process did not publish its docker version status: exit %d, err %v", code, err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // Needs a sysbox host and an image holding dockerd, the docker CLI, compose
@@ -74,7 +95,7 @@ func TestDockerNestedDocker(t *testing.T) {
 		t.Fatal("nested Docker container is privileged")
 	}
 
-	if status := strings.TrimSpace(execOK(t, ctx, docker, id, "cat /tmp/main-docker-status")); status != "0" {
+	if status := mainDockerStatus(t, ctx, docker, id); status != "0" {
 		t.Fatalf("main process ran before dockerd was ready: docker version exit %s\n%s", status, execOK(t, ctx, docker, id, "cat /tmp/main-docker-version"))
 	}
 	if err := docker.Start(ctx, id); err != nil {
@@ -108,10 +129,27 @@ YAML`)
 		t.Fatalf("published port body = %q, want nested-ok", body)
 	}
 	execOK(t, ctx, docker, id, "docker compose -f compose/compose.yaml down -v")
-	t.Run("non-root user", func(t *testing.T) {
-		user := startNestedDocker(t, ctx, docker, image, "12345:12345")
-		if status := strings.TrimSpace(execOK(t, ctx, docker, user, "cat /tmp/main-docker-status")); status != "0" {
-			t.Fatalf("docker version as 12345:12345 exit %s\n%s", status, execOK(t, ctx, docker, user, "cat /tmp/main-docker-version"))
+	for _, user := range []string{"12345:12345", "1001:0"} {
+		t.Run("non-root user "+user, func(t *testing.T) {
+			nested := startNestedDocker(t, ctx, docker, image, user)
+			if status := mainDockerStatus(t, ctx, docker, nested); status != "0" {
+				t.Fatalf("docker version as %s exit %s\n%s", user, status, execOK(t, ctx, docker, nested, "cat /tmp/main-docker-version"))
+			}
+		})
+	}
+	t.Run("ID-mapped bind mount", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Chown(dir, 1000, 1000); err != nil {
+			t.Fatal(err)
+		}
+		nested := startNestedDocker(t, ctx, docker, image, "1000:1000", runtime.Mount{HostPath: dir, ContainerPath: "/m"})
+		mainDockerStatus(t, ctx, docker, nested)
+		info, err := os.Stat(filepath.Join(dir, "main-wrote"))
+		if err != nil {
+			t.Fatalf("main process could not write the bind mount: %v", err)
+		}
+		if uid := info.Sys().(*syscall.Stat_t).Uid; uid != 1000 {
+			t.Fatalf("file written through the bind mount is owned by uid %d on the host, want 1000", uid)
 		}
 	})
 	t.Run("saved environment", func(t *testing.T) {
@@ -122,7 +160,7 @@ YAML`)
 		}
 		t.Cleanup(func() { _ = docker.RemoveImage(context.Background(), tag) })
 		saved := startNestedDocker(t, ctx, docker, tag, "0:0")
-		if status := strings.TrimSpace(execOK(t, ctx, docker, saved, "cat /tmp/main-docker-status")); status != "0" {
+		if status := mainDockerStatus(t, ctx, docker, saved); status != "0" {
 			t.Fatalf("dockerd did not start from the committed image: docker version exit %s\n%s", status, execOK(t, ctx, docker, saved, "cat /var/log/aether-dockerd.log"))
 		}
 		execOK(t, ctx, docker, saved, "docker run --rm busybox:1.36 true")

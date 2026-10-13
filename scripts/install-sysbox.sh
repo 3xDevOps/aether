@@ -86,15 +86,19 @@ apt_install() {
 command -v jq >/dev/null 2>&1 || apt_install jq
 
 # The package adds "bip" and "default-address-pools" when either is missing,
-# and a daemon.json edit of those needs a Docker restart.
+# and a daemon.json edit of those needs a Docker restart. Only the running
+# daemon's live-restore setting keeps containers up through it.
 restart_safe=no
-if [ -s "$DAEMON_JSON" ] && jq -e '."live-restore" == true or ((.bip // "") != "" and ((."default-address-pools" // []) | length) > 0)' "$DAEMON_JSON" >/dev/null; then
+live_restore="$(docker info --format '{{.LiveRestoreEnabled}}' 2>&1)" || die "docker info failed: ${live_restore}"
+if [ "$live_restore" = true ]; then
+	restart_safe=yes
+elif [ -s "$DAEMON_JSON" ] && jq -e '(.bip // "") != "" and ((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null; then
 	restart_safe=yes
 fi
 running_ids="$(docker ps -q 2>&1)" || die "docker ps failed: ${running_ids}"
 running="$(printf '%s' "$running_ids" | grep -c . || true)"
 if [ "$restart_safe" = no ] && [ "$running" -gt 0 ]; then
-	die "${running} containers are running and the Sysbox package may restart Docker, which stops them. Stop them first (docker stop \$(docker ps -q)), or add \"live-restore\": true to ${DAEMON_JSON} and run: systemctl reload docker. Then re-run this script."
+	die "${running} containers are running and the Sysbox package may restart Docker, which stops them. Stop them first (docker stop \$(docker ps -q)), or add \"live-restore\": true to ${DAEMON_JSON} and run: systemctl reload docker, then check that docker info reports Live Restore Enabled: true. Then re-run this script."
 fi
 
 tmp="$(mktemp -d)"

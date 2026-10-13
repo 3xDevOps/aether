@@ -294,10 +294,11 @@ The script downloads Sysbox CE 0.7.1, verifies its pinned SHA-256, installs
 the package and checks that `docker info` lists `sysbox-runc`. It exits 0
 without changes when that version is already installed. Sysbox's installer
 may restart Docker, which stops every running container, so the script
-refuses with the number of running containers unless `/etc/docker/daemon.json`
-sets `"live-restore": true` or both `bip` and `default-address-pools`. Stop
-the runs, or enable `live-restore` and run `sudo systemctl reload docker`,
-then run it again.
+refuses with the number of running containers unless the running daemon
+reports `docker info --format '{{.LiveRestoreEnabled}}'` as `true`, or
+`/etc/docker/daemon.json` sets both `bip` and `default-address-pools`. Stop
+the runs, or set `"live-restore": true` in `daemon.json` and run
+`sudo systemctl reload docker`, then run it again.
 
 The script ends by running `docker run --runtime sysbox-runc -u 1000:1000`
 against a host directory owned by 1000:1000. It fails with "bind mounts are

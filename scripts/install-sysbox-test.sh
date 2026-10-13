@@ -25,7 +25,7 @@ stub dpkg-query 'printf "%s" "${FAKE_INSTALLED:-}"; [ -n "${FAKE_INSTALLED:-}" ]
 stub uname 'echo "${FAKE_KERNEL:-6.8.0-45-generic}"'
 stub modinfo '[ -n "${FAKE_SHIFTFS:-}" ]'
 stub docker 'case "$1" in
-info) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;;
+info) case "$*" in *LiveRestoreEnabled*) echo "${FAKE_LIVE_RESTORE:-false}" ;; *) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;; esac ;;
 ps) [ -z "${FAKE_PS_FAIL:-}" ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
 	i=0; while [ "$i" -lt "${FAKE_RUNNING:-0}" ]; do echo "c$i"; i=$((i + 1)); done ;;
 esac'
@@ -85,6 +85,9 @@ expect 1 "3 containers are running"
 [ ! -s "$log" ] || { echo "install-sysbox-test: apt-get ran despite running containers" >&2; exit 1; }
 
 run FAKE_RUNNING=3 AETHER_SYSBOX_DAEMON_JSON="$tmp/live.json"
+expect 1 "3 containers are running"
+
+run FAKE_RUNNING=3 FAKE_LIVE_RESTORE=true
 expect 1 "checksum mismatch for sysbox-ce_0.7.1.linux_amd64.deb"
 
 run FAKE_ARCH=arm64 FAKE_RUNNING=0

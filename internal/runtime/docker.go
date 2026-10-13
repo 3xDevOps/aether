@@ -33,8 +33,7 @@ const (
 	labelManaged       = "aether.managed"
 	labelSetupScript   = "aether.setup-script"
 	labelSetupSentinel = "aether.setup-sentinel"
-	// labelNestedDocker marks a container whose Start brings up dockerd.
-	labelNestedDocker = "aether.nested-docker"
+	labelNestedDocker  = "aether.nested-docker"
 	// labelSecretEnv holds Spec.SecretEnv, the names only, as a JSON array.
 	labelSecretEnv = "aether.secret-env"
 	// labelCreationKey persists Spec.CreationKey so FindByCreationKey can
@@ -459,7 +458,7 @@ case "$1" in
 *) group= ;;
 esac
 case "$user" in
-""|0|root) group=0 ;;
+""|0|root) [ -n "$group" ] || group=0 ;;
 *) [ -n "$group" ] || group=$(id -g "$user" 2>/dev/null) || group=0 ;;
 esac
 alive=
@@ -468,7 +467,7 @@ for comm in /proc/[0-9]*/comm; do
 done
 [ -n "$alive" ] || rm -f /var/run/docker.pid /var/run/docker.sock /var/run/docker/containerd/containerd.pid /var/run/docker/containerd/containerd.sock
 set -- dockerd -H "$sock"
-case "$group" in 0|root) ;; *) set -- "$@" --group "$group" ;; esac
+set -- "$@" --group "$group"
 if command -v setsid >/dev/null 2>&1; then
 	setsid "$@" >>/var/log/aether-dockerd.log 2>&1 </dev/null &
 else
