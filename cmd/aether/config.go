@@ -551,6 +551,9 @@ func configPush(c *protocol.Client, out io.Writer, agent string, paths []string,
 			switch {
 			case !exists:
 				item.state = pushCreated
+			case entry.Blocked:
+				item.state, item.detail = pushLeftOut, "the server has a folder, symlink, or hard link at this path"
+				continue
 			case entry.Revision == hex.EncodeToString(sum[:]):
 				item.state, item.detail = pushSkipped, "identical on the server"
 				continue

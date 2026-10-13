@@ -184,7 +184,7 @@ func (b *HomeConfigBackend) Stat(ctx context.Context, member domain.MemberID, na
 	}
 	out := make([]protocol.ConfigStatEntry, 0, len(stats))
 	for _, stat := range stats {
-		out = append(out, protocol.ConfigStatEntry{Path: stat.Path, Size: stat.Size, Revision: stat.Revision})
+		out = append(out, protocol.ConfigStatEntry(stat))
 	}
 	return out, nil
 }

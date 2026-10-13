@@ -59,13 +59,15 @@ type ConfigStatParams struct {
 	Paths   []string `json:"paths"`
 }
 
-// ConfigStatEntry is one requested path that exists as a readable file;
-// Revision is the SHA-256 of its bytes, as in ConfigFileReadResult, and
-// empty for a file over 64 MiB.
+// ConfigStatEntry is one requested path that exists. Revision is the SHA-256
+// of a file's bytes, as in ConfigFileReadResult, and empty for a file over
+// 64 MiB. Blocked marks a path config.import would refuse: a directory, a
+// symlink, a hard link, or a path through one.
 type ConfigStatEntry struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 	Revision string `json:"revision"`
+	Blocked  bool   `json:"blocked,omitempty"`
 }
 
 type ConfigStatResult struct {

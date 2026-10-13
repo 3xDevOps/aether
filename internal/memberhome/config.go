@@ -66,11 +66,14 @@ type ConfigImportResult struct {
 }
 
 // ConfigStat is the size and exact-byte revision of one existing file.
-// Revision is empty for a file over ConfigMaxFileBytes.
+// Revision is empty for a file over ConfigMaxFileBytes. Blocked marks a path
+// config.import would refuse instead: a directory, a symlink, a hard link, or
+// a path through one.
 type ConfigStat struct {
 	Path     string
 	Size     int64
 	Revision string
+	Blocked  bool
 }
 
 // ConfigTreeEntry is one immediate child of a profile directory.
@@ -382,9 +385,8 @@ func readConfigFile(ctx context.Context, root *os.Root, rel string) (ConfigRead,
 	return out, nil
 }
 
-// ConfigStat reports which of paths exist as readable files under
-// localRoot. A path that is absent, not a regular file, or one config.read
-// would refuse is left out.
+// ConfigStat reports which of paths exist under localRoot. A path that is
+// absent, or that the credential and runtime policy hides, is left out.
 func (m *Manager) ConfigStat(ctx context.Context, member domain.MemberID, harnessName, localRoot string, paths []string, deny []string) ([]ConfigStat, error) {
 	if len(paths) > ConfigImportMaxFiles {
 		return nil, fmt.Errorf("%w: too many paths", ErrConfigTooLarge)
@@ -424,10 +426,13 @@ func (m *Manager) ConfigStat(ctx context.Context, member domain.MemberID, harnes
 			continue
 		}
 		f, info, err := openConfigFile(profileRoot, rel)
-		if errors.Is(err, ErrConfigNotFound) || errors.Is(err, ErrConfigDenied) {
+		switch {
+		case errors.Is(err, ErrConfigNotFound):
 			continue
-		}
-		if err != nil {
+		case errors.Is(err, ErrConfigDenied):
+			out = append(out, ConfigStat{Path: raw, Blocked: true})
+			continue
+		case err != nil:
 			return nil, err
 		}
 		stat := ConfigStat{Path: raw, Size: info.Size()}

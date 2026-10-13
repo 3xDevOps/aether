@@ -182,6 +182,17 @@ func TestConfigImportKeepsADifferingFileUnlessOverwrite(t *testing.T) {
 	if got := stat("model.bin"); !slices.Equal(got, []ConfigStat{{Path: "model.bin", Size: ConfigMaxFileBytes + 1}}) {
 		t.Fatalf("stat of a file over the upload limit = %+v, want its size and no revision", got)
 	}
+	claudeDir := filepath.Dir(asset)
+	if err = os.Mkdir(filepath.Join(claudeDir, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("settings.json", filepath.Join(claudeDir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	blocked := []ConfigStat{{Path: "skills", Blocked: true}, {Path: "link.json", Blocked: true}, {Path: "settings.json/below", Blocked: true}}
+	if got := stat("skills", "link.json", "settings.json/below", "skills/absent.md"); !slices.Equal(got, blocked) {
+		t.Fatalf("stat of paths import refuses = %+v, want %+v", got, blocked)
+	}
 
 	second := []ConfigFile{
 		{Path: "settings.json", Content: []byte("local copy"), Mode: 0o644},

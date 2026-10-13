@@ -693,6 +693,8 @@ override. What is left is compared with the server's copy:
 - a file that is identical on the server is skipped
 - a file the server has with different content is refused, and the server's
   file stays; `--overwrite` replaces it instead
+- a file whose path on the server is a folder, a symlink, or a hard link, or
+  runs through one, is left out
 
 The server applies the same rules, so a dry run lists exactly what a push
 does. Each file gets one line:

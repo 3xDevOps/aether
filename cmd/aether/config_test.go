@@ -376,6 +376,24 @@ func TestConfigPushUploadsChosenPathsAndLeavesOutWhatTheServerWould(t *testing.T
 		t.Errorf("--overwrite left the server with %q", got)
 	}
 
+	if err = os.Mkdir(filepath.Join(serverHome, ".claude", "taken.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, filepath.Join(claude, "taken.md"), "local\n")
+	for _, opts := range []configPushOptions{{dryRun: true}, {}, {overwrite: true}} {
+		leave, summary := "left out", "created 0, replaced 0, skipped 1 identical, refused 0, left out 1 in ~/.claude (0 bytes uploaded)\n"
+		if opts.dryRun {
+			leave, summary = "would leave out", "would create 0, replace 0, skip 1 identical, refuse 0, leave out 1 in ~/.claude (0 bytes to upload)\n"
+		}
+		skip := strings.Replace(leave, "leave out", "skip", 1)
+		skip = strings.Replace(skip, "left out", "skipped", 1)
+		if err = push(skip+" CLAUDE.md: identical on the server\n"+
+			leave+" taken.md: the server has a folder, symlink, or hard link at this path\n"+summary,
+			opts, "CLAUDE.md", "taken.md"); err != nil {
+			t.Fatalf("config push %+v onto a server folder: %v", opts, err)
+		}
+	}
+
 	edited := filepath.Join(home, "edited.json")
 	writeConfigFile(t, edited, `{"model":"haiku"}`)
 	if err = push("created settings.local.json\n"+
