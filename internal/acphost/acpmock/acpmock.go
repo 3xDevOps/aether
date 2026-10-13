@@ -39,6 +39,10 @@ const (
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
+	// PromptSubagents plays a turn in which the main agent launches
+	// subagents the way Claude's adapter reports them: nested, concurrent,
+	// and with later updates that omit the parent link.
+	PromptSubagents = "subagents"
 )
 
 type Fixture struct {
@@ -310,6 +314,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptDemo:
 		return a.demo(ctx, cancelled), nil
+	case PromptSubagents:
+		a.subagents(ctx)
+		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {
 		case <-cancelled:
@@ -401,4 +408,76 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		time.Sleep(15 * time.Millisecond)
 	}
 	return map[string]any{"stopReason": "end_turn"}
+}
+
+func claudeUpdate(u map[string]any, parent, toolName string) json.RawMessage {
+	cc := map[string]any{}
+	if parent != "" {
+		cc["parentToolUseId"] = parent
+	}
+	if toolName != "" {
+		cc["toolName"] = toolName
+	}
+	if len(cc) > 0 {
+		u["_meta"] = map[string]any{"claudeCode": cc}
+	}
+	b, _ := json.Marshal(u)
+	return b
+}
+
+func (a *Agent) subagents(ctx context.Context) {
+	prose := func(parent, s string) json.RawMessage {
+		return claudeUpdate(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": s}}, parent, "")
+	}
+	call := func(id, kind, title, parent, toolName string, rawInput any) json.RawMessage {
+		u := map[string]any{"sessionUpdate": "tool_call", "toolCallId": id, "kind": kind, "title": title, "status": "in_progress"}
+		if rawInput != nil {
+			u["rawInput"] = rawInput
+		}
+		return claudeUpdate(u, parent, toolName)
+	}
+	done := func(id, parent, toolName string) json.RawMessage {
+		return claudeUpdate(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed"}, parent, toolName)
+	}
+	launch := func(description, subagentType, prompt string) map[string]any {
+		in := map[string]any{"description": description, "prompt": prompt}
+		if subagentType != "" {
+			in["subagent_type"] = subagentType
+		}
+		return in
+	}
+	plan := claudeUpdate(map[string]any{"sessionUpdate": "plan", "entries": []any{
+		map[string]any{"content": "List the functions", "priority": "medium", "status": "completed"},
+		map[string]any{"content": "Find what calls them", "priority": "medium", "status": "in_progress"},
+	}}, "task-1", "")
+	for _, u := range []json.RawMessage{
+		prose("", "Splitting the work across subagents."),
+		call("task-1", "think", "Map the billing module", "", "Agent",
+			launch("Map the billing module", "Explore", "List every function in src/billing.js and what calls it.")),
+		prose("task-1", "Reading the billing module."),
+		plan,
+		call("task-1-read", "read", "Read src/billing.js", "task-1", "Read", nil),
+		call("task-1-1", "think", "Find the callers", "task-1", "Task",
+			launch("Find the callers", "general-purpose", "Search for callers of total().")),
+		call("task-1-1-grep", "search", "grep total(", "task-1-1", "Grep", nil),
+		prose("task-1-1", "Two callers found."),
+		done("task-1-1-grep", "", "Grep"),
+		done("task-1-1", "task-1", ""),
+		done("task-1-read", "", ""),
+		done("task-1", "", "Agent"),
+		call("task-2", "think", "Run the tests", "", "Agent", launch("Run the tests", "general-purpose", "Run npm test and report the result.")),
+		call("task-3", "think", "Round totals to cents", "", "Agent", launch("Round totals to cents", "", "Make total() round to cents.")),
+		call("task-2-bash", "execute", "npm test", "task-2", "Bash", nil),
+		call("task-3-edit", "edit", "Edit src/billing.js", "task-3", "Edit", nil),
+		prose("task-2", "Running the tests."),
+		prose("task-3", "Rounding the total."),
+		prose("task-2", "Both tests pass."),
+		done("task-2-bash", "", ""),
+		done("task-3-edit", "", "Edit"),
+		done("task-2", "", "Agent"),
+		done("task-3", "", "Agent"),
+		prose("", "All three subagents finished."),
+	} {
+		a.update(ctx, u)
+	}
 }

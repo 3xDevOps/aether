@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -321,6 +322,155 @@ func TestToolCallMerge(t *testing.T) {
 	rec.mu.Unlock()
 	if len(activity) == 0 || activity[0] != [2]string{"execute", "/workspace/main.go"} || len(activity) > 2 {
 		t.Fatalf("activity not throttled to one a second: %v", activity)
+	}
+}
+
+func TestSubagentItemsKeepTheirParent(t *testing.T) {
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go func() {
+		acpmock.New(loadFixture(t, "claude")).Serve(agentIn, agentOut)
+		_ = agentOut.Close()
+	}()
+	rec := newRecorder()
+	s, err := Start(t.Context(), hostIn, hostOut, rec.config(Config{LogPath: filepath.Join(t.TempDir(), "run.items.jsonl"), Cwd: "/workspace", Logger: discard}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(); <-s.Done() })
+	if _, err := s.Prompt(context.Background(), textPrompt(acpmock.PromptSubagents), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	its := items(t, s)
+
+	parents := map[string]string{"task-1": "", "task-1-read": "task-1", "task-1-1": "task-1", "task-1-1-grep": "task-1-1",
+		"task-2": "", "task-3": "", "task-2-bash": "task-2", "task-3-edit": "task-3"}
+	names := map[string]string{"task-1": "Agent", "task-1-read": "Read", "task-1-1": "Task", "task-1-1-grep": "Grep",
+		"task-2": "Agent", "task-3": "Agent", "task-2-bash": "Bash", "task-3-edit": "Edit"}
+	last := map[string]Item{}
+	for _, it := range ofKind(its, KindToolCall) {
+		tc := it.ToolCall
+		if want, ok := parents[tc.ID]; !ok || tc.ParentID != want {
+			t.Fatalf("tool call %s has parent %q, want %q", tc.ID, tc.ParentID, want)
+		}
+		last[tc.ID] = it
+	}
+	if len(last) != len(parents) {
+		t.Fatalf("%d tool calls, want %d", len(last), len(parents))
+	}
+	for id, it := range last {
+		if it.ToolCall.Status != "completed" || it.ToolCall.ToolName != names[id] {
+			t.Fatalf("%s ended as %q with tool name %q, want completed and %q", id, it.ToolCall.Status, it.ToolCall.ToolName, names[id])
+		}
+	}
+	for id, want := range map[string]*Subagent{
+		"task-1": {Description: "Map the billing module", Type: "Explore"}, "task-1-1": {Description: "Find the callers", Type: "general-purpose"},
+		"task-3": {Description: "Round totals to cents"}, "task-1-read": nil,
+	} {
+		if got := last[id].ToolCall.Subagent; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s subagent %+v, want %+v", id, got, want)
+		}
+	}
+
+	text := map[string]string{}
+	completes := map[string]bool{}
+	for _, it := range ofKind(its, KindMessage) {
+		m := it.Message
+		if m.Role != "assistant" {
+			continue
+		}
+		text[m.ParentID] += m.Text
+		completes[m.MessageID] = completes[m.MessageID] || m.Complete
+	}
+	want := map[string]string{"": "Splitting the work across subagents.All three subagents finished.", "task-1": "Reading the billing module.",
+		"task-1-1": "Two callers found.", "task-2": "Running the tests.Both tests pass.", "task-3": "Rounding the total."}
+	if !reflect.DeepEqual(text, want) {
+		t.Fatalf("messages by parent %q, want %q", text, want)
+	}
+	ids := map[string]bool{}
+	for _, it := range ofKind(its, KindMessage) {
+		if p := it.Message.ParentID; p == "task-2" || p == "task-3" {
+			ids[it.Message.MessageID] = true
+		}
+	}
+	if len(ids) != 3 {
+		t.Fatalf("interleaved sentences share message ids: %v", ids)
+	}
+	for id := range completes {
+		if !completes[id] {
+			t.Fatalf("message %s never closed", id)
+		}
+	}
+
+	plans := ofKind(its, KindPlan)
+	if len(plans) != 1 || plans[0].PlanParentID != "task-1" {
+		t.Fatalf("plans %+v", plans)
+	}
+
+	for _, id := range []string{"task-1-1-grep", "task-1"} {
+		it := last[id]
+		it.ToolCall.Title = strings.Repeat("x", 8<<10)
+		b, truncated, err := it.Wire(1024)
+		if err != nil || !truncated || len(b) > 1024 {
+			t.Fatalf("%s wire: %d bytes, truncated %v, %v", id, len(b), truncated, err)
+		}
+		var got Item
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatal(err)
+		}
+		g, w := got.ToolCall, last[id].ToolCall
+		if g.ParentID != w.ParentID || g.ToolName != w.ToolName || !reflect.DeepEqual(g.Subagent, w.Subagent) {
+			t.Fatalf("%s brief form lost the subagent link: %s", id, b)
+		}
+	}
+}
+
+func TestToolUpdateAfterTheTurnMergesIntoItsSnapshot(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	turns := 0
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		turns++
+		if turns == 1 {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Map the module", "kind": "think", "status": "in_progress",
+				"rawInput": map[string]any{"description": "Map the module"},
+				"_meta":    map[string]any{"claudeCode": map[string]any{"toolName": "Agent", "parentToolUseId": "outer"}}})
+		} else {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Second", "status": "pending"})
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	newest := func(status string) *ToolCall {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			tools := ofKind(items(t, s), KindToolCall)
+			if n := len(tools); n > 0 && tools[n-1].ToolCall.Status == status {
+				return tools[n-1].ToolCall
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no %s tool item in %+v", status, tools)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if _, err := s.Prompt(context.Background(), textPrompt("map it"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
+	tc := newest("completed")
+	if tc.Title != "Map the module" || tc.ToolKind != "think" || tc.ParentID != "outer" || tc.ToolName != "Agent" ||
+		tc.Subagent == nil || tc.Subagent.Description != "Map the module" {
+		t.Fatalf("late update lost the snapshot: %+v", tc)
+	}
+	if _, err := s.Prompt(context.Background(), textPrompt("again"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	tc = newest("pending")
+	if tc.Title != "Second" || tc.ParentID != "" || tc.ToolName != "" || tc.Subagent != nil {
+		t.Fatalf("reused id kept the old snapshot: %+v", tc)
 	}
 }
 

@@ -614,6 +614,25 @@ and history pages limit each read, not the stored conversation.
 Anything an agent or a tool prints, a secret included, can be in it;
 [privacy.md](privacy.md#remote-development-data) covers who can read it.
 
+Items carry the subagent tree that Claude's adapter reports. A subagent is
+the agent that Claude Code's `Agent` or `Task` tool launches; its
+messages, thoughts, tool calls and plans arrive in the same session as the
+main agent's.
+
+| Field | Set on |
+|---|---|
+| `tool_call.parent_id` | A subagent's tool call: the `id` of the `Agent` or `Task` tool call that launched the subagent. Nested subagents chain through it. |
+| `message.parent_id` | A subagent's message or thought segment. A change of parent starts a new segment. |
+| `plan_parent_id` | A subagent's plan. Each subagent keeps its own plan, apart from the main agent's. |
+| `tool_call.tool_name` | Every tool call: Claude Code's tool name, such as `Bash` or `Agent`. |
+| `tool_call.subagent` | An `Agent` or `Task` tool call: `description` and `type` (the input's `subagent_type`), each at most 128 bytes. The full prompt stays in `raw_input`. |
+
+These fields are kept when an item is cut to fit a size limit, so a
+dashboard can place and label every item. A later update that omits the
+parent keeps the one already recorded, and an update that arrives after its
+turn ended merges into that tool call's last snapshot. Codex, pi, omp and
+opencode send no parent or tool name, so these fields stay empty for them.
+
 A dashboard that opens the run receives the newest 200 items and pages
 older ones with `run.acp.history`; one that reconnects at most 200 items
 behind receives only the items it missed

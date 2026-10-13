@@ -22,6 +22,10 @@ const (
 	toolSkipLimit    = 10
 
 	maxDiffInput = 1 << 20
+
+	// The newest tool calls stay known past the end of their turn, so a
+	// late update merges into its previous snapshot.
+	maxKeptTools = 256
 )
 
 // projector turns session/update payloads into items. It is not safe for
@@ -33,17 +37,22 @@ type projector struct {
 
 	text  *openText
 	tools map[string]*toolState
-	plan  []PlanEntry
+	// toolOrder lists the keys of tools oldest first.
+	toolOrder []string
+	// plans holds the last plan of the main agent ("") and of each subagent,
+	// by the ID of the tool call that launched it.
+	plans map[string][]PlanEntry
 	usage Usage
 	title string
 }
 
 type openText struct {
-	kind  Kind
-	role  string
-	id    string
-	buf   strings.Builder
-	armed bool
+	kind   Kind
+	role   string
+	id     string
+	parent string
+	buf    strings.Builder
+	armed  bool
 }
 
 type toolState struct {
@@ -53,10 +62,12 @@ type toolState struct {
 	emittedStatus string
 	emittedTitle  string
 	skipped       int
+	// ended is set once the turn that opened the call is over.
+	ended bool
 }
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
-	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState)}
+	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState), plans: make(map[string][]PlanEntry)}
 }
 
 func (p *projector) update(raw json.RawMessage) {
@@ -87,13 +98,14 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 			k = KindThought
 			p.activity("think", "")
 		}
-		p.chunk(k, "assistant", deref(u.MessageId), u.Content)
+		parent, _ := claudeMeta(u.Meta)
+		p.chunk(k, "assistant", deref(u.MessageId), parent, u.Content)
 	case "tool_call":
 		var u acp.SessionUpdateToolCall
 		if json.Unmarshal(raw, &u) != nil {
 			return false
 		}
-		patch := toolPatch{title: &u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
+		patch := toolPatch{opens: true, title: &u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
 		if u.Kind != "" {
 			k := string(u.Kind)
 			patch.kind = &k
@@ -127,9 +139,10 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 		for i, e := range u.Entries {
 			plan[i] = PlanEntry{Content: e.Content, Priority: string(e.Priority), Status: string(e.Status)}
 		}
-		if !slices.Equal(plan, p.plan) {
-			p.plan = plan
-			p.emit(Item{Kind: KindPlan, Plan: plan})
+		parent, _ := claudeMeta(u.Meta)
+		if !slices.Equal(plan, p.plans[parent]) {
+			p.plans[parent] = plan
+			p.emit(Item{Kind: KindPlan, Plan: plan, PlanParentID: parent})
 		}
 	case "current_mode_update":
 		var u acp.SessionCurrentModeUpdate
@@ -188,22 +201,51 @@ func deref(s *string) string {
 	return *s
 }
 
+// claudeMeta reads the subagent link and tool name Claude's adapter stamps
+// on an update. Other agents send neither.
+func claudeMeta(meta map[string]any) (parent, toolName string) {
+	cc, _ := meta["claudeCode"].(map[string]any)
+	parent, _ = cc["parentToolUseId"].(string)
+	toolName, _ = cc["toolName"].(string)
+	if len(parent) > maxLinkBytes {
+		parent = ""
+	}
+	if len(toolName) > maxLinkBytes {
+		toolName = ""
+	}
+	return parent, toolName
+}
+
+// subagentLabel reads the fields that name a subagent from the input of an
+// Agent or Task tool call.
+func subagentLabel(rawInput any) *Subagent {
+	in, _ := rawInput.(map[string]any)
+	description, _ := in["description"].(string)
+	kind, _ := in["subagent_type"].(string)
+	if description == "" && kind == "" {
+		return nil
+	}
+	description, _ = cutTail(description, maxLinkBytes)
+	kind, _ = cutTail(kind, maxLinkBytes)
+	return &Subagent{Description: description, Type: kind}
+}
+
 // chunk appends streamed text to the open message, starting a new one when
-// the kind, role or message id changes.
-func (p *projector) chunk(kind Kind, role, id string, block acp.ContentBlock) {
-	if t := p.text; t != nil && (t.kind != kind || t.role != role || (id != "" && id != t.id)) {
+// the kind, role, message id or subagent changes.
+func (p *projector) chunk(kind Kind, role, id, parent string, block acp.ContentBlock) {
+	if t := p.text; t != nil && (t.kind != kind || t.role != role || t.parent != parent || (id != "" && id != t.id)) {
 		p.closeText()
 	}
 	if p.text == nil {
 		if id == "" {
 			id = rand.Text()
 		}
-		p.text = &openText{kind: kind, role: role, id: id}
+		p.text = &openText{kind: kind, role: role, id: id, parent: parent}
 	}
 	t := p.text
 	if block.Text == nil {
 		p.flushText()
-		p.emit(Item{Kind: kind, Message: &Message{Role: role, MessageID: t.id, Attachments: []Content{contentRef(block)}}})
+		p.emit(Item{Kind: kind, Message: &Message{Role: role, MessageID: t.id, ParentID: t.parent, Attachments: []Content{contentRef(block)}}})
 		return
 	}
 	t.buf.WriteString(block.Text.Text)
@@ -232,7 +274,7 @@ func (p *projector) flushText() {
 			seg = s[:maxTextSegment]
 		}
 		s = s[len(seg):]
-		p.emit(Item{Kind: t.kind, Message: &Message{Role: t.role, MessageID: t.id, Text: seg}})
+		p.emit(Item{Kind: t.kind, Message: &Message{Role: t.role, MessageID: t.id, ParentID: t.parent, Text: seg}})
 	}
 }
 
@@ -249,10 +291,13 @@ func (p *projector) closeText() {
 		s = ""
 	}
 	p.text = nil
-	p.emit(Item{Kind: t.kind, Message: &Message{Role: t.role, MessageID: t.id, Text: s, Complete: true}})
+	p.emit(Item{Kind: t.kind, Message: &Message{Role: t.role, MessageID: t.id, ParentID: t.parent, Text: s, Complete: true}})
 }
 
 type toolPatch struct {
+	// opens is set for a tool_call, which starts over an ID an earlier turn
+	// used.
+	opens     bool
 	title     *string
 	kind      *string
 	status    *string
@@ -267,12 +312,25 @@ type toolPatch struct {
 // their previous value, content and locations are replaced when present.
 func (p *projector) tool(id string, patch toolPatch) {
 	st, known := p.tools[id]
+	if known && patch.opens && st.ended {
+		known = false
+		p.toolOrder = slices.DeleteFunc(p.toolOrder, func(kept string) bool { return kept == id })
+	}
 	if !known {
 		p.closeText()
 		st = &toolState{call: ToolCall{ID: id}}
 		p.tools[id] = st
+		p.toolOrder = append(p.toolOrder, id)
 	}
 	c := &st.call
+	// A later update of a subagent's tool call can omit the link.
+	parent, toolName := claudeMeta(patch.meta)
+	if parent != "" {
+		c.ParentID = parent
+	}
+	if toolName != "" {
+		c.ToolName = toolName
+	}
 	if patch.title != nil {
 		var cut bool
 		c.Title, cut = cutTail(*patch.title, maxShrunkString)
@@ -299,6 +357,11 @@ func (p *projector) tool(id string, patch toolPatch) {
 		var cut bool
 		c.RawInput, cut = capRaw(patch.rawInput, maxRawBytes)
 		st.truncated = st.truncated || cut
+	}
+	if c.ToolName == "Agent" || c.ToolName == "Task" {
+		if label := subagentLabel(patch.rawInput); label != nil {
+			c.Subagent = label
+		}
 	}
 	if patch.rawOutput != nil {
 		var cut bool
@@ -346,15 +409,23 @@ func (p *projector) emitTool(st *toolState) {
 }
 
 // endTurn closes the open message and writes every tool call update that
-// was held back.
+// was held back. The newest tool calls stay known: a background subagent
+// reports on its tool calls after the turn that started them.
 func (p *projector) endTurn() {
 	p.closeText()
 	for _, id := range slices.Sorted(maps.Keys(p.tools)) {
-		if st := p.tools[id]; st.skipped > 0 || st.output != "" {
+		st := p.tools[id]
+		if st.skipped > 0 || st.output != "" {
 			p.emitTool(st)
 		}
+		st.ended = true
 	}
-	clear(p.tools)
+	if drop := len(p.toolOrder) - maxKeptTools; drop > 0 {
+		for _, id := range p.toolOrder[:drop] {
+			delete(p.tools, id)
+		}
+		p.toolOrder = slices.Delete(p.toolOrder, 0, drop)
+	}
 }
 
 func toolContent(cs []acp.ToolCallContent) ([]Content, []Diff, bool) {
