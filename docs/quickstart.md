@@ -912,8 +912,10 @@ your edit into the checkout the agent works in. A file's path in **Changes**
 opens it there. So does a path the agent names in **Session** or prints in
 the terminal, such as `web/src/app.ts:42`, at that line: point at the path
 and click it once it is underlined. Only a path that is a file in the
-checkout becomes a link. The **Files** page in the sidebar keeps the base
-branch and your agent configuration.
+checkout becomes a link. The **Files** page keeps the base branch and
+**Home**, every file in your home on the server: there you create, rename,
+move, upload, download and delete from each row's **…** menu
+([environment-home.md](environment-home.md#uploading-and-editing-configuration)).
 
 The terminal escape hatch is `aether attach <run-id>` - a raw byte-for-byte
 passthrough where every native keybind and theme of the agent's own TUI works.

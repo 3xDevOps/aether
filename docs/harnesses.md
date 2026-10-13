@@ -1486,16 +1486,17 @@ records launch provenance, not an isolated writable copy or a promise that
 home changes wait for later runs.
 Changing configuration does not rebuild the installed-agent image.
 
-After an upload, open **Files** to browse your own member configuration alongside
-workspace base and live-run files. The editor supports JSON, JavaScript,
+After an upload, open **Files** and unfold **Home** to browse your whole home,
+the upload included, alongside workspace base and live-run files
+([environment-home.md](environment-home.md#uploading-and-editing-configuration)).
+The editor supports JSON, JavaScript,
 TypeScript, Markdown, Python, and TOML syntax highlighting, plus find/replace.
 Edits stay as in-memory dirty tabs while you navigate. Save explicitly with
 **Save**, **Commit to <branch>**, or Ctrl/Cmd-S; there is no autosave or
 force-save. Browser navigation warns before unloading dirty buffers.
 
 Configuration files are complete UTF-8 text up to 64 MiB. Binary and oversized
-files are read-only. New configuration files accept nested relative paths and
-never overwrite an existing file. A later push does not replace an already
+files are read-only. A new file never overwrites an existing one. A later push does not replace an already
 open editor buffer. Use **Reload from server** when you want current remote
 bytes, including after a stale save; it deliberately discards the local draft.
 Every `config.*` method requires `Launch` and addresses only the authenticated

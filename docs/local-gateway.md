@@ -191,9 +191,12 @@ For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). `config.import`, `workspace.import`, `agent.install`,
 `github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
+`home.mkdir`, `home.rename`, `home.remove`, `home.upload`,
 `dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
 so uncertainty surfaces immediately. A subsequent explicit request can
-reconnect. A server refusal passes through untouched as that `protocol.Error`;
+reconnect. A call with no answer after 60 seconds fails with `-32004` and
+is not retried; `home.upload` and `home.download`, which carry up to 64 MiB,
+get 15 minutes. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
 triggers a redial only when a keepalive shows the connection is actually gone,
@@ -842,6 +845,14 @@ unavailable owned source remains the server's protocol error.
 | `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
 | `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | complete: `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}`; an incomplete write after at least one file is committed adds `"error":"...failed relative path...: ..."` and `"imported_paths":["settings.json"]` |
+| `home.tree` | `{"path":".claude"}` (`path` may be omitted, empty, or `"."` for the home itself) | `{"entries":[{"name":".credentials.json","kind":"file","size":412,"locked":true},{"name":"skills","kind":"dir","size":4096,"locked":false}]}` |
+| `home.read` | `{"path":".claude/settings.json"}` | the same `FileRead` shape as `config.read` |
+| `home.write` | `{"path":".claude/settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape, for the saved bytes |
+| `home.mkdir` | `{"path":"notes/drafts"}` | empty result |
+| `home.rename` | `{"from":"notes/todo.md","to":"notes/done.md"}` | empty result |
+| `home.remove` | `{"path":"notes"}` | empty result |
+| `home.upload` | `{"path":"notes/logo.png","content_base64":"...","overwrite":false}` | empty result |
+| `home.download` | `{"path":"notes/logo.png"}` | `{"content_base64":"...","size":1234}` |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
@@ -992,6 +1003,60 @@ private until the destination permissions have been validated.
 These checks are optimistic, not a filesystem compare-and-swap: Aether's root
 lock coordinates its own operations, not arbitrary processes in the shared
 HOME, which can still write between the final check and rename.
+
+`home.tree`, `home.read`, `home.write`, `home.mkdir`, `home.rename`,
+`home.remove`, `home.upload`, and `home.download` address any path in that
+same home, not one agent's directory. The dashboard's **Files** view calls
+them for its **Home** tree. They require **Launch** and take no member
+selector. Paths are slash-separated and relative to the home; an absolute
+path, a `..` or empty segment, a backslash, or a NUL byte is refused.
+
+| Method | Does |
+| --- | --- |
+| `home.tree` | Lists the immediate children of a directory, sorted by name, with nothing left out: dotfiles, agent runtime folders, and credential files are listed. `kind` is `dir`, `file`, or `link` for a symlink; sockets, FIFOs, and devices are omitted. `locked` marks a credential file. |
+| `home.read` | Reads one file with the rules and result of `config.read`. |
+| `home.write` | Saves complete UTF-8 text with the revision rules of `config.write`. An empty `revision` creates the file as `0644`, with any missing parent directories, and refuses an existing one. |
+| `home.mkdir` | Creates one directory, `0700`. Its parent must exist and the name must be free. |
+| `home.rename` | Renames or moves a file, directory, or symlink. It never replaces: an existing `to` is refused, and so is moving a directory into itself. |
+| `home.remove` | Deletes a file or symlink, or a directory with everything in it. The home itself is refused. |
+| `home.upload` | Writes one file of arbitrary bytes up to 64 MiB, creating missing parent directories. An existing file is replaced only with `"overwrite":true` and keeps its mode; a new file is `0644`. |
+| `home.download` | Returns one regular file up to 64 MiB as base64. |
+
+A credential file is listed and never served. `home.read`, `home.download`,
+and `home.write` refuse it with `-32001` and a message such as
+`.claude/.credentials.json is a credential file; read it in the Environment terminal`.
+A path is a credential file when any of its components is one of the
+`credential_names` of a shipped agent, matched case-insensitively, or ends in
+`.pem`; when it is under `.ssh/` and does not end in `.pub`; or when it is
+`.config/gh/hosts.yml`, `.git-credentials`, or `.netrc`. `home.rename`,
+`home.remove`, and `home.upload` work on a credential file, so a renamed copy
+is readable: the lock keeps credential bytes out of the browser by default
+and is not a boundary against the member
+([security.md](security.md#agent-configuration-and-files)).
+
+No `home.*` method follows a symlink. A symlink is listed, renamed, and
+removed as itself; a read, write, upload, or download of one, or of anything
+under a symlinked directory, is refused, as is a regular file with more than
+one hard link. New files and directories are owned like the home. The
+credential, runtime-ignore, and secret-scanner exclusions of `config.import`
+do not apply: they decide what `aether config push` uploads, not what a
+member may see or change in their own home. One lock per member serializes
+`home.*` calls; like configuration saves, they are not atomic against other
+processes writing the home.
+
+`home.*` error messages carry no method prefix:
+
+| Code | When | Example message |
+| --- | --- | --- |
+| `-32001` | A credential file, a symlink or hard link, or an invalid path | `notes cannot be moved into itself` |
+| `-32000` | The path, or the parent a new entry needs, does not exist | `notes/gone was not found` |
+| `-32003` | The name is taken, or the file changed since `revision` was read | `notes/logo.png already exists` |
+| `-32602` | A file over 64 MiB, or text to save that is binary or not UTF-8 | `big.bin is over the 64 MiB limit` |
+| `-32004` | The operating system refused | `permission denied` |
+
+`home.write` shares the HTTP body limit of `config.write`, and `home.upload`
+that of `config.import`, both below; `home.upload` does not use import
+admission.
 
 `config.roots` returns each agent's `runtime_ignores` and
 `credential_names`. `runtime_ignores` contains exact, case-sensitive

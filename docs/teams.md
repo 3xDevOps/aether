@@ -748,7 +748,7 @@ commit captured at launch.
 | `aether workspace env list\|set\|unset\|import\|script` | The workspace's variables, secrets and setup script, which every new run in it gets. Any member can `list` and print the `script`; changing either needs the admin role. See [environments.md](environments.md#workspace-environment). |
 | `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
 | `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
-| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base, live-run files, and your own persistent member configuration. |
+| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base and live-run files, and manages every file in your own persistent home. |
 | `aether config ls [<agent> [path]]` / `aether config push [--dry-run] <agent> <path>...` | List the agents Aether holds configuration for and what your home has for one, or upload files and directories from an agent's directory into your own home. See [quickstart.md](quickstart.md#upload-agent-configuration). |
 
 The dashboard shows each run in one of five states: **Needs you**,
@@ -1424,8 +1424,9 @@ The upload writes the authenticated member's persistent home immediately,
 including for that member's active runs. An agent may need to reload its
 configuration.
 
-The **Files** view browses and edits that own-member configuration beside
-workspace base and live-run files. It has explicit **Save** or
+The **Files** view browses and edits the member's own home, that
+configuration included, under **Home**, beside workspace base and live-run
+files. It has explicit **Save** or
 **Commit to <branch>** actions, Ctrl/Cmd-S, syntax highlighting, find/replace,
 dirty tabs that survive navigation, unload warnings, and no autosave or
 force-save. A failed or stale save keeps the draft; **Reload from server**
