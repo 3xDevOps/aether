@@ -1,27 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Callout } from '@/components/ui/callout'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
-import { message } from '@/lib/format'
-import type { ConfigRoot } from '@/lib/types'
 import { FileEditor, type ViewerMode } from '@/routes/files/editor'
+import { HomeFiles } from '@/routes/files/home'
+import { HomeStatus, HomeTree } from '@/routes/files/home-tree'
 import { closeTab, FilesPane } from '@/routes/files/pane'
 import {
-  type ConfigSource,
   type FileSource,
   fileTabFromSource,
   fileTabToSelection,
+  homeSource,
   isLiveRun,
   sourceKey,
 } from '@/routes/files/sources'
-import { FileTree, NewConfigFile, TreeExpansion } from '@/routes/files/tree'
+import { FileTree, TreeExpansion } from '@/routes/files/tree'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
+const homeRoot = { ...homeSource, path: '' }
+
+export function FilesRoute({ params, client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
   const liveRuns = useStore(useShallow((s) => Object.values(s.runs).filter(isLiveRun)))
   const filesEpoch = useStore((s) => s.filesEpoch)
@@ -34,30 +35,8 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   const mobile = useIsMobile()
   const [mode, setMode] = useState<ViewerMode>('file')
   const [browsing, setBrowsing] = useState(false)
-  const [configRoots, setConfigRoots] = useState<ConfigRoot[] | null>(null)
-  const [configError, setConfigError] = useState<string | null>(null)
-  const [newFile, setNewFile] = useState<ConfigSource | null>(null)
 
   useEffect(() => {
-    if (!capabilities.hasMethod('config.roots')) return
-    let active = true
-    setConfigRoots(null)
-    setConfigError(null)
-    void client
-      .configRoots()
-      .then((result) => {
-        if (active) setConfigRoots(result.roots)
-      })
-      .catch((err) => {
-        if (active) setConfigError(message(err))
-      })
-    return () => {
-      active = false
-    }
-  }, [capabilities, client, identityKey])
-
-  useEffect(() => {
-    setNewFile(null)
     setBrowsing(false)
   }, [identityKey])
 
@@ -78,37 +57,23 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
   }
 
   const canBrowseWorkspaces = capabilities.hasMethod('files.tree')
-  const canBrowseConfig = capabilities.hasMethod('config.roots')
-  if (!canBrowseWorkspaces && !canBrowseConfig) return null
+  const canBrowseHome = capabilities.hasMethod('home.tree')
+  if (!canBrowseWorkspaces && !canBrowseHome) return null
   const shownWorkspaces = canBrowseWorkspaces ? workspaces : []
-  const nothing = shownWorkspaces.length === 0 && (!canBrowseConfig || configRoots?.length === 0)
 
   const tree = (
-    <>
+    <div className="flex min-h-full flex-col">
       <FileTree
         workspaces={shownWorkspaces}
         runs={canBrowseWorkspaces ? liveRuns : []}
-        configRoots={canBrowseConfig ? configRoots : null}
+        home={canBrowseHome && <HomeTree onSelect={select} selected={selection} />}
         client={client}
         onSelect={select}
         selected={selection}
-        onNewFile={setNewFile}
       />
-      {newFile && (
-        <NewConfigFile
-          key={newFile.harness}
-          source={newFile}
-          client={client}
-          onCancel={() => setNewFile(null)}
-          onCreated={(path) => {
-            setNewFile(null)
-            select(newFile, path)
-          }}
-        />
-      )}
-      {configError && <Callout tone="failed" role="alert" className="mx-2 mb-2">{configError}</Callout>}
-      {nothing && <p className="px-4 py-3 text-ui text-muted">No workspaces or agent config roots to browse.</p>}
-    </>
+      {shownWorkspaces.length === 0 && !canBrowseHome && <p className="px-4 py-3 text-ui text-muted">No workspaces to browse.</p>}
+      {canBrowseHome && <HomeStatus />}
+    </div>
   )
 
   const editor = selection && (
@@ -127,12 +92,22 @@ export function FilesRoute({ client = api }: RouteProps & { client?: Api }) {
     />
   )
 
+  const view = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <ViewHeader title="Files" />
+      <FilesPane narrow={mobile} tree={tree} editor={editor} browsing={browsing} onBrowsing={setBrowsing} />
+    </div>
+  )
+
   return (
-    <TreeExpansion>
-      <div className="flex h-full min-h-0 min-w-0 flex-col">
-        <ViewHeader title="Files" />
-        <FilesPane narrow={mobile} tree={tree} editor={editor} browsing={browsing} onBrowsing={setBrowsing} />
-      </div>
+    <TreeExpansion reveal={params.home ? homeRoot : null}>
+      {canBrowseHome ? (
+        <HomeFiles key={identityKey} client={client} onOpen={(path) => select(homeSource, path)}>
+          {view}
+        </HomeFiles>
+      ) : (
+        view
+      )}
     </TreeExpansion>
   )
 }

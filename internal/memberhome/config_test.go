@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -526,5 +527,36 @@ func TestConfigTreeAllowsOmittedRootPath(t *testing.T) {
 	}
 	if len(entries) != 2 || entries[0].Name != "commands" || entries[0].Kind != "dir" || entries[1].Name != "settings.json" || entries[1].Kind != "file" {
 		t.Fatalf("tree = %+v, want commands directory and settings file", entries)
+	}
+}
+
+func TestHomeAndConfigWritesShareOneLockPerMember(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := manager.LockConfigRoot("member-a", ".claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 2)
+	go func() { done <- manager.HomeMkdir("member-a", "notes") }()
+	go func() {
+		_, treeErr := manager.ConfigTree(context.Background(), "member-a", "codex", ".codex", "", nil)
+		done <- treeErr
+	}()
+	select {
+	case err = <-done:
+		t.Fatalf("a home or config call ran under another's lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err = manager.HomeMkdir("member-b", "notes"); err != nil {
+		t.Fatalf("another member's home waited on the lock: %v", err)
+	}
+	unlock()
+	for range 2 {
+		if err = <-done; err != nil {
+			t.Fatal(err)
+		}
 	}
 }

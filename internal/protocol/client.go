@@ -80,7 +80,8 @@ func (c *Client) Close() error { return c.rwc.Close() }
 func responseLineLimit(method string) int {
 	switch method {
 	case MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite,
-		MethodConfigRead, MethodConfigWrite:
+		MethodConfigRead, MethodConfigWrite,
+		MethodHomeRead, MethodHomeWrite:
 		return maxBlobResponseBytes
 	default:
 		return MaxLineBytes

@@ -8,7 +8,6 @@ import type {
   AgentInfo,
   Approval,
   BudgetReport,
-  ConfigRoot,
   CoordMessagesListResult,
   DaemonInstallResult,
   DaemonStatusResult,
@@ -209,22 +208,22 @@ function isTerminalImageType(type: string): type is TerminalImageType {
   return (TERMINAL_IMAGE_TYPES as readonly string[]).includes(type)
 }
 
-function readFileBase64(file: File): Promise<string> {
+export function readFileBase64(file: File): Promise<string> {
   const { promise, resolve, reject } = Promise.withResolvers<string>()
   const reader = new FileReader()
   reader.onload = () => {
     if (typeof reader.result !== 'string') {
-      reject(new Error('Could not read image'))
+      reject(new Error('Could not read file'))
       return
     }
     const comma = reader.result.indexOf(',')
     if (comma < 0) {
-      reject(new Error('Could not encode image'))
+      reject(new Error('Could not encode file'))
       return
     }
     resolve(reader.result.slice(comma + 1))
   }
-  reader.onerror = () => reject(reader.error ?? new Error('Could not read image'))
+  reader.onerror = () => reject(reader.error ?? new Error('Could not read file'))
   reader.readAsDataURL(file)
   return promise
 }
@@ -899,13 +898,17 @@ export const api = {
     call<FileRead>('files.read', params),
   filesWrite: (params: { workspace_id: string; run_id?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
-  configRoots: () => call<{ roots: ConfigRoot[] }>('config.roots'),
-  configTree: (params: { harness: string; path: string }) =>
-    call<FilesTreeResult>('config.tree', params),
-  configRead: (params: { harness: string; path: string }) =>
-    call<FileRead>('config.read', params),
-  configWrite: (params: { harness: string; path: string; content: string; revision: string }) =>
-    call<FileRead>('config.write', params),
+  homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
+  homeRead: (path: string) => call<FileRead>('home.read', { path }),
+  homeWrite: (params: { path: string; content: string; revision: string }) =>
+    call<FileRead>('home.write', params),
+  homeMkdir: (path: string) => call<unknown>('home.mkdir', { path }),
+  homeRename: (from: string, to: string) => call<unknown>('home.rename', { from, to }),
+  homeRemove: (path: string) => call<unknown>('home.remove', { path }),
+  homeUpload: (path: string, contentBase64: string, overwrite: boolean) =>
+    call<unknown>('home.upload', { path, content_base64: contentBase64, overwrite }),
+  homeDownload: (path: string) =>
+    call<{ content_base64: string; size: number }>('home.download', { path }),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
   disk: () => get<DiskUsage>('/disk'),

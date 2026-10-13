@@ -3489,20 +3489,20 @@ questions and queued messages stay contextual to their run, in its Details
 ## Files
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
-workspace's base branch, live run checkouts, and the authenticated member's
-own persistent configuration roots from `config.roots`. `files.tree`,
-`files.read`, `files.write`, `files.diff`, and the `config.*` methods are
+workspace's base branch, live run checkouts, and **Home**, the authenticated
+member's whole persistent home ([Home](#home)). `files.tree`,
+`files.read`, `files.write`, `files.diff`, and the `home.*` methods are
 available through both the local SSH-backed gateway and the server-hosted
 WhoIs gateway. Directory requests are lazy and cached in
-`src/store/files.ts`; file content comes from `files.read` or `config.read`.
+`src/store/files.ts`; file content comes from `files.read` or `home.read`.
 A live run's file can switch from **File** to **Changes vs base**. The same
 tree and editor are a view of each run, scoped to that run's checkout: see
 [Files in a run](#files-in-a-run).
 
 The tree lists each workspace's `base: <branch>` first, then its live runs
-under **Run checkouts** and the member's configuration roots under **Agent
-config**; both groups start folded, so a run's or root's tree is read only
-when it is opened. Folder expansion is kept per view. The tree sits beside the
+under **Run checkouts**, then one **Home** row; both start folded, so a
+run's tree or the home is read only when it is opened. Folder expansion is
+kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
 CodeMirror provides syntax highlighting for JSON/JSONC, JavaScript/TypeScript,
@@ -3514,13 +3514,12 @@ The action label states the write target: base files show **Commit to
 <branch>…**, which opens a dialog saying the commit lands on that branch and
 is not pushed upstream, then creates one file commit (a failed commit keeps
 the dialog open with the error); live-run files show **Save**, changing the
-run's uncommitted checkout; configuration files show **Save**, changing only
+run's uncommitted checkout; Home files show **Save**, changing only
 the authenticated member's persistent home. Base writes need the push
-permission, run writes the steer permission, and config reads and writes are
+permission, run writes the steer permission, and Home reads and writes are
 always for the calling member and need the launch permission. A text file
 the member may read but not change shows **Read-only** in place of the
-action. A new configuration file accepts nested relative paths and refuses to
-overwrite an existing file.
+action. The header names a Home file as `~/<path>`.
 
 Saves are explicit (**Save**, **Commit to <branch>…**, or Ctrl/Cmd-S, which
 opens the same commit dialog for a base file); there is no autosave or
@@ -3554,7 +3553,7 @@ during the reread is still based on the revision that was on screen.
 checkout under its branch name, with the tree, the editor, the tabs and the
 phone layout of the Files route (`FilesPane`, `closeTab` in `pane.tsx`). Its
 tabs are the open files of that run; they are the same tabs the Files route
-shows under **Run checkouts**. The base branch and agent configuration stay
+shows under **Run checkouts**. The base branch and Home stay
 on the Files route. The pane is measured: below 640px, with the Browser
 docked beside it for instance, it shows the tree until a file is open and
 then the editor with **Browse**, as a phone does.
@@ -3597,6 +3596,110 @@ with Tab; the tree is the keyboard's way to any file.
 
 There is no file finder: `files.tree` lists one directory, and nothing lists
 a whole checkout.
+
+### Home
+
+**Home** is one root row with a trailing `~`, shown when the gateway serves
+`home.tree`. Under it is the member's whole persistent home, the directory
+that is `$HOME` in their Environment and runs, read one folder at a time
+through `home.tree` with nothing filtered. Only this tree changes files;
+base and run-checkout trees are read and edited as before. The methods and
+the server's rules are in
+[local-gateway.md](local-gateway.md#files-and-member-configuration).
+
+| File | Holds |
+| --- | --- |
+| `home.tsx` | `HomeFiles`, the provider that owns naming, the dialogs, uploads and drag state, and `useHomeFiles` |
+| `home-tree.tsx` | `HomeTree`, its rows, and `HomeStatus`, the transfer line under the tree |
+| `home-menu.tsx` | `HomeMenu`, a row's actions |
+| `home-name.tsx` | `NameRow`, the field a name is typed into |
+| `home-dialogs.tsx` | The delete, move and replace confirmations |
+| `home-upload.ts` | `useHomeUpload` and `droppedUploads` |
+
+`HomeFiles` wraps the whole route, above `FilesPane`: a phone remounts the
+tree in its side sheet, and an upload in progress or an open dialog must
+outlive that. It is keyed by the signed-in identity, and every answer is
+dropped when `sameIdentity()` says the member changed while it was pending.
+
+Each row has a **…** button in the `ListRow` `hoverAction`, which a coarse
+pointer always shows, and a right click on the row opens the same `Menu`:
+
+| Row | Items |
+| --- | --- |
+| Folder | **New file**, **New folder**, **Upload files…**, **Rename**, **Copy path**, **Delete** |
+| **Home** | **New file**, **New folder**, **Upload files…**, **Refresh**, **Copy path**, beside a **Refresh Home** icon button |
+| File | **Download**, **Rename**, **Copy path**, **Delete** |
+| Credential file or symlink | **Rename**, **Copy path**, **Delete** |
+
+**Copy path** copies `~/<path>`. **Download** reads the file with
+`home.download` and saves it through an object URL; `HomeStatus` shows
+**Downloading name** meanwhile. **Refresh** drops every
+Home listing from the store (`refreshHome`), so each open folder is reread;
+`useListing` in `tree.tsx` keeps the last listing up meanwhile. Nothing
+watches the home: a file an agent writes shows after a refresh.
+
+A name is typed where the entry sits. **New file** and **New folder** open
+the folder and put `NameRow` first among its children, with the entry's
+icon; **Rename**, or F2 on a focused row, replaces the row's label with a
+field holding the name, its stem selected. Enter commits, and a new file
+then opens in the editor. Escape or leaving the field cancels. A name is one
+path segment: an empty one, one with `/`, `.` and `..` are refused before any
+request, and a server refusal such as `notes/drafts already exists` shows
+under the field, which stays open. When naming ends, focus returns to the
+row (`takeFocus`). A menu item that opens the field does so from the menu's
+`onCloseAutoFocus`: a closing menu returns focus to its button, which would
+otherwise blur the new field and cancel it.
+
+**Delete**, or the Delete key on a focused row, opens an `AlertDialog`
+titled **Delete <name>?** that names `~/<path>`, says a folder goes with
+everything in it, and says when open files under it have unsaved edits.
+Confirming calls `home.remove`. A refusal stays in the dialog.
+
+**Upload files…** opens the system file picker. Files and folders dragged
+from the desktop upload into the folder under the pointer: a folder row is
+that folder, a file row its parent, and the **Home** row or the empty pane
+below the tree is `~`. The folder that would receive them is outlined, and
+a folded one opens after 600ms. `droppedUploads` walks dropped folders with
+`webkitGetAsEntry`, so their structure is kept; empty folders are not
+created. `useHomeUpload` sends one `home.upload` per file, in order, first
+without `overwrite`, while `HomeStatus` shows **Uploading 3 of 12 · name**
+pinned to the bottom of the tree pane. A file over 64 MiB fails without being
+read. Files the server already has are collected and asked about once at the
+end, **Replace 2 files?** with **Replace** and **Skip**; replacing sends
+them again with `overwrite: true`. Each file that failed is listed with the
+server's error until dismissed. One batch uploads at a time: a drop is
+taken, and a second one refused, before its folders are walked, while the
+status reads **Reading dropped files…**. An upload or download started as
+one member stops when another signs in, before any byte is sent or saved.
+While the
+route is mounted, a file dropped anywhere else on the page is refused, so
+it cannot replace the dashboard.
+
+Dragging a Home row onto a folder, or onto **Home**, asks **Move <name> to
+~/<folder>?** and calls `home.rename`. A row cannot land on itself, inside
+itself, or in the folder it is already in.
+
+Open tabs stay truthful. After a rename or a move, `moveHomePath` rekeys the
+tabs, documents, drafts and listings of that path and of everything under
+it, and `TreeExpansion` keeps a renamed folder as open as it was; after a
+delete, `dropHomePath` closes those tabs and drops their documents and
+drafts. A listing or
+read in flight under the moved path is dropped, so its reader asks again at
+the new one. A save in flight keeps its `saving` state and settles on the
+file wherever it is by then: the editor follows the `homeMoves` recorded
+since the save began (`followHomeKey`), and drops the answer when the file
+was deleted.
+
+A credential file, `locked` in `home.tree`, shows a lock at the end of its
+row, has no **Rename**, and cannot be dragged. It opens like any file, and
+the editor shows the server's refusal:
+`home.read: .claude/.credentials.json is a credential file; read it in the Environment terminal`.
+A symlink shows a link icon and does not open. Inline and dialog errors show
+the server's sentence without its method prefix (`errorSentence`).
+
+Drag and drop needs a mouse. On a phone every action is in the row's menu,
+and Escape in the name field cancels the name without closing the tree
+sheet (`FilesPane`).
 
 ## Templates
 
@@ -3827,8 +3930,9 @@ for byte. It shows in a read-only, focusable monospace block that keeps its
 line breaks, wraps long lines and scrolls past 18rem. **Copy prompt** goes
 through `copyText` (`src/lib/clipboard.ts`): it toasts **Copied**, or, when
 the clipboard refuses, selects the whole prompt and toasts **Selected. Press
-Ctrl+C to copy.** **Open remote files** navigates to the `files` route, where
-the uploads show under **Agent config**. Agent logins are separate. See
+Ctrl+C to copy.** **Open remote files** navigates to the `files` route with
+`home: 'open'`, which unfolds [Home](#home), where the uploads are. Agent
+logins are separate. See
 [Agent configuration](harnesses.md#agent-configuration-import-and-files) for
 the user workflow and [the
 protocol](local-gateway.md#files-and-member-configuration) for the
@@ -5138,6 +5242,9 @@ toolbar and the address field, its polling, and opening a port on this
 computer or showing the command for it; and `src/routes/run/frame.test.tsx`
 covers when Browser and Files are offered, the docked layout and run-local
 terminal links.
+`src/routes/files/home.test.tsx` covers the Home tree: each row's menu,
+naming in place, delete, upload from the picker and from a drop, and moving
+a dragged row.
 `src/routes/files/run-files.test.tsx` covers the run's Files view and path
 links in the Session view, `paths.test.ts` what reads as a path, and
 `src/routes/run/terminal-links.test.tsx` a path link in a terminal.

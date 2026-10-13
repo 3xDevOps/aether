@@ -395,16 +395,30 @@ profile, and a share of your agent account does not expose it, except the
 pin is audit metadata, not a private writable copy, and changing configuration
 does not rebuild an installed-agent image.
 
-Use **Files** to browse your configuration beside workspace base and live-run
-files. Configuration edits are complete UTF-8 text up to 64 MiB; binary and
-oversized files are read-only. New configuration files accept nested relative
-paths and refuse to overwrite an existing file. Save explicitly with **Save** or
+**Files** in the dashboard has a **Home** tree beside workspace base and
+live-run files: your whole persistent home, dotfiles and agent runtime
+folders included. Each row's **…** menu, also on right click, creates a
+file or folder, uploads, downloads, renames, copies the path, and deletes.
+Dragging a row onto a folder moves it, and files or folders dragged from your
+desktop upload into the folder under the pointer. Deleting, moving, and
+replacing an existing file ask first; there is no trash. One file is at most
+64 MiB. Nothing is filtered: the exclusions above apply to
+`aether config push` only.
+
+Credential files are listed with a lock and cannot be opened, edited,
+downloaded, renamed, or moved in Files: agent logins such as `~/.claude/.credentials.json`,
+everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
+`~/.git-credentials`, `~/.netrc`, and `*.pem`. Deleting one and uploading
+over one work. Do the rest in the Environment terminal. Symlinks are listed and never followed.
+
+Text edits are complete UTF-8 text up to 64 MiB; binary and oversized files
+are read-only. Save explicitly with **Save** or
 Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
 before unloading them. There is no autosave or force-save. A failed or stale
 save keeps the draft. Later pushes also leave open buffers intact;
 **Reload from server** deliberately discards the draft and loads remote bytes.
-All `config.*` methods require `Launch` and target only the authenticated
-member's own home; there is no admin/member selector.
+All `config.*` and `home.*` methods require `Launch` and target only the
+authenticated member's own home; there is no admin/member selector.
 
 For the separate workspace explorer, base-branch saves are **Commit to
 <branch>**, creating one file commit without pushing upstream; live-run saves

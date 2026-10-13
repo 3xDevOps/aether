@@ -1,22 +1,24 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, File, Folder, FolderPlus, GitBranch } from '@/components/icons'
-import { Button } from '@/components/ui/button'
+import { ChevronRight, File, Folder, GitBranch } from '@/components/icons'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { FormField } from '@/components/ui/form-field'
-import { Input } from '@/components/ui/input'
 import { ListRow } from '@/components/ui/list-row'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
-import type { ConfigRoot, Run, Workspace } from '@/lib/types'
+import type { Run, Workspace } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { type ConfigSource, type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
+import { type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
 import { useStore } from '@/store'
-import { configKey, type FileTreeState } from '@/store/files'
+import type { FileTreeState } from '@/store/files'
 
-type Expansion = { open: (key: string, fallback: boolean) => boolean; toggle: (key: string, fallback: boolean) => void }
+interface Expansion {
+  open: (key: string, fallback: boolean) => boolean
+  set: (key: string, open: boolean) => void
+  /** Keeps a renamed folder, and the folders under it, as open as they were. */
+  move: (from: string, to: string) => void
+}
 
-const ExpansionContext = createContext<Expansion>({ open: (_, fallback) => fallback, toggle: () => {} })
+const ExpansionContext = createContext<Expansion>({ open: (_, fallback) => fallback, set: () => {}, move: () => {} })
 
 /** Keeps folder expansion across the phone sheet remounting the tree, and
  * opens the folders above `reveal`, a file that was opened from outside it. */
@@ -31,38 +33,45 @@ export function TreeExpansion({ reveal, children }: { reveal?: Selection | null;
   }, [revealed])
   const value: Expansion = {
     open: (key, fallback) => state[key] ?? fallback,
-    toggle: (key, fallback) => setState((s) => ({ ...s, [key]: !(s[key] ?? fallback) })),
+    set: (key, open) => setState((s) => ({ ...s, [key]: open })),
+    move: (from, to) =>
+      setState((s) =>
+        Object.fromEntries(
+          Object.entries(s).map(([key, open]) => [key === from || key.startsWith(`${from}/`) ? to + key.slice(from.length) : key, open]),
+        ),
+      ),
   }
   return <ExpansionContext.Provider value={value}>{children}</ExpansionContext.Provider>
 }
 
-function useExpanded(key: string, fallback: boolean): [boolean, () => void] {
-  const { open, toggle } = useContext(ExpansionContext)
-  return [open(key, fallback), () => toggle(key, fallback)]
+export const useExpansion = () => useContext(ExpansionContext)
+
+export function useExpanded(key: string, fallback: boolean): [boolean, () => void] {
+  const { open, set } = useExpansion()
+  const expanded = open(key, fallback)
+  return [expanded, () => set(key, !expanded)]
 }
 
-const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 })
+export const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 })
 
 export function FileTree({
   workspaces,
   runs,
-  configRoots,
+  home,
   client,
   onSelect,
   selected,
-  onNewFile,
 }: {
   workspaces: Workspace[]
   runs: Run[]
-  configRoots: ConfigRoot[] | null
+  home?: ReactNode
   client: Api
   onSelect: SelectFile
   selected: Selection | null
-  onNewFile: (source: ConfigSource) => void
 }) {
   const several = workspaces.length > 1
   return (
-    <div className="flex flex-col gap-3 p-2">
+    <div className="flex flex-1 flex-col gap-3 p-2">
       {workspaces.map((workspace) => {
         const checkouts = runs.filter((run) => run.workspace_id === workspace.id)
         const base = { kind: 'workspace' as const, workspaceID: workspace.id, runID: '', label: `base: ${workspace.base_branch}`, branch: workspace.base_branch }
@@ -90,31 +99,7 @@ export function FileTree({
           </section>
         )
       })}
-      {configRoots && configRoots.length > 0 && (
-        <Disclosure id="config" label="Agent config" count={configRoots.length}>
-          {configRoots.map((root) => {
-            const source: ConfigSource = { kind: 'config', harness: root.harness, rootPath: root.path, label: root.harness }
-            return (
-              <TreeDirectory
-                key={root.harness}
-                source={source}
-                path=""
-                depth={1}
-                rootOpen={false}
-                client={client}
-                onSelect={onSelect}
-                selected={selected}
-                trailing={root.path}
-                action={
-                  <Button variant="ghost" size="icon-sm" label={`New file in ${root.harness}`} onClick={() => onNewFile(source)}>
-                    <FolderPlus />
-                  </Button>
-                }
-              />
-            )
-          })}
-        </Disclosure>
-      )}
+      {home}
     </div>
   )
 }
@@ -139,47 +124,20 @@ export function touchedPaths(runID: string): Set<string> {
 
 const noPaths = new Set<string>()
 
-const scrollToRow = (row: HTMLElement | null) => row?.scrollIntoView({ block: 'nearest' })
+export const scrollToRow = (row: HTMLElement | null) => row?.scrollIntoView({ block: 'nearest' })
 
-export function TreeDirectory({
-  source,
-  path,
-  depth,
-  rootOpen = true,
-  client,
-  onSelect,
-  selected,
-  touched = noPaths,
-  icon,
-  trailing,
-  action,
-}: {
-  source: FileSource
-  path: string
-  depth: number
-  rootOpen?: boolean
-  client: Api
-  onSelect: SelectFile
-  selected: Selection | null
-  touched?: Set<string>
-  icon?: ReactNode
-  trailing?: string
-  action?: ReactNode
-}) {
+/** Reads one directory while it is expanded and whenever its cached listing
+ * is dropped. The last listing this member read stays up while the next is
+ * read, so an open folder does not blink. */
+export function useListing(source: FileSource, path: string, expanded: boolean, client: Api): FileTreeState | undefined {
   const key = sourceKey(source, path)
   const cached = useStore((s) => s.trees[key])
   const filesEpoch = useStore((s) => s.filesEpoch)
   const identityEpoch = useStore((s) => s.identityEpoch)
-  // A run's listings are dropped whenever its checkout changes. The last one
-  // this member read stays up while the next is read, so an open folder does
-  // not blink.
   const read = useRef<{ identity: number; tree: FileTreeState } | null>(null)
   if (cached && !cached.loading) read.current = { identity: identityEpoch, tree: cached }
-  const listing = (!cached || cached.loading) && read.current?.identity === identityEpoch ? read.current.tree : cached
   const setTree = useStore((s) => s.setTree)
-  const [expanded, toggle] = useExpanded(key, path === '' && rootOpen)
   const sourceKind = source.kind
-  const harness = source.kind === 'config' ? source.harness : undefined
   const workspaceID = source.kind === 'workspace' ? source.workspaceID : undefined
   const runID = source.kind === 'workspace' ? source.runID : undefined
   const requestID = useRef(0)
@@ -193,8 +151,8 @@ export function TreeDirectory({
       requestID.current !== requestToken ||
       useStore.getState().identityEpoch !== requestIdentityEpoch ||
       useStore.getState().trees[key] !== pending
-    const request = source.kind === 'config'
-      ? client.configTree({ harness: source.harness, path })
+    const request = source.kind === 'home'
+      ? client.homeTree(path)
       : client.filesTree({ workspace_id: source.workspaceID, ...(source.runID ? { run_id: source.runID } : {}), path })
     void request
       .then((result) => {
@@ -203,8 +161,42 @@ export function TreeDirectory({
       .catch((err) => {
         if (!stale()) setTree(key, { entries: [], loading: false, error: message(err) })
       })
-  }, [cached, client, expanded, filesEpoch, harness, identityEpoch, key, path, runID, setTree, sourceKind, workspaceID])
+  }, [cached, client, expanded, filesEpoch, identityEpoch, key, path, runID, setTree, sourceKind, workspaceID])
+  return (!cached || cached.loading) && read.current?.identity === identityEpoch ? read.current.tree : cached
+}
 
+export function ListingStatus({ listing, depth }: { listing: FileTreeState | undefined; depth: number }) {
+  return (
+    <>
+      {listing?.loading && <p className="py-1 text-ui-sm text-muted" style={indent(depth + 2)}>Loading files…</p>}
+      {listing?.error && <p role="alert" className="py-1 text-ui-sm text-state-failed" style={indent(depth + 2)}>{listing.error}</p>}
+    </>
+  )
+}
+
+export function TreeDirectory({
+  source,
+  path,
+  depth,
+  rootOpen = true,
+  client,
+  onSelect,
+  selected,
+  touched = noPaths,
+  icon,
+}: {
+  source: FileSource
+  path: string
+  depth: number
+  rootOpen?: boolean
+  client: Api
+  onSelect: SelectFile
+  selected: Selection | null
+  touched?: Set<string>
+  icon?: ReactNode
+}) {
+  const [expanded, toggle] = useExpanded(sourceKey(source, path), path === '' && rootOpen)
+  const listing = useListing(source, path, expanded, client)
   const label = path === '' ? source.label : path.split('/').at(-1) ?? path
   return (
     <div>
@@ -218,16 +210,13 @@ export function TreeDirectory({
             {icon ?? <Folder />}
           </>
         }
-        trailing={trailing}
-        hoverAction={action}
         title={label}
       >
         {label}
       </ListRow>
       {expanded && (
         <div>
-          {listing?.loading && <p className="py-1 text-ui-sm text-muted" style={indent(depth + 2)}>Loading files…</p>}
-          {listing?.error && <p role="alert" className="py-1 text-ui-sm text-state-failed" style={indent(depth + 2)}>{listing.error}</p>}
+          <ListingStatus listing={listing} depth={depth} />
           {listing?.entries.map((entry) => {
             const childPath = path ? `${path}/${entry.name}` : entry.name
             if (entry.kind === 'dir') {
@@ -253,68 +242,4 @@ export function TreeDirectory({
       )}
     </div>
   )
-}
-
-export function NewConfigFile({
-  source,
-  client,
-  onCancel,
-  onCreated,
-}: {
-  source: ConfigSource
-  client: Api
-  onCancel: () => void
-  onCreated: (path: string) => void
-}) {
-  const [path, setPath] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const identityEpoch = useStore((s) => s.identityEpoch)
-  return (
-    <form
-      className="mx-2 mb-2 flex flex-col gap-2 rounded-panel border border-seam bg-canvas p-2"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void createConfigFile(source, path, client, identityEpoch)
-          .then((created) => {
-            if (created && useStore.getState().identityEpoch === identityEpoch) onCreated(created)
-          })
-          .catch((err) => {
-            if (useStore.getState().identityEpoch === identityEpoch) setError(message(err))
-          })
-      }}
-    >
-      <FormField label={`New file in ${source.label}`} help="Relative paths only. Existing files are never overwritten." error={error}>
-        <Input
-          autoFocus
-          value={path}
-          onChange={(event) => {
-            setPath(event.target.value)
-            setError(null)
-          }}
-          placeholder="settings.json or skills/my-skill.md"
-          className="font-code"
-        />
-      </FormField>
-      <div className="flex justify-end gap-2">
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" size="sm">Create</Button>
-      </div>
-    </form>
-  )
-}
-
-async function createConfigFile(source: ConfigSource, raw: string, client: Api, requestEpoch: number): Promise<string | null> {
-  const path = raw.trim()
-  const pieces = path.split('/')
-  if (!path || path.startsWith('/') || path.endsWith('/') || pieces.some((piece) => !piece || piece === '.' || piece === '..')) {
-    throw new Error('Use a non-empty relative path without . or .. segments.')
-  }
-  const result = await client.configWrite({ harness: source.harness, path, content: '', revision: '' })
-  const store = useStore.getState()
-  if (store.identityEpoch !== requestEpoch) return null
-  store.setDocument(configKey(source.harness, path), { ...result, loading: false, error: undefined })
-  for (let length = pieces.length - 1; length >= 0; length -= 1) {
-    store.invalidateTree(configKey(source.harness, pieces.slice(0, length).join('/')))
-  }
-  return path
 }

@@ -44,7 +44,7 @@ export function ConfigPrompt() {
         <Button size="sm" onClick={() => void copyText(configPrompt, prompt.current)}>
           Copy prompt
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => navigate('files')}>
+        <Button size="sm" variant="secondary" onClick={() => navigate('files', { home: 'open' })}>
           Open remote files
         </Button>
       </div>

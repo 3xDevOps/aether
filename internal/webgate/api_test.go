@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -97,11 +98,14 @@ func TestFileWriteAPIAcceptsLargeEditorBodies(t *testing.T) {
 	defer func() { _ = g.Close() }()
 
 	body := `{"content":"` + strings.Repeat("x", 5<<20) + `"}`
-	if rec := post(g, "/api/v1/config.write", body); rec.Code != http.StatusOK {
-		t.Fatalf("large config.write body = %d: %s", rec.Code, rec.Body)
+	methods := []string{protocol.MethodConfigWrite, protocol.MethodHomeWrite, protocol.MethodHomeUpload}
+	for _, method := range methods {
+		if rec := post(g, "/api/v1/"+method, body); rec.Code != http.StatusOK {
+			t.Fatalf("large %s body = %d: %s", method, rec.Code, rec.Body)
+		}
 	}
-	if len(backend.calls) != 1 || backend.calls[0] != protocol.MethodConfigWrite {
-		t.Fatalf("large config.write calls = %+v", backend.calls)
+	if !slices.Equal(backend.calls, methods) {
+		t.Fatalf("large body calls = %+v", backend.calls)
 	}
 }
 

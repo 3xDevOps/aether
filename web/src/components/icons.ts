@@ -115,6 +115,7 @@ import {
   Smartphone as LucideSmartphone,
   Tablet as LucideTablet,
   Bug as LucideBug,
+  FileSymlink as LucideFileSymlink,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -258,3 +259,4 @@ export const RotateCw = icon(LucideRotateCw)
 export const Smartphone = icon(LucideSmartphone)
 export const Tablet = icon(LucideTablet)
 export const Bug = icon(LucideBug)
+export const FileSymlink = icon(LucideFileSymlink)

@@ -217,6 +217,7 @@ func TestSSHBackendTransportFailureRetryPolicy(t *testing.T) {
 	}{
 		{name: "config_import_no_replay", method: protocol.MethodConfigImport, wantCalls: 1, wantError: true},
 		{name: "workspace_import_no_replay", method: protocol.MethodWorkspaceImport, wantCalls: 1, wantError: true},
+		{name: "home_remove_no_replay", method: protocol.MethodHomeRemove, wantCalls: 1, wantError: true},
 		{name: "github_oauth_start_no_replay", method: protocol.MethodGitHubOAuthStart, wantCalls: 1, wantError: true},
 		{name: "github_oauth_cancel_no_replay", method: protocol.MethodGitHubOAuthCancel, wantCalls: 1, wantError: true},
 		{name: "mirror_configure_no_replay", method: protocol.MethodWorkspaceMirrorConfigure, wantCalls: 1, wantError: true},

@@ -80,18 +80,20 @@ type ConfigRead struct {
 	Writable  bool
 }
 
-// LockConfigRoot serializes Aether writes for one member/profile root. The
-// lock is intentionally shared with profile materialization so legacy profile
-// operations cannot race an editor save.
+// LockConfigRoot serializes Aether's own writes to one member's home. The
+// config.* methods, the home.* methods and profile materialization share it,
+// whichever root they name, so none of them can race another's save.
 func (m *Manager) LockConfigRoot(member domain.MemberID, localRoot string) (func(), error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
-	root, err := configRootPath(localRoot)
-	if err != nil {
+	if _, err := configRootPath(localRoot); err != nil {
 		return nil, err
 	}
-	key := string(member) + "\x00" + root
+	return m.lock(string(member)), nil
+}
+
+func (m *Manager) lock(key string) func() {
 	m.mu.Lock()
 	lock := m.locks[key]
 	if lock == nil {
@@ -100,7 +102,7 @@ func (m *Manager) LockConfigRoot(member domain.MemberID, localRoot string) (func
 	}
 	m.mu.Unlock()
 	lock.Lock()
-	return lock.Unlock, nil
+	return lock.Unlock
 }
 
 // OpenConfigRoot opens a member's profile root through the trusted home
@@ -339,10 +341,14 @@ func (m *Manager) ConfigRead(ctx context.Context, member domain.MemberID, harnes
 		return ConfigRead{}, err
 	}
 	defer func() { _ = profileRoot.Close() }()
-	if err = checkParent(profileRoot, rel); err != nil {
+	return readConfigFile(ctx, profileRoot, rel)
+}
+
+func readConfigFile(ctx context.Context, root *os.Root, rel string) (ConfigRead, error) {
+	if err := checkParent(root, rel); err != nil {
 		return ConfigRead{}, err
 	}
-	f, info, err := openConfigFile(profileRoot, rel)
+	f, info, err := openConfigFile(root, rel)
 	if err != nil {
 		return ConfigRead{}, err
 	}
@@ -407,7 +413,11 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 		return ConfigRead{}, err
 	}
 	defer func() { _ = profileRoot.Close() }()
-	info, err := configTargetInfo(profileRoot, rel)
+	return writeConfigFile(home, profileRoot, rel, content, expected)
+}
+
+func writeConfigFile(home, root *os.Root, rel string, content []byte, expected string) (ConfigRead, error) {
+	info, err := configTargetInfo(root, rel)
 	var mode os.FileMode = 0o644
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -419,7 +429,7 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 	case !info.Mode().IsRegular():
 		return ConfigRead{}, ErrConfigDenied
 	default:
-		current, readErr := readConfigBytes(profileRoot, rel, ConfigMaxFileBytes)
+		current, readErr := readConfigBytes(root, rel, ConfigMaxFileBytes)
 		if readErr != nil {
 			return ConfigRead{}, readErr
 		}
@@ -431,10 +441,10 @@ func (m *Manager) ConfigWrite(ctx context.Context, member domain.MemberID, harne
 		}
 		mode = info.Mode().Perm()
 	}
-	if err := ensureDirPathOwned(home, profileRoot, path.Dir(rel), true); err != nil {
+	if err := ensureDirPathOwned(home, root, path.Dir(rel), true); err != nil {
 		return ConfigRead{}, err
 	}
-	if err := atomicConfigWrite(home, profileRoot, rel, content, mode, expected, info); err != nil {
+	if err := atomicConfigWrite(home, root, rel, content, mode, expected, info); err != nil {
 		return ConfigRead{}, err
 	}
 	return ConfigRead{Content: append([]byte(nil), content...), Size: int64(len(content)), Revision: revision(content), Writable: true}, nil
@@ -663,6 +673,10 @@ func configPath(localRoot, raw string, allowRoot bool) (string, error) {
 	} else if strings.HasPrefix(raw, localRoot+"/") {
 		raw = strings.TrimPrefix(raw, localRoot+"/")
 	}
+	return relPath(raw, allowRoot)
+}
+
+func relPath(raw string, allowRoot bool) (string, error) {
 	if (raw == "." || raw == "") && allowRoot {
 		return ".", nil
 	}

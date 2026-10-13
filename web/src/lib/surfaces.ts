@@ -35,10 +35,7 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'missions', label: 'Swarms', Icon: Waypoints, place: 'nav' })
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
-  if (
-    cap.hasMethod('files.tree') ||
-    (cap.hasMethod('config.roots') && cap.hasMethod('config.tree'))
-  )
+  if (cap.hasMethod('files.tree') || cap.hasMethod('home.tree'))
     list.push({ name: 'files', label: 'Files', Icon: FolderTree, place: 'nav' })
   if (cap.hasWS('terminal'))
     list.push({ name: 'environment', label: 'Environment', Icon: SquareTerminal, place: 'nav' })

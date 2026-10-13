@@ -1009,6 +1009,29 @@ staged-file ownership. Every `config.*` method requires the `Launch`
 capability and targets only the authenticated member's own home; an admin
 cannot select another member or account.
 
+**Files** reaches the whole home, not only agent directories. Its **Home**
+tree lists every file and folder under `~` and creates, renames, moves,
+deletes, uploads, and downloads there through the `home.*` methods
+([local-gateway.md](local-gateway.md#files-and-member-configuration)). They
+require `Launch`, target only the caller's own home, never follow a symlink,
+and keep the hardlink and ownership rules above. The credential, runtime,
+and secret-scanner exclusions apply to `aether config push` only: in Files a
+member acts on their own home deliberately, as they can in its terminal.
+`home.upload` has the 96 MiB request limit of `config.import` and
+`home.write` the 385 MiB of `config.write`.
+
+Credential files are listed in Files and locked: `home.read`,
+`home.download`, and `home.write` refuse a path with a credential name of
+any shipped agent or a `.pem` suffix in any component, anything under
+`~/.ssh` except `*.pub`, and `~/.config/gh/hosts.yml`, `~/.git-credentials`,
+and `~/.netrc`. The lock keeps credential bytes out of the browser and out
+of downloads. `home.rename` refuses a locked file, and a folder that holds
+one of those fixed paths, because a renamed copy would be served;
+`home.remove` and `home.upload` work on a locked file, since neither returns
+its bytes. It is not a boundary against the member: the Environment terminal
+reads the same home, and a credential stored under any other name is not
+recognized.
+
 Uploaded and edited files are in the member's shared read-write home,
 mounted into that member's environment and the active and future
 runs they launch, including runs on a shared account. A member's account
