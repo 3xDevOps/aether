@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRootStore } from '@/store'
-import { filesKey } from '@/store/files'
+import { filesKey, homeKey } from '@/store/files'
 
 const document = {
   content: 'package main\n',
@@ -105,5 +105,41 @@ describe('files cache', () => {
     store.getState().invalidateRun('run-1')
 
     expect(store.getState().drafts[key]?.content).toBe('changed\n')
+  })
+
+  it('carries a moved home folder and drops what is left of a deleted one', () => {
+    const store = createRootStore()
+    const s = store.getState
+    const tab = (path: string) => ({ key: homeKey(path), kind: 'home' as const, path, label: 'Home' })
+    const workspace = filesKey('ws-1', '', 'notes/a.md')
+    for (const path of ['notes/a.md', 'notes/sub/b.md', 'notebook.md', 'archive/a.md']) {
+      s().setDocument(homeKey(path), { ...document, content: path })
+      s().openFileTab(tab(path))
+    }
+    s().setDocument(workspace, document)
+    s().updateDraft(homeKey('notes/sub/b.md'), 'draft\n')
+    s().setTree(homeKey('notes/sub'), { entries: [{ name: 'b.md', kind: 'file', size: 1 }] })
+    s().setActiveFileKey(homeKey('notes/sub/b.md'))
+
+    // archive/a.md is a leftover of a path deleted elsewhere: the move lands on it.
+    s().moveHomePath('notes', 'archive')
+    expect(s().fileTabs.map((open) => open.path)).toEqual(['archive/a.md', 'archive/sub/b.md', 'notebook.md'])
+    expect(s().activeFileKey).toBe(homeKey('archive/sub/b.md'))
+    expect(s().documents[homeKey('archive/a.md')]?.content).toBe('notes/a.md')
+    expect(s().drafts[homeKey('archive/sub/b.md')]?.content).toBe('draft\n')
+    expect(s().trees[homeKey('archive/sub')]?.entries).toHaveLength(1)
+    expect(s().documents[homeKey('notes/a.md')]).toBeUndefined()
+    expect(s().documents[workspace]).toBeDefined()
+
+    s().dropHomePath('archive')
+    expect(s().fileTabs.map((open) => open.path)).toEqual(['notebook.md'])
+    expect(s().activeFileKey).toBe(homeKey('notebook.md'))
+    expect(s().drafts).toEqual({})
+    expect(Object.keys(s().documents).sort()).toEqual([workspace, homeKey('notebook.md')].sort())
+
+    s().setTree(homeKey(''), { entries: [] })
+    s().setTree(filesKey('ws-1', '', ''), { entries: [] })
+    s().refreshHome()
+    expect(Object.keys(s().trees)).toEqual([filesKey('ws-1', '', '')])
   })
 })
