@@ -916,6 +916,9 @@ Building the APK from a checkout is in
   candidate verification started by them or by their runs - need Docker
   Engine 26.0 or newer (API 1.45);
   `docker version --format '{{.Server.Version}}'` prints yours.
+- Optionally **Sysbox**, which lets agents run Docker inside their run
+  containers: `sudo sh scripts/install-sysbox.sh`, then restart
+  `aether-server`. See [environments.md](environments.md#docker-inside-runs).
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
 - **`ssh-keygen`** on the host, from the OpenSSH client package
   (`openssh-client` on Debian and Ubuntu). Git uses it to sign the commits
@@ -938,7 +941,8 @@ is a client, not a server prerequisite.
 An image is a read-only package used to create containers. A container is one
 runtime instance of that image. The server opens terminals only inside
 containers, never on the host, and never mounts the Docker socket into a
-workspace container.
+workspace container. With Sysbox installed, a container instead runs its own
+Docker daemon ([environments.md](environments.md#docker-inside-runs)).
 
 Every container a member receives - agent runs, workspace shells, and their
 environment - starts from that member's saved image. When the member
@@ -1176,6 +1180,7 @@ uses the default; negative values have the semantics in the table.
 | `--addr` | `:2222` | The SSH listener. This is the port clients must be able to reach. |
 | `--web-port` | `0` (off) | Serve the dashboard over HTTPS on this host's tailnet addresses at this port; `443` makes it `https://<magicdns-name>/`. Needs tailscaled, MagicDNS and HTTPS certificates; see [networking.md](networking.md#the-dashboard). |
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
+| `--container-runtime` | `auto` | OCI runtime for run and Environment containers: `auto` uses `sysbox-runc` when Docker has it registered, else the daemon default; `runc` opts out; any other value names a registered runtime. See [environments.md](environments.md#docker-inside-runs). |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
 | `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
 | `--edge-access` | `approved-devices` | Who may reach the server through the edge: `account` (signing in is enough) or `approved-devices` (each new device waits until a person approves it). `install` refuses `--edge-url` without it. See [edge.md](edge.md#access-policies). |

@@ -17,6 +17,9 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         curl \
+        docker-buildx \
+        docker-compose-v2 \
+        docker.io \
         findutils \
         git \
         gnupg \

@@ -926,6 +926,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		MemoryLimitBytes:  s.cfg.RunMemoryBytes,
 		PidsLimit:         s.cfg.RunPidsLimit,
 		CreationKey:       string(run.ID),
+		NestedDocker:      true,
 	}
 }
 

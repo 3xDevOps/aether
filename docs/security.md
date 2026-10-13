@@ -20,6 +20,16 @@ second sandbox inside it.
   can reach.** Security comes from what the container is given, not from
   restrictions applied inside it: the mount policy, the network it can see, and
   the credentials mounted into it.
+- **Docker inside a run uses Sysbox, not the host daemon.** On a host with
+  the Sysbox runtime ([environments.md](environments.md#docker-inside-runs)),
+  run and Environment containers start with `--runtime sysbox-runc` and
+  run their own `dockerd`. Sysbox gives the container a user namespace: root
+  in the container maps to an unprivileged host uid, so the inner daemon's
+  privileges stop at the container. The container is not `--privileged` and
+  never receives the host Docker socket, so an agent cannot start containers
+  on the host daemon or mount host paths through it. The browser companion
+  stays on the daemon default. Without Sysbox nothing changes: a run has no
+  daemon and no socket.
 - **Git trusts the checkout regardless of owner.** Every container with a run
   checkout gets `safe.directory=/workspace` through `GIT_CONFIG_COUNT`,
   `GIT_CONFIG_KEY_n` and `GIT_CONFIG_VALUE_n`, appended after any of the

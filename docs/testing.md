@@ -77,7 +77,8 @@ Layers, per the design spec's testing strategy:
   `TestRecoveredTerminalUsesCapturedUserAndHomeForImages` must stay covered.
   The `smoke` job runs `internal/harness` on the images it builds natively
   on amd64 and arm64, alongside `scripts/standard-image-smoke.sh` toolchain
-  and native Git checks. A docs-only pull request (only `docs/**` and root `*.md`) runs
+  and native Git checks.
+  A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
   the release matrix. A markdown file anywhere else, including a dashboard
   end-to-end fixture, does not. The `changes` job runs
@@ -346,6 +347,45 @@ right after the build, before arming Defender, whose realtime scan made
 archiving the Bun cache take eight minutes. Before compressing
 an archive, each writer checks whether its exact key already exists and skips
 the save on a hit. Cache reuse does not replace any build or validation gate.
+
+## Running the Docker suites inside a run
+
+On a server host with Sysbox ([environments.md](environments.md#docker-inside-runs)),
+a run or Environment terminal has its own `dockerd`, so the Docker-backed
+suites run from inside it. Bind-mounted temp paths resolve because the daemon
+and the test process share one filesystem, which is not true when the socket
+belongs to the host. Check first with `docker info`.
+
+```sh
+make test-integration                    # real Docker, real git; Go and git are in the image
+make android                             # needs only the docker CLI and network
+curl -fsSL https://bun.sh/install | bash # make test-e2e also needs Bun on PATH
+(cd web && bun install --frozen-lockfile && bunx playwright install --with-deps chromium)
+make test-e2e
+```
+
+To prove the path on a Sysbox host, install Sysbox with
+`sudo sh scripts/install-sysbox.sh`, build the standard image, then run the
+Go test against it and the smoke script:
+
+```sh
+docker build -f images/standard/Dockerfile -t aether-standard:ci .
+sudo env "PATH=$PATH" "HOME=$HOME" \
+  AETHER_NESTED_DOCKER_TEST_IMAGE=aether-standard:ci \
+  make test-integration INTEGRATION_PKGS=./internal/runtime \
+    INTEGRATION_RUN='^TestDockerNestedDocker$'
+sudo sh scripts/nested-docker-smoke.sh aether-standard:ci
+```
+
+`TestDockerNestedDocker` creates a container with the runtime the server
+resolves, starts `dockerd` in it and runs a nested container. It skips unless
+`AETHER_NESTED_DOCKER_TEST_IMAGE` names an image that contains `dockerd`.
+`scripts/nested-docker-smoke.sh` starts a Sysbox container with the checkout
+mounted at `/src`, starts `dockerd` in it, and runs `TestDockerResourceLimits`,
+`TestDockerPIDLimitEnforced` and `TestDockerOOMContained` against the nested
+daemon. That proves cgroup limits and Aether's capacity checks hold on a
+daemon that is not the host's. It pulls `busybox` and Python images, so it
+needs network access.
 
 ## Headless browser and remote-development acceptance
 

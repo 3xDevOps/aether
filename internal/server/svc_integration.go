@@ -260,6 +260,7 @@ func integrationEnvironment(d Deps) func(context.Context, integration.Actor, *do
 			SecretEnv:         plan.SecretEnv,
 			Mounts:            plan.Mounts,
 			User:              plan.User,
+			NestedDocker:      true,
 		}, nil
 	}
 }

@@ -14,6 +14,10 @@ docker run --rm "$1" sh -euxc '
 	rg --version
 	jq --version
 	gh --version
+	docker --version
+	docker compose version
+	docker buildx version
+	dockerd --version
 	git --version
 	repo=$(mktemp -d)
 	trap '\''rm -rf "$repo"'\'' EXIT

@@ -160,7 +160,14 @@ type Config struct {
 	RunCPULimit    float64
 	RunMemoryBytes int64
 	RunPidsLimit   int64
+
+	// ContainerRuntime is the OCI runtime of run and member environment
+	// containers: DefaultContainerRuntime picks sysbox-runc when Docker has
+	// it registered, empty means the Docker daemon default.
+	ContainerRuntime string
 }
+
+const DefaultContainerRuntime = runtime.RuntimeAuto
 
 // Server is the assembled Aether server.
 type Server struct {
@@ -269,7 +276,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 
 	s.rt = cfg.Runtime
 	if s.rt == nil {
-		if s.docker, err = runtime.NewDocker(); err != nil {
+		if s.docker, err = runtime.NewDocker(runtime.WithContainerRuntime(cfg.ContainerRuntime)); err != nil {
 			return nil, err
 		}
 		s.rt = s.docker
