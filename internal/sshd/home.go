@@ -23,14 +23,15 @@ func init() {
 }
 
 // homeCall decodes one home.* request and runs it against the caller's own
-// home; no request field selects another member.
-func homeCall[P, R any](s *Server, method string, params json.RawMessage, op func(*memberhome.Manager, P) (R, error)) (any, *protocol.Error) {
+// home; no request field selects another member. Messages carry no method
+// prefix: the HTTP client adds the method it called.
+func homeCall[P, R any](s *Server, params json.RawMessage, op func(*memberhome.Manager, P) (R, error)) (any, *protocol.Error) {
 	p, perr := decodeParams[P](params)
 	if perr != nil {
 		return nil, perr
 	}
 	if s.cfg.Homes == nil {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": persistent homes are not enabled"}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "persistent homes are not enabled"}
 	}
 	result, err := op(s.cfg.Homes, p)
 	if err == nil {
@@ -38,13 +39,13 @@ func homeCall[P, R any](s *Server, method string, params json.RawMessage, op fun
 	}
 	var refusal *memberhome.HomeError
 	if !errors.As(err, &refusal) {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": " + configFailureDetail(err)}
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: configFailureDetail(err)}
 	}
-	return nil, &protocol.Error{Code: configError(refusal.Err).Code, Message: method + ": " + refusal.Reason}
+	return nil, &protocol.Error{Code: configError(refusal.Err).Code, Message: refusal.Reason}
 }
 
 func (s *Server) homeTree(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeTree, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.HomeTreeResult, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.HomeTreeResult, error) {
 		entries, err := homes.HomeTree(ctx, member, p.Path)
 		out := protocol.HomeTreeResult{Entries: make([]protocol.HomeTreeEntry, 0, len(entries))}
 		for _, entry := range entries {
@@ -55,45 +56,45 @@ func (s *Server) homeTree(ctx context.Context, member domain.MemberID, params js
 }
 
 func (s *Server) homeRead(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeRead, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.ConfigFileReadResult, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.ConfigFileReadResult, error) {
 		read, err := homes.HomeRead(ctx, member, p.Path)
 		return configReadResult(read), err
 	})
 }
 
 func (s *Server) homeWrite(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeWrite, params, func(homes *memberhome.Manager, p protocol.HomeWriteParams) (protocol.ConfigFileReadResult, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomeWriteParams) (protocol.ConfigFileReadResult, error) {
 		read, err := homes.HomeWrite(member, p.Path, []byte(p.Content), p.Revision)
 		return configReadResult(read), err
 	})
 }
 
 func (s *Server) homeMkdir(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeMkdir, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (struct{}, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (struct{}, error) {
 		return struct{}{}, homes.HomeMkdir(member, p.Path)
 	})
 }
 
 func (s *Server) homeRename(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeRename, params, func(homes *memberhome.Manager, p protocol.HomeRenameParams) (struct{}, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomeRenameParams) (struct{}, error) {
 		return struct{}{}, homes.HomeRename(member, p.From, p.To)
 	})
 }
 
 func (s *Server) homeRemove(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeRemove, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (struct{}, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (struct{}, error) {
 		return struct{}{}, homes.HomeRemove(member, p.Path)
 	})
 }
 
 func (s *Server) homeUpload(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeUpload, params, func(homes *memberhome.Manager, p protocol.HomeUploadParams) (struct{}, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomeUploadParams) (struct{}, error) {
 		return struct{}{}, homes.HomeUpload(member, p.Path, p.Content, p.Overwrite)
 	})
 }
 
 func (s *Server) homeDownload(_ context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	return homeCall(s, protocol.MethodHomeDownload, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.HomeDownloadResult, error) {
+	return homeCall(s, params, func(homes *memberhome.Manager, p protocol.HomePathParams) (protocol.HomeDownloadResult, error) {
 		content, err := homes.HomeDownload(member, p.Path)
 		return protocol.HomeDownloadResult{Content: content, Size: int64(len(content))}, err
 	})

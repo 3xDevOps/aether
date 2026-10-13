@@ -77,7 +77,7 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatalf("home.upload: %v", err)
 	}
 	err := c.Call(protocol.MethodHomeUpload, protocol.HomeUploadParams{Path: "notes/img/logo.png", Content: []byte("new")}, nil)
-	wantHomeError(t, err, protocol.CodeConflict, "home.upload: notes/img/logo.png already exists")
+	wantHomeError(t, err, protocol.CodeConflict, "notes/img/logo.png already exists")
 	var download protocol.HomeDownloadResult
 	if err = c.Call(protocol.MethodHomeDownload, protocol.HomePathParams{Path: "notes/img/logo.png"}, &download); err != nil {
 		t.Fatalf("home.download: %v", err)
@@ -93,7 +93,7 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = c.Call(protocol.MethodHomeDownload, protocol.HomePathParams{Path: "big.bin"}, nil)
-	wantHomeError(t, err, protocol.CodeInvalidParams, "home.download: big.bin is over the 64 MiB limit")
+	wantHomeError(t, err, protocol.CodeInvalidParams, "big.bin is over the 64 MiB limit")
 	if err = c.Call(protocol.MethodHomeRemove, protocol.HomePathParams{Path: "big.bin"}, nil); err != nil {
 		t.Fatalf("home.remove big.bin: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatalf("home.write create: %v", err)
 	}
 	err = c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: "notes/todo.md", Content: "again\n"}, nil)
-	wantHomeError(t, err, protocol.CodeConflict, "home.write: notes/todo.md changed on the server; reload it and try again")
+	wantHomeError(t, err, protocol.CodeConflict, "notes/todo.md changed on the server; reload it and try again")
 	if err = c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: "notes/todo.md", Content: "two\n", Revision: read.Revision}, &read); err != nil {
 		t.Fatalf("home.write save: %v", err)
 	}
@@ -115,16 +115,16 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatalf("home.mkdir: %v", err)
 	}
 	err = c.Call(protocol.MethodHomeMkdir, protocol.HomePathParams{Path: "notes/archive"}, nil)
-	wantHomeError(t, err, protocol.CodeConflict, "home.mkdir: notes/archive already exists")
+	wantHomeError(t, err, protocol.CodeConflict, "notes/archive already exists")
 	err = c.Call(protocol.MethodHomeMkdir, protocol.HomePathParams{Path: "missing/child"}, nil)
-	wantHomeError(t, err, protocol.CodeNotFound, "home.mkdir: missing was not found")
+	wantHomeError(t, err, protocol.CodeNotFound, "missing was not found")
 
 	err = c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: "notes/todo.md", To: "notes/img/logo.png"}, nil)
-	wantHomeError(t, err, protocol.CodeConflict, "home.rename: notes/img/logo.png already exists")
+	wantHomeError(t, err, protocol.CodeConflict, "notes/img/logo.png already exists")
 	err = c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: "notes", To: "notes/archive/notes"}, nil)
-	wantHomeError(t, err, protocol.CodeDenied, "home.rename: notes cannot be moved into itself")
+	wantHomeError(t, err, protocol.CodeDenied, "notes cannot be moved into itself")
 	err = c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: "notes/gone", To: "notes/here"}, nil)
-	wantHomeError(t, err, protocol.CodeNotFound, "home.rename: notes/gone was not found")
+	wantHomeError(t, err, protocol.CodeNotFound, "notes/gone was not found")
 	if err = c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: "notes/todo.md", To: "notes/archive/done.md"}, nil); err != nil {
 		t.Fatalf("home.rename: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 	}
 
 	err = c.Call(protocol.MethodHomeRemove, protocol.HomePathParams{Path: "."}, nil)
-	wantHomeError(t, err, protocol.CodeDenied, "home.remove: the home itself cannot be deleted")
+	wantHomeError(t, err, protocol.CodeDenied, "the home itself cannot be deleted")
 	if err = c.Call(protocol.MethodHomeRemove, protocol.HomePathParams{Path: "notes"}, nil); err != nil {
 		t.Fatalf("home.remove: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestHomeRPCFileLifecycle(t *testing.T) {
 		t.Fatalf("home after remove = %+v", got)
 	}
 	err = c.Call(protocol.MethodHomeRemove, protocol.HomePathParams{Path: "notes"}, nil)
-	wantHomeError(t, err, protocol.CodeNotFound, "home.remove: notes was not found")
+	wantHomeError(t, err, protocol.CodeNotFound, "notes was not found")
 
 	for _, bad := range []string{"/etc/passwd", "../other", "a//b", "a/./b", `a\b`, "a\x00b"} {
 		var pe *protocol.Error
@@ -171,11 +171,11 @@ func TestHomeRPCListsButNeverReadsCredentials(t *testing.T) {
 			t.Errorf("home.tree entry for %s = %+v, want a locked file", rel, entry)
 		}
 		wantHomeError(t, c.Call(protocol.MethodHomeRead, protocol.HomePathParams{Path: rel}, nil),
-			protocol.CodeDenied, "home.read: "+rel+" is a credential file; read it in the Environment terminal")
+			protocol.CodeDenied, ""+rel+" is a credential file; read it in the Environment terminal")
 		wantHomeError(t, c.Call(protocol.MethodHomeDownload, protocol.HomePathParams{Path: rel}, nil),
-			protocol.CodeDenied, "home.download: "+rel+" is a credential file; read it in the Environment terminal")
+			protocol.CodeDenied, ""+rel+" is a credential file; read it in the Environment terminal")
 		wantHomeError(t, c.Call(protocol.MethodHomeWrite, protocol.HomeWriteParams{Path: rel, Content: "x"}, nil),
-			protocol.CodeDenied, "home.write: "+rel+" is a credential file; edit it in the Environment terminal")
+			protocol.CodeDenied, ""+rel+" is a credential file; edit it in the Environment terminal")
 	}
 	if entry := e.tree(t, ".ssh")["id_ed25519.pub"]; entry.Locked {
 		t.Fatalf("public key is locked: %+v", entry)
@@ -274,7 +274,7 @@ func TestHomeRPCRequiresLaunchAndOwnHome(t *testing.T) {
 	}
 
 	err = e.client.Call(protocol.MethodHomeRead, map[string]any{"member_id": bob.ID, "path": "bob.txt"}, nil)
-	wantHomeError(t, err, protocol.CodeNotFound, "home.read: bob.txt was not found")
+	wantHomeError(t, err, protocol.CodeNotFound, "bob.txt was not found")
 	var read protocol.ConfigFileReadResult
 	if err = controlAs(t, e.testEnv, bobSigner).Call(protocol.MethodHomeRead, protocol.HomePathParams{Path: "bob.txt"}, &read); err != nil || read.Content != "bob" {
 		t.Fatalf("Bob's own home.read = %+v, %v", read, err)
