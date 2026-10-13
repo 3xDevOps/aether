@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -297,5 +298,31 @@ func TestAgentModelsFallbackRereadsCodexCache(t *testing.T) {
 	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "codex", true)
 	if err != nil || got.Source != protocol.ModelSourceNone || len(got.Models) != 0 {
 		t.Fatalf("after the cache file went away: %+v, %v", got, err)
+	}
+}
+
+func TestCodexModelsScriptAnswersWithoutStdinEOF(t *testing.T) {
+	if _, err := exec.LookPath("timeout"); err != nil {
+		t.Skip("timeout is not on PATH")
+	}
+	fake := filepath.Join(t.TempDir(), "codex")
+	body := "#!/bin/sh\nread a; read b\nprintf '%s\\n' '{\"id\":2,\"result\":{\"data\":[{\"model\":\"m1\",\"displayName\":\"M1\",\"description\":\"d\",\"hidden\":false,\"isDefault\":true}]}}'\ncat >/dev/null\n"
+	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	out, err := exec.Command("/bin/sh", "-c", codexModelsScript, "sh", fake, `{"id":1}`, codexModelsList).Output()
+	if err != nil {
+		t.Fatalf("script: %v", err)
+	}
+	if took := time.Since(started); took > 10*time.Second {
+		t.Fatalf("script took %s", took)
+	}
+	list, err := parseCodexModels(string(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.models) != 1 || list.models[0].ID != "m1" {
+		t.Fatalf("models = %+v", list.models)
 	}
 }
