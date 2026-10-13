@@ -226,6 +226,17 @@ func TestAgentModelsSharedAccount(t *testing.T) {
 
 	writeHomeFiles(t, e.ownerHome, claudeLogin)
 	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.owner.ID, "claude", false)
+	if err != nil || got.Source != protocol.ModelSourceFallback || !strings.Contains(got.Error, "the account owner's environment is not running") {
+		t.Fatalf("with the owner's terminal stopped: %+v, %v, want the fallback and why", got, err)
+	}
+	if n := len(e.rt.execRuns()); n != 0 || e.rt.byName(terminalContainerName(e.owner.ID)) != nil {
+		t.Fatalf("%d probes ran or the owner's terminal was started", n)
+	}
+
+	if _, err = e.sched.EnsureTerminal(t.Context(), e.owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = e.sched.AgentModels(t.Context(), e.member.ID, e.owner.ID, "claude", true)
 	if err != nil || got.Source != protocol.ModelSourceAgent {
 		t.Fatalf("with the owner's login: %+v, %v", got, err)
 	}
@@ -241,5 +252,50 @@ func TestAgentModelsOtherAgentsHaveNone(t *testing.T) {
 	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "omp", false)
 	if err != nil || got.Source != protocol.ModelSourceNone || got.Models == nil || len(e.rt.execRuns()) != 0 {
 		t.Fatalf("got %+v, %v, %d execs", got, err, len(e.rt.execRuns()))
+	}
+}
+
+func TestAgentModelsFailuresExpireSooner(t *testing.T) {
+	t.Parallel()
+	e, clock := newModelsEnv(t)
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) { return 127, "", nil }
+	for range 2 {
+		if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(e.rt.execRuns()); n != 1 {
+		t.Fatalf("%d probes within the failure TTL, want 1", n)
+	}
+	clock.advance(agentModelsFailTTL + time.Second)
+	if _, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.rt.execRuns()); n != 2 {
+		t.Fatalf("%d probes after the failure TTL, want 2", n)
+	}
+}
+
+func TestAgentModelsFallbackRereadsCodexCache(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) { return 127, "", nil }
+	cache := filepath.Join(e.adaHome, ".codex", "models_cache.json")
+	if err := os.MkdirAll(filepath.Dir(cache), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture := modelsFixture(t, "codex-models_cache.json")
+	if err := os.WriteFile(cache, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "codex", false); err != nil || got.Source != protocol.ModelSourceCache {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if err := os.Remove(cache); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "codex", true)
+	if err != nil || got.Source != protocol.ModelSourceNone || len(got.Models) != 0 {
+		t.Fatalf("after the cache file went away: %+v, %v", got, err)
 	}
 }

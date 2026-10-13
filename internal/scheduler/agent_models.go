@@ -18,17 +18,18 @@ import (
 
 const (
 	agentModelsTTL     = time.Hour
+	agentModelsFailTTL = time.Minute
 	agentModelsTimeout = 30 * time.Second
 	codexModelsCache   = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
-	claudeModelsScript  = `printf '%s\n' "$1" | timeout -s KILL 25 claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
+	claudeModelsScript  = `printf '%s\n' "$1" | timeout -s KILL 25 claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
 
 	// codex exits on stdin EOF before it answers, so stdin stays open until
 	// the model/list answer shows up in its output or codex exits.
 	codexModelsScript = `out=$(mktemp) || exit 1
 { printf '%s\n' "$1" "$2"
-  i=0; while [ $i -lt 250 ] && [ ! -e "$out.code" ] && ! grep -q '"id":2[,}]' "$out"; do sleep 0.1; i=$((i+1)); done; } | { codex app-server; echo $? >"$out.code"; } >"$out"
+  i=0; while [ $i -lt 250 ] && [ ! -e "$out.code" ] && ! grep -q '"id":2[,}]' "$out"; do sleep 0.1; i=$((i+1)); done; } | { timeout -s KILL 25 codex app-server; echo $? >"$out.code"; } >"$out"
 code=$(cat "$out.code")
 cat "$out"; rm -f "$out" "$out.code"; exit "${code:-1}"`
 	codexModelsList = `{"id":2,"method":"model/list","params":{}}`
@@ -42,6 +43,13 @@ type agentModelsKey struct {
 type agentModelsEntry struct {
 	result protocol.AgentModelsResult
 	probed time.Time
+}
+
+func (e agentModelsEntry) ttl() time.Duration {
+	if e.result.Source == protocol.ModelSourceFallback || e.result.Source == protocol.ModelSourceNone {
+		return agentModelsFailTTL
+	}
+	return agentModelsTTL
 }
 
 type codexCacheModel struct {
@@ -61,7 +69,9 @@ var errNoModelsAnswer = errors.New("no answer")
 
 // AgentModels lists the models agent name offers on account, probing the
 // agent in account's environment terminal and caching the answer for an hour.
-// A failed probe still answers: with the last good list, else a fallback.
+// A failed probe still answers: with the last good list, else a fallback,
+// which is cached for a minute. Another member's account is probed only while
+// its owner's terminal is running.
 func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error) {
 	if name != "claude" && name != "codex" {
 		return protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}, nil
@@ -80,21 +90,22 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 		s.agentModelsMu.Lock()
 		entry, ok := s.agentModels[key]
 		s.agentModelsMu.Unlock()
-		if ok && s.cfg.Now().Sub(entry.probed) < agentModelsTTL {
+		if ok && s.cfg.Now().Sub(entry.probed) < entry.ttl() {
 			return entry.result, nil
 		}
 	}
-	result, _, _ := s.modelProbes.Do(string(account)+"\x00"+name, func() (any, error) {
-		return s.probeAgentModels(context.WithoutCancel(ctx), key), nil
+	start := account == member
+	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
+		return s.probeAgentModels(context.WithoutCancel(ctx), key, start), nil
 	})
 	return result.(protocol.AgentModelsResult), nil
 }
 
-func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey) protocol.AgentModelsResult {
+func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, start bool) protocol.AgentModelsResult {
 	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
 	defer cancel()
 	now := s.cfg.Now().UTC()
-	list, err := s.execAgentModels(ctx, key)
+	list, err := s.execAgentModels(ctx, key, start)
 	var result protocol.AgentModelsResult
 	if err == nil {
 		result = protocol.AgentModelsResult{
@@ -119,7 +130,7 @@ func (s *Scheduler) agentModelsFallback(key agentModelsKey, probeErr error) prot
 	s.agentModelsMu.Lock()
 	prev, ok := s.agentModels[key]
 	s.agentModelsMu.Unlock()
-	if ok && (prev.result.Source == protocol.ModelSourceAgent || prev.result.Source == protocol.ModelSourceCache) {
+	if ok && prev.result.Source == protocol.ModelSourceAgent {
 		prev.result.Error = probeErr.Error()
 		return prev.result
 	}
@@ -173,19 +184,24 @@ func (s *Scheduler) readCodexModelsCache(account domain.MemberID) (modelList, st
 	return list, file.FetchedAt, nil
 }
 
-func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey) (modelList, error) {
+func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, start bool) (modelList, error) {
 	script, args, parse := claudeModelsScript, []string{claudeModelsRequest}, parseClaudeModels
 	if key.name == "codex" {
 		script, parse = codexModelsScript, parseCodexModels
 		args = []string{fmt.Sprintf(`{"id":1,"method":"initialize","params":{"clientInfo":{"name":"aether","version":%q}}}`, version.Version), codexModelsList}
 	}
-	if _, err := s.EnsureTerminal(ctx, key.account); err != nil {
-		return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
+	if start {
+		if _, err := s.EnsureTerminal(ctx, key.account); err != nil {
+			return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
+		}
 	}
 	s.mu.Lock()
 	sup := s.terminals[key.account]
 	if sup == nil || sup.cleanupPending {
 		s.mu.Unlock()
+		if !start {
+			return modelList{}, fmt.Errorf("%s models: the account owner's environment is not running; start it to list this login's models", key.name)
+		}
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
 	containerID, home := sup.containerID, sup.home

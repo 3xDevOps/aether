@@ -19,7 +19,7 @@ import (
 func init() {
 	registerMethod(protocol.MethodAgentRegister, (*Server).agentRegister)
 	registerMethod(protocol.MethodAgentList, (*Server).agentList)
-	registerMethod(protocol.MethodAgentModels, (*Server).agentModels)
+	registerGuarded(protocol.MethodAgentModels, permissions.Launch, nil, (*Server).agentModels)
 	registerGuarded(protocol.MethodAgentInstall, permissions.Launch, nil, (*Server).agentInstall)
 }
 

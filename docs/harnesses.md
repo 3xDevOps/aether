@@ -1104,12 +1104,12 @@ model "x y" must be a single argument: no whitespace or control characters, not 
 `agent.models` lists the models the installed CLI offers on an account's
 login, so the dashboard can offer them instead of a free-form field. The
 server asks the agent itself, in the account's environment terminal (started
-if needed), with the account's home as `HOME` and working directory:
+if needed for your own account), with the account's home as `HOME` and working directory:
 
 | `--agent` | How | When it fails |
 | --- | --- | --- |
-| `claude` | Pipes one `initialize` control request into `claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence` and reads `models` from the response | `opus`, `sonnet`, `haiku` |
-| `codex` | Sends `initialize` and `model/list` to `codex app-server`; hidden models are dropped | The models listed in `~/.codex/models_cache.json` (`visibility` `list`, by `priority`), else none |
+| `claude` | Pipes one `initialize` control request into `claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose --no-session-persistence` and reads `models` from the response | `opus`, `sonnet`, `haiku` |
+| `codex` | Sends `initialize` and `model/list` to `codex app-server` (25 second limit); hidden models are dropped | The models listed in `~/.codex/models_cache.json` (`visibility` `list`, by `priority`), else none |
 | every other agent | Not discovered | None; type the model |
 
 Each model's `id` is the value a launch passes as the model, in every mode:
@@ -1134,8 +1134,14 @@ discovery that takes over 30 seconds fails.
 
 On a shared account, discovery runs in the account owner's environment with
 the owner's login and installation, since that login decides which models a
-launch can use. It runs only when a launch there would be allowed; otherwise
-`agent.models` answers with the launch's own refusal.
+launch can use. It needs the `Launch` permission and the launch's own checks
+pass first; otherwise `agent.models` answers with the launch's refusal. It
+never starts the owner's environment: if the owner's terminal is not running,
+nothing runs and the result is the fallback above with an `error` saying so.
+
+A `fallback` or `none` result is cached for a minute, not an hour, so the next
+request retries discovery. A failed discovery keeps the last list only when
+it came from `agent`; a `cache` result reads `models_cache.json` again.
 
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
