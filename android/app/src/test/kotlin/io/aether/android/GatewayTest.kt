@@ -70,6 +70,12 @@ class GatewayTest {
     }
 
     @Test
+    fun theCaDirectoryIsTheApexStoreWhereItExists() {
+        assertEquals("/apex/com.android.conscrypt/cacerts", caDirectory(apexExists = true))
+        assertEquals("/system/etc/security/cacerts", caDirectory(apexExists = false))
+    }
+
+    @Test
     fun aStoredAddressWithoutAModeIsTailscale() {
         assertEquals(ConnectionMode.TAILSCALE, resolveMode(null, "https://my-server.ts.net/"))
         assertEquals(ConnectionMode.TAILSCALE, resolveMode("tailscale", null))

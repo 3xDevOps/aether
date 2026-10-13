@@ -871,7 +871,7 @@ there is no sign-in. The app stores only that address.
 
 **Aether Edge.** Sign in with GitHub; no Tailscale needed. The APK carries the
 `aether` CLI built for Android (`arm64-v8a` and `x86_64`) as
-`lib/<abi>/libaether.so`. The app runs `libaether.so gui --json --port 0`, the
+`lib/<abi>/libaether.so`. The app runs `libaether.so gui --json --port <port>`, the
 [local gateway](local-gateway.md) the desktop app runs, and loads its tokened
 `http://127.0.0.1:<port>/?token=...` URL in the WebView. The WebView stays
 locked to that origin, port included; every other link opens in the phone's
@@ -905,8 +905,17 @@ the server requires it.
 `/etc/resolv.conf` on Android, so the app reads the active network's DNS
 servers (permission `ACCESS_NETWORK_STATE`), rewrites the file on every
 network change and points the CLI at it with `AETHER_RESOLV_CONF`
-([networking.md](networking.md#android-dns)). TLS roots are Android's system
-store, `/system/etc/security/cacerts`, plus user-added CAs.
+([networking.md](networking.md#android-dns)). The CLI is given Android's
+system CA store (`/apex/com.android.conscrypt/cacerts` on Android 14+, else
+`/system/etc/security/cacerts`) and does not trust user-installed CAs, as the
+app's network security config does not.
+
+The gateway port is fixed per install, so the dashboard keeps its settings
+across gateway restarts. The WebView does not cache the gateway's pages and
+runs no service worker, and the page is blanked (`about:blank`) whenever the
+gateway exits, until the restarted gateway prints its new URL. Pages the
+dashboard opens in a new window, such as the sign-in verification page, open
+in the phone's browser.
 
 The bundled CLI never checks GitHub for releases (`AETHER_PACKAGED` is set to
 `Android app`): it updates when the app does. The dashboard's update notice
@@ -927,9 +936,12 @@ restarts it on resume if it died.
 **Multiple servers.** In Edge mode, Settings > This computer lists **Saved
 servers** (the default link plus named ones). **Switch** relinks the gateway in
 place and the dashboard reloads. **Link another server** opens onboarding's
-Connect step with the edge server picker. A newly linked edge server becomes
-the default, and the previous edge default stays as a saved server named by its
-server id. The app starts on the default link.
+Connect step with the edge server picker; it is off while a named server is
+active, because a new link replaces the default. A newly linked edge server
+becomes the default, and the previous edge default stays as a saved server
+named by its server id. The app starts on the server you last switched to
+(`gui_server` in `config.json`). Port forwarding is not offered on the phone:
+a forward listens on `127.0.0.1`, which every app on the phone can reach.
 
 **Changing mode.** Long-press the app icon and pick **Connection**. A failed
 load's button is also **Connection**. In Tailscale mode, an address that does

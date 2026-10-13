@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -15,6 +16,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.ServiceWorkerController
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -169,6 +171,7 @@ class MainActivity : ComponentActivity() {
         val stored = connectionMode() ?: return
         if (stored != mode) {
             mode = stored
+            applyModeSettings()
             gatewayUrl = null
             loaded = null
             web.stopLoading()
@@ -267,6 +270,7 @@ class MainActivity : ComponentActivity() {
             allowFileAccess = false
             allowContentAccess = false
         }
+        applyModeSettings()
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         // Lets `chrome://inspect` attach to a debuggable build; a release
         // build stays closed. See docs/dashboard-frontend.md.
@@ -279,9 +283,9 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest,
                 ): Boolean {
                     val target = request.url
-                    // Multiple windows are unsupported, so `target=_blank`
-                    // and `window.open` arrive here as top-level navigations
-                    // too.
+                    // In Tailscale mode multiple windows are unsupported, so
+                    // `target=_blank` and `window.open` arrive here as
+                    // top-level navigations too.
                     val decision =
                         navigationFor(
                             loaded,
@@ -381,7 +385,82 @@ class MainActivity : ComponentActivity() {
                     }
                     return true
                 }
+
+                override fun onCreateWindow(
+                    view: WebView,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message,
+                ): Boolean {
+                    val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                    transport.webView = popupWebView()
+                    resultMsg.sendToTarget()
+                    return true
+                }
+
+                override fun onCloseWindow(window: WebView) {
+                    window.destroy()
+                }
             }
+    }
+
+    /**
+     * Edge mode only; Tailscale mode keeps the WebView's defaults.
+     *
+     * The gateway's port is fixed, so while the CLI is down another app could
+     * bind it and serve the open page a cached chunk or new script that reads
+     * its tokens. Nothing from that origin is cached, no service worker may
+     * keep a copy, and the page is blanked whenever the CLI exits.
+     */
+    private fun applyModeSettings() {
+        val edge = mode == ConnectionMode.EDGE
+        web.settings.cacheMode = if (edge) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
+        web.settings.setSupportMultipleWindows(edge)
+        ServiceWorkerController.getInstance().serviceWorkerWebSettings.apply {
+            blockNetworkLoads = edge
+            cacheMode = if (edge) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
+            allowContentAccess = !edge
+            allowFileAccess = !edge
+        }
+    }
+
+    /**
+     * The window a `window.open` gets: never attached, never rendered, with
+     * script off. It only learns the address the page is sending it to, which
+     * goes to the system browser, and is destroyed once it has.
+     */
+    private fun popupWebView(): WebView {
+        val popup = WebView(this)
+        popup.settings.javaScriptEnabled = false
+        popup.settings.blockNetworkLoads = true
+        var done = false
+        fun route(url: String, scheme: String?): Boolean {
+            if (done) return true
+            val decision = popupNavigation(url, scheme)
+            if (decision == Navigation.LOAD) return false
+            if (decision == Navigation.EXTERNAL) openExternally(Uri.parse(url))
+            done = true
+            popup.post { popup.destroy() }
+            return true
+        }
+        popup.webViewClient =
+            object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean = route(request.url.toString(), request.url.scheme?.lowercase())
+
+                // A first load can skip shouldOverrideUrlLoading.
+                override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    if (done) return
+                    val scheme = Uri.parse(url).scheme?.lowercase()
+                    if (popupNavigation(url, scheme) != Navigation.LOAD) {
+                        view.stopLoading()
+                        route(url, scheme)
+                    }
+                }
+            }
+        return popup
     }
 
     /**
@@ -439,9 +518,16 @@ class MainActivity : ComponentActivity() {
                     // A new address is a new origin: what the old one has in
                     // flight stops before it can be read as an escape.
                     web.stopLoading()
+                    web.clearCache(true)
                     loaded = url
                     web.loadUrl(url + pendingSuffix)
                     pendingSuffix = ""
+                },
+                onExited = {
+                    gatewayUrl = null
+                    loaded = null
+                    web.stopLoading()
+                    web.loadUrl("about:blank")
                 },
                 onFailed = { message ->
                     gatewayUrl = null

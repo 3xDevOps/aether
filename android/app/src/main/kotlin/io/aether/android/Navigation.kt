@@ -83,3 +83,15 @@ fun startedOnDashboard(base: String?, url: String): Boolean {
         }
     return navigationFor(base, url, scheme, mainFrame = true) == Navigation.LOAD
 }
+
+/**
+ * Where a popup the page opened should go. The popup is never shown: a link
+ * goes to the system browser, `about:blank` is the placeholder `window.open`
+ * loads before the page sets the real address, and anything else is dropped.
+ */
+fun popupNavigation(url: String, scheme: String?): Navigation =
+    when {
+        url == "about:blank" -> Navigation.LOAD
+        navigationFor(null, url, scheme, mainFrame = true) == Navigation.EXTERNAL -> Navigation.EXTERNAL
+        else -> Navigation.DROP
+    }

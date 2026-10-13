@@ -27,7 +27,8 @@ request ([What an edge stores](#what-an-edge-stores)).
   phone's current network, which the app reads (permission
   `ACCESS_NETWORK_STATE`) and rewrites when the network changes. Nothing else
   the app writes is its own.
-- **The WebView's ordinary cache** of the dashboard's files, and the
+- **The WebView's ordinary cache** of the dashboard's files (none in Edge
+  mode, which turns it off), and the
   dashboard's own local record of how you use it. That record holds how the
   dashboard looks (theme, text size, sidebar width and whether it is
   collapsed, whether a run's Details panel is open, the embedded
@@ -76,7 +77,9 @@ device-to-device transfer (`allowBackup=false` and
   encrypted end to end between the phone and your server. The GitHub sign-in
   happens in the phone's browser, under GitHub's own policy. The CLI inside the
   app never contacts GitHub to check for updates; new versions arrive with the
-  app.
+  app. The CLI resolves host names with plain DNS over port 53 to the active
+  network's DNS servers, bypassing Android Private DNS (DNS-over-TLS), so that
+  network can see which names it looks up.
 - **In Tailscale mode, your identity reaches the server through Tailscale, not
   through the app.** The server asks its own tailscaled which tailnet login
   owns the connecting device. The app sends no name, email, or identifier of

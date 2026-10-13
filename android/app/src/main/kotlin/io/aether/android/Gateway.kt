@@ -47,6 +47,15 @@ fun parseHandshake(line: String): Handshake? {
 fun resolvConf(servers: List<String>): String =
     servers.joinToString("") { "nameserver $it\n" }
 
+private const val APEX_CA_DIR = "/apex/com.android.conscrypt/cacerts"
+private const val SYSTEM_CA_DIR = "/system/etc/security/cacerts"
+
+/**
+ * The directory of Android's system CA store. Android 14 serves it from the
+ * updatable conscrypt APEX; before that it is the read-only system copy.
+ */
+fun caDirectory(apexExists: Boolean): String = if (apexExists) APEX_CA_DIR else SYSTEM_CA_DIR
+
 // The exit status `aether gui --json` uses to say it replaced its own binary
 // (localgw.ExitRelaunch).
 private const val RELAUNCH_EXIT = 75
@@ -66,6 +75,7 @@ class Gateway(
     private val port: Int,
     private val onReady: (url: String) -> Unit,
     private val onFailed: (message: String) -> Unit,
+    private val onExited: () -> Unit,
 ) {
     private val context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -155,6 +165,7 @@ class Gateway(
                     return
                 }
             if (stopping) return
+            main.post { if (!stopping) onExited() }
             // Another app may hold the port. An ephemeral one costs only the
             // dashboard's saved settings, until the next start.
             val served = servedAt != 0L
@@ -195,8 +206,10 @@ class Gateway(
             put("AETHER_PACKAGED", "Android app")
             put("AETHER_RESOLV_CONF", resolvConfFile().absolutePath)
             // The x86_64 CLI is a linux/amd64 build (Go's android/amd64 needs
-            // cgo), which knows only the CA paths of desktop Linux.
-            put("SSL_CERT_DIR", "/system/etc/security/cacerts:/data/misc/keychain/certs-added")
+            // cgo), which knows only the CA paths of desktop Linux. Only the
+            // system store: the app's network security config does not trust
+            // user-installed CAs, so neither may the CLI.
+            put("SSL_CERT_DIR", caDirectory(File(APEX_CA_DIR).isDirectory))
         }
         synchronized(stderrTail) { stderrTail.clear() }
         val child = builder.start()

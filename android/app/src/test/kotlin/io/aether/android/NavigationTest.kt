@@ -15,6 +15,20 @@ class NavigationTest {
         refusesRequest(BASE, url, scheme, mainFrame = true)
 
     @Test
+    fun aPopupGoesToTheBrowserOrNowhere() {
+        assertEquals(Navigation.LOAD, popupNavigation("about:blank", "about"))
+        assertEquals(Navigation.EXTERNAL, popupNavigation("https://github.com/login/device", "https"))
+        assertEquals(Navigation.EXTERNAL, popupNavigation("http://example.com/", "http"))
+        assertEquals(Navigation.EXTERNAL, popupNavigation("mailto:a@example.com", "mailto"))
+        assertEquals(Navigation.EXTERNAL, popupNavigation("tel:+15551234", "tel"))
+        assertEquals(Navigation.DROP, popupNavigation("about:srcdoc", "about"))
+        assertEquals(Navigation.DROP, popupNavigation("data:text/html,x", "data"))
+        assertEquals(Navigation.DROP, popupNavigation("blob:https://a/b", "blob"))
+        assertEquals(Navigation.DROP, popupNavigation("intent://x#Intent;end", "intent"))
+        assertEquals(Navigation.DROP, popupNavigation("javascript:alert(1)", "javascript"))
+    }
+
+    @Test
     fun theDashboardStaysInTheWebView() {
         assertEquals(Navigation.LOAD, mainFrame("https://my-server.ts.net/?run=01k4x7m2qc", "https"))
         assertEquals(Navigation.LOAD, mainFrame("https://MY-SERVER.ts.net/board", "https"))
