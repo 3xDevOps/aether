@@ -6,10 +6,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -62,12 +67,12 @@ func runUpdate(args []string) error {
 		}
 		if !got.UpdateAvailable {
 			printCheck(got)
-			return nil
+			return reportBinary()
 		}
 		*tag = got.Latest
 	} else if version.Version == *tag {
 		fmt.Printf("already on %s\n", *tag)
-		return nil
+		return reportBinary()
 	}
 
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
@@ -81,12 +86,42 @@ func runUpdate(args []string) error {
 	if len(replaced) > 1 {
 		fmt.Println("restart it: sudo systemctl restart aether-server")
 	}
+	warnShadowed(os.Stderr, replaced[0])
 	if *noApp {
 		return nil
 	}
 	// replaced[0] is this CLI's own path with its symlinks resolved, which
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
+}
+
+// reportBinary names the binary a no-op update looked at. Without it,
+// "already on the latest release" reads as an answer about the aether the
+// shell runs, which sudo and PATH order can make a different file.
+func reportBinary() error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate this binary: %w", err)
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return fmt.Errorf("resolve this binary: %w", err)
+	}
+	fmt.Printf("this binary is %s\n", self)
+	warnShadowed(os.Stderr, self)
+	return nil
+}
+
+func warnShadowed(w io.Writer, self string) {
+	onPath, err := exec.LookPath("aether")
+	if err != nil {
+		return
+	}
+	a, errA := os.Stat(onPath)
+	b, errB := os.Stat(self)
+	if errA != nil || errB != nil || os.SameFile(a, b) {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "warning: aether in PATH is %s, a different binary; update it with: %s update\n", onPath, shellquote.Quote(onPath))
 }
 
 // reportCheck prints the release check and exits 0 whatever it says: a
