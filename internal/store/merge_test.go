@@ -186,7 +186,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanMerge: %v", err)
 	}
-	if _, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: "stale", Policy: "account",
+	if _, err = db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: "stale", Policy: "account",
 		Now: now, Expires: now.Add(time.Minute)}); !isRefusal(err, "preview again") {
 		t.Fatalf("ProposeMerge with a stale digest = %v", err)
 	}
@@ -195,12 +195,12 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposeMerge: %v", err)
 	}
-	if _, err := db.PlanMerge(ctx, "code", c.ID, "account", now); !isRefusal(err, "already used") {
+	if _, err = db.PlanMerge(ctx, "code", c.ID, "account", now); !isRefusal(err, "already used") {
 		t.Fatalf("a proposed code planned again = %v", err)
 	}
 	accept := MergeAccept{ProposalID: pm.ProposalID, Caller: b.ID, Digest: plan.Digest, Policy: "account", Now: now,
 		ConfirmedByKind: "ssh", ConfirmedBy: "test"}
-	if _, err := db.AcceptMerge(ctx, accept); !isRefusal(err, "only member") {
+	if _, err = db.AcceptMerge(ctx, accept); !isRefusal(err, "only member") {
 		t.Fatalf("AcceptMerge by the proposer = %v", err)
 	}
 	accept.Caller = a.ID
@@ -216,11 +216,11 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if got.TailnetLogin != "ada@" || got.PublicKey != a.PublicKey || got.Role != domain.RoleCollaborator || got.DisplayName != "Ada" {
 		t.Fatalf("survivor = %+v", got)
 	}
-	if m, err := db.GetMember(ctx, b.ID); err != nil || m.ID != a.ID {
-		t.Fatalf("the absorbed member resolves to %+v, %v; want the survivor", m, err)
+	if m, gerr := db.GetMember(ctx, b.ID); gerr != nil || m.ID != a.ID {
+		t.Fatalf("the absorbed member resolves to %+v, %v; want the survivor", m, gerr)
 	}
-	if members, err := db.ListMembers(ctx); err != nil || len(members) != 2 {
-		t.Fatalf("ListMembers = %d members, %v; want the survivor and Cy", len(members), err)
+	if members, gerr := db.ListMembers(ctx); gerr != nil || len(members) != 2 {
+		t.Fatalf("ListMembers = %d members, %v; want the survivor and Cy", len(members), gerr)
 	}
 	for ref, moved := range memberRefs {
 		table, column, _ := strings.Cut(ref, ".")
@@ -235,29 +235,29 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("history rewritten: events by the absorbed member = %d, want 1", n)
 	}
-	if err := checkForeignKeysDB(db); err != nil {
+	if err = checkForeignKeysDB(db); err != nil {
 		t.Fatal(err)
 	}
-	if m, err := db.GetMemberByIdentity(ctx, "github", "42"); err != nil || m.ID != a.ID {
-		t.Fatalf("identity resolves to %v, %v", m, err)
+	if m, gerr := db.GetMemberByIdentity(ctx, "github", "42"); gerr != nil || m.ID != a.ID {
+		t.Fatalf("identity resolves to %v, %v", m, gerr)
 	}
-	if m, err := db.GetMemberByTailnetLogin(ctx, "ada@"); err != nil || m.ID != a.ID {
-		t.Fatalf("tailnet login resolves to %v, %v", m, err)
+	if m, gerr := db.GetMemberByTailnetLogin(ctx, "ada@"); gerr != nil || m.ID != a.ID {
+		t.Fatalf("tailnet login resolves to %v, %v", m, gerr)
 	}
-	if d, err := db.GetDevice(ctx, dev.ID); err != nil || d.Member != a.ID || d.Status != domain.DeviceApproved {
-		t.Fatalf("device = %+v, %v", d, err)
+	if d, gerr := db.GetDevice(ctx, dev.ID); gerr != nil || d.Member != a.ID || d.Status != domain.DeviceApproved {
+		t.Fatalf("device = %+v, %v", d, gerr)
 	}
-	if steerers, err := db.ListRunSteerers(ctx, runC.ID); err != nil || len(steerers) != 1 || steerers[0].ID != a.ID {
-		t.Fatalf("steerers = %v, %v", steerers, err)
+	if steerers, gerr := db.ListRunSteerers(ctx, runC.ID); gerr != nil || len(steerers) != 1 || steerers[0].ID != a.ID {
+		t.Fatalf("steerers = %v, %v", steerers, gerr)
 	}
-	if owners, err := db.ListAccountOwners(ctx, a.ID); err != nil || len(owners) != 1 || owners[0].ID != c.ID {
-		t.Fatalf("accounts shared with the survivor = %v, %v", owners, err)
+	if owners, gerr := db.ListAccountOwners(ctx, a.ID); gerr != nil || len(owners) != 1 || owners[0].ID != c.ID {
+		t.Fatalf("accounts shared with the survivor = %v, %v", owners, gerr)
 	}
-	if grantees, err := db.ListAccountGrantees(ctx, a.ID); err != nil || len(grantees) != 0 {
-		t.Fatalf("survivor shares with %v, %v", grantees, err)
+	if grantees, gerr := db.ListAccountGrantees(ctx, a.ID); gerr != nil || len(grantees) != 0 {
+		t.Fatalf("survivor shares with %v, %v", grantees, gerr)
 	}
-	if r, err := db.GetRun(ctx, runB.ID); err != nil || r.MemberID != a.ID {
-		t.Fatalf("absorbed member's run = %+v, %v", r, err)
+	if r, gerr := db.GetRun(ctx, runB.ID); gerr != nil || r.MemberID != a.ID {
+		t.Fatalf("absorbed member's run = %+v, %v", r, gerr)
 	}
 
 	d := merge.Discarded

@@ -484,7 +484,7 @@ func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeS
 	for _, dev := range snap.Devices {
 		dev.ApprovalCode, dev.LastSeenAt = "", nil
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT
+	if err = tx.QueryRowContext(ctx, `SELECT
 		(SELECT COUNT(*) FROM runs WHERE member_id = ?1), (SELECT COUNT(*) FROM schedules WHERE member_id = ?1)`, id).
 		Scan(&snap.Runs, &snap.Schedules); err != nil {
 		return nil, fmt.Errorf("store: plan merge: counts: %w", err)
@@ -495,8 +495,8 @@ func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeS
 	defs, err := collect(rows, func(row interface{ Scan(...any) error }) (*MergeHarnessDefinition, error) {
 		var d MergeHarnessDefinition
 		var raw []byte
-		if err := row.Scan(&d.Name, &raw); err != nil {
-			return nil, err
+		if serr := row.Scan(&d.Name, &raw); serr != nil {
+			return nil, serr
 		}
 		d.Definition = string(raw)
 		return &d, nil
@@ -643,9 +643,9 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 		return nil, err
 	}
 	if code.consumed {
-		done, err := getMerge(ctx, tx, `?`, code.mergeID)
-		if err != nil {
-			return nil, err
+		done, gerr := getMerge(ctx, tx, `?`, code.mergeID)
+		if gerr != nil {
+			return nil, gerr
 		}
 		if done.SurvivorID == a.Caller {
 			return done, nil
@@ -695,7 +695,7 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 		return nil, err
 	}
 	demoted := role != domain.RoleAdmin && (survivor.Member.Role == domain.RoleAdmin || absorbed.Member.Role == domain.RoleAdmin)
-	if err := mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
+	if err = mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
 		return nil, err
 	}
 	var undo func()
@@ -704,7 +704,7 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 			return nil, fmt.Errorf("store: merge: archive the absorbed member's home: %w", err)
 		}
 	}
-	if err := insertMerge(ctx, tx, merge); err != nil {
+	if err = insertMerge(ctx, tx, merge); err != nil {
 		return nil, err
 	}
 	consumed, err := encodeTime(a.Now)

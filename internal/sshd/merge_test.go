@@ -134,7 +134,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ghHome, "notes.txt"), []byte("kept"), 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(ghHome, "notes.txt"), []byte("kept"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,7 +145,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := identities(t, e).ApproveDevice(ctx, dev.ID, e.member.ID); err != nil {
+	if err = identities(t, e).ApproveDevice(ctx, dev.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +157,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if !slices.Contains(plan.SignIns, "tailnet login octo@example.com") || !slices.Contains(plan.SignIns, "github account octo at the edge") {
 		t.Fatalf("sign-ins = %v", plan.SignIns)
 	}
-	if _, err := mergePropose(github, code, string(tina.ID), "0000", false); err == nil || !strings.Contains(err.Error(), "preview again") {
+	if _, err = mergePropose(github, code, string(tina.ID), "0000", false); err == nil || !strings.Contains(err.Error(), "preview again") {
 		t.Fatalf("propose with a stale digest = %v", err)
 	}
 	proposal, err := mergePropose(github, code, string(tina.ID), plan.PlanDigest, false)
@@ -168,7 +168,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	wantRefusal(t, err, "only member "+string(tina.ID))
 
 	var pending protocol.MemberMergePendingResult
-	if err := tailnet.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 ||
+	if err = tailnet.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 ||
 		pending.Proposals[0].ID != proposal.ID || pending.Proposals[0].Plan == nil || pending.Proposals[0].Refusal != "" {
 		t.Fatalf("member.merge.pending = %+v, %v", pending, err)
 	}
@@ -180,8 +180,8 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 		res.Merge.ConfirmedByKind != "ssh" || res.Merge.ArchivePath != filepath.Join(merged, res.Merge.ID) {
 		t.Fatalf("merge = %+v", res)
 	}
-	if data, err := os.ReadFile(filepath.Join(res.Merge.ArchivePath, "home", "notes.txt")); err != nil || string(data) != "kept" {
-		t.Fatalf("archived home: %q, %v", data, err)
+	if data, gerr := os.ReadFile(filepath.Join(res.Merge.ArchivePath, "home", "notes.txt")); gerr != nil || string(data) != "kept" {
+		t.Fatalf("archived home: %q, %v", data, gerr)
 	}
 	waitClosed(t, edgeConn)
 
@@ -191,11 +191,11 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(tina.ID) {
 		t.Fatalf("the tailnet login reconnects as %s", m.ID)
 	}
-	if m, err := e.store.GetMember(ctx, domain.MemberID(gh.ID)); err != nil || m.ID != tina.ID {
-		t.Fatalf("the absorbed member shows as %+v, %v; want the survivor", m, err)
+	if m, gerr := e.store.GetMember(ctx, domain.MemberID(gh.ID)); gerr != nil || m.ID != tina.ID {
+		t.Fatalf("the absorbed member shows as %+v, %v; want the survivor", m, gerr)
 	}
-	if entries, err := e.srv.EdgeDirectory(ctx); err != nil || len(entries) != 1 || entries[0].Subject != octo.Subject {
-		t.Fatalf("edge directory = %+v, %v", entries, err)
+	if entries, gerr := e.srv.EdgeDirectory(ctx); gerr != nil || len(entries) != 1 || entries[0].Subject != octo.Subject {
+		t.Fatalf("edge directory = %+v, %v", entries, gerr)
 	}
 	replay, err := mergeAccept(tailnet, proposal, false)
 	if err != nil || replay.Merge.ID != res.Merge.ID {
@@ -252,7 +252,7 @@ func TestMergeRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mergeAccept(vi, proposal, false); err != nil {
+	if _, err = mergeAccept(vi, proposal, false); err != nil {
 		t.Fatalf("accept: %v", err)
 	}
 	if m, _ := e.store.GetMember(ctx, tina.ID); m.Role != domain.RoleViewer || m.PublicKey != viewer.PublicKey {
@@ -260,7 +260,7 @@ func TestMergeRefusals(t *testing.T) {
 	}
 
 	hash, _ := mergeCodeHash("AAAA-BBBB-CCCC-DDDD")
-	if err := e.store.(store.MergeStore).CreateMergeCode(ctx, e.member.ID, hash, time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)); err != nil {
+	if err = e.store.(store.MergeStore).CreateMergeCode(ctx, e.member.ID, hash, time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: "aaaa bbbb cccc dddd"}, nil), "expired")
@@ -272,7 +272,7 @@ func TestMergeRefusals(t *testing.T) {
 	oc := tailnetDial(t, e, whois, other.TailnetLogin)
 	proposal = mustPropose(t, oc, code, string(other.ID))
 	var cancelled protocol.MemberMergeCancelResult
-	if err := oc.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{}, &cancelled); err != nil || cancelled.Cancelled != 1 {
+	if err = oc.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{}, &cancelled); err != nil || cancelled.Cancelled != 1 {
 		t.Fatalf("member.merge.cancel = %+v, %v", cancelled, err)
 	}
 	_, err = mergeAccept(admin, proposal, false)
@@ -306,18 +306,18 @@ func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 	wantRefusal(t, err, "last admin")
 
 	_, _ = addMember(t, e, "Zed", domain.RoleAdmin, false)
-	if err := identities(t, e).BindIdentity(ctx, &domain.Identity{Member: e.member.ID, Provider: octo.Provider, Subject: octo.Subject, Login: octo.Login}); err != nil {
+	if err = identities(t, e).BindIdentity(ctx, &domain.Identity{Member: e.member.ID, Provider: octo.Provider, Subject: octo.Subject, Login: octo.Login}); err != nil {
 		t.Fatal(err)
 	}
 	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
 	var pending protocol.MemberMergePendingResult
-	if err := admin.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 {
+	if err = admin.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}
 	if pending.Proposals[0].Refusal == "" {
 		t.Fatal("a proposal whose members changed shows no refusal")
 	}
-	if err := admin.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{ProposalID: proposal.ID}, nil); err != nil {
+	if err = admin.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{ProposalID: proposal.ID}, nil); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -352,14 +352,14 @@ func TestSelfLinkByNonAdmin(t *testing.T) {
 	if err == nil || !strings.Contains(banner, want) {
 		t.Fatalf("join by a member's link = %v, banner %q; want it to wait, saying %q", err, banner, want)
 	}
-	if m, err := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("the link bound the account before approval: %+v, %v", m, err)
+	if m, lerr := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject); !errors.Is(lerr, store.ErrNotFound) {
+		t.Fatalf("the link bound the account before approval: %+v, %v", m, lerr)
 	}
 	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{DeviceID: string(dev.ID)}, nil); err != nil {
+	if err = c.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{DeviceID: string(dev.ID)}, nil); err != nil {
 		t.Fatalf("approve own link's device: %v", err)
 	}
 	if m := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))); m.ID != string(carol.ID) || m.Role != string(domain.RoleViewer) {

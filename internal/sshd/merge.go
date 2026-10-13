@@ -232,17 +232,16 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 		Policy: policy, Now: time.Now().UTC(), Archive: s.archiveHome}
 	accept.ConfirmedByKind, accept.ConfirmedBy = s.connDescription(ctx)
 	if edge := s.currentEdgeOwner(); edge != nil {
-		owner, err := edge.Owner()
-		if err != nil {
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": read the server's owner at its edge: " + err.Error()}
+		owner, oerr := edge.Owner()
+		if oerr != nil {
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": read the server's owner at its edge: " + oerr.Error()}
 		}
 		if owner != nil {
 			accept.OwnerProvider, accept.OwnerSubject = owner.Provider, owner.Subject
 		}
 	}
 	if absorbed == "" {
-		_, err := ms.AcceptMerge(ctx, accept)
-		if err == nil {
+		if _, err = ms.AcceptMerge(ctx, accept); err == nil {
 			err = fmt.Errorf("%s: proposal %s is not open for member %s", method, p.ProposalID, member)
 		}
 		return nil, mergeError(err)
