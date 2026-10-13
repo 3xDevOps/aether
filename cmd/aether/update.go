@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -100,10 +101,10 @@ func runUpdate(args []string) error {
 func reportBinary() error {
 	self, err := os.Executable()
 	if err != nil {
-		return err
+		return fmt.Errorf("locate this binary: %w", err)
 	}
 	if self, err = filepath.EvalSymlinks(self); err != nil {
-		return err
+		return fmt.Errorf("resolve this binary: %w", err)
 	}
 	fmt.Printf("this binary is %s\n", self)
 	warnShadowed(os.Stderr, self)
@@ -120,7 +121,7 @@ func warnShadowed(w io.Writer, self string) {
 	if errA != nil || errB != nil || os.SameFile(a, b) {
 		return
 	}
-	_, _ = fmt.Fprintf(w, "warning: aether in PATH is %s, a different binary; update it with: %s update\n", onPath, onPath)
+	_, _ = fmt.Fprintf(w, "warning: aether in PATH is %s, a different binary; update it with: %s update\n", onPath, shellquote.Quote(onPath))
 }
 
 // reportCheck prints the release check and exits 0 whatever it says: a

@@ -12,7 +12,7 @@ import (
 func TestWarnShadowedNamesADifferentAetherInPath(t *testing.T) {
 	dir := t.TempDir()
 	self := filepath.Join(dir, "self", "aether")
-	onPath := filepath.Join(dir, "bin", "aether")
+	onPath := filepath.Join(dir, "my tools", "aether")
 	for _, path := range []string{self, onPath} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -25,7 +25,7 @@ func TestWarnShadowedNamesADifferentAetherInPath(t *testing.T) {
 
 	var out bytes.Buffer
 	warnShadowed(&out, self)
-	want := "warning: aether in PATH is " + onPath + ", a different binary; update it with: " + onPath + " update\n"
+	want := "warning: aether in PATH is " + onPath + ", a different binary; update it with: '" + onPath + "' update\n"
 	if out.String() != want {
 		t.Errorf("warning = %q, want %q", out.String(), want)
 	}
