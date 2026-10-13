@@ -45,6 +45,13 @@ func runGUI(args []string) error {
 		// The dashboard's onboarding wizard links through link.apply.
 		cfg = cli.Config{}
 	}
+	if *server == "" && cfg.GUIServer != "" {
+		if _, ok := cfg.Named(cfg.GUIServer); ok {
+			*server = cfg.GUIServer
+		} else {
+			fmt.Fprintf(os.Stderr, "the server switched to last, %q, is no longer saved; serving the default link\n", cfg.GUIServer)
+		}
+	}
 	if *server != "" {
 		named, ok := cfg.Named(*server)
 		if !ok {

@@ -1405,7 +1405,7 @@ authority.
 | `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link` |
 | `edge.join` | `{"link":"<join link>","addr":"host[:port]","name":"..."}` (`addr` and `name` optional) | as `edge.link` |
 | `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
-| `link.switch` | `{"name":"..."}` (empty selects the default link) | `{"active":"<name>"}` after relinking the gateway in place; the dashboard reloads. An unknown name is `-32602`: `no server named "<name>"` |
+| `link.switch` | `{"name":"..."}` (empty selects the default link) | `{"active":"<name>"}` after relinking the gateway in place; the dashboard reloads. It stops the gateway's forwards and syncs first and saves the choice as `gui_server` in `config.json`, which a later `aether gui` without `--server` starts on. Naming the active link changes nothing. An unknown name is `-32602`: `no server named "<name>"` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
@@ -1676,7 +1676,9 @@ the server snapshot from loading.
   checkout, service manager or local agents. It leaves out `daemon.install`,
   `daemon.status`, `env.agents`, `git.identity`, `link.repo`, `pull`,
   `pull.switch`, `repo.fast-forward`, `repo.push`, `sync.start`,
-  `sync.status` and `sync.stop` from `local`, never checks GitHub for releases,
+  `sync.status` and `sync.stop` from `local`, and `forward.start`,
+  `forward.status` and `forward.stop` too: a forward listens on `127.0.0.1`,
+  which every app on a phone can reach. It never checks GitHub for releases,
   and `aether update` refuses with `this aether is part of the Android app,
   which installs its updates; update the Android app instead`.
 - On Android the CLI reads `AETHER_RESOLV_CONF`, a resolv.conf path, only when

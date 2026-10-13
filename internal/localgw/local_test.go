@@ -541,6 +541,14 @@ func TestLocalLinkSwitch(t *testing.T) {
 	if got := g.local.snapshot(); got.Active != "prod" {
 		t.Fatalf("cached config = %+v, want prod active", got)
 	}
+	if onDisk, err := cli.Load(); err != nil || onDisk.GUIServer != "prod" || onDisk.Addr != "home:2222" {
+		t.Fatalf("saved config = %+v, %v; want gui_server prod beside the unchanged default", onDisk, err)
+	}
+
+	rec = do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true)
+	if rec.Code != http.StatusOK || len(dialed) != 1 {
+		t.Fatalf("switch to the active link = %d %s, dialed %v; want a no-op", rec.Code, rec.Body, dialed)
+	}
 
 	rec = do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"nope"}`, true)
 	if rec.Code != http.StatusBadRequest || decodeError(t, rec.Body.Bytes()).Message != `no server named "nope"` {
@@ -574,7 +582,7 @@ func TestPackagedGatewayOmitsHostVerbs(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
-	for _, verb := range []string{"link.repo", "daemon.install", "sync.start"} {
+	for _, verb := range []string{"link.repo", "daemon.install", "sync.start", "forward.start"} {
 		if slices.Contains(caps.Local, verb) {
 			t.Errorf("capabilities offer %s on a packaged gateway", verb)
 		}

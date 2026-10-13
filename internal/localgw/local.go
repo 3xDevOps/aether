@@ -59,10 +59,12 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 }
 
 // needsHost lists the verbs that need a git checkout, a service manager or
-// local coding agents; a packaged gateway runs on a phone with none of them.
+// local coding agents, which a packaged gateway's phone has none of, and the
+// port forwards, whose loopback listener every app on a phone can reach.
 var needsHost = []string{
-	"daemon.install", "daemon.status", "env.agents", "git.identity", "link.repo", "pull",
-	"pull.switch", "repo.fast-forward", "repo.push", "sync.start", "sync.status", "sync.stop",
+	"daemon.install", "daemon.status", "env.agents", "forward.start", "forward.status", "forward.stop",
+	"git.identity", "link.repo", "pull", "pull.switch", "repo.fast-forward", "repo.push",
+	"sync.start", "sync.status", "sync.stop",
 }
 
 func localVerbsFor(packaged bool) []string {
@@ -86,13 +88,16 @@ var dialLink = cli.Dial
 // the saved link config (link.repo updates it), the background sync
 // sessions, and the edge sign-in in progress.
 type localState struct {
-	mu      sync.Mutex
-	cfg     cli.Config
-	mtime   time.Time
-	backend Backend
-	sync    *localops.SyncManager
-	forward *localops.ForwardManager
-	edge    edgeLogin
+	mu sync.Mutex
+	// switching holds link.switch off while a sync or forward starts, so
+	// neither starts on the server being switched away from.
+	switching sync.RWMutex
+	cfg       cli.Config
+	mtime     time.Time
+	backend   Backend
+	sync      *localops.SyncManager
+	forward   *localops.ForwardManager
+	edge      edgeLogin
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
@@ -319,9 +324,10 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 	return nil
 }
 
-// localLinkSwitch moves the gateway onto a saved link in place. Relink
-// closes the old connection, which ends every stream on it; the dashboard
-// reloads after a switch so it rehydrates against the new server.
+// localLinkSwitch moves the gateway onto a saved link in place and saves
+// it as the link `aether gui` starts on. Relink closes the old connection,
+// which ends every stream on it; the dashboard reloads after a switch so it
+// rehydrates against the new server.
 func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Name string `json:"name"`
@@ -329,10 +335,16 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
 	}
-	target, err := cli.Load()
+	g.local.switching.Lock()
+	defer g.local.switching.Unlock()
+	if g.local.snapshot().Active == params.Name {
+		return map[string]string{"active": params.Name}, nil
+	}
+	saved, err := cli.Load()
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "load link config: " + err.Error()}
 	}
+	target := saved
 	if params.Name != "" {
 		named, ok := target.Named(params.Name)
 		if !ok {
@@ -343,6 +355,11 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	conn, err := dialLink(target)
 	if err != nil {
 		return nil, unreachableError(err)
+	}
+	saved.GUIServer = params.Name
+	if err := cli.Save(saved); err != nil {
+		_ = conn.Close()
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
 	}
 	// Forwards and syncs name the old server's runs and would follow the
 	// backend onto the new one.
@@ -713,6 +730,8 @@ func (g *Gateway) localSyncStart(_ *http.Request, body []byte) (any, *protocol.E
 	if params.RunID == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
 	}
+	g.local.switching.RLock()
+	defer g.local.switching.RUnlock()
 	cfg := g.local.snapshot()
 	if cfg.Repo == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
@@ -785,6 +804,8 @@ func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protoco
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
 	}
+	g.local.switching.RLock()
+	defer g.local.switching.RUnlock()
 	err := g.local.forward.Ensure(params.Target, int(params.Port), func() (io.ReadWriteCloser, error) {
 		return g.cfg.Backend.Forward(params.Target, params.Port)
 	})

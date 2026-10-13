@@ -33,6 +33,10 @@ type Config struct {
 	// The top-level fields stay the default link, so config files written
 	// before this field existed parse and re-save unchanged.
 	Links []NamedLink `json:"links,omitempty"`
+	// GUIServer is the named link `aether gui` serves when started without
+	// --server; the dashboard's server switch sets it, empty for the
+	// default link.
+	GUIServer string `json:"gui_server,omitempty"`
 	// Active is the profile name this process runs on, set by Named and
 	// never persisted: the file's top-level fields are always the default
 	// link, whichever profile a given `aether gui --server` serves.
