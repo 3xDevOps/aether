@@ -35,7 +35,16 @@ export function FilesPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {editor ?? <aside aria-label="Files" className="min-h-0 flex-1 overflow-y-auto">{tree}</aside>}
       <Dialog open={browsing && Boolean(editor)} onOpenChange={onBrowsing}>
-        <DialogContent variant="side" side="left" aria-describedby={undefined} className="w-[min(320px,85vw)]">
+        <DialogContent
+          variant="side"
+          side="left"
+          aria-describedby={undefined}
+          className="w-[min(320px,85vw)]"
+          // Escape in the tree's name field cancels the name, not the sheet.
+          onEscapeKeyDown={(event) => {
+            if (event.target instanceof HTMLInputElement) event.preventDefault()
+          }}
+        >
           <div className="flex h-11 shrink-0 items-center border-b border-seam px-4">
             <DialogTitle>Files</DialogTitle>
           </div>

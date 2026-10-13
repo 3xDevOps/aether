@@ -3686,7 +3686,9 @@ row. It opens like any file, and the editor shows the server's refusal:
 A symlink shows a link icon and does not open. Inline and dialog errors show
 the server's sentence without its method prefix (`errorSentence`).
 
-Drag and drop needs a mouse. On a phone every action is in the row's menu.
+Drag and drop needs a mouse. On a phone every action is in the row's menu,
+and Escape in the name field cancels the name without closing the tree
+sheet (`FilesPane`).
 
 ## Templates
 

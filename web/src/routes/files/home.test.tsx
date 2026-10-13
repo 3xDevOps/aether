@@ -6,6 +6,7 @@ import { FilesRoute } from '@/routes/files'
 import { useStore } from '@/store'
 import { homeKey } from '@/store/files'
 import { fakeApi } from '@/test/fixtures'
+import { atViewport } from '@/test/viewport'
 
 const dir = (name: string): FileTreeEntry => ({ name, kind: 'dir', size: 0 })
 const file = (name: string, locked = false): FileTreeEntry => ({ name, kind: 'file', size: 1, locked })
@@ -183,6 +184,26 @@ describe('Home naming', () => {
     expect(state.drafts[homeKey('done.md')]?.content).toBe('edited\n')
     expect(state.documents[homeKey('todo.md')]).toBeUndefined()
     expect(client.homeRead).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Home on a phone', () => {
+  it('names a row from the menu in the tree sheet, and Escape leaves the sheet open', async () => {
+    atViewport(412, { pointer: 'coarse' })
+    const client = homeApi()
+    await openHome(client)
+    fireEvent.click(row('todo.md'))
+    fireEvent.click(within(await screen.findByRole('article')).getByRole('button', { name: 'Browse' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Files' }))
+
+    await userEvent.click(sheet.getByRole('button', { name: 'Actions for notes' }))
+    await choose('Rename')
+    const field = await sheet.findByRole('textbox', { name: 'New name for notes' })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+
+    await userEvent.keyboard('{Escape}')
+    expect(sheet.queryByRole('textbox')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Files' })).toBeDefined()
   })
 })
 
