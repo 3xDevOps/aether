@@ -1099,6 +1099,44 @@ A model that is not a single argument is refused before launch:
 model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
 ```
 
+### Model discovery
+
+`agent.models` lists the models the installed CLI offers on an account's
+login, so the dashboard can offer them instead of a free-form field. The
+server asks the agent itself, in the account's environment terminal (started
+if needed), with the account's home as `HOME` and working directory:
+
+| `--agent` | How | When it fails |
+| --- | --- | --- |
+| `claude` | Pipes one `initialize` control request into `claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence` and reads `models` from the response | `opus`, `sonnet`, `haiku` |
+| `codex` | Sends `initialize` and `model/list` to `codex app-server`; hidden models are dropped | The models listed in `~/.codex/models_cache.json` (`visibility` `list`, by `priority`), else none |
+| every other agent | Not discovered | None; type the model |
+
+Each model's `id` is the value a launch passes as the model, in every mode:
+Claude's aliases and full names and Codex's model slugs are accepted as is by
+`--model` and by both Enhanced adapters' `model` option. The CLI's own
+`default` entry is not a model; its description becomes `default_label`, and
+an empty model still means the agent's default.
+
+`source` says where the list came from: `agent` (the CLI), `cache` (Codex's
+own cache file), `fallback` (Claude's aliases, which every Claude Code
+version accepts), or `none`. `error` carries the failed discovery's error as
+the CLI or shell printed it, for example:
+
+```text
+codex exited 127: sh: 3: codex: not found
+```
+
+The server keeps each account's list per agent for an hour; `refresh`
+discovers again. A failed refresh keeps the last list and reports the new
+`error`. Concurrent requests for the same list share one discovery, and a
+discovery that takes over 30 seconds fails.
+
+On a shared account, discovery runs in the account owner's environment with
+the owner's login and installation, since that login decides which models a
+launch can use. It runs only when a launch there would be allowed; otherwise
+`agent.models` answers with the launch's own refusal.
+
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
 `--verbose` comes with it. If a launch fails with the CLI rejecting its own

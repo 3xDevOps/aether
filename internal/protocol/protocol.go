@@ -94,6 +94,8 @@ const (
 	// MethodAgentInstall answers when the install command ends or
 	// AgentInstallTimeout passes, whichever is first.
 	MethodAgentInstall = "agent.install"
+	// MethodAgentModels lists the models an agent offers on an account.
+	MethodAgentModels = "agent.models"
 )
 
 // AgentInstallTimeout bounds one agent.install.

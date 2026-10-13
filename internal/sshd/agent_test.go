@@ -3,8 +3,10 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -424,5 +426,35 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		if agent.LoginMissing || agent.OwnAccountOnly || agent.Unavailable != "" {
 			t.Fatalf("own account %s reports a refusal: %+v", agent.Name, agent)
 		}
+	}
+}
+
+func TestAgentModelsRoutesToRuns(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	runs := s.cfg.Runs.(*fakeRuns)
+	call := func(p protocol.AgentModelsParams) (any, *protocol.Error) {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.agentModels(context.Background(), member.ID, raw)
+	}
+	result, perr := call(protocol.AgentModelsParams{Name: "codex", Refresh: true})
+	if perr != nil {
+		t.Fatalf("agentModels: %+v", perr)
+	}
+	if got := result.(protocol.AgentModelsResult).Models; len(got) != 1 || got[0].ID != "codex" {
+		t.Fatalf("models = %+v", got)
+	}
+	if want := "models:" + string(member.ID) + ":" + string(member.ID) + ":codex:true"; !slices.Contains(runs.calls, want) {
+		t.Fatalf("calls = %v, want %q", runs.calls, want)
+	}
+	if _, perr = call(protocol.AgentModelsParams{}); perr == nil || perr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("empty name: %+v, want invalid params", perr)
+	}
+	runs.setErr(errors.New("not logged in"))
+	if _, perr = call(protocol.AgentModelsParams{Name: "claude"}); perr == nil || !strings.Contains(perr.Message, "not logged in") {
+		t.Fatalf("runs error: %+v", perr)
 	}
 }
