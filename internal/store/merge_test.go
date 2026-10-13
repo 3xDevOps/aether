@@ -13,22 +13,18 @@ import (
 )
 
 // notMemberRefs are the columns a member-reference name pattern matches
-// that hold no member id a merge must rewrite.
+// that hold no member id.
 var notMemberRefs = map[string]string{
-	"member_merges.absorbed_id":          "names the member the merge deleted",
-	"member_merges.confirmed_by":         "describes the confirming connection",
+	"member_merges.confirmed_by":         "describes the accepting connection",
 	"evidence_packets.publication_owner": "an enum, not a member",
 }
 
-// TestMergeHandlesEveryMemberColumn fails when a column that can hold a
-// member id is neither rewritten by a merge (memberRefs) nor listed as
-// holding none, so no table keeps an absorbed member's id unnoticed.
-func TestMergeHandlesEveryMemberColumn(t *testing.T) {
+// TestMergeClassifiesEveryMemberColumn fails when a column that can hold a
+// member id is neither moved by a merge nor kept as history (memberRefs),
+// nor listed as holding none, so no new table keeps a merged member's id
+// unreviewed.
+func TestMergeClassifiesEveryMemberColumn(t *testing.T) {
 	db := openTestDB(t)
-	handled := map[string]bool{}
-	for _, ref := range memberRefs {
-		handled[ref.table+"."+ref.column] = true
-	}
 	tables, err := db.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
@@ -54,9 +50,10 @@ func TestMergeHandlesEveryMemberColumn(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, col := range colNames {
-			columns[*table+"."+*col] = true
-			if *table != "members" && memberNamed(*col) && !handled[*table+"."+*col] && notMemberRefs[*table+"."+*col] == "" {
-				t.Errorf("%s.%s looks like a member reference that a merge does not rewrite; add it to memberRefs or notMemberRefs", *table, *col)
+			ref := *table + "." + *col
+			columns[ref] = true
+			if _, ok := memberRefs[ref]; !ok && memberNamed(*col) && notMemberRefs[ref] == "" && ref != "members.id" {
+				t.Errorf("%s looks like a member reference a merge does not classify; add it to memberRefs or notMemberRefs", ref)
 			}
 		}
 		fks, err := db.db.Query(`SELECT "table", "from" FROM pragma_foreign_key_list(?)`, *table)
@@ -68,15 +65,15 @@ func TestMergeHandlesEveryMemberColumn(t *testing.T) {
 			if err := fks.Scan(&parent, &from); err != nil {
 				t.Fatal(err)
 			}
-			if parent == "members" && !handled[*table+"."+from] {
-				t.Errorf("%s.%s references members(id) and a merge does not rewrite it; add it to memberRefs", *table, from)
+			if _, ok := memberRefs[*table+"."+from]; parent == "members" && !ok {
+				t.Errorf("%s.%s references members(id) and a merge does not classify it; add it to memberRefs", *table, from)
 			}
 		}
 		if err := fks.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for ref := range handled {
+	for ref := range memberRefs {
 		if !columns[ref] {
 			t.Errorf("memberRefs lists %s, which the schema does not have", ref)
 		}
@@ -87,7 +84,8 @@ func memberNamed(col string) bool {
 	switch {
 	case strings.HasSuffix(col, "member_id"), strings.HasSuffix(col, "_human_id"), col == "actor_id", col == "actor_key",
 		strings.HasSuffix(col, "_by"), strings.Contains(col, "owner"), col == "creator_id", col == "origin_id",
-		strings.HasSuffix(col, "account_id"), col == "survivor_id", col == "absorbed_id":
+		strings.HasSuffix(col, "account_id"), col == "survivor_id", col == "absorbed_id", col == "merged_into",
+		col == "proposed_by", col == "keep_settings_of":
 		return true
 	}
 	return false
@@ -118,7 +116,7 @@ func TestMergeMigrationUpgradesV62(t *testing.T) {
 		t.Fatalf("run after upgrade = %+v, %v", r, err)
 	}
 	now := time.Now()
-	if err := db.CreateMergeCode(ctx, "m1", "hash", false, now, now.Add(time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, "m1", "hash", now, now.Add(time.Minute)); err != nil {
 		t.Fatalf("CreateMergeCode after upgrade: %v", err)
 	}
 	if merges, err := db.ListMerges(ctx, ""); err != nil || len(merges) != 0 {
@@ -126,7 +124,7 @@ func TestMergeMigrationUpgradesV62(t *testing.T) {
 	}
 }
 
-func TestConfirmMergeRewritesEveryReference(t *testing.T) {
+func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -181,20 +179,34 @@ func TestConfirmMergeRewritesEveryReference(t *testing.T) {
 		INSERT INTO events (id, ts, workspace_id, run_id, actor_id, type, payload) VALUES ('ev1', 1, ?5, ?4, ?2, 'run.status', '{}');
 	`, runC.ID, b.ID, a.ID, runB.ID, w.ID)
 
-	if err := db.CreateMergeCode(ctx, a.ID, "code", false, now, now.Add(10*time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(10*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := db.PlanMerge(ctx, "code", b.ID, now)
+	plan, err := db.PlanMerge(ctx, "code", b.ID, "account", now)
 	if err != nil {
 		t.Fatalf("PlanMerge: %v", err)
 	}
-	if _, err := db.ConfirmMerge(ctx, MergeConfirm{CodeHash: "code", Caller: b.ID, Keep: a.ID, Digest: "stale", Now: now}); !isRefusal(err, "preview again") {
-		t.Fatalf("ConfirmMerge with a stale digest = %v", err)
+	if _, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: "stale", Policy: "account",
+		Now: now, Expires: now.Add(time.Minute)}); !isRefusal(err, "preview again") {
+		t.Fatalf("ProposeMerge with a stale digest = %v", err)
 	}
-	merge, err := db.ConfirmMerge(ctx, MergeConfirm{CodeHash: "code", Caller: b.ID, Keep: a.ID, Digest: plan.Digest, Now: now,
-		ConfirmedByKind: "ssh", ConfirmedBy: "test"})
+	pm, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: plan.Digest, Policy: "account",
+		Now: now, Expires: now.Add(time.Minute)})
 	if err != nil {
-		t.Fatalf("ConfirmMerge: %v", err)
+		t.Fatalf("ProposeMerge: %v", err)
+	}
+	if _, err := db.PlanMerge(ctx, "code", c.ID, "account", now); !isRefusal(err, "already used") {
+		t.Fatalf("a proposed code planned again = %v", err)
+	}
+	accept := MergeAccept{ProposalID: pm.ProposalID, Caller: b.ID, Digest: plan.Digest, Policy: "account", Now: now,
+		ConfirmedByKind: "ssh", ConfirmedBy: "test"}
+	if _, err := db.AcceptMerge(ctx, accept); !isRefusal(err, "only member") {
+		t.Fatalf("AcceptMerge by the proposer = %v", err)
+	}
+	accept.Caller = a.ID
+	merge, err := db.AcceptMerge(ctx, accept)
+	if err != nil {
+		t.Fatalf("AcceptMerge: %v", err)
 	}
 
 	got, err := db.GetMember(ctx, a.ID)
@@ -204,21 +216,33 @@ func TestConfirmMergeRewritesEveryReference(t *testing.T) {
 	if got.TailnetLogin != "ada@" || got.PublicKey != a.PublicKey || got.Role != domain.RoleCollaborator || got.DisplayName != "Ada" {
 		t.Fatalf("survivor = %+v", got)
 	}
-	if _, err := db.GetMember(ctx, b.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("absorbed member still there: %v", err)
+	if m, err := db.GetMember(ctx, b.ID); err != nil || m.ID != a.ID {
+		t.Fatalf("the absorbed member resolves to %+v, %v; want the survivor", m, err)
 	}
-	for _, ref := range memberRefs {
+	if members, err := db.ListMembers(ctx); err != nil || len(members) != 2 {
+		t.Fatalf("ListMembers = %d members, %v; want the survivor and Cy", len(members), err)
+	}
+	for ref, moved := range memberRefs {
+		table, column, _ := strings.Cut(ref, ".")
 		var n int
-		mustScan(t, db, &n, `SELECT COUNT(*) FROM `+ref.table+` WHERE instr(`+ref.column+`, ?) > 0`, string(b.ID))
-		if n != 0 {
-			t.Errorf("%s.%s still names the absorbed member in %d rows", ref.table, ref.column, n)
+		mustScan(t, db, &n, `SELECT COUNT(*) FROM `+table+` WHERE `+column+` = ?`, string(b.ID))
+		if moved && n != 0 {
+			t.Errorf("%s still names the absorbed member in %d rows", ref, n)
 		}
+	}
+	var n int
+	mustScan(t, db, &n, `SELECT COUNT(*) FROM events WHERE actor_id = ?`, string(b.ID))
+	if n != 1 {
+		t.Fatalf("history rewritten: events by the absorbed member = %d, want 1", n)
 	}
 	if err := checkForeignKeysDB(db); err != nil {
 		t.Fatal(err)
 	}
 	if m, err := db.GetMemberByIdentity(ctx, "github", "42"); err != nil || m.ID != a.ID {
 		t.Fatalf("identity resolves to %v, %v", m, err)
+	}
+	if m, err := db.GetMemberByTailnetLogin(ctx, "ada@"); err != nil || m.ID != a.ID {
+		t.Fatalf("tailnet login resolves to %v, %v", m, err)
 	}
 	if d, err := db.GetDevice(ctx, dev.ID); err != nil || d.Member != a.ID || d.Status != domain.DeviceApproved {
 		t.Fatalf("device = %+v, %v", d, err)
@@ -232,36 +256,27 @@ func TestConfirmMergeRewritesEveryReference(t *testing.T) {
 	if grantees, err := db.ListAccountGrantees(ctx, a.ID); err != nil || len(grantees) != 0 {
 		t.Fatalf("survivor shares with %v, %v", grantees, err)
 	}
-	if r, err := db.GetRun(ctx, runB.ID); err != nil || r.MemberID != a.ID || r.ProfileSnapshotID != "ps-a" {
+	if r, err := db.GetRun(ctx, runB.ID); err != nil || r.MemberID != a.ID {
 		t.Fatalf("absorbed member's run = %+v, %v", r, err)
-	}
-	var runs int
-	mustScan(t, db, &runs, `SELECT runs FROM run_cost_deletions WHERE member_id = ?`, string(a.ID))
-	if runs != 5 {
-		t.Fatalf("deleted run costs summed to %d runs, want 5", runs)
-	}
-	mustScan(t, db, &runs, `SELECT COUNT(*) FROM room_messages WHERE actor_id = ?`, string(a.ID))
-	if runs != 2 {
-		t.Fatalf("room messages of the survivor = %d, want 2", runs)
 	}
 
 	d := merge.Discarded
 	if d.DisplayName != "Ada on GitHub" || d.GitEmail != "ada@example.com" || d.Image != "aether-member-b:1" ||
 		len(d.HarnessDefinitions) != 1 || d.HarnessDefinitions[0].Name != "mine" || len(d.ProfileHeads) != 2 ||
-		!slices.Equal(d.AccountSharedWith, []domain.MemberID{a.ID, c.ID}) {
+		len(d.AccountSharedWith) != 2 || !slices.Contains(d.AccountSharedWith, a.ID) || !slices.Contains(d.AccountSharedWith, c.ID) {
 		t.Fatalf("discarded settings = %+v", d)
 	}
 	merges, err := db.ListMerges(ctx, a.ID)
 	if err != nil || len(merges) != 1 || merges[0].Absorbed.Member.ID != b.ID || merges[0].Discarded.Color != "#3cb44b" {
 		t.Fatalf("ListMerges = %+v, %v", merges, err)
 	}
-
-	replay, err := db.ConfirmMerge(ctx, MergeConfirm{CodeHash: "code", Caller: a.ID, Keep: a.ID, Digest: plan.Digest, Now: now})
+	replay, err := db.AcceptMerge(ctx, accept)
 	if err != nil || replay.ID != merge.ID {
-		t.Fatalf("replayed confirm = %+v, %v", replay, err)
+		t.Fatalf("replayed accept = %+v, %v", replay, err)
 	}
-	if _, err := db.ConfirmMerge(ctx, MergeConfirm{CodeHash: "code", Caller: c.ID, Keep: c.ID, Digest: plan.Digest, Now: now}); !isRefusal(err, "already used") {
-		t.Fatalf("confirm of a used code by another member = %v", err)
+	accept.Caller = c.ID
+	if _, err := db.AcceptMerge(ctx, accept); !isRefusal(err, "accepted already") {
+		t.Fatalf("accept of a used proposal by another member = %v", err)
 	}
 }
 
@@ -274,22 +289,21 @@ func TestPlanMergeRefusals(t *testing.T) {
 	if err := db.CreateMember(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateMergeCode(ctx, a.ID, "code", false, now, now.Add(time.Minute)); err != nil {
+	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.PlanMerge(ctx, "nope", b.ID, now); !isRefusal(err, "unknown") {
+	if _, err := db.PlanMerge(ctx, "nope", b.ID, "", now); !isRefusal(err, "unknown") {
 		t.Fatalf("unknown code = %v", err)
 	}
-	if _, err := db.PlanMerge(ctx, "code", b.ID, now.Add(time.Hour)); !isRefusal(err, "expired") {
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now.Add(time.Hour)); !isRefusal(err, "expired") {
 		t.Fatalf("expired code = %v", err)
 	}
-	var same *MergeRefusal
-	if _, err := db.PlanMerge(ctx, "code", a.ID, now); !errors.As(err, &same) || !same.SameMember {
+	if _, err := db.PlanMerge(ctx, "code", a.ID, "", now); !isRefusal(err, "already the same member") {
 		t.Fatalf("own code = %v", err)
 	}
 	w := mustCreateWorkspace(t, db)
 	run := mustCreateRun(t, db, w.ID, b.ID, domain.RunRunning)
-	if _, err := db.PlanMerge(ctx, "code", b.ID, now); !isRefusal(err, string(run.ID)) {
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, string(run.ID)) {
 		t.Fatalf("live run = %v", err)
 	}
 }

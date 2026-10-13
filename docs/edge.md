@@ -145,10 +145,12 @@ With a member's GitHub account, the edge honest:
 | --- | --- | --- |
 | Sign in and list the member's servers: names, ids, roles, online state, policy | Yes | Yes |
 | Reach a workspace | **Yes**, with the member's role on each server they belong to (`TestTakenOverProviderAccount`) | No: the new device is pending (`TestTakenOverProviderAccount`) |
-| As an admin | Invite accounts, mint invite codes, change roles, link accounts, transfer ownership. Not approve a device: a registered device approves nothing (`TestAccountAccess`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
+| As an admin | Invite accounts, change roles, transfer ownership. Not approve a device, link an account or take a merge step: a registered device does none of those (`TestAccountAccess`, `TestMergeTailnetMemberWithEdgeMember` in `internal/sshd`) | Nothing: a pending device completes no handshake (`TestApprovedDevices`) |
 | Accept an invitation addressed to the member | Only with its join link, which the admin sends outside the edge; with it, yes, with its role (`TestInvitations`) | Only with the link, and then the device waits on the invitation. No member is created, no account bound and the invitation stays open until an admin approves the device (`TestJoinByLink`, `TestInvitationWaitsUntilOneDeviceIsApproved` in `internal/sshd`) |
 | Persist after the member recovers the account | Yes: the device token does not expire and the device stays registered until revoked at the edge and on each server, along with anything done as an admin ([Recovering a GitHub account](#recovering-a-github-account)) | A pending device and a device token remain, with no access |
 | Get a device approved | Not needed | Only by an admin's, or the member's own, click on its Needs you card, which shows the device label, account, key fingerprint, and the member and role it admits as. Its code reaches the device only when it admits as the only admin, who has no approved device; the machine's administrator who types it is shown the same before answering `y` (`TestApprovalCodeOnlyWithoutAnInAppApprover` in `internal/sshd`). The code is 40 bits, and a code naming two waiting devices approves neither (`GetDeviceByApprovalCode` in `internal/store`) |
+| Merge the member with another | No: every merge step needs an approved device, member SSH key or tailnet connection, and a registered device has none. On a server where the member has an approved device, a merge needs a code minted on one member's sign-in, shown only there, a proposal from the other member's, and acceptance on the first: two sign-ins it would both have to hold. The merged member takes the lower role; only the admin side keeps it admin (`TestMergeTailnetMemberWithEdgeMember`, `TestMergeLastAdminNeedsKeepAdmin` in `internal/sshd`). `aether member merges` lists every merge | Nothing: a pending device completes no handshake (`TestPrivilegedMethodsRefuseAnUnapprovedDevice` in `internal/sshd`) |
+| Bind the account to a member through a link | Only by opening that member's link, which waits for that member's approval under either policy after telling the device whose member it would act as (`TestSelfLinkByNonAdmin` in `internal/sshd`) | The same |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
 | Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Members > Devices tab and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
 
@@ -164,7 +166,8 @@ With the edge, or its signing key:
 | Record its own key under a member's account | Yes, admitted as that member | Pending: the Needs you card, `aether device approve` and `sudo aether-server device approve` show the approver that it admits the key as that member, with that role, and approve only on a click or a yes (`TestMaliciousEdgeApprovedDevices`) |
 | Grow the server's device table | Registered devices are admitted devices, not bounded | At most 10 pending devices per account and 10 per invitation (`TestWaitingDevicesAreBounded` in `internal/sshd`) |
 | Replay a connection, or change the policy, a member, a role or the owner by altering or injecting control messages | No: the server refuses a used connection id and takes no instruction from the edge's messages | No (`TestMaliciousEdgeApprovedDevices`, `TestServerVerifiesGrants`) |
-| Send a forged account deletion | Removes that identity and its edge devices on the server, including approved device keys used on the direct path: access lost, none gained. An admin restores it with `aether member link` | The same (`TestMaliciousEdgeApprovedDevices`) |
+| Merge two members | No: a forged grant yields a registered device, which takes no merge step | No: forged grants yield pending devices |
+| Send a forged account deletion | Removes that identity and its edge devices on the server, including approved device keys used on the direct path: access lost, none gained. The member restores it with `aether member link` | The same (`TestMaliciousEdgeApprovedDevices`) |
 | Read or alter an SSH session | No: SSH is end to end | No |
 | Impersonate a server to a linked client | No: the host key must derive the linked id (`TestEnrollmentSignatureIsNotAHostSignature`) | No |
 | Send a client that is linking for the first time to another server | Yes, by listing a false id, unless the person links by a join or claim link, or by an id from the server's admin ([First link](#first-link-and-server-identity)) | The same |
@@ -881,8 +884,8 @@ edge devices and closes their connections. It removes no member, changes no role
 What stays: the member itself, with its runs and role; its SSH keys and
 tailnet identity; invitations to the login or email, until an admin revokes
 them. Signing in again creates a new account with a new account id, which
-no server knows: an admin links it to themselves with `aether member link`,
-or invites it, which creates a new member.
+no server knows: a member links it to themselves with `aether member link`,
+or an admin invites it, which creates a new member.
 
 Before deleting an account that is the only way an admin reaches a server,
 make sure another admin exists, or that the admin also has an SSH key or a

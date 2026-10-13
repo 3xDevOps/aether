@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -20,8 +21,11 @@ import (
 
 const defaultInviteTTL = 24 * time.Hour
 
+// inviteRecord is an open invite code. IssuedBy is the admin who minted
+// it, empty for codes minted before it was recorded.
 type inviteRecord struct {
-	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	IssuedBy  domain.MemberID `json:"issued_by,omitempty"`
 }
 
 // parseInviteUser recognizes SSH usernames of the form invite:<code> or
@@ -55,7 +59,7 @@ func invitePath(dir, code string) string {
 	return filepath.Join(dir, code)
 }
 
-func mintInvite(dir string, ttl time.Duration) (code string, expires time.Time, err error) {
+func mintInvite(dir string, ttl time.Duration, issuer domain.MemberID) (code string, expires time.Time, err error) {
 	if dir == "" {
 		return "", time.Time{}, errors.New("sshd: invites directory not configured")
 	}
@@ -71,7 +75,7 @@ func mintInvite(dir string, ttl time.Duration) (code string, expires time.Time, 
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return "", time.Time{}, fmt.Errorf("sshd: create invites dir: %w", err)
 	}
-	rec := inviteRecord{ExpiresAt: expires}
+	rec := inviteRecord{ExpiresAt: expires, IssuedBy: issuer}
 	body, err := json.Marshal(rec)
 	if err != nil {
 		return "", time.Time{}, err
@@ -163,4 +167,25 @@ func restoreInvite(dir, code string, rec inviteRecord) error {
 		return err
 	}
 	return os.WriteFile(invitePath(dir, code), append(body, '\n'), 0o600)
+}
+
+// revokeInvitesBy deletes the open invite codes any of issuers minted.
+func revokeInvitesBy(dir string, issuers ...domain.MemberID) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sshd: list invites: %w", err)
+	}
+	for _, e := range entries {
+		rec, err := loadInvite(dir, e.Name())
+		if err != nil || rec.IssuedBy == "" || !slices.Contains(issuers, rec.IssuedBy) {
+			continue
+		}
+		if err := burnInvite(dir, e.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("sshd: revoke invite: %w", err)
+		}
+	}
+	return nil
 }

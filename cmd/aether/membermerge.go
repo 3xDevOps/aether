@@ -14,40 +14,53 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const memberMergeUsage = "usage: aether member merge start [--keep-admin] | aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes]"
+const memberMergeUsage = "usage: aether member merge start | aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes] |\n" +
+	"       aether member merge accept [--keep-admin] [--yes] | aether member merge cancel"
 
-// memberMerge mints a merge code on one sign-in, or previews and confirms
-// one minted on the other.
+// memberMerge mints a merge code on one sign-in, proposes a merge with it
+// from the other, and accepts or cancels it.
 func memberMerge(args []string) error {
-	if len(args) > 0 && args[0] == "start" {
-		fs := flag.NewFlagSet("member merge start", flag.ContinueOnError)
-		keepAdmin := fs.Bool("keep-admin", false, "as an admin, let the merged member stay admin if the other sign-in confirms with --keep-admin")
-		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
-			return errors.New(memberMergeUsage)
-		}
-		return withControl(func(c *protocol.Client) error {
-			var res protocol.MemberMergeStartResult
-			if err := c.Call(protocol.MethodMemberMergeStart, protocol.MemberMergeStartParams{KeepAdmin: *keepAdmin}, &res); err != nil {
-				return err
-			}
-			fmt.Printf("merge code %s, valid until %s\n", res.Code, res.ExpiresAt)
-			fmt.Printf("on your other sign-in run: aether member merge %s, or open Profile > Sign-ins > Merge in the dashboard\n", res.Code)
-			fmt.Println("whoever enters this code merges their member with yours; give it to no one")
-			return nil
-		})
-	}
-	fs := flag.NewFlagSet("member merge", flag.ContinueOnError)
-	keep := fs.String("keep", "", "the member id whose settings prevail")
-	keepAdmin := fs.Bool("keep-admin", false, "keep the merged member admin when one of the two is")
-	yes := fs.Bool("yes", false, "discard the other member's settings without asking")
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return errors.New(memberMergeUsage)
 	}
-	code := args[0]
+	fs := flag.NewFlagSet("member merge", flag.ContinueOnError)
+	keep := fs.String("keep", "", "the member id whose settings prevail")
+	keepAdmin := fs.Bool("keep-admin", false, "as the admin side, keep the merged member admin")
+	yes := fs.Bool("yes", false, "answer yes instead of asking")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return errors.New(memberMergeUsage)
 	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))
+	in, out := bufio.NewReader(os.Stdin), os.Stdout
+	switch args[0] {
+	case "start":
+		return withControl(func(c *protocol.Client) error {
+			var res protocol.MemberMergeStartResult
+			if err := c.Call(protocol.MethodMemberMergeStart, struct{}{}, &res); err != nil {
+				return err
+			}
+			fmt.Printf("merge code %s, valid until %s\n", res.Code, res.ExpiresAt)
+			fmt.Printf("on your other sign-in run: aether member merge %s, or open Profile > Sign-ins > Merge in the dashboard\n", res.Code)
+			fmt.Println("Anyone who enters this code can propose joining their sign-ins to your member; you will be asked to accept.")
+			fmt.Println("then accept here: aether member merge accept")
+			return nil
+		})
+	case "cancel":
+		return withControl(func(c *protocol.Client) error {
+			var res protocol.MemberMergeCancelResult
+			if err := c.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{}, &res); err != nil {
+				return err
+			}
+			fmt.Printf("cancelled %d open merge code(s) and proposal(s)\n", res.Cancelled)
+			return nil
+		})
+	case "accept":
+		if !interactive && !*yes {
+			return errors.New("aether member merge accept: no terminal to ask on; pass --yes after reading aether member merge accept's output")
+		}
+		return withControl(func(c *protocol.Client) error { return mergeAccept(c, *keepAdmin, *yes, in, out) })
+	}
+	code := args[0]
 	if !interactive && (*keep == "" || !*yes) {
 		return errors.New("aether member merge: no terminal to ask on; pass --keep <member-id> and --yes after reading the preview")
 	}
@@ -56,84 +69,120 @@ func memberMerge(args []string) error {
 		if err := c.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: code}, &plan); err != nil {
 			return err
 		}
-		params, err := mergeDecision(plan, code, *keep, *keepAdmin, *yes, bufio.NewReader(os.Stdin), os.Stdout)
+		params, err := mergeProposal(plan, code, *keep, *keepAdmin, *yes, in, out)
 		if err != nil {
 			return err
 		}
-		var res protocol.MemberMergeConfirmResult
-		if err := c.Call(protocol.MethodMemberMergeConfirm, params, &res); err != nil {
+		var res protocol.MemberMergeProposal
+		if err := c.Call(protocol.MethodMemberMergePropose, params, &res); err != nil {
 			return err
 		}
-		fmt.Printf("merged member %s into %s (%s), now %s\n", res.Merge.AbsorbedID, res.Member.ID, res.Member.DisplayName, res.Member.Role)
-		if res.Merge.ArchivePath != "" {
-			fmt.Printf("its home was moved to %s on the server\n", res.Merge.ArchivePath)
-		}
-		fmt.Println("its discarded settings are kept in: aether member merges")
+		fmt.Printf("proposed merge %s, open until %s\n", res.ID, res.ExpiresAt)
+		fmt.Printf("on the sign-in that minted the code, member %s, run: aether member merge accept\n", res.MintedID)
 		return nil
 	})
 }
 
-// mergeDecision prints plan and asks, unless the flags already answer,
-// whose settings prevail, whether to discard the other's, and whether to
-// keep admin.
-func mergeDecision(plan protocol.MemberMergePlan, code, keep string, keepAdmin, yes bool, in *bufio.Reader, out io.Writer) (protocol.MemberMergeConfirmParams, error) {
-	params := protocol.MemberMergeConfirmParams{Code: code, PlanDigest: plan.PlanDigest, KeepAdmin: keepAdmin}
-	sides := []protocol.MergeMember{plan.Minted, plan.Confirming}
-	for i, m := range sides {
-		printMergeMember(out, i+1, m)
-	}
-	_, _ = fmt.Fprintf(out, "\nthe merged member signs in with: %s\n", strings.Join(plan.SignIns, ", "))
+// mergeProposal prints plan and asks, unless the flags already answer,
+// whose settings prevail, whether the admin side keeps admin, and whether
+// to discard the other member's settings.
+func mergeProposal(plan protocol.MemberMergePlan, code, keep string, keepAdmin, yes bool, in *bufio.Reader, out io.Writer) (protocol.MemberMergeProposeParams, error) {
+	params := protocol.MemberMergeProposeParams{Code: code, PlanDigest: plan.PlanDigest, KeepAdmin: keepAdmin}
+	printMergePlan(out, plan)
 	if keep == "" {
 		_, _ = fmt.Fprint(out, "whose settings prevail, 1 or 2? ")
 		switch line, _ := in.ReadString('\n'); strings.TrimSpace(line) {
 		case "1":
 			keep = plan.Minted.ID
 		case "2":
-			keep = plan.Confirming.ID
+			keep = plan.Proposer.ID
 		default:
-			return params, errors.New("aether member merge: answer 1 or 2; nothing was merged")
+			return params, errors.New("aether member merge: answer 1 or 2; nothing was proposed")
 		}
 	}
 	params.KeepSettingsOf = keep
-	var choice *protocol.MergeChoice
-	for i := range plan.Choices {
-		if plan.Choices[i].KeepSettingsOf == keep {
-			choice = &plan.Choices[i]
-		}
+	if err := printMergeChoice(out, plan, keep); err != nil {
+		return params, err
 	}
-	if choice == nil {
-		return params, fmt.Errorf("aether member merge: --keep %s is neither %s nor %s", keep, plan.Minted.ID, plan.Confirming.ID)
+	if plan.RoleWithKeepAdmin != "" && plan.Proposer.Role == "admin" && !keepAdmin && !yes {
+		params.KeepAdmin = askKeepAdmin(out, in, plan)
 	}
-	_, _ = fmt.Fprintf(out, "\nkeeping %s; member %s is absorbed and these of its settings are discarded:\n", keep, choice.AbsorbedID)
-	printDiscarded(out, choice.Discarded)
-	if plan.RoleWithKeepAdmin != "" && !keepAdmin {
-		_, _ = fmt.Fprintf(out, "\nthe merged member will be %s, the lower of the two roles", plan.Role)
-		if plan.KeepAdminRequired {
-			_, _ = fmt.Fprint(out, ", which leaves the server without an admin")
-		}
-		switch {
-		case !plan.KeepAdminConsented:
-			_, _ = fmt.Fprintln(out, "; to keep it admin, mint the code on the admin sign-in with aether member merge start --keep-admin")
-		case yes:
-			_, _ = fmt.Fprintln(out, "; pass --keep-admin to keep it admin")
-		default:
-			_, _ = fmt.Fprintf(out, "\nkeep it %s instead? every sign-in above then reaches the server as admin [y/N]: ", plan.RoleWithKeepAdmin)
-			params.KeepAdmin = yesAnswer(in)
-		}
-	}
-	role := plan.Role
-	if params.KeepAdmin && plan.RoleWithKeepAdmin != "" {
-		role = plan.RoleWithKeepAdmin
-	}
-	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
 	if !yes {
 		_, _ = fmt.Fprint(out, "discard these settings and merge? [y/N]: ")
 		if !yesAnswer(in) {
-			return params, errors.New("aether member merge: not merged")
+			return params, errors.New("aether member merge: nothing was proposed")
 		}
 	}
 	params.DiscardAck = true
 	return params, nil
+}
+
+// mergeAccept shows the newest proposal this sign-in minted the code for
+// and accepts it on a yes.
+func mergeAccept(c *protocol.Client, keepAdmin, yes bool, in *bufio.Reader, out io.Writer) error {
+	var info protocol.ServerInfoResult
+	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+		return err
+	}
+	var pending protocol.MemberMergePendingResult
+	if err := c.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil {
+		return err
+	}
+	var proposal *protocol.MemberMergeProposal
+	for i := range pending.Proposals {
+		if pending.Proposals[i].MintedID == info.Member.ID {
+			proposal = &pending.Proposals[i]
+		}
+	}
+	if proposal == nil {
+		return errors.New("aether member merge accept: no merge was proposed with a code from this sign-in; enter the code on your other sign-in first")
+	}
+	if proposal.Refusal != "" || proposal.Plan == nil {
+		return fmt.Errorf("aether member merge accept: %s", proposal.Refusal)
+	}
+	params, err := acceptDecision(*proposal, keepAdmin, yes, in, out)
+	if err != nil {
+		return err
+	}
+	var res protocol.MemberMergeAcceptResult
+	if err := c.Call(protocol.MethodMemberMergeAccept, params, &res); err != nil {
+		return err
+	}
+	fmt.Printf("merged member %s into %s (%s), now %s\n", res.Merge.AbsorbedID, res.Member.ID, res.Member.DisplayName, res.Member.Role)
+	if res.Merge.ArchivePath != "" {
+		fmt.Printf("its home was moved to %s on the server\n", res.Merge.ArchivePath)
+	}
+	fmt.Println("its discarded settings are kept in: aether member merges")
+	return nil
+}
+
+func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes bool, in *bufio.Reader, out io.Writer) (protocol.MemberMergeAcceptParams, error) {
+	params := protocol.MemberMergeAcceptParams{ProposalID: p.ID, PlanDigest: p.PlanDigest, KeepAdmin: keepAdmin}
+	plan := *p.Plan
+	_, _ = fmt.Fprintf(out, "member %s proposes merging with your member %s\n", p.ProposerID, p.MintedID)
+	printMergePlan(out, plan)
+	if err := printMergeChoice(out, plan, p.KeepSettingsOf); err != nil {
+		return params, err
+	}
+	if plan.RoleWithKeepAdmin != "" && plan.Minted.Role == "admin" && !keepAdmin && !yes {
+		params.KeepAdmin = askKeepAdmin(out, in, plan)
+	}
+	if !yes {
+		_, _ = fmt.Fprint(out, "accept this merge? [y/N]: ")
+		if !yesAnswer(in) {
+			return params, errors.New("aether member merge accept: not merged; aether member merge cancel drops the proposal")
+		}
+	}
+	return params, nil
+}
+
+func askKeepAdmin(out io.Writer, in *bufio.Reader, plan protocol.MemberMergePlan) bool {
+	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s, the lower of the two roles", plan.Role)
+	if plan.KeepAdminRequired {
+		_, _ = fmt.Fprint(out, ", which leaves the server without an admin")
+	}
+	_, _ = fmt.Fprintf(out, ". keep it %s? every sign-in above then reaches the server as admin [y/N]: ", plan.RoleWithKeepAdmin)
+	return yesAnswer(in)
 }
 
 func yesAnswer(in *bufio.Reader) bool {
@@ -142,27 +191,44 @@ func yesAnswer(in *bufio.Reader) bool {
 	return line == "y" || line == "yes"
 }
 
-func printMergeMember(out io.Writer, n int, m protocol.MergeMember) {
-	_, _ = fmt.Fprintf(out, "%d. %s (%s), %s\n", n, m.DisplayName, m.ID, m.Role)
-	if m.TailnetLogin != "" {
-		_, _ = fmt.Fprintf(out, "   tailnet login: %s\n", m.TailnetLogin)
+func printMergePlan(out io.Writer, plan protocol.MemberMergePlan) {
+	for i, m := range []protocol.MergeMember{plan.Minted, plan.Proposer} {
+		_, _ = fmt.Fprintf(out, "%d. %s (%s), %s\n", i+1, m.DisplayName, m.ID, m.Role)
+		if m.TailnetLogin != "" {
+			_, _ = fmt.Fprintf(out, "   tailnet login: %s\n", m.TailnetLogin)
+		}
+		if m.PublicKeyFingerprint != "" {
+			_, _ = fmt.Fprintf(out, "   SSH key: %s\n", m.PublicKeyFingerprint)
+		}
+		for _, id := range m.Identities {
+			_, _ = fmt.Fprintf(out, "   %s account: %s\n", id.Provider, id.Login)
+		}
+		for _, d := range m.Devices {
+			_, _ = fmt.Fprintf(out, "   device %q: %s\n", d.Label, d.Status)
+		}
+		_, _ = fmt.Fprintf(out, "   %d runs, %d schedules\n", m.Runs, m.Schedules)
 	}
-	if m.PublicKeyFingerprint != "" {
-		_, _ = fmt.Fprintf(out, "   SSH key: %s\n", m.PublicKeyFingerprint)
+	_, _ = fmt.Fprintf(out, "\nthe merged member signs in with: %s, as %s\n", strings.Join(plan.SignIns, ", "), plan.Role)
+	if plan.RoleWithKeepAdmin != "" {
+		_, _ = fmt.Fprintf(out, "or as %s if the admin side asks for it with --keep-admin\n", plan.RoleWithKeepAdmin)
 	}
-	for _, id := range m.Identities {
-		_, _ = fmt.Fprintf(out, "   %s account: %s\n", id.Provider, firstNonEmpty(id.Login, id.Email, id.Subject))
+}
+
+func printMergeChoice(out io.Writer, plan protocol.MemberMergePlan, keep string) error {
+	for _, c := range plan.Choices {
+		if c.KeepSettingsOf == keep {
+			_, _ = fmt.Fprintf(out, "\nkeeping %s; member %s is absorbed and these of its settings are discarded:\n", keep, c.AbsorbedID)
+			printDiscarded(out, c.Discarded)
+			return nil
+		}
 	}
-	for _, d := range m.Devices {
-		_, _ = fmt.Fprintf(out, "   device %s %q: %s\n", d.ID, d.Label, d.Status)
-	}
-	_, _ = fmt.Fprintf(out, "   %d runs, %d schedules\n", m.Runs, m.Schedules)
+	return fmt.Errorf("aether member merge: --keep %s is neither %s nor %s", keep, plan.Minted.ID, plan.Proposer.ID)
 }
 
 func printDiscarded(out io.Writer, s protocol.MergeSettings) {
 	_, _ = fmt.Fprintf(out, "  display name %q, color %s\n", s.DisplayName, s.Color)
 	if s.GitName != "" || s.GitEmail != "" {
-		_, _ = fmt.Fprintf(out, "  git identity %s <%s>\n", s.GitName, s.GitEmail)
+		_, _ = fmt.Fprintf(out, "  git identity %s %s\n", s.GitName, s.GitEmail)
 	}
 	if s.Image != "" {
 		_, _ = fmt.Fprintf(out, "  saved environment image %s, deleted by cache cleanup\n", s.Image)
@@ -171,7 +237,7 @@ func printDiscarded(out io.Writer, s protocol.MergeSettings) {
 		_, _ = fmt.Fprintf(out, "  custom agent %s\n", d.Name)
 	}
 	for _, h := range s.ProfileHeads {
-		_, _ = fmt.Fprintf(out, "  current %s profile, snapshot %s (kept as the merged member's snapshot)\n", h.Harness, h.SnapshotID)
+		_, _ = fmt.Fprintf(out, "  current %s profile, snapshot %s\n", h.Harness, h.SnapshotID)
 	}
 	if len(s.AccountSharedWith) > 0 {
 		_, _ = fmt.Fprintf(out, "  agent account shared with %s\n", strings.Join(s.AccountSharedWith, ", "))
@@ -184,15 +250,6 @@ func printDiscarded(out io.Writer, s protocol.MergeSettings) {
 	}
 }
 
-func firstNonEmpty(s ...string) string {
-	for _, v := range s {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // memberMerges lists the merges into your member; an admin sees every one.
 func memberMerges() error {
 	return withControl(func(c *protocol.Client) error {
@@ -201,9 +258,12 @@ func memberMerges() error {
 			return err
 		}
 		for _, m := range res.Merges {
-			fmt.Printf("%s %s: %s (%s) absorbed into %s, %s+%s -> %s, confirmed by %s\n", m.ID, m.CreatedAt,
+			fmt.Printf("%s %s: %s (%s) absorbed into %s, %s+%s -> %s, accepted on %s\n", m.ID, m.CreatedAt,
 				m.AbsorbedID, m.Absorbed.DisplayName, m.SurvivorID, m.SurvivorRoleBefore, m.AbsorbedRoleBefore, m.RoleAfter, m.ConfirmedBy)
 			printDiscarded(os.Stdout, m.Discarded)
+			for _, d := range m.Discarded.HarnessDefinitions {
+				fmt.Printf("  custom agent %s definition: %s\n", d.Name, d.Definition)
+			}
 			if m.ArchivePath != "" {
 				fmt.Printf("  home archived at %s\n", m.ArchivePath)
 			}

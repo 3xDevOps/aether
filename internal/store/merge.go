@@ -14,23 +14,32 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// MergeStore keeps member merges: the codes that start them, the plan
-// that previews one, the merge itself and its audit record.
+// MergeStore keeps member merges: the code one member mints, the proposal
+// the other member makes with it, the minter's acceptance that merges, and
+// the audit record.
 type MergeStore interface {
 	// CreateMergeCode records the code with hash for member until expires,
 	// replacing member's open code, and drops every expired open code.
-	// keepAdmin is member's consent, as an admin, to keep the merged
-	// member admin.
-	CreateMergeCode(ctx context.Context, member domain.MemberID, hash string, keepAdmin bool, now, expires time.Time) error
-	// PlanMerge computes what confirming the code with hash from caller's
-	// member would do at now. A merge the plan refuses is a *MergeRefusal.
-	PlanMerge(ctx context.Context, hash string, caller domain.MemberID, now time.Time) (*MergePlan, error)
-	// ConfirmMerge recomputes the plan and, while it still has c.Digest,
-	// merges in one transaction; see MergeConfirm.
-	ConfirmMerge(ctx context.Context, c MergeConfirm) (*MemberMerge, error)
-	// MergeOfCode returns the merge that consumed the code with hash;
-	// ErrNotFound while it is open or unknown.
-	MergeOfCode(ctx context.Context, hash string) (*MemberMerge, error)
+	CreateMergeCode(ctx context.Context, member domain.MemberID, hash string, now, expires time.Time) error
+	// PlanMerge computes what merging the open code's member with caller's
+	// would do at now. A merge the plan refuses is a *MergeRefusal.
+	PlanMerge(ctx context.Context, hash string, caller domain.MemberID, policy string, now time.Time) (*MergePlan, error)
+	// ProposeMerge records p on its code while the plan still has
+	// p.Digest; the code then takes no other proposal.
+	ProposeMerge(ctx context.Context, p MergeProposal) (*PendingMerge, error)
+	// PendingMerges returns the open proposals member made or is asked
+	// to accept, each with its plan recomputed.
+	PendingMerges(ctx context.Context, member domain.MemberID, policy string, now time.Time) ([]*PendingMerge, error)
+	// AcceptMerge merges the proposal in one transaction while the plan
+	// still has the proposal's digest; see MergeAccept.
+	AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, error)
+	// CancelMerge drops member's open codes and the open proposals it made
+	// or was made, or only proposal when it is not empty, and returns how
+	// many.
+	CancelMerge(ctx context.Context, member domain.MemberID, proposal string) (int, error)
+	// MergeOfProposal returns the merge that accepted proposal; ErrNotFound
+	// while it is open or unknown.
+	MergeOfProposal(ctx context.Context, proposal string) (*MemberMerge, error)
 	// ListMerges returns the merges into survivor, or every merge when
 	// survivor is empty, newest first.
 	ListMerges(ctx context.Context, survivor domain.MemberID) ([]*MemberMerge, error)
@@ -41,8 +50,6 @@ var _ MergeStore = (*DB)(nil)
 // MergeRefusal is a merge the store refuses, with the message to show.
 type MergeRefusal struct {
 	Message string
-	// SameMember is set when the code's member is the caller's.
-	SameMember bool
 }
 
 func (e *MergeRefusal) Error() string { return e.Message }
@@ -51,7 +58,7 @@ func refuseMerge(format string, args ...any) error {
 	return &MergeRefusal{Message: fmt.Sprintf(format, args...)}
 }
 
-// MergeHarnessDefinition is one discarded custom agent definition.
+// MergeHarnessDefinition is one custom agent definition.
 type MergeHarnessDefinition struct {
 	Name       string `json:"name"`
 	Definition string `json:"definition"`
@@ -78,35 +85,31 @@ type MergeSettings struct {
 }
 
 // MergeSnapshot is one member as a merge plan read it. Devices carry no
-// approval code and no last-seen time.
+// approval code and no last-seen time. SharedWithMe lists the members
+// sharing their agent account with it, OpenInvitations the open
+// invitations it created or that link to it.
 type MergeSnapshot struct {
-	Member     domain.Member      `json:"member"`
-	Identities []*domain.Identity `json:"identities"`
-	Devices    []*domain.Device   `json:"devices"`
-	Runs       int                `json:"runs"`
-	Schedules  int                `json:"schedules"`
-	Settings   MergeSettings      `json:"settings"`
+	Member          domain.Member         `json:"member"`
+	Identities      []*domain.Identity    `json:"identities"`
+	Devices         []*domain.Device      `json:"devices"`
+	Runs            int                   `json:"runs"`
+	Schedules       int                   `json:"schedules"`
+	Settings        MergeSettings         `json:"settings"`
+	SharedWithMe    []domain.MemberID     `json:"shared_with_me"`
+	OpenInvitations []domain.InvitationID `json:"open_invitations"`
 }
 
-// MergePlan is what confirming a merge code would do. Minted is the
-// member that minted the code, Confirming the caller's. MintedKeepAdmin is
-// the minter's consent to keep the merged member admin. Admins counts the
-// server's admins. Digest is the SHA-256 of all of it.
+// MergePlan is what merging two members would do. Minted is the member
+// that minted the code, Proposer the one that entered it. Policy is the
+// server's edge access policy and Admins counts its admins. Digest is the
+// SHA-256 of all of it.
 type MergePlan struct {
-	CodeHash        string        `json:"code_hash"`
-	Minted          MergeSnapshot `json:"minted"`
-	Confirming      MergeSnapshot `json:"confirming"`
-	MintedKeepAdmin bool          `json:"minted_keep_admin"`
-	Admins          int           `json:"admins"`
-	Digest          string        `json:"-"`
-}
-
-// KeepAdminConsented reports whether the admin side asked to keep the
-// merged member admin: the confirming member is an admin, or an admin
-// minted the code with keep_admin. The other side asking cannot raise
-// its own role.
-func (p *MergePlan) KeepAdminConsented() bool {
-	return p.Confirming.Member.Role == domain.RoleAdmin || (p.Minted.Member.Role == domain.RoleAdmin && p.MintedKeepAdmin)
+	CodeHash string        `json:"code_hash"`
+	Minted   MergeSnapshot `json:"minted"`
+	Proposer MergeSnapshot `json:"proposer"`
+	Policy   string        `json:"policy"`
+	Admins   int           `json:"admins"`
+	Digest   string        `json:"-"`
 }
 
 // Side returns the plan's snapshot of member, nil when it is neither.
@@ -114,8 +117,8 @@ func (p *MergePlan) Side(member domain.MemberID) *MergeSnapshot {
 	switch member {
 	case p.Minted.Member.ID:
 		return &p.Minted
-	case p.Confirming.Member.ID:
-		return &p.Confirming
+	case p.Proposer.Member.ID:
+		return &p.Proposer
 	}
 	return nil
 }
@@ -123,16 +126,25 @@ func (p *MergePlan) Side(member domain.MemberID) *MergeSnapshot {
 // Other returns the snapshot of the member that is not member.
 func (p *MergePlan) Other(member domain.MemberID) *MergeSnapshot {
 	if member == p.Minted.Member.ID {
-		return &p.Confirming
+		return &p.Proposer
 	}
 	return &p.Minted
+}
+
+// Role is the merged member's role: the lower of the two, or admin when
+// an admin side asked to keep it, the minter on accepting or the proposer
+// on proposing. Neither side's flag lifts the other's role.
+func (p *MergePlan) Role(mintedKeepAdmin, proposerKeepAdmin bool) domain.Role {
+	keep := (mintedKeepAdmin && p.Minted.Member.Role == domain.RoleAdmin) ||
+		(proposerKeepAdmin && p.Proposer.Member.Role == domain.RoleAdmin)
+	return MergedRole(p.Minted.Member.Role, p.Proposer.Member.Role, keep)
 }
 
 // LeavesNoAdmin reports whether a merge with role as its result leaves
 // the server without an admin.
 func (p *MergePlan) LeavesNoAdmin(role domain.Role) bool {
 	after := p.Admins
-	for _, m := range []domain.Member{p.Minted.Member, p.Confirming.Member} {
+	for _, m := range []domain.Member{p.Minted.Member, p.Proposer.Member} {
 		if m.Role == domain.RoleAdmin {
 			after--
 		}
@@ -146,8 +158,7 @@ func (p *MergePlan) LeavesNoAdmin(role domain.Role) bool {
 var roleRank = map[domain.Role]int{domain.RoleViewer: 0, domain.RoleCollaborator: 1, domain.RoleAdmin: 2}
 
 // MergedRole is the role of two members merged: the lower of a and b,
-// or admin when one of them is admin and keepAdmin is set. A merge never
-// grants a permission neither member had.
+// or admin when one of them is admin and keepAdmin is set.
 func MergedRole(a, b domain.Role, keepAdmin bool) domain.Role {
 	if keepAdmin && (a == domain.RoleAdmin || b == domain.RoleAdmin) {
 		return domain.RoleAdmin
@@ -158,17 +169,50 @@ func MergedRole(a, b domain.Role, keepAdmin bool) domain.Role {
 	return b
 }
 
-// MergeConfirm is one confirmed merge. Keep is the member whose id and
-// settings survive; the other is absorbed. Archive moves the absorbed
-// member's home aside for the merge and returns where it went, empty when
-// it had none; it runs in the transaction once every row is merged, and
-// undo puts the home back when the commit fails.
-type MergeConfirm struct {
-	CodeHash        string
+// MergeProposal is the proposer's half of a merge: whose settings prevail
+// and, from an admin proposer only, keeping the merged member admin. The
+// proposal is open until Expires.
+type MergeProposal struct {
+	CodeHash  string
+	Proposer  domain.MemberID
+	Keep      domain.MemberID
+	Digest    string
+	KeepAdmin bool
+	Policy    string
+	Now       time.Time
+	Expires   time.Time
+}
+
+// PendingMerge is an open proposal. Plan is recomputed when it is read;
+// Refusal is set when the merge would now be refused.
+type PendingMerge struct {
+	ProposalID        string
+	CodeHash          string
+	Minted            domain.MemberID
+	Proposer          domain.MemberID
+	Keep              domain.MemberID
+	ProposerKeepAdmin bool
+	Digest            string
+	ExpiresAt         time.Time
+	Plan              *MergePlan
+	Refusal           string
+}
+
+// MergeAccept is the minter's half: it accepts ProposalID, still with
+// Digest, keeping the merged member admin only when the minter is the
+// admin and KeepAdmin is set. OwnerProvider and OwnerSubject name the
+// server's owner at its edge, empty without one. Archive moves the
+// absorbed member's home aside for the merge and returns where it went,
+// empty when it had none; it runs in the transaction once every row is
+// merged, and undo puts the home back when the commit fails.
+type MergeAccept struct {
+	ProposalID      string
 	Caller          domain.MemberID
-	Keep            domain.MemberID
 	Digest          string
 	KeepAdmin       bool
+	Policy          string
+	OwnerProvider   string
+	OwnerSubject    string
 	ConfirmedByKind string
 	ConfirmedBy     string
 	Now             time.Time
@@ -192,7 +236,7 @@ type MemberMerge struct {
 	CreatedAt          time.Time
 }
 
-func (d *DB) CreateMergeCode(ctx context.Context, member domain.MemberID, hash string, keepAdmin bool, now, expires time.Time) error {
+func (d *DB) CreateMergeCode(ctx context.Context, member domain.MemberID, hash string, now, expires time.Time) error {
 	created, err := encodeTime(now)
 	if err != nil {
 		return fmt.Errorf("store: create merge code: %w", err)
@@ -207,13 +251,13 @@ func (d *DB) CreateMergeCode(ctx context.Context, member domain.MemberID, hash s
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM member_merge_codes WHERE consumed_at IS NULL AND (member_id = ? OR expires_at <= ?)`,
+		`DELETE FROM member_merge_codes WHERE consumed_at IS NULL AND ((member_id = ? AND proposal_id = '') OR expires_at <= ?)`,
 		member, created); err != nil {
 		return fmt.Errorf("store: create merge code: replace open codes: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO member_merge_codes (code_hash, member_id, created_at, expires_at, keep_admin) VALUES (?, ?, ?, ?, ?)`,
-		hash, member, created, until, keepAdmin); err != nil {
+		`INSERT INTO member_merge_codes (code_hash, member_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+		hash, member, created, until); err != nil {
 		return fmt.Errorf("store: create merge code: %w", mapConstraint(err, ErrNotFound))
 	}
 	if err := tx.Commit(); err != nil {
@@ -223,67 +267,91 @@ func (d *DB) CreateMergeCode(ctx context.Context, member domain.MemberID, hash s
 }
 
 type mergeCode struct {
-	member    domain.MemberID
-	expires   time.Time
-	consumed  bool
-	mergeID   string
-	keepAdmin bool
+	hash              string
+	member            domain.MemberID
+	expires           time.Time
+	proposalID        string
+	proposer          domain.MemberID
+	keep              domain.MemberID
+	proposerKeepAdmin bool
+	digest            string
+	consumed          bool
+	mergeID           string
 }
 
-func getMergeCode(ctx context.Context, tx *sql.Tx, hash string) (*mergeCode, error) {
+const mergeCodeCols = `code_hash, member_id, expires_at, proposal_id, proposed_by, keep_settings_of, proposer_keep_admin,
+	plan_digest, consumed_at, merge_id`
+
+func scanMergeCode(row interface{ Scan(...any) error }) (*mergeCode, error) {
 	var (
 		c        mergeCode
 		expires  int64
 		consumed *int64
 	)
-	err := tx.QueryRowContext(ctx,
-		`SELECT member_id, expires_at, consumed_at, merge_id, keep_admin FROM member_merge_codes WHERE code_hash = ?`, hash).
-		Scan(&c.member, &expires, &consumed, &c.mergeID, &c.keepAdmin)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, refuseMerge("merge code unknown: check it, or mint a new one with aether member merge start on your other sign-in")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: merge code: %w", err)
+	if err := row.Scan(&c.hash, &c.member, &expires, &c.proposalID, &c.proposer, &c.keep, &c.proposerKeepAdmin,
+		&c.digest, &consumed, &c.mergeID); err != nil {
+		return nil, err
 	}
 	c.expires, c.consumed = decodeTime(expires), consumed != nil
 	return &c, nil
 }
 
-func (d *DB) PlanMerge(ctx context.Context, hash string, caller domain.MemberID, now time.Time) (*MergePlan, error) {
+func getMergeCode(ctx context.Context, tx *sql.Tx, where string, arg any) (*mergeCode, error) {
+	c, err := scanMergeCode(tx.QueryRowContext(ctx, `SELECT `+mergeCodeCols+` FROM member_merge_codes WHERE `+where, arg))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: merge code: %w", err)
+	}
+	return c, nil
+}
+
+// openCode returns the code with hash while it takes a proposal.
+func openCode(ctx context.Context, tx *sql.Tx, hash string, now time.Time) (*mergeCode, error) {
+	code, err := getMergeCode(ctx, tx, `code_hash = ?`, hash)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return nil, refuseMerge("merge code unknown: check it, or mint a new one with aether member merge start on your other sign-in")
+	case err != nil:
+		return nil, err
+	case code.consumed || code.proposalID != "":
+		return nil, refuseMerge("merge code already used; mint a new one with aether member merge start")
+	case !now.Before(code.expires):
+		return nil, refuseMerge("merge code expired at %s; mint a new one with aether member merge start", code.expires.Format(time.RFC3339))
+	}
+	return code, nil
+}
+
+func (d *DB) PlanMerge(ctx context.Context, hash string, caller domain.MemberID, policy string, now time.Time) (*MergePlan, error) {
 	tx, err := d.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("store: begin plan merge: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	code, err := getMergeCode(ctx, tx, hash)
+	code, err := openCode(ctx, tx, hash, now)
 	if err != nil {
 		return nil, err
 	}
-	return planInTx(ctx, tx, hash, code, caller, now)
+	return planInTx(ctx, tx, hash, code.member, caller, policy)
 }
 
-func planInTx(ctx context.Context, tx *sql.Tx, hash string, code *mergeCode, caller domain.MemberID, now time.Time) (*MergePlan, error) {
-	switch {
-	case code.consumed:
-		return nil, refuseMerge("merge code already used; mint a new one with aether member merge start")
-	case !now.Before(code.expires):
-		return nil, refuseMerge("merge code expired at %s; mint a new one with aether member merge start", code.expires.Format(time.RFC3339))
-	case code.member == caller:
-		return nil, &MergeRefusal{SameMember: true, Message: fmt.Sprintf(
-			"already the same member: %s minted this code; enter it from your other sign-in", caller)}
+func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer domain.MemberID, policy string) (*MergePlan, error) {
+	if minted == proposer {
+		return nil, refuseMerge("already the same member: %s minted this code; enter it from your other sign-in", proposer)
 	}
-	plan := &MergePlan{CodeHash: hash, MintedKeepAdmin: code.keepAdmin}
+	plan := &MergePlan{CodeHash: hash, Policy: policy}
 	for _, side := range []struct {
 		id  domain.MemberID
 		out *MergeSnapshot
-	}{{code.member, &plan.Minted}, {caller, &plan.Confirming}} {
+	}{{minted, &plan.Minted}, {proposer, &plan.Proposer}} {
 		snap, err := mergeSnapshot(ctx, tx, side.id)
 		if err != nil {
 			return nil, err
 		}
 		*side.out = *snap
 	}
-	a, b := plan.Minted.Member, plan.Confirming.Member
+	a, b := plan.Minted.Member, plan.Proposer.Member
 	for _, m := range []domain.Member{a, b} {
 		if m.Pending {
 			return nil, refuseMerge("member %s is pending; approve first: aether member approve %s", m.ID, m.ID)
@@ -299,7 +367,7 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, code *mergeCode, cal
 	if err := refuseLiveWork(ctx, tx, a.ID, b.ID); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'admin'`).Scan(&plan.Admins); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM members WHERE role = 'admin' AND merged_into = ''`).Scan(&plan.Admins); err != nil {
 		return nil, fmt.Errorf("store: plan merge: count admins: %w", err)
 	}
 	body, err := json.Marshal(plan)
@@ -313,7 +381,7 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, code *mergeCode, cal
 
 // refuseLiveWork refuses a merge while either member has a run that is not
 // finished, an Environment terminal, or a role in an open swarm: those
-// hold the member's id in memory, beyond what a merge rewrites.
+// hold the member's id in memory, beyond what a merge moves.
 func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error {
 	var live []string
 	for _, s := range domain.AllRunStatuses {
@@ -364,7 +432,7 @@ func queryStrings(ctx context.Context, tx *sql.Tx, query string, args ...any) ([
 		return nil, fmt.Errorf("store: plan merge: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only iteration
-	var out []string
+	out := []string{}
 	for rows.Next() {
 		var s string
 		if err := rows.Scan(&s); err != nil {
@@ -375,15 +443,29 @@ func queryStrings(ctx context.Context, tx *sql.Tx, query string, args ...any) ([
 	return out, rows.Err()
 }
 
-func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeSnapshot, error) {
-	m, err := scanMember(tx.QueryRowContext(ctx, `SELECT `+memberCols+` FROM members WHERE id = ?`, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, refuseMerge("member %s no longer exists", id)
+func idsOf[T ~string](in []string) []T {
+	out := make([]T, len(in))
+	for i, s := range in {
+		out[i] = T(s)
 	}
+	return out
+}
+
+func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeSnapshot, error) {
+	var mergedInto string
+	if err := tx.QueryRowContext(ctx, `SELECT merged_into FROM members WHERE id = ?`, id).Scan(&mergedInto); errors.Is(err, sql.ErrNoRows) {
+		return nil, refuseMerge("member %s no longer exists", id)
+	} else if err != nil {
+		return nil, fmt.Errorf("store: plan merge: member %s: %w", id, err)
+	}
+	if mergedInto != "" {
+		return nil, refuseMerge("member %s was merged into %s already", id, mergedInto)
+	}
+	m, err := scanMember(tx.QueryRowContext(ctx, `SELECT `+memberCols+` FROM members WHERE id = ?`, id))
 	if err != nil {
 		return nil, fmt.Errorf("store: plan merge: member %s: %w", id, err)
 	}
-	snap := &MergeSnapshot{Member: *m, Identities: []*domain.Identity{}, Devices: []*domain.Device{}}
+	snap := &MergeSnapshot{Member: *m}
 	s := &snap.Settings
 	s.DisplayName, s.Color, s.GitName, s.GitEmail, s.Image = m.DisplayName, m.Color, m.GitName, m.GitEmail, m.Image
 	rows, err := tx.QueryContext(ctx, `SELECT `+identityCols+` FROM member_identities WHERE member_id = ? ORDER BY provider, subject`, id)
@@ -434,21 +516,22 @@ func mergeSnapshot(ctx context.Context, tx *sql.Tx, id domain.MemberID) (*MergeS
 		return nil, err
 	}
 	s.ProfileHeads = derefAll(heads)
-	grantees, err := queryStrings(ctx, tx, `SELECT grantee_member_id FROM account_shares WHERE owner_member_id = ? ORDER BY grantee_member_id`, id)
-	if err != nil {
-		return nil, err
+	lists := []struct {
+		query string
+		set   func([]string)
+	}{
+		{`SELECT grantee_member_id FROM account_shares WHERE owner_member_id = ? ORDER BY 1`, func(v []string) { s.AccountSharedWith = idsOf[domain.MemberID](v) }},
+		{`SELECT owner_member_id FROM account_shares WHERE grantee_member_id = ? ORDER BY 1`, func(v []string) { snap.SharedWithMe = idsOf[domain.MemberID](v) }},
+		{`SELECT workspace_id FROM workspace_mirrors WHERE github_member_id = ? ORDER BY 1`, func(v []string) { s.MirrorWorkspaces = idsOf[domain.WorkspaceID](v) }},
+		{`SELECT id FROM identity_invitations WHERE consumed_at IS NULL AND (created_by = ?1 OR member_id = ?1) ORDER BY 1`,
+			func(v []string) { snap.OpenInvitations = idsOf[domain.InvitationID](v) }},
 	}
-	s.AccountSharedWith = make([]domain.MemberID, len(grantees))
-	for i, g := range grantees {
-		s.AccountSharedWith[i] = domain.MemberID(g)
-	}
-	mirrors, err := queryStrings(ctx, tx, `SELECT workspace_id FROM workspace_mirrors WHERE github_member_id = ? ORDER BY workspace_id`, id)
-	if err != nil {
-		return nil, err
-	}
-	s.MirrorWorkspaces = make([]domain.WorkspaceID, len(mirrors))
-	for i, w := range mirrors {
-		s.MirrorWorkspaces[i] = domain.WorkspaceID(w)
+	for _, l := range lists {
+		v, err := queryStrings(ctx, tx, l.query, id)
+		if err != nil {
+			return nil, err
+		}
+		l.set(v)
 	}
 	return snap, nil
 }
@@ -461,72 +544,175 @@ func derefAll[T any](in []*T) []T {
 	return out
 }
 
-func (d *DB) ConfirmMerge(ctx context.Context, c MergeConfirm) (*MemberMerge, error) {
+func (d *DB) ProposeMerge(ctx context.Context, p MergeProposal) (*PendingMerge, error) {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: begin propose merge: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	code, err := openCode(ctx, tx, p.CodeHash, p.Now)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := planInTx(ctx, tx, p.CodeHash, code.member, p.Proposer, p.Policy)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case plan.Digest != p.Digest:
+		return nil, refuseMerge("the members changed since the preview; preview again")
+	case plan.Side(p.Keep) == nil:
+		return nil, refuseMerge("keep_settings_of must be %s or %s, the two members this code merges", code.member, p.Proposer)
+	case p.KeepAdmin && plan.Proposer.Member.Role != domain.RoleAdmin:
+		return nil, refuseMerge("keep_admin is the admin's to ask for, and you are %s; the admin asks for it when accepting", plan.Proposer.Member.Role)
+	}
+	id, err := newID("mrp")
+	if err != nil {
+		return nil, err
+	}
+	proposed, err := encodeTime(p.Now)
+	if err != nil {
+		return nil, fmt.Errorf("store: propose merge: %w", err)
+	}
+	expires, err := encodeTime(p.Expires)
+	if err != nil {
+		return nil, fmt.Errorf("store: propose merge: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE member_merge_codes SET proposal_id = ?, proposed_by = ?, keep_settings_of = ?,
+		proposer_keep_admin = ?, plan_digest = ?, proposed_at = ?, expires_at = ? WHERE code_hash = ?`,
+		id, p.Proposer, p.Keep, p.KeepAdmin, plan.Digest, proposed, expires, p.CodeHash); err != nil {
+		return nil, fmt.Errorf("store: propose merge: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: commit propose merge: %w", err)
+	}
+	return &PendingMerge{ProposalID: id, CodeHash: p.CodeHash, Minted: code.member, Proposer: p.Proposer, Keep: p.Keep,
+		ProposerKeepAdmin: p.KeepAdmin, Digest: plan.Digest, ExpiresAt: p.Expires, Plan: plan}, nil
+}
+
+func (d *DB) PendingMerges(ctx context.Context, member domain.MemberID, policy string, now time.Time) ([]*PendingMerge, error) {
+	at, err := encodeTime(now)
+	if err != nil {
+		return nil, fmt.Errorf("store: pending merges: %w", err)
+	}
+	tx, err := d.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("store: begin pending merges: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT `+mergeCodeCols+` FROM member_merge_codes
+		WHERE proposal_id <> '' AND consumed_at IS NULL AND expires_at > ?1 AND (member_id = ?2 OR proposed_by = ?2)
+		ORDER BY proposed_at, proposal_id`, at, member)
+	if err != nil {
+		return nil, fmt.Errorf("store: pending merges: %w", err)
+	}
+	codes, err := collect(rows, scanMergeCode)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*PendingMerge, 0, len(codes))
+	for _, c := range codes {
+		pm := &PendingMerge{ProposalID: c.proposalID, CodeHash: c.hash, Minted: c.member, Proposer: c.proposer, Keep: c.keep,
+			ProposerKeepAdmin: c.proposerKeepAdmin, Digest: c.digest, ExpiresAt: c.expires}
+		pm.Plan, err = planInTx(ctx, tx, c.hash, c.member, c.proposer, policy)
+		var refused *MergeRefusal
+		switch {
+		case errors.As(err, &refused):
+			pm.Plan, pm.Refusal = nil, refused.Message
+		case err != nil:
+			return nil, err
+		case pm.Plan.Digest != c.digest:
+			pm.Refusal = "the members changed since the proposal; cancel it with aether member merge cancel and propose again"
+		}
+		out = append(out, pm)
+	}
+	return out, nil
+}
+
+func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: begin merge: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	code, err := getMergeCode(ctx, tx, c.CodeHash)
+	code, err := getMergeCode(ctx, tx, `proposal_id <> '' AND proposal_id = ?`, a.ProposalID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, refuseMerge("merge proposal %s unknown or cancelled", a.ProposalID)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if code.consumed && code.mergeID != "" {
+	if code.consumed {
 		done, err := getMerge(ctx, tx, `?`, code.mergeID)
 		if err != nil {
 			return nil, err
 		}
-		if done.SurvivorID == c.Caller {
+		if done.SurvivorID == a.Caller {
 			return done, nil
 		}
+		return nil, refuseMerge("merge proposal %s was accepted already, as merge %s", a.ProposalID, done.ID)
 	}
-	plan, err := planInTx(ctx, tx, c.CodeHash, code, c.Caller, c.Now)
+	switch {
+	case code.member != a.Caller:
+		return nil, refuseMerge("only member %s, which minted the code, accepts this proposal: run aether member merge accept on that sign-in", code.member)
+	case !a.Now.Before(code.expires):
+		return nil, refuseMerge("merge proposal %s expired at %s; mint a new code with aether member merge start", a.ProposalID, code.expires.Format(time.RFC3339))
+	case a.Digest != code.digest:
+		return nil, refuseMerge("this is not the plan that was proposed; read it again with aether member merge accept")
+	}
+	plan, err := planInTx(ctx, tx, code.hash, code.member, code.proposer, a.Policy)
 	if err != nil {
 		return nil, err
 	}
-	if plan.Digest != c.Digest {
-		return nil, refuseMerge("the members changed since the preview; preview again")
+	switch {
+	case plan.Digest != code.digest:
+		return nil, refuseMerge("the members changed since the proposal; cancel it with aether member merge cancel and propose again")
+	case a.KeepAdmin && plan.Minted.Member.Role != domain.RoleAdmin:
+		return nil, refuseMerge("keep_admin is the admin's to ask for, and you are %s", plan.Minted.Member.Role)
 	}
-	survivor := plan.Side(c.Keep)
-	if survivor == nil {
-		return nil, refuseMerge("keep_settings_of must be %s or %s, the two members this code merges", plan.Minted.Member.ID, plan.Confirming.Member.ID)
-	}
-	absorbed := plan.Other(c.Keep)
-	keepAdmin := c.KeepAdmin && MergedRole(survivor.Member.Role, absorbed.Member.Role, true) == domain.RoleAdmin
-	if keepAdmin && !plan.KeepAdminConsented() {
-		return nil, refuseMerge("keep_admin must come from the admin's sign-in: mint a new code there with aether member merge start --keep-admin")
-	}
-	role := MergedRole(survivor.Member.Role, absorbed.Member.Role, keepAdmin)
+	role := plan.Role(a.KeepAdmin, code.proposerKeepAdmin)
 	if plan.LeavesNoAdmin(role) {
-		return nil, refuseMerge("refusing to demote the server's last admin: the merged member would be %s; confirm with keep_admin to keep it admin", role)
+		return nil, refuseMerge("refusing to demote the server's last admin: the merged member would be %s; the admin side asks to keep it admin with --keep-admin", role)
 	}
+	if role != domain.RoleAdmin && a.OwnerSubject != "" {
+		for _, side := range []MergeSnapshot{plan.Minted, plan.Proposer} {
+			for _, id := range side.Identities {
+				if id.Provider == a.OwnerProvider && id.Subject == a.OwnerSubject {
+					return nil, refuseMerge("%s account %s owns this server at its edge and the merged member would be %s; transfer ownership to another admin first with aether member transfer <member id>, or keep it admin",
+						id.Provider, identityName(id), role)
+				}
+			}
+		}
+	}
+	survivor, absorbed := plan.Side(code.keep), plan.Other(code.keep)
 	merge := &MemberMerge{
 		SurvivorID: survivor.Member.ID, AbsorbedID: absorbed.Member.ID,
-		ConfirmedByKind: c.ConfirmedByKind, ConfirmedBy: c.ConfirmedBy,
+		ConfirmedByKind: a.ConfirmedByKind, ConfirmedBy: a.ConfirmedBy,
 		SurvivorRoleBefore: survivor.Member.Role, AbsorbedRoleBefore: absorbed.Member.Role, RoleAfter: role,
-		Discarded: absorbed.Settings, Absorbed: *absorbed, CodeHash: c.CodeHash, CreatedAt: c.Now,
+		Discarded: absorbed.Settings, Absorbed: *absorbed, CodeHash: code.hash, CreatedAt: a.Now,
 	}
 	if merge.ID, err = newID("mrg"); err != nil {
 		return nil, err
 	}
-	if err := mergeRows(ctx, tx, survivor.Member, absorbed.Member, role); err != nil {
+	demoted := role != domain.RoleAdmin && (survivor.Member.Role == domain.RoleAdmin || absorbed.Member.Role == domain.RoleAdmin)
+	if err := mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
 		return nil, err
 	}
 	var undo func()
-	if c.Archive != nil {
-		if merge.ArchivePath, undo, err = c.Archive(merge.ID, absorbed.Member.ID); err != nil {
+	if a.Archive != nil {
+		if merge.ArchivePath, undo, err = a.Archive(merge.ID, absorbed.Member.ID); err != nil {
 			return nil, fmt.Errorf("store: merge: archive the absorbed member's home: %w", err)
 		}
 	}
 	if err := insertMerge(ctx, tx, merge); err != nil {
 		return nil, err
 	}
-	consumed, err := encodeTime(c.Now)
+	consumed, err := encodeTime(a.Now)
 	if err != nil {
 		return nil, fmt.Errorf("store: merge: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE member_merge_codes SET consumed_at = ?, merge_id = ? WHERE code_hash = ?`,
-		consumed, merge.ID, c.CodeHash); err != nil {
+		consumed, merge.ID, code.hash); err != nil {
 		return nil, fmt.Errorf("store: merge: consume code: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -536,6 +722,29 @@ func (d *DB) ConfirmMerge(ctx context.Context, c MergeConfirm) (*MemberMerge, er
 		return nil, fmt.Errorf("store: commit merge: %w", err)
 	}
 	return merge, nil
+}
+
+func identityName(id *domain.Identity) string {
+	switch {
+	case id.Login != "":
+		return id.Login
+	case id.Email != "":
+		return id.Email
+	}
+	return id.Subject
+}
+
+func (d *DB) CancelMerge(ctx context.Context, member domain.MemberID, proposal string) (int, error) {
+	res, err := d.db.ExecContext(ctx, `DELETE FROM member_merge_codes WHERE consumed_at IS NULL
+		AND (member_id = ?1 OR proposed_by = ?1) AND (?2 = '' OR proposal_id = ?2)`, member, proposal)
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel merge: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel merge: %w", err)
+	}
+	return int(n), nil
 }
 
 const mergeCols = `id, survivor_id, absorbed_id, confirmed_by_kind, confirmed_by, survivor_role_before,
@@ -594,8 +803,8 @@ func getMerge(ctx context.Context, q queryRower, idExpr string, args ...any) (*M
 	return m, nil
 }
 
-func (d *DB) MergeOfCode(ctx context.Context, hash string) (*MemberMerge, error) {
-	return getMerge(ctx, d.db, `(SELECT merge_id FROM member_merge_codes WHERE code_hash = ?)`, hash)
+func (d *DB) MergeOfProposal(ctx context.Context, proposal string) (*MemberMerge, error) {
+	return getMerge(ctx, d.db, `(SELECT merge_id FROM member_merge_codes WHERE proposal_id <> '' AND proposal_id = ?)`, proposal)
 }
 
 func (d *DB) ListMerges(ctx context.Context, survivor domain.MemberID) ([]*MemberMerge, error) {

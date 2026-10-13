@@ -617,7 +617,8 @@ const memberCols = `id, display_name, public_key, tailnet_login, pending, color,
 
 func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
 	m, err := scanMember(d.db.QueryRowContext(ctx,
-		`SELECT `+memberCols+` FROM members WHERE id = ?`, id))
+		`SELECT `+memberCols+` FROM members WHERE id =
+		 (SELECT CASE merged_into WHEN '' THEN id ELSE merged_into END FROM members WHERE id = ?)`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -690,7 +691,7 @@ func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image st
 
 func (d *DB) ListMembers(ctx context.Context) ([]*domain.Member, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+memberCols+` FROM members ORDER BY created_at, rowid`)
+		`SELECT `+memberCols+` FROM members WHERE merged_into = '' ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list members: %w", err)
 	}

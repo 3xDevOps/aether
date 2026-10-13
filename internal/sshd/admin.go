@@ -114,7 +114,7 @@ func (s *Server) memberInvite(ctx context.Context, member domain.MemberID, param
 		return nil, invalidParams("ttl_seconds must not be negative")
 	}
 	ttl := time.Duration(p.TTLSeconds) * time.Second
-	code, expires, err := mintInvite(s.cfg.InvitesDir, ttl)
+	code, expires, err := mintInvite(s.cfg.InvitesDir, ttl, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}

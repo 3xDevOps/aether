@@ -33,6 +33,8 @@ type IdentityStore interface {
 	// DeleteInvitationsBy revokes every invitation creator made that is
 	// not yet accepted.
 	DeleteInvitationsBy(ctx context.Context, creator domain.MemberID) error
+	// DeleteOpenLinks revokes every link to member not yet accepted.
+	DeleteOpenLinks(ctx context.Context, member domain.MemberID) error
 	// AcceptInvitation binds identity to a member in one transaction and
 	// returns that member. When identity is already bound it returns its
 	// member and consumes nothing. Otherwise the invitation must be
@@ -376,6 +378,14 @@ func (d *DB) DeleteInvitationsBy(ctx context.Context, creator domain.MemberID) e
 	if _, err := d.db.ExecContext(ctx,
 		`DELETE FROM identity_invitations WHERE created_by = ? AND consumed_at IS NULL`, creator); err != nil {
 		return fmt.Errorf("store: delete invitations by %s: %w", creator, err)
+	}
+	return nil
+}
+
+func (d *DB) DeleteOpenLinks(ctx context.Context, member domain.MemberID) error {
+	if _, err := d.db.ExecContext(ctx,
+		`DELETE FROM identity_invitations WHERE member_id = ? AND consumed_at IS NULL`, member); err != nil {
+		return fmt.Errorf("store: delete open links to %s: %w", member, err)
 	}
 	return nil
 }

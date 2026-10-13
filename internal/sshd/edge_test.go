@@ -250,7 +250,7 @@ func TestEdgeIgnoresInviteCodeUserAndTailnet(t *testing.T) {
 		c.InvitesDir = dir
 		c.WhoIs = whois
 	})
-	code, _, err := mintInvite(dir, time.Hour)
+	code, _, err := mintInvite(dir, time.Hour, "")
 	if err != nil {
 		t.Fatalf("mint invite: %v", err)
 	}

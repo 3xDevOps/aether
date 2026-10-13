@@ -1509,12 +1509,40 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
 - `member.device.revoke` (`{"device_id":"..."}`).
 - `member.invitation.create` and `member.identity.link`, which answer
   `{"invitation":{...},"link":"https://<edge host>/join/<server id>/<invitation id>#<secret>","server_id":"..."}`:
-  the link is the only copy of the join secret.
+  the link is the only copy of the join secret. `member.identity.link`
+  links to the caller's own member, for any approved member.
 - `member.invitation.list`, `member.invitation.revoke`
   (`{"invitation_id":"..."}`), `member.identity.list`
   (`{"member_id":"..."}`), `member.identity.remove`
   (`{"member_id":"...","provider":"github","subject":"..."}`) and
   `server.owner.transfer` (`{"member_id":"..."}`).
+- `member.merge.start` answers `{"code":"XXXX-XXXX-XXXX-XXXX","expires_at":"..."}`,
+  shown once. `member.merge.preview` (`{"code":"..."}`), from the other
+  sign-in, answers the plan: `minted` and `proposer`, each with `id`,
+  `display_name`, `role`, `tailnet_login`, `public_key_fingerprint`,
+  `identities` (`provider`, `login`), `devices` (`id`, `label`, `status`),
+  `runs`, `schedules` and `settings`; the merged `role`, with
+  `role_with_keep_admin` and `keep_admin_required` when one side is an
+  admin; `sign_ins`; `choices`, one per `keep_settings_of` with the
+  `discarded` settings; and `plan_digest`. It carries no email address,
+  device key or agent definition. `member.merge.propose`
+  (`{"code":"...","keep_settings_of":"<member id>","plan_digest":"...","discard_ack":true,"keep_admin":bool}`)
+  answers the proposal: `id`, `minted_id`, `proposer_id`,
+  `keep_settings_of`, `plan_digest`, `expires_at` and `plan`.
+  `member.merge.pending` answers `{"proposals":[...]}`, the open ones the
+  caller made or is asked to accept, each with its plan recomputed and a
+  `refusal` when accepting it would now be refused: a minter's Needs you
+  item. `member.merge.accept`
+  (`{"proposal_id":"...","plan_digest":"...","keep_admin":bool}`), from the
+  minter, answers `{"merge":{...},"member":{...}}` and then closes the
+  absorbed member's connections, the caller's included once it has the
+  answer; a new connection is the survivor. `member.merge.cancel`
+  (`{"proposal_id":"..."}`, or `{}` for all) answers `{"cancelled":n}`.
+  `member.merge.list` answers `{"merges":[...]}`, each with `archive_path`:
+  the caller's as survivor, every one for an admin. A refused step answers
+  `-32002` with the reason, such as `the members changed since the
+  preview; preview again`, and a connection signed in with a device no
+  person approved `-32001`.
 - `server.edge`, for any member:
   `{"edge_url":"https://...","server_id":"...","access_policy":"approved-devices","owner":{"provider":"github","login":"..."},"connected":bool,"claimed":bool}`;
   `edge_url` is empty with the edge off, `owner` is `null` without one, and
@@ -1525,8 +1553,9 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   to `edge.claim`.
 
 A device recorded pending, approved or revoked is published as the
-`member.device` event, `{"device_id":"...","status":"..."}`, under the
-workspace id `server`, which names no workspace, so a server without
+`member.device` event, `{"device_id":"...","status":"..."}`, and a merge
+as `member.merged`, `{"merge_id":"...","survivor_id":"...","absorbed_id":"..."}`,
+under the workspace id `server`, which names no workspace, so a server without
 workspaces still reports it. The shapes are in
 `internal/protocol/identity.go` and `internal/protocol/edge.go`, and
 [edge.md](edge.md) describes what each does.

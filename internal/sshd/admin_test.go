@@ -355,7 +355,7 @@ func TestInviteJoinRegistersCollaboratorAndBurns(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
-	code, _, err := mintInvite(dir, time.Hour)
+	code, _, err := mintInvite(dir, time.Hour, "")
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestInviteProbeIsSideEffectFree(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "invites")
 	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
-	code, _, err := mintInvite(dir, time.Hour)
+	code, _, err := mintInvite(dir, time.Hour, "")
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}

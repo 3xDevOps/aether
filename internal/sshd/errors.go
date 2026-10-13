@@ -37,6 +37,11 @@ func (s *Server) memberFor(ctx context.Context, member domain.MemberID) (*domain
 		}
 		return nil, err
 	}
+	// A member a merge absorbed resolves to the survivor and authenticates
+	// nothing itself.
+	if m.ID != member {
+		return nil, errMemberRemoved
+	}
 	return m, nil
 }
 

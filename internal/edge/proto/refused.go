@@ -163,6 +163,11 @@ func RefusedBy(r Refusal) *Refused {
 func (r *Refused) Error() string {
 	switch r.Kind {
 	case RefusedDevicePending:
+		link := ""
+		if r.Invitation != "" && r.MemberID != "" {
+			link = fmt.Sprintf("This links your %s to the existing member %s (%s), role %s; you will act as that member. ",
+				r.Account, r.MemberName, r.MemberID, r.Role)
+		}
 		state := "is waiting for approval"
 		switch {
 		case r.Registered && r.Direct:
@@ -175,17 +180,17 @@ func (r *Refused) Error() string {
 			if r.MemberID != "" {
 				who += ", or you do, from an approved device of yours"
 			}
-			return fmt.Sprintf("device %q, signed in as %s, %s. %s, or with:\n  aether device approve %s\n"+
+			return fmt.Sprintf("%sdevice %q, signed in as %s, %s. %s, or with:\n  aether device approve %s\n"+
 				"or on the server:\n  sudo aether-server device review",
-				r.Device, r.Account, state, who, r.DeviceID)
+				link, r.Device, r.Account, state, who, r.DeviceID)
 		}
 		who := "from an approved device, SSH key or tailnet connection of this account, or as an admin"
 		if r.Invitation != "" {
 			who = "as an admin, or as the member an account link names; approving it accepts the invitation"
 		}
-		return fmt.Sprintf("device %q, signed in as %s, %s. Approve it %s:\n"+
+		return fmt.Sprintf("%sdevice %q, signed in as %s, %s. Approve it %s:\n"+
 			"  aether device approve %s\nor on the server:\n  sudo aether-server device approve %s",
-			r.Device, r.Account, state, who, r.ApprovalCode, r.ApprovalCode)
+			link, r.Device, r.Account, state, who, r.ApprovalCode, r.ApprovalCode)
 	case RefusedDeviceRevoked:
 		return fmt.Sprintf("device %q was revoked on this server", r.Device)
 	case RefusedNotMember:

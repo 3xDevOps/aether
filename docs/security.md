@@ -1309,6 +1309,31 @@ can do under each policy, with the tests that show it; the reasons follow.
   by the member or an admin, from a credential a person approved: the
   devices that signed in with it are revoked, not deleted, so their keys
   stay refused if the account is linked again.
+- **Sign-ins are joined only by proof of both.** Nothing joins two
+  sign-ins because an email, login or name matches. `aether member link`
+  binds a GitHub account to the caller's own member only once a device
+  signed in with that account opens the join link, is told `This links
+  your github account <login> to the existing member <name> (<id>), role
+  <role>; you will act as that member.`, and the member approves that
+  device, under either policy; a member has one open link at a time. A
+  member merge takes both sides: a code minted on one sign-in, shown only
+  there, kept as a SHA-256 hash, 80 bits, used once within 10 minutes; a
+  proposal from the other sign-in; and acceptance back on the first, which
+  recomputes the plan under the lock that member and role changes hold and
+  refuses one that differs from the proposal. No step is taken from a
+  device no person approved, under either policy. The merged member never
+  gains a permission: it takes the lower role, and stays admin only when
+  the admin side asks for it, which an admin can already grant. When it is
+  no longer an admin, the invitations, links and invite codes either member
+  created are revoked, and a merge that would leave the edge owner's
+  account on a member who is not an admin is refused. The absorbed member
+  stays as a tombstone that authenticates nothing, so history keeps naming
+  it. A merge keeps an audit record with every setting it discarded and
+  moves the absorbed home, live agent logins included, to
+  `<data-dir>/merged/<merge id>/`, owner-only and outside every member's
+  home and Files view, for the machine's administrator to remove. A merge
+  code you did not ask for should not be entered: it proposes joining your
+  member with the code's.
 - **The first link decides which server a client pins.** Every later
   connection must present a host key that derives the linked id. An id
   from the server's admin, or from `sudo aether-server edge status`, rules

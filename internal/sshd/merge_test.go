@@ -60,13 +60,8 @@ func addTailnetMember(t *testing.T, e *testEnv, login string, role domain.Role) 
 
 func mergeStart(t *testing.T, c *protocol.Client) string {
 	t.Helper()
-	return mergeStartKeepingAdmin(t, c, false)
-}
-
-func mergeStartKeepingAdmin(t *testing.T, c *protocol.Client, keepAdmin bool) string {
-	t.Helper()
 	var res protocol.MemberMergeStartResult
-	if err := c.Call(protocol.MethodMemberMergeStart, protocol.MemberMergeStartParams{KeepAdmin: keepAdmin}, &res); err != nil {
+	if err := c.Call(protocol.MethodMemberMergeStart, struct{}{}, &res); err != nil {
 		t.Fatalf("member.merge.start: %v", err)
 	}
 	return res.Code
@@ -81,10 +76,26 @@ func mergePreview(t *testing.T, c *protocol.Client, code string) protocol.Member
 	return plan
 }
 
-func mergeConfirm(c *protocol.Client, code, keep, digest string, keepAdmin bool) (protocol.MemberMergeConfirmResult, error) {
-	var res protocol.MemberMergeConfirmResult
-	err := c.Call(protocol.MethodMemberMergeConfirm, protocol.MemberMergeConfirmParams{Code: code, KeepSettingsOf: keep,
+func mergePropose(c *protocol.Client, code, keep, digest string, keepAdmin bool) (protocol.MemberMergeProposal, error) {
+	var res protocol.MemberMergeProposal
+	err := c.Call(protocol.MethodMemberMergePropose, protocol.MemberMergeProposeParams{Code: code, KeepSettingsOf: keep,
 		PlanDigest: digest, DiscardAck: true, KeepAdmin: keepAdmin}, &res)
+	return res, err
+}
+
+func mustPropose(t *testing.T, c *protocol.Client, code, keep string) protocol.MemberMergeProposal {
+	t.Helper()
+	p, err := mergePropose(c, code, keep, mergePreview(t, c, code).PlanDigest, false)
+	if err != nil {
+		t.Fatalf("member.merge.propose: %v", err)
+	}
+	return p
+}
+
+func mergeAccept(c *protocol.Client, p protocol.MemberMergeProposal, keepAdmin bool) (protocol.MemberMergeAcceptResult, error) {
+	var res protocol.MemberMergeAcceptResult
+	err := c.Call(protocol.MethodMemberMergeAccept, protocol.MemberMergeAcceptParams{ProposalID: p.ID,
+		PlanDigest: p.PlanDigest, KeepAdmin: keepAdmin}, &res)
 	return res, err
 }
 
@@ -97,10 +108,11 @@ func wantRefusal(t *testing.T, err error, contains string) {
 }
 
 // A person who reached the server through Tailscale and through the edge
-// as two members merges them: the code minted on the tailnet sign-in,
-// confirmed from the GitHub one. The GitHub device then resolves to the
-// survivor, the absorbed member's connection is closed, its home is
-// archived, and a replay returns the recorded merge.
+// as two members merges them: the code minted on the tailnet sign-in, the
+// merge proposed from the GitHub one and accepted on the tailnet one. The
+// GitHub device then resolves to the survivor, the absorbed member's
+// connection is closed, its home is archived, and a replay returns the
+// recorded merge.
 func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	t.Parallel()
 	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "caches"), nil)
@@ -109,6 +121,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	}
 	merged := filepath.Join(t.TempDir(), "merged")
 	e, whois := mergeEnv(t, edgeproto.PolicyAccount, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
+	ctx := context.Background()
 	tina := addTailnetMember(t, e, "octo@example.com", domain.RoleCollaborator)
 	tailnet := tailnetDial(t, e, whois, tina.TailnetLogin)
 
@@ -117,9 +130,6 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	edgeConn := e.mustDialEdge(t, octo, laptop, "laptop")
 	github := controlClientOn(t, edgeConn)
 	gh := serverInfoMember(t, github)
-	if gh.ID == string(tina.ID) {
-		t.Fatal("the edge sign-in is already the tailnet member")
-	}
 	ghHome, err := homes.Path(domain.MemberID(gh.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -129,23 +139,45 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	}
 
 	code := mergeStart(t, tailnet)
+	// Signing in alone registered the device; no merge step is taken from it.
+	wantRefusal(t, github.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: code}, nil), "needs an approved device")
+	dev, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := identities(t, e).ApproveDevice(ctx, dev.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	plan := mergePreview(t, github, code)
-	if plan.Minted.ID != string(tina.ID) || plan.Confirming.ID != gh.ID || plan.Role != string(domain.RoleCollaborator) ||
+	if plan.Minted.ID != string(tina.ID) || plan.Proposer.ID != gh.ID || plan.Role != string(domain.RoleCollaborator) ||
 		plan.RoleWithKeepAdmin != "" || len(plan.Choices) != 2 || plan.PlanDigest == "" {
 		t.Fatalf("plan = %+v", plan)
 	}
 	if !slices.Contains(plan.SignIns, "tailnet login octo@example.com") || !slices.Contains(plan.SignIns, "github account octo at the edge") {
 		t.Fatalf("sign-ins = %v", plan.SignIns)
 	}
-	if _, err := mergeConfirm(github, code, string(tina.ID), "0000", false); err == nil || !strings.Contains(err.Error(), "preview again") {
-		t.Fatalf("confirm with a stale digest = %v", err)
+	if _, err := mergePropose(github, code, string(tina.ID), "0000", false); err == nil || !strings.Contains(err.Error(), "preview again") {
+		t.Fatalf("propose with a stale digest = %v", err)
 	}
-	res, err := mergeConfirm(github, code, string(tina.ID), plan.PlanDigest, false)
+	proposal, err := mergePropose(github, code, string(tina.ID), plan.PlanDigest, false)
 	if err != nil {
-		t.Fatalf("member.merge.confirm: %v", err)
+		t.Fatalf("member.merge.propose: %v", err)
+	}
+	_, err = mergeAccept(github, proposal, false)
+	wantRefusal(t, err, "only member "+string(tina.ID))
+
+	var pending protocol.MemberMergePendingResult
+	if err := tailnet.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 ||
+		pending.Proposals[0].ID != proposal.ID || pending.Proposals[0].Plan == nil || pending.Proposals[0].Refusal != "" {
+		t.Fatalf("member.merge.pending = %+v, %v", pending, err)
+	}
+	res, err := mergeAccept(tailnet, pending.Proposals[0], false)
+	if err != nil {
+		t.Fatalf("member.merge.accept: %v", err)
 	}
 	if res.Member.ID != string(tina.ID) || res.Merge.AbsorbedID != gh.ID || res.Merge.Discarded.DisplayName != "Octo Cat" ||
-		res.Merge.ConfirmedByKind != "edge-device" || res.Merge.ArchivePath != filepath.Join(merged, res.Merge.ID) {
+		res.Merge.ConfirmedByKind != "ssh" || res.Merge.ArchivePath != filepath.Join(merged, res.Merge.ID) {
 		t.Fatalf("merge = %+v", res)
 	}
 	if data, err := os.ReadFile(filepath.Join(res.Merge.ArchivePath, "home", "notes.txt")); err != nil || string(data) != "kept" {
@@ -159,15 +191,18 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(tina.ID) {
 		t.Fatalf("the tailnet login reconnects as %s", m.ID)
 	}
-	if entries, err := e.srv.EdgeDirectory(context.Background()); err != nil || len(entries) != 1 || entries[0].Subject != octo.Subject {
+	if m, err := e.store.GetMember(ctx, domain.MemberID(gh.ID)); err != nil || m.ID != tina.ID {
+		t.Fatalf("the absorbed member shows as %+v, %v; want the survivor", m, err)
+	}
+	if entries, err := e.srv.EdgeDirectory(ctx); err != nil || len(entries) != 1 || entries[0].Subject != octo.Subject {
 		t.Fatalf("edge directory = %+v, %v", entries, err)
 	}
-	replay, err := mergeConfirm(tailnet, code, string(tina.ID), plan.PlanDigest, false)
+	replay, err := mergeAccept(tailnet, proposal, false)
 	if err != nil || replay.Merge.ID != res.Merge.ID {
-		t.Fatalf("replayed confirm = %+v, %v", replay, err)
+		t.Fatalf("replayed accept = %+v, %v", replay, err)
 	}
-	_, err = mergeConfirm(controlClient(t, e), code, string(e.member.ID), plan.PlanDigest, false)
-	wantRefusal(t, err, "already used")
+	_, err = mergeAccept(controlClient(t, e), proposal, false)
+	wantRefusal(t, err, "accepted already")
 	var list protocol.MemberMergeListResult
 	if err := tailnet.Call(protocol.MethodMemberMergeList, struct{}{}, &list); err != nil || len(list.Merges) != 1 || list.Merges[0].ID != res.Merge.ID {
 		t.Fatalf("member.merge.list = %+v, %v", list, err)
@@ -184,13 +219,9 @@ func TestMergeRefusals(t *testing.T) {
 
 	wantRefusal(t, vi.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: mergeStart(t, vi)}, nil),
 		"already the same member")
-
-	// Both members have an SSH key.
 	wantRefusal(t, vi.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: mergeStart(t, admin)}, nil),
 		"both members have an SSH public key")
 
-	// A pending member gets nothing; approving it lets the plan through to
-	// the next refusal.
 	pending := addTailnetMember(t, e, "pat@example.com", domain.RoleViewer)
 	pending.Pending = true
 	if err := e.store.UpdateMember(ctx, pending); err != nil {
@@ -199,7 +230,6 @@ func TestMergeRefusals(t *testing.T) {
 	pat := tailnetDial(t, e, whois, pending.TailnetLogin)
 	wantRefusal(t, pat.Call(protocol.MethodMemberMergeStart, struct{}{}, nil), "pending")
 
-	// A live run of either member.
 	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
 	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
 	run := &domain.Run{WorkspaceID: e.ws.ID, MemberID: viewer.ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
@@ -212,68 +242,104 @@ func TestMergeRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The result role is the lower one; the viewer's code keeps it a viewer.
 	plan := mergePreview(t, tc, code)
 	if plan.Role != string(domain.RoleViewer) || plan.RoleWithKeepAdmin != "" {
 		t.Fatalf("plan role = %s, keep-admin role %q", plan.Role, plan.RoleWithKeepAdmin)
 	}
-	if _, err := mergeConfirm(tc, code, string(tina.ID), plan.PlanDigest, true); err != nil {
-		t.Fatalf("confirm: %v", err)
+	_, err := mergePropose(tc, code, string(tina.ID), plan.PlanDigest, true)
+	wantRefusal(t, err, "keep_admin is the admin's to ask for")
+	proposal, err := mergePropose(tc, code, string(tina.ID), plan.PlanDigest, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mergeAccept(vi, proposal, false); err != nil {
+		t.Fatalf("accept: %v", err)
 	}
 	if m, _ := e.store.GetMember(ctx, tina.ID); m.Role != domain.RoleViewer || m.PublicKey != viewer.PublicKey {
-		t.Fatalf("merged member = %+v; keep_admin may not lift a merge of two non-admins", m)
+		t.Fatalf("merged member = %+v", m)
 	}
 
-	// Expired code.
 	hash, _ := mergeCodeHash("AAAA-BBBB-CCCC-DDDD")
-	if err := e.store.(store.MergeStore).CreateMergeCode(ctx, e.member.ID, hash, false, time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)); err != nil {
+	if err := e.store.(store.MergeStore).CreateMergeCode(ctx, e.member.ID, hash, time.Now().Add(-time.Hour), time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: "aaaa bbbb cccc dddd"}, nil), "expired")
 	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: "AAAA-BBBB-CCCC-EEEE"}, nil), "unknown")
+
+	// A proposal is dropped by either side.
+	code = mergeStart(t, admin)
+	other := addTailnetMember(t, e, "otto@example.com", domain.RoleCollaborator)
+	oc := tailnetDial(t, e, whois, other.TailnetLogin)
+	proposal = mustPropose(t, oc, code, string(other.ID))
+	var cancelled protocol.MemberMergeCancelResult
+	if err := oc.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{}, &cancelled); err != nil || cancelled.Cancelled != 1 {
+		t.Fatalf("member.merge.cancel = %+v, %v", cancelled, err)
+	}
+	_, err = mergeAccept(admin, proposal, false)
+	wantRefusal(t, err, "unknown or cancelled")
 }
 
 // Merging the server's only admin into a collaborator demotes it unless
-// keep_admin is set, and keep_admin counts only when the admin side asks
-// for it: here the admin minted the code, so only a code minted with
-// keep_admin lets the collaborator's confirm keep the merged member admin.
+// the admin side asks to keep it admin, and keep_admin counts only from
+// that side. A merge that would leave the owner's GitHub account on a
+// member who is not an admin is refused.
 func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 	t.Parallel()
 	e, whois := mergeEnv(t, edgeproto.PolicyAccount, nil)
+	ctx := context.Background()
 	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
 	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
 	admin := controlClient(t, e)
-	wantRefusal(t, tc.Call(protocol.MethodMemberMergeStart, protocol.MemberMergeStartParams{KeepAdmin: true}, nil), "requires the admin role")
 
 	code := mergeStart(t, admin)
 	plan := mergePreview(t, tc, code)
-	if plan.Role != string(domain.RoleCollaborator) || plan.RoleWithKeepAdmin != string(domain.RoleAdmin) || !plan.KeepAdminRequired || plan.KeepAdminConsented {
+	if plan.Role != string(domain.RoleCollaborator) || plan.RoleWithKeepAdmin != string(domain.RoleAdmin) || !plan.KeepAdminRequired {
 		t.Fatalf("plan = %+v", plan)
 	}
-	_, err := mergeConfirm(tc, code, string(e.member.ID), plan.PlanDigest, false)
-	wantRefusal(t, err, "last admin")
-	_, err = mergeConfirm(tc, code, string(e.member.ID), plan.PlanDigest, true)
-	wantRefusal(t, err, "must come from the admin's sign-in")
-
-	code = mergeStartKeepingAdmin(t, admin, true)
-	if plan = mergePreview(t, tc, code); !plan.KeepAdminConsented {
-		t.Fatalf("plan of a code minted with keep_admin = %+v", plan)
+	_, err := mergePropose(tc, code, string(e.member.ID), plan.PlanDigest, true)
+	wantRefusal(t, err, "keep_admin is the admin's to ask for")
+	proposal, err := mergePropose(tc, code, string(e.member.ID), plan.PlanDigest, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	res, err := mergeConfirm(tc, code, string(e.member.ID), plan.PlanDigest, true)
+	_, err = mergeAccept(admin, proposal, false)
+	wantRefusal(t, err, "last admin")
+
+	_, _ = addMember(t, e, "Zed", domain.RoleAdmin, false)
+	if err := identities(t, e).BindIdentity(ctx, &domain.Identity{Member: e.member.ID, Provider: octo.Provider, Subject: octo.Subject, Login: octo.Login}); err != nil {
+		t.Fatal(err)
+	}
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{owner: &octo})
+	var pending protocol.MemberMergePendingResult
+	if err := admin.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	if pending.Proposals[0].Refusal == "" {
+		t.Fatal("a proposal whose members changed shows no refusal")
+	}
+	if err := admin.Call(protocol.MethodMemberMergeCancel, protocol.MemberMergeCancelParams{ProposalID: proposal.ID}, nil); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	code = mergeStart(t, admin)
+	proposal = mustPropose(t, tc, code, string(e.member.ID))
+	_, err = mergeAccept(admin, proposal, false)
+	wantRefusal(t, err, "owns this server at its edge")
+	res, err := mergeAccept(admin, proposal, true)
 	if err != nil || res.Member.Role != string(domain.RoleAdmin) || res.Merge.RoleAfter != string(domain.RoleAdmin) {
-		t.Fatalf("keep_admin confirm = %+v, %v", res, err)
+		t.Fatalf("keep_admin accept = %+v, %v", res, err)
 	}
 	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(e.member.ID) || m.Role != string(domain.RoleAdmin) {
 		t.Fatalf("tailnet login now reaches the server as %+v", m)
 	}
 }
 
-// Under approved-devices a member who is not an admin links their own
-// GitHub account: the join link opened with that account waits on the
-// member's approval, which they give from their key.
+// A member who is not an admin links their own GitHub account: the device
+// opening the join link is told whose member it would act as and waits on
+// the member's approval, which they give from their key.
 func TestSelfLinkByNonAdmin(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
 	carolKey, carol := addMember(t, e, "Carol", domain.RoleViewer, false)
 	c := controlAs(t, e, carolKey)
 	link := e.invite(t, c, protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "octo"})
@@ -281,19 +347,32 @@ func TestSelfLinkByNonAdmin(t *testing.T) {
 		t.Fatalf("link = %+v", link.Invitation)
 	}
 	laptop := newSigner(t)
-	code := e.refusedForApproval(t, octo, laptop, "laptop")
-	if err := approveByCode(c, code, nil); err != nil {
+	_, banner, err := e.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, e.edgeUser(t, octo))
+	want := "This links your github account octo to the existing member Carol (" + string(carol.ID) + "), role viewer; you will act as that member."
+	if err == nil || !strings.Contains(banner, want) {
+		t.Fatalf("join by a member's link = %v, banner %q; want it to wait, saying %q", err, banner, want)
+	}
+	if m, err := identities(t, e).GetMemberByIdentity(context.Background(), octo.Provider, octo.Subject); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the link bound the account before approval: %+v, %v", m, err)
+	}
+	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Call(protocol.MethodMemberDeviceApprove, protocol.MemberDeviceApproveParams{DeviceID: string(dev.ID)}, nil); err != nil {
 		t.Fatalf("approve own link's device: %v", err)
 	}
 	if m := serverInfoMember(t, controlClientOn(t, e.mustDialEdge(t, octo, laptop, "laptop"))); m.ID != string(carol.ID) || m.Role != string(domain.RoleViewer) {
 		t.Fatalf("linked device connects as %+v", m)
 	}
-	raw, _ := json.Marshal(protocol.MemberIdentityLinkParams{Login: "someone"})
-	if _, perr := e.srv.dispatch(context.Background(), carol.ID, protocol.MethodMemberIdentityLink, raw); perr != nil {
-		t.Fatalf("second link: %v", perr)
+	for _, login := range []string{"someone", "someone-else"} {
+		raw, _ := json.Marshal(protocol.MemberIdentityLinkParams{Login: login})
+		if _, perr := e.srv.dispatch(context.Background(), carol.ID, protocol.MethodMemberIdentityLink, raw); perr != nil {
+			t.Fatalf("link %s: %v", login, perr)
+		}
 	}
 	invs, err := identities(t, e).ListInvitations(context.Background())
-	if err != nil || len(invs) != 1 || invs[0].Login != "someone" || invs[0].Member != carol.ID {
+	if err != nil || len(invs) != 1 || invs[0].Login != "someone-else" || invs[0].Member != carol.ID {
 		t.Fatalf("open invitations = %+v, %v; want only Carol's newest link", invs, err)
 	}
 }

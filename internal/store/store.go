@@ -75,6 +75,8 @@ type Store interface {
 	DeleteWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) error
 
 	CreateMember(ctx context.Context, m *domain.Member) error
+	// GetMember returns the member id, or for a member a merge absorbed,
+	// the member it was merged into: the returned ID then differs from id.
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)
@@ -86,6 +88,7 @@ type Store interface {
 	// UpdateMemberGitIdentity sets only the member's git author name and
 	// address. Either may be empty, restoring that half's fallback.
 	UpdateMemberGitIdentity(ctx context.Context, id domain.MemberID, name, email string) error
+	// ListMembers returns every member but those a merge absorbed.
 	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	UpdateMember(ctx context.Context, m *domain.Member) error
 	DeleteMember(ctx context.Context, id domain.MemberID) error
