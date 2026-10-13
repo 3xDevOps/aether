@@ -189,10 +189,13 @@ function HomeRow({
   )
 }
 
-/** Upload progress and what could not be uploaded, pinned under the tree. */
+/** Transfers in progress and what could not be uploaded, pinned under the tree. */
 export function HomeStatus() {
-  const { uploads, dismissFailures } = useHomeFiles()
-  if (!uploads.progress && uploads.failures.length === 0) return null
+  const { uploads, downloading, dismissFailures } = useHomeFiles()
+  const progress = uploads.progress
+    ? `Uploading ${uploads.progress.at} of ${uploads.progress.of} · ${uploads.progress.name}`
+    : downloading && `Downloading ${baseName(downloading)}`
+  if (!progress && uploads.failures.length === 0) return null
   return (
     <div className="sticky bottom-0 flex flex-col gap-2 border-t border-seam bg-chrome p-2">
       {uploads.failures.length > 0 && (
@@ -209,12 +212,10 @@ export function HomeStatus() {
           </ul>
         </Callout>
       )}
-      {uploads.progress && (
+      {progress && (
         <p role="status" className="flex min-w-0 items-center gap-2 text-ui-sm text-muted">
           <Spinner />
-          <span className="min-w-0 truncate">
-            Uploading {uploads.progress.at} of {uploads.progress.of} · {uploads.progress.name}
-          </span>
+          <span className="min-w-0 truncate">{progress}</span>
         </p>
       )}
     </div>

@@ -87,6 +87,27 @@ describe('Home tree', () => {
     await waitFor(() => expect(vi.mocked(client.homeTree).mock.calls.map(([path]) => path).sort()).toEqual(['', 'notes']))
   })
 
+  it('downloads a file through the browser, saying so while it is fetched', async () => {
+    const fetched = Promise.withResolvers<{ content_base64: string; size: number }>()
+    const client = homeApi({ homeDownload: vi.fn(() => fetched.promise) })
+    const saved: Array<{ name: string; bytes: number }> = []
+    let blob = new Blob()
+    Object.assign(URL, { createObjectURL: (made: Blob) => ((blob = made), 'blob:home'), revokeObjectURL: () => {} })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push({ name: this.download, bytes: blob.size })
+    })
+    onTestFinished(() => click.mockRestore())
+    await openHome(client)
+
+    await menu('Actions for todo.md')
+    await choose('Download')
+    expect((await tree().findByRole('status')).textContent).toBe('Downloading todo.md')
+    fetched.resolve({ content_base64: btoa('hi\n'), size: 3 })
+    await waitFor(() => expect(saved).toEqual([{ name: 'todo.md', bytes: 3 }]))
+    expect(client.homeDownload).toHaveBeenCalledWith('todo.md')
+    await waitFor(() => expect(tree().queryByRole('status')).toBeNull())
+  })
+
   it('shows the server refusal when a credential file is opened', async () => {
     const refusal = 'home.read: .netrc is a credential file; read it in the Environment terminal'
     const client = homeApi({ homeRead: vi.fn(async () => Promise.reject(new ApiError(403, refusal))) })

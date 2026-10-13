@@ -24,6 +24,8 @@ interface Home {
   dropTarget: string | null
   uploads: UploadState
   uploading: boolean
+  /** The path being fetched for the browser to save. */
+  downloading: string | null
   dismissFailures: () => void
   create: (parent: string, kind: 'file' | 'dir') => void
   rename: (path: string) => void
@@ -55,6 +57,7 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
   const [removing, setRemoving] = useState<{ path: string; dir: boolean } | null>(null)
   const [moving, setMoving] = useState<{ from: string; dir: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState<string | null>(null)
   const uploader = useHomeUpload(client)
   const picker = useRef<HTMLInputElement>(null)
   const pickedFor = useRef('')
@@ -134,6 +137,7 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
     dropTarget,
     uploads: uploader.state,
     uploading: uploader.busy,
+    downloading,
     dismissFailures: uploader.dismissFailures,
     create: (parent, kind) => {
       expansion.set(homeKey(parent), true)
@@ -144,18 +148,22 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
     commitName,
     remove: (path, dir) => setRemoving({ path, dir }),
     download: (path) => {
-      void client.homeDownload(path).then(
-        (result) => {
-          const bytes = Uint8Array.from(atob(result.content_base64), (char) => char.charCodeAt(0))
-          const link = document.createElement('a')
-          link.href = URL.createObjectURL(new Blob([bytes]))
-          link.download = baseName(path)
-          link.click()
-          // Some engines read the blob only after the click has returned.
-          window.setTimeout(() => URL.revokeObjectURL(link.href), 60_000)
-        },
-        (err) => toast.error(errorSentence(err)),
-      )
+      setDownloading(path)
+      void client
+        .homeDownload(path)
+        .then(
+          (result) => {
+            const bytes = Uint8Array.from(atob(result.content_base64), (char) => char.charCodeAt(0))
+            const link = document.createElement('a')
+            link.href = URL.createObjectURL(new Blob([bytes]))
+            link.download = baseName(path)
+            link.click()
+            // Some engines read the blob only after the click has returned.
+            window.setTimeout(() => URL.revokeObjectURL(link.href), 60_000)
+          },
+          (err) => toast.error(errorSentence(err)),
+        )
+        .finally(() => setDownloading(null))
     },
     pickUpload: (dir) => {
       pickedFor.current = dir
@@ -192,7 +200,12 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
         if (dir === null) return
         event.preventDefault()
         if (dragged.current !== null) setMoving({ from: dragged.current, dir })
-        else void droppedUploads(event.dataTransfer).then((dropped) => uploader.upload(dir, dropped))
+        else {
+          void droppedUploads(event.dataTransfer).then(
+            (dropped) => uploader.upload(dir, dropped),
+            (err) => toast.error(errorSentence(err)),
+          )
+        }
       },
     },
   }
