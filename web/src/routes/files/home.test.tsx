@@ -63,7 +63,7 @@ describe('Home tree', () => {
     await userEvent.keyboard('{Escape}')
     expect(await menu('Actions for todo.md')).toEqual(['Download', 'Rename', 'Copy path', 'Delete'])
     await userEvent.keyboard('{Escape}')
-    expect(await menu('Actions for .netrc')).toEqual(['Rename', 'Copy path', 'Delete'])
+    expect(await menu('Actions for .netrc')).toEqual(['Copy path', 'Delete'])
     await userEvent.keyboard('{Escape}')
     expect(await menu('Actions for shortcut')).toEqual(['Rename', 'Copy path', 'Delete'])
     await userEvent.keyboard('{Escape}')

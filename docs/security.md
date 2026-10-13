@@ -1025,10 +1025,12 @@ Credential files are listed in Files and locked: `home.read`,
 any shipped agent or a `.pem` suffix in any component, anything under
 `~/.ssh` except `*.pub`, and `~/.config/gh/hosts.yml`, `~/.git-credentials`,
 and `~/.netrc`. The lock keeps credential bytes out of the browser and out
-of downloads by default. It is not a boundary against the member:
-`home.rename`, `home.remove`, and `home.upload` work on a locked file, a
-renamed copy is readable, and the Environment terminal reads the same home.
-A credential stored under any other name is not recognized.
+of downloads. `home.rename` refuses a locked file, and a folder that holds
+one of those fixed paths, because a renamed copy would be served;
+`home.remove` and `home.upload` work on a locked file, since neither returns
+its bytes. It is not a boundary against the member: the Environment terminal
+reads the same home, and a credential stored under any other name is not
+recognized.
 
 Uploaded and edited files are in the member's shared read-write home,
 mounted into that member's environment and the active and future

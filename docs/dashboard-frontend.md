@@ -3682,7 +3682,8 @@ delete, `dropHomePath` closes those tabs and drops their documents and
 drafts.
 
 A credential file, `locked` in `home.tree`, shows a lock at the end of its
-row. It opens like any file, and the editor shows the server's refusal:
+row, has no **Rename**, and cannot be dragged. It opens like any file, and
+the editor shows the server's refusal:
 `home.read: .claude/.credentials.json is a credential file; read it in the Environment terminal`.
 A symlink shows a link icon and does not open. Inline and dialog errors show
 the server's sentence without its method prefix (`errorSentence`).

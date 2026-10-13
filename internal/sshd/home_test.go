@@ -189,8 +189,12 @@ func TestHomeRPCListsButNeverReadsCredentials(t *testing.T) {
 	if err := c.Call(protocol.MethodHomeUpload, protocol.HomeUploadParams{Path: ".netrc", Content: []byte("replaced"), Overwrite: true}, nil); err != nil {
 		t.Fatalf("home.upload over a credential: %v", err)
 	}
-	if err := c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: ".netrc", To: ".netrc.bak"}, nil); err != nil {
-		t.Fatalf("home.rename a credential: %v", err)
+	// A rename would turn a credential into a file home.read serves.
+	wantHomeError(t, c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: ".netrc", To: "notes.txt"}, nil),
+		protocol.CodeDenied, ".netrc is a credential file; rename or move it in the Environment terminal")
+	for _, dir := range []string{".ssh", ".config", ".config/gh"} {
+		wantHomeError(t, c.Call(protocol.MethodHomeRename, protocol.HomeRenameParams{From: dir, To: "moved"}, nil),
+			protocol.CodeDenied, dir+" holds credential files; rename or move it in the Environment terminal")
 	}
 	if err := c.Call(protocol.MethodHomeRemove, protocol.HomePathParams{Path: ".git-credentials"}, nil); err != nil {
 		t.Fatalf("home.remove a credential: %v", err)

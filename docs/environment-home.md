@@ -405,11 +405,11 @@ replacing an existing file ask first; there is no trash. One file is at most
 64 MiB. Nothing is filtered: the exclusions above apply to
 `aether config push` only.
 
-Credential files are listed with a lock and cannot be opened, edited, or
-downloaded in Files: agent logins such as `~/.claude/.credentials.json`,
+Credential files are listed with a lock and cannot be opened, edited,
+downloaded, renamed, or moved in Files: agent logins such as `~/.claude/.credentials.json`,
 everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
-`~/.git-credentials`, `~/.netrc`, and `*.pem`. Read or edit them in the
-Environment terminal. Symlinks are listed and never followed.
+`~/.git-credentials`, `~/.netrc`, and `*.pem`. Deleting one and uploading
+over one work. Do the rest in the Environment terminal. Symlinks are listed and never followed.
 
 Text edits are complete UTF-8 text up to 64 MiB; binary and oversized files
 are read-only. Save explicitly with **Save** or

@@ -55,15 +55,29 @@ var shippedDenyNames = sync.OnceValue(func() []string {
 	return names
 })
 
+// homeCredentialPaths are the credential files known by where they are, not
+// by name. A trailing slash covers everything below except *.pub.
+var homeCredentialPaths = []string{githubCredentialPath, ".git-credentials", ".netrc", ".ssh/"}
+
 // homeLocked reports whether rel is a credential file: listed, never read.
 func homeLocked(rel string) bool {
-	switch {
-	case rel == githubCredentialPath, rel == ".git-credentials", rel == ".netrc":
-		return true
-	case strings.HasPrefix(rel, ".ssh/") && !strings.HasSuffix(rel, ".pub"):
-		return true
+	for _, p := range homeCredentialPaths {
+		if rel == p || (strings.HasSuffix(p, "/") && strings.HasPrefix(rel, p) && !strings.HasSuffix(rel, ".pub")) {
+			return true
+		}
 	}
 	return profilesvc.DeniedBasename(rel, shippedDenyNames())
+}
+
+// homeHoldsCredentials reports whether renaming the directory rel would move
+// a homeCredentialPaths entry to a path where it is no longer locked.
+func homeHoldsCredentials(rel string) bool {
+	for _, p := range homeCredentialPaths {
+		if strings.HasPrefix(p, rel+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // inHome runs op on one path of the member's home under that member's home
@@ -211,12 +225,18 @@ func (m *Manager) HomeMkdir(member domain.MemberID, raw string) error {
 }
 
 // HomeRename renames or moves a file, directory or symlink without replacing
-// anything at the destination.
+// anything at the destination. A credential file stays where it is locked.
 func (m *Manager) HomeRename(member domain.MemberID, rawFrom, rawTo string) error {
 	return m.inHome(member, rawFrom, false, func(home *os.Root, from string) error {
 		to, err := relPath(rawTo, false)
 		if err != nil {
 			return refusePath(rawTo)
+		}
+		if homeLocked(from) {
+			return refuseLocked(from, "rename or move")
+		}
+		if homeHoldsCredentials(from) {
+			return refuse(ErrConfigDenied, "%s holds credential files; rename or move it in the Environment terminal", from)
 		}
 		if strings.HasPrefix(to, from+"/") {
 			return refuse(ErrConfigDenied, "%s cannot be moved into itself", from)

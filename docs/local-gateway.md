@@ -1017,7 +1017,7 @@ path, a `..` or empty segment, a backslash, or a NUL byte is refused.
 | `home.read` | Reads one file with the rules and result of `config.read`. |
 | `home.write` | Saves complete UTF-8 text with the revision rules of `config.write`. An empty `revision` creates the file as `0644`, with any missing parent directories, and refuses an existing one. |
 | `home.mkdir` | Creates one directory, `0700`. Its parent must exist and the name must be free. |
-| `home.rename` | Renames or moves a file, directory, or symlink. It never replaces: an existing `to` is refused, and so is moving a directory into itself. |
+| `home.rename` | Renames or moves a file, directory, or symlink. It never replaces: an existing `to` is refused, and so is moving a directory into itself. A credential file, and `.ssh`, `.config`, or `.config/gh`, is refused. |
 | `home.remove` | Deletes a file or symlink, or a directory with everything in it. The home itself is refused. |
 | `home.upload` | Writes one file of arbitrary bytes up to 64 MiB, creating missing parent directories. An existing file is replaced only with `"overwrite":true` and keeps its mode; a new file is `0644`. |
 | `home.download` | Returns one regular file up to 64 MiB as base64. |
@@ -1028,10 +1028,12 @@ and `home.write` refuse it with `-32001` and a message such as
 A path is a credential file when any of its components is one of the
 `credential_names` of a shipped agent, matched case-insensitively, or ends in
 `.pem`; when it is under `.ssh/` and does not end in `.pub`; or when it is
-`.config/gh/hosts.yml`, `.git-credentials`, or `.netrc`. `home.rename`,
-`home.remove`, and `home.upload` work on a credential file, so a renamed copy
-is readable: the lock keeps credential bytes out of the browser by default
-and is not a boundary against the member
+`.config/gh/hosts.yml`, `.git-credentials`, or `.netrc`. `home.rename`
+refuses a credential file, and a folder holding one of those fixed paths,
+with the same code, since a renamed copy would be readable. `home.remove`
+and `home.upload` work on a credential file. The lock keeps credential bytes
+out of the browser and is not a boundary against the member, whose terminal
+reads the same home
 ([security.md](security.md#agent-configuration-and-files)).
 
 No `home.*` method follows a symlink. A symlink is listed, renamed, and

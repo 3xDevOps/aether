@@ -14,7 +14,7 @@ import { indent, ListingStatus, scrollToRow, useExpanded, useListing } from '@/r
 import { useStore } from '@/store'
 import { homeKey } from '@/store/files'
 
-const lockedHint = 'Credential file. Files lists it but does not open it; use the Environment terminal.'
+const lockedHint = 'Credential file. Files lists it but does not open, rename or move it; use the Environment terminal.'
 const linkHint = 'Symlink. Files does not follow links; use the Environment terminal.'
 
 const fileSpacer = <span className="w-3.5 shrink-0" />
@@ -152,7 +152,7 @@ function HomeRow({
       ref={button}
       selected={selected}
       aria-expanded={expanded}
-      aria-keyshortcuts={root ? undefined : 'F2 Delete'}
+      aria-keyshortcuts={root ? undefined : locked ? 'Delete' : 'F2 Delete'}
       style={indent(depth)}
       title={name}
       onClick={onClick}
@@ -162,7 +162,7 @@ function HomeRow({
       }}
       onKeyDown={(event) => {
         if (root) return
-        if (event.key === 'F2') home.rename(path)
+        if (event.key === 'F2' && !locked) home.rename(path)
         if (event.key === 'Delete') home.remove(path, kind === 'dir')
       }}
       leading={leading}
@@ -181,7 +181,7 @@ function HomeRow({
       {name}
     </ListRow>
   )
-  if (root) return row
+  if (root || locked) return row
   return (
     <div draggable onDragStart={(event) => home.dragStart(path, event)} onDragEnd={home.dragEnd}>
       {row}

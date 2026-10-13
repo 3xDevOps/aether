@@ -27,6 +27,7 @@ export function HomeMenu({
   const refreshHome = useStore((s) => s.refreshHome)
   const folder = kind === 'root' || kind === 'dir'
   const readable = kind === 'file' && !locked
+  const renamable = kind !== 'root' && !locked
   // A closing menu takes focus back to its button, which would close the
   // field an item has just opened; the field opens once the menu is gone.
   const afterClose = useRef<(() => void) | null>(null)
@@ -59,7 +60,7 @@ export function HomeMenu({
         )}
         {kind === 'root' && <MenuItem onSelect={refreshHome}>Refresh</MenuItem>}
         {readable && <MenuItem onSelect={() => home.download(path)}>Download</MenuItem>}
-        {kind !== 'root' && (
+        {renamable && (
           <>
             {(folder || readable) && <MenuSeparator />}
             <MenuItem onSelect={thenName(() => home.rename(path))}>Rename</MenuItem>
