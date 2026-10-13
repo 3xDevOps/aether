@@ -211,6 +211,22 @@ command to run:
 aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
 ```
 
+With nothing to install, it prints the path of the binary it checked,
+because `sudo` and `PATH` order can each pick a different `aether` than the
+one your shell runs:
+
+```
+already on the latest release v0.7.0-alpha.6
+this binary is /usr/local/bin/aether
+```
+
+After either outcome it warns when another `aether` comes first in `PATH`,
+with the command that updates that one:
+
+```
+warning: aether in PATH is /home/ada/.local/bin/aether, a different binary; update it with: /home/ada/.local/bin/aether update
+```
+
 Re-running either installer upgrades the client without changing its data.
 On Windows, close Aether first and rerun `install.ps1`; the default also
 rebuilds the desktop app. `aether update` still refuses on Windows.
