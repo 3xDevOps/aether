@@ -281,6 +281,29 @@ func TestCheckOptOutNeverDials(t *testing.T) {
 	}
 }
 
+func TestCheckPackagedNeverDials(t *testing.T) {
+	setVersion(t, "v1.2.3", "abc1234")
+	t.Setenv(PackagedEnv, "Android app")
+	srv, hits, _ := tagServer(t, "v1.3.0")
+
+	got, err := NewChecker(srv.URL, time.Hour).Check(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Packaged != "Android app" || got.CanSelfUpdate || got.UpdateAvailable || got.Latest != "" {
+		t.Fatalf("check = %+v, want a packaged check that cannot self-update", got)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("dialed %d times with %s set", n, PackagedEnv)
+	}
+
+	setVersion(t, "dev", "unknown")
+	got, err = NewChecker(srv.URL, time.Hour).CheckFresh(t.Context())
+	if err != nil || !got.Dev || got.Packaged != "Android app" {
+		t.Fatalf("dev check = %+v, %v, want Dev and Packaged both reported", got, err)
+	}
+}
+
 func TestCheckFreshBypassesAndReplacesTheCache(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
 	srv, _, setTag := tagServer(t, "v1.3.0")

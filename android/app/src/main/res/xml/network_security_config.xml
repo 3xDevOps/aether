@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The dashboard is HTTPS on the tailnet and the shell carries a member's
-     whole authority, so there is no cleartext path at all. -->
+<!-- A tailnet dashboard is HTTPS and the shell carries a member's whole
+     authority, so the only cleartext path is the Edge gateway the bundled CLI
+     serves on this phone's own loopback address. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>

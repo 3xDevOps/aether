@@ -16,6 +16,11 @@ import (
 // OptOutEnv disables the release check when set to a non-empty value.
 const OptOutEnv = "AETHER_NO_UPDATE_CHECK"
 
+// PackagedEnv names the app that installs and updates this binary, such as
+// "Android app". Only that app sets it; the binary then never checks for or
+// installs a release itself.
+const PackagedEnv = "AETHER_PACKAGED"
+
 // defaultTTL is how long a successful answer is reused.
 const defaultTTL = time.Hour
 
@@ -44,6 +49,9 @@ type Check struct {
 	Dev bool `json:"dev"`
 	// Disabled reports that OptOutEnv is set and no network was touched.
 	Disabled bool `json:"disabled"`
+	// Packaged is the app that installs this binary's updates, empty when
+	// the binary updates itself. No network was touched when it is set.
+	Packaged string `json:"packaged,omitempty"`
 	// CanSelfUpdate is false on Windows, which cannot rename over a
 	// running executable.
 	CanSelfUpdate bool `json:"can_self_update"`
@@ -286,7 +294,10 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		CheckedAt:     c.now(),
 	}
 	var err error
-	switch {
+	switch packaged := os.Getenv(PackagedEnv); {
+	case packaged != "":
+		out.Packaged, out.CanSelfUpdate = packaged, false
+		out.Dev = version.Version == devVersion
 	case version.Version == devVersion:
 		out.Dev = true
 	case os.Getenv(OptOutEnv) != "":

@@ -115,4 +115,25 @@ class NavigationTest {
         assertFalse(startedOnDashboard(BASE, "https://my-server.ts.net:8443/"))
         assertFalse(startedOnDashboard(BASE, "not a url"))
     }
+
+    @Test
+    fun theLoopbackGatewayIsTheOnlyOriginInEdgeMode() {
+        val gateway = "http://127.0.0.1:41233/?token=abc"
+        assertEquals(
+            Navigation.LOAD,
+            navigationFor(gateway, "http://127.0.0.1:41233/?token=abc&run=01k4x7m2qc", "http", mainFrame = true),
+        )
+        assertFalse(refusesRequest(gateway, "http://127.0.0.1:41233/api/v1/run.list", "http", mainFrame = true))
+        for (other in listOf(
+            "http://127.0.0.1:41234/",
+            "https://127.0.0.1:41233/",
+            "http://localhost:41233/",
+            "http://127.0.0.2:41233/",
+            "http://evil.example:41233/",
+        )) {
+            assertFalse(other, isDashboardUrl(gateway, other))
+            assertEquals(other, Navigation.EXTERNAL, navigationFor(gateway, other, other.substringBefore(':'), mainFrame = true))
+            assertTrue(other, refusesRequest(gateway, other, other.substringBefore(':'), mainFrame = true))
+        }
+    }
 }

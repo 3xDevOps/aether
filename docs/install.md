@@ -842,58 +842,120 @@ are in [CONTRIBUTING.md](../CONTRIBUTING.md#desktop-shell).
 
 ## Android app
 
-Optional: a shell app that opens the server-hosted dashboard full screen on a
-phone. Every release carries two builds of it in its assets and in
-`checksums.txt`: `aether-android.apk` for installing straight from the release
-page, and `aether-android.aab`, the app bundle Google Play takes. It is not on
-Google Play yet; the listing material is in `android/listing/`, and the Play
-link replaces this sentence the day the listing goes live. What the app stores
-and sends is in [privacy.md](privacy.md); the licences it ships under are in
+Optional: an app that opens the dashboard full screen on a phone. Every
+release carries two builds of it in its assets and in `checksums.txt`:
+`aether-android.apk` for installing straight from the release page, and
+`aether-android.aab`, the app bundle Google Play takes. It is not on Google
+Play yet; the listing material is in `android/listing/`, and the Play link
+replaces this sentence the day the listing goes live. What the app stores and
+sends is in [privacy.md](privacy.md); the licences it ships under are in
 [notices.md](notices.md).
-
-The app holds no logic and no credential. It is a WebView locked to one HTTPS
-origin, so identity stays the phone's own tailnet login, resolved by the server
-on every request ([networking.md](networking.md#the-dashboard)). A WebView
-cannot receive push notifications, so the app shows none: for those, install
-the dashboard from Chrome instead
-([networking.md](networking.md#notifications)). Two things
-have to be true first: the server has `web-port` set, and the phone is signed
-in to the same tailnet. The app does not use the edge in this release: it
-works over a tailnet exactly as before, whatever the server's `edge-url`
-and `edge-access` say ([edge.md](edge.md#the-dashboard)).
 
 1. Open the release page in the phone's browser and download
    `aether-android.apk`. Check it against its line in `checksums.txt` if you
    want to.
 2. Android asks once for permission to install apps from that browser. Allow
    it, then open the downloaded file.
-3. The first screen asks for the server name. Type its MagicDNS name, for
-   example `my-server.tailnet-name.ts.net`. A pasted
-   `https://my-server.tailnet-name.ts.net/` works too, and a port other than
-   443 goes on the end: `my-server.tailnet-name.ts.net:8443`. `http://` is
-   refused rather than upgraded.
-4. The dashboard opens at the board, already identified. There is no sign-in.
+3. The first screen asks how to reach your server. Pick one of two modes.
 
-To change the address later, long-press the app icon and pick **Server
-address**. An address that does not resolve leaves the WebView's own error page
-on screen, which names what actually failed, with a **Server address** button
-on it. That screen also carries the link to [privacy.md](privacy.md), the
-only place the app itself shows one.
+**Tailscale.** The app is a WebView locked to your server's HTTPS dashboard
+origin. Identity is the phone's own tailnet login, resolved by the server on
+every request ([networking.md](networking.md#the-dashboard)). Two things have
+to be true first: the server has `web-port` set, and the phone is signed in
+to the same tailnet. Type the server's MagicDNS name, for example
+`my-server.tailnet-name.ts.net`. A pasted
+`https://my-server.tailnet-name.ts.net/` works too, and a port other than 443
+goes on the end: `my-server.tailnet-name.ts.net:8443`. `http://` is refused
+rather than upgraded. The dashboard opens at the board, already identified;
+there is no sign-in. The app stores only that address.
 
-The app opens only `aether://run/<id>`, on that run, the same link the
-desktop shell handles. Open a join or claim link on a computer, with the
-desktop app or `aether link`: the app reaches servers over a tailnet, not an
-edge, and the dashboard it shows is served by the server it points at.
+**Aether Edge.** Sign in with GitHub; no Tailscale needed. The APK carries the
+`aether` CLI built for Android (`arm64-v8a` and `x86_64`) as
+`lib/<abi>/libaether.so`. The app runs `libaether.so gui --json --port 0`, the
+[local gateway](local-gateway.md) the desktop app runs, and loads its tokened
+`http://127.0.0.1:<port>/?token=...` URL in the WebView. The WebView stays
+locked to that origin, port included; every other link opens in the phone's
+browser, and cleartext is permitted only for `127.0.0.1`. The dashboard's own
+onboarding then signs you in through the [edge](edge.md), the same flow as the
+[desktop app](#desktop-app):
 
-The back gesture walks the dashboard's history and then sends the app to the
-background instead of closing it, so a terminal keeps its scrollback. Links
-that leave the dashboard, such as an agent's OAuth page, open in the phone's
-browser.
+1. The Connect step shows a sign-in code and opens the verification page in the
+   phone's browser. Sign in with GitHub there.
+2. The step lists the servers the edge says you can reach. Pick one.
+3. It shows the server's id and host key fingerprint. **Link and pin** saves
+   the link only once you confirm.
+4. Where the server requires device approval (`edge-access
+   approved-devices`), the step waits, retrying every 5 seconds, until an
+   admin approves the device ([teams.md](teams.md#through-an-edge)). A refusal
+   is shown as the server or edge sent it.
+
+SSH still runs end to end from the phone to the server; the edge relays
+encrypted bytes, and the server's access control is unchanged.
+
+In Edge mode the app stores, under its private files directory,
+`.config/aether/config.json` (the links), `edge-device-key` and
+`edge-tokens.json` (both mode `0600`) and `edge.lock`, plus `resolv.conf`.
+All of it is excluded from cloud backup and device transfer
+(`allowBackup="false"` and `data_extraction_rules.xml`) and deleted on
+uninstall. Uninstalling or clearing the app's storage loses the device key:
+the phone then signs in again as a new device and needs approval again where
+the server requires it.
+
+`resolv.conf` holds the phone's current DNS servers. Go's resolver finds no
+`/etc/resolv.conf` on Android, so the app reads the active network's DNS
+servers (permission `ACCESS_NETWORK_STATE`), rewrites the file on every
+network change and points the CLI at it with `AETHER_RESOLV_CONF`
+([networking.md](networking.md#android-dns)). TLS roots are Android's system
+store, `/system/etc/security/cacerts`, plus user-added CAs.
+
+The bundled CLI never checks GitHub for releases (`AETHER_PACKAGED` is set to
+`Android app`): it updates when the app does. The dashboard's update notice
+says `Updates come from the Android app: install its new version to update
+Aether.`, and `aether update` refuses with `this aether is part of the Android
+app, which installs its updates; update the Android app instead`. The gateway
+also omits the verbs that need a git checkout, a service manager or local
+agents ([local-gateway.md](local-gateway.md#get-apiv1capabilities)).
+
+If the gateway exits, the app restarts it after 1 s, 2 s and 4 s. After three
+failed restarts it shows a native screen with the exit code and the CLI's
+stderr verbatim, with **Retry** and **Connection**. A build without the
+library (a bare Gradle build, see
+[CONTRIBUTING.md](../CONTRIBUTING.md#android-shell)) says so and names the
+missing path. The app stops the gateway when its window is destroyed and
+restarts it on resume if it died.
+
+**Multiple servers.** In Edge mode, Settings > This computer lists **Saved
+servers** (the default link plus named ones). **Switch** relinks the gateway in
+place and the dashboard reloads. **Link another server** opens onboarding's
+Connect step with the edge server picker. A newly linked edge server becomes
+the default, and the previous edge default stays as a saved server named by its
+server id. The app starts on the default link.
+
+**Changing mode.** Long-press the app icon and pick **Connection**. A failed
+load's button is also **Connection**. In Tailscale mode, an address that does
+not resolve leaves the WebView's own error page on screen, which names what
+actually failed. The first screen carries the link to [privacy.md](privacy.md),
+the only place the app itself shows one.
+
+**Deep links.** Both modes open `aether://run/<id>` on that run, the same link
+the desktop shell handles. Edge mode also opens `aether://join?...` and
+`aether://claim?...` at onboarding's Connect step, validated like the desktop
+app ([edge.md](edge.md#the-dashboard)). Tailscale mode shows a message that
+these open in Edge mode: its dashboard is served by a remote server, which must
+not see another server's secret.
+
+A WebView cannot receive push notifications, so the app shows none: for those,
+install the dashboard from Chrome instead
+([networking.md](networking.md#notifications)). The back gesture walks the
+dashboard's history and then sends the app to the background instead of
+closing it, so a terminal keeps its scrollback. Links that leave the dashboard,
+such as an agent's OAuth page, open in the phone's browser.
 
 **Updates install over the old version**, because every release is signed with
-the same key. An APK built from a checkout is signed with a different key or
-not at all, so Android refuses it as an update; uninstall first, which also
-drops the stored server name.
+the same key, and in Edge mode they replace the bundled CLI. An APK built from
+a checkout is signed with a different key or not at all, so Android refuses it
+as an update; uninstall first, which also drops everything the app stored,
+including the Edge device key.
 
 The app needs a WebView from Chromium 140 or newer to paint under the status
 and navigation bars the way the dashboard expects. On an older one the app
@@ -1632,9 +1694,13 @@ checks out the authorized SHA and runs independently:
   each macOS or Windows lane builds only its CLI. They call
   `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
   and upload `binaries-go-<goos>-<goarch>`.
-- `android` separately builds and verifies the signed APK and AAB with
-  `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
-  It is the only job that receives the Android signing secrets.
+- `android-cli` builds the CLI libraries the APK carries
+  (`make android-cli VERSION="$GITHUB_REF_NAME"`) with no secrets and uploads
+  them as `android-jnilibs`.
+- `android` downloads those libraries, then builds and verifies the signed APK
+  and AAB with `make -o android-cli android VERSION="$GITHUB_REF_NAME"` and
+  uploads `binaries-android`. It is the only job that receives the Android
+  signing secrets.
 - `browser-image`, `edge-image` and `standard-image` each build on native
   amd64 (`ubuntu-latest`) and arm64 (`ubuntu-24.04-arm`) runners. Each loads,
   smoke-tests and pushes the same local image as `<tag>-<arch>`; standard
@@ -1710,8 +1776,8 @@ repository** links it. Until then `edge-manifest` ends with the warning
 `aether-edge is not public` and the release still completes.
 
 The separate `android` release job builds and signs the [Android app](#android-app),
-both APK and app bundle, in a pinned SDK container. It needs Docker on its runner
-and four repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
+both APK and app bundle, in a pinned SDK container, around the libraries the
+`android-cli` job built. It needs Docker on its runner and four repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
 base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
 `ANDROID_KEY_PASSWORD`. Its first step, **after release policy succeeds but
 before checkout or signing-toolchain setup**, checks that all four are present

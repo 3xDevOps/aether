@@ -5,7 +5,7 @@ publish it unless you sign in to the edge they run, at `auth.onaether.dev`
 and `edge.onaether.dev` ([What an edge stores](#what-an-edge-stores)). This page is the privacy
 policy for the Aether Android app (package `io.aether.android`), whether it
 came from a GitHub release or from Google Play, for the dashboard the app
-shows, and for that edge. Effective 2026-10-10.
+shows, and for that edge. Effective 2026-10-13.
 
 ## Who publishes it
 
@@ -17,8 +17,16 @@ request ([What an edge stores](#what-an-edge-stores)).
 
 ## What the app stores on the phone
 
-- **The server name you type on the first screen**, in the app's private
-  storage. Nothing else the app writes is its own.
+- **Which mode you chose and, in Tailscale mode, the server name you type on
+  the first screen**, in the app's private storage.
+- **In Aether Edge mode, the CLI's state**, under the app's private files
+  directory in `.config/aether/`: `config.json` (the servers you linked),
+  `edge-device-key` (this phone's SSH private key, mode `0600`),
+  `edge-tokens.json` (the edge's sign-in token for this device, mode `0600`)
+  and `edge.lock`. Beside them, `resolv.conf` holds the DNS servers of the
+  phone's current network, which the app reads (permission
+  `ACCESS_NETWORK_STATE`) and rewrites when the network changes. Nothing else
+  the app writes is its own.
 - **The WebView's ordinary cache** of the dashboard's files, and the
   dashboard's own local record of how you use it. That record holds how the
   dashboard looks (theme, text size, sidebar width and whether it is
@@ -32,19 +40,25 @@ request ([What an edge stores](#what-an-edge-stores)).
   server origin, including its port. Nothing reads them but the dashboard,
   and they last until you uninstall the app. Both are private to the app.
 
-No dashboard account, password, token, cookie or key is stored by the Android
-shell. There is no dashboard sign-in: the phone's Tailscale login identifies
-it to your server ([networking.md](networking.md#the-dashboard)). An app
+In Tailscale mode the app stores no account, password, token, cookie or key:
+there is no dashboard sign-in, and the phone's Tailscale login identifies it
+to your server ([networking.md](networking.md#the-dashboard)). In Edge mode the
+device key and token above are credentials, kept only on the phone. An app
 login in the remote development browser is separate server-side state, as
-described below. Uninstalling the app deletes everything stored on the phone.
-None of it is backed up: the app opts out of Google's cloud backup and of
-device-to-device transfer, so setting up a new phone asks for the server name
-again.
+described below. Uninstalling the app deletes everything stored on the phone,
+which in Edge mode includes the device key: the phone then signs in again as a
+new device and needs approval again where the server requires it. None of it
+is backed up: the app opts out of Google's cloud backup and of
+device-to-device transfer (`allowBackup=false` and
+`data_extraction_rules.xml`), so setting up a new phone starts again.
 
 ## What leaves the phone
 
-- **To your server, and only there.** Every request the dashboard makes goes
-  over HTTPS to the server whose name you typed, which you or your team run.
+- **To your server.** In Tailscale mode every request the dashboard makes goes
+  over HTTPS to the server whose name you typed, which you or your team run;
+  in Edge mode the dashboard talks to the gateway on the phone
+  (`127.0.0.1`), which reaches the server over SSH through the edge (next
+  items).
   That includes what you type into a terminal, the messages you send an
   agent, an image you pick from the phone to paste into a terminal, the
   contents of files you edit in the dashboard, approvals, and the run controls
@@ -52,13 +66,24 @@ again.
   ([install.md](install.md#what-lives-in-the-data-directory)); who on your
   team can see them is in [teams.md](teams.md#roles) and
   [security.md](security.md#the-dashboard-gateways). The app refuses a plain
-  `http://` address, forbids cleartext for the whole process, and refuses
-  mixed content, so nothing travels unencrypted.
-- **Your identity reaches the server through Tailscale, not through the
-  app.** The server asks its own tailscaled which tailnet login owns the
-  connecting device. The app sends no name, email, or identifier of its own.
-- **Your server records you as a member on the app's first request.** From
-  that answer it stores your tailnet login, which is an email address, and a
+  `http://` address, permits cleartext only for `127.0.0.1` (the Edge mode
+  gateway), and refuses mixed content, so nothing leaves the phone
+  unencrypted.
+- **In Edge mode, to the edge and through it.** The bundled CLI contacts the
+  edge to sign in, list your servers and relay the SSH connection to the one
+  you linked; the edge holds what [What an edge
+  stores](#what-an-edge-stores) lists and cannot read the stream, which is
+  encrypted end to end between the phone and your server. The GitHub sign-in
+  happens in the phone's browser, under GitHub's own policy. The CLI inside the
+  app never contacts GitHub to check for updates; new versions arrive with the
+  app.
+- **In Tailscale mode, your identity reaches the server through Tailscale, not
+  through the app.** The server asks its own tailscaled which tailnet login
+  owns the connecting device. The app sends no name, email, or identifier of
+  its own. In Edge mode the phone's device key and your edge account identify
+  you instead ([edge.md](edge.md)).
+- **Your server records you as a member on the app's first request.** In
+  Tailscale mode, from that answer it stores your tailnet login, which is an email address, and a
   display name taken from the part before the `@`, and writes one log line
   carrying that login and your device's Tailscale node ID. The record is how
   your administrator approves you and how your teammates see who did what
@@ -169,7 +194,7 @@ you are there. It is not stored, and no other member sees it.
 
 An **edge** is the relay and sign-in service that lets a computer running
 `aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
-Android app does not use it. Whoever runs an edge, the publisher for
+Android app uses it only in Edge mode. Whoever runs an edge, the publisher for
 `auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge cannot read terminal,
 agent, file or dashboard content: all of it travels inside SSH, which is
 encrypted end to end between your computer and your server.
@@ -317,13 +342,18 @@ ask agents to pass credentials to each other.
 
 ## Permissions
 
-`INTERNET` is the only permission the app asks for. The androidx library
+`INTERNET` lets the app reach your server, or in Edge mode the edge.
+`ACCESS_NETWORK_STATE` lets Edge mode read the active network's DNS servers,
+because Go's resolver finds no `/etc/resolv.conf` on Android; the app reads
+no other network state. The androidx library
 adds one signature-level permission the app defines for its own receivers,
 which no other app can hold and which grants nothing.
 
 ## Deleting your data
 
-- On the phone: uninstall the app.
+- On the phone: uninstall the app, or clear its storage. In Edge mode, also
+  revoke the device at the edge ([What an edge stores](#what-an-edge-stores)),
+  since the edge keeps its record of the device until you do.
 - At an edge: see [What an edge stores](#what-an-edge-stores).
 - On the server: the server's administrator owns the data directory and can
   delete a run, a member home, or the whole directory

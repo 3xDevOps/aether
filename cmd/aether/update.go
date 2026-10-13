@@ -48,6 +48,9 @@ func runUpdate(args []string) error {
 		return errors.New("--no-app skips part of an install and --check installs nothing; pick one")
 	}
 
+	if app := os.Getenv(selfupdate.PackagedEnv); app != "" {
+		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if *check {

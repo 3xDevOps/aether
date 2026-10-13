@@ -49,7 +49,8 @@ make test-scripts
 make public-audit
 ```
 
-The Android shell has its own build and tests, in a container:
+The Android app has its own build and tests. It needs Go, Bun and Node on
+the host as well as Docker ([Android shell](#android-shell)):
 
 ```sh
 make android
@@ -194,9 +195,11 @@ which fontTools cannot read the woff2 the banner's type comes from.
 
 ### Android shell
 
-`android/` is a Kotlin WebView shell around the server-hosted dashboard; see
-[docs/install.md](docs/install.md#android-app) for what it does. No Android
-SDK is installed on any machine, contributor or runner. The APK is built in
+`android/` is a Kotlin WebView shell that loads either a server-hosted
+dashboard or, in Aether Edge mode, the local gateway of the `aether` CLI it
+carries; see [docs/install.md](docs/install.md#android-app) for what it does.
+No Android SDK is installed on any machine, contributor or runner. The APK is
+built in
 `ghcr.io/cirruslabs/android-sdk` (JDK 21, the API 36 platform, build-tools
 36.0.0, licenses pre-accepted), whose digest the `Makefile` pins rather than
 its moving `:36` tag. CI and the release job use the same line, so a local
@@ -206,7 +209,18 @@ build and a released one run the same toolchain:
 make android
 ```
 
-That runs the app's JUnit tests and writes `dist/aether-android-unsigned.apk`
+`make android` first runs `make android-cli`, which needs Go, Bun and Node on
+the host: it builds the dashboard, then cross-compiles the CLI
+(`CGO_ENABLED=0 GOOS=android`, the release `-ldflags`) for arm64 and amd64 into
+`android/app/src/main/jniLibs/<abi>/libaether.so` (`arm64-v8a`, `x86_64`;
+gitignored). Gradle packages them as native libraries, and after the build
+`make android` checks with `unzip -l` that the APK holds both. A bare Gradle
+build without them still compiles; the app then reports the missing
+`libaether.so` path in Edge mode.
+
+The container step runs the app's JUnit tests (`./gradlew test`, which `make
+android` runs before assembling; `make android-debug` builds the debug APK
+without it) and writes `dist/aether-android-unsigned.apk`
 and `dist/aether-android-unsigned.aab`, the app bundle Google Play takes. With
 signing variables in the environment it writes `dist/aether-android.apk` and
 `dist/aether-android.aab` instead and fails unless both carry the certificate

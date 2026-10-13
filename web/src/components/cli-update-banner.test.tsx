@@ -64,6 +64,27 @@ test('offers no button where the CLI cannot update itself', async () => {
   expect(screen.getByRole('link', { name: 'Release notes' })).toBeTruthy()
 })
 
+// An app-packaged CLI is updated by installing the app's new version, so
+// no offer, command or release link may appear.
+test('a packaged CLI offers nothing and names the app that updates it', async () => {
+  const status = updateStatus()
+  const client = fakeApi({
+    localUpdateCheck: vi.fn(async () => ({
+      ...status,
+      cli: { ...status.cli, packaged: 'Android app', update_available: false, latest: '', can_self_update: false },
+    })),
+  })
+  seed()
+  render(<UpdateCenter client={client} />)
+
+  expect(
+    await screen.findByText('Updates come from the Android app: install its new version to update Aether.'),
+  ).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  expect(screen.queryByText(/sudo/)).toBeNull()
+  expect(screen.queryByText('Nothing to update.')).toBeNull()
+})
+
 test('the Update button applies and the banner says it is restarting', async () => {
   const client = fakeApi()
   seed()

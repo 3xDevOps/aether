@@ -82,6 +82,15 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            // libaether.so is the CLI, an executable rather than a library.
+            // Android runs a process from a file, so the installer has to
+            // extract it into nativeLibraryDir.
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

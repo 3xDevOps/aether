@@ -13,9 +13,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 /**
- * The first-run and settings screen: one field for the server's tailnet name.
+ * The first-run and settings screen: a choice between Aether Edge and
+ * Tailscale, and for Tailscale one field for the server's tailnet name.
  *
- * Reached on first launch, from the launcher's "Server address" shortcut, and
+ * It stores no credential. Edge sign-in happens in the dashboard, and the
+ * CLI sidecar keeps the resulting device key and tokens in app-private
+ * storage (see [Gateway]).
+ *
+ * Reached on first launch, from the launcher's "Connection" shortcut, and
  * from the button a failed load shows.
  */
 class SetupActivity : ComponentActivity() {
@@ -38,9 +43,34 @@ class SetupActivity : ComponentActivity() {
             WindowInsetsCompat.CONSUMED
         }
 
+        val choice = findViewById<View>(R.id.choice)
+        val form = findViewById<View>(R.id.form)
         val address = findViewById<EditText>(R.id.address)
         val error = findViewById<TextView>(R.id.error)
         storedDashboardUrl()?.let { address.setText(it) }
+
+        connectionMode()?.let { mode ->
+            val current = findViewById<TextView>(R.id.choice_current)
+            current.text =
+                getString(
+                    R.string.choice_current,
+                    getString(if (mode == ConnectionMode.EDGE) R.string.choice_edge else R.string.choice_tailscale),
+                )
+            current.visibility = View.VISIBLE
+        }
+
+        findViewById<Button>(R.id.choose_edge).setOnClickListener {
+            storeConnectionMode(ConnectionMode.EDGE)
+            // MainActivity is singleTask: this reaches the running window
+            // through onNewIntent, which starts the gateway.
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+        }
+        findViewById<Button>(R.id.choose_tailscale).setOnClickListener {
+            choice.visibility = View.GONE
+            form.visibility = View.VISIBLE
+            address.requestFocus()
+        }
 
         fun submit() {
             val url =

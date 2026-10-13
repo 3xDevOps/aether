@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ThemeEffect } from '@/components/theme'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
@@ -179,6 +179,19 @@ describe('settings view', () => {
     expect(useStore.getState().paletteDialog).toBe('release-finished')
   })
 
+  it('tells a packaged CLI where its updates come from', () => {
+    const status = updateStatus()
+    seed({
+      capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'update.check'] },
+      update: { ...status, cli: { ...status.cli, packaged: 'Android app', update_available: false, latest: '' } },
+    })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+
+    const server = screen.getByRole('region', { name: 'Server' })
+    expect(within(server).getByText(/Updates come from the Android app: install its new version to update Aether\./)).toBeDefined()
+    expect(within(server).queryByRole('button', { name: 'Update…' })).toBeNull()
+  })
+
   it('keeps the server admin rows from a collaborator', () => {
     seed({ info: { ...serverInfo, member: bob } })
     render(<SettingsRoute params={{}} client={fakeApi()} />)
@@ -236,38 +249,67 @@ describe('settings view', () => {
     expect(client.localDaemonInstall).not.toHaveBeenCalled()
   })
 
-  it('lists named servers, marks the active one, and shows the switch instruction', async () => {
-    const client = fakeApi({
-      localLinkStatus: vi.fn(async () => ({
-        server_configured: true,
-        linked: true,
-        addr: 'host:2222',
-        user: 'alice',
-        repo: '/src/repo',
-        links: [
-          { name: 'prod', addr: 'host:2222' },
-          { name: 'staging', addr: 'staging:2222' },
-        ],
-        active: 'prod',
-      })),
+  describe('saved servers', () => {
+    const status = {
+      server_configured: true,
+      linked: true,
+      addr: 'edge:2222',
+      user: 'alice',
+      repo: '/src/repo',
+      default: { name: '' as const, addr: 'edge:2222' },
+      links: [
+        { name: 'prod', addr: 'host:2222' },
+        { name: 'staging', addr: 'staging:2222' },
+      ],
+      active: 'prod',
+    }
+    const reload = vi.fn()
+
+    beforeEach(() => {
+      reload.mockClear()
+      vi.stubGlobal('location', { ...window.location, reload })
     })
-    seed()
-    render(<SettingsRoute params={{}} client={client} />)
+    afterEach(() => vi.unstubAllGlobals())
 
-    expect(await screen.findByText('prod')).toBeDefined()
-    expect(screen.getByText('staging')).toBeDefined()
-    expect(screen.getByText('Active')).toBeDefined()
-    const switches = screen.getAllByRole('button', { name: 'Switch' })
-    expect(switches).toHaveLength(1)
+    it('lists the default and named servers, marks the active one, and reloads after a switch', async () => {
+      const client = fakeApi({ localLinkStatus: vi.fn(async () => status) })
+      seed()
+      render(<SettingsRoute params={{}} client={client} />)
 
-    // The SSH identity is process-lifetime, so switching is a restart.
-    fireEvent.click(switches[0])
-    expect(
-      await screen.findByText(
-        'restart aether gui --server staging to switch servers',
-      ),
-    ).toBeDefined()
-    expect(client.localLinkSwitch).toHaveBeenCalledWith('staging')
+      expect(await screen.findByText('Default')).toBeDefined()
+      expect(screen.getByText('prod')).toBeDefined()
+      expect(screen.getAllByText('Active')).toHaveLength(1)
+      const switches = screen.getAllByRole('button', { name: 'Switch' })
+      expect(switches).toHaveLength(2)
+
+      fireEvent.click(switches[0])
+      await waitFor(() => expect(reload).toHaveBeenCalled())
+      expect(client.localLinkSwitch).toHaveBeenCalledWith('')
+    })
+
+    it('shows the gateway refusal verbatim and does not reload', async () => {
+      const client = fakeApi({
+        localLinkStatus: vi.fn(async () => status),
+        localLinkSwitch: vi.fn(async () => {
+          throw new Error('server staging:2222 refused the key')
+        }),
+      })
+      seed()
+      render(<SettingsRoute params={{}} client={client} />)
+
+      fireEvent.click((await screen.findAllByRole('button', { name: 'Switch' }))[1])
+      expect(await screen.findByText('server staging:2222 refused the key')).toBeDefined()
+      expect(reload).not.toHaveBeenCalled()
+    })
+
+    it('opens onboarding on the server picker from Link another server', async () => {
+      const client = fakeApi({ localLinkStatus: vi.fn(async () => status) })
+      seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'edge.link'] } })
+      render(<SettingsRoute params={{}} client={client} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Link another server' }))
+      expect(useStore.getState().route).toEqual({ name: 'onboarding', params: { link: 'another' } })
+    })
   })
   it('separates a configured server from its missing repository', async () => {
     const client = fakeApi({

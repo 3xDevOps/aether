@@ -41,6 +41,8 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
     if (scope.current.generation === generation) setOwnership({ generation, status })
   }, [generation])
 
+  // A packaged gateway links a server but has no filesystem to read a clone from.
+  const packaged = caps.hasLocal('link.status') && !caps.hasLocal('link.repo')
   const notReady = source?.enabled === true && (source.status !== 'ready' || !source.accepted_commit)
 
   return <section aria-label="Workspace repository" className="flex min-w-0 flex-col gap-4">
@@ -49,7 +51,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
         {source.last_error || 'Runs start once it is verified and adopted. Open Advanced to review it.'}
       </Callout>
     )}
-    <div className="flex flex-col items-start gap-2">
+    {!packaged && <div className="flex flex-col items-start gap-2">
       <h3 className="text-ui font-medium text-text">Local clone</h3>
       <p className="text-ui-sm text-muted">
         {source?.enabled
@@ -58,7 +60,7 @@ export function WorkspaceRepository({ client = api, caps, workspace, initialLoca
       </p>
       {!local && <Button size="sm" variant="secondary" onClick={() => { setLocal(true); onLocalChange?.(true) }}>Link local repository</Button>}
       {local && <RepoStep client={client} caps={caps} workspace={workspace} mirrored={source?.enabled === true} sourcePending={source === null} back={back} cancel={<Button size="sm" variant="secondary" onClick={() => { setLocal(false); onLocalChange?.(false) }}>Cancel</Button>} onNext={onNext ?? (() => { setLocal(false); onLocalChange?.(false) })} />}
-    </div>
+    </div>}
     <div className="border-t border-seam pt-1">
       <Collapsible defaultOpen={advancedOpen}>
         <CollapsibleTrigger>

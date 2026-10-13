@@ -16,6 +16,7 @@ import (
 )
 
 func main() {
+	useResolvConfEnv()
 	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "aether:", err)
 		if output := setupOutput(err); output != "" {

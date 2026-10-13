@@ -76,6 +76,8 @@ func runGUI(args []string) error {
 		Backend: localgw.NewSSHBackend(cfg),
 		CLI:     cfg,
 		Update:  checker,
+		// The Android app sets it and installs this binary's updates.
+		Packaged: os.Getenv(selfupdate.PackagedEnv),
 		// The desktop shell spawns `aether gui --json` and restarts it,
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,

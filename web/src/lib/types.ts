@@ -1057,7 +1057,9 @@ export interface LinkStatus {
    * `repo` is the profile's own clone, absent when it has none.
    */
   links?: { name: string; addr: string; repo?: string }[]
-  /** The profile this gateway runs on; absent on the top-level link. */
+  /** The top-level link, present when one is configured. */
+  default?: { name: ''; addr: string; repo?: string }
+  /** The profile this gateway runs on; empty on the top-level link. */
   active?: string
   /** The edge and server id of a link through an edge; absent otherwise. */
   edge_url?: string
@@ -1462,6 +1464,9 @@ export interface UpdateCheck {
   disabled: boolean
   /** False on Windows, where the binary cannot replace itself. */
   can_self_update: boolean
+  /** The app that installs and updates this CLI, e.g. "Android app"; no
+   * release check ran. */
+  packaged?: string
   checked_at: string
 }
 

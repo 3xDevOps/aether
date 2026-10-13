@@ -3,7 +3,7 @@
 # Requires GNU make and Go 1.26+. The Go binaries cross-compile with nothing
 # beyond that toolchain (pure Go, CGO_ENABLED=0 throughout), but `make
 # release` also builds the dashboard, which needs Bun and Node, and the
-# Android APK, which needs Docker.
+# Android APK, which needs Docker as well.
 
 MODULE  := github.com/3xDevOps/Aether
 # Both reach shell command lines - the linker flags here, the Windows resource
@@ -121,6 +121,16 @@ ANDROID_VERSION_CODE = $(or $(shell sh scripts/android-version-code.sh '$(VERSIO
 # leading v reads as part of the number.
 ANDROID_VERSION_NAME = $(VERSION:v%=%)
 
+# The APK carries the CLI as a native library so Android extracts it with the
+# execute bit; the app runs it as its local gateway in Aether Edge mode. One
+# build per ABI the app ships, Android ABI name before the Go platform.
+# android/amd64 links only through cgo, so x86_64 (emulators, Chromebooks)
+# gets a static linux/amd64 executable, which Android's kernel runs with no
+# dynamic linker; the app hands it Android's CA directories through
+# SSL_CERT_DIR.
+ANDROID_CLI_ABIS := arm64-v8a:android/arm64 x86_64:linux/amd64
+ANDROID_JNILIBS  := android/app/src/main/jniLibs
+
 # Release signing comes from the environment, never the tree: a keystore path
 # and the three secrets beside it. Without them the APK and the bundle come
 # out unsigned and are named for it, so a PR's build can never be mistaken for
@@ -140,7 +150,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-debug release release-binaries deploy clean
+.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -238,12 +248,13 @@ public-audit:
 # export is built before Go compiles. Bun installs dependencies; Node runs the
 # Next build.
 # The Android shell's unit tests, release APK and app bundle, built in the
-# pinned SDK container. The APK is for direct installs; the bundle is what
+# pinned SDK container around the CLI that android-cli cross-compiles on the
+# host first. The APK is for direct installs; the bundle is what
 # Google Play takes (docs/install.md). Both are signed with the same key.
 # scripts/android-verify-signature.sh runs in the same container, which is
 # where apksigner, jarsigner and keytool live, and is given the keystore the
 # build was handed so it can check who actually signed the two artifacts.
-android:
+android: android-cli
 	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
 	@if [ -n '$(ANDROID_KEYSTORE_FILE)' ] && [ ! -f '$(ANDROID_KEYSTORE_FILE)' ]; then \
 		echo 'make android: ANDROID_KEYSTORE_FILE does not name a file: $(ANDROID_KEYSTORE_FILE)' >&2; \
@@ -255,6 +266,11 @@ android:
 			'-PaetherVersionName=$(ANDROID_VERSION_NAME)' -PaetherVersionCode=$(ANDROID_VERSION_CODE)
 	cp android/app/build/outputs/apk/release/$(ANDROID_BUILT) $(DIST)/$(ANDROID_APK)
 	cp android/app/build/outputs/bundle/release/app-release.aab $(DIST)/$(ANDROID_AAB)
+	@for pair in $(ANDROID_CLI_ABIS); do \
+		lib=lib/$${pair%%:*}/libaether.so; \
+		unzip -l $(DIST)/$(ANDROID_APK) | grep -q " $$lib$$" || { \
+			echo "make android: $(DIST)/$(ANDROID_APK) does not contain $$lib" >&2; exit 1; }; \
+	done
 	@if [ -n '$(ANDROID_SIGNING)' ]; then \
 		docker run --rm -v '$(CURDIR)/$(DIST)':/dist:ro \
 			-v '$(CURDIR)/scripts':/scripts:ro $(ANDROID_SIGNING) \
@@ -269,11 +285,19 @@ android:
 # neither of which an unsigned release APK allows. It never updates over a
 # released install, and a released APK never updates over it.
 # See docs/dashboard-frontend.md.
-android-debug:
+android-debug: android-cli
 	@mkdir -p $(DIST) '$(ANDROID_GRADLE_HOME)'
 	$(ANDROID_RUN) $(ANDROID_IMAGE) ./gradlew --console=plain assembleDebug
 	cp android/app/build/outputs/apk/debug/app-debug.apk $(DIST)/aether-android-debug.apk
 	@echo 'built $(DIST)/aether-android-debug.apk; install it with: adb install -r $(DIST)/aether-android-debug.apk'
+
+android-cli: dashboard
+	@for pair in $(ANDROID_CLI_ABIS); do \
+		abi=$${pair%%:*}; platform=$${pair#*:}; \
+		echo "building $(ANDROID_JNILIBS)/$$abi/libaether.so"; \
+		CGO_ENABLED=0 GOOS=$${platform%/*} GOARCH=$${platform#*/} go build -trimpath -ldflags '$(LDFLAGS)' \
+			-o $(ANDROID_JNILIBS)/$$abi/libaether.so ./cmd/aether || exit 1; \
+	done
 
 dashboard:
 	@command -v $(BUN) >/dev/null 2>&1 || { \
@@ -355,4 +379,4 @@ release-binaries: dashboard
 
 clean:
 	rm -rf $(DIST) cmd/aether/resource_windows_*.syso \
-		android/.gradle android/build android/app/build
+		android/.gradle android/build android/app/build android/app/src/main/jniLibs

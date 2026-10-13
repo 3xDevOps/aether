@@ -743,10 +743,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       remote: 'aether',
       url: 'ssh://alice@host:2222/wsp_1',
     })),
-    // Like the gateway: the SSH identity is process-lifetime, so link.switch always refuses.
-    localLinkSwitch: vi.fn(async (name: string) => {
-      throw new Error(`restart aether gui --server ${name} to switch servers`)
-    }),
+    localLinkSwitch: vi.fn(async (name: string) => ({ active: name })),
     localEdgeStatus: vi.fn(async () => ({ edges: [] })),
     localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
     localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),

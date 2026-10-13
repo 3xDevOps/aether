@@ -19,6 +19,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -31,16 +32,22 @@ import androidx.core.view.WindowInsetsCompat
 import java.io.ByteArrayInputStream
 
 /**
- * The whole shell: one WebView on the dashboard the server hosts on the
- * tailnet.
+ * The whole shell: one WebView on a dashboard.
  *
- * It holds no credential and no logic. Identity is this phone's tailnet
- * login, resolved per request by the server (docs/security.md), so the
- * WebView is a browser locked to one HTTPS origin and nothing more.
+ * In Tailscale mode that is the one the server hosts on the tailnet. The
+ * shell holds no credential and no logic there: identity is this phone's
+ * tailnet login, resolved per request by the server (docs/security.md), so
+ * the WebView is a browser locked to one HTTPS origin and nothing more.
+ *
+ * In Edge mode it is the one the bundled CLI serves on loopback, which this
+ * window starts and owns as a [Gateway]. The CLI sidecar holds the device
+ * key and tokens in app-private storage; the WebView itself still holds
+ * none, and is locked to the gateway's one `http://127.0.0.1:<port>` origin.
  */
 class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
-    private lateinit var changeServer: Button
+    private lateinit var connection: Button
+    private lateinit var gatewayError: View
     private lateinit var pickFiles: ActivityResultLauncher<Intent>
 
     /**
@@ -50,6 +57,15 @@ class MainActivity : ComponentActivity() {
      */
     @Volatile
     private var loaded: String? = null
+
+    private var mode = ConnectionMode.TAILSCALE
+    private var gateway: Gateway? = null
+
+    /** The running gateway's address, once it has printed it. */
+    private var gatewayUrl: String? = null
+
+    /** A deep link's suffix held until the gateway has an address to append it to. */
+    private var pendingSuffix = ""
     private var fileChooser: ValueCallback<Array<Uri>>? = null
 
     /**
@@ -100,17 +116,21 @@ class MainActivity : ComponentActivity() {
         // separate Activity, and carrying the link through it would have to
         // survive the member abandoning that screen. Tapping the link again
         // after setup works.
-        val base = storedDashboardUrl()
-        if (base == null) {
-            openSetup()
-            finish()
-            return
-        }
+        mode =
+            connectionMode()
+                ?: run {
+                    openSetup()
+                    finish()
+                    return
+                }
         WindowCompat.enableEdgeToEdge(window)
         setContentView(R.layout.activity_main)
         web = findViewById(R.id.web)
-        changeServer = findViewById(R.id.change_server)
-        changeServer.setOnClickListener { openSetup() }
+        connection = findViewById(R.id.connection)
+        connection.setOnClickListener { openSetup() }
+        gatewayError = findViewById(R.id.gateway_error)
+        findViewById<Button>(R.id.gateway_retry).setOnClickListener { startGateway() }
+        findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
 
         pickFiles =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -138,16 +158,48 @@ class MainActivity : ComponentActivity() {
         // root intent again, so a shell first launched from an
         // aether://run link would reopen that run on every return. The link
         // is one-shot here, as it is in the dashboard.
-        open(base, if (savedInstanceState == null) intent else null)
+        connect(if (savedInstanceState == null) intent else null)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // SetupActivity stores the address before it starts this window, so a
-        // changed address is already here to reload.
-        val base = storedDashboardUrl() ?: return
-        open(base, intent)
+        // SetupActivity stores the mode and address before it starts this
+        // window, so a change is already here to apply.
+        val stored = connectionMode() ?: return
+        if (stored != mode) {
+            mode = stored
+            gatewayUrl = null
+            loaded = null
+            web.stopLoading()
+            stopGateway()
+        }
+        connect(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (mode == ConnectionMode.EDGE && gateway?.isActive != true &&
+            gatewayError.visibility != View.VISIBLE
+        ) {
+            startGateway()
+        }
+    }
+
+    override fun onDestroy() {
+        stopGateway()
+        super.onDestroy()
+    }
+
+    private fun connect(intent: Intent?) {
+        gatewayError.visibility = View.GONE
+        when (mode) {
+            ConnectionMode.TAILSCALE -> {
+                stopGateway()
+                open(storedDashboardUrl() ?: return, intent)
+            }
+            ConnectionMode.EDGE -> openEdge(intent)
+        }
     }
 
     /**
@@ -185,9 +237,16 @@ class MainActivity : ComponentActivity() {
             // The button is a sibling of the WebView inside that container, so
             // it needs the navigation bar's height only when the container
             // itself was not padded for it.
-            val params = changeServer.layoutParams as ViewGroup.MarginLayoutParams
+            val params = connection.layoutParams as ViewGroup.MarginLayoutParams
             params.bottomMargin = margin + if (pageHandlesSafeAreas) bars.bottom else 0
-            changeServer.requestLayout()
+            connection.requestLayout()
+            val panel = gatewayError
+            panel.setPadding(
+                margin,
+                margin + if (pageHandlesSafeAreas) bars.top else 0,
+                margin,
+                margin + if (pageHandlesSafeAreas) bars.bottom else 0,
+            )
             val forwarded = WindowInsetsCompat.Builder(windowInsets).setInsets(imeType, Insets.NONE)
             if (!pageHandlesSafeAreas) forwarded.setInsets(barType, Insets.NONE)
             forwarded.build()
@@ -255,7 +314,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                    changeServer.visibility = View.GONE
+                    connection.visibility = View.GONE
                     if (startedOnDashboard(loaded, url)) return
                     // The refused request still commits, on the blank
                     // document it was answered with, so the dashboard goes
@@ -294,7 +353,7 @@ class MainActivity : ComponentActivity() {
                     // what actually failed. This only adds the way back to
                     // the address that failed. An HTTP status is not this
                     // case: the server answered, so the address is right.
-                    if (request.isForMainFrame) changeServer.visibility = View.VISIBLE
+                    if (request.isForMainFrame) connection.visibility = View.VISIBLE
                 }
             }
 
@@ -334,7 +393,11 @@ class MainActivity : ComponentActivity() {
         // whatever the old one still has in flight stops before its commit
         // can be read as an escape off the dashboard.
         if (base != loaded) web.stopLoading()
-        val link = intent?.dataString?.let { deepLinkUrl(base, it) }
+        val raw = intent?.dataString
+        if (raw != null && isEdgeOnlyLink(raw)) {
+            Toast.makeText(this, R.string.join_needs_edge, Toast.LENGTH_LONG).show()
+        }
+        val link = raw?.let { deepLinkUrl(base, it) }
         if (link != null) {
             loaded = base
             web.loadUrl(link)
@@ -344,6 +407,54 @@ class MainActivity : ComponentActivity() {
             loaded = base
             web.loadUrl(base)
         }
+    }
+
+    /**
+     * Shows the Edge dashboard: now if the gateway has an address, else when
+     * it prints one. A link that names something to open is held until then.
+     */
+    private fun openEdge(intent: Intent?) {
+        val suffix = intent?.dataString?.let(::edgeDeepLinkSuffix)
+        val url = gatewayUrl
+        when {
+            gateway?.isActive != true -> {
+                pendingSuffix = suffix ?: ""
+                startGateway()
+            }
+            url == null -> if (suffix != null) pendingSuffix = suffix
+            suffix != null -> web.loadUrl(url + suffix)
+        }
+    }
+
+    private fun startGateway() {
+        stopGateway()
+        gatewayUrl = null
+        gatewayError.visibility = View.GONE
+        gateway =
+            Gateway(
+                this,
+                onReady = { url ->
+                    gatewayUrl = url
+                    // A new address is a new origin: what the old one has in
+                    // flight stops before it can be read as an escape.
+                    web.stopLoading()
+                    loaded = url
+                    web.loadUrl(url + pendingSuffix)
+                    pendingSuffix = ""
+                },
+                onFailed = { message ->
+                    gatewayUrl = null
+                    loaded = null
+                    findViewById<TextView>(R.id.gateway_error_text).text = message
+                    gatewayError.visibility = View.VISIBLE
+                },
+            )
+        gateway?.start()
+    }
+
+    private fun stopGateway() {
+        gateway?.stop()
+        gateway = null
     }
 
     /**

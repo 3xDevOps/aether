@@ -41,6 +41,10 @@ import type { UpdateKind } from '@/store/ui'
 
 export const RECHECK_MS = 30 * 60 * 1000
 
+export function packagedLine(packaged: string): string {
+  return `Updates come from the ${packaged}: install its new version to update Aether.`
+}
+
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
   if (!shell || !cliVersion) return false
@@ -136,12 +140,17 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const open = useStore((s) => s.updatesOpen)
   const setOpen = useStore((s) => s.setUpdatesOpen)
   const anything = useUpdateNotice() !== null
+  const packaged = serves ? update?.cli.packaged : undefined
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Updates</DialogTitle>
-          {!anything && <DialogDescription>Nothing to update.</DialogDescription>}
+          {packaged ? (
+            <DialogDescription>{packagedLine(packaged)}</DialogDescription>
+          ) : (
+            !anything && <DialogDescription>Nothing to update.</DialogDescription>
+          )}
         </DialogHeader>
         <div className="min-w-0">
           {serves && <ShellBanner />}

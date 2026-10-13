@@ -68,6 +68,8 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
     }
   }
 
+  // A packaged gateway links a server but has no filesystem to read a clone from.
+  const packaged = caps.hasLocal('link.status') && !caps.hasLocal('link.repo')
   const canImport = isAdmin && caps.hasMethod('workspace.import')
   const canAdd = isAdmin && caps.hasMethod('workspace.add')
   const canGitHub = canImport && caps.hasMethod('github.oauth.start') && caps.hasMethod('github.repositories.list')
@@ -88,13 +90,13 @@ export function WorkspaceCreate({ client, onCreated, onRefresh }: {
           ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => { setImported(null); setChoice('remote') }}>Import repository</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot import repositories.</p>}
       </div>
-      <div className={cn('flex flex-col items-start gap-2 rounded-panel border p-3', choice === 'local' ? 'border-accent' : 'border-seam')}>
+      {!packaged && <div className={cn('flex flex-col items-start gap-2 rounded-panel border p-3', choice === 'local' ? 'border-accent' : 'border-seam')}>
         <h4 className="text-ui font-medium text-text">From a local clone</h4>
         <p className="flex-1 text-ui-sm text-muted">Create the workspace, then link your clone and push its base branch. History is never rewritten.</p>
         {canAdd
           ? <Button size="sm" variant="secondary" disabled={busy || uncertain} onClick={() => setChoice('local')}>Create from local clone</Button>
           : <p className="text-ui-sm text-muted">This gateway cannot create workspaces.</p>}
-      </div>
+      </div>}
     </div>
     {choice === 'local' && (caps.hasLocal('link.repo') ? <form aria-label="Create workspace" className="flex flex-col gap-3 border-t border-seam pt-3" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <fieldset disabled={busy || uncertain} className="grid gap-3 sm:grid-cols-2">

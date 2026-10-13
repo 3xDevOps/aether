@@ -1,12 +1,12 @@
 package localgw
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -58,7 +58,30 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"workspace.selection": (*Gateway).localWorkspaceSelection,
 }
 
-var localVerbs = slices.Sorted(maps.Keys(localHandlers))
+// needsHost lists the verbs that need a git checkout, a service manager or
+// local coding agents; a packaged gateway runs on a phone with none of them.
+var needsHost = []string{
+	"daemon.install", "daemon.status", "env.agents", "git.identity", "link.repo", "pull",
+	"pull.switch", "repo.fast-forward", "repo.push", "sync.start", "sync.status", "sync.stop",
+}
+
+// localVerbsFor is the sorted verb list one gateway offers.
+func localVerbsFor(packaged bool) []string {
+	return slices.Sorted(func(yield func(string) bool) {
+		for verb := range localHandlers {
+			if packaged && slices.Contains(needsHost, verb) {
+				continue
+			}
+			if !yield(verb) {
+				return
+			}
+		}
+	})
+}
+
+// dialLink is cli.Dial behind a variable so tests can switch links without
+// a server.
+var dialLink = cli.Dial
 
 // localState is the mutable client-machine state behind /local/v1:
 // the saved link config (link.repo updates it), the background sync
@@ -148,7 +171,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	verb := r.PathValue("verb")
 	handler, ok := localHandlers[verb]
-	if !ok {
+	if !ok || !slices.Contains(g.verbs, verb) {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
 			Code:    protocol.CodeMethodNotFound,
 			Message: "unknown local verb " + verb,
@@ -210,8 +233,19 @@ func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) 
 		ServerID         string    `json:"server_id,omitempty"`
 		Links            []linkRef `json:"links,omitempty"`
 		Active           string    `json:"active,omitempty"`
+		Default          *linkRef  `json:"default,omitempty"`
 	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "" || cfg.ServerID != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
-		EdgeURL: cfg.EdgeURL, ServerID: cfg.ServerID, Links: namedLinks(cfg), Active: cfg.Active}, nil
+		EdgeURL: cfg.EdgeURL, ServerID: cfg.ServerID, Links: namedLinks(cfg), Active: cfg.Active, Default: defaultLink()}, nil
+}
+
+// defaultLink describes the saved top-level link, nil when none is saved.
+// An edge link may have no address; its server id stands in.
+func defaultLink() *linkRef {
+	saved, err := cli.Load()
+	if err != nil {
+		return nil
+	}
+	return &linkRef{Addr: cmp.Or(saved.Addr, saved.ServerID), Repo: saved.Repo}
 }
 
 func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -286,11 +320,10 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 	return nil
 }
 
-// localLinkSwitch always refuses. link.apply relinks in place because the
-// dashboard has nothing open yet; switching a linked gateway would leave
-// every live event stream and attach session pointed at the old host, so
-// it stays a process restart. The verb exists so the SPA can probe it and
-// render the instruction verbatim.
+// localLinkSwitch moves the gateway onto a saved link in place. Relink
+// closes the old connection, which ends every stream on it; the dashboard
+// reloads after a switch so it rehydrates against the new server. An empty
+// name selects the top-level (default) link.
 func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Name string `json:"name"`
@@ -298,13 +331,26 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
 	}
-	if params.Name == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "name is required"}
+	target, err := cli.Load()
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "load link config: " + err.Error()}
 	}
-	return nil, &protocol.Error{
-		Code:    protocol.CodeInvalidState,
-		Message: "restart aether gui --server " + params.Name + " to switch servers",
+	if params.Name != "" {
+		named, ok := target.Named(params.Name)
+		if !ok {
+			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("no server named %q", params.Name)}
+		}
+		target = named
 	}
+	conn, err := dialLink(target)
+	if err != nil {
+		return nil, unreachableError(err)
+	}
+	g.local.mu.Lock()
+	g.local.cacheConfig(target)
+	g.local.mu.Unlock()
+	g.cfg.Backend.Relink(target, conn)
+	return map[string]string{"active": target.Active}, nil
 }
 
 func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Error) {
