@@ -1,6 +1,6 @@
 // The Agent step's Agent config files section through a real browser,
 // gateway and server: the prompt copies byte for byte, and Open remote files
-// lands on the Files tree where the agent's uploads show.
+// lands on the Files tree with Home unfolded, where the agent's uploads show.
 
 import { configPrompt } from '../src/lib/config-prompt'
 import { expect, test } from './fixtures'
@@ -40,7 +40,7 @@ test('the Agent step copies the config prompt and opens the uploads in Files', a
   await configuration.openRemoteFiles().click()
   await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeAttached()
   const tree = page.getByRole('complementary', { name: 'Files' })
-  await tree.getByRole('button', { name: /^Agent config/ }).click()
-  await tree.getByRole('button', { name: /^claude/ }).click()
+  await expect(tree.getByRole('button', { name: /^Home\s?~$/ })).toHaveAttribute('aria-expanded', 'true')
+  await tree.getByRole('button', { name: '.claude', exact: true }).click()
   await expect(tree.getByRole('button', { name: 'settings.json', exact: true })).toBeVisible()
 })
