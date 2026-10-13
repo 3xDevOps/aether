@@ -1,4 +1,4 @@
-import { swarmHandle } from '@/components/messages/handles'
+import { workerName } from '@/components/messages/handles'
 import { compactAge } from '@/lib/format'
 import type { MissionAttempt, MissionTask } from '@/lib/types'
 import type { MissionDetail } from '@/store/missions'
@@ -21,20 +21,25 @@ export function taskTitle(task: MissionTask): string {
 }
 
 export function missionTree(detail: MissionDetail): TaskNode[] {
-  return detail.tasks.map((task) => {
+  const byTask = new Map<string, MissionAttempt[]>()
+  for (const attempt of detail.attempts) {
+    const attempts = byTask.get(attempt.task_id)
+    if (attempts) attempts.push(attempt)
+    else byTask.set(attempt.task_id, [attempt])
+  }
+  return detail.tasks.map((task, index) => {
     const needed = new Set((task.dependencies ?? []).map((dependency) => dependency.depends_on_task_id))
+    const attempts = [...(byTask.get(task.id) ?? [])].sort((a, b) => b.number - a.number)
+    const first = attempts.at(-1)?.number ?? 0
     return {
       task,
       title: taskTitle(task),
       dependsOn: detail.tasks.filter((other) => needed.has(other.id)),
-      attempts: detail.attempts
-        .filter((attempt) => attempt.task_id === task.id)
-        .sort((a, b) => b.number - a.number)
-        .map((attempt) => ({
-          attempt,
-          name: (attempt.run_id && swarmHandle(detail, attempt.run_id)?.name) || `Attempt ${attempt.number}`,
-          earlierIntegrator: attempt.integrator_generation !== detail.mission.integrator_generation,
-        })),
+      attempts: attempts.map((attempt) => ({
+        attempt,
+        name: attempt.run_id ? workerName(index, attempt.number, first) : `Attempt ${attempt.number}`,
+        earlierIntegrator: attempt.integrator_generation !== detail.mission.integrator_generation,
+      })),
     }
   })
 }
