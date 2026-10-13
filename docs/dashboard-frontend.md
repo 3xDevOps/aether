@@ -1347,8 +1347,9 @@ every run in every workspace in one `RunList`, in the board's group order
 (Needs you, Working, Finished) with a `StatusDot` and the state word per row.
 A swarm worker whose integrator run is also listed is indented under it,
 by the board map's rule (`swarmParents` in `src/routes/board/map-layout.ts`);
-other workers stay in place. The integrator's chevron, **Hide <n> workers**,
-folds them.
+other workers stay in place. The tree sits where its earliest member falls, so
+a worker that needs you lifts its integrator into Needs you. The integrator's
+chevron, **Hide <n> workers**, folds the workers that do not need you.
 It is reached from the workspace switcher, `g` then `l` and the palette's
 **Open all workspaces**.
 

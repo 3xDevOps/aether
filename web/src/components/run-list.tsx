@@ -20,6 +20,8 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])
+  const shown = (id: string, workers: RunRow[]) =>
+    expanded[id] ?? true ? workers : workers.filter((worker) => worker.state === 'needs-you')
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)
 
@@ -86,11 +88,11 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
               {workers.length > 0 && (
                 <ul
                   id={workersID(row.run.id)}
-                  hidden={!(expanded[row.run.id] ?? true)}
+                  hidden={shown(row.run.id, workers).length === 0}
                   aria-label={`Workers of ${runLabel(row.run)}`}
                   className="ml-5 border-l border-seam"
                 >
-                  {workers.map((worker) => (
+                  {shown(row.run.id, workers).map((worker) => (
                     <li key={worker.run.id} className="border-t border-seam first:border-t-0">
                       <Row row={worker} />
                     </li>
@@ -108,13 +110,13 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
 function nestWorkers(runs: RunRow[]): { row: RunRow; workers: RunRow[] }[] {
   const parents = swarmParents(runs)
   const nodes = new Map(runs.map((row) => [runKey(row), { row, workers: [] as RunRow[] }]))
-  const top: { row: RunRow; workers: RunRow[] }[] = []
+  const top = new Set<{ row: RunRow; workers: RunRow[] }>()
   for (const row of runs) {
     const parent = nodes.get(parents.get(runKey(row)) ?? '')
     if (parent) parent.workers.push(row)
-    else top.push(nodes.get(runKey(row))!)
+    top.add(parent ?? nodes.get(runKey(row))!)
   }
-  return top
+  return [...top]
 }
 
 const workersID = (runID: string) => `workers-${runID}`
