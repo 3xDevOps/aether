@@ -65,7 +65,6 @@ var needsHost = []string{
 	"pull.switch", "repo.fast-forward", "repo.push", "sync.start", "sync.status", "sync.stop",
 }
 
-// localVerbsFor is the sorted verb list one gateway offers.
 func localVerbsFor(packaged bool) []string {
 	return slices.Sorted(func(yield func(string) bool) {
 		for verb := range localHandlers {
@@ -322,8 +321,7 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 
 // localLinkSwitch moves the gateway onto a saved link in place. Relink
 // closes the old connection, which ends every stream on it; the dashboard
-// reloads after a switch so it rehydrates against the new server. An empty
-// name selects the top-level (default) link.
+// reloads after a switch so it rehydrates against the new server.
 func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Name string `json:"name"`
@@ -346,9 +344,15 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	if err != nil {
 		return nil, unreachableError(err)
 	}
+	// Forwards and syncs name the old server's runs and would follow the
+	// backend onto the new one.
+	g.local.forward.Close()
+	for _, session := range g.local.sync.Status() {
+		_ = g.local.sync.Stop(session.RunID)
+	}
 	g.local.mu.Lock()
+	defer g.local.mu.Unlock()
 	g.local.cacheConfig(target)
-	g.local.mu.Unlock()
 	g.cfg.Backend.Relink(target, conn)
 	return map[string]string{"active": target.Active}, nil
 }

@@ -64,7 +64,6 @@ func readNameservers(path string) ([]netip.Addr, error) {
 	return servers, nil
 }
 
-// parseNameservers returns the address of each valid `nameserver <ip>` line.
 func parseNameservers(data []byte) []netip.Addr {
 	var servers []netip.Addr
 	scanner := bufio.NewScanner(bytes.NewReader(data))
