@@ -6,7 +6,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import android.os.SystemClock
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
@@ -53,6 +53,7 @@ private const val RELAUNCH_EXIT = 75
 private const val MAX_RESPAWNS = 3
 private const val HANDSHAKE_TIMEOUT_SECONDS = 15L
 private const val STDERR_LINES = 40
+private const val STABLE_RUN_MS = 30_000L
 
 /**
  * One run of the bundled `aether gui --json` sidecar, which holds the device
@@ -117,7 +118,15 @@ class Gateway(
                     try {
                         writeResolvConf(properties)
                     } catch (e: IOException) {
-                        Log.w("Gateway", "could not update the DNS servers for the CLI", e)
+                        // Left running, the CLI would resolve against the
+                        // last network's servers and fail every lookup.
+                        val message = "Could not update the DNS servers for the CLI: ${e.message}"
+                        main.post {
+                            if (!stopping) {
+                                stop()
+                                onFailed(message)
+                            }
+                        }
                     }
                 }
             }
@@ -135,13 +144,10 @@ class Gateway(
         var respawns = 0
         var listen = port
         while (!stopping) {
-            var served = false
+            var servedAt = 0L
             val code =
                 try {
-                    runOnce(bin, listen) {
-                        respawns = 0
-                        served = true
-                    }
+                    runOnce(bin, listen) { servedAt = SystemClock.elapsedRealtime() }
                 } catch (_: InterruptedException) {
                     return
                 } catch (e: IOException) {
@@ -151,7 +157,11 @@ class Gateway(
             if (stopping) return
             // Another app may hold the port. An ephemeral one costs only the
             // dashboard's saved settings, until the next start.
+            val served = servedAt != 0L
             if (!served) listen = 0
+            // Only a run that stayed up resets the count: one that exits
+            // right after its handshake would otherwise restart forever.
+            if (served && SystemClock.elapsedRealtime() - servedAt >= STABLE_RUN_MS) respawns = 0
             try {
                 if (code == RELAUNCH_EXIT) {
                     // The gateway replaced its binary. Desktop relaunches its
