@@ -198,6 +198,17 @@ describe('swarm detail', () => {
     expect(screen.getByText('rewrite the guest checkout flow · attempt 1')).toBeDefined()
   })
 
+  it('links run IDs in Technical details to their runs', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator()) } })
+    await mount(showing({}, { tasks: [missionTask()], attempts: [attempt()] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Integration' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Technical details' }))
+    await userEvent.click(screen.getAllByRole('button', { name: 'run_worker' })[0])
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_worker' } })
+    await userEvent.click(screen.getAllByRole('button', { name: 'run_integrator' }).at(-1)!)
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_integrator' } })
+  })
+
   it('answers an open question from the primary action', async () => {
     seed()
     const client = showing({ phase: 'planning', open_questions: 1 }, { questions: [missionQuestion()] })
@@ -255,17 +266,69 @@ describe('swarm detail', () => {
       attempts: [attempt({ takeover_active: true, takeover_member_id: alice.id, takeover_generation: 4 })],
     })
     await mount(client)
-    const rows = within(screen.getByRole('region', { name: 'Tasks' })).getAllByRole('listitem')
-    expect(rows[0].textContent).toContain('rewrite the guest checkout flow')
-    expect(rows[0].textContent).toContain('Working')
-    expect(rows[0].textContent).toContain('Background')
-    expect(rows[0].textContent).toContain('Alice holds control of this worker')
-    expect(rows[1].textContent).toContain('No worker yet')
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
+    const first = tasks.getByText('rewrite the guest checkout flow').closest('li')!
+    const second = tasks.getByText('add empty cart tests').closest('li')!
+    expect(first.textContent).toContain('Working')
+    expect(first.textContent).toContain('Background')
+    expect(first.textContent).toContain('Alice holds control of this worker')
+    expect(second.textContent).toContain('No worker yet')
 
-    await userEvent.click(within(rows[0]).getByRole('button', { name: /Claude Code/ }))
+    await userEvent.click(within(first).getByRole('button', { name: /Worker 1 · Claude Code/ }))
     expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_worker' } })
-    await userEvent.click(within(rows[0]).getByRole('button', { name: 'Release control' }))
+    await userEvent.click(within(first).getByRole('button', { name: 'Release control' }))
     expect(client.missionWorkerRelease).toHaveBeenCalledWith({ run_id: 'run_worker', expected_takeover_generation: 4 })
+  })
+
+  it('nests the integrator, tasks, attempts and live worker runs', async () => {
+    seed({
+      runs: Object.fromEntries([
+        integrator(),
+        worker('run_w2', { started_at: '2026-08-14T10:15:00Z' }),
+      ].map((r) => [r.id, toRecord(r)])),
+    })
+    useStore.setState((s) => ({ runs: { ...s.runs, run_w2: { ...s.runs.run_w2, activity: { verb: 'Editing', target: 'cart.ts', at: '2026-08-14T10:19:00Z' } } } }))
+    await mount(showing({}, {
+      tasks: [
+        missionTask({ status: 'working' }),
+        missionTask({
+          id: 'task_2',
+          revision: missionTaskRevision({ task_id: 'task_2', title: 'add empty cart tests' }),
+          dependencies: [
+            { task_id: 'task_2', revision: 1, depends_on_task_id: 'task_1', depends_on_revision: 1 },
+            { task_id: 'task_2', revision: 1, depends_on_task_id: 'task_missing', depends_on_revision: 1 },
+          ],
+        }),
+      ],
+      attempts: [
+        attempt({ id: 'attempt_1', number: 1, run_id: 'run_w1', state: 'failed', started_at: '2026-08-14T10:05:00Z', finished_at: '2026-08-14T10:10:00Z' }),
+        attempt({ id: 'attempt_2', number: 2, run_id: 'run_w2', started_at: '2026-08-14T10:15:00Z' }),
+      ],
+    }))
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
+    expect(tasks.getByText(/^Integrator · Claude Code/)).toBeDefined()
+    const second = tasks.getByText('add empty cart tests').closest('li')!
+    expect(second.textContent).toContain('Depends on')
+    expect(within(second).getByRole('img', { name: 'Working' }).nextSibling?.textContent).toBe('rewrite the guest checkout flow')
+
+    const first = tasks.getByText('rewrite the guest checkout flow', { selector: 'span.truncate' }).closest('li')!
+    const attempts = within(first).getAllByRole('listitem')
+    expect(attempts[0].textContent).toContain('Worker 1, attempt 2')
+    expect(attempts[0].textContent).toContain('Running · Editing cart.ts')
+    expect(attempts[0].textContent).toContain('5m')
+    expect(attempts[1].textContent).toContain('Worker 1 · Claude Code')
+    expect(attempts[1].textContent).toContain('Failed')
+    expect(attempts[1].textContent).toContain('5m')
+
+    act(() => useStore.getState().upsertRun(run({ id: 'run_w2', mission_id: 'mission_1', mission_role: 'worker', mode: 'headless', status: 'completed', finished_at: '2026-08-14T10:19:00Z' })))
+    expect(within(first).getAllByRole('listitem')[0].textContent).toContain('Running · Finished')
+    expect(within(first).getAllByRole('listitem')[0].textContent).not.toContain('Editing cart.ts')
+
+    await userEvent.click(within(first).getByRole('button', { name: /Worker 1, attempt 2/ }))
+    expect(useStore.getState().route).toMatchObject({ name: 'run', params: { runId: 'run_w2' } })
+
+    await userEvent.click(tasks.getByRole('button', { name: "Integrator's tasks" }))
+    expect(tasks.queryByText('add empty cart tests')).toBeNull()
   })
 
   it('groups agent messages by thread and folds a run of plain messages', async () => {

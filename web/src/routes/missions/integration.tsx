@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { SectionLabel } from '@/components/ui/section-label'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
@@ -20,6 +21,10 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
 function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: AgentInfo[] | null }) {
   const { mission, tasks, attempts, submissions } = detail
   const members = useStore((s) => s.members)
+  const navigate = useStore((s) => s.navigate)
+  const runLink = (runID: string) => (
+    <Button variant="link" size="sm" className="font-code break-all whitespace-normal" onClick={() => navigate('run', { runId: runID })}>{runID}</Button>
+  )
   const taskTitle = (taskID: string) => tasks.find((task) => task.id === taskID)?.revision?.title || taskID
   const accepted = submissions.filter((item) => item.state === 'accepted')
   return (
@@ -28,7 +33,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
       <CollapsibleContent>
         <dl className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-4 gap-y-1 py-2 pl-5 text-ui-sm">
           <Fact term="Swarm">{mission.id}</Fact>
-          <Fact term="Integrator run">{mission.current_integrator_run_id || 'none'}</Fact>
+          <Fact term="Integrator run">{mission.current_integrator_run_id ? runLink(mission.current_integrator_run_id) : 'none'}</Fact>
           <Fact term="Integrator generation">{mission.integrator_generation}</Fact>
           <Fact term="Accepted set">{mission.accepted_set_version}</Fact>
           <Fact term="Execution choices">
@@ -44,13 +49,13 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
           ))}
           {attempts.map((attempt) => (
             <Fact key={attempt.id} term={`${taskTitle(attempt.task_id)} · attempt ${attempt.number}`}>
-              {attempt.run_id} · {attempt.state} · rev {attempt.task_revision}
+              {attempt.run_id && runLink(attempt.run_id)} · {attempt.state} · rev {attempt.task_revision}
               {attempt.takeover_generation != null ? ` · takeover ${attempt.takeover_generation}` : ''}
             </Fact>
           ))}
           {accepted.map((submission) => (
             <Fact key={submission.id} term={`Accepted · revision ${submission.task_revision}`}>
-              {submission.ref.run_id} · {submission.ref.retained_revision}
+              {runLink(submission.ref.run_id)} · {submission.ref.retained_revision}
               {submission.ref.evidence_ref && ` · evidence ${submission.ref.evidence_ref}`}
               {submission.evidence
                 .filter((source) => !source.available || source.truncated)

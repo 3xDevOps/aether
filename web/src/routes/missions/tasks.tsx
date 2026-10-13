@@ -1,19 +1,22 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { modeLabel } from '@/components/launch/modes'
-import { swarmHandle } from '@/components/messages/handles'
-import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { agentLabel, modeLabel } from '@/components/launch/modes'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { SectionLabel } from '@/components/ui/section-label'
-import { StateLine, type Tone } from '@/components/ui/status-dot'
+import { StateLine, StatusDot, type Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
+import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
 import { plainReason } from '@/lib/status'
-import type { AgentInfo, MissionAttempt, MissionTask, MissionTaskScope } from '@/lib/types'
+import type { AgentInfo, MissionAttempt, MissionAttemptState, MissionTask, MissionTaskScope } from '@/lib/types'
+import { cn } from '@/lib/utils'
+import { elapsed, missionTree, taskTitle, type AttemptNode, type TaskNode } from '@/routes/missions/tree'
 import { useStore } from '@/store'
+import { useRun, useRunPresentation } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
+import type { RunRecord } from '@/store/runs'
 
 const statusWord: Record<MissionTask['status'], string> = {
   proposed: 'Proposed',
@@ -35,7 +38,18 @@ const statusTone: Record<MissionTask['status'], Tone> = {
   blocked: 'failed',
 }
 
-const columns = 'md:grid md:grid-cols-[minmax(0,1fr)_7rem_6rem_13rem] md:items-center md:gap-3'
+const attemptWord: Record<MissionAttemptState, string> = {
+  reserved: 'Reserved',
+  launching: 'Launching',
+  running: 'Running',
+  unknown: 'State unknown',
+  submitted: 'Submitted',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  superseded: 'Superseded',
+  abandoned: 'Abandoned',
+}
 
 function scopeFacts(scope: MissionTaskScope): string[] {
   return [
@@ -84,6 +98,79 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
   )
 }
 
+interface RunLineProps {
+  runID: string
+  label: string
+  lead?: string
+  note?: string
+  from?: string | null
+  to?: string | null
+}
+
+function RunRow({ runID, label, tone, pulse = false, detail, shimmer = false, from, to }: {
+  runID: string
+  label: string
+  tone: Tone
+  pulse?: boolean
+  detail: string
+  shimmer?: boolean
+  from?: string | null
+  to?: string | null
+}) {
+  const navigate = useStore((s) => s.navigate)
+  useClock()
+  const time = from ? elapsed(from, to ?? Date.now()) : ''
+  return (
+    <Button
+      variant="ghost"
+      className="h-auto min-h-7 w-full justify-start gap-2 py-1 text-left whitespace-normal coarse:min-h-11"
+      onClick={() => navigate('run', { runId: runID })}
+    >
+      <StatusDot tone={tone} pulse={pulse} />
+      <span className="line-clamp-2 min-w-0 flex-1 text-ui-sm md:block md:truncate">
+        <span className="text-text">{label}</span>
+        <span className={cn(shimmer && 'live-shimmer')}> · {detail}</span>
+      </span>
+      {time && <span className="shrink-0 text-ui-sm tabular-nums">{time}</span>}
+    </Button>
+  )
+}
+
+function LoadedRunLine({ run, label, lead, note, from, to }: RunLineProps & { run: RunRecord }) {
+  const shown = useRunPresentation(run)
+  const working = shown.state === 'working'
+  return (
+    <RunRow
+      runID={run.id}
+      label={label}
+      tone={shown.state}
+      pulse={working}
+      shimmer={working}
+      detail={[lead, shown.reason, note].filter(Boolean).join(' · ')}
+      from={from}
+      to={to}
+    />
+  )
+}
+
+function RunLine(props: RunLineProps) {
+  const run = useRun(props.runID)
+  if (!props.runID) return <p className="py-1 pl-1 text-ui-sm text-muted">{props.label} · No run yet</p>
+  if (!run) {
+    return (
+      <RunRow
+        runID={props.runID}
+        label={props.label}
+        tone="neutral"
+        detail={[props.lead ?? 'Run not loaded', props.note].filter(Boolean).join(' · ')}
+        from={props.from}
+        to={props.to}
+      />
+    )
+  }
+  return <LoadedRunLine run={run} {...props} />
+}
+
 function ControlHold({ attempt, canRelease, client, onReleased }: {
   attempt: MissionAttempt
   canRelease: boolean
@@ -123,8 +210,28 @@ function ControlHold({ attempt, canRelease, client, onReleased }: {
   )
 }
 
-function TaskRow({ task, detail, agents, showProposalBlocker, canRelease, client, onChanged }: {
-  task: MissionTask
+function runLabel(name: string, harness: string, mode: string, agents: AgentInfo[] | null): string {
+  return `${name} · ${agentLabel(agents?.find((item) => item.name === harness), harness)} · ${modeLabel(mode)}`
+}
+
+function AttemptRow({ node, agents }: { node: AttemptNode; agents: AgentInfo[] | null }) {
+  const { attempt } = node
+  return (
+    <li>
+      <RunLine
+        runID={attempt.run_id}
+        label={runLabel(node.name, attempt.harness, attempt.mode, agents)}
+        lead={attemptWord[attempt.state]}
+        note={node.earlierIntegrator ? 'from a replaced integrator' : undefined}
+        from={attempt.started_at}
+        to={attempt.finished_at}
+      />
+    </li>
+  )
+}
+
+function TaskRow({ node, detail, agents, showProposalBlocker, canRelease, client, onChanged }: {
+  node: TaskNode
   detail: MissionDetail
   agents: AgentInfo[] | null
   showProposalBlocker: boolean
@@ -132,46 +239,69 @@ function TaskRow({ task, detail, agents, showProposalBlocker, canRelease, client
   client: Api
   onChanged: () => void
 }) {
-  const navigate = useStore((s) => s.navigate)
-  const attempt = detail.attempts.filter((item) => item.task_id === task.id).sort((a, b) => b.number - a.number)[0]
-  const agent = attempt && (agents?.find((item) => item.name === attempt.harness)?.display_name || attempt.harness)
-  const held = attempt && (attempt.takeover_active || attempt.orchestration_hold)
-  const title = task.revision?.title || task.pending_revision?.title || 'Untitled task'
+  const { task, title, dependsOn, attempts } = node
+  const latest = attempts[0]?.attempt
+  const held = latest && (latest.takeover_active || latest.orchestration_hold)
   return (
     <li className="border-b border-seam last:border-b-0">
-      <Collapsible>
-        <div className={`flex min-h-7 flex-col gap-0.5 py-1 coarse:min-h-11 ${columns}`}>
-          <CollapsibleTrigger>
+      <Collapsible defaultOpen>
+        <div className="flex min-h-7 items-center gap-3 coarse:min-h-11">
+          <CollapsibleTrigger className="w-auto min-w-0 flex-1">
             <span className="min-w-0 truncate">{title}</span>
           </CollapsibleTrigger>
-          <div className="flex min-w-0 items-center gap-3 pl-5 md:contents">
-            <StateLine tone={statusTone[task.status]}>{statusWord[task.status]}</StateLine>
-            <span className="text-ui-sm text-muted">{attempt ? modeLabel(attempt.mode) : '-'}</span>
-            {attempt?.run_id ? (
-              <Button
-                variant="link"
-                size="sm"
-                className="min-w-0 justify-start"
-                onClick={() => navigate('run', { runId: attempt.run_id })}
-              >
-                <AgentGlyph agent={attempt.harness} />
-                <span className="truncate">{swarmHandle(detail, attempt.run_id)?.name ?? 'Worker'} · {agent}</span>
-              </Button>
-            ) : (
-              <span className="text-ui-sm text-muted">No worker yet</span>
-            )}
-          </div>
+          <StateLine tone={statusTone[task.status]} className="shrink-0">{statusWord[task.status]}</StateLine>
         </div>
-        {held && (
-          <div className="pb-2 pl-5">
-            <ControlHold attempt={attempt} canRelease={canRelease} client={client} onReleased={onChanged} />
-          </div>
+        {dependsOn.length > 0 && (
+          <p className="flex flex-wrap items-center gap-x-1 pb-1 pl-5 text-ui-sm text-muted">
+            Depends on
+            {dependsOn.map((other, index) => (
+              <span key={other.id} className="inline-flex items-center gap-1">
+                <StatusDot tone={statusTone[other.status]} label={statusWord[other.status]} />
+                {taskTitle(other)}
+                {index < dependsOn.length - 1 && ','}
+              </span>
+            ))}
+          </p>
         )}
         <CollapsibleContent>
-          <TaskDetails task={task} detail={detail} showProposalBlocker={showProposalBlocker} />
+          <div className="pl-5">
+            {attempts.length === 0 ? (
+              <p className="py-1 text-ui-sm text-muted">No worker yet</p>
+            ) : (
+              <ul className="flex flex-col">
+                {attempts.map((attempt) => (
+                  <AttemptRow key={attempt.attempt.id} node={attempt} agents={agents} />
+                ))}
+              </ul>
+            )}
+            {held && (
+              <div className="pb-2">
+                <ControlHold attempt={latest} canRelease={canRelease} client={client} onReleased={onChanged} />
+              </div>
+            )}
+            <Collapsible>
+              <CollapsibleTrigger>Task details</CollapsibleTrigger>
+              <CollapsibleContent>
+                <TaskDetails task={task} detail={detail} showProposalBlocker={showProposalBlocker} />
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
         </CollapsibleContent>
       </Collapsible>
     </li>
+  )
+}
+
+function IntegratorLine({ detail, agents }: { detail: MissionDetail; agents: AgentInfo[] | null }) {
+  const { integrator, current_integrator_run_id: runID } = detail.mission
+  const run = useRun(runID)
+  return (
+    <RunLine
+      runID={runID}
+      label={runLabel('Integrator', integrator.harness, integrator.mode, agents)}
+      from={run?.started_at ?? run?.created_at}
+      to={run?.finished_at}
+    />
   )
 }
 
@@ -182,38 +312,43 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   client: Api
   onChanged: () => void
 }) {
-  const { mission, tasks } = detail
+  const { mission } = detail
+  const tree = missionTree(detail)
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
-      {tasks.length === 0 ? (
-        <p className="text-ui text-muted">
-          {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
-        </p>
-      ) : (
-        <>
-          <div aria-hidden className={`hidden border-b border-seam pb-1 text-ui-sm text-muted ${columns}`}>
-            <span className="pl-5">Task</span>
-            <span>Status</span>
-            <span>Mode</span>
-            <span>Worker</span>
+      <Collapsible defaultOpen>
+        <div className="flex items-center gap-1">
+          <CollapsibleTrigger className="w-auto shrink-0" aria-label="Integrator's tasks" />
+          <div className="min-w-0 flex-1">
+            <IntegratorLine detail={detail} agents={agents} />
           </div>
-          <ul className="flex flex-col">
-            {tasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                detail={detail}
-                agents={agents}
-                showProposalBlocker={mission.phase === 'active'}
-                canRelease={canRelease}
-                client={client}
-                onChanged={onChanged}
-              />
-            ))}
-          </ul>
-        </>
-      )}
+        </div>
+        <CollapsibleContent>
+          <div className="ml-2 border-l border-seam pl-3">
+            {tree.length === 0 ? (
+              <p className="text-ui text-muted">
+                {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
+              </p>
+            ) : (
+              <ul className="flex flex-col">
+                {tree.map((node) => (
+                  <TaskRow
+                    key={node.task.id}
+                    node={node}
+                    detail={detail}
+                    agents={agents}
+                    showProposalBlocker={mission.phase === 'active'}
+                    canRelease={canRelease}
+                    client={client}
+                    onChanged={onChanged}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   )
 }
