@@ -286,8 +286,8 @@ export function LaunchDialog() {
                   onSetUp={setUp}
                 />
               )}
-              {harness && <ModelField label="Integrator model" harness={harness} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} onToggle={toggleWorker} onModel={setWorkerModel} />
+              {harness && <ModelField label="Integrator model" harness={harness} accountMemberID={choice.accountMemberID} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
+              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} />
               <ModeControl
                 label="Worker mode"
                 value={workerMode}

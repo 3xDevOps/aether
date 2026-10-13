@@ -28,7 +28,7 @@ export const surface = 'rounded-panel border border-seam bg-raised text-text sha
 export const fieldFocus =
   'focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-accent focus-visible:shadow-field-focus focus-visible:transition-none'
 
-/** Composed by `Input`, `Textarea` and `SelectTrigger`; nothing wears it by hand. */
+/** Composed by `Input`, `Textarea`, `SelectTrigger` and `PopoverFieldTrigger`; nothing wears it by hand. */
 export const field = cn(
   fieldFocus,
   'h-7 w-full rounded-control border border-control bg-canvas px-2 py-0 text-ui text-text coarse:h-11',

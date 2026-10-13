@@ -705,6 +705,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       agentInfo({ display_name: 'Claude Code' }),
       agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),
     ]),
+    agentModels: vi.fn(async () => ({ models: [], source: 'none' as const })),
     agentRegister: vi.fn(async () => ({})),
     agentInstall: vi.fn(async () => ({ log_tail: 'installed\n', installed: true, enhanced_installed: false })),
     runProtect: vi.fn(async () => ({})),

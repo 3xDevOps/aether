@@ -5,6 +5,7 @@ import type {
   AccountAccess,
   AgentDefinition,
   AgentInstallResult,
+  AgentModelsResult,
   AgentInfo,
   Approval,
   BudgetReport,
@@ -866,6 +867,12 @@ export const api = {
     call<{ agents: AgentInfo[] }>('agent.list', {
       ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
     }).then((r) => r.agents),
+  agentModels: (name: string, accountMemberID?: string, refresh?: boolean) =>
+    call<AgentModelsResult>('agent.models', {
+      name,
+      ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
+      ...(refresh ? { refresh } : {}),
+    }),
   agentRegister: (definition: AgentDefinition) =>
     call<unknown>('agent.register', { definition }),
   agentInstall: (name: string, enhanced: boolean) =>
