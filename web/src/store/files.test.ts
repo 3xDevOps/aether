@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRootStore } from '@/store'
-import { filesKey, homeKey } from '@/store/files'
+import { filesKey, followHomeKey, homeKey } from '@/store/files'
 
 const document = {
   content: 'package main\n',
@@ -143,16 +143,31 @@ describe('files cache', () => {
     expect(Object.keys(s().trees)).toEqual([filesKey('ws-1', '', '')])
   })
 
-  it('does not carry a request in flight to the new path', () => {
+  it('asks again for what was loading under a moved path, and lets a save in flight follow its file', () => {
     const s = createRootStore().getState
+    const blank = { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false }
     s().setTree(homeKey('notes'), { entries: [], loading: true })
-    s().setDocument(homeKey('notes/a.md'), { content: '', truncated: false, binary: false, size: 0, revision: '', writable: false, loading: true })
+    s().setTree(homeKey('other'), { entries: [], loading: true })
+    s().setDocument(homeKey('notes/a.md'), { ...blank, loading: true })
+    s().setDocument(homeKey('other/a.md'), { ...blank, loading: true })
     s().setDraft(homeKey('notes/b.md'), { content: 'draft\n', saving: true })
+    s().setDraft(homeKey('other/b.md'), { content: 'draft\n', saving: true })
+    const before = s().homeMoves.length
 
     s().moveHomePath('notes', 'archive')
-    // Their answers arrive for the old keys, so each reader asks again.
-    expect(s().trees).toEqual({})
-    expect(s().documents).toEqual({})
-    expect(s().drafts[homeKey('archive/b.md')]).toMatchObject({ content: 'draft\n', saving: false })
+    // The answers arrive for the old keys; what was not moved is untouched.
+    expect(Object.keys(s().trees)).toEqual([homeKey('other')])
+    expect(Object.keys(s().documents)).toEqual([homeKey('other/a.md')])
+    expect(s().drafts[homeKey('archive/b.md')]?.saving).toBe(true)
+    expect(s().drafts[homeKey('other/b.md')]?.saving).toBe(true)
+
+    s().moveHomePath('archive/b.md', 'archive/c.md')
+    const moves = s().homeMoves.slice(before)
+    expect(followHomeKey(moves, homeKey('notes/b.md'))).toBe(homeKey('archive/c.md'))
+    expect(followHomeKey(moves, homeKey('other/b.md'))).toBe(homeKey('other/b.md'))
+    expect(followHomeKey(moves, filesKey('ws-1', '', 'notes/b.md'))).toBe(filesKey('ws-1', '', 'notes/b.md'))
+
+    s().dropHomePath('archive')
+    expect(followHomeKey(s().homeMoves.slice(before), homeKey('notes/b.md'))).toBeNull()
   })
 })

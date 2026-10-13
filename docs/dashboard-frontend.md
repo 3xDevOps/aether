@@ -3683,7 +3683,12 @@ Open tabs stay truthful. After a rename or a move, `moveHomePath` rekeys the
 tabs, documents, drafts and listings of that path and of everything under
 it, and `TreeExpansion` keeps a renamed folder as open as it was; after a
 delete, `dropHomePath` closes those tabs and drops their documents and
-drafts.
+drafts. A listing or
+read in flight under the moved path is dropped, so its reader asks again at
+the new one. A save in flight keeps its `saving` state and settles on the
+file wherever it is by then: the editor follows the `homeMoves` recorded
+since the save began (`followHomeKey`), and drops the answer when the file
+was deleted.
 
 A credential file, `locked` in `home.tree`, shows a lock at the end of its
 row, has no **Rename**, and cannot be dragged. It opens like any file, and

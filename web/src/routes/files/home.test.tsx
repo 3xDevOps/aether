@@ -1,7 +1,7 @@
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
-import type { FileTreeEntry } from '@/lib/types'
+import type { FileRead, FileTreeEntry } from '@/lib/types'
 import { FilesRoute } from '@/routes/files'
 import { useStore } from '@/store'
 import { homeKey } from '@/store/files'
@@ -184,6 +184,26 @@ describe('Home naming', () => {
     expect(state.drafts[homeKey('done.md')]?.content).toBe('edited\n')
     expect(state.documents[homeKey('todo.md')]).toBeUndefined()
     expect(client.homeRead).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles a save on the file it was renamed to while the save was in flight', async () => {
+    const written = Promise.withResolvers<FileRead>()
+    const client = homeApi({ homeWrite: vi.fn(() => written.promise) })
+    await openHome(client)
+    fireEvent.click(row('todo.md'))
+    await waitFor(() => expect(useStore.getState().documents[homeKey('todo.md')]?.loading).toBe(false))
+    act(() => useStore.getState().updateDraft(homeKey('todo.md'), 'edited\n'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.homeWrite).toHaveBeenCalledWith({ path: 'todo.md', content: 'edited\n', revision: 'r1' }))
+
+    act(() => useStore.getState().moveHomePath('todo.md', 'done.md'))
+    expect(useStore.getState().drafts[homeKey('done.md')]?.saving).toBe(true)
+    written.resolve({ content: 'edited\n', truncated: false, binary: false, size: 7, revision: 'r2', writable: true })
+
+    await waitFor(() => expect(useStore.getState().drafts).toEqual({}))
+    const state = useStore.getState()
+    expect(state.documents[homeKey('done.md')]).toMatchObject({ content: 'edited\n', revision: 'r2' })
+    expect(state.documents[homeKey('todo.md')]).toBeUndefined()
   })
 })
 

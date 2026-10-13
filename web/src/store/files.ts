@@ -60,6 +60,8 @@ export interface FilesSlice {
   fileDiffs: Record<string, FileDiffState>
   fileTabs: FileTab[]
   activeFileKey: string | null
+  /** Every move and delete of a Home path since the last identity change. */
+  homeMoves: HomeMove[]
   /** Incremented whenever cached viewer data is invalidated. */
   filesEpoch: number
   /** Incremented only when the authenticated server/member changes. */
@@ -122,20 +124,40 @@ function relocate(path: string, from: string, to?: string): string | null {
   return to !== undefined && within(path, to) ? null : path
 }
 
-function relocateKeys<T>(values: Record<string, T>, from: string, to?: string): Record<string, T> {
+/** Moves the entries under `from`. A moved entry that fails `carry` is left
+ * behind instead. */
+function relocateKeys<T>(values: Record<string, T>, from: string, to?: string, carry: (value: T) => boolean = () => true): Record<string, T> {
   const out: Record<string, T> = {}
   for (const [key, value] of Object.entries(values)) {
     const path = homePath(key)
-    const next = path === null ? key : relocate(path, from, to)
-    if (next !== null) out[path === null ? key : homeKey(next)] = value
+    const next = path === null ? path : relocate(path, from, to)
+    if (next === path) out[key] = value
+    else if (next !== null && carry(value)) out[homeKey(next)] = value
   }
   return out
 }
 
-/** A request in flight answers for the old path. A listing or a read is
- * dropped so its reader asks again; a save is settled, its draft still unsaved. */
-function withoutPending<T extends { loading?: boolean }>(values: Record<string, T>): Record<string, T> {
-  return Object.fromEntries(Object.entries(values).filter(([key, value]) => homePath(key) === null || !value.loading))
+/** A listing or read in flight answers for the old path, so it is not moved
+ * and its reader asks again at the new one. */
+const settled = (value: { loading?: boolean }) => !value.loading
+
+/** One rename, move, or (without `to`) delete of a Home path. */
+export interface HomeMove {
+  from: string
+  to?: string
+}
+
+/** Where the file a key named is after `moves`, or null once it is deleted.
+ * A save that outlasts a rename settles there. */
+export function followHomeKey(moves: HomeMove[], key: string): string | null {
+  let path = homePath(key)
+  if (path === null) return key
+  for (const move of moves) {
+    const next = relocate(path, move.from, move.to)
+    if (next === null) return null
+    path = next
+  }
+  return homeKey(path)
 }
 
 function relocateHome(s: FilesSlice, from: string, to?: string): Partial<FilesSlice> {
@@ -149,11 +171,10 @@ function relocateHome(s: FilesSlice, from: string, to?: string): Partial<FilesSl
   return {
     fileTabs,
     activeFileKey: activePath === null ? s.activeFileKey : active === null ? fileTabs.at(-1)?.key ?? null : homeKey(active),
-    trees: withoutPending(relocateKeys(s.trees, from, to)),
-    documents: withoutPending(relocateKeys(s.documents, from, to)),
-    drafts: Object.fromEntries(
-      Object.entries(relocateKeys(s.drafts, from, to)).map(([key, draft]) => [key, homePath(key) !== null && draft.saving ? { ...draft, saving: false } : draft]),
-    ),
+    trees: relocateKeys(s.trees, from, to, settled),
+    documents: relocateKeys(s.documents, from, to, settled),
+    drafts: relocateKeys(s.drafts, from, to),
+    homeMoves: [...s.homeMoves, { from, to }],
   }
 }
 
@@ -164,6 +185,7 @@ export const createFilesSlice: SliceCreator<FilesSlice> = (set) => ({
   fileDiffs: {},
   fileTabs: [],
   activeFileKey: null,
+  homeMoves: [],
   filesEpoch: 0,
   identityEpoch: 0,
   setTree: (key, patch) =>
@@ -331,6 +353,7 @@ export const createFilesSlice: SliceCreator<FilesSlice> = (set) => ({
       fileDiffs: {},
       fileTabs: [],
       activeFileKey: null,
+      homeMoves: [],
       filesEpoch: s.filesEpoch + 1,
       identityEpoch: s.identityEpoch + 1,
     })),

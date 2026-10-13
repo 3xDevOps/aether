@@ -11,7 +11,7 @@ import { DiffDocument, EditableDocument, editorCommands } from '@/routes/files/d
 import type { FileTarget } from '@/routes/files/paths'
 import { isBaseBranch, type SelectFile, type Selection, sourceKey, tildePath } from '@/routes/files/sources'
 import { useStore } from '@/store'
-import type { FileDocumentState } from '@/store/files'
+import { followHomeKey, type FileDocumentState } from '@/store/files'
 import { useHeaderPrimary } from '@/store/hooks'
 
 export type ViewerMode = 'file' | 'diff'
@@ -114,19 +114,24 @@ export function FileEditor({
     const captured = currentDraft.content
     const revision = currentDraft.baseRevision
     const epochAtStart = currentState.identityEpoch
+    const movesAtStart = currentState.homeMoves.length
+    // A Home file can be renamed, moved or deleted while its save is in flight.
+    const landed = () => followHomeKey(useStore.getState().homeMoves.slice(movesAtStart), key)
     setDraft(key, { ...currentDraft, content: captured, saving: true, error: undefined, conflict: false })
     try {
       const result = selection.kind === 'home'
         ? await client.homeWrite({ path: selection.path, content: captured, revision })
         : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), path: selection.path, content: captured, revision })
-      if (useStore.getState().identityEpoch !== epochAtStart) return false
-      markDraftSaved(key, captured, result)
+      const savedAt = landed()
+      if (useStore.getState().identityEpoch !== epochAtStart || savedAt === null) return false
+      markDraftSaved(savedAt, captured, result)
       return true
     } catch (err) {
-      if (useStore.getState().identityEpoch !== epochAtStart) return false
+      const failedAt = landed()
+      if (useStore.getState().identityEpoch !== epochAtStart || failedAt === null) return false
       const detail = message(err)
       const conflict = (err instanceof ApiError && err.status === 409) || /conflict|stale|revision/i.test(detail)
-      markDraftError(key, detail, conflict)
+      markDraftError(failedAt, detail, conflict)
       return false
     }
   }
