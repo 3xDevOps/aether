@@ -61,7 +61,9 @@ func (s *Service) reportNeedsInput(ctx context.Context, run domain.RunID, p prot
 		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
 	}
 	id := fmt.Sprintf("needs-input:%s:%s", run, p.IdempotencyKey)
-	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportReason(question), time.Now().UTC()); err != nil {
+	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportReason(question), time.Now().UTC()); errors.Is(err, ErrCannotAsk) {
+		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
+	} else if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	return protocol.CoordReportResult{

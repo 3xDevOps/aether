@@ -28,7 +28,7 @@ const (
 	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified."
 	DiscoveryFileName    = "discovery.md"
 	// ReportInstruction makes an agent say why each turn ended.
-	ReportInstruction = "You MUST run `aether-internal report` before you end a turn: --outcome success or failure when the task is done or cannot be done, blocked when an external blocker stops you, needs-input with your question as --summary when you need the user's decision or information. Never end a turn without a report."
+	ReportInstruction = "Before you end a turn you MUST run `aether-internal report` with an outcome `aether-internal skill` allows your role: success or failure when the task is done or cannot be done, blocked when an external blocker stops you, needs-input with your question as --summary when you need the user's decision or information. Never end a turn without a report."
 	// developer_instructions is the Codex config key for additional
 	// instructions; model_instructions_file would replace built-ins.
 	codexDiscoverySetting = "developer_instructions=\"" + DiscoveryInstruction + "\""

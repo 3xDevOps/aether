@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -1505,5 +1506,25 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if got := reason(); got != agentstatus.ReasonIdle {
 		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
+	}
+}
+
+// TestNeedsInputIsRefusedForABackgroundRun: nobody can answer a headless run
+// before its turn ends, so the question is refused and the run is left alone.
+func TestNeedsInputIsRefusedForABackgroundRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "write docs", "fake", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err = e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", time.Now()); !errors.Is(err, coord.ErrCannotAsk) {
+		t.Fatalf("ReportNeedsInput = %v, want %v", err, coord.ErrCannotAsk)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || row.Status != domain.RunRunning || row.Reason == "needs input: which region?" {
+		t.Fatalf("run after the refused question = %+v, %v", row, err)
 	}
 }

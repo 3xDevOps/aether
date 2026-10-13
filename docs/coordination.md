@@ -1272,8 +1272,11 @@ What a report does depends on the run:
   next prompt, and resuming work clears the reason. It is nonterminal and not
   a durable report: it has no `report_id` or evidence, takes no
   `--evidence-ref`, and does not use the terminal slot. Retrying the same
-  key is a no-op. A swarm worker's report is refused with `CodeInvalidParams`;
-  workers ask their integrator with `aether-internal ask`.
+  key while its question is the latest is a no-op; retrying an older key
+  after a newer question asks the older one again. A Background run's or a
+  swarm worker's report is refused with `CodeInvalidParams`: a Background run
+  ends at its turn end, and workers ask their integrator with
+  `aether-internal ask`.
 
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason

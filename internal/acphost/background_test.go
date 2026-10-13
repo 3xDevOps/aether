@@ -342,6 +342,7 @@ func TestRestoreReportsAnInterruptedTurn(t *testing.T) {
 	}{
 		{"open turn", []Item{{Kind: KindTurnStart, Turn: 1}}, "interrupted"},
 		{"ended turn", []Item{{Kind: KindTurnStart, Turn: 1}, {Kind: KindTurnEnd, Turn: 1, StopReason: "end_turn"}}, ""},
+		{"ended turn with background tasks", []Item{{Kind: KindTurnStart, Turn: 1}, {Kind: KindTurnEnd, Turn: 1, StopReason: "end_turn", BackgroundTasks: []string{"bg-1"}}}, "interrupted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "run.items.jsonl")
@@ -442,4 +443,83 @@ func startRealMock(t *testing.T) (*Session, *recorder) {
 	}
 	t.Cleanup(func() { _ = s.Close(); <-s.Done() })
 	return s, rec
+}
+
+func TestAnsweringAnAutonomousQuestionRestartsTheQuietWait(t *testing.T) {
+	shortenQuiet(t, 300*time.Millisecond)
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitStates(t, "working:prompt", "idle:end_turn")
+	m.chunk("hello")
+	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background")
+
+	replied := make(chan string, 1)
+	go func() {
+		res, err := m.request(context.Background(), acp.ClientMethodElicitationCreate, map[string]any{
+			"sessionId": m.sessionID(), "mode": "form", "message": "Which branch?",
+			"requestedSchema": map[string]any{"type": "object", "properties": map[string]any{"branch": map[string]any{"type": "string"}}},
+		})
+		if err != nil {
+			replied <- err.Error()
+			return
+		}
+		replied <- string(res)
+	}()
+	q := rec.waitInputs(t, 1)[0]
+	time.Sleep(2 * autonomousQuiet)
+	if st := s.State(); !st.TurnInFlight {
+		t.Fatal("the autonomous turn ended with a question open")
+	}
+	if err := s.Answer(q.ID, "accept", map[string]any{"branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-replied; res != `{"action":"accept","content":{"branch":"main"}}` {
+		t.Fatalf("agent got %s", res)
+	}
+	time.Sleep(autonomousQuiet / 3)
+	if n := len(turnEnds(s, t)); n != 1 {
+		t.Fatalf("%d turn ends %v after the answer, want only the first prompt's", n, autonomousQuiet/3)
+	}
+	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+}
+
+func TestInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		log  []Item
+		want bool
+	}{
+		{"empty", nil, false},
+		{"open turn", []Item{{Kind: KindTurnStart, Turn: 1}}, false},
+		{"end_turn", []Item{{Kind: KindTurnEnd, StopReason: "end_turn"}}, false},
+		{"interrupted", []Item{{Kind: KindTurnEnd, StopReason: "interrupted"}}, true},
+		{"background tasks", []Item{{Kind: KindTurnEnd, StopReason: "end_turn", BackgroundTasks: []string{"bg-1"}}}, true},
+		{"reset after", []Item{{Kind: KindTurnEnd, StopReason: "end_turn", BackgroundTasks: []string{"bg-1"}}, {Kind: KindReset}}, false},
+		{"later turn ended plainly", []Item{
+			{Kind: KindTurnEnd, StopReason: "end_turn", BackgroundTasks: []string{"bg-1"}},
+			{Kind: KindTurnEnd, StopReason: "end_turn"},
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := OpenLog(filepath.Join(t.TempDir(), "run.items.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = log.Close() }()
+			for _, it := range tc.log {
+				if err := log.Append(&it); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := Interrupted(log); got != tc.want {
+				t.Fatalf("Interrupted = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

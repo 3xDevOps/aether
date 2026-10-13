@@ -246,10 +246,8 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		// requests may have ended without reporting their end.
 		s.mu.Lock()
 		s.inputsLocked()
-		// A host that closed the connection already logged the turn
-		// interrupted.
 		reason := ""
-		if end := LastItem(log, KindTurnEnd); end.StopReason == "interrupted" && LastItem(log, KindReset).Seq < end.Seq {
+		if Interrupted(log) {
 			reason = "interrupted"
 		}
 		s.stateLocked(false, reason, nil)
@@ -943,6 +941,7 @@ func (s *Session) requestOpened(r Request) {
 	defer s.mu.Unlock()
 	s.acceptedLocked()
 	s.openAutonomousLocked()
+	s.lastUpdate = time.Now()
 	s.proj.flushText()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
@@ -953,6 +952,8 @@ func (s *Session) requestClosed(r Request) {
 	defer s.mu.Unlock()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
+	// The agent resumes only after this returns; its quiet wait starts now.
+	s.lastUpdate = time.Now()
 	s.settleLocked()
 }
 

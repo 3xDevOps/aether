@@ -422,3 +422,20 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 		t.Fatalf("scheduler calls = %+v, want only the accepted reports", got)
 	}
 }
+
+// A scheduler that cannot take the user's answer, a Background run, rejects
+// the question with the reason the agent should read.
+func TestCoordReportNeedsInputFromARunThatCannotAsk(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	outcomes.fail(ErrCannotAsk)
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_cannot_ask"}
+		c.Outcomes = outcomes
+	})
+	_, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeNeedsInput, Summary: "which region?", IdempotencyKey: "ask-1",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, ErrCannotAsk.Error()) {
+		t.Fatalf("err = %+v, want invalid params carrying %q", rpcErr, ErrCannotAsk)
+	}
+}

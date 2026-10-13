@@ -97,8 +97,9 @@ type acpRun struct {
 	// untried marks a first task sent but not yet accepted, so a refusal
 	// fails a worker whichever of startOneShot or the turn end reports it.
 	untried bool
-	// instructions are the run instructions the first message a taskless
-	// session accepts carries, for an agent with no system prompt route.
+	// instructions are the run instructions the first message or mail prompt
+	// a taskless session accepts carries, for an agent with no system prompt
+	// route.
 	instructions string
 }
 
@@ -251,13 +252,17 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}
 	if err == nil && instructions != "" {
-		d.mu.Lock()
-		if r := d.runs[run.ID]; r != nil && r.session == sess {
-			r.instructions = ""
-		}
-		d.mu.Unlock()
+		d.instructionsTaken(run.ID, sess)
 	}
 	return receipt.Outcome, err
+}
+
+func (d *acpDriver) instructionsTaken(run domain.RunID, sess *acphost.Session) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if r := d.runs[run]; r != nil && r.session == sess {
+		r.instructions = ""
+	}
 }
 
 func (d *acpDriver) instructions(run domain.RunID) string {
@@ -485,7 +490,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
-	if fresh && task == "" && systemPrompt == "" {
+	if task == "" && systemPrompt == "" && (fresh || acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq == 0) {
 		r.instructions = d.s.runInstructions()
 	}
 	d.setRun(runID, r)
@@ -570,12 +575,10 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 	if !fresh {
 		last := acphost.LastItem(sess.Log(), acphost.KindTurnEnd)
 		reset := acphost.LastItem(sess.Log(), acphost.KindReset).Seq > last.Seq
-		switch last.StopReason {
-		case "":
-		case "interrupted":
-			if !reset {
-				prompt = oneShotResume
-			}
+		switch {
+		case acphost.Interrupted(sess.Log()):
+			prompt = oneShotResume
+		case last.StopReason == "", last.StopReason == "interrupted" && reset:
 		default:
 			d.endOneShot(entry, last.StopReason == "end_turn", false, turnEndReport(last.StopReason))
 			return

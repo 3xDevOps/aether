@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -431,4 +432,44 @@ func TestBackgroundRunOverACPWaitsForTheBackgroundFollowUp(t *testing.T) {
 	if !slices.ContainsFunc(e.rt.execRuns(), func(call fakeExecCall) bool { return slices.Contains(call.argv, "kill -USR1 1") }) {
 		t.Fatalf("the container was not ended with SIGUSR1: %+v", e.rt.execRuns())
 	}
+}
+
+func TestBackgroundRunOverACPContinuesAfterRestartWithBackgroundTasks(t *testing.T) {
+	delay := acpmock.BackgroundDelay
+	acpmock.BackgroundDelay = time.Hour
+	t.Cleanup(func() { acpmock.BackgroundDelay = delay })
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptBackground)
+	waitFor(t, "the turn to end with background work pending", func() bool {
+		sess := e.sched.acp.session(run.ID)
+		return sess != nil && assistantSaidNow(e, run.ID, "started") && sess.State().Background
+	})
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	page, err := s2.ACPHistory(run.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(page.Items, func(it acphost.Item) bool {
+		return it.Kind == acphost.KindMessage && it.Message.Role == "user" && it.Message.Text == oneShotResume
+	}) {
+		t.Fatalf("the restored session was not asked to continue: %+v", page.Items)
+	}
+}
+
+func assistantSaidNow(e *testEnv, run domain.RunID, text string) bool {
+	page, err := e.sched.ACPHistory(run, 0, 0)
+	return err == nil && assistantSaid(text)(page.Items)
 }

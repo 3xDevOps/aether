@@ -390,14 +390,15 @@ the report rule while coordination reporting is enabled, and the co-author
 rule. The report rule reads:
 
 ```
-You MUST run `aether-internal report` before you end a turn: --outcome success or failure when the task is done or cannot be done, blocked when an external blocker stops you, needs-input with your question as --summary when you need the user's decision or information. Never end a turn without a report.
+Before you end a turn you MUST run `aether-internal report` with an outcome `aether-internal skill` allows your role: success or failure when the task is done or cannot be done, blocked when an external blocker stops you, needs-input with your question as --summary when you need the user's decision or information. Never end a turn without a report.
 ```
 
 Claude's adapter takes them as `_meta.systemPrompt.append` on `session/new`,
 `session/resume` and `session/load`, so a run with no task gets them too, and
 its task prompt is the bare task. Every other agent gets them appended to its
 task prompt, or, without a task, as a separate text block after the first
-message the session accepts. That block is part of the logged prompt. An
+message the session accepts or the first mail prompt, also after a restart
+that came before it. That block is part of the logged prompt. An
 agent that ends a turn without reporting still parks with `agent idle`.
 
 What the agent is doing reaches the dashboard's state line as a `run.agent`
@@ -484,8 +485,10 @@ history dropped because the log already holds it. The session id is stored in th
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
 the run parks at `needs-attention` with `turn interrupted` until the next
-prompt. Background tasks the old adapter was running end with it: the log
-gets a **Background work interrupted** notice naming them. Messages still
+prompt, also when only background tasks were pending. Background tasks the
+old adapter was running end with it: the log gets a **Background work
+interrupted** notice naming them, and a Background run is asked to continue
+like one whose turn was cut off. Messages still
 queued behind that turn read **Not sent** (`agent_disconnected`), also
 after a crash, since the next server records them when it starts; send them
 again once the session is back. The restored

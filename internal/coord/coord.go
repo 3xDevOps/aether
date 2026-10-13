@@ -50,6 +50,9 @@ var (
 	// ErrNoOutcomeSink is returned when a needs-input report arrives with no
 	// scheduler behind it.
 	ErrNoOutcomeSink = errors.New("coord: no run outcome sink is attached")
+	// ErrCannotAsk is returned by OutcomeSink.ReportNeedsInput for a run
+	// that cannot take its user's answer.
+	ErrCannotAsk = errors.New("a Background run cannot ask its user; report blocked or failure instead")
 )
 
 // EvidenceCapture is the narrow evidence seam needed by coord.report.

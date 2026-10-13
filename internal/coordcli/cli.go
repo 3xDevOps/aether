@@ -264,7 +264,8 @@ input is open. It is not a way to wait for a peer or human.
 Needs-input is nonterminal: the summary is the question shown to the user as
 the Needs you reason at turn end. Ask one specific question, then end your
 turn; the user's reply arrives as your next prompt. It takes no --evidence-ref
-and is refused for mission workers, who ask their integrator with ask.
+and is refused for Background runs and for mission workers, who ask their
+integrator with ask.
 You MUST report before ending a turn: success or failure when the task is done
 or cannot be done, blocked when an external blocker stops you, needs-input with
 your question as the summary when you need the user's decision or information.
@@ -507,7 +508,7 @@ is open. It may repeat; it is not a way to wait. Do not report while idle or
 waiting on a peer or human.
 Needs-input is nonterminal; its summary is your question for the user, shown as
 the Needs you reason at turn end. Ask one specific question, then end your turn;
-the user's reply arrives as your next prompt.
+the user's reply arrives as your next prompt. Background runs cannot ask.
 You MUST report before ending a turn: success or failure when the task is done
 or cannot be done, blocked when an external blocker stops you, needs-input with
 your question as the summary when you need the user's decision or information.

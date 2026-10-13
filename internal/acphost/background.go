@@ -65,7 +65,6 @@ func (s *Session) backgroundTasksLocked() []string {
 	return slices.Sorted(maps.Keys(s.launched))
 }
 
-// trackLocked notes what an update says about work outside a prompt.
 func (s *Session) trackLocked(head updateHead) {
 	s.lastUpdate = time.Now()
 	if id := launchedTask(head.Meta.ClaudeCode.ToolResponse); id != "" {
@@ -148,8 +147,6 @@ func (s *Session) quietCheck() {
 	s.settleLocked()
 }
 
-// endAutonomousLocked records the end of the autonomous turn and starts the
-// first queued prompt.
 func (s *Session) endAutonomousLocked(stop string) {
 	s.proj.endTurn()
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin, BackgroundTasks: s.backgroundTasksLocked()})

@@ -440,3 +440,11 @@ func LastItem(log *Log, kind Kind) Item {
 		before = items[0].Seq
 	}
 }
+
+// Interrupted reports whether the agent session the log records lost work when
+// its connection ended: its last turn ended interrupted, as a host that closed
+// the connection logs it, or with background tasks awaiting their follow-up.
+func Interrupted(log *Log) bool {
+	end := LastItem(log, KindTurnEnd)
+	return (end.StopReason == "interrupted" || len(end.BackgroundTasks) > 0) && LastItem(log, KindReset).Seq < end.Seq
+}

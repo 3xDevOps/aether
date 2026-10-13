@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -385,8 +386,15 @@ func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportI
 }
 
 // ReportNeedsInput records an agent's question for its user like
-// ReportBlocked.
+// ReportBlocked. A Background run ends at its turn end, before anyone answers.
 func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	headless := entry != nil && entry.launchMode == domain.LaunchHeadless
+	s.mu.Unlock()
+	if headless {
+		return coord.ErrCannotAsk
+	}
 	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report")
 }
 
