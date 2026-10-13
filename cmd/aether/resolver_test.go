@@ -76,7 +76,7 @@ func TestFileResolverReadsNameserversAtEachDial(t *testing.T) {
 		t.Fatalf("lookup without the file: err = %v, want it to name %s %s", err, resolvConfEnv, path)
 	}
 
-	if err := os.WriteFile(path, []byte("nameserver 127.0.0.1\n"), 0o600); err != nil {
+	if err = os.WriteFile(path, []byte("nameserver 127.0.0.1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ips, err := resolver.LookupIP(t.Context(), "ip4", "app.example.")

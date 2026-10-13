@@ -3,7 +3,7 @@
 # Requires GNU make and Go 1.26+. The Go binaries cross-compile with nothing
 # beyond that toolchain (pure Go, CGO_ENABLED=0 throughout), but `make
 # release` also builds the dashboard, which needs Bun and Node, and the
-# Android APK, which needs Docker as well.
+# Android APK, which needs Docker.
 
 MODULE  := github.com/3xDevOps/Aether
 # Both reach shell command lines - the linker flags here, the Windows resource
@@ -131,6 +131,22 @@ ANDROID_VERSION_NAME = $(VERSION:v%=%)
 ANDROID_CLI_ABIS := arm64-v8a:android/arm64 x86_64:linux/amd64
 ANDROID_JNILIBS  := android/app/src/main/jniLibs
 
+# The dashboard and that CLI are built in containers pinned by digest too, so
+# `make android` needs Docker and nothing else, as before. The Go image is the
+# toolchain go.mod pins and the Bun image the version web/.bun-version pins;
+# android-cli refuses to run when either has moved without the other. The Bun
+# image has no Node, so Next runs on Bun (`bun --bun`). Their module and build
+# caches live outside the tree, like Gradle's.
+ANDROID_GO_VERSION  := 1.26.9
+ANDROID_GO_IMAGE    := golang:$(ANDROID_GO_VERSION)@sha256:d7722066f0b60ceccb6c0643cbed1f5f9e15506ac237146c95333504d7805d89
+ANDROID_BUN_VERSION := 1.3.14
+ANDROID_BUN_IMAGE   := oven/bun:$(ANDROID_BUN_VERSION)@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+ANDROID_CLI_CACHE   ?= $(HOME)/.cache/aether/android-cli
+ANDROID_CLI_RUN = docker run --rm \
+	-u $$(id -u):$$(id -g) \
+	-v '$(CURDIR)':/src \
+	-v '$(ANDROID_CLI_CACHE)':/cache -e HOME=/cache
+
 # Release signing comes from the environment, never the tree: a keystore path
 # and the three secrets beside it. Without them the APK and the bundle come
 # out unsigned and are named for it, so a PR's build can never be mistaken for
@@ -248,9 +264,9 @@ public-audit:
 # export is built before Go compiles. Bun installs dependencies; Node runs the
 # Next build.
 # The Android shell's unit tests, release APK and app bundle, built in the
-# pinned SDK container around the CLI that android-cli cross-compiles on the
-# host first. The APK is for direct installs; the bundle is what
-# Google Play takes (docs/install.md). Both are signed with the same key.
+# pinned SDK container around the CLI that android-cli builds first. The APK
+# is for direct installs; the bundle is what Google Play takes
+# (docs/install.md). Both are signed with the same key.
 # scripts/android-verify-signature.sh runs in the same container, which is
 # where apksigner, jarsigner and keytool live, and is given the keystore the
 # build was handed so it can check who actually signed the two artifacts.
@@ -291,13 +307,21 @@ android-debug: android-cli
 	cp android/app/build/outputs/apk/debug/app-debug.apk $(DIST)/aether-android-debug.apk
 	@echo 'built $(DIST)/aether-android-debug.apk; install it with: adb install -r $(DIST)/aether-android-debug.apk'
 
-android-cli: dashboard
-	@for pair in $(ANDROID_CLI_ABIS); do \
-		abi=$${pair%%:*}; platform=$${pair#*:}; \
-		echo "building $(ANDROID_JNILIBS)/$$abi/libaether.so"; \
-		CGO_ENABLED=0 GOOS=$${platform%/*} GOARCH=$${platform#*/} go build -trimpath -ldflags '$(LDFLAGS)' \
-			-o $(ANDROID_JNILIBS)/$$abi/libaether.so ./cmd/aether || exit 1; \
-	done
+android-cli:
+	@[ 'go$(ANDROID_GO_VERSION)' = '$(GO_TOOLCHAIN)' ] || { \
+		echo 'make android-cli: ANDROID_GO_IMAGE is Go $(ANDROID_GO_VERSION) but go.mod pins $(GO_TOOLCHAIN); move both together' >&2; exit 1; }
+	@[ '$(ANDROID_BUN_VERSION)' = "$$(cat web/.bun-version)" ] || { \
+		echo "make android-cli: ANDROID_BUN_IMAGE is Bun $(ANDROID_BUN_VERSION) but web/.bun-version pins $$(cat web/.bun-version); move both together" >&2; exit 1; }
+	@mkdir -p '$(ANDROID_CLI_CACHE)'
+	$(ANDROID_CLI_RUN) -w /src/web $(ANDROID_BUN_IMAGE) \
+		sh -c 'bun install --frozen-lockfile && bun --bun run build'
+	$(ANDROID_CLI_RUN) -w /src -e CGO_ENABLED=0 -e GOTOOLCHAIN=local $(ANDROID_GO_IMAGE) sh -c ' \
+		for pair in $(ANDROID_CLI_ABIS); do \
+			abi=$${pair%%:*}; platform=$${pair#*:}; \
+			echo "building $(ANDROID_JNILIBS)/$$abi/libaether.so"; \
+			GOOS=$${platform%/*} GOARCH=$${platform#*/} go build -trimpath -buildvcs=false -ldflags "$(LDFLAGS)" \
+				-o $(ANDROID_JNILIBS)/$$abi/libaether.so ./cmd/aether || exit 1; \
+		done'
 
 dashboard:
 	@command -v $(BUN) >/dev/null 2>&1 || { \

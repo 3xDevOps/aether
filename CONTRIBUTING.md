@@ -49,8 +49,8 @@ make test-scripts
 make public-audit
 ```
 
-The Android app has its own build and tests. It needs Go, Bun and Node on
-the host as well as Docker ([Android shell](#android-shell)):
+The Android app has its own build and tests, in containers
+([Android shell](#android-shell)):
 
 ```sh
 make android
@@ -209,11 +209,15 @@ build and a released one run the same toolchain:
 make android
 ```
 
-`make android` first runs `make android-cli`, which needs Go, Bun and Node on
-the host: it builds the dashboard, then cross-compiles the CLI
-(`CGO_ENABLED=0 GOOS=android`, the release `-ldflags`) for arm64 and amd64 into
-`android/app/src/main/jniLibs/<abi>/libaether.so` (`arm64-v8a`, `x86_64`;
-gitignored). Gradle packages them as native libraries, and after the build
+`make android` first runs `make android-cli`, which builds the dashboard in
+`oven/bun` and then the CLI in `golang`, both pinned by digest in the
+`Makefile` (`ANDROID_BUN_IMAGE`, `ANDROID_GO_IMAGE`) and refused when they
+drift from `web/.bun-version` or `go.mod`'s toolchain. The CLI is built with
+`CGO_ENABLED=0` and the release `-ldflags` into
+`android/app/src/main/jniLibs/<abi>/libaether.so` (gitignored): `GOOS=android`
+for `arm64-v8a`, and a static `linux/amd64` build for `x86_64`, because Go
+links `android/amd64` only through cgo. Their caches live in
+`~/.cache/aether/android-cli` (`ANDROID_CLI_CACHE`). Gradle packages them as native libraries, and after the build
 `make android` checks with `unzip -l` that the APK holds both. A bare Gradle
 build without them still compiles; the app then reports the missing
 `libaether.so` path in Edge mode.

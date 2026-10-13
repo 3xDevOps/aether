@@ -1694,13 +1694,9 @@ checks out the authorized SHA and runs independently:
   each macOS or Windows lane builds only its CLI. They call
   `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
   and upload `binaries-go-<goos>-<goarch>`.
-- `android-cli` builds the CLI libraries the APK carries
-  (`make android-cli VERSION="$GITHUB_REF_NAME"`) with no secrets and uploads
-  them as `android-jnilibs`.
-- `android` downloads those libraries, then builds and verifies the signed APK
-  and AAB with `make -o android-cli android VERSION="$GITHUB_REF_NAME"` and
-  uploads `binaries-android`. It is the only job that receives the Android
-  signing secrets.
+- `android` separately builds and verifies the signed APK and AAB with
+  `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
+  It is the only job that receives the Android signing secrets.
 - `browser-image`, `edge-image` and `standard-image` each build on native
   amd64 (`ubuntu-latest`) and arm64 (`ubuntu-24.04-arm`) runners. Each loads,
   smoke-tests and pushes the same local image as `<tag>-<arch>`; standard
@@ -1776,8 +1772,9 @@ repository** links it. Until then `edge-manifest` ends with the warning
 `aether-edge is not public` and the release still completes.
 
 The separate `android` release job builds and signs the [Android app](#android-app),
-both APK and app bundle, in a pinned SDK container, around the libraries the
-`android-cli` job built. It needs Docker on its runner and four repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
+both APK and app bundle, in pinned containers: the dashboard and the CLI the
+APK carries first, then the SDK container. It needs Docker on its runner and
+four repository secrets: `ANDROID_KEYSTORE_B64` (the release keystore,
 base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
 `ANDROID_KEY_PASSWORD`. Its first step, **after release policy succeeds but
 before checkout or signing-toolchain setup**, checks that all four are present

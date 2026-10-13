@@ -582,7 +582,7 @@ func TestPackagedGatewayOmitsHostVerbs(t *testing.T) {
 	if !slices.Contains(caps.Local, "link.status") || !slices.Contains(caps.Local, "link.switch") {
 		t.Errorf("capabilities = %v, want link.status and link.switch", caps.Local)
 	}
-	if rec := do(g, http.MethodPost, "/local/v1/link.repo", `{}`, true); rec.Code != http.StatusNotFound {
+	if rec = do(g, http.MethodPost, "/local/v1/link.repo", `{}`, true); rec.Code != http.StatusNotFound {
 		t.Errorf("link.repo = %d, want 404: %s", rec.Code, rec.Body)
 	}
 	rec = do(g, http.MethodPost, "/local/v1/link.status", `{}`, true)
