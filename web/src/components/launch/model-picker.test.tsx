@@ -20,7 +20,7 @@ const discovered: AgentModelsResult = {
 }
 
 beforeEach(() => {
-  useStore.setState({ agentModels: {} })
+  useStore.setState({ agentModels: {}, capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
   vi.clearAllMocks()
   vi.mocked(api.agentModels).mockResolvedValue(discovered)
 })
@@ -162,5 +162,50 @@ describe('ModelPicker', () => {
     setup({ accountMemberID: 'mem_bob' })
     await waitFor(() => expect(api.agentModels).toHaveBeenCalledTimes(2))
     expect(api.agentModels).toHaveBeenLastCalledWith('claude', 'mem_bob', false)
+  })
+
+  it('picks the typed id on Enter even when a listed model matches it loosely', async () => {
+    vi.mocked(api.agentModels).mockResolvedValue({ source: 'agent', models: [{ id: 'opus', name: 'opus', description: 'Opus 4.1' }] })
+    const { trigger, onChange } = setup()
+    const search = await openPicker(trigger)
+    await screen.findByRole('option', { name: /^opus/ })
+    await userEvent.type(search, 'opus-4')
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Use “opus-4”' }).getAttribute('aria-selected')).toBe('true'))
+    await userEvent.keyboard('{Enter}')
+
+    expect(onChange).toHaveBeenCalledWith('opus-4')
+  })
+
+  it('retries a failed agent.models call on the next mount and drops answers after an identity change', async () => {
+    vi.mocked(api.agentModels).mockRejectedValueOnce(new Error('agent.models: connection closed'))
+    setup()
+    await waitFor(() => expect(useStore.getState().agentModels['/claude']?.error).toBeDefined())
+    cleanup()
+    setup()
+    await waitFor(() => expect(useStore.getState().agentModels['/claude']?.result).toEqual(discovered))
+    expect(api.agentModels).toHaveBeenCalledTimes(2)
+
+    cleanup()
+    useStore.setState({ agentModels: {}, identityKey: 'member:alice' })
+    let answer!: (result: AgentModelsResult) => void
+    vi.mocked(api.agentModels).mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    setup()
+    await waitFor(() => expect(api.agentModels).toHaveBeenCalledTimes(3))
+    useStore.setState({ agentModels: {}, identityKey: 'member:bob' })
+    answer(discovered)
+    await Promise.resolve()
+    expect(useStore.getState().agentModels['/claude']).toBeUndefined()
+  })
+
+  it('neither fetches nor shows the status row when the server lacks agent.models', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.launch'], ws: [] } })
+    const { trigger, onChange } = setup()
+    const search = await openPicker(trigger)
+    expect(screen.queryByRole('button', { name: 'Refresh models' })).toBeNull()
+    await userEvent.type(search, 'typed')
+    await userEvent.click(await screen.findByRole('option', { name: 'Use “typed”' }))
+
+    expect(api.agentModels).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledWith('typed')
   })
 })

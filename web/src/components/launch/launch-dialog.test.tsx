@@ -115,6 +115,7 @@ describe('new run', () => {
   })
 
   it('sends a model picked from the agent\'s discovered list', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
     vi.mocked(api.agentModels).mockResolvedValue({ models: [{ id: 'claude-opus-4-1', name: 'Opus 4.1' }], source: 'agent' })
     await open()
     await pickModel(screen.getByRole('combobox', { name: 'Model' }), /^Opus 4.1/)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { defaultFilter } from 'cmdk'
 import type * as React from 'react'
 import { Check, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -8,24 +9,28 @@ import { Spinner } from '@/components/ui/spinner'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 /** The models `harness` offers on the account, fetched the first time a field shows them. */
 export function useAgentModels(harness: string, accountMemberID?: string) {
   const key = `${accountMemberID ?? ''}/${harness}`
+  const supported = useCapability().hasMethod('agent.models')
   const entry = useStore((s) => s.agentModels[key])
   const load = useCallback((refresh: boolean) => {
+    const same = sameIdentity()
     const { agentModels, setAgentModels } = useStore.getState()
     setAgentModels(key, { result: agentModels[key]?.result, loading: true })
     api.agentModels(harness, accountMemberID, refresh).then(
-      (result) => useStore.getState().setAgentModels(key, { result }),
-      (err: unknown) => useStore.getState().setAgentModels(key, { result: useStore.getState().agentModels[key]?.result, error: message(err) }),
+      (result) => { if (same()) useStore.getState().setAgentModels(key, { result }) },
+      (err: unknown) => { if (same()) useStore.getState().setAgentModels(key, { result: useStore.getState().agentModels[key]?.result, error: message(err) }) },
     )
   }, [key, harness, accountMemberID])
   useEffect(() => {
-    if (harness && !useStore.getState().agentModels[key]) load(false)
-  }, [key, harness, load])
-  return { ...entry, refresh: () => load(true) }
+    const current = useStore.getState().agentModels[key]
+    if (supported && harness && (!current || (current.error && !current.loading))) load(false)
+  }, [key, harness, supported, load])
+  return { ...entry, supported, refresh: () => load(true) }
 }
 
 const sourceNotes: Record<string, string> = { cache: "From the agent's cache", fallback: 'Fallback list' }
@@ -40,12 +45,16 @@ export function ModelPicker({ harness, accountMemberID, value, onChange, disable
 } & Omit<React.ComponentProps<'button'>, 'value' | 'onChange'>) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const { result, loading, error, refresh } = useAgentModels(harness, accountMemberID)
+  const { result, loading, error, supported, refresh } = useAgentModels(harness, accountMemberID)
   const models = result?.models ?? []
   const selected = models.find((model) => model.id === value)
   const typed = search.trim()
   const failure = error ?? result?.error
   const note = result ? sourceNotes[result.source] : undefined
+  const showUse = Boolean(typed) && typed !== value && !models.some((model) => model.id === typed)
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
   const pick = (model: string) => {
     onChange(model)
     setOpen(false)
@@ -80,28 +89,27 @@ export function ModelPicker({ harness, accountMemberID, value, onChange, disable
           content.querySelector('[cmdk-item][data-selected=true]')?.scrollIntoView({ block: 'nearest' })
         }}
       >
-        <Command label="Models" defaultValue={JSON.stringify(value)} className="[&_[cmdk-input-wrapper]]:shrink-0">
+        <Command label="Models" defaultValue={JSON.stringify(value)} filter={(item, query, keywords) => (item.startsWith('use:') ? 1 : defaultFilter(item, query, keywords))} className="[&_[cmdk-input-wrapper]]:shrink-0">
           <CommandInput value={search} onValueChange={setSearch} placeholder="Search or enter a model id…" aria-label="Search models" />
-          <div className="flex min-h-7 shrink-0 items-center gap-2 px-2 text-ui-sm text-muted coarse:min-h-11">
+          {supported && <div className="flex min-h-7 shrink-0 items-center gap-2 px-2 text-ui-sm text-muted coarse:min-h-11">
             {loading ? (
               <>
                 <Spinner />
                 <span>Loading models…</span>
               </>
-            ) : failure ? (
-              <span className="min-w-0 py-1 break-words text-state-failed">{failure}</span>
-            ) : note && <span>{note}</span>}
+            ) : (
+              <span className="min-w-0 py-1 break-words">
+                {note && <span>{note}</span>}
+                {note && failure && ': '}
+                {failure && <span className="text-state-failed">{failure}</span>}
+              </span>
+            )}
             <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" label="Refresh models" disabled={loading} onClick={refresh}>
               <RefreshCw aria-hidden />
             </Button>
-          </div>
+          </div>}
           <CommandList className="min-h-0">
-            <CommandGroup value="models">
-              {item('', 'Agent default', [result?.default_label], ['Agent default', result?.default_label ?? ''])}
-              {value && !selected && item(value, value, [], [value])}
-              {models.map((model) => item(model.id, model.name, [model.id === model.name ? undefined : model.id, model.description], [model.id, model.name, model.description ?? '']))}
-            </CommandGroup>
-            {typed && typed !== value && !models.some((model) => model.id === typed) && (
+            {showUse && (
               <CommandGroup forceMount value="custom">
                 <CommandItem forceMount value={`use:${typed}`} onSelect={() => pick(typed)}>
                   <span className="size-4 shrink-0" />
@@ -109,6 +117,11 @@ export function ModelPicker({ harness, accountMemberID, value, onChange, disable
                 </CommandItem>
               </CommandGroup>
             )}
+            <CommandGroup value="models">
+              {item('', 'Agent default', [result?.default_label], ['Agent default', result?.default_label ?? ''])}
+              {value && !selected && item(value, value, [], [value])}
+              {models.map((model) => item(model.id, model.name, [model.id === model.name ? undefined : model.id, model.description], [model.id, model.name, model.description ?? '']))}
+            </CommandGroup>
           </CommandList>
         </Command>
       </PopoverContent>

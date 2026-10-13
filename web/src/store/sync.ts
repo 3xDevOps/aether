@@ -156,7 +156,7 @@ export async function hydrate(
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
       store.getState().resetNotes()
-      store.setState({ invitations: null, revokingInvitations: [] })
+      store.setState({ invitations: null, revokingInvitations: [], agentModels: {} })
     }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
