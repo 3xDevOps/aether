@@ -652,7 +652,7 @@ describe('command palette', () => {
       useStore.setState({
         capabilities: {
           gateway,
-          methods: ['agent.list', 'config.roots', 'config.import', 'config.tree', 'config.read'],
+          methods: ['agent.list', 'config.roots', 'config.import', 'home.tree'],
           ws: [],
         },
         workspaces: {},

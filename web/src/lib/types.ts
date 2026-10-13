@@ -906,11 +906,14 @@ export interface RunPatch {
   recorded?: boolean
 }
 
-/** One immediate child returned by files.tree. */
+/** One immediate child returned by files.tree or home.tree. Only home.tree
+ * sends `link`, a symlink that is never followed, and `locked`, a credential
+ * file that is listed but cannot be read. */
 export interface FileTreeEntry {
   name: string
-  kind: 'file' | 'dir'
+  kind: 'file' | 'dir' | 'link'
   size: number
+  locked?: boolean
 }
 
 export interface FilesTreeResult {
@@ -1036,14 +1039,6 @@ export interface AgentDefinition {
   profile_root?: string
   credential_paths?: string[]
   deny_names?: string[]
-}
-
-export interface ConfigRoot {
-  harness: string
-  display_name?: string
-  path: string
-  runtime_ignores: string[]
-  credential_names: string[]
 }
 
 // POST /local/v1/<verb> results (internal/localgw/local.go); only a gateway

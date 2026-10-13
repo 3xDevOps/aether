@@ -194,6 +194,6 @@ describe('agent config files', () => {
   it('opens remote files', async () => {
     const section = await open()
     fireEvent.click(section.getByRole('button', { name: 'Open remote files' }))
-    expect(useStore.getState().route).toEqual({ name: 'files', params: {} })
+    expect(useStore.getState().route).toEqual({ name: 'files', params: { home: 'open' } })
   })
 })

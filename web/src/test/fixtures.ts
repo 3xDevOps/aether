@@ -688,39 +688,19 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     scheduleList: vi.fn(async () => [schedule()]),
     scheduleSave: vi.fn(async () => schedule()),
     scheduleDelete: vi.fn(async () => ({})),
-    configRoots: vi.fn(async () => ({
-      roots: [
-        {
-          harness: 'claude',
-          display_name: 'Claude Code',
-          path: '~/.claude',
-          runtime_ignores: ['projects/'],
-          credential_names: ['.credentials.json', 'credentials.json', 'credentials', '.claude.json', 'auth.json', 'keychain', 'token.json', 'tokens.json', 'oauth.json', 'agent.db', 'agent.db-wal', 'agent.db-shm'],
-        },
-        {
-          harness: 'codex',
-          display_name: 'Codex',
-          path: '~/.codex',
-          runtime_ignores: ['tmp/'],
-          credential_names: ['auth.json', 'keychain', 'token.json'],
-        },
-        {
-          harness: 'pi',
-          display_name: 'pi',
-          path: '~/.pi',
-          runtime_ignores: ['agent/sessions/'],
-          credential_names: ['auth.json', 'oauth.json'],
-        },
-      ],
-    })),
-    configTree: vi.fn(async () => ({ entries: [] })),
-    configRead: vi.fn(async () => ({
+    homeTree: vi.fn(async () => ({ entries: [] })),
+    homeRead: vi.fn(async () => ({
       content: '', size: 0, binary: false, truncated: false, revision: '', writable: true,
     })),
-    configWrite: vi.fn(async ({ content }) => ({
+    homeWrite: vi.fn(async ({ content }) => ({
       content, size: new TextEncoder().encode(content).length,
       binary: false, truncated: false, revision: 'saved', writable: true,
     })),
+    homeMkdir: vi.fn(async () => ({})),
+    homeRename: vi.fn(async () => ({})),
+    homeRemove: vi.fn(async () => ({})),
+    homeUpload: vi.fn(async () => ({})),
+    homeDownload: vi.fn(async () => ({ content_base64: '', size: 0 })),
     agentList: vi.fn(async () => [
       agentInfo({ display_name: 'Claude Code' }),
       agentInfo({ name: 'myagent', source: 'member', install_script: undefined }),

@@ -9,7 +9,7 @@ import { ApiError, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { DiffDocument, EditableDocument, editorCommands } from '@/routes/files/document'
 import type { FileTarget } from '@/routes/files/paths'
-import { isBaseBranch, type SelectFile, type Selection, sourceKey, sourceLabel } from '@/routes/files/sources'
+import { isBaseBranch, type SelectFile, type Selection, sourceKey, tildePath } from '@/routes/files/sources'
 import { useStore } from '@/store'
 import type { FileDocumentState } from '@/store/files'
 import { useHeaderPrimary } from '@/store/hooks'
@@ -69,7 +69,6 @@ export function FileEditor({
   const reloadDiscard = useRef<Record<string, number>>({})
   const documentPresent = Boolean(stored)
   const documentLoading = stored?.loading ?? false
-  const selectedHarness = selection.kind === 'config' ? selection.harness : undefined
   const selectedWorkspaceID = selection.kind === 'workspace' ? selection.workspaceID : undefined
   const selectedRunID = selection.kind === 'workspace' ? selection.runID : undefined
   useEffect(() => {
@@ -89,8 +88,8 @@ export function FileEditor({
       request.current[key] !== requestID ||
       useStore.getState().identityEpoch !== requestEpoch ||
       useStore.getState().documents[key] !== pending
-    const promise = current.kind === 'config'
-      ? client.configRead({ harness: current.harness, path: current.path })
+    const promise = current.kind === 'home'
+      ? client.homeRead(current.path)
       : client.filesRead({ workspace_id: current.workspaceID, ...(current.runID ? { run_id: current.runID } : {}), path: current.path })
     void promise
       .then((result) => {
@@ -105,7 +104,7 @@ export function FileEditor({
         if (stale()) return
         setDocument(key, { ...blank, loading: false, error: message(err) })
       })
-  }, [clearDraft, client, documentLoading, documentPresent, epoch, identityEpoch, key, mode, reload, selectedHarness, selectedRunID, selectedWorkspaceID, selection.kind, selection.path, setDocument])
+  }, [clearDraft, client, documentLoading, documentPresent, epoch, identityEpoch, key, mode, reload, selectedRunID, selectedWorkspaceID, selection.kind, selection.path, setDocument])
 
   const save = async () => {
     const currentState = useStore.getState()
@@ -117,8 +116,8 @@ export function FileEditor({
     const epochAtStart = currentState.identityEpoch
     setDraft(key, { ...currentDraft, content: captured, saving: true, error: undefined, conflict: false })
     try {
-      const result = selection.kind === 'config'
-        ? await client.configWrite({ harness: selection.harness, path: selection.path, content: captured, revision })
+      const result = selection.kind === 'home'
+        ? await client.homeWrite({ path: selection.path, content: captured, revision })
         : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), path: selection.path, content: captured, revision })
       if (useStore.getState().identityEpoch !== epochAtStart) return false
       markDraftSaved(key, captured, result)
@@ -152,6 +151,7 @@ export function FileEditor({
     if (canSave) primary()
   }
   const runFile = selection.kind === 'workspace' && Boolean(selection.runID)
+  const shownPath = (file: Selection) => (file.kind === 'home' ? tildePath(file.path) : file.path)
 
   return (
     <article className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
@@ -163,8 +163,8 @@ export function FileEditor({
             </Button>
           )}
           <div className="flex min-w-0 flex-1 flex-col">
-            <p className="truncate font-code text-ui-sm text-text" title={selection.path}>{selection.path}</p>
-            <p className="truncate text-ui-xs text-muted" title={sourceLabel(selection)}>{sourceLabel(selection)}</p>
+            <p className="truncate font-code text-ui-sm text-text" title={shownPath(selection)}>{shownPath(selection)}</p>
+            <p className="truncate text-ui-xs text-muted" title={selection.label}>{selection.label}</p>
           </div>
           <Button variant="ghost" size="sm" hint="Find and replace (Ctrl/Cmd-F)" aria-label="Find and replace" onClick={() => editorCommands.openSearch()}>
             <Search />
@@ -192,7 +192,7 @@ export function FileEditor({
                   <TabsTrigger
                     key={tabKey}
                     value={tabKey}
-                    title={`${tab.path} · ${sourceLabel(tab)}`}
+                    title={`${shownPath(tab)} · ${tab.label}`}
                     aria-keyshortcuts="Delete"
                     onKeyDown={(event) => {
                       if (event.key === 'Delete') onClose(tab)
@@ -207,7 +207,7 @@ export function FileEditor({
                     )}
                     <span
                       aria-hidden
-                      title={`Close ${tab.path}`}
+                      title={`Close ${shownPath(tab)}`}
                       className="-mr-1 grid size-6 place-items-center rounded-control text-muted hover:bg-hover hover:text-text coarse:size-11"
                       onMouseDown={(event) => {
                         event.preventDefault()

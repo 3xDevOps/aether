@@ -9,7 +9,7 @@ type Entries = { entries: Array<{ name: string; kind: 'file' | 'dir'; size: numb
 
 const file = (name: string): Entries['entries'][number] => ({ name, kind: 'file', size: 1 })
 
-function seed(methods = ['files.tree', 'config.roots']) {
+function seed(methods = ['files.tree', 'home.tree']) {
   useStore.getState().resetFiles()
   useStore.setState({
     capabilities: { gateway: 'server', methods, ws: [] },
@@ -28,7 +28,7 @@ function tree() {
 describe('Files tree', () => {
   beforeEach(() => seed())
 
-  it('opens on the base branch with run checkouts and agent config folded away', async () => {
+  it('opens on the base branch with run checkouts and Home folded away', async () => {
     const client = fakeApi({
       filesTree: vi.fn(async (params) => (params.run_id ? { entries: [file('run.txt')] } : { entries: [file('README.md')] })),
     })
@@ -36,35 +36,34 @@ describe('Files tree', () => {
 
     expect(await tree().findByRole('button', { name: 'README.md' })).toBeDefined()
     const checkouts = tree().getByRole('button', { name: /^Run checkouts/ })
-    const config = tree().getByRole('button', { name: /^Agent config/ })
+    const home = tree().getByRole('button', { name: /^Home ?~$/ })
     expect(checkouts.getAttribute('aria-expanded')).toBe('false')
-    expect(config.getAttribute('aria-expanded')).toBe('false')
+    expect(home.getAttribute('aria-expanded')).toBe('false')
     expect(client.filesTree).not.toHaveBeenCalledWith(expect.objectContaining({ run_id: 'run_1' }))
-    expect(client.configTree).not.toHaveBeenCalled()
+    expect(client.homeTree).not.toHaveBeenCalled()
 
     fireEvent.click(checkouts)
     fireEvent.click(tree().getByRole('button', { name: 'rewrite the checkout flow' }))
     expect(await tree().findByRole('button', { name: 'run.txt' })).toBeDefined()
-
-    fireEvent.click(config)
-    expect(tree().getByRole('button', { name: /^claude/ })).toBeDefined()
-    expect(tree().getByRole('button', { name: 'New file in claude' })).toBeDefined()
   })
 
-  it('does not strand a pending config tree when another run invalidates', async () => {
-    seed(['config.roots'])
-    const pending = Promise.withResolvers<Entries>()
-    const client = fakeApi({
-      configRoots: vi.fn(async () => ({
-        roots: [{ harness: 'claude', path: '~/.claude', runtime_ignores: ['projects/'], credential_names: ['auth.json'] }],
-      })),
-      configTree: vi.fn(() => pending.promise),
-    })
-    render(<FilesRoute params={{}} client={client} />)
-    fireEvent.click(await tree().findByRole('button', { name: /^Agent config/ }))
-    fireEvent.click(tree().getByRole('button', { name: /^claude/ }))
+  it('opens with Home unfolded when a link asks for it', async () => {
+    seed(['home.tree'])
+    const client = fakeApi({ homeTree: vi.fn(async () => ({ entries: [{ name: '.claude', kind: 'dir' as const, size: 0 }] })) })
+    render(<FilesRoute params={{ home: 'open' }} client={client} />)
 
-    await waitFor(() => expect(client.configTree).toHaveBeenCalledWith({ harness: 'claude', path: '' }))
+    expect(await tree().findByRole('button', { name: '.claude' })).toBeDefined()
+    expect(tree().getByRole('button', { name: /^Home ?~$/ }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('does not strand a pending Home listing when another run invalidates', async () => {
+    seed(['home.tree'])
+    const pending = Promise.withResolvers<Entries>()
+    const client = fakeApi({ homeTree: vi.fn(() => pending.promise) })
+    render(<FilesRoute params={{}} client={client} />)
+    fireEvent.click(await tree().findByRole('button', { name: /^Home ?~$/ }))
+
+    await waitFor(() => expect(client.homeTree).toHaveBeenCalledWith(''))
     act(() => useStore.getState().invalidateRun('unrelated-run'))
 
     pending.resolve({ entries: [file('settings.json')] })

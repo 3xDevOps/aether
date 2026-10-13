@@ -6,7 +6,7 @@ import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } f
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { loadDevices } from '@/store/devices'
-import { configKey } from '@/store/files'
+import { homeKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
@@ -2241,13 +2241,13 @@ describe('connect', () => {
     try {
       const socket = await subscribe()
       await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
-      const key = configKey('claude', 'settings.json')
+      const key = homeKey('.claude/settings.json')
       store.getState().setDocument(key, {
         content: '{}', size: 2, revision: 'original', writable: true, binary: false, truncated: false,
       })
       store.getState().updateDraft(key, '{"private":"draft"}')
       store.getState().openFileTab({
-        key, kind: 'config', harness: 'claude', rootPath: '~/.claude', path: 'settings.json', label: 'claude',
+        key, kind: 'home', path: '.claude/settings.json', label: 'Home',
       })
       deliver(socket, statusEvent())
       await vi.waitFor(() => expect(store.getState().lastSeq).toBe(5))
