@@ -1647,6 +1647,38 @@ CREATE INDEX idx_run_costs_workspace ON run_costs(workspace_id);
 CREATE INDEX idx_run_costs_member ON run_costs(member_id);
 CREATE INDEX idx_run_costs_workspace_recorded ON run_costs(workspace_id, recorded_at, run_id);
 `,
+	// v63: member merge. A merge code is kept as its SHA-256 hash, open
+	// until a merge consumes it and records merge_id. A merge's audit row
+	// keeps the absorbed member and the settings it discarded; absorbed_id
+	// names a member that no longer exists, and survivor_id carries no
+	// foreign key so the record outlives the survivor's removal.
+	`
+CREATE TABLE member_merge_codes (
+	code_hash   TEXT PRIMARY KEY,
+	member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	created_at  INTEGER NOT NULL,
+	expires_at  INTEGER NOT NULL,
+	consumed_at INTEGER,
+	merge_id    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_member_merge_codes_member ON member_merge_codes(member_id);
+CREATE TABLE member_merges (
+	id                   TEXT PRIMARY KEY,
+	survivor_id          TEXT NOT NULL,
+	absorbed_id          TEXT NOT NULL,
+	confirmed_by_kind    TEXT NOT NULL,
+	confirmed_by         TEXT NOT NULL,
+	survivor_role_before TEXT NOT NULL,
+	absorbed_role_before TEXT NOT NULL,
+	role_after           TEXT NOT NULL,
+	discarded            TEXT NOT NULL CHECK (json_valid(discarded)),
+	absorbed             TEXT NOT NULL CHECK (json_valid(absorbed)),
+	archive_path         TEXT NOT NULL DEFAULT '',
+	code_hash            TEXT NOT NULL,
+	created_at           INTEGER NOT NULL
+);
+CREATE INDEX idx_member_merges_survivor ON member_merges(survivor_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
