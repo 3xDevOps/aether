@@ -3227,7 +3227,8 @@ The body is one column, in this order:
    earlier integrator generation dispatched it. A run the store does not
    hold shows a neutral dot and the attempt state, or `Run not loaded` for
    the integrator. The integrator and each task fold with their chevron and
-   start open; selecting a run row opens that run. The derivation is
+   start open; a control hold stays visible when its task folds. Selecting a
+   run row opens that run. The derivation is
    `missionTree` in `src/routes/missions/tree.ts`. **Task details**, closed
    by default, shows the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,

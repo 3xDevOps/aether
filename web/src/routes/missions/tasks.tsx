@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
 import { Button } from '@/components/ui/button'
@@ -263,6 +263,11 @@ function TaskRow({ node, detail, agents, showProposalBlocker, canRelease, client
             ))}
           </p>
         )}
+        {held && (
+          <div className="pb-2 pl-5">
+            <ControlHold attempt={latest} canRelease={canRelease} client={client} onReleased={onChanged} />
+          </div>
+        )}
         <CollapsibleContent>
           <div className="pl-5">
             {attempts.length === 0 ? (
@@ -273,11 +278,6 @@ function TaskRow({ node, detail, agents, showProposalBlocker, canRelease, client
                   <AttemptRow key={attempt.attempt.id} node={attempt} agents={agents} />
                 ))}
               </ul>
-            )}
-            {held && (
-              <div className="pb-2">
-                <ControlHold attempt={latest} canRelease={canRelease} client={client} onReleased={onChanged} />
-              </div>
             )}
             <Collapsible>
               <CollapsibleTrigger>Task details</CollapsibleTrigger>
@@ -313,7 +313,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   onChanged: () => void
 }) {
   const { mission } = detail
-  const tree = missionTree(detail)
+  const tree = useMemo(() => missionTree(detail), [detail])
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
