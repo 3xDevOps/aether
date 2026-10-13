@@ -280,7 +280,8 @@ socket. `docker run`, `docker build` and `docker compose up` work in a run
 as they do on a laptop.
 
 Install Sysbox once on the server host (Ubuntu or Debian, amd64 or arm64,
-with Docker already running):
+Linux 5.19 or newer or a kernel with the `shiftfs` module, Docker already
+running):
 
 ```sh
 sudo sh scripts/install-sysbox.sh
@@ -297,6 +298,10 @@ refuses with the number of running containers unless `/etc/docker/daemon.json`
 sets `"live-restore": true` or both `bip` and `default-address-pools`. Stop
 the runs, or enable `live-restore` and run `sudo systemctl reload docker`,
 then run it again.
+
+The script ends by running `docker run --runtime sysbox-runc -u 1000:1000`
+against a host directory owned by 1000:1000. It fails with "bind mounts are
+not ID-mapped on this host" if the container user cannot write it.
 
 The server picks its container runtime once, at first use, from
 `--container-runtime` (config key `container-runtime`):
@@ -322,9 +327,12 @@ Things to know:
   `runtime: dockerd did not become ready (exit 1): <last lines of the log>`.
   The full log is `/var/log/aether-dockerd.log` in the container. An image
   without `dockerd` skips the step silently.
-- Inner images, containers and volumes live in the container's own layer.
-  They are discarded with it, and `aether env save` does not keep them.
-  Pull or build again in each run, or bake what you need into the image.
+- Sysbox keeps the container's `/var/lib/docker` in a host directory under
+  `/var/lib/sysbox` and removes it with the container. Inner images,
+  containers and volumes are discarded with it, and `aether env save` does
+  not keep them. Pull or build again in each run, or bake what you need into
+  the image. Admission's free-space floor covers that directory when
+  `/var/lib/sysbox` shares a filesystem with Docker's data root.
 - A port published by an inner container is on the run's own network
   namespace, not the host's. Reach it from the run at `127.0.0.1`; the
   run's browser companion opens it at `127.0.0.1` as well.

@@ -211,8 +211,8 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	if cfg.Labels[labelManaged] != "true" || cfg.Labels["aether.session"] != "s1" {
 		t.Errorf("Labels = %v, want managed + runtime labels", cfg.Labels)
 	}
-	if _, ok := cfg.Labels[labelSetupScript]; ok {
-		t.Errorf("Labels = %v, setup label present without setup script", cfg.Labels)
+	if cfg.Labels[labelSetupScript] != "" {
+		t.Errorf("Labels = %v, setup label set without setup script", cfg.Labels)
 	}
 
 	if hostCfg.NetworkMode != "none" {

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Exercises scripts/install-sysbox.sh with stubbed id, dpkg, dpkg-query,
-# docker, apt-get and curl. The real package is never downloaded, so the
+# uname, modinfo, docker, apt-get and curl. The real package is never downloaded, so the
 # checksum failure stands in for the install path: it must stop before
 # apt-get runs.
 set -eu
@@ -22,9 +22,12 @@ stub() {
 stub id 'echo "${FAKE_UID:-0}"'
 stub dpkg 'echo "${FAKE_ARCH:-amd64}"'
 stub dpkg-query 'printf "%s" "${FAKE_INSTALLED:-}"; [ -n "${FAKE_INSTALLED:-}" ]'
+stub uname 'echo "${FAKE_KERNEL:-6.8.0-45-generic}"'
+stub modinfo '[ -n "${FAKE_SHIFTFS:-}" ]'
 stub docker 'case "$1" in
 info) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;;
-ps) i=0; while [ "$i" -lt "${FAKE_RUNNING:-0}" ]; do echo "c$i"; i=$((i + 1)); done ;;
+ps) [ -z "${FAKE_PS_FAIL:-}" ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
+	i=0; while [ "$i" -lt "${FAKE_RUNNING:-0}" ]; do echo "c$i"; i=$((i + 1)); done ;;
 esac'
 stub apt-get 'echo "apt-get $*" >>"$CMD_LOG"'
 stub curl 'out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; echo not-a-deb >"$out"'
@@ -64,6 +67,18 @@ expect 0 "nothing to do"
 
 run FAKE_INSTALLED=0.7.0.linux 'FAKE_RUNTIMES={"runc":{},"sysbox-runc":{}}'
 expect 1 "Upgrade by following"
+
+run FAKE_KERNEL=5.15.0-122-generic
+expect 1 "kernel 5.15.0-122-generic cannot ID-map bind mounts"
+
+run FAKE_KERNEL=4.19.0 FAKE_SHIFTFS=1
+expect 1 "checksum mismatch"
+
+run FAKE_KERNEL=5.19.2
+expect 1 "checksum mismatch"
+
+run FAKE_PS_FAIL=1
+expect 1 "docker ps failed: Cannot connect to the Docker daemon"
 
 run FAKE_RUNNING=3
 expect 1 "3 containers are running"

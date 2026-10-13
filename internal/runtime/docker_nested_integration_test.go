@@ -126,6 +126,18 @@ YAML`)
 			t.Fatalf("dockerd did not start from the committed image: docker version exit %s\n%s", status, execOK(t, ctx, docker, saved, "cat /var/log/aether-dockerd.log"))
 		}
 		execOK(t, ctx, docker, saved, "docker run --rm busybox:1.36 true")
+
+		plain, err := docker.Create(ctx, runtime.Spec{Image: tag, User: "0:0", Command: []string{"sleep", "3600"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = docker.Destroy(context.Background(), plain) })
+		if err := docker.Start(ctx, plain); err != nil {
+			t.Fatalf("a non-nested container from the saved image must start without dockerd: %v", err)
+		}
+		if count := strings.TrimSpace(execOK(t, ctx, docker, plain, "pgrep -x dockerd | wc -l")); count != "0" {
+			t.Fatalf("dockerd processes in a non-nested container = %s, want 0", count)
+		}
 	})
 	execOK(t, ctx, docker, id, `mkdir -p build && printf 'FROM busybox:1.36\nRUN echo built > /built\n' > build/Dockerfile && docker buildx build --load -t nested-built:test build && docker run --rm nested-built:test cat /built`)
 }

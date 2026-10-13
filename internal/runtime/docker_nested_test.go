@@ -90,6 +90,11 @@ func TestContainerConfigNestedDocker(t *testing.T) {
 	spec.SetupScript = ""
 
 	cfg, hostCfg := d.containerConfig(spec, "")
+	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSecretEnv} {
+		if value, ok := cfg.Labels[key]; !ok || value != "" {
+			t.Errorf("label %s = %q, present %v; want an empty value that overrides a saved image's", key, value, ok)
+		}
+	}
 	if hostCfg.Runtime != "" || cfg.Labels[labelNestedDocker] != "" || cfg.Labels[labelSetupSentinel] != "" {
 		t.Errorf("plain spec got runtime %q, labels %v", hostCfg.Runtime, cfg.Labels)
 	}

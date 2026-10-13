@@ -9,7 +9,8 @@
 # /etc/docker/daemon.json lacks "bip" or "default-address-pools" it adds them
 # and restarts Docker, which stops every running container unless
 # "live-restore" is on. This script refuses to run into that while containers
-# are running.
+# are running. It then checks that bind mounts are ID-mapped, which Sysbox
+# needs and which takes Linux 5.19 or newer, or the shiftfs module.
 set -eu
 
 VERSION="0.7.1"
@@ -31,7 +32,7 @@ say() {
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo sh install-sysbox.sh"
 
-for tool in dpkg apt-get docker; do
+for tool in dpkg apt-get docker uname; do
 	command -v "$tool" >/dev/null 2>&1 || die "${tool} not found; this script needs an Ubuntu or Debian host with Docker installed"
 done
 
@@ -41,6 +42,15 @@ arm64) want_sha="$SHA256_ARM64" ;;
 *) die "unsupported architecture $(dpkg --print-architecture); Sysbox publishes amd64 and arm64 packages" ;;
 esac
 deb="sysbox-ce_${VERSION}.linux_$(dpkg --print-architecture).deb"
+
+kernel="$(uname -r)"
+kernel_major="${kernel%%.*}"
+kernel_minor="${kernel#*.}"
+kernel_minor="${kernel_minor%%[!0-9]*}"
+if [ "$kernel_major" -lt 5 ] || { [ "$kernel_major" -eq 5 ] && [ "${kernel_minor:-0}" -lt 19 ]; }; then
+	command -v modinfo >/dev/null 2>&1 && modinfo shiftfs >/dev/null 2>&1 ||
+		die "kernel ${kernel} cannot ID-map bind mounts, which Sysbox needs: use Linux 5.19 or newer, or a kernel with the shiftfs module"
+fi
 
 if command -v sha256sum >/dev/null 2>&1; then
 	sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
@@ -64,7 +74,16 @@ case "$runtimes_out" in
 esac
 [ -z "$installed" ] || die "sysbox-ce ${installed} is installed but Docker does not list sysbox-runc. Run: systemctl restart docker, or purge it with: apt-get purge -y sysbox-ce"
 
-command -v jq >/dev/null 2>&1 || apt-get install -y jq
+apt_updated=no
+apt_install() {
+	if [ "$apt_updated" = no ]; then
+		apt-get update || die "apt-get update failed"
+		apt_updated=yes
+	fi
+	apt-get install -y "$@"
+}
+
+command -v jq >/dev/null 2>&1 || apt_install jq
 
 # The package adds "bip" and "default-address-pools" when either is missing,
 # and a daemon.json edit of those needs a Docker restart.
@@ -72,7 +91,8 @@ restart_safe=no
 if [ -s "$DAEMON_JSON" ] && jq -e '."live-restore" == true or ((.bip // "") != "" and ((."default-address-pools" // []) | length) > 0)' "$DAEMON_JSON" >/dev/null; then
 	restart_safe=yes
 fi
-running="$(docker ps -q | wc -l | tr -d ' ')"
+running_ids="$(docker ps -q 2>&1)" || die "docker ps failed: ${running_ids}"
+running="$(printf '%s' "$running_ids" | grep -c . || true)"
 if [ "$restart_safe" = no ] && [ "$running" -gt 0 ]; then
 	die "${running} containers are running and the Sysbox package may restart Docker, which stops them. Stop them first (docker stop \$(docker ps -q)), or add \"live-restore\": true to ${DAEMON_JSON} and run: systemctl reload docker. Then re-run this script."
 fi
@@ -86,7 +106,7 @@ got="$(sha256_of "$tmp/$deb")"
 [ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
 
 say "installing ${deb}"
-apt-get install -y "$tmp/$deb"
+apt_install "$tmp/$deb"
 
 tries=0
 until runtimes | grep -q '"sysbox-runc"'; do
@@ -96,6 +116,13 @@ until runtimes | grep -q '"sysbox-runc"'; do
 done
 
 say "Docker lists sysbox-runc"
+
+probe="$tmp/probe"
+mkdir "$probe"
+chown 1000:1000 "$probe"
+probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 touch /m/probe 2>&1)" ||
+	die "bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}"
+say "bind-mount probe passed"
 echo
 echo "next:"
 echo "  sudo systemctl restart aether-server   # the server picks its runtime once, at first use"

@@ -227,6 +227,12 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	if spec.CreationKey != "" {
 		cfg.Labels[labelCreationKey] = spec.CreationKey
 	}
+	// A saved image carries these labels from the container it was committed
+	// from, and Docker merges image labels into new containers; empty values
+	// keep them from reaching a container that has no gate or dockerd.
+	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSecretEnv} {
+		cfg.Labels[key] = ""
+	}
 	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
 	if spec.SetupScript != "" || nestedDockerd {
 		sentinel := newSetupSentinel()
@@ -444,7 +450,7 @@ func (d *Docker) prepare(ctx context.Context, id ID, labels map[string]string, s
 // it. The probes pin the socket because workspace variables may set
 // DOCKER_HOST. Pid and socket files left in a committed image are removed
 // only when no dockerd process is alive.
-const dockerdScript = `command -v dockerd >/dev/null 2>&1 || exit 0
+const dockerdScript = `command -v dockerd >/dev/null 2>&1 && command -v docker >/dev/null 2>&1 || exit 0
 sock=unix:///var/run/docker.sock
 docker -H "$sock" version >/dev/null 2>&1 && exit 0
 user=${1%%:*}
@@ -468,9 +474,11 @@ if command -v setsid >/dev/null 2>&1; then
 else
 	nohup "$@" >>/var/log/aether-dockerd.log 2>&1 </dev/null &
 fi
+pid=$!
 i=0
 while [ "$i" -lt 300 ]; do
 	docker -H "$sock" version >/dev/null 2>&1 && exit 0
+	kill -0 "$pid" 2>/dev/null || break
 	sleep 0.1 2>/dev/null || sleep 1
 	i=$((i+1))
 done
