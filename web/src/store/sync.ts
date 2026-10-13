@@ -377,36 +377,40 @@ export async function applyEvent(
         changedMissionID === missionID &&
         (!currentMission || currentMission.workspace_id === ev.workspace_id)
       ) {
-        await client
-          .missionShow(missionID)
-          .then((result) => {
-            if (result.mission.workspace_id !== ev.workspace_id) return
-            store.getState().setMissionDetail({
-              mission: result.mission,
-              tasks: result.tasks,
-              attempts: result.attempts ?? [],
-              submissions: result.submissions ?? [],
-              diagnostics: result.diagnostics ?? [],
-              questions: result.questions ?? [],
+        coalesce(store, `mission:${missionID}`, () =>
+          client
+            .missionShow(missionID)
+            .then((result) => {
+              if (result.mission.workspace_id !== ev.workspace_id) return
+              store.getState().setMissionDetail({
+                mission: result.mission,
+                tasks: result.tasks,
+                attempts: result.attempts ?? [],
+                submissions: result.submissions ?? [],
+                diagnostics: result.diagnostics ?? [],
+                questions: result.questions ?? [],
+              })
             })
-          })
-          .catch(ignore)
+            .catch(ignore),
+        )
       } else {
-        await client
-          .missionList({ workspace_id: ev.workspace_id, limit: 50 })
-          .then((result) => {
-            const state = store.getState()
-            // Merged, not replaced, so loaded older pages stay and the stored
-            // cursor still marks the next older page for this workspace.
-            const loaded = state.missionListWorkspace === ev.workspace_id
-            state.setMissions(
-              ev.workspace_id,
-              result.missions,
-              loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
-              true,
-            )
-          })
-          .catch(ignore)
+        coalesce(store, `missions:${ev.workspace_id}`, () =>
+          client
+            .missionList({ workspace_id: ev.workspace_id, limit: 50 })
+            .then((result) => {
+              const state = store.getState()
+              // Merged, not replaced, so loaded older pages stay and the stored
+              // cursor still marks the next older page for this workspace.
+              const loaded = state.missionListWorkspace === ev.workspace_id
+              state.setMissions(
+                ev.workspace_id,
+                result.missions,
+                loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
+                true,
+              )
+            })
+            .catch(ignore),
+        )
       }
     }
   }

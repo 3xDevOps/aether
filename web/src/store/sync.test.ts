@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { Toaster, toast } from 'sonner'
 import { ApiError } from '@/lib/api'
-import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } from '@/lib/types'
+import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, MissionShowResult, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { loadDevices } from '@/store/devices'
@@ -1644,6 +1644,29 @@ describe('applyEvent', () => {
     expect(Object.keys(s.missions).sort()).toEqual(['mission_new', 'mission_newest', 'mission_old'])
     expect(s.missions.mission_new.phase).toBe('cancelled')
     expect(s.missionNextCursor).toBe('page-3')
+  })
+
+  it('coalesces a burst of mission changes into at most two reads', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const release: Array<() => void> = []
+    const missionShow = vi.fn((_id: string) => new Promise<MissionShowResult>((resolve) => {
+      const objective = `read-${missionShow.mock.calls.length}`
+      release.push(() => resolve({ mission: mission({ objective }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
+    }))
+    const client = fakeApi({ missionShow })
+
+    for (let i = 0; i < 5; i++) {
+      await applyEvent(store, statusEvent({ seq: 10 + i, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } }), client)
+    }
+    expect(missionShow).toHaveBeenCalledTimes(1)
+
+    release[0]()
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(2))
+    release[1]()
+    await vi.waitFor(() => expect(store.getState().missions.mission_1.objective).toBe('read-2'))
+    expect(missionShow).toHaveBeenCalledTimes(2)
   })
 
   it('takes the fetched mission cursor over one read for another workspace', async () => {
