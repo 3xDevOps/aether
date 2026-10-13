@@ -36,6 +36,11 @@ const (
 	// does when the account's usage limit is reached
 	// (acphost/testdata/claude_usage_limit.jsonl).
 	PromptUsageLimit = "hit the usage limit"
+	// PromptBackground starts a background command as Claude's adapter
+	// reports one, ends the turn, and BackgroundDelay later runs the
+	// follow-up turn Claude Code runs when the command finishes, with no
+	// prompt open.
+	PromptBackground = "work in background"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
@@ -44,6 +49,13 @@ const (
 	// and with later updates that omit the parent link.
 	PromptSubagents = "subagents"
 )
+
+// BackgroundDelay is how long after PromptBackground's turn ends its
+// follow-up turn starts.
+var BackgroundDelay = 300 * time.Millisecond
+
+// BackgroundTaskID is the id of the task PromptBackground starts.
+const BackgroundTaskID = "mock-background-task"
 
 type Fixture struct {
 	Initialize json.RawMessage `json:"initialize"`
@@ -317,6 +329,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptSubagents:
 		a.subagents(ctx)
 		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptBackground:
+		a.background(ctx)
+		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {
 		case <-cancelled:
@@ -480,4 +495,24 @@ func (a *Agent) subagents(ctx context.Context) {
 	} {
 		a.update(ctx, u)
 	}
+}
+
+func (a *Agent) background(ctx context.Context) {
+	a.update(ctx, demoTool("mock-bash", "execute", "sleep 1", "in_progress", nil))
+	a.update(ctx, demoTool("mock-bash", "execute", "sleep 1", "completed", map[string]any{"_meta": map[string]any{
+		"claudeCode": map[string]any{"toolName": "Bash", "toolResponse": map[string]any{
+			"stdout": "", "stderr": "", "interrupted": false, "backgroundTaskId": BackgroundTaskID,
+		}},
+	}}))
+	a.text(ctx, "started")
+	time.AfterFunc(BackgroundDelay, func() {
+		ctx := context.Background()
+		a.text(ctx, "background done")
+		usage, _ := json.Marshal(map[string]any{
+			"sessionUpdate": "usage_update", "used": 1000, "size": 200000,
+			"cost":  map[string]any{"amount": 0.01, "currency": "USD"},
+			"_meta": map[string]any{"_claude/origin": map[string]any{"kind": "task-notification"}},
+		})
+		a.update(ctx, usage)
+	})
 }

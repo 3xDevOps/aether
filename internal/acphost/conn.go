@@ -122,6 +122,9 @@ type Conn struct {
 	replaying    atomic.Bool
 	lastActivity atomic.Int64
 	autoAllow    bool
+	// sessionMeta is the _meta of session/new, session/resume and
+	// session/load.
+	sessionMeta map[string]any
 
 	mu       sync.Mutex
 	idle     *sync.Cond
@@ -289,7 +292,7 @@ func (c *Conn) initialize(ctx context.Context) error {
 func present(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
 
 func (c *Conn) newSession(ctx context.Context, cwd string, mcp []acp.McpServer) (sessionResult, error) {
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionNew, acp.NewSessionRequest{Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionNew, acp.NewSessionRequest{Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		return res, err
 	}
@@ -302,7 +305,7 @@ func (c *Conn) newSession(ctx context.Context, cwd string, mcp []acp.McpServer) 
 
 func (c *Conn) resumeSession(ctx context.Context, id, cwd string, mcp []acp.McpServer) (sessionResult, error) {
 	c.sessionID.Store(id)
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionResume, acp.ResumeSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionResume, acp.ResumeSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		c.sessionID.Store("")
 		return res, err
@@ -318,7 +321,7 @@ func (c *Conn) loadSession(ctx context.Context, id, cwd string, mcp []acp.McpSer
 	c.sessionID.Store(id)
 	c.replaying.Store(true)
 	defer c.replaying.Store(false)
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionLoad, acp.LoadSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionLoad, acp.LoadSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		c.sessionID.Store("")
 		return res, err

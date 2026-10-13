@@ -35,17 +35,31 @@ var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
 // server state, so this prompt never embeds authority or stale task text.
 const coordinationInstruction = harness.DiscoveryInstruction
 
-// withCoAuthorInstruction appends the coordination discovery hint and the
-// co-author rule to a task prompt. A taskless launch remains taskless: its
-// profile receives the discovery hint through the coordination directory's
-// ephemeral launch mechanism instead of gaining a seeded user prompt. A run
-// without a run transport has no mounted directory to read the files from.
-func (s *Scheduler) withCoAuthorInstruction(task string) string {
+// runInstructions are the rules a run's agent follows: the coordination
+// discovery hint, the report rule while lifecycle reporting is enabled, and
+// the co-author rule. A run without a run transport has no mounted directory
+// to read the files from and gets none.
+func (s *Scheduler) runInstructions() string {
 	c := s.coordinationSeam()
-	if task == "" || c == nil || c.svc == nil {
-		return task
+	if c == nil || c.svc == nil {
+		return ""
 	}
-	return task + "\n\n" + coordinationInstruction + "\n\n" + coAuthorInstruction
+	rules := coordinationInstruction
+	if c.enabled {
+		rules += "\n\n" + harness.ReportInstruction
+	}
+	return rules + "\n\n" + coAuthorInstruction
+}
+
+// withCoAuthorInstruction appends the run instructions to a task prompt. A
+// taskless launch remains taskless: its profile receives the discovery hint
+// through the coordination directory's ephemeral launch mechanism instead of
+// gaining a seeded user prompt.
+func (s *Scheduler) withCoAuthorInstruction(task string) string {
+	if rules := s.runInstructions(); task != "" && rules != "" {
+		return task + "\n\n" + rules
+	}
+	return task
 }
 
 // coAuthorTrailers renders one Co-authored-by line per member in members

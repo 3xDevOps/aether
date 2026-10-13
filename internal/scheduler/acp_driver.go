@@ -55,6 +55,13 @@ const (
 	acpTurnFailedReason = "enhanced turn failed: "
 )
 
+// Idle reasons of an interactive enhanced turn that did not end normally.
+const (
+	acpCancelledReason   = "turn cancelled"
+	acpInterruptedReason = "turn interrupted"
+	acpStoppedReason     = "turn ended: "
+)
+
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
 // stdio the acphost session owns. The adapter never outlives that pipe, so
@@ -90,6 +97,9 @@ type acpRun struct {
 	// untried marks a first task sent but not yet accepted, so a refusal
 	// fails a worker whichever of startOneShot or the turn end reports it.
 	untried bool
+	// instructions are the run instructions the first message a taskless
+	// session accepts carries, for an agent with no system prompt route.
+	instructions string
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {
@@ -225,6 +235,10 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		blocks = append(blocks, block)
 	}
 	untitled := run.Task == "" && run.Title == ""
+	instructions := d.instructions(run.ID)
+	if instructions != "" {
+		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
+	}
 	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
 		if untitled && taken == nil {
 			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
@@ -236,7 +250,23 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}
+	if err == nil && instructions != "" {
+		d.mu.Lock()
+		if r := d.runs[run.ID]; r != nil && r.session == sess {
+			r.instructions = ""
+		}
+		d.mu.Unlock()
+	}
 	return receipt.Outcome, err
+}
+
+func (d *acpDriver) instructions(run domain.RunID) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if r := d.runs[run]; r != nil {
+		return r.instructions
+	}
+	return ""
 }
 
 func (d *acpDriver) session(run domain.RunID) *acphost.Session {
@@ -398,6 +428,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if profile.ACPTitleLookup {
 		titleLookup = acpTitleLookupDelay
 	}
+	prompt, systemPrompt := d.s.withCoAuthorInstruction(task), ""
+	if profile.ACPSystemPrompt {
+		prompt, systemPrompt = task, d.s.runInstructions()
+	}
 	runID := entry.runID
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
@@ -407,6 +441,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		RequireRestore: how == openSwitch || how == openContinue,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
+		SystemPrompt:   systemPrompt,
 		TitleLookup:    titleLookup,
 		OnState: func(working bool, reason string, failed error) {
 			if message, ok := acphost.UsageLimit(failed); ok {
@@ -450,6 +485,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
+	if fresh && task == "" && systemPrompt == "" {
+		r.instructions = d.s.runInstructions()
+	}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
 	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
@@ -464,9 +502,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
 	case how == openContinue:
 	case oneShot:
-		d.startOneShot(ctx, entry, sess, fresh, task)
+		d.startOneShot(ctx, entry, sess, fresh, prompt)
 	case fresh && task != "":
-		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false, nil); err != nil {
+		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
 			slog.Warn("scheduler: send the task to the agent", "run", runID, "error", err)
 		}
 	case !fresh:
@@ -479,7 +517,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 
 func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason string, failed error) {
 	if oneShot && !working {
-		if reason != "" {
+		// An interrupted session is ended by its connection's end or
+		// resumed by startOneShot.
+		if reason != "" && reason != "interrupted" {
 			d.endOneShot(entry, reason == "end_turn", false, turnEndReport(reason))
 		}
 		return
@@ -492,7 +532,7 @@ func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason s
 		// on a turn that failed.
 		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
 	default:
-		report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
+		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpIdleReason(reason)}
 	}
 	d.report(entry.runID, report)
 	if !working {
@@ -525,11 +565,11 @@ func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, f
 	}
 }
 
-func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
-	prompt := d.s.withCoAuthorInstruction(task)
+// startOneShot sends prompt, the task with the run instructions it needs.
+func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, prompt string) {
 	if !fresh {
-		last := lastItem(sess.Log(), acphost.KindTurnEnd)
-		reset := lastItem(sess.Log(), acphost.KindReset).Seq > last.Seq
+		last := acphost.LastItem(sess.Log(), acphost.KindTurnEnd)
+		reset := acphost.LastItem(sess.Log(), acphost.KindReset).Seq > last.Seq
 		switch last.StopReason {
 		case "":
 		case "interrupted":
@@ -558,6 +598,20 @@ func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *a
 	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, accepted); err != nil && !usageLimited(err) {
 		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
 	}
+}
+
+// acpIdleReason is an interactive run's reason for a turn that ended with
+// stop; a restored session with no interrupted turn reports none.
+func acpIdleReason(stop string) string {
+	switch stop {
+	case "", "end_turn":
+		return agentstatus.ReasonIdle
+	case "cancelled":
+		return acpCancelledReason
+	case "interrupted":
+		return acpInterruptedReason
+	}
+	return acpStoppedReason + stop
 }
 
 func turnEndReport(stop string) agentstatus.Report {

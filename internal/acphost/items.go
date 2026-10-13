@@ -83,6 +83,16 @@ type Item struct {
 	Notice        *Notice         `json:"notice,omitempty"`
 	StopReason    string          `json:"stop_reason,omitempty"`
 	Raw           json.RawMessage `json:"raw,omitempty"`
+
+	// Autonomous marks the turn_start and turn_end of a turn the agent ran
+	// with no prompt from the host.
+	Autonomous bool `json:"autonomous,omitempty"`
+	// Origin is what the agent reported started an autonomous turn, such as
+	// Claude Code's "task-notification".
+	Origin string `json:"origin,omitempty"`
+	// BackgroundTasks are the ids of background tasks the agent started that
+	// still await their follow-up when a turn ends.
+	BackgroundTasks []string `json:"background_tasks,omitempty"`
 }
 
 // Message is one segment of a user message, assistant message, or thought.

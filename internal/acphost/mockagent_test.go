@@ -58,6 +58,7 @@ type mockAgent struct {
 
 	mu          sync.Mutex
 	methods     []string
+	received    map[string]json.RawMessage
 	inflight    int
 	maxInflight int
 	cancelled   chan struct{}
@@ -107,6 +108,10 @@ func (m *mockAgent) request(ctx context.Context, method string, params any) (jso
 func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	m.mu.Lock()
 	m.methods = append(m.methods, method)
+	if m.received == nil {
+		m.received = map[string]json.RawMessage{}
+	}
+	m.received[method] = params
 	m.mu.Unlock()
 	switch method {
 	case acp.AgentMethodInitialize:

@@ -137,21 +137,6 @@ func (s *Scheduler) recordedMode(run domain.RunID) string {
 	return log.Mode()
 }
 
-func lastItem(log *acphost.Log, kind acphost.Kind) acphost.Item {
-	for before := int64(math.MaxInt64); ; {
-		items, err := log.ReadBefore(before, 512)
-		if err != nil || len(items) == 0 {
-			return acphost.Item{}
-		}
-		for i := len(items) - 1; i >= 0; i-- {
-			if items[i].Kind == kind {
-				return items[i]
-			}
-		}
-		before = items[0].Seq
-	}
-}
-
 func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 	log, err := s.itemLogs.Open(s.cfg.PTY.ItemLogPath(run))
 	if errors.Is(err, os.ErrNotExist) {

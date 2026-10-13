@@ -12,8 +12,10 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -364,5 +366,69 @@ func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 				t.Fatalf("started an ACP server: %+v", execs)
 			}
 		})
+	}
+}
+
+func (e *testEnv) runStatusEvents(sub events.Subscription, run domain.RunID) []events.RunStatusPayload {
+	var got []events.RunStatusPayload
+	for {
+		select {
+		case ev := <-sub.Events():
+			if p, ok := ev.Payload.(events.RunStatusPayload); ok && ev.RunID == run {
+				got = append(got, p)
+			}
+		default:
+			return got
+		}
+	}
+}
+
+func TestEnhancedRunStaysRunningUntilTheBackgroundFollowUp(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchACP(t, acpmock.PromptBackground)
+	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	page, err := e.sched.ACPHistory(run.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !assistantSaid("started")(page.Items) || !assistantSaid("background done")(page.Items) {
+		t.Fatalf("the run parked before the follow-up: %+v", page.Items)
+	}
+	if got.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("reason %q, want %q", got.Reason, agentstatus.ReasonIdle)
+	}
+	var parks []events.RunStatusPayload
+	waitFor(t, "the park transition", func() bool {
+		for _, p := range e.runStatusEvents(sub, run.ID) {
+			if p.To == domain.RunNeedsAttention {
+				parks = append(parks, p)
+			}
+		}
+		return len(parks) > 0
+	})
+	if len(parks) != 1 {
+		t.Fatalf("needs-attention transitions %+v, want one", parks)
+	}
+}
+
+func TestBackgroundRunOverACPWaitsForTheBackgroundFollowUp(t *testing.T) {
+	t.Parallel()
+	e, _ := newBackgroundEnv(t, enhancedAgent, true)
+	run := e.launchBackground(t, enhancedAgent, acpmock.PromptBackground)
+	got := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
+	page, err := e.sched.ACPHistory(run.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !assistantSaid("background done")(page.Items) {
+		t.Fatalf("the run finished before the follow-up: %+v", page.Items)
+	}
+	if got.Reason != exitedCompletedReason {
+		t.Fatalf("reason %q, want %q", got.Reason, exitedCompletedReason)
+	}
+	if !slices.ContainsFunc(e.rt.execRuns(), func(call fakeExecCall) bool { return slices.Contains(call.argv, "kill -USR1 1") }) {
+		t.Fatalf("the container was not ended with SIGUSR1: %+v", e.rt.execRuns())
 	}
 }

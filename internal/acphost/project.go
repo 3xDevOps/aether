@@ -401,6 +401,17 @@ func (p *projector) emitTool(st *toolState) {
 	p.emit(Item{Kind: KindToolCall, ToolCall: &snap, Truncated: st.truncated || cut})
 }
 
+// toolsOpen reports whether a tool call of the current turn is pending or
+// running.
+func (p *projector) toolsOpen() bool {
+	for _, st := range p.tools {
+		if !st.ended && (st.call.Status == "pending" || st.call.Status == "in_progress") {
+			return true
+		}
+	}
+	return false
+}
+
 // endTurn closes the open message and writes every tool call update that
 // was held back. Finished calls are forgotten; the most recently updated
 // in-progress ones stay known, because a background subagent reports on its

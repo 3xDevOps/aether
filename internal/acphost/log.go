@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -421,4 +422,21 @@ func (l *Log) Delete() error {
 		return fmt.Errorf("acphost: delete item log: %w", err)
 	}
 	return nil
+}
+
+// LastItem is the log's newest item of kind, or a zero Item when there is none
+// or the log cannot be read.
+func LastItem(log *Log, kind Kind) Item {
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return Item{}
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			if items[i].Kind == kind {
+				return items[i]
+			}
+		}
+		before = items[0].Seq
+	}
 }

@@ -833,6 +833,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.DiscoveryArgs = nil
 		profile.DiscoveryEnv = nil
 		profile.DiscoveryFiles = nil
+		profile.ACPSystemPrompt = false
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
 		profile.SwitchVerified = false
