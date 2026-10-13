@@ -369,12 +369,16 @@ func TestRebootRecoveryContainerStopped(t *testing.T) {
 		name   string
 		code   int
 		worker bool
-		reason string
+		// An older server armed an interactive run's report for a terminal
+		// finish; recovery turns it into an idle outcome, which explains no exit.
+		legacyReport bool
+		reason       string
 	}{
 		{name: "sigterm", code: 143, reason: "server restarted: container exited 143"},
 		{name: "sigkill", code: 137, reason: "server restarted: container exited 137"},
 		{name: "host crash", code: 255, reason: "server restarted: container exited 255"},
 		{name: "swarm worker", code: 143, worker: true, reason: "server restarted: container exited 143"},
+		{name: "legacy interactive report", code: 143, legacyReport: true, reason: "server restarted: container exited 143"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -388,6 +392,16 @@ func TestRebootRecoveryContainerStopped(t *testing.T) {
 			}
 			if err := e.sched.Close(); err != nil {
 				t.Fatalf("Close: %v", err)
+			}
+			if tc.legacyReport {
+				sc, err := e.sched.readSidecar(run.ID)
+				if err != nil {
+					t.Fatalf("readSidecar: %v", err)
+				}
+				sc.ReportedOutcome = domain.RunCompleted
+				if err := e.sched.writeSidecar(sc); err != nil {
+					t.Fatalf("writeSidecar: %v", err)
+				}
 			}
 			c.exitNow(tc.code)
 

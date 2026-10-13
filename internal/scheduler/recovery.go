@@ -1310,8 +1310,10 @@ func (s *Scheduler) recoverSupervised(ctx context.Context, r *domain.Run) {
 // above 128 is a signal's, or the 255 Docker records for a container it lost
 // in a host crash. Unless a kill, a report or a usage limit explains it, the
 // host or the runtime stopped the run, which did not survive the restart.
+// entryFromSidecar decides whether a report still counts: it drops the one
+// an older server armed on an interactive run.
 func (s *Scheduler) finishRecoveredExit(ctx context.Context, r *domain.Run, sc sidecar) {
-	if sc.ExitCode > 128 && !sc.KillRequested && sc.ReportedOutcome == "" && sc.UsageLimit == "" {
+	if sc.ExitCode > 128 && !sc.KillRequested && sc.UsageLimit == "" && s.entryFromSidecar(r, sc).reported == "" {
 		s.didNotSurvive(ctx, r, runtime.ID(sc.ContainerID))
 		return
 	}
