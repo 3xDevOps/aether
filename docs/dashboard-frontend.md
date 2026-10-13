@@ -3610,7 +3610,7 @@ the server's rules are in
 | File | Holds |
 | --- | --- |
 | `home.tsx` | `HomeFiles`, the provider that owns naming, the dialogs, uploads and drag state, and `useHomeFiles` |
-| `home-tree.tsx` | `HomeTree`, its rows, and `HomeStatus`, the upload line under the tree |
+| `home-tree.tsx` | `HomeTree`, its rows, and `HomeStatus`, the transfer line under the tree |
 | `home-menu.tsx` | `HomeMenu`, a row's actions |
 | `home-name.tsx` | `NameRow`, the field a name is typed into |
 | `home-dialogs.tsx` | The delete, move and replace confirmations |
@@ -3632,7 +3632,8 @@ pointer always shows, and a right click on the row opens the same `Menu`:
 | Credential file or symlink | **Rename**, **Copy path**, **Delete** |
 
 **Copy path** copies `~/<path>`. **Download** reads the file with
-`home.download` and saves it through an object URL. **Refresh** drops every
+`home.download` and saves it through an object URL; `HomeStatus` shows
+**Downloading name** meanwhile. **Refresh** drops every
 Home listing from the store (`refreshHome`), so each open folder is reread;
 `useListing` in `tree.tsx` keeps the last listing up meanwhile. Nothing
 watches the home: a file an agent writes shows after a refresh.
