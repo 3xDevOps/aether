@@ -353,7 +353,7 @@ func (repeatedLineByte) Read(p []byte) (int, error) {
 }
 
 func TestResponseLineLimitBoundsBlobMethods(t *testing.T) {
-	for _, method := range []string{MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite, MethodConfigRead, MethodConfigWrite} {
+	for _, method := range []string{MethodRunPatch, MethodFilesRead, MethodFilesDiff, MethodFilesWrite, MethodConfigRead, MethodConfigWrite, MethodHomeRead, MethodHomeWrite} {
 		if got := responseLineLimit(method); got != maxBlobResponseBytes {
 			t.Errorf("responseLineLimit(%q) = %d, want %d", method, got, maxBlobResponseBytes)
 		}

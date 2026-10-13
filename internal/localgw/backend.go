@@ -100,9 +100,16 @@ func unreachableError(err error) *protocol.Error {
 // (suspend/resume, network switch) never errors on its own.
 const callTimeout = 60 * time.Second
 
+// transferTimeout is the server's lifetime for one large control frame: a
+// 64 MiB file does not cross a slow link within callTimeout.
+const transferTimeout = 15 * time.Minute
+
 func callBound(method string) time.Duration {
-	if method == protocol.MethodAgentInstall {
+	switch method {
+	case protocol.MethodAgentInstall:
 		return protocol.AgentInstallTimeout + callTimeout
+	case protocol.MethodHomeUpload, protocol.MethodHomeDownload:
+		return transferTimeout
 	}
 	return callTimeout
 }
@@ -183,6 +190,8 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 		return nil, perr
 	}
 	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
+		method == protocol.MethodHomeMkdir || method == protocol.MethodHomeRename ||
+		method == protocol.MethodHomeRemove || method == protocol.MethodHomeUpload ||
 		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
 		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
 		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||

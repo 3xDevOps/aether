@@ -20,8 +20,9 @@ const MaxRequestBody = 1 << 20
 
 const (
 	maxTerminalImageRequestBody = 12 << 20
-	// Each config import request carries up to 64 MiB decoded in base64 JSON;
-	// leave room for encoding and framing without limiting directory size.
+	// A config import request or home upload carries up to 64 MiB decoded in
+	// base64 JSON; leave room for encoding and framing without limiting
+	// directory size.
 	maxConfigImportRequestBody = 96 << 20
 	// JSON escaping can expand a supported 64 MiB editor document sixfold;
 	// leave room for the remaining request fields while bounding memory.
@@ -32,9 +33,9 @@ func requestBodyLimit(method string) int64 {
 	switch method {
 	case protocol.MethodTerminalImage:
 		return maxTerminalImageRequestBody
-	case protocol.MethodConfigImport:
+	case protocol.MethodConfigImport, protocol.MethodHomeUpload:
 		return maxConfigImportRequestBody
-	case protocol.MethodFilesWrite, protocol.MethodConfigWrite:
+	case protocol.MethodFilesWrite, protocol.MethodConfigWrite, protocol.MethodHomeWrite:
 		return maxEditorWriteRequestBody
 	default:
 		return MaxRequestBody
