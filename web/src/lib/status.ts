@@ -70,6 +70,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^killed$/, () => 'Stopped'],
   [/^retained container expired$/, () => 'Its container was removed when it expired'],
   [/^retained container unavailable$/, () => 'Its container is no longer available'],
+  [/^server restarted: container exited (-?\d+)$/, (code) => `Its container had stopped with exit code ${code} when the server restarted`],
   [/^agent idle$/, () => 'Agent idle'],
   [/^agent resumed$/, () => 'Agent resumed'],
   [/^agent failed$/, () => 'Agent failed'],

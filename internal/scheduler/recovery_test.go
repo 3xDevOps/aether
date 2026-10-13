@@ -360,6 +360,134 @@ func TestRebootRecoveryContainerGone(t *testing.T) {
 	})
 }
 
+// A host reboot or a Docker restart stops every container before the server
+// returns, and Docker still lists them as exited: 143 from the run
+// supervisor's SIGTERM, 137 after SIGKILL, 255 when the host went down hard.
+func TestRebootRecoveryContainerStopped(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		code   int
+		worker bool
+		// An older server armed an interactive run's report for a terminal
+		// finish; recovery turns it into an idle outcome, which explains no exit.
+		legacyReport bool
+		reason       string
+	}{
+		{name: "sigterm", code: 143, reason: "server restarted: container exited 143"},
+		{name: "sigkill", code: 137, reason: "server restarted: container exited 137"},
+		{name: "host crash", code: 255, reason: "server restarted: container exited 255"},
+		{name: "swarm worker", code: 143, worker: true, reason: "server restarted: container exited 143"},
+		{name: "legacy interactive report", code: 143, legacyReport: true, reason: "server restarted: container exited 143"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newTestEnv(t, nil)
+			var run *domain.Run
+			var c *fakeContainer
+			if tc.worker {
+				run, c = launchRetentionWorker(t, e, domain.LaunchTUI)
+			} else {
+				run, c = e.launchFake(t, "stopped by the reboot")
+			}
+			if err := e.sched.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			if tc.legacyReport {
+				sc, err := e.sched.readSidecar(run.ID)
+				if err != nil {
+					t.Fatalf("readSidecar: %v", err)
+				}
+				sc.ReportedOutcome = domain.RunCompleted
+				if err := e.sched.writeSidecar(sc); err != nil {
+					t.Fatalf("writeSidecar: %v", err)
+				}
+			}
+			c.exitNow(tc.code)
+
+			s2 := e.newScheduler(t, e.rt, newFakePTY())
+			startScheduler(t, s2)
+
+			r := e.waitStoreStatus(t, run.ID, domain.RunInterrupted)
+			if r.Reason != tc.reason {
+				t.Fatalf("interrupted reason = %q, want %q", r.Reason, tc.reason)
+			}
+			if got := e.git.commitsFor(run.ID); len(got) != 1 || !strings.HasPrefix(got[0], "wip: ") {
+				t.Fatalf("commits = %v, want one wip commit", got)
+			}
+			if e.git.publishedCount(run.ID) == 0 {
+				t.Fatal("branch not published during recovery")
+			}
+			if _, err := os.Stat(r.Worktree); err != nil {
+				t.Fatalf("checkout must survive recovery: %v", err)
+			}
+			waitFor(t, "container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
+			waitFor(t, "sidecar removed", func() bool {
+				_, err := os.Stat(s2.sidecarPath(run.ID))
+				return os.IsNotExist(err)
+			})
+		})
+	}
+}
+
+// An exit that the agent chose, a member's kill or the agent's report
+// explains keeps that outcome across the restart.
+func TestRebootRecoveryKeepsAnExplainedExit(t *testing.T) {
+	t.Parallel()
+	recover := func(t *testing.T, e *testEnv, run *domain.Run, code int, status domain.RunStatus, reason string) {
+		t.Helper()
+		e.rt.byName(string(run.ID)).exitNow(code)
+		startScheduler(t, e.newScheduler(t, e.rt, newFakePTY()))
+		if r := e.waitStoreStatus(t, run.ID, status); !strings.HasPrefix(r.Reason, reason) {
+			t.Fatalf("%s reason = %q, want %q", status, r.Reason, reason)
+		}
+	}
+
+	t.Run("agent failure", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		run, _ := e.launchFake(t, "failed on its own")
+		if err := e.sched.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		recover(t, e, run, 1, domain.RunFailed, "agent exited 1")
+	})
+
+	t.Run("accepted kill", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		run, _ := e.launchFake(t, "killed before the reboot")
+		if err := e.sched.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		sc, err := e.sched.readSidecar(run.ID)
+		if err != nil {
+			t.Fatalf("readSidecar: %v", err)
+		}
+		sc.KillRequested = true
+		if err := e.sched.writeSidecar(sc); err != nil {
+			t.Fatalf("writeSidecar: %v", err)
+		}
+		recover(t, e, run, 137, domain.RunAbandoned, "killed")
+	})
+
+	t.Run("reported outcome", func(t *testing.T) {
+		t.Parallel()
+		e := newTestEnv(t, nil)
+		run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "reported before the reboot", "fake", domain.LaunchHeadless)
+		if err != nil {
+			t.Fatalf("Launch: %v", err)
+		}
+		if err := e.sched.FinishReported(t.Context(), run.ID, "report-1", domain.RunCompleted, time.Now()); err != nil {
+			t.Fatalf("FinishReported: %v", err)
+		}
+		if err := e.sched.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		recover(t, e, run, 143, domain.RunCompleted, reportedSuccessReason)
+	})
+}
+
 func TestRebootRecoveryQueuedAndMissingSidecar(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)

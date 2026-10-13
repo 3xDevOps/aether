@@ -373,7 +373,12 @@ killed server loses no committed write, but a power loss or kernel crash can
 roll back the last commits before it; the database stays consistent. On the
 next boot the scheduler reconciles every non-terminal run and
 every retained TUI or completed swarm run against the runtime's actual
-containers:
+containers.
+
+A restart of the server alone leaves run containers running. A host reboot
+stops every one of them, running or paused, and so does a Docker daemon
+restart unless Docker's `live-restore` is on. A live run does not continue
+after that, and a closed run can no longer be reopened.
 
 - **An active container survived** (the server died, the container did not):
   supervision reattaches to its primary terminal, the diff watch restarts
@@ -394,6 +399,15 @@ containers:
 - **An active container is gone**: the partial work is committed as `wip:`, the
   run branch is published, and the run is marked `interrupted` with its
   checkout preserved. An interrupted run cannot be reopened.
+- **An active container was stopped**: Docker still lists it, exited. An exit
+  code above 128 means a signal ended it: `143` after Docker's SIGTERM, `137`
+  after its SIGKILL, and `255` when the host went down without stopping it.
+  Unless a kill, the agent's own report or a usage limit already explains the
+  exit, the run is handled as one whose container is gone, the stopped
+  container is removed, and the reason is `server restarted: container exited
+  <code>`. This covers live swarm integrators and workers too; their stopped
+  containers are not retained. Any other exit code is the agent's own exit
+  and finishes the run as it would have with the server up.
 - **The run never started** (it died between the row and the container): any
   container is found by its sidecar or, in the narrow window before that
   exists, by the runtime's durable creation key. Recovery preserves partial
@@ -407,11 +421,14 @@ containers:
   already-exited swarm containers until that deadline. Ordinary Standard and
   Enhanced runs explicitly closed by a user can be reopened; completion
   never revives an assigned worker.
-- **A retained container is gone or expired**: boot cleanup preserves required
-  evidence, destroys any remaining runtime object, then releases retention
-  ownership. It never creates a replacement. A capture, runtime or persistence
-  failure keeps ownership and a bounded cleanup cause for automatic retries;
-  the deadline can pass while safe cleanup is still pending.
+- **A retained container is gone or expired, or a closed run's container was
+  stopped**: boot cleanup preserves required evidence, destroys any remaining
+  runtime object, then releases retention ownership. It never creates a
+  replacement. A run closed as merged or abandoned then reads `retained
+  container unavailable`, or `retained container expired` at its deadline. A
+  capture, runtime or persistence failure keeps ownership and a bounded cleanup
+  cause for automatic retries; the deadline can pass while safe cleanup is
+  still pending.
 
 An active run whose container user could not be inspected is recorded as
 `<unknown>`. This conservatively blocks environment terminal adoption for the
@@ -441,7 +458,8 @@ even in headless mode, so a one-shot agent exit does not destroy the container
 or mark the run completed. They stay until Close, Kill, a terminal worker
 report, or worker cancel. Accepted success/failure reports pause and retain the
 exact worker container for `--run-container-ttl` (default seven days), and an actual
-swarm container exit retains that exited container for the same duration.
+swarm container exit retains that exited container for the same duration,
+except the signal-stopped container of a live run that a restart interrupts.
 Attempts release execution capacity only after evidence, runtime quiescence,
 and durable retention have settled. Failed capture, runtime, or persistence
 steps keep ownership and capacity until reconciliation succeeds. Explicit
