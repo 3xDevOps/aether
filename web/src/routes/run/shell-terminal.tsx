@@ -62,6 +62,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
   const self = useSelf()
   const setShellRefused = useStore((s) => s.setShellRefused)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const activeTab = dock.activeTab
   const activeProcess = dock.terminals.find((item) => item.terminal_id === activeTab)
   const incarnation = activeProcess?.incarnation
@@ -576,7 +577,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       setCaptureMessage(`Captured ${result.artifact.id}. Open Captures to keep it.`)
     } catch (cause) { reportError(cause) } finally { setBusy(false) }
   }
-  const controlledBy = controlledByOther ? controllerName(owner, members) : null
+  const controlledBy = controlledByOther ? controllerName(owner, { members, mergedInto }) : null
   const shellActions = (
     <>
       {processRunning && !activeHasControl && controlledBy && !mobile && (

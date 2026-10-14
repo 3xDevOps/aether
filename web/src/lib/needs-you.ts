@@ -1,3 +1,4 @@
+import { memberName as storeMemberName } from '@/lib/member-name'
 import type {
   Approval,
   Device,
@@ -17,6 +18,7 @@ export interface StateContext {
   viewerID: string | null
   viewerRole: Member['role'] | null
   members: Record<string, Member>
+  mergedInto: Record<string, string>
   runs: Record<string, RunRecord>
   workspaces: Record<string, Workspace>
   approvalsByRun: Record<string, Approval[]>
@@ -161,8 +163,8 @@ function controller(run: RunRecord, ctx: StateContext): string | undefined {
   return ctx.roomStatus[run.id]?.controller?.member_id
 }
 
-export function memberName(memberID: string, ctx: Pick<StateContext, 'members'>): string {
-  return ctx.members[memberID]?.display_name ?? memberID
+export function memberName(memberID: string, ctx: Pick<StateContext, 'members' | 'mergedInto'>): string {
+  return storeMemberName(ctx, memberID)
 }
 
 function waited(iso: string, now: number): string {

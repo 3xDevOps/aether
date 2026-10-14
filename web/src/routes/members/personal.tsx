@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { StopEnvironmentDialog } from '@/routes/environment/stop-environment-dialog'
 import { reopen, useFailure, useReopenHost } from '@/components/failure'
 import { roleLabel } from '@/routes/members/roster'
+import { SignInsSection } from '@/routes/members/sign-ins'
 import { GitIdentityForm } from '@/routes/onboarding/git-identity'
 import { useStore } from '@/store'
 import { nextMemberOrder, type MemberPatch } from '@/store/members'
@@ -32,12 +33,20 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
     setReopened((last) => ({ draft, n: (last?.n ?? 0) + 1 }))
     onOpenChange(true)
   })
+  const [signIns, setSignIns] = useState(false)
+  useReopenHost('sign-ins', () => {
+    setSignIns(true)
+    onOpenChange(true)
+  })
   if (!self) return null
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setReopened(undefined)
+        if (!next) {
+          setReopened(undefined)
+          setSignIns(false)
+        }
         onOpenChange(next)
       }}
     >
@@ -67,6 +76,7 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
             </section>
           )}
           {caps.hasMethod('account.share') && caps.hasMethod('account.revoke') && <AccountSharing client={client} self={self} />}
+          {caps.hasMethod('member.identity.list') && <SignInsSection client={client} self={self} focus={signIns} />}
         </div>
       </DialogContent>
     </Dialog>

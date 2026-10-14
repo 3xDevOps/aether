@@ -4,6 +4,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { clipLabel, runLabel, type PresentationState } from '@/lib/status'
 import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -82,12 +83,13 @@ const peopleLines = 7
 function Details({ run, state, reason, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const workspace = useStore((s) => s.workspaces[run.workspace_id]?.name ?? run.workspace_id)
   const agent = useStore((s) => s.agentList?.agents.find((a) => a.name === run.harness)?.display_name) || run.harness
-  const name = (id: string) => `${members[id]?.display_name ?? id}${id === self ? ' (you)' : ''}`
+  const name = (id: string) => `${memberName({ members, mergedInto }, id)}${id === self ? ' (you)' : ''}`
   const person = (id: string) => (
     <span className="flex min-w-0 items-center gap-1.5">
-      <Avatar name={name(id)} color={members[id]?.color} />
+      <Avatar name={name(id)} color={resolveMember({ members, mergedInto }, id).member?.color} />
       <span className="min-w-0 truncate">{name(id)}</span>
     </span>
   )

@@ -1,3 +1,4 @@
+import { resolveMember } from '@/lib/member-name'
 import type { NeedsYouID, StateContext } from '@/lib/needs-you'
 import {
   groupLabel,
@@ -61,6 +62,7 @@ export function stateContextOf(s: RootState, now: number): StateContext {
     viewerID: s.info?.member.id ?? null,
     viewerRole: s.info?.member.role ?? null,
     members: s.members,
+    mergedInto: s.mergedInto,
     runs: s.runs,
     workspaces: s.workspaces,
     approvalsByRun: s.approvalsByRun,
@@ -89,7 +91,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       group: groupOf(shown.state),
       since,
       waitingSince: since,
-      owner: ctx.members[run.member_id],
+      owner: resolveMember(ctx, run.member_id).member,
     })
   }
   return rows

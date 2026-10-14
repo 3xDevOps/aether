@@ -12,6 +12,8 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // Under approved-devices every device that signs in as an invited account
@@ -114,11 +116,17 @@ func TestMemberIdentityListAndRemove(t *testing.T) {
 		t.Fatalf("list own identities: %v", err)
 	}
 	if len(list.Identities) != 1 || list.Identities[0].Subject != octo.Subject || list.Identities[0].Login != "octo" ||
-		len(list.Devices) != 1 || list.Devices[0].Account != "octo" || list.Devices[0].Provider != "github" {
+		len(list.Devices) != 1 || list.Devices[0].Account != "octo" || list.Devices[0].Provider != "github" ||
+		list.PublicKeyFingerprint != "" || list.TailnetLogin != "" {
 		t.Fatalf("identity list = %+v", list)
 	}
-	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	bob, bobMember := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	other := controlAs(t, e, bob)
+	var own protocol.MemberIdentityListResult
+	if err := other.Call(protocol.MethodMemberIdentityList, protocol.MemberIdentityListParams{MemberID: string(bobMember.ID)}, &own); err != nil ||
+		own.PublicKeyFingerprint != ssh.FingerprintSHA256(bob.PublicKey()) {
+		t.Fatalf("own identity list = %+v, %v; want the SSH key fingerprint", own, err)
+	}
 	var pe *protocol.Error
 	for method, params := range map[string]any{
 		protocol.MethodMemberIdentityList:   protocol.MemberIdentityListParams{MemberID: string(m.ID)},

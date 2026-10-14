@@ -32,6 +32,7 @@ import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
 import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
+import { loadMergeProposals } from '@/store/members'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
@@ -162,7 +163,7 @@ export async function hydrate(
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
-    s.setMembers(identityChanged ? members : keptMembers)
+    s.setMemberList(identityChanged ? members : keptMembers)
     s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
@@ -189,6 +190,7 @@ export async function hydrate(
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
+    await loadMergeProposals(store, client).catch(ignore)
     await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
     // Nothing else fetches linkStatus before settings or onboarding opens, so
@@ -340,7 +342,7 @@ export async function applyEvent(
   // No workspace.created event exists; without this a new workspace's runs
   // would be stored but rendered nowhere. Device events carry the server
   // scope, which names no workspace.
-  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -348,8 +350,8 @@ export async function applyEvent(
   }
 
   // A new teammate has no event of their own; without this they render as a raw ID.
-  if (ev.actor_id && !store.getState().members[ev.actor_id]) {
-    await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
+  if (ev.actor_id && !store.getState().members[ev.actor_id] && !store.getState().mergedInto[ev.actor_id]) {
+    await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
   }
 
   if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
@@ -439,7 +441,7 @@ export async function applyEvent(
       break
     case 'member.changed': {
       const p = ev.payload as { member_id: string; display_name: string }
-      await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
+      await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
       const info = store.getState().info
       if (info && info.member.id === p.member_id) {
         store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })
@@ -449,6 +451,18 @@ export async function applyEvent(
     case 'member.device':
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
       break
+    case 'member.merged': {
+      const p = ev.payload as { survivor_id: string; absorbed_id: string }
+      const viewer = store.getState().info?.member.id
+      // The viewer's member or role changed: only a fresh snapshot shows the survivor.
+      if (viewer === p.survivor_id || viewer === p.absorbed_id) {
+        if (!(await hydrate(store, client))) return false
+      } else {
+        await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
+        await loadMergeProposals(store, client).catch(ignore)
+      }
+      break
+    }
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {

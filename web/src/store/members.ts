@@ -1,6 +1,8 @@
-import type { Invitation, Member } from '@/lib/types'
-import type { RootState } from '@/store'
+import type { Api } from '@/lib/api'
+import type { Invitation, Member, MemberList, MergeProposal } from '@/lib/types'
+import type { RootState, RootStore } from '@/store'
 import { byCreated } from '@/store/collaboration'
+import { capability } from '@/store/hooks'
 import type { SliceCreator } from '@/store/slice'
 
 /** A provisional invitation is one the dashboard shows before the server has assigned it an id. */
@@ -22,13 +24,17 @@ interface Lineage {
 
 export interface MembersSlice {
   members: Record<string, Member>
-  setMembers: (members: Member[]) => void
+  /** From `member.list`: each member a merge absorbed, to the member it became. */
+  mergedInto: Record<string, string>
+  /** Without `mergedInto`, the map already held stays. */
+  setMembers: (members: Member[], mergedInto?: Record<string, string>) => void
+  setMemberList: (list: MemberList) => void
   /** Returns false, writing nothing, when an answer to a later-started change already wrote these fields. */
   confirmMember: (id: string, fields: Partial<Member>, patch?: MemberPatch) => boolean
   /** Pass the same `order` to every retry of one change. */
   patchMember: (id: string, patch: Partial<Member>, order?: number) => MemberPatch
   /** Call with the read as it is sent, not once it has answered. */
-  readMembers: (read: Promise<Member[]>) => Promise<Member[]>
+  readMembers: (read: Promise<MemberList>) => Promise<MemberList>
   revertMember: (id: string, patch?: MemberPatch) => void
   invitations: ListedInvitation[] | null
   /** Ids of invitations whose revoke awaits the server. */
@@ -40,6 +46,9 @@ export interface MembersSlice {
   addInvitation: (invitation: ListedInvitation, replaces?: string) => void
   dropInvitation: (id: string) => void
   setRevokingInvitation: (id: string, pending: boolean) => void
+  /** From `member.merge.pending`: open proposals the viewer made or is asked to accept. */
+  mergeProposals: MergeProposal[]
+  setMergeProposals: (proposals: MergeProposal[]) => void
 }
 
 function withMember(s: RootState, id: string, patch: Partial<Member>): Partial<RootState> {
@@ -79,8 +88,10 @@ const settle = (patch?: MemberPatch) => {
 
 export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   members: {},
-  setMembers: (members) =>
-    set({ members: Object.fromEntries(members.map((m) => [m.id, m])) }),
+  mergedInto: {},
+  setMembers: (members, mergedInto) =>
+    set({ members: Object.fromEntries(members.map((m) => [m.id, m])), ...(mergedInto && { mergedInto }) }),
+  setMemberList: (list) => get().setMembers(list.members, list.merged_into ?? {}),
   confirmMember: (id, fields, patch) => {
     settle(patch)
     changed(id)
@@ -133,7 +144,7 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
     reads.add(since)
     try {
       const list = await read
-      return list.map((m) => {
+      return { merged_into: list.merged_into ?? {}, members: list.members.map((m) => {
         const shown = get().members[m.id]
         if (!shown) return m
         if (since.has(m.id)) return shown
@@ -143,7 +154,7 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
         const kept = { ...m, ...Object.fromEntries(pending.map((key) => [key, shown[key]])) }
         lineages.set(kept, lineage)
         return kept
-      })
+      }) }
     } finally {
       reads.delete(since)
     }
@@ -180,4 +191,14 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   },
   setRevokingInvitation: (id, pending) =>
     set((s) => ({ revokingInvitations: [...s.revokingInvitations.filter((r) => r !== id), ...(pending ? [id] : [])] })),
+  mergeProposals: [],
+  setMergeProposals: (mergeProposals) => set({ mergeProposals }),
 })
+
+/** Reads `member.merge.pending`; an answer for a viewer who has since changed is dropped. */
+export async function loadMergeProposals(store: RootStore, client: Api): Promise<void> {
+  const s = store.getState()
+  if (!s.info || !capability(s.capabilities).hasMethod('member.merge.pending')) return s.setMergeProposals([])
+  const proposals = await client.memberMergePending()
+  if (store.getState().identityKey === s.identityKey) store.getState().setMergeProposals(proposals)
+}

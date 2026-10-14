@@ -1183,7 +1183,8 @@ comes back online, which catches a failed read and an approval made with
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. No card carries an
-approval code. Device cards list before
+approval code. Merge proposal cards ([Members, devices and
+Profile](#members-devices-and-profile)), then device cards, list before
 runs in the board's Needs you and above the Map. The sidebar's Needs you
 counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
@@ -4162,6 +4163,48 @@ teammate shared or revoked since it was sent.
 A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 
+**Sign-ins** in Profile (`src/routes/members/sign-ins.tsx`) lists, from
+`member.identity.list`, the member's tailnet login, SSH key fingerprint,
+GitHub accounts and devices with their status. **Link a GitHub account**
+sends `member.identity.link` for the viewer and shows the join link with
+the next step: open it on a device signed in as that account, or `aether
+link '<link>'`, then approve that device. **Merge with another member**
+opens a dialog with two tabs:
+
+- **Get a merge code** sends `member.merge.start` and shows the code, a
+  per-second expiry countdown and `aether member merge <code>`. While the
+  code is open it re-reads `member.merge.pending` every 5 seconds.
+- **I have a merge code** sends `member.merge.preview` and shows both
+  members side by side (role, sign-ins, devices, runs, schedules,
+  settings), stacked at phone width. **Keep settings from** has no
+  default; choosing a side lists what the other loses. When the roles
+  differ the resulting role is stated, and the admin side gets **Keep the
+  merged member an admin** only when the plan carries
+  `role_with_keep_admin`. **Propose merge** (danger style) stays disabled
+  until a side is chosen and **Discard the listed settings** is ticked,
+  then sends `member.merge.propose` with the plan's `plan_digest`; the
+  answer says the other sign-in must accept.
+
+A proposal for the viewer to accept (`member.merge.pending` where the
+viewer minted the code, read at hydration and on `member.merged`) shows in
+Sign-ins, in the code tab, and as a Needs you card whose **Review** opens
+Profile at Sign-ins. It lists the proposer's sign-ins, the settings kept,
+what is discarded and the resulting role; **Accept and merge** (danger
+style) needs the same tick and sends `member.merge.accept` with the
+proposal's digest, and **Cancel** sends `member.merge.cancel`. A refusal
+the proposal carries, and every RPC error, shows verbatim. After a merge
+the record shows in Sign-ins; **Merge history** lists `member.merge.list`
+with the discarded settings, custom agent definitions included, and the
+archive path.
+
+`member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
+`resolveMember` in `lib/member-name.ts` follow it, so an id history names
+(events, runs, costs, comments, swarms, devices) shows the survivor's name
+with `(merged)`. A `member.merged` event (workspace id `server`) re-reads
+`member.list`; when the viewer is either member it takes a fresh snapshot
+instead, so a session absorbed by the merge shows the survivor, with its
+role, without a reload.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
@@ -5246,7 +5289,11 @@ and answers a swarm; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette
 coming back once it is gone - needs a narrow window with a keyboard rather
-than a phone. `board-card`, `run-switch`, `run-attach-retry`,
+than a phone. `sign-ins-merge.spec.ts` gets a merge code
+as one member and previews it as another at phone width; both harness
+members have an SSH key, so it checks the server's refusal verbatim, and
+`src/routes/members/sign-ins.test.tsx` covers choosing, proposing and
+accepting. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and

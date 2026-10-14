@@ -10,6 +10,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -268,9 +269,10 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
   const unopened = run.finish_unopened === true && (state === 'done' || state === 'failed')
   const recedes = state !== 'needs-you' && !unopened && (state !== 'working' || (!swarm && run.member_id !== self))
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const people = useRunPeople(run)
   const exactTime = useId()
-  const name = (id: string) => members[id]?.display_name ?? id
+  const name = (id: string) => memberName({ members, mergedInto }, id)
   const controller = run.controller_member_id
   const watching = people.filter((id) => id !== controller).map((id) => (id === self ? 'you' : name(id)))
   useClock()
@@ -309,7 +311,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
             <span
               data-slot="owner-mark"
               aria-hidden
-              style={{ backgroundColor: members[run.member_id]?.color }}
+              style={{ backgroundColor: resolveMember({ members, mergedInto }, run.member_id).member?.color }}
               className="-mx-1 h-1.75 w-1.5 shrink-0 bg-icon-faint [clip-path:polygon(0_0,100%_50%,0_100%)]"
             />
           </>
@@ -348,6 +350,7 @@ const peopleShown = 3
  */
 function PeopleStack({ people, yields }: { people: string[]; yields: boolean }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const faces = people.length > peopleShown ? people.slice(0, peopleShown - 1) : people
   return (
     <span
@@ -363,7 +366,7 @@ function PeopleStack({ people, yields }: { people: string[]; yields: boolean }) 
             behind > 0 && '-ml-1.5',
           )}
         >
-          <Avatar name={members[id]?.display_name ?? id} color={members[id]?.color} />
+          <Avatar name={memberName({ members, mergedInto }, id)} color={resolveMember({ members, mergedInto }, id).member?.color} />
         </span>
       ))}
     </span>

@@ -44,14 +44,14 @@ describe('who is on a run', () => {
   })
 
   it('leads with the controller, even before the roster lists them', () => {
-    expect(runPeople({ controller_member_id: vera.id }, everyone, members)).toEqual([vera.id, alice.id, bob.id])
-    expect(runPeople({ controller_member_id: vera.id }, [bob.id], members)).toEqual([vera.id, bob.id])
+    expect(runPeople({ controller_member_id: vera.id }, everyone, { members, mergedInto: {} })).toEqual([vera.id, alice.id, bob.id])
+    expect(runPeople({ controller_member_id: vera.id }, [bob.id], { members, mergedInto: {} })).toEqual([vera.id, bob.id])
   })
 
   it('leads with the last controller only while nobody controls and they are still on the run', () => {
     const free = { controller_member_id: '', last_controller_member_id: bob.id }
-    expect(runPeople(free, everyone, members)).toEqual([bob.id, alice.id, vera.id])
-    expect(runPeople(free, [vera.id, alice.id], members)).toEqual([alice.id, vera.id])
-    expect(runPeople({}, everyone, members)).toEqual([alice.id, bob.id, vera.id])
+    expect(runPeople(free, everyone, { members, mergedInto: {} })).toEqual([bob.id, alice.id, vera.id])
+    expect(runPeople(free, [vera.id, alice.id], { members, mergedInto: {} })).toEqual([alice.id, vera.id])
+    expect(runPeople({}, everyone, { members, mergedInto: {} })).toEqual([alice.id, bob.id, vera.id])
   })
 })

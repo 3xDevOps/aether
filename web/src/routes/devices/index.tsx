@@ -13,11 +13,12 @@ import { SectionLabel } from '@/components/ui/section-label'
 import type { Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { message, providerName } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import type { Device, DeviceLookup } from '@/lib/types'
 import { useStore } from '@/store'
 import { useIsAdmin } from '@/store/hooks'
 
-const status: Record<Device['status'], { tone: Tone; label: string }> = {
+export const deviceStatus: Record<Device['status'], { tone: Tone; label: string }> = {
   registered: { tone: 'needs-you', label: 'Registered' },
   pending: { tone: 'needs-you', label: 'Pending' },
   approved: { tone: 'done', label: 'Approved' },
@@ -28,6 +29,7 @@ const provider = (device: Device) => providerName[device.provider] ?? device.pro
 
 export function DevicesPanel({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const isAdmin = useIsAdmin()
   const [devices, setDevices] = useState<Device[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -63,7 +65,7 @@ export function DevicesPanel({ client }: { client: Api }) {
   }
 
   const owner = (device: Device) =>
-    device.invitation_id ? `invitation ${device.invitation_id}` : (members[device.member_id]?.display_name ?? device.member_id)
+    device.invitation_id ? `invitation ${device.invitation_id}` : memberName({ members, mergedInto }, device.member_id)
 
   const approve = confirming && (() => {
     const { device } = confirming.found
@@ -140,7 +142,7 @@ export function DevicesPanel({ client }: { client: Api }) {
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="truncate text-ui font-medium text-text">{device.label}</span>
-                    <Badge tone={status[device.status].tone}>{status[device.status].label}</Badge>
+                    <Badge tone={deviceStatus[device.status].tone}>{deviceStatus[device.status].label}</Badge>
                   </span>
                   <span className="text-ui-sm text-muted">
                     {isAdmin && <>{owner(device)} · </>}

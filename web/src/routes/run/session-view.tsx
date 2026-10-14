@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
+import { memberName } from '@/lib/member-name'
 import { runLabel } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
@@ -98,6 +99,7 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const events = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]?.events))
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyRoom)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
@@ -105,12 +107,12 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
     const floor = historyFloor(session)
     const base = enhanced
       ? withSteers(enhancedRows(session), room, floor)
-      : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => members[id]?.display_name ?? id })
+      : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => memberName({ members, mergedInto }, id) })
     if (!showMessages) return base
     const reported = messages.some((m) => m.kind === 'report')
     const mail = messages.filter((m) => Date.parse(m.created_at) >= floor)
     return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, mail.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
-  }, [enhanced, session, room, run, events, members, messages, showMessages, paused])
+  }, [enhanced, session, room, run, events, members, mergedInto, messages, showMessages, paused])
   const roomIDs = new Set(room.map((m) => m.id))
   const missingRoomImages = enhanced && rows.some((row) => row.kind === 'user' && row.images?.some((image) => !roomIDs.has(image.messageID)))
   return { rows, session, missingRoomImages }
@@ -133,7 +135,7 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
 
 function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string }) {
   const workspace = useStore((s) => s.workspaces[run.workspace_id]?.name ?? run.workspace_id)
-  const owner = useStore((s) => s.members[run.member_id]?.display_name ?? run.member_id)
+  const owner = useStore((s) => memberName(s, run.member_id))
   return (
     <section aria-label="Run overview" className="flex min-h-0 flex-1 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable_both-edges]">
       <div className="m-auto flex w-full min-w-0 max-w-sm flex-col items-center gap-6">

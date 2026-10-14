@@ -272,6 +272,12 @@ describe('viewer scoping', () => {
     expect(presentRun(stopped, ctx)).toEqual({ state: 'working', reason: 'Waiting for Alice' })
   })
 
+  it('names a waiting run by the member its owner was merged into', () => {
+    const stopped = record({ status: 'needs-attention', reason: 'agent idle', member_id: 'mem_old' })
+    const ctx = stateContext({ ...bobViewing, mergedInto: { mem_old: alice.id } })
+    expect(presentRun(stopped, ctx).reason).toBe('Waiting for Alice (merged)')
+  })
+
   it("leaves another member's unreviewed finish Done", () => {
     const finished = record({ status: 'completed', outcome_unseen: true })
     expect(presentRun(finished, stateContext(bobViewing))).toEqual({ state: 'done', reason: 'Finished' })

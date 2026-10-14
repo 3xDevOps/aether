@@ -5,6 +5,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
@@ -13,13 +14,14 @@ import { useStore } from '@/store'
 export function ConflictChips({ run }: CardSlotProps) {
   const peers = useStore((s) => s.overlaps[run.id])
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const navigate = useStore((s) => s.navigate)
   const coarse = useMediaQuery(coarsePointer)
   if (!peers?.length) return null
 
   return peers.map((peer) => {
-    const member = members[peer.member_id]
-    const who = member?.display_name ?? peer.member_id
+    const member = resolveMember({ members, mergedInto }, peer.member_id).member
+    const who = memberName({ members, mergedInto }, peer.member_id)
     const [first = '', ...rest] = peer.files
     return (
       <Fragment key={peer.run_id}>

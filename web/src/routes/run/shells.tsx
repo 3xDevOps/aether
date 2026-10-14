@@ -8,9 +8,10 @@ import { api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { onTabListKeyDown } from '@/lib/keys'
 import { message } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import type { DevControlFence, DevController, DevTerminal } from '@/lib/types'
 import { cn, focusRingInset } from '@/lib/utils'
-import { useStore } from '@/store'
+import { useStore, type RootState } from '@/store'
 import { getShellSocket, initialRunShellDock, shellEnded } from '@/store/terminal'
 
 /** Mirrors maxRunShells in internal/scheduler/run_shell.go. */
@@ -34,9 +35,9 @@ function shellLabel(terminal: DevTerminal): string {
   return terminal.process.state === 'running' ? name : `${name} · ${terminal.process.state}`
 }
 
-export function controllerName(controller: DevController, members: Record<string, { display_name: string } | undefined>): string {
+export function controllerName(controller: DevController, names: Pick<RootState, 'members' | 'mergedInto'>): string {
   if (controller.kind === 'run_agent') return 'The agent'
-  return controller.member_id ? members[controller.member_id]?.display_name ?? controller.member_id : 'Someone'
+  return controller.member_id ? memberName(names, controller.member_id) : 'Someone'
 }
 
 export function useRunShells(runID: string, visible: boolean) {
@@ -223,6 +224,7 @@ export function ShellCloseItems({ shells, terminal, onClose }: { shells: RunShel
 
 export function StopShellDialog({ shells }: { shells: RunShells }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const shown = useRef(shells.stopRequest)
   if (shells.stopRequest) shown.current = shells.stopRequest
   const request = shown.current
@@ -234,7 +236,7 @@ export function StopShellDialog({ shells }: { shells: RunShells }) {
             <DialogHeader>
               <DialogTitle>Stop {shellName(request.terminal)}?</DialogTitle>
               <DialogDescription>
-                {controllerName(request.controller, members)} controls this shell. Stopping it ends its process for everyone using it.
+                {controllerName(request.controller, { members, mergedInto })} controls this shell. Stopping it ends its process for everyone using it.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

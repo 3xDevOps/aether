@@ -179,11 +179,14 @@ type MemberIdentityListParams struct {
 }
 
 // MemberIdentityListResult is the result of member.identity.list: the
-// member's identities, and every device of the member with the account it
-// signed in as, revoked ones and those of removed identities included.
+// member's tailnet login and SSH key fingerprint when it has them, its
+// identities, and every device of the member with the account it signed
+// in as, revoked ones and those of removed identities included.
 type MemberIdentityListResult struct {
-	Identities []Identity `json:"identities"`
-	Devices    []Device   `json:"devices"`
+	TailnetLogin         string     `json:"tailnet_login,omitempty"`
+	PublicKeyFingerprint string     `json:"public_key_fingerprint,omitempty"`
+	Identities           []Identity `json:"identities"`
+	Devices              []Device   `json:"devices"`
 }
 
 // MemberIdentityRemoveParams are the params of member.identity.remove.

@@ -35,6 +35,7 @@ export const eventLabel = {
   'mission.changed': 'Swarm changes',
   'member.changed': 'Member renames',
   'member.device': 'Devices',
+  'member.merged': 'Member merges',
   'profile.change': 'Agent profiles',
 } satisfies Record<string, string>
 

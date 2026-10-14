@@ -8,6 +8,7 @@ import { createRootStore } from '@/store'
 import { loadDevices } from '@/store/devices'
 import { homeKey } from '@/store/files'
 import { capability } from '@/store/hooks'
+import { memberName } from '@/lib/member-name'
 import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -21,6 +22,7 @@ import {
   roomMessage,
   run,
   serverInfo as serverInfoFixture,
+  vera,
   workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -1536,7 +1538,7 @@ describe('applyEvent', () => {
 
   it('re-fetches the member list when an event names an actor it does not know', async () => {
     const store = createRootStore()
-    await hydrate(store, fakeApi({ memberList: vi.fn(async () => [alice]) }))
+    await hydrate(store, fakeApi({ memberList: vi.fn(async () => ({ members: [alice] })) }))
     expect(store.getState().members[bob.id]).toBeUndefined()
 
     await applyEvent(store, statusEvent({ actor_id: bob.id }), fakeApi())
@@ -1776,13 +1778,39 @@ describe('applyEvent', () => {
     await hydrate(store, fakeApi())
     const self = store.getState().info!.member
     const renamed = { ...self, display_name: 'Renamed' }
-    const client = fakeApi({ memberList: vi.fn(async () => [renamed, bob]) })
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [renamed, bob] })) })
     await applyEvent(store, statusEvent({
       run_id: '', type: 'member.changed', actor_id: self.id, payload: { member_id: self.id, display_name: 'Renamed' },
     }), client)
 
     expect(store.getState().members[self.id].display_name).toBe('Renamed')
     expect(store.getState().info?.member.display_name).toBe('Renamed')
+  })
+
+  it('maps a merged-away member to the survivor on a member.merged event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice, vera], merged_into: { [bob.id]: vera.id } })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: vera.id,
+      payload: { merge_id: 'merge_1', survivor_id: vera.id, absorbed_id: bob.id },
+    }), client)
+
+    expect(memberName(store.getState(), bob.id)).toBe('Vera (merged)')
+    expect(client.serverInfo).not.toHaveBeenCalled()
+    expect(client.workspaceListFull).not.toHaveBeenCalled()
+  })
+
+  it('takes a fresh snapshot when the viewer was merged away', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) }))
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice], merged_into: { [bob.id]: alice.id } })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: alice.id,
+      payload: { merge_id: 'merge_1', survivor_id: alice.id, absorbed_id: bob.id },
+    }), client)
+
+    expect(store.getState().info?.member.id).toBe(alice.id)
   })
 
   it('re-reads the devices on a device event', async () => {
@@ -1817,7 +1845,7 @@ describe('applyEvent', () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
     store.getState().patchMember(bob.id, { color: '#911eb4' })
-    const client = fakeApi({ memberList: vi.fn(async () => [alice, { ...bob, display_name: 'Robert' }]) })
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice, { ...bob, display_name: 'Robert' }] })) })
     await applyEvent(store, statusEvent({
       run_id: '', type: 'member.changed', actor_id: bob.id, payload: { member_id: bob.id, display_name: 'Robert' },
     }), client)

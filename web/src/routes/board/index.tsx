@@ -11,6 +11,8 @@ import { useKeybindings } from '@/lib/keybindings'
 import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { DeviceCard } from '@/routes/board/device-card'
+import { MergeProposalCard } from '@/routes/board/merge-card'
+import { useProposalsToAccept } from '@/routes/members/sign-ins'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
@@ -39,7 +41,8 @@ export function Board() {
   }, [archivedCards.length])
 
   const devices = useDeviceNeeds()
-  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length
+  const merges = useProposalsToAccept()
+  const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length + merges.length
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && total === 0)
   const placeholder: Placeholder = loading ? 'skeleton' : hydrated ? 'empty' : 'none'
@@ -52,6 +55,11 @@ export function Board() {
   if (view === 'map') {
     body = (
       <>
+        {merges.length > 0 && (
+          <div aria-label="Merge proposals waiting for you" role="region" className="grid shrink-0 grid-cols-1 gap-2 border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
+            {merges.map((proposal) => <MergeProposalCard key={proposal.id} proposal={proposal} />)}
+          </div>
+        )}
         {devices.length > 0 && (
           <div aria-label="Devices waiting for approval" role="region" className="grid max-h-[40%] shrink-0 grid-cols-1 gap-2 overflow-y-auto border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
             {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
@@ -79,7 +87,7 @@ export function Board() {
       <div
         className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
       >
-        <Column column={column('needs-you')} devices={devices} placeholder={placeholder} agentNames={agentNames} />
+        <Column column={column('needs-you')} devices={devices} merges={merges} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
         <Column
           key={stacked ? 'stacked' : 'wide'}

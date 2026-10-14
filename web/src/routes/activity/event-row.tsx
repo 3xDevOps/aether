@@ -5,6 +5,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
+import { resolveMember } from '@/lib/member-name'
 import { runLabel } from '@/lib/status'
 import type { CoordMessageAckedPayload, CoordMessagePayload, Event, RunStatus } from '@/lib/types'
 import type { Visit } from '@/routes/activity/visits'
@@ -76,7 +77,7 @@ function Row({ time, dot, who, children, runID }: { time: string; dot?: Tone; wh
 }
 
 function MemberAvatar({ id }: { id: string }) {
-  const member = useStore((s) => s.members[id])
+  const member = useStore((s) => resolveMember(s, id).member)
   return member ? <Avatar name={member.display_name} color={member.color} /> : null
 }
 

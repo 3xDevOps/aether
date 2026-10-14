@@ -20,6 +20,7 @@ import { ApiError, codeNotFound, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { errorSentence, message, providerName, timeAgo } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
+import { memberName } from '@/lib/member-name'
 import type { Invitation, InvitationResult, Member } from '@/lib/types'
 import { draftKey, useFailure } from '@/components/failure'
 import { roleLabel, roles } from '@/routes/members/roster'
@@ -94,6 +95,7 @@ function Creating() {
 
 export function InvitationsSection({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const invitations = useStore((s) => s.invitations)
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<Invitation | null>(null)
@@ -138,7 +140,7 @@ export function InvitationsSection({ client }: { client: Api }) {
     }), { onDone: () => toast.success(`Invitation for ${invitee(invitation)} revoked`), key: invitation.id })
   }
 
-  const memberName = (id: string) => members[id]?.display_name ?? id
+  const nameOf = (id: string) => memberName({ members, mergedInto }, id)
 
   return (
     <section aria-label="Invitations" className="flex min-w-0 flex-col gap-2">
@@ -153,8 +155,8 @@ export function InvitationsSection({ client }: { client: Api }) {
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-ui font-medium text-text">{invitee(invitation)}</span>
                 <span className="truncate text-ui-sm text-muted">
-                  {invitation.member_id ? `Links to ${memberName(invitation.member_id)}` : invitation.role && roleLabel[invitation.role]}
-                  {' · invited by '}{memberName(invitation.created_by)}
+                  {invitation.member_id ? `Links to ${nameOf(invitation.member_id)}` : invitation.role && roleLabel[invitation.role]}
+                  {' · invited by '}{nameOf(invitation.created_by)}
                   {invitation.provisional ? <Creating /> : <>{' · expires '}<RelativeTime at={invitation.expires_at} /></>}
                 </span>
               </span>
@@ -171,7 +173,7 @@ export function InvitationsSection({ client }: { client: Api }) {
         <Confirm
           title={`Revoke the invitation for ${invitee(revoking)}?`}
           description={revoking.member_id
-            ? `${invitee(revoking)} can no longer connect through the edge as ${memberName(revoking.member_id)}.`
+            ? `${invitee(revoking)} can no longer connect through the edge as ${nameOf(revoking.member_id)}.`
             : `${invitee(revoking)} can no longer join this server by signing in to the edge.`}
           action="Revoke"
           onConfirm={async () => revoke(revoking)}

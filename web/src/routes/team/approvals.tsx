@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { runLabel } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import type { Approval } from '@/lib/types'
@@ -102,7 +103,10 @@ function Row({
   const workspace = useStore((s) => s.workspaces[approval.workspace_id])
   const run = useStore((s) => s.runs[approval.run_id])
   const decider = useStore((s) =>
-    approval.decided_by ? s.members[approval.decided_by] : undefined,
+    approval.decided_by ? resolveMember(s, approval.decided_by).member : undefined,
+  )
+  const deciderName = useStore((s) =>
+    approval.decided_by ? memberName(s, approval.decided_by) : 'someone',
   )
   const navigate = useStore((s) => s.navigate)
   const [error, setError] = useState<string | null>(null)
@@ -180,7 +184,7 @@ function Row({
             style={{ backgroundColor: decider?.color }}
           />
           {approval.decision === 'approved' ? 'Approved' : 'Denied'} by{' '}
-          <span className="min-w-0 break-words">{decider?.display_name ?? approval.decided_by ?? 'someone'}</span>
+          <span className="min-w-0 break-words">{deciderName}</span>
           {approval.decided_at && <> <RelativeTime at={approval.decided_at} /></>}
         </p>
       )}
