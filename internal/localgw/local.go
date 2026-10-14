@@ -361,16 +361,18 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 		_ = conn.Close()
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
 	}
+	g.local.mu.Lock()
+	g.local.cacheConfig(target)
+	// Relink closes the old connection first, so a forward blocked opening
+	// a channel on an unresponsive server returns before Close waits on it.
+	g.cfg.Backend.Relink(target, conn)
+	g.local.mu.Unlock()
 	// Forwards and syncs name the old server's runs and would follow the
 	// backend onto the new one.
 	g.local.forward.Close()
 	for _, session := range g.local.sync.Status() {
 		_ = g.local.sync.Stop(session.RunID)
 	}
-	g.local.mu.Lock()
-	defer g.local.mu.Unlock()
-	g.local.cacheConfig(target)
-	g.cfg.Backend.Relink(target, conn)
 	return map[string]string{"active": target.Active}, nil
 }
 

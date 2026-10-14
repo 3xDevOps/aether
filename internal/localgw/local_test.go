@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -505,6 +506,58 @@ func (b *switchBackend) Relink(cfg cli.Config, _ *cli.Conn) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.relinked = append(b.relinked, cfg)
+}
+
+// hangingForwardBackend blocks Forward the way OpenChannel does on an
+// unresponsive server, until Relink closes the old connection.
+type hangingForwardBackend struct {
+	switchBackend
+	opening  chan struct{}
+	released chan struct{}
+}
+
+func (b *hangingForwardBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
+	close(b.opening)
+	<-b.released
+	return nil, errors.New("ssh: connection closed")
+}
+
+func (b *hangingForwardBackend) Relink(cfg cli.Config, conn *cli.Conn) {
+	b.switchBackend.Relink(cfg, conn)
+	close(b.released)
+}
+
+func TestLocalLinkSwitchWithForwardOpeningChannel(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "home:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222"}}}
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	backend := &hangingForwardBackend{opening: make(chan struct{}), released: make(chan struct{})}
+	g := newVerbGateway(t, backend, saved)
+	stubDialLink(t, func(cli.Config) (*cli.Conn, error) { return nil, nil })
+	port := freeLocalForwardPort(t)
+	rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	<-backend.opening
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true) }()
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("switch = %d: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("link.switch hung waiting for a forward blocked opening a channel")
+	}
 }
 
 func stubDialLink(t *testing.T, fn func(cli.Config) (*cli.Conn, error)) {
