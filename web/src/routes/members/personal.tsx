@@ -28,6 +28,7 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
   const self = useStore((s) => s.info?.member)
   const color = useStore((s) => (s.info ? s.members[s.info.member.id]?.color : undefined)) ?? self?.color
   const caps = useCapability()
+  const identity = useStore((s) => s.identityKey)
   const [reopened, setReopened] = useState<{ draft: NameDraft; n: number }>()
   useReopenHost<NameDraft>('profile', (draft) => {
     setReopened((last) => ({ draft, n: (last?.n ?? 0) + 1 }))
@@ -76,7 +77,7 @@ export function ProfileDialog({ open, onOpenChange, client = api }: { open: bool
             </section>
           )}
           {caps.hasMethod('account.share') && caps.hasMethod('account.revoke') && <AccountSharing client={client} self={self} />}
-          {caps.hasMethod('member.identity.list') && <SignInsSection client={client} self={self} focus={signIns} />}
+          {caps.hasMethod('member.identity.list') && <SignInsSection key={identity} client={client} self={self} focus={signIns} />}
         </div>
       </DialogContent>
     </Dialog>

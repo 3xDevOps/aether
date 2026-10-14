@@ -399,6 +399,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
   const [plan, setPlan] = useState<{ code: string; plan: MergePlan } | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useActionError()
+  const [same] = useState(sameIdentity)
   // Kept with the member it was proposed to: the code may have changed while the propose was answered.
   const [proposal, setProposal] = useState<{ proposal: MergeProposal; minted: MergeMember } | null>(null)
 
@@ -459,6 +460,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
           code={plan.code}
           plan={plan.plan}
           onProposed={(proposed) => {
+            if (!same()) return
             setProposal({ proposal: proposed, minted: plan.plan.minted })
             addMergeProposal(useStore, proposed)
             void loadMergeProposals(useStore, client)

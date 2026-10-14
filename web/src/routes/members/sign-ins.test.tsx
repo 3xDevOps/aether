@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { toast, Toaster } from 'sonner'
 import { ApiError } from '@/lib/api'
 import type { MemberMerge, MergeMember, MergePlan, MergeProposal, MergeSettings } from '@/lib/types'
+import { ProfileDialog } from '@/routes/members/personal'
 import { ProposeForm, SignInsSection } from '@/routes/members/sign-ins'
 import { useStore } from '@/store'
 import { alice, bob, fakeApi, serverInfo, workspace } from '@/test/fixtures'
@@ -390,6 +391,17 @@ describe('accept a merge', () => {
     expect(history.queryByText(/Gone \(mem_gone\)/)).toBeNull()
     await act(async () => second([]))
     expect(history.getByText('No merges.')).toBeDefined()
+  })
+
+  it('resets an open link form when the signed-in identity changes', async () => {
+    seed()
+    useStore.setState({ identityKey: 'server\u0000mem_alice' })
+    render(<ProfileDialog open onOpenChange={() => {}} client={fakeApi()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Link a GitHub account' }))
+    expect(screen.getByRole('dialog', { name: 'Link a GitHub account' })).toBeDefined()
+
+    act(() => useStore.setState({ identityKey: 'server\u0000mem_bob' }))
+    expect(screen.queryByRole('dialog', { name: 'Link a GitHub account' })).toBeNull()
   })
 
   it('re-reads the sign-ins when a merge maps another member', async () => {
