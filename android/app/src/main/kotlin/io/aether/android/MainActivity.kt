@@ -519,6 +519,9 @@ class MainActivity : ComponentActivity() {
                     // flight stops before it can be read as an escape.
                     web.stopLoading()
                     web.clearCache(true)
+                    // The previous gateway's pages and the blank page its
+                    // exit left are another origin; back must not reach them.
+                    clearHistoryOnLoad = true
                     loaded = url
                     web.loadUrl(url + pendingSuffix)
                     pendingSuffix = ""
