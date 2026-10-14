@@ -331,8 +331,8 @@ unchanged.
 tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
 it, sheets slide in from their edge, a run's details box wipes in from the
 row it docks to, and every one leaves at once. Panels
-change instantly. The `state-pulse` dot (the run header's working dot and the
-Session view's live row) and the `live-shimmer` text sweep step through a few
+change instantly. The `state-pulse` dot (the run header's working dot, the
+Session view's live row and the working rows on a swarm's Tasks list) and the `live-shimmer` text sweep (also on those rows' reasons) step through a few
 frames per cycle rather than tweening, and stop under
 `prefers-reduced-motion: reduce`, where the shimmer leaves plain muted text.
 

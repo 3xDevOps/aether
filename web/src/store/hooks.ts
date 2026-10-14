@@ -62,6 +62,18 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
   }, [key])
 }
 
+/** Which of these runs need the viewer; stable while that set is. */
+export function useNeedsYouRuns(ids: string[]): ReadonlySet<string> {
+  const now = useClock()
+  const needy = useStore(
+    useShallow((s) => {
+      const ctx = stateContextOf(s, now)
+      return ids.filter((id) => s.runs[id] && presentRun(s.runs[id], ctx).state === 'needs-you')
+    }),
+  )
+  return useMemo(() => new Set(needy), [needy])
+}
+
 /** One run's record; re-renders only when that run changes. */
 export function useRun(runID: string): RunRecord | undefined {
   return useStore((s) => s.runs[runID])
