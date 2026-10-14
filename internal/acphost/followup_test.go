@@ -294,6 +294,35 @@ func TestPromptIdleReportsDelivery(t *testing.T) {
 	})
 }
 
+func TestSubagentOutputDoesNotAcceptAPrompt(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	release := make(chan struct{})
+	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
+		<-release
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{ClaudeCode: true})
+	delivered := make(chan error, 2)
+	if ok, err := s.PromptIdle(context.Background(), textPrompt("go"), func(err error) { delivered <- err }); !ok || err != nil {
+		t.Fatalf("PromptIdle = %v, %v", ok, err)
+	}
+	chunk := func(id string, meta map[string]any) {
+		m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "messageId": id, "content": map[string]any{"type": "text", "text": id}, "_meta": meta})
+	}
+	chunk("sub", map[string]any{"claudeCode": map[string]any{"parentToolUseId": "toolu_1"}})
+	select {
+	case err := <-delivered:
+		t.Fatalf("a subagent's output accepted the prompt: %v", err)
+	case <-time.After(promptAcceptGrace / 3):
+	}
+	chunk("main", nil)
+	if err := <-delivered; err != nil {
+		t.Fatalf("delivered with %v, want nil once the main agent answered", err)
+	}
+	close(release)
+	rec.waitIdle(t)
+}
+
 func TestTaskProgressTouchesActivityOnly(t *testing.T) {
 	m := workflowAgent(t)
 	s, rec := startWorkflow(t, m)

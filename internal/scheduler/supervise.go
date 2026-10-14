@@ -636,7 +636,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			}
 			var err error
 			switch {
-			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold && !heldByTasks(e.agentReport):
+			case e.status == domain.RunRunning && idle > stallLimit(e.agentReport, s.cfg.StallThreshold):
 				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the

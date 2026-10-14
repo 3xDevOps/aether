@@ -871,7 +871,11 @@ func (s *Session) update(raw json.RawMessage) {
 	_ = json.Unmarshal(raw, &head)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.acceptedLocked()
+	// A background subagent streams while the main agent has not yet taken
+	// the prompt.
+	if head.Meta.ClaudeCode.ParentToolUseID == "" {
+		s.acceptedLocked()
+	}
 	if head.opensTurn() {
 		s.openAutonomousLocked()
 	}

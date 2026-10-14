@@ -90,8 +90,15 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	}
 	// The question already shows; the agent's own idle repeats it.
 	repeat := entry.idleShown && reason == entry.idleReason && entry.status == domain.RunNeedsAttention
+	parks := (report.State == agentstatus.Idle || showsIdle) && !finishes && !repeat &&
+		(entry.status != domain.RunNeedsAttention || reportChanged || showsIdle)
+	// Another reason replacing an Enhanced run's question ends its hold on
+	// the agent's work; the question stays pending and shows again at the
+	// next settled turn end.
+	unshows := parks && !showsIdle && reason != entry.idleReason &&
+		entry.idleShown && entry.asks() && entry.launchMode == domain.LaunchACP
 	var oldSidecar sidecar
-	persist := inputsChanged || reportChanged || showsIdle || clearsIdle
+	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows
 	if persist {
 		oldSidecar = entry.sidecar()
 		next := oldSidecar
@@ -106,6 +113,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		if showsIdle {
 			next.IdleShown = true
 		}
+		if unshows {
+			next.IdleShown = false
+		}
 		if clearsIdle {
 			next.IdleReason, next.IdleShown = "", false
 		}
@@ -117,7 +127,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	var transitionErr error
 	switch {
 	case report.State == agentstatus.Idle || showsIdle:
-		if !finishes && !repeat && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
+		if parks {
 			cause := causeUnattended
 			if showsIdle {
 				cause = idleCause(reason)
@@ -175,6 +185,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	if showsIdle {
 		entry.idleShown = true
 		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+	}
+	if unshows {
+		entry.idleShown = false
 	}
 	if clearsIdle {
 		entry.idleReason, entry.idleShown = "", false

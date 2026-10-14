@@ -340,7 +340,14 @@ or as soon as its turn ends with only [background work](#background-work)
 left: the run parks with `needs input: <question>` and the push carries the
 question while the tasks keep running. The question stays the run's status
 through the tasks' ends, the agent's own follow-up turns and turns that mail
-starts, until a member's message reaches the agent. Any frame from the agent counts as activity for stall detection.
+starts. Any frame from the agent counts as activity for stall detection.
+
+A member's message sent after the question was asked clears it once the
+message reaches the agent, even before the question shows. Stop, a restart,
+a failed turn or an ended session replaces the shown question with its own
+reason, and the run works as usual; Stop does not dismiss the question. It
+shows again when a later turn ends as above, unless a message answered it
+first.
 
 While a Claude agent works with no prompt open
 ([background work](#background-work)), the run stays `running` and its
@@ -410,13 +417,16 @@ that fails while tasks are live parks the run with
 Limits:
 
 - A task the run waits for that never ends keeps the run working until you
-  press Stop.
+  press Stop, as long as the agent sends something within three times
+  `--stall-threshold`.
 - A shell a subagent started does not hold the run, and the subagent's
   output after it ends is logged without changing the run's state.
-- `--stall-threshold` does not apply while a task the run waits for is
-  live, since a task can work for long without telling the session. An
-  autonomous turn that sends nothing for that long parks the run `stalled:`
-  until the agent sends something again.
+- While a task the run waits for is live, the run parks `stalled:` only
+  after three times `--stall-threshold` with nothing from the agent: a task
+  reports each tool use (`task_progress`), not the work between them. With
+  no task live, an autonomous turn that sends nothing for `--stall-threshold`
+  parks the run `stalled:` until the agent sends something again; the turn
+  itself ends after at most 15 minutes of quiet.
 - Other agents (Codex, pi, omp, opencode, custom) report no background tasks
   and get no autonomous turns: output they send with no prompt open is
   logged under their last turn and changes no state.

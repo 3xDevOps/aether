@@ -584,7 +584,7 @@ the container and shell are still healthy, not that an OOM spared them.
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`; background tasks the old server was running are gone. |
 | A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
-| A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop; the stall threshold does not apply while such a task is live ([enhanced-runs.md](enhanced-runs.md#background-work)). |
+| A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop. While such a task is live, the run parks `stalled:` only after three times the stall threshold with nothing from the agent ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
 

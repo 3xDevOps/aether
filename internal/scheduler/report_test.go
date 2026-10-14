@@ -446,6 +446,7 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 
 func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 	t.Parallel()
+	const threshold = 300 * time.Millisecond
 	for _, tc := range []struct {
 		name, reason string
 		stalls       bool
@@ -458,7 +459,7 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e := newReportingEnv(t, func(cfg *Config) {
-				cfg.StallThreshold = 300 * time.Millisecond
+				cfg.StallThreshold = threshold
 				cfg.PollInterval = 20 * time.Millisecond
 			})
 			e.startStalls(t)
@@ -474,11 +475,12 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				waitFor(t, "the run to stall", stalled)
 				return
 			}
-			time.Sleep(4 * time.Second / 3)
+			time.Sleep(2 * threshold)
 			r, err := e.db.GetRun(t.Context(), run.ID)
 			if err != nil || r.Status != domain.RunRunning || stalled() {
 				t.Fatalf("run = %+v, %v; want running past the stall threshold", r, err)
 			}
+			waitFor(t, "the run to stall after the stretched limit", stalled)
 		})
 	}
 }

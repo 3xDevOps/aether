@@ -494,33 +494,25 @@ func (e *supervised) questionHeld(report agentstatus.Report) bool {
 	return e.idleShown && e.asks() && e.launchMode == domain.LaunchACP && report.State == agentstatus.Working
 }
 
-// shownQuestion is the report id of the question run shows, if any.
-func (s *Scheduler) shownQuestion(run domain.RunID) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil && entry.idleShown && entry.asks() {
-		return entry.idleReportID
-	}
-	return ""
-}
-
-// answerReached clears question, the report id shownQuestion gave when a
-// member sent a message, once that message reached the agent, and returns a
-// working run to running. A question asked after the message was sent stays.
-// The question stays cleared when persisting that fails: the agent has the
-// answer, and the next sidecar write or agent report repairs the rest.
-func (s *Scheduler) answerReached(run domain.RunID, question string) error {
+// answerReached clears the run's question once a member's message sent after
+// it was asked reached the agent, whether or not the question shows yet, and
+// returns a run working under a shown question to running. A question asked
+// after the message was sent stays. The question stays cleared when
+// persisting that fails: the agent has the answer, and the next sidecar
+// write or agent report repairs the rest.
+func (s *Scheduler) answerReached(run domain.RunID, sent time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
-	if entry == nil || question == "" || entry.idleReportID != question || !entry.idleShown || !entry.asks() {
+	if entry == nil || !entry.asks() || !entry.idleReportAt.Before(sent) {
 		return nil
 	}
+	shown := entry.idleShown
 	entry.idleReason, entry.idleShown = "", false
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		return fmt.Errorf("scheduler: persist the answered question of %s: %w", run, err)
 	}
-	if entry.status != domain.RunNeedsAttention || entry.agentReport.State != agentstatus.Working {
+	if !shown || entry.status != domain.RunNeedsAttention || entry.agentReport.State != agentstatus.Working {
 		return nil
 	}
 	reason := agentstatus.ReasonResumed
