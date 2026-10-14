@@ -276,7 +276,7 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	accept := store.MergeAccept{ProposalID: p.ProposalID, Caller: member, Digest: p.PlanDigest, KeepAdmin: p.KeepAdmin,
 		Policy: policy, Now: time.Now().UTC(), Archive: s.archiveHome}
 	if s.cfg.InvitesDir != "" {
-		accept.Demoted = func(a, b domain.MemberID) (func(), error) { return revokeInvitesBy(s.cfg.InvitesDir, a, b) }
+		accept.Demoted = func(a, b domain.MemberID) (func() error, error) { return revokeInvitesBy(s.cfg.InvitesDir, a, b) }
 	}
 	accept.ConfirmedByKind, accept.ConfirmedBy = s.connDescription(ctx)
 	if edge := s.currentEdgeOwner(); edge != nil {

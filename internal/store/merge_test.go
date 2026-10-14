@@ -316,9 +316,9 @@ func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
 			moved = true
 			return "/merged/x", func() { restored = true }, nil
 		},
-		Demoted: func(domain.MemberID, domain.MemberID) (func(), error) {
+		Demoted: func(domain.MemberID, domain.MemberID) (func() error, error) {
 			revoked = true
-			return func() { reinstated = true }, nil
+			return func() error { reinstated = true; return nil }, nil
 		}})
 	if err == nil || !moved || !restored || !revoked || !reinstated {
 		t.Fatalf("AcceptMerge = %v; home moved %v, restored %v; codes revoked %v, reinstated %v; want a failure that undoes both",

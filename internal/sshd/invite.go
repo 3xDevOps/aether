@@ -212,14 +212,16 @@ func restoreInvite(dir, code string, rec inviteRecord) error {
 
 // revokeInvitesBy deletes the open invite codes any of issuers minted and
 // returns how to put them back.
-func revokeInvitesBy(dir string, issuers ...domain.MemberID) (func(), error) {
+func revokeInvitesBy(dir string, issuers ...domain.MemberID) (func() error, error) {
 	revoked := map[string]inviteRecord{}
-	undo := func() {
+	undo := func() error {
+		var errs []error
 		for code, rec := range revoked {
 			if err := restoreInvite(dir, code, rec); err != nil {
-				slog.Error("sshd: put back an invite code a failed merge revoked", "error", err)
+				errs = append(errs, fmt.Errorf("sshd: put back invite %s a failed merge revoked: %w", code, err))
 			}
 		}
+		return errors.Join(errs...)
 	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
