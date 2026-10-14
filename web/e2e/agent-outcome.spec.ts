@@ -2,12 +2,12 @@ import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
-// The container may still be provisioning, so the report retries until the
-// socket answers. The outcome becomes reviewable at the Stop hook.
-const reportSuccess = `i=0
+// The run may still be provisioning, which includes up to 25 seconds of the
+// pre-launch harness update, so the report retries for as long as the test
+// waits for the card. The outcome becomes reviewable at the Stop hook.
+const reportSuccess = `end=$(($(date +%s) + 180))
 until aether-internal report --outcome success --summary 'outcome review fixture' --idempotency-key outcome-review-fixture >/dev/null; do
-  i=$((i + 1))
-  if [ "$i" -ge 300 ]; then exit 1; fi
+  if [ "$(date +%s)" -ge "$end" ]; then exit 1; fi
   sleep 0.1
 done
 printf '%s\\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
