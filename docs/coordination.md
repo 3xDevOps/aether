@@ -1217,9 +1217,9 @@ verification evidence and exact delivery.
   --idempotency-key report-example-1
 ```
 
-`--outcome` is exactly one of `success`, `failure`, or `blocked`. A non-empty
-summary is required. `--evidence-ref` may be repeated, and `--summary-file`
-accepts a file or `-` for standard input. The result contains a durable
+`--outcome` is exactly one of `success`, `failure`, `blocked`, or
+`needs-input`. A non-empty summary is required. `--evidence-ref` may be
+repeated, and `--summary-file` accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 Terminal worker reports wait for concurrent swarm operations to leave admission
 before returning the receipt; ordinary lock contention is not a report conflict.
@@ -1266,6 +1266,22 @@ What a report does depends on the run:
   or when an agent without a status reporter stalls. It does not interrupt
   an open input request. Resuming work clears the reason; an older retried
   report cannot bring it back.
+- **Needs-input report.** `--outcome needs-input` asks the user a question.
+  The summary is the question; ask one specific question, then end the turn.
+  At turn end the run shows `needs input: <question>` as its **Needs you**
+  reason, separate from `blocked: <summary>`. The user's reply arrives as the
+  next prompt, and resuming work clears the reason. It is nonterminal and not
+  a durable report: it has no `report_id` or evidence, takes no
+  `--evidence-ref`, and does not use the terminal slot. The latest report
+  decides the turn's reason: a question after a success or failure in the
+  same turn replaces `agent reported success` or `agent reported failure`,
+  and that report stays durable. Retrying the same key while its question is
+  the latest is a no-op; retrying an older key after a newer question asks
+  the older one again. The report is refused with `CodeInvalidParams` for a
+  Background run (`a Background run cannot ask its user; report blocked or
+  failure instead`), a swarm worker, which asks its integrator with
+  `aether-internal ask`, and a run that already finished (`the run already
+  finished; its reported outcome stands, so it cannot ask its user`).
 
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason
@@ -1370,7 +1386,8 @@ After an interactive success or failure `coord.report`, the next `waiting`
 closing the run. A hook that only opens or closes an input request is not a
 turn end, but closing the last request on an already-idle run can reveal the
 outcome. A Background run still finishes at that boundary. A blocked report
-shows `blocked: <summary>` instead of `agent idle`. The first `working` hook
+shows `blocked: <summary>` and a needs-input report shows
+`needs input: <question>`, instead of `agent idle`. The first `working` hook
 after an outcome was shown clears that idle reason; older report retries
 cannot bring it back.
 The scheduler applies a report as part of its durable publication, so a

@@ -553,8 +553,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			s.leaveRun(run)
 		}
 	}()
-	if p.Outcome != protocol.CoordOutcomeSuccess && p.Outcome != protocol.CoordOutcomeFailure && p.Outcome != protocol.CoordOutcomeBlocked {
-		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", or \"blocked\"")
+	if p.Outcome != protocol.CoordOutcomeSuccess && p.Outcome != protocol.CoordOutcomeFailure &&
+		p.Outcome != protocol.CoordOutcomeBlocked && p.Outcome != protocol.CoordOutcomeNeedsInput {
+		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", \"blocked\", or \"needs-input\"")
 	}
 	if p.IdempotencyKey == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "idempotency_key is required")
@@ -570,6 +571,9 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	summary := cleanCoordText(p.Summary, protocol.CoordMaxSummaryBytes)
 	if summary == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "summary is required")
+	}
+	if p.Outcome == protocol.CoordOutcomeNeedsInput {
+		return s.reportNeedsInput(ctx, run, p, summary)
 	}
 	if len(p.EvidenceRefs) >= protocol.CoordMaxEvidenceRefs {
 		return protocol.CoordReportResult{}, invalidParams(method,

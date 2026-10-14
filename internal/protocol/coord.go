@@ -80,6 +80,8 @@ const (
 	CoordOutcomeSuccess = "success"
 	CoordOutcomeFailure = "failure"
 	CoordOutcomeBlocked = "blocked"
+	// CoordOutcomeNeedsInput is nonterminal and never stored as a durable report.
+	CoordOutcomeNeedsInput = "needs-input"
 )
 
 // Peer authorization states.

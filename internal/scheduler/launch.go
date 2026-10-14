@@ -194,7 +194,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
-	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, task, opts.Model)
+	argv, profile, acp, err := s.command(ctx, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model)
 	if err != nil {
 		return nil, err
 	}

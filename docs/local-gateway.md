@@ -2344,8 +2344,12 @@ does not run its agent over ACP`. Every frame is JSON text.
    drop what you hold and apply the replay that follows. Items are the
    `acphost.Item` kinds `message`, `thought`, `tool_call`, `plan`, `request`,
    `mode_change`, `config_options`, `commands`, `usage`, `auth_status`,
-   `session_info`, `notice`, `turn_start`, `turn_end` and `reset`; skip kinds
-   you do not know.
+   `session_info`, `notice`, `turn_start`, `turn_end`, `background` and
+   `reset`; skip kinds you do not know. `turn_start`, `turn_end` and
+   `background` carry the fields for autonomous turns and Claude's
+   background tasks described in
+   [enhanced-runs.md](enhanced-runs.md#the-session-item-log), which also
+   covers the ack `state` fields `background` and `tasks`.
 4. Lease frames are the attach's: the client sends
    `{"type":"control","request_id":1,"write":true}` to take control or
    `{"type":"control","request_id":2,"control_generation":7}` to release it,

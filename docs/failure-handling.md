@@ -581,8 +581,10 @@ the container and shell are still healthy, not that an OOM spared them.
 | Failure | What happens |
 | --- | --- |
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
-| The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
-| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted**. |
+| The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
+| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`; background tasks the old server was running are gone. |
+| A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
+| A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop. While such a task is live, the run parks `stalled:` only after three times the stall threshold with nothing from the agent ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
 
@@ -875,7 +877,10 @@ state means idle; generic turn completion, interruption, silence, and prose
 do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
 turn parks at its end with `blocked: <summary>` instead of `agent idle`,
-until it resumes. The execution report is recovered through a server
+until it resumes. `--outcome needs-input` does the same with
+`needs input: <question>` when the agent needs a user decision; an Enhanced
+Claude run shows it at the end of the turn that asked even while background
+tasks keep running. The execution report is recovered through a server
 restart.
 
 How such a run comes back depends on how much its agent can say. Where the
@@ -904,9 +909,12 @@ than `agent idle` if you then walk away.
 agent's reporter past `--stall-threshold` parks a live run at
 `needs-attention` with a reason that leads with `stalled:`. This is the hang
 detector: it catches an agent that said it was working and then wedged, and
-it is the only signal at all for an agent that cannot report. Genuine agent
-output or a file change returns such a run to `running`; server-written
-message echoes do not.
+it is the only signal at all for an agent that cannot report. An Enhanced
+run waiting for Claude background tasks parks only after three times
+`--stall-threshold`, and returns to `running` with its background reason
+when the agent sends something again. Genuine
+agent output or a file change returns such a run to `running`;
+server-written message echoes do not.
 
 Either way the run remains supervised in its run container: while unpaused,
 members with the `steer` permission can attach, send messages, and

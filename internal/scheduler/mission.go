@@ -208,7 +208,7 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 // account has a command for mode, resolving it exactly as a launch would, so
 // a mission never records an integrator the scheduler cannot start.
 func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
-	_, _, _, err := s.command(ctx, member, account, harnessName, mode, "task", model)
+	_, _, _, err := s.command(ctx, member, account, harnessName, mode, true, "task", model)
 	return err
 }
 

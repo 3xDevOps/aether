@@ -187,6 +187,14 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 
 // Outcome guidance is selected by the live assignment, not merely by whether
 // the coordination socket belongs to a mission.
+func TestCLIReportHelpListsNeedsInput(t *testing.T) {
+	for _, want := range []string{"success|failure|blocked|needs-input", "Needs you reason", "you MUST report needs-input"} {
+		if !strings.Contains(commandUsages["report"], want) {
+			t.Fatalf("report help lacks %q: %s", want, commandUsages["report"])
+		}
+	}
+}
+
 func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": workerOutcomes, "integrator": integratorOutcomes} {
 		status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: []string{protocol.MethodCoordInbox}}
@@ -199,6 +207,10 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 		}
 		if raw := out.String(); !strings.Contains(raw, want) {
 			t.Fatalf("%s skill lacks its outcome guidance: %s", role, raw)
+		}
+		raw := out.String()
+		if strings.Contains(raw, "needs-input") == (role == "worker") || strings.Contains(raw, "end a turn silently") {
+			t.Fatalf("%s skill has wrong needs-input guidance: %s", role, raw)
 		}
 	}
 }
@@ -385,10 +397,23 @@ func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 	if code, _ = runCLI(t, s.path, []string{"report", "--outcome", "success", "--summary", "done", "--evidence-ref", "ev-existing", "--idempotency-key", "report-fixed"}, ""); code != ExitOK {
 		t.Fatalf("report exit = %d, want %d", code, ExitOK)
 	}
+	if code, _ = runCLI(t, s.path, []string{"report", "--outcome", "needs-input", "--summary", "which region?", "--idempotency-key", "ask-user"}, ""); code != ExitOK {
+		t.Fatalf("needs-input report exit = %d, want %d", code, ExitOK)
+	}
 	if code, _ = runCLI(t, s.path, []string{"send", "--to", "run-2", "--body", "retry", "--idempotency-key", "send-fixed"}, ""); code != ExitOK {
 		t.Fatalf("idempotent send retry exit = %d, want %d", code, ExitOK)
 	}
 	seen := s.requests()
+	var asked bool
+	for _, req := range seen {
+		var p protocol.CoordReportParams
+		if req.Method == protocol.MethodCoordReport && json.Unmarshal(req.Params, &p) == nil && p.Outcome == protocol.CoordOutcomeNeedsInput {
+			asked = p.Summary == "which region?" && p.IdempotencyKey == "ask-user"
+		}
+	}
+	if !asked {
+		t.Fatalf("no needs-input report reached the socket: %+v", seen)
+	}
 	var sends []protocol.CoordSendParams
 	for _, req := range seen {
 		if req.Method != protocol.MethodCoordSend {

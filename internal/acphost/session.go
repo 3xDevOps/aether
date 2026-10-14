@@ -49,12 +49,15 @@ type Config struct {
 	// AutoAllow answers every permission request with allow_once, or else
 	// the first allow_* option.
 	AutoAllow bool
+	// SystemPrompt is sent as _meta.systemPrompt.append when the session is
+	// created or restored, for an agent that reads it.
+	SystemPrompt string
+	// ClaudeCode marks Claude's adapter: the session asks it for Claude
+	// Code's background task frames, and takes agent output that arrives
+	// with no prompt open for a turn the agent runs on its own.
+	ClaudeCode bool
 
-	// OnState reports execution state: working at every prompt start,
-	// idle at every turn end with the stop reason, and idle once a
-	// restored session opens. failed is the error a turn's prompt failed
-	// with while the agent stayed connected.
-	OnState func(working bool, reason string, failed error)
+	OnState func(TurnState)
 	// OnInputs reports the complete set of pending requests whenever it
 	// changes and once a restored session opens; an empty set clears them.
 	OnInputs func(pending []domain.RunInputRequest)
@@ -67,6 +70,23 @@ type Config struct {
 	// Code titles a session at its first prompt, but its adapter sends
 	// session_info_update only when the turn ends.
 	TitleLookup time.Duration
+}
+
+// TurnState is the session's execution state: working with reason "prompt"
+// at every prompt start and "background" when the agent works with no prompt
+// open, and idle with the stop reason once a turn ended and no background
+// work is left. A restored session reports idle once it opens, with
+// "interrupted" when the previous connection left work unfinished.
+type TurnState struct {
+	Working bool
+	Reason  string
+	// Tasks counts the background tasks a background state waits for.
+	Tasks int
+	// Autonomous says a background state's agent runs a turn of its own.
+	Autonomous bool
+	// Failed is the error a turn's prompt failed with while the agent stayed
+	// connected.
+	Failed error
 }
 
 // Receipt says what happened to a prompt.
@@ -85,7 +105,14 @@ const (
 
 // State is a snapshot of the session for a viewer that just connected.
 type State struct {
-	TurnInFlight  bool            `json:"turn_in_flight"`
+	// TurnInFlight is true while a prompt or an autonomous turn runs.
+	TurnInFlight bool `json:"turn_in_flight"`
+	// Background is true while the agent works with no prompt open: an
+	// autonomous turn runs or tasks the run waits for are live.
+	Background bool `json:"background,omitempty"`
+	// Tasks are the live background tasks, as the latest background item
+	// records them.
+	Tasks         []Task          `json:"tasks,omitempty"`
 	Queued        int             `json:"queued"`
 	Pending       []Request       `json:"pending"`
 	LastActivity  time.Time       `json:"last_activity"`
@@ -171,6 +198,39 @@ type Session struct {
 	actTimer   *time.Timer
 	// prompted is the latest prompt's text with whitespace collapsed.
 	prompted string
+
+	// autonomous is a turn the agent runs with no prompt from the host;
+	// resulted says the agent reported its result, origin what started it.
+	autonomous  bool
+	resulted    bool
+	origin      string
+	tasks       map[string]*liveTask
+	loggedTasks []Task
+	loggedOwed  bool
+	// taskCalls holds the last snapshot of each tool call whose task runs;
+	// endedTasks the status of tasks that ended before their tool call
+	// arrived, oldest first in endedOrder.
+	taskCalls  map[string]ToolCall
+	endedTasks map[string]string
+	endedOrder []string
+	lastUpdate time.Time
+	// quietAt is when the armed check of the autonomous turn's quiet fires.
+	quietAt time.Time
+	// owedUntil bounds the wait for the turn reporting back on a task the
+	// run waited for; endedInTurn says such a task ended during a turn.
+	owedUntil   time.Time
+	endedInTurn bool
+	// reported is the latest state OnState got; idleStop is the stop reason
+	// idle reports once background work drains. holdIdle keeps a failed
+	// turn's idle until the agent works again.
+	reported TurnState
+	idleStop string
+	holdIdle bool
+	// answers counts session/prompt answers the answer barrier passed,
+	// ended the turns whose end is recorded; turnEnded signals ended
+	// changing.
+	answers, ended int64
+	turnEnded      *sync.Cond
 }
 
 // Start initializes the agent over r and w, restores or creates its session
@@ -185,13 +245,17 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		return nil, err
 	}
 	s := &Session{
-		cfg:    cfg,
-		log:    log,
-		logger: cfg.Logger,
-		notify: newSerialQueue(),
-		done:   make(chan struct{}),
-		subs:   make(map[chan Item]struct{}),
+		cfg:        cfg,
+		log:        log,
+		logger:     cfg.Logger,
+		notify:     newSerialQueue(),
+		done:       make(chan struct{}),
+		subs:       make(map[chan Item]struct{}),
+		tasks:      make(map[string]*liveTask),
+		taskCalls:  make(map[string]ToolCall),
+		endedTasks: make(map[string]string),
 	}
+	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
 	s.proj = newProjector(s.projectLocked, s.armFlush, s.activityLocked)
 	go s.notify.run()
@@ -204,9 +268,23 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
 		s.mu.Unlock()
 	}
+	if cfg.ClaudeCode {
+		s.mu.Lock()
+		s.interruptTasksLocked(LastItem(log, KindBackground))
+		s.mu.Unlock()
+	}
 
 	s.conn = newConn(r, w, s, cfg.Logger)
 	s.conn.autoAllow = cfg.AutoAllow
+	if cfg.SystemPrompt != "" || cfg.ClaudeCode {
+		s.conn.sessionMeta = map[string]any{}
+	}
+	if cfg.SystemPrompt != "" {
+		s.conn.sessionMeta["systemPrompt"] = map[string]any{"append": cfg.SystemPrompt}
+	}
+	if cfg.ClaudeCode {
+		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames}
+	}
 	if err := s.open(ctx); err != nil {
 		_ = w.Close()
 		s.stop()
@@ -218,9 +296,11 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		// requests may have ended without reporting their end.
 		s.mu.Lock()
 		s.inputsLocked()
-		if s.cfg.OnState != nil {
-			s.callback(func() { s.cfg.OnState(false, "", nil) })
+		reason := ""
+		if Interrupted(log) {
+			reason = "interrupted"
 		}
+		s.stateLocked(TurnState{Reason: reason})
 		s.mu.Unlock()
 	}
 	go s.watch()
@@ -317,7 +397,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
-	if !s.turnActive {
+	if !s.turnActive && !s.autonomous {
 		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
@@ -376,7 +456,7 @@ func (s *Session) Prompt(ctx context.Context, blocks []acp.ContentBlock, steer b
 		s.mu.Unlock()
 		return Receipt{}, ErrClosed
 	}
-	if !s.turnActive {
+	if !s.turnActive && !s.autonomous {
 		ack := s.startTurnLocked(blocks, report(delivered, false))
 		s.mu.Unlock()
 		return awaitAccept(ctx, ack)
@@ -410,9 +490,11 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 	return Receipt{Outcome: OutcomeSent}, nil
 }
 
-// PromptIdle starts a turn only when no turn is running and no prompt is
-// queued, and reports whether it did once the agent accepted the prompt.
-func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bool, error) {
+// PromptIdle starts a turn only when no prompt or autonomous turn is running
+// or owed and no prompt is queued, and reports whether it did once the agent
+// accepted the prompt. delivered, if set, is called once for a prompt that
+// started a turn, as for Prompt.
+func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock, delivered func(error)) (bool, error) {
 	if err := s.validatePromptImages(blocks); err != nil {
 		return false, err
 	}
@@ -421,11 +503,11 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bo
 		s.mu.Unlock()
 		return false, ErrClosed
 	}
-	if s.turnActive || len(s.queue) > 0 {
+	if s.turnActive || s.autonomous || s.owingLocked() || len(s.queue) > 0 {
 		s.mu.Unlock()
 		return false, nil
 	}
-	ack := s.startTurnLocked(blocks, nil)
+	ack := s.startTurnLocked(blocks, delivered)
 	s.mu.Unlock()
 	if _, err := awaitAccept(ctx, ack); err != nil {
 		return false, err
@@ -448,14 +530,11 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 	ack := &turnAck{done: make(chan struct{}), delivered: delivered}
 	s.starting = ack
 	s.turn++
-	s.turnActive = true
+	s.turnActive, s.holdIdle, s.owedUntil = true, false, time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart})
+	s.relogTasksLocked()
 	s.userMessageLocked(blocks)
-	s.callback(func() {
-		if s.cfg.OnState != nil {
-			s.cfg.OnState(true, "prompt", nil)
-		}
-	})
+	s.stateLocked(TurnState{Working: true, Reason: "prompt"})
 	if s.cfg.TitleLookup > 0 && s.proj.title == "" && s.conn.Info().List {
 		time.AfterFunc(s.cfg.TitleLookup, s.lookupTitle)
 	}
@@ -530,13 +609,17 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
 	sent()
-	if err != nil && s.conn.closed() {
-		// Record what the agent sent before it went away ahead of the
-		// interruption.
-		s.conn.delivered()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ended++
+	s.turnEnded.Broadcast()
+	if err != nil && s.conn.closed() {
+		// Record what the agent sent before it went away ahead of the
+		// interruption. Its answer barrier, released above, is among it.
+		s.mu.Unlock()
+		s.conn.delivered()
+		s.mu.Lock()
+	}
 	s.resolveLocked(ack, err)
 	if s.starting == ack {
 		s.starting = nil
@@ -560,6 +643,10 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		reason, failed = "error", err
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})
 	}
+	if reason == "cancelled" {
+		s.endedInTurn = false
+		s.dismissLocked()
+	}
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: reason})
 	s.turnActive = false
 	if len(s.queue) > 0 && !s.closingLocked() {
@@ -568,16 +655,48 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		s.startTurnLocked(next.blocks, next.delivered)
 		return
 	}
-	s.callback(func() {
-		if s.cfg.OnState != nil {
-			s.cfg.OnState(false, reason, failed)
-		}
-	})
+	s.followUpLocked()
+	s.idleStop = reason
+	switch {
+	case failed != nil:
+		// Tasks still report back; the failure shows until the agent works
+		// again.
+		s.holdIdle, s.idleStop = true, ""
+		s.stateLocked(TurnState{Reason: reason, Failed: failed})
+	case reason == "interrupted":
+		s.stateLocked(TurnState{Reason: reason})
+	default:
+		s.settleLocked()
+	}
+}
+
+// promptAnswered returns once the turn whose session/prompt the agent just
+// answered has ended, so the updates the agent sends after its answer are
+// not taken for that turn.
+func (s *Session) promptAnswered() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.answers++
+	s.awaitTurnEndsLocked(s.answers)
+}
+
+// awaitTurnEndsLocked waits until the ends of the first n turns are recorded.
+func (s *Session) awaitTurnEndsLocked(n int64) {
+	for s.ended < n && !s.closed {
+		s.turnEnded.Wait()
+	}
 }
 
 // Cancel stops the running turn and answers every pending request
-// cancelled. Queued prompts still run afterwards.
-func (s *Session) Cancel(ctx context.Context) error { return s.conn.cancel(ctx) }
+// cancelled. Queued prompts still run afterwards. With no prompt open it ends
+// the autonomous turn and stops waiting for background tasks' follow-up.
+func (s *Session) Cancel(ctx context.Context) error {
+	err := s.conn.cancel(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cancelBackgroundLocked()
+	return err
+}
 
 // Answer resolves a pending request with one of its option ids. Content is
 // the form answer for an accepted question and nil otherwise.
@@ -585,140 +704,10 @@ func (s *Session) Answer(requestID, optionID string, content map[string]any) err
 	return s.conn.answer(requestID, optionID, content)
 }
 
-// SetOption sets an advertised option, using the legacy API only for selectors
-// synthesized from the agent's models or modes.
-func (s *Session) SetOption(ctx context.Context, configID string, value any) error {
-	s.optionMu.Lock()
-	defer s.optionMu.Unlock()
-	s.mu.Lock()
-	category, err := s.options.selection(configID, value)
-	nativeRevision := s.options.nativeRevision
-	modeRevision := s.options.mode.revision
-	var revision uint64
-	if category != "" {
-		revision = s.options.legacy(category).revision
-	}
-	s.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if category == "" {
-		opts, optionErr := s.conn.setOption(ctx, configID, value)
-		if optionErr != nil {
-			return optionErr
-		}
-		if present(opts) {
-			s.mu.Lock()
-			// Full catalog notifications own the entire snapshot. A mode-only
-			// notification owns just mode, not the other accepted response values.
-			if s.options.nativeRevision == nativeRevision {
-				mode, modeChanged := s.options.mode.current, s.options.mode.revision != modeRevision
-				s.options.replace(opts)
-				if modeChanged {
-					s.options.setCurrent("mode", mode)
-				}
-				s.publishOptionsLocked()
-			}
-			s.mu.Unlock()
-		}
-		return nil
-	}
-	return s.setLegacy(ctx, category, value.(string), revision) // selection checked the legacy value and type.
-}
-
-// setLegacy runs under optionMu; revision is the category's legacy revision
-// read before the call.
-func (s *Session) setLegacy(ctx context.Context, category, selected string, revision uint64) error {
-	var err error
-	if category == "model" {
-		err = s.conn.setModel(ctx, selected)
-	} else {
-		err = s.conn.setMode(ctx, selected)
-	}
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Notifications can supply the authoritative selection during the RPC.
-	// Only fill in the requested value when the agent did not send one.
-	if s.options.legacy(category).revision == revision {
-		if category == "mode" {
-			s.emitLocked(Item{Kind: KindModeChange, Mode: selected})
-		} else {
-			s.options.setCurrent(category, selected)
-			s.emitOptionsLocked()
-		}
-	}
-	return nil
-}
-
-// SetModel sets the agent's native model option when it advertises one, and
-// calls session/set_model otherwise.
-func (s *Session) SetModel(ctx context.Context, model string) error {
-	s.mu.Lock()
-	id := s.options.nativeModelID()
-	s.mu.Unlock()
-	if id != "" {
-		return s.SetOption(ctx, id, model)
-	}
-	s.optionMu.Lock()
-	defer s.optionMu.Unlock()
-	s.mu.Lock()
-	revision := s.options.model.revision
-	s.mu.Unlock()
-	return s.setLegacy(ctx, "model", model, revision)
-}
-
-// ModelOptionID is the id SetOption takes to change the model: the native
-// model option, else the selector synthesized from the agent's model list,
-// else empty.
-func (s *Session) ModelOptionID() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if id := s.options.nativeModelID(); id != "" {
-		return id
-	}
-	return s.options.syntheticID("model")
-}
-
-// Model is the session's current model, empty when the agent reports none.
-func (s *Session) Model() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, option := range s.options.options {
-		if option.category() == "model" {
-			if current, ok := option.selectValue(); ok {
-				return current
-			}
-		}
-	}
-	return s.options.model.current
-}
-
 func (s *Session) Notice(severity, title, description string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}})
-}
-
-// SetMode switches the agent's mode for agents that expose modes but no
-// mode config option.
-func (s *Session) SetMode(ctx context.Context, modeID string) error {
-	s.optionMu.Lock()
-	defer s.optionMu.Unlock()
-	s.mu.Lock()
-	revision := s.options.mode.revision
-	s.mu.Unlock()
-	if err := s.conn.setMode(ctx, modeID); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.options.mode.revision == revision {
-		s.emitLocked(Item{Kind: KindModeChange, Mode: modeID})
-	}
-	return nil
 }
 
 func (s *Session) ListSessions(ctx context.Context, cwd, cursor string) ([]SessionSummary, string, error) {
@@ -729,7 +718,9 @@ func (s *Session) State() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.state
-	st.TurnInFlight = s.turnActive
+	st.TurnInFlight = s.turnActive || s.autonomous
+	st.Background = s.backgroundLocked()
+	st.Tasks = s.loggedTasks
 	st.Queued = len(s.queue)
 	st.Pending = s.conn.pendingRequests()
 	st.LastActivity = s.conn.LastActivity()
@@ -802,6 +793,8 @@ func (s *Session) emitLocked(it Item) {
 		if s.cfg.OnTitle != nil {
 			s.callback(func() { s.cfg.OnTitle(it.Title) })
 		}
+	case KindToolCall:
+		s.trackTaskCallLocked(&it)
 	}
 	it.Turn = s.turn
 	s.appendLocked(it)
@@ -877,10 +870,21 @@ func (s *Session) inputsLocked() {
 }
 
 func (s *Session) update(raw json.RawMessage) {
+	var head updateHead
+	_ = json.Unmarshal(raw, &head)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.acceptedLocked()
+	// A background subagent streams while the main agent has not yet taken
+	// the prompt.
+	if head.Meta.ClaudeCode.ParentToolUseID == "" {
+		s.acceptedLocked()
+	}
+	if head.opensTurn() {
+		s.openAutonomousLocked()
+	}
 	s.proj.update(raw)
+	s.trackLocked(head)
+	s.settleLocked()
 }
 
 func (s *Session) authStatus(raw json.RawMessage) {
@@ -892,10 +896,15 @@ func (s *Session) authStatus(raw json.RawMessage) {
 func (s *Session) requestOpened(r Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Requests are not ordered with the answer barrier's notification.
+	s.awaitTurnEndsLocked(s.conn.answers.Load())
 	s.acceptedLocked()
+	s.openAutonomousLocked()
+	s.lastUpdate = time.Now()
 	s.proj.flushText()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
+	s.settleLocked()
 }
 
 func (s *Session) requestClosed(r Request) {
@@ -903,6 +912,9 @@ func (s *Session) requestClosed(r Request) {
 	defer s.mu.Unlock()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
+	// The agent resumes only after this returns; its quiet wait starts now.
+	s.lastUpdate = time.Now()
+	s.settleLocked()
 }
 
 // watch records the end of the connection: an interrupted turn, cancelled
@@ -917,17 +929,22 @@ func (s *Session) watch() {
 		s.resolveLocked(s.starting, ErrClosed)
 		s.starting = nil
 	}
-	if s.turnActive {
+	for id := range s.taskCalls {
+		s.taskEndedLocked(id, "stopped")
+	}
+	if held := s.heldTasksLocked(); len(held) > 0 {
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Background work interrupted", Description: "The agent connection closed while these background tasks ran: " + strings.Join(held, ", ")}})
+	}
+	s.interruptTasksLocked(Item{Tasks: s.loggedTasks, FollowUp: s.loggedOwed})
+	if s.turnActive || s.autonomous {
 		s.proj.endTurn()
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "The agent connection closed before the turn finished."}})
-		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
-		s.turnActive = false
-		s.callback(func() {
-			if s.cfg.OnState != nil {
-				s.cfg.OnState(false, "interrupted", nil)
-			}
-		})
+		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted", Autonomous: s.autonomous})
 	}
+	if s.turnActive || s.backgroundLocked() {
+		s.stateLocked(TurnState{Reason: "interrupted"})
+	}
+	s.turnActive, s.autonomous = false, false
 	for _, queued := range s.queue {
 		if queued.delivered != nil {
 			s.callback(func() { queued.delivered(ErrClosed) })
@@ -945,6 +962,7 @@ func (s *Session) watch() {
 		s.callback(func() { s.cfg.OnInputs(nil) })
 	}
 	s.closed = true
+	s.turnEnded.Broadcast()
 	s.queue = nil
 	for ch := range s.subs {
 		delete(s.subs, ch)
@@ -958,60 +976,4 @@ func (s *Session) watch() {
 	}
 	s.mu.Unlock()
 	s.notify.close(s.done)
-}
-
-// serialQueue runs callbacks one at a time in push order on its own
-// goroutine, so callbacks may call back into the Session.
-type serialQueue struct {
-	mu     sync.Mutex
-	fns    []func()
-	closed bool
-	done   chan struct{}
-	wake   chan struct{}
-}
-
-func newSerialQueue() *serialQueue { return &serialQueue{wake: make(chan struct{}, 1)} }
-
-func (q *serialQueue) push(f func()) {
-	q.mu.Lock()
-	q.fns = append(q.fns, f)
-	q.mu.Unlock()
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
-}
-
-// close stops the queue after the callbacks already pushed and then closes
-// done, if given.
-func (q *serialQueue) close(done chan struct{}) {
-	q.mu.Lock()
-	q.closed, q.done = true, done
-	q.mu.Unlock()
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
-}
-
-func (q *serialQueue) run() {
-	for {
-		q.mu.Lock()
-		fns, closed, done := q.fns, q.closed, q.done
-		q.fns = nil
-		q.mu.Unlock()
-		for _, f := range fns {
-			f()
-		}
-		if len(fns) > 0 {
-			continue
-		}
-		if closed {
-			if done != nil {
-				close(done)
-			}
-			return
-		}
-		<-q.wake
-	}
 }

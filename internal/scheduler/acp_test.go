@@ -202,6 +202,35 @@ func (w *acpWire) prompts(t *testing.T) [][]acp.ContentBlock {
 	return prompts
 }
 
+func (w *acpWire) sessionNewMeta(t *testing.T) map[string]any {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, line := range bytes.Split(w.data.Bytes(), []byte("\n")) {
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				Meta map[string]any `json:"_meta"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(line, &request); err == nil && request.Method == acp.AgentMethodSessionNew {
+			return request.Params.Meta
+		}
+	}
+	t.Fatal("no session/new on the wire")
+	return nil
+}
+
+func textOf(blocks []acp.ContentBlock) []string {
+	var texts []string
+	for _, b := range blocks {
+		if b.Text != nil {
+			texts = append(texts, b.Text.Text)
+		}
+	}
+	return texts
+}
+
 func newACPEnv(t *testing.T, opts ...func(*Config)) (*testEnv, *acpRuntime) {
 	t.Helper()
 	rt := newACPRuntime(t)
@@ -456,7 +485,24 @@ func TestEnhancedRunCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitItems(t, e.sched, run.ID, "cancelled turn", turnEnded("cancelled", 1))
-	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); got.Reason != acpCancelledReason {
+		t.Fatalf("reason %q, want %q", got.Reason, acpCancelledReason)
+	}
+}
+
+func TestACPIdleReason(t *testing.T) {
+	t.Parallel()
+	for stop, want := range map[string]string{
+		"":            agentstatus.ReasonIdle,
+		"end_turn":    agentstatus.ReasonIdle,
+		"cancelled":   acpCancelledReason,
+		"interrupted": acpInterruptedReason,
+		"max_tokens":  "turn ended: max_tokens",
+	} {
+		if got := acpIdleReason(stop); got != want {
+			t.Errorf("acpIdleReason(%q) = %q, want %q", stop, got, want)
+		}
+	}
 }
 
 func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
@@ -476,6 +522,10 @@ func TestEnhancedRunInputAfterAgentExitIsNotSent(t *testing.T) {
 			return it.Kind == acphost.KindNotice && it.Notice.Title == "Message not delivered: agent connection closed" &&
 				it.Notice.Description == "queued behind the turn"
 		})
+	})
+	waitFor(t, "the ended session's reason", func() bool {
+		row, getErr := e.db.GetRun(t.Context(), run.ID)
+		return getErr == nil && row.Status == domain.RunNeedsAttention && strings.HasPrefix(row.Reason, acpEndedReason)
 	})
 	_, err = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after exit"}, false, nil)
 	if got := collab.ClassifyReceipt(err); got != collab.ReceiptNotSent {
@@ -516,12 +566,48 @@ func TestEnhancedRunResumesAfterRestart(t *testing.T) {
 		s2.mu.Lock()
 		defer s2.mu.Unlock()
 		entry := s2.runs[run.ID]
-		return entry != nil && entry.agentReport.State == agentstatus.Idle && len(entry.pendingInputs) == 0
+		return entry != nil && entry.agentReport.State == agentstatus.Idle && entry.agentReport.Reason == acpInterruptedReason && len(entry.pendingInputs) == 0
 	})
 	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "after restart"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitItems(t, s2, run.ID, "a turn after the restart", turnEnded("end_turn", 1))
+}
+
+func TestEnhancedRunParksAsInterruptedWhenARestartFindsAnOpenTurn(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	run := e.launchACP(t, acpmock.PromptWait)
+	e.waitAgentWorking(t, run.ID)
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	log, err := acphost.OpenLog(e.pty.ItemLogPath(run.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = log.Append(&acphost.Item{Kind: acphost.KindTurnStart}); err != nil {
+		t.Fatal(err)
+	}
+	if err = log.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	waitFor(t, "the interrupted turn's idle reason", func() bool {
+		s2.mu.Lock()
+		defer s2.mu.Unlock()
+		entry := s2.runs[run.ID]
+		return entry != nil && entry.agentReport.State == agentstatus.Idle && entry.agentReport.Reason == acpInterruptedReason
+	})
 }
 
 func TestEnhancedRunRestartWakesUnreadMail(t *testing.T) {
@@ -1160,5 +1246,246 @@ func TestStandardDriverKeepsImageReferencesAndSubmitSequence(t *testing.T) {
 	want := "caption\n\n--- AETHER ATTACHMENTS ---\n- " + prompt.Attachments[0] + "\n--- END AETHER ATTACHMENTS ---"
 	if len(injected) != 1 || injected[0].message != want || injected[0].submit != "\r" {
 		t.Fatalf("terminal delivery = %+v", injected)
+	}
+}
+
+func TestEnhancedRunSendsInstructionsAsSystemPromptWhenTheAgentTakesOne(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	wire := &rt.all()[0].wire
+	system, _ := wire.sessionNewMeta(t)["systemPrompt"].(map[string]any)
+	if got := system["append"]; got != e.sched.runInstructions(false, false) || got == "" {
+		t.Fatalf("session/new systemPrompt.append %q, want the run instructions", got)
+	}
+	prompts := wire.prompts(t)
+	if len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{"say pong"}) {
+		t.Fatalf("prompts %+v, want the bare task", prompts)
+	}
+}
+
+func TestEnhancedRunAppendsInstructionsToTheTaskWithoutASystemPromptRoute(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	wire := &rt.all()[0].wire
+	if meta := wire.sessionNewMeta(t); meta["systemPrompt"] != nil {
+		t.Fatalf("session/new _meta %+v, want no system prompt", meta)
+	}
+	prompts := wire.prompts(t)
+	if want := e.sched.withCoAuthorInstruction("say pong", false, false); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
+		t.Fatalf("prompts %+v, want the task with the instructions", prompts)
+	}
+}
+
+func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMessageOnly(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	for i, text := range []string{"first", "second"} {
+		if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: text}, false, nil); err != nil {
+			t.Fatal(err)
+		}
+		waitItems(t, e.sched, run.ID, "turn "+text, turnEnded("end_turn", i+1))
+	}
+	prompts := rt.all()[0].wire.prompts(t)
+	if len(prompts) != 2 {
+		t.Fatalf("prompts %+v, want two", prompts)
+	}
+	if want := []string{"first", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
+	}
+	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
+		t.Fatalf("second prompt %q, want the message alone", got)
+	}
+}
+
+func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMailPrompt(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "idle session", func() bool { return e.sched.acp.session(run.ID) != nil && e.sched.IdleEnhanced(run.ID) })
+	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the wake turn", turnEnded("end_turn", 1))
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "second"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the second turn", turnEnded("end_turn", 2))
+	prompts := rt.all()[0].wire.prompts(t)
+	if len(prompts) != 2 {
+		t.Fatalf("prompts %+v, want two", prompts)
+	}
+	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+		t.Fatalf("mail prompt %q, want the hint and the instructions", textOf(prompts[0]))
+	}
+	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
+		t.Fatalf("second prompt %q, want the message alone", got)
+	}
+}
+
+func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartBeforeAnyTurn(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, binDir := withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	s2.UseCoordination(coord, binDir)
+	startScheduler(t, s2)
+	waitFor(t, "restored session", func() bool { return s2.acp.session(run.ID) != nil })
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "first"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, s2, run.ID, "the first turn", turnEnded("end_turn", 1))
+	execs := rt.all()
+	prompts := execs[len(execs)-1].wire.prompts(t)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts %+v, want one", prompts)
+	}
+	if want := []string{"first", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
+	}
+}
+
+func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartAfterOnlyRefusedPrompts(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, binDir := withCoordination(t, e)
+	rt.fixture.RefusePrompts = true
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "first"}, false, nil); err == nil {
+		t.Fatal("Inject of a refused prompt succeeded")
+	}
+	waitItems(t, e.sched, run.ID, "the refused turn", turnEnded("error", 1))
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rt.fixture.RefusePrompts = false
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	s2.UseCoordination(coord, binDir)
+	startScheduler(t, s2)
+	waitFor(t, "restored session", func() bool { return s2.acp.session(run.ID) != nil })
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "second"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, s2, run.ID, "the first answered turn", turnEnded("end_turn", 1))
+	execs := rt.all()
+	prompts := execs[len(execs)-1].wire.prompts(t)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts %+v, want one", prompts)
+	}
+	if want := []string{"second", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+		t.Fatalf("first answered prompt %q, want the message and the instructions", textOf(prompts[0]))
+	}
+}
+
+// A prompt queued behind a running turn that the session drops never reached
+// the agent, so the next prompt still owes the instructions.
+func TestEnhancedTasklessRunKeepsInstructionsWhenTheFirstMessageIsDropped(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	if _, err := sess.Prompt(t.Context(), []acp.ContentBlock{acp.TextBlock(acpmock.PromptWait)}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := e.sched.acp.Deliver(t.Context(), &domain.Run{ID: run.ID}, nil, domain.AgentPrompt{Text: "first"}, false, nil)
+	if err != nil || receipt != acphost.OutcomeQueued {
+		t.Fatalf("Deliver = %q, %v; want %q", receipt, err, acphost.OutcomeQueued)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the instructions given back", func() bool {
+		e.sched.acp.mu.Lock()
+		defer e.sched.acp.mu.Unlock()
+		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(false, false)
+	})
+}
+
+func TestEnhancedTasklessRunAppendsInstructionsOnceToConcurrentPrompts(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "idle session", func() bool { return e.sched.acp.session(run.ID) != nil && e.sched.IdleEnhanced(run.ID) })
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "message"}, false, nil); err != nil {
+			t.Errorf("Inject: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil && !errors.Is(err, errACPBusy) {
+			t.Errorf("WakeEnhanced: %v", err)
+		}
+	}()
+	wg.Wait()
+	waitFor(t, "the turns to finish", func() bool { return e.sched.IdleEnhanced(run.ID) && assistantSaidNow(e, run.ID, "pong") })
+	count := 0
+	for _, prompt := range rt.all()[0].wire.prompts(t) {
+		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(false, false)) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%d prompts carry the instructions, want one", count)
+	}
+}
+
+func TestEnhancedTasklessRunGetsInstructionsBackFromABusyWake(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	instructions, settle := e.sched.acp.claimInstructions(run.ID, sess)
+	if instructions != e.sched.runInstructions(false, false) {
+		t.Fatalf("claimed %q, want the run instructions", instructions)
+	}
+	if again, _ := e.sched.acp.claimInstructions(run.ID, sess); again != "" {
+		t.Fatalf("a second claim got %q, want none while the first is out", again)
+	}
+	settle(errACPBusy)
+	if got, _ := e.sched.acp.claimInstructions(run.ID, sess); got != instructions {
+		t.Fatalf("claim after a busy wake = %q, want the instructions back", got)
 	}
 }

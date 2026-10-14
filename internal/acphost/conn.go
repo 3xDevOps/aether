@@ -1,6 +1,8 @@
 package acphost
 
 import (
+	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -39,6 +41,14 @@ const methodSteering = "_session/steering"
 // context, which it cancels only once the notifications read before the
 // connection ended have been handled; the marker's call captures it.
 const deliveryMarker = "_aether/delivery"
+
+// answeredMarker is fed to the SDK right behind the agent's answer to a
+// session/prompt. The SDK hands a response to its caller once the
+// notifications read before it are handled, but handles later ones
+// meanwhile; the marker's call holds them until the turn's end is recorded.
+const answeredMarker = "_aether/prompt-answered"
+
+var answeredLine = []byte(`{"jsonrpc":"2.0","method":"` + answeredMarker + `"}` + "\n")
 
 // AgentInfo is what the agent advertised in initialize that the host acts on.
 type AgentInfo struct {
@@ -87,11 +97,14 @@ type sessionResult struct {
 	ConfigOptions json.RawMessage `json:"configOptions"`
 }
 
-// connEvents receives what the agent sends. Calls for session/update and
-// _auth/status_update arrive in wire order; request calls may interleave.
+// connEvents receives what the agent sends. Calls for session/update,
+// _auth/status_update, _claude/sdkMessage and promptAnswered arrive in wire
+// order; request calls may interleave.
 type connEvents interface {
 	update(raw json.RawMessage)
 	authStatus(raw json.RawMessage)
+	sdkMessage(raw json.RawMessage)
+	promptAnswered()
 	requestOpened(r Request)
 	requestClosed(r Request)
 }
@@ -121,7 +134,13 @@ type Conn struct {
 	sessionID    atomic.Value
 	replaying    atomic.Bool
 	lastActivity atomic.Int64
-	autoAllow    bool
+	// answers counts session/prompt answers read from the agent, in wire
+	// order with requests.
+	answers   atomic.Int64
+	autoAllow bool
+	// sessionMeta is the _meta of session/new, session/resume and
+	// session/load.
+	sessionMeta map[string]any
 
 	mu       sync.Mutex
 	idle     *sync.Cond
@@ -141,26 +160,53 @@ type agentInput struct {
 
 	mu     sync.Mutex
 	unsent chan struct{}
+	// promptID is the JSON-RPC id of the session/prompt awaiting its answer.
+	promptID string
+}
+
+type rpcHead struct {
+	Method string          `json:"method"`
+	ID     json.RawMessage `json:"id"`
 }
 
 func (in *agentInput) Write(p []byte) (int, error) {
+	var m rpcHead
+	prompt := bytes.Contains(p, []byte(`"`+acp.AgentMethodSessionPrompt+`"`)) && json.Unmarshal(p, &m) == nil &&
+		m.Method == acp.AgentMethodSessionPrompt
+	if prompt {
+		// Before the write: the agent can answer before Write returns.
+		in.mu.Lock()
+		in.promptID = string(m.ID)
+		in.mu.Unlock()
+	}
 	n, err := in.WriteCloser.Write(p)
 	if err != nil {
 		in.broken.Store(true)
 		_ = in.output.Close()
 	}
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.unsent != nil {
-		var m struct {
-			Method string `json:"method"`
-		}
-		if json.Unmarshal(p, &m) == nil && m.Method == acp.AgentMethodSessionPrompt {
+	if prompt {
+		in.mu.Lock()
+		if in.unsent != nil {
 			close(in.unsent)
 			in.unsent = nil
 		}
+		in.mu.Unlock()
 	}
 	return n, err
+}
+
+// answersPrompt reports whether line, one line of the agent's output, is its
+// answer to the latest session/prompt.
+func (in *agentInput) answersPrompt(line []byte) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	var m rpcHead
+	if in.promptID == "" || !bytes.Contains(line, []byte(`"id"`)) || json.Unmarshal(line, &m) != nil ||
+		m.Method != "" || string(m.ID) != in.promptID {
+		return false
+	}
+	in.promptID = ""
+	return true
 }
 
 // sendingPrompt holds a cancel back until the next session/prompt is
@@ -188,10 +234,6 @@ func (in *agentInput) promptUnsent() <-chan struct{} {
 
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
 	outR, outW := io.Pipe()
-	go func() {
-		_, err := io.Copy(outW, r)
-		_ = outW.CloseWithError(err)
-	}()
 	c := &Conn{
 		w:          &agentInput{WriteCloser: w, output: outW},
 		logger:     logger,
@@ -201,12 +243,50 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 		resolved:   make(map[string]bool),
 	}
 	c.idle = sync.NewCond(&c.mu)
+	go c.relay(outW, r)
 	c.sessionID.Store("")
 	c.touch()
 	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
 	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, outR))
 	c.rpc.SetLogger(logger)
 	return c
+}
+
+// relay copies the agent's output to the SDK, with answeredMarker behind the
+// answer to each session/prompt.
+func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
+	br := bufio.NewReaderSize(src, 64<<10)
+	lineStart := true
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(chunk) > 0 {
+			ended := chunk[len(chunk)-1] == '\n'
+			// Matched before the SDK sees the answer, which can start the
+			// next prompt.
+			answered := ended && lineStart && c.w.answersPrompt(chunk)
+			if answered {
+				c.answers.Add(1)
+			}
+			_, werr := dst.Write(chunk)
+			if werr == nil && answered {
+				_, werr = dst.Write(answeredLine)
+			}
+			if werr != nil {
+				_ = dst.CloseWithError(werr)
+				return
+			}
+			lineStart = ended
+		}
+		switch {
+		case errors.Is(err, bufio.ErrBufferFull):
+		case errors.Is(err, io.EOF):
+			_ = dst.Close()
+			return
+		case err != nil:
+			_ = dst.CloseWithError(err)
+			return
+		}
+	}
 }
 
 func (c *Conn) touch() { c.lastActivity.Store(time.Now().UnixNano()) }
@@ -289,7 +369,7 @@ func (c *Conn) initialize(ctx context.Context) error {
 func present(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
 
 func (c *Conn) newSession(ctx context.Context, cwd string, mcp []acp.McpServer) (sessionResult, error) {
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionNew, acp.NewSessionRequest{Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionNew, acp.NewSessionRequest{Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		return res, err
 	}
@@ -302,7 +382,7 @@ func (c *Conn) newSession(ctx context.Context, cwd string, mcp []acp.McpServer) 
 
 func (c *Conn) resumeSession(ctx context.Context, id, cwd string, mcp []acp.McpServer) (sessionResult, error) {
 	c.sessionID.Store(id)
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionResume, acp.ResumeSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionResume, acp.ResumeSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		c.sessionID.Store("")
 		return res, err
@@ -318,7 +398,7 @@ func (c *Conn) loadSession(ctx context.Context, id, cwd string, mcp []acp.McpSer
 	c.sessionID.Store(id)
 	c.replaying.Store(true)
 	defer c.replaying.Store(false)
-	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionLoad, acp.LoadSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp)})
+	res, err := call[sessionResult](c, ctx, acp.AgentMethodSessionLoad, acp.LoadSessionRequest{SessionId: acp.SessionId(id), Cwd: cwd, McpServers: nonNil(mcp), Meta: c.sessionMeta})
 	if err != nil {
 		c.sessionID.Store("")
 		return res, err
@@ -460,6 +540,21 @@ func (c *Conn) handle(ctx context.Context, method string, params json.RawMessage
 			return nil, nil
 		}
 		c.events.update(n.Update)
+		return nil, nil
+	case "_claude/sdkMessage":
+		var n struct {
+			SessionID string          `json:"sessionId"`
+			Message   json.RawMessage `json:"message"`
+		}
+		if err := json.Unmarshal(params, &n); err != nil {
+			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
+		if n.SessionID == c.SessionID() {
+			c.events.sdkMessage(n.Message)
+		}
+		return nil, nil
+	case answeredMarker:
+		c.events.promptAnswered()
 		return nil, nil
 	case "_auth/status_update":
 		var n struct {

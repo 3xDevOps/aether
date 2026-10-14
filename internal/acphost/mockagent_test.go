@@ -58,6 +58,7 @@ type mockAgent struct {
 
 	mu          sync.Mutex
 	methods     []string
+	received    map[string]json.RawMessage
 	inflight    int
 	maxInflight int
 	cancelled   chan struct{}
@@ -107,6 +108,10 @@ func (m *mockAgent) request(ctx context.Context, method string, params any) (jso
 func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {
 	m.mu.Lock()
 	m.methods = append(m.methods, method)
+	if m.received == nil {
+		m.received = map[string]json.RawMessage{}
+	}
+	m.received[method] = params
 	m.mu.Unlock()
 	switch method {
 	case acp.AgentMethodInitialize:
@@ -180,6 +185,7 @@ func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMe
 type recorder struct {
 	mu       sync.Mutex
 	states   []string
+	turns    []TurnState
 	inputs   [][]domain.RunInputRequest
 	activity [][2]string
 	failed   error
@@ -188,21 +194,25 @@ type recorder struct {
 }
 
 func newRecorder() *recorder {
-	return &recorder{idle: make(chan string, 16), inputsCh: make(chan []domain.RunInputRequest, 16)}
+	return &recorder{idle: make(chan string, 256), inputsCh: make(chan []domain.RunInputRequest, 16)}
 }
 
 func (r *recorder) config(c Config) Config {
-	c.OnState = func(working bool, reason string, failed error) {
+	c.OnState = func(st TurnState) {
 		r.mu.Lock()
-		r.failed = failed
-		if working {
-			r.states = append(r.states, "working:"+reason)
-		} else {
-			r.states = append(r.states, "idle:"+reason)
+		r.failed = st.Failed
+		r.turns = append(r.turns, st)
+		switch {
+		case st.Autonomous:
+			r.states = append(r.states, "working:autonomous")
+		case st.Working:
+			r.states = append(r.states, "working:"+st.Reason)
+		default:
+			r.states = append(r.states, "idle:"+st.Reason)
 		}
 		r.mu.Unlock()
-		if !working {
-			r.idle <- reason
+		if !st.Working {
+			r.idle <- st.Reason
 		}
 	}
 	c.OnInputs = func(p []domain.RunInputRequest) {
