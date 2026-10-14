@@ -91,6 +91,10 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                   id={workersID(row.run.id)}
                   hidden={shown(row.run.id, workers).length === 0}
                   aria-label={`Workers of ${runLabel(row.run)}`}
+                  className={cn(
+                    '[--wire:--spacing(4.75)]',
+                    foldable(workers) > 0 ? '[--trunk:--spacing(12.75)] coarse:[--trunk:--spacing(17.75)]' : '[--trunk:--spacing(4.75)]',
+                  )}
                 >
                   {shown(row.run.id, workers).map((worker) => (
                     <li key={worker.run.id} className={connectors}>

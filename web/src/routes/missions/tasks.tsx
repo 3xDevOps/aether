@@ -250,7 +250,7 @@ function TaskRow({ node, detail, agents, needy, folded, showProposalBlocker, can
   const needing = attempts.filter((item) => needy.has(item.attempt.run_id))
   if (folded && !held && needing.length === 0) return null
   return (
-    <li className={connectors}>
+    <li className={cn(connectors, '[--wire:--spacing(3.5)] coarse:[--wire:--spacing(5.5)]')}>
       <Collapsible open={expanded} onOpenChange={setOpen}>
         <div className="flex min-h-7 items-center gap-3 coarse:min-h-11">
           {folded ? (
@@ -352,7 +352,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
             </p>
           )
         ) : (
-          <ul className="ml-2 flex flex-col">
+          <ul className="ml-2 flex flex-col [--trunk:--spacing(7.75)]">
             {tree.map((node) => (
               <TaskRow
                 key={node.task.id}
