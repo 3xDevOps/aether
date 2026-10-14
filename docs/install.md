@@ -936,10 +936,11 @@ restarts it on resume if it died.
 **Multiple servers.** In Edge mode, Settings > This computer lists **Saved
 servers** (the default link plus named ones). **Switch** relinks the gateway in
 place and the dashboard reloads. **Link another server** opens onboarding's
-Connect step with the edge server picker; it is off while a named server is
-active, because a new link replaces the default. A newly linked edge server
-becomes the default, and the previous edge default stays as a saved server
-named by its server id. The app starts on the server you last switched to
+Connect step with the edge server picker, and works while the default server
+is offline. From the default, a newly linked edge server becomes the default
+and the previous edge default stays as a saved server named by its server id.
+From a named server, the link is saved into that server and the default is
+untouched. The app starts on the server you last switched to
 (`gui_server` in `config.json`). Port forwarding is not offered on the phone:
 a forward listens on `127.0.0.1`, which every app on the phone can reach.
 

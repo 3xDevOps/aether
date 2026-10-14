@@ -311,14 +311,15 @@ describe('settings view', () => {
       expect(useStore.getState().route).toEqual({ name: 'onboarding', params: { link: 'another' } })
     })
 
-    it('keeps Link another server off while a named server is active, so the default survives', async () => {
+    it('keeps Link another server available on a named server, so an offline Default cannot block it', async () => {
       const client = fakeApi({ localLinkStatus: vi.fn(async () => status) })
       seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'edge.link'] } })
       render(<SettingsRoute params={{}} client={client} />)
 
       const button = await screen.findByRole('button', { name: 'Link another server' })
-      expect((button as HTMLButtonElement).disabled).toBe(true)
-      expect(screen.getByText(/switch to Default first/)).toBeDefined()
+      expect((button as HTMLButtonElement).disabled).toBe(false)
+      fireEvent.click(button)
+      expect(useStore.getState().route).toEqual({ name: 'onboarding', params: { link: 'another' } })
     })
   })
   it('separates a configured server from its missing repository', async () => {

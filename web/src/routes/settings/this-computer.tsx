@@ -74,7 +74,6 @@ function LinkRows({ client }: { client: Api }) {
               ? (
                   <>
                     Connected to <Code>{linkTarget(link)}</Code> as {link.user}.
-                    {link.active && caps.hasLocal('edge.link') && ' To link another server, switch to Default first: a new link replaces the default.'}
                   </>
                 )
               : caps.hasLocal('edge.link')
@@ -85,9 +84,6 @@ function LinkRows({ client }: { client: Api }) {
           <Button
             size="sm"
             variant="secondary"
-            // A new link replaces the default one; from a named server the
-            // default would be overwritten instead of kept as a saved server.
-            disabled={!!link?.active}
             onClick={() => navigate('onboarding', { link: 'another' })}
           >
             {configured ? 'Link another server' : 'Link a server'}
