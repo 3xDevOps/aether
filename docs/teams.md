@@ -455,7 +455,8 @@ linked to my-server:2222 as Dana (collaborator)
 
 Invited members are collaborators immediately - no approval step, because the
 code was the approval. Nobody needs shell access to the server box to join.
-A code stops working once the admin who minted it is no longer an admin.
+A code stops working once the admin who minted it is no longer an admin,
+and a merge that demotes them deletes it for good.
 A code minted by an older server, which did not record who minted it,
 lasts until it expires.
 

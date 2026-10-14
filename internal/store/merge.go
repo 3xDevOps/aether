@@ -224,6 +224,9 @@ type MergeAccept struct {
 	ConfirmedBy     string
 	Now             time.Time
 	Archive         func(mergeID string, absorbed domain.MemberID) (path string, undo func(), err error)
+	// Demoted runs in the transaction when the merged member loses the
+	// admin role either had, to revoke what they issued outside the store.
+	Demoted func(a, b domain.MemberID) error
 }
 
 // MemberMerge is the audit record of one merge.
@@ -721,6 +724,11 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 	demoted := role != domain.RoleAdmin && (survivor.Member.Role == domain.RoleAdmin || absorbed.Member.Role == domain.RoleAdmin)
 	if err = mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
 		return nil, err
+	}
+	if demoted && a.Demoted != nil {
+		if err = a.Demoted(survivor.Member.ID, absorbed.Member.ID); err != nil {
+			return nil, fmt.Errorf("store: merge: revoke what the demoted admin issued: %w", err)
+		}
 	}
 	if a.Archive != nil {
 		var undo func()

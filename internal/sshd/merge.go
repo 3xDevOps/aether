@@ -275,6 +275,9 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	}
 	accept := store.MergeAccept{ProposalID: p.ProposalID, Caller: member, Digest: p.PlanDigest, KeepAdmin: p.KeepAdmin,
 		Policy: policy, Now: time.Now().UTC(), Archive: s.archiveHome}
+	if s.cfg.InvitesDir != "" {
+		accept.Demoted = func(a, b domain.MemberID) error { return revokeInvitesBy(s.cfg.InvitesDir, a, b) }
+	}
 	accept.ConfirmedByKind, accept.ConfirmedBy = s.connDescription(ctx)
 	if edge := s.currentEdgeOwner(); edge != nil {
 		owner, oerr := edge.Owner()
@@ -358,8 +361,6 @@ func acceptable(pending []*store.PendingMerge, p protocol.MemberMergeAcceptParam
 
 // afterMerge closes the absorbed member's connections, the caller's once
 // it has the result, and publishes the merge and the devices that moved.
-// A demoted admin's invite codes need nothing here: joining checks the
-// issuer's role.
 func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *store.MemberMerge, devs []*domain.Device) {
 	closeAbsorbed := func() { s.closeMemberConns(merge.AbsorbedID) }
 	if caller != merge.AbsorbedID || !deferUntilResponded(ctx, closeAbsorbed) {

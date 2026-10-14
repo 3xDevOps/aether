@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -207,4 +208,25 @@ func restoreInvite(dir, code string, rec inviteRecord) error {
 		return err
 	}
 	return os.WriteFile(invitePath(dir, code), append(body, '\n'), 0o600)
+}
+
+// revokeInvitesBy deletes the open invite codes any of issuers minted.
+func revokeInvitesBy(dir string, issuers ...domain.MemberID) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sshd: list invites: %w", err)
+	}
+	for _, e := range entries {
+		rec, lerr := loadInvite(dir, e.Name())
+		if lerr != nil || !slices.Contains(issuers, rec.IssuedBy) {
+			continue
+		}
+		if berr := burnInvite(dir, e.Name()); berr != nil && !errors.Is(berr, os.ErrNotExist) {
+			return fmt.Errorf("sshd: revoke invite: %w", berr)
+		}
+	}
+	return nil
 }

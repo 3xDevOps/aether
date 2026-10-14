@@ -511,3 +511,26 @@ func TestInviteCodeFollowsAMergedIssuer(t *testing.T) {
 		t.Fatalf("issuer merged into an admin = %v, %v; want still an admin", admin, err)
 	}
 }
+
+// A merge that demotes an admin revokes their invite codes for good:
+// promoting the merged member again does not bring them back.
+func TestDemotingMergeRevokesInviteCodes(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "invites")
+	e, whois := mergeEnv(t, func(c *Config) { c.InvitesDir = dir })
+	_, _ = addMember(t, e, "Zed", domain.RoleAdmin, false)
+	code, _, err := mintInvite(dir, time.Hour, e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
+	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
+	admin := controlClient(t, e)
+	proposal := mustPropose(t, tc, mergeStart(t, admin), string(e.member.ID))
+	if _, err = mergeAccept(admin, proposal, false); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if inviteUsable(dir, code) {
+		t.Fatal("the demoted admin's invite code survived the merge")
+	}
+}
