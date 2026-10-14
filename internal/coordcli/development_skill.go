@@ -138,8 +138,10 @@ func skillDevelopmentCommands(status *protocol.CoordStatusResult, group string) 
 
 func writeDevelopmentEntrypoints(out io.Writer, status *protocol.CoordStatusResult) error {
 	var topics []string
+	var terminalView string
 	if len(skillDevelopmentCommands(status, "terminal")) > 0 {
 		topics = append(topics, "terminal")
+		terminalView = "Terminals started with aether-internal terminal appear in the run's Terminal view in the dashboard; your own shell tool's sessions do not.\n"
 	}
 	if len(skillDevelopmentCommands(status, "browser")) > 0 {
 		topics = append(topics, "browser")
@@ -150,7 +152,7 @@ func writeDevelopmentEntrypoints(out io.Writer, status *protocol.CoordStatusResu
 	if len(topics) == 0 {
 		return nil
 	}
-	_, err := fmt.Fprintf(out, "Live development topics (load only what you need):\n  aether-internal skill <%s>\nNative Git guidance does not assert installed tools or push authority.\n", strings.Join(topics, "|"))
+	_, err := fmt.Fprintf(out, "Live development topics (load only what you need):\n  aether-internal skill <%s>\n%sNative Git guidance does not assert installed tools or push authority.\n", strings.Join(topics, "|"), terminalView)
 	return err
 }
 

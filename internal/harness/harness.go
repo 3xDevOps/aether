@@ -25,7 +25,7 @@ const ModelPlaceholder = "{model}"
 // DiscoveryInstruction points to live run identity, available capabilities, and
 // any assignment. It carries no authority, identity, or task details.
 const (
-	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified."
+	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified."
 	DiscoveryFileName    = "discovery.md"
 	// developer_instructions is the Codex config key for additional
 	// instructions; model_instructions_file would replace built-ins.

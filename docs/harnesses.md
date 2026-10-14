@@ -945,7 +945,7 @@ Task-bearing and taskless launches use the same capability-neutral discovery
 instruction:
 
 ```
-Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified.
 ```
 
 For a taskless launch, the same instruction is delivered through the
