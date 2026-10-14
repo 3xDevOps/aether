@@ -123,10 +123,7 @@ jobs:
         run: make vulncheck
         continue-on-error: true
       - name: Lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.10.1
-          skip-cache: true
+        run: make lint
 
   build-and-test:
     needs: changes
@@ -199,8 +196,7 @@ jobs:
       - name: Native hook lifecycle tests
         run: make test-native-hooks
 
-  # internal/harness needs the agent images built here. The independent
-  # integration shards start without waiting for these images.
+  # internal/harness needs the agent images built here.
   smoke:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
@@ -270,16 +266,6 @@ jobs:
           AETHER_SMOKE_IMAGE_CODEX_NOLOGIN: aether-smoke:ci
           AETHER_SMOKE_IMAGE_OPENCODE_NOLOGIN: aether-smoke:ci
         run: make test-integration INTEGRATION_PKGS=./internal/harness
-      - name: Export the tested standard image
-        if: matrix.arch == 'amd64'
-        run: docker save --output "$RUNNER_TEMP/aether-standard.tar" aether-standard:ci
-      - uses: actions/upload-artifact@v4
-        if: matrix.arch == 'amd64'
-        with:
-          name: standard-image-amd64
-          path: ${{ runner.temp }}/aether-standard.tar
-          compression-level: 0
-          retention-days: 1
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && matrix.arch == 'arm64' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
@@ -329,15 +315,6 @@ jobs:
       # Match that authority, not a chmod 777 workaround for the test runner.
       - name: Exercise the real browser runtime
         run: sudo env "PATH=$PATH" "HOME=$HOME" AETHER_BROWSER_TEST_IMAGE=aether/browser:test go test -race -timeout=10m -tags=integration ./internal/runtime -run '^TestDockerBrowser' -v
-      - name: Save the tested image for server and dashboard scenarios
-        if: matrix.arch == 'amd64'
-        run: docker save --output "$RUNNER_TEMP/aether-browser.tar" aether/browser:test
-      - uses: actions/upload-artifact@v4
-        if: matrix.arch == 'amd64'
-        with:
-          name: browser-image-amd64
-          path: ${{ runner.temp }}/aether-browser.tar
-          retention-days: 1
 
   # A pull request runs the edge image build and smoke test only when
   # scripts/ci-classify-edge.sh says a changed path can affect the image.
@@ -349,10 +326,9 @@ jobs:
       contents: read
     uses: ./.github/workflows/edge-image.yml
 
-  # Five shards cover internal/server by test name, balanced by the durations
+  # Four shards cover internal/server by test name, balanced by the durations
   # -v prints; scheduler is its own package; rest dynamically discovers every
-  # other integration package. Only server-rest needs the browser image, so
-  # the six image-independent shards do not wait for or transfer it.
+  # other integration package. Only server-rest needs the browser image.
   integration:
     name: integration (${{ matrix.shard }})
     needs: changes
@@ -366,10 +342,8 @@ jobs:
         include:
           - shard: server-chaos
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationChaos
-          - shard: server-coordination
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationCoordination
-          - shard: server-mission
-            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN=^TestIntegrationMission
+          - shard: server-mission-coordination
+            make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(Mission|Coordination)'
           - shard: server-heavy
             make: INTEGRATION_PKGS=./internal/server INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'
           - shard: scheduler
@@ -405,8 +379,8 @@ jobs:
 
   integration-server-rest:
     name: integration (server-rest)
-    needs: [changes, browser]
-    if: ${{ !cancelled() && needs.browser.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -420,12 +394,17 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
-      - uses: actions/download-artifact@v4
+      # Built from the cache the browser job writes on main, never written
+      # here, so this job does not wait for that job.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the browser companion
+        uses: docker/build-push-action@v6
         with:
-          name: browser-image-amd64
-          path: ${{ runner.temp }}
-      - name: Load the tested browser companion
-        run: docker load --input "$RUNNER_TEMP/aether-browser.tar"
+          context: .
+          file: images/browser/Dockerfile
+          load: true
+          tags: aether/browser:test
+          cache-from: type=gha,scope=browser-amd64-main
       - name: Integration tests (real Docker, real git)
         env:
           GOFLAGS: -v
@@ -475,8 +454,8 @@ jobs:
   # gate and this one starts containers.
   dashboard-e2e:
     name: dashboard-e2e (${{ matrix.shard }}/4)
-    needs: [changes, browser, smoke]
-    if: ${{ !cancelled() && needs.browser.result == 'success' && needs.smoke.result == 'success' && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -533,18 +512,25 @@ jobs:
           printf 'https://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt
           bunx playwright install --with-deps chromium
         working-directory: web
-      - uses: actions/download-artifact@v4
+      # Built from the caches the browser and smoke jobs write on main, never
+      # written here, so this job does not wait for them.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the browser companion
+        uses: docker/build-push-action@v6
         with:
-          name: browser-image-amd64
-          path: ${{ runner.temp }}
-      - name: Load the tested browser companion
-        run: docker load --input "$RUNNER_TEMP/aether-browser.tar"
-      - uses: actions/download-artifact@v4
+          context: .
+          file: images/browser/Dockerfile
+          load: true
+          tags: aether/browser:test
+          cache-from: type=gha,scope=browser-amd64-main
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
         with:
-          name: standard-image-amd64
-          path: ${{ runner.temp }}
-      - name: Load the tested standard environment
-        run: docker load --input "$RUNNER_TEMP/aether-standard.tar"
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard-amd64-main
       - name: Dashboard end-to-end suite
         env:
           AETHER_BROWSER_TEST_IMAGE: aether/browser:test
@@ -720,16 +706,10 @@ jobs:
     uses: ./.github/workflows/windows-install.yml
 
   release-build:
-    name: release-build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -742,7 +722,7 @@ jobs:
       - uses: ./.github/actions/go-cache
         with:
           mode: restore
-          variant: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          variant: release
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -754,27 +734,24 @@ jobs:
         with:
           mode: restore
       - name: Cross-compile release binaries
-        env:
-          TARGET_OS: ${{ matrix.goos }}
-          TARGET_ARCH: ${{ matrix.goarch }}
-        run: |
-          linux_platforms=""
-          if [ "$TARGET_OS" = linux ]; then
-            linux_platforms="linux/$TARGET_ARCH"
-          fi
-          make release-binaries \
-            SERVER_PLATFORMS="$linux_platforms" \
-            EDGE_PLATFORMS="$linux_platforms" \
-            CLI_PLATFORMS="$TARGET_OS/$TARGET_ARCH"
+        run: make release-binaries
       - uses: ./.github/actions/go-cache
         if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         with:
           mode: save
-          variant: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          variant: release
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-go-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/
+          name: binaries-go-windows
+          path: dist/aether-windows-*.exe
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-go
+          path: |
+            dist/
+            !dist/aether-windows-*.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -830,7 +807,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Scans the binaries the release matrix just produced with the Defender
+  # Scans the Windows binaries release-build just produced with the Defender
   # build that ships on the runner. A detection here is the same failure a
   # user hits: the download is blocked, or the client is quarantined on first
   # run. It is signal, not a flake - the response is to submit the binary at
@@ -850,8 +827,7 @@ jobs:
         run: ./scripts/windows-defender.ps1 -Mode Prepare
       - uses: actions/download-artifact@v4
         with:
-          pattern: binaries-go-windows-*
-          merge-multiple: true
+          name: binaries-go-windows
           path: dist
       - name: Scan both Windows clients
         shell: powershell

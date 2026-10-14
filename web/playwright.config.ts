@@ -6,14 +6,16 @@ import { defineConfig, devices } from '@playwright/test'
 // `aether` fixture in e2e/fixtures.ts owns every process.
 //
 // One worker. The suite runs real containers against one Docker daemon, and
-// a serial run is what makes a CI failure reproducible locally.
+// a serial run is what makes a CI failure reproducible locally. fullyParallel
+// only lets --shard split a file between shards; one worker still runs every
+// test in turn.
 
 /** The specs the mobile project owns, and the desktop project skips. */
 const mobileSpecs = '**/*.mobile.spec.ts'
 
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: false,
+  fullyParallel: true,
   workers: 1,
   forbidOnly: !!process.env.CI,
   // A scenario that starts a container and waits for a run to finish is

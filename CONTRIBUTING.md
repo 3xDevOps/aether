@@ -59,7 +59,10 @@ make android
 `make lint` runs golangci-lint under the toolchain pinned in `go.mod`, the same
 Go version CI uses. Without that pin, a host whose default Go is newer fails
 with `export data version 4 is greater than maximum supported version 2`
-before linting anything.
+before linting anything. It first runs `golangci-lint config verify` against
+the schema inside the pinned golangci-lint module, because `run` silently
+ignores a misspelled key in `.golangci.yml`. CI's `lint` job runs the same
+target.
 
 `make lint-workflows` uses pinned actionlint v1.7.12, matching CI's workflow
 lint gate without adding a tool dependency to `go.mod`. It requires
