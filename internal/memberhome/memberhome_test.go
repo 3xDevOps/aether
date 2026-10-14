@@ -102,3 +102,29 @@ func TestMigrateLegacyHomesFlattensKnownHarnessHomes(t *testing.T) {
 		t.Fatalf("missing-root MigrateLegacyHomes: %v", err)
 	}
 }
+
+// Once its home is archived, a member gets no new home until it is put
+// back.
+func TestArchivedHomeIsNotRecreated(t *testing.T) {
+	m, err := New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "caches"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Path("mem-a"); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "merged", "home")
+	moved, err := m.Archive("mem-a", dest)
+	if err != nil || !moved {
+		t.Fatalf("Archive = %v, %v", moved, err)
+	}
+	if _, err = m.Path("mem-a"); err == nil {
+		t.Fatal("an archived member's home was created again")
+	}
+	if err = m.Unarchive("mem-a", dest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Path("mem-a"); err != nil {
+		t.Fatalf("home after Unarchive: %v", err)
+	}
+}

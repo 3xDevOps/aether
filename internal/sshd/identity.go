@@ -99,16 +99,21 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	owner := member
-	if caller.Role == domain.RoleAdmin {
-		owner = ""
-	}
-	devs, err := ids.ListDevices(ctx, owner)
+	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Device, 0, len(devs))
 	for _, d := range devs {
+		if caller.Role != domain.RoleAdmin && d.Member != member {
+			linked, err := linksTo(ctx, ids, d, member)
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			if !linked {
+				continue
+			}
+		}
 		w := deviceToWire(d)
 		if d.Status.AwaitsApproval() {
 			_, name, role, err := s.admitsAs(ctx, ids, d)
@@ -123,6 +128,22 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 		out = append(out, w)
 	}
 	return protocol.MemberDeviceListResult{Devices: out}, nil
+}
+
+// linksTo reports whether dev waits on a link to member, which member
+// approves.
+func linksTo(ctx context.Context, ids store.IdentityStore, dev *domain.Device, member domain.MemberID) (bool, error) {
+	if dev.Invitation == "" {
+		return false, nil
+	}
+	inv, err := ids.GetInvitation(ctx, dev.Invitation)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return inv.Member == member, nil
 }
 
 // admitsAs returns whom approving dev admits it as: its own member or the
@@ -393,15 +414,13 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 	return s.createInvitation(ctx, ids, inv, protocol.MethodMemberInvitationCreate)
 }
 
-// memberIdentityLink binds the edge account an admin names to the admin's
-// own member. Nothing proves the caller holds that account, so a link, like
-// an invitation, is an admin's to make: from any member it would bind
-// someone else's account to theirs.
+// memberIdentityLink names an edge account to bind to the caller's own
+// member, never another's. Naming it proves nothing: the account is bound
+// only when the join link is opened while signed in with it and, under
+// either policy, the member then approves that device. A new link
+// replaces the member's open one, so no member fills the edge directory.
 func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	if perr := s.requireAdmin(ctx, member, protocol.MethodMemberIdentityLink); perr != nil {
-		return nil, perr
-	}
-	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, false); perr != nil {
+	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, true); perr != nil {
 		return nil, perr
 	}
 	if perr := s.requireEdgeClaimed(protocol.MethodMemberIdentityLink); perr != nil {
@@ -508,9 +527,11 @@ func (s *Server) memberIdentityRemove(ctx context.Context, member domain.MemberI
 	return out, nil
 }
 
-// createInvitation stores inv while its creator is an admin. member.role
-// revokes a demoted admin's invitations under registerMu, so checking
-// under it too keeps any invitation from outliving its creator's role.
+// createInvitation stores inv while its creator is an admin, or for a link,
+// while its creator is the approved member it links to; a link replaces
+// that member's open one. member.role revokes a demoted admin's
+// invitations under registerMu, so checking under it too keeps any
+// invitation from outliving its creator's role.
 // An invitation the edge directory has no room for is refused here: once
 // the directory is over the edge's limit, it stops being pushed at all.
 // The join secret is returned once, in the link, and only its hash is
@@ -524,14 +545,37 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	inv.SecretHash = edgeproto.HashToken(secret)
 	s.registerMu.Lock()
 	defer s.registerMu.Unlock()
-	if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
-		return nil, perr
+	var replaced []*domain.Device
+	if inv.Member == "" {
+		if perr := s.requireAdmin(ctx, inv.CreatedBy, method); perr != nil {
+			return nil, perr
+		}
+	} else {
+		if m, err := s.memberFor(ctx, inv.CreatedBy); err != nil || m.Pending || inv.Member != inv.CreatedBy {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: method + ": a link is to its creator's own member, which must be approved"}
+		}
+		var err error
+		if replaced, err = ids.ListDevices(ctx, ""); err != nil {
+			return nil, rpcError(err)
+		}
 	}
 	entries, err := s.EdgeDirectory(ctx)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if len(entries) >= edgeproto.MaxDirectoryEntries {
+	room := edgeproto.MaxDirectoryEntries
+	if inv.Member != "" {
+		open, err := ids.ListInvitations(ctx)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		for _, o := range open {
+			if o.Member == inv.Member && time.Now().Before(o.ExpiresAt) {
+				room++
+			}
+		}
+	}
+	if len(entries) >= room {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 			"%s: the edge directory already holds %d members and open invitations, the most an edge accepts; revoke an open invitation first",
 			method, len(entries))}
@@ -540,6 +584,9 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 		return nil, rpcError(err)
 	}
 	s.notifyDirectory()
+	if replaced != nil {
+		s.publishDroppedDevices(ctx, inv.CreatedBy, ids, replaced)
+	}
 	slog.Info("sshd: invitation created", "actor", inv.CreatedBy, "invitation", inv.ID,
 		"provider", inv.Provider, "login", inv.Login, "email", inv.Email, "role", inv.Role, "link", inv.Member)
 	serverID := edgeproto.ServerID(s.hostKey.PublicKey())

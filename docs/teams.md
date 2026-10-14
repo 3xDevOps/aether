@@ -126,11 +126,16 @@ aether invite revoke <invitation-id>
 Without `--github` or `--email`, `aether invite` still mints the one-time
 invite code described [below](#by-invite-code-fallback).
 
-#### Linking an existing member
+#### Linking and merging sign-ins
 
-An admin who joined by SSH key or tailnet links their own GitHub account
-with **Connect my GitHub account** in Settings › Remote access, or from a
-linked terminal:
+A member is one person however they reach the server: a tailnet login, an
+SSH key, GitHub accounts at the edge, or several. Sign-ins are joined only
+by an explicit step that proves the person holds both; matching emails,
+logins or names never join them.
+
+**Linking a GitHub account to your member.** An admin who joined by SSH key
+or tailnet and is claiming the server uses **Connect my GitHub account** in
+Settings › Remote access, or from a linked terminal:
 
 ```sh
 aether edge connect
@@ -139,7 +144,8 @@ aether edge connect
 That claims the server for the account this machine is signed in with at
 the server's edge, binds it to the admin's member, and approves this
 device ([edge.md](edge.md#server-id-and-claiming)). It is refused once
-the server has an owner. To link an account without claiming, name it:
+the server has an owner. Any approved member links an account to their own
+member, never another's, by naming it:
 
 ```sh
 aether member link --github dana
@@ -152,17 +158,123 @@ server id: <server id>
 github:dana can link to member <member id> until <expiry>: open the link on a device signed in with that account
 ```
 
-Opening that link, or `aether link '<invite link>'`, connects the account
-through the edge as the same member. Under `approved-devices` it binds
-nothing at first: the device waits on the link, and the admin approves it
-from this SSH key or tailnet connection, with **Approve** on its Needs you
-card or `aether device approve <code or device id>`, which binds the
-account. While the edge reports the server unclaimed, linking and inviting
-are refused ([edge.md](edge.md#server-id-and-claiming)); an ownerless
-server the edge has recorded keeps relaying and accepts both. Only admins
-can link: nothing proves the caller holds the account they name. Any other
-member is invited by an admin with `aether invite --github` or `--email`,
-which creates a new member for that account.
+Naming the account proves nothing. Opening that link while signed in with
+it, or `aether link '<invite link>'`, shows on that device:
+
+```
+This links your github account dana to the existing member Dana (<member id>), role collaborator; you will act as that member. device "dana-laptop", signed in as github account dana, is waiting for approval. ...
+```
+
+and binds nothing: under either policy the device waits on the link until
+you approve it from this SSH key, tailnet connection or an approved
+device, with **Approve** on its Needs you card or `aether device approve
+<device id>`, which binds the account. A link opened by anyone else is
+yours to deny. While the edge reports the server unclaimed, linking and
+inviting are refused ([edge.md](edge.md#server-id-and-claiming)); an
+ownerless server the edge has recorded keeps relaying and accepts both. A
+member has one open link at a time: a new one replaces it. Someone who is
+not a member yet is invited by an admin with `aether invite --github` or
+`--email`, which creates a new member for that account.
+
+**Merging two members.** Someone who reached the server two ways before
+linking them, say through Tailscale and through the edge with GitHub, is
+two members. Both sides take part: the one that mints a code accepts the
+merge the other proposes. On one sign-in:
+
+```sh
+aether member merge start
+```
+
+```
+merge code ABCD-EFGH-IJKL-MNOP, valid until <expiry>
+on your other sign-in run: aether member merge ABCD-EFGH-IJKL-MNOP, or open Profile > Sign-ins > Merge in the dashboard
+Anyone who enters this code can propose joining their sign-ins to your member; you will be asked to accept.
+then accept here: aether member merge accept
+```
+
+The code is shown once, kept on the server only as a SHA-256 hash, valid
+for 10 minutes and used once; a new `start` replaces your open one. On the
+other sign-in:
+
+```sh
+aether member merge <code> [--keep <member id>] [--keep-admin] [--yes]
+```
+
+It prints both members (role, tailnet login, SSH key fingerprint, GitHub
+logins, device labels, runs and schedules), every sign-in the merged
+member will have, asks whose settings prevail (`1` or `2`) unless `--keep`
+names the member, lists exactly what of the other member is discarded,
+and asks `discard these settings and merge? [y/N]` unless `--yes`; without
+a terminal it needs both. That records a proposal, open for 10 minutes.
+Back on the first sign-in:
+
+```sh
+aether member merge accept [<proposal-id>] [--keep-admin] [--yes]
+```
+
+shows the same plan and the choice made, and merges on `y`; with more
+than one proposal open, name the one you mean. `--yes` accepts the plan
+it printed. `aether member
+merge cancel`, on either side, drops your open codes and proposals. Every
+step is refused on a connection that signed in with a device no person
+approved, under either policy.
+
+The member whose settings prevail survives with its id, display name,
+color, git identity, saved image, custom agents, profiles, home and the
+account shares it grants. The other member is absorbed: its GitHub
+accounts, devices (each keeping its status, revoked ones included),
+tailnet login or SSH key, runs with the agent account and home they run
+on, schedules, the finished swarms it owns, push subscriptions and the
+account shares it received become the survivor's, so the survivor reopens
+those runs. It stays as a
+tombstone that signs nothing in: history it made, such as events,
+comments, costs and swarm records, keeps naming its id, which
+`member.list` maps to the survivor (`merged_into`); the CLI and the
+dashboard still show the old id there. Its discarded settings are recorded, its account shares
+are revoked, and its home (agent logins, git signing key, files) moves to
+`<data-dir>/merged/<merge id>/home` on the server. That directory, owner
+only and outside every member's home and Files view, still holds live
+agent logins; once nothing in it is needed, the machine's administrator
+removes it with `sudo rm -r <data-dir>/merged/<merge id>`. The home is
+moved by renaming it, so `<data-dir>/homes` and `<data-dir>/merged` must
+be on one filesystem; otherwise the merge is refused with the rename's
+error (`invalid cross-device link`) and nothing changes. A merge
+interrupted after the move and before it was recorded, by the server
+stopping, has the home put back when `aether-server` next starts. The absorbed
+member's saved environment image is removed by cache cleanup, like a
+removed member's. A workspace mirror that fetched with its GitHub
+connection needs GitHub reconnected on the merged member. Its connections
+close and reconnect as the survivor.
+
+The merged member never gains a permission: it takes the lower of the two
+roles. When one of them is an admin, that side keeps it admin with
+`--keep-admin`: the admin who minted the code when accepting, or the admin
+who proposes. When the merged member is no longer an admin, the open
+invitations and links either member created are revoked, and so are the
+invite codes they minted ([By invite code](#by-invite-code-fallback)). A
+merge that would leave the server without an admin, or leave its owner's
+GitHub account at the edge on a member who is not an admin, is refused
+(`aether member transfer` first).
+
+A merge is refused, with what to do, when the code is unknown, expired or
+used; both members have a tailnet login, or both an SSH key; either is
+pending (`aether member approve <id>` first); either has a run that has
+not finished, an Environment terminal, a role in an open swarm (stop
+those first), a handoff still publishing (retry in a minute) or a finished
+run whose container the server still keeps, since it mounts the agent
+logins (merge once it is released, or `aether delete <run-id>`); or the members changed since the preview or proposal
+(`the members changed since the preview; preview again`). Entering your
+own code answers `already the same member`; accepting again from the
+merged member returns the recorded merge.
+
+```sh
+aether member merges   # your merges; an admin sees every one
+```
+
+lists each merge with the roles before and after, the connection that
+accepted it, the discarded settings, custom agent definitions included,
+and where the home went, so an admin can restore a setting by hand.
+Nothing undoes a merge.
 
 An admin makes another admin with a linked GitHub account the server's
 owner at its edge, as before deleting their own account
@@ -200,7 +312,9 @@ device gets depends on the server's `edge-access` policy
   member a link names. Revoking the invitation deletes its waiting devices;
   once it expires they are no longer listed or approvable. A new or rotated
   key is a new device.
-- `account`: signing in admits the new device, recorded as `registered`.
+- `account`: signing in admits the new device, recorded as `registered`,
+  except a device joining with a link to an existing member, which waits
+  on the link as under `approved-devices`.
 
 A waiting device of an existing member is refused with:
 
@@ -282,9 +396,10 @@ ID           MEMBER                     ACCOUNT      LABEL        STATUS    KEY 
 without `--github` or `--email`) are refused on a connection that signed
 in with a device no person has approved, under either policy, so a device
 never approves itself and a later switch to `approved-devices` inherits
-nothing. Under `approved-devices`, inviting, linking or unlinking an account,
-changing a role, approving a tailnet member and transferring ownership are
-refused on such a connection too. A device key belongs to the edge account it first signed in
+nothing. Under `approved-devices`, inviting, unlinking an account,
+changing a role, approving a tailnet member and transferring ownership
+are refused on such a connection too; linking an account and every merge
+step are refused on it under either policy. A device key belongs to the edge account it first signed in
 with: a grant naming another account with that key is refused. The direct
 SSH path accepts approved device keys only.
 
@@ -298,9 +413,9 @@ aether member unlink <member-id> github:<user id>     # the identity as identiti
 Unlinking removes one account from the member when it was linked while
 someone else held it: the devices that signed in with it are revoked and
 their connections closed, and the member, its role, its other accounts, SSH
-key and tailnet identity stay. The member or an admin may do both. An
-admin links an account to themself again with `aether member link` and its
-link, or with **Connect my GitHub account** while the server has no owner;
+key and tailnet identity stay. The member or an admin may do both. A
+member links an account to themself again with `aether member link` and its
+link, an admin also or with **Connect my GitHub account** while the server has no owner;
 an admin who has no other way in is restored on the machine
 ([edge.md](edge.md#console-recovery)).
 
@@ -346,6 +461,10 @@ linked to my-server:2222 as Dana (collaborator)
 
 Invited members are collaborators immediately - no approval step, because the
 code was the approval. Nobody needs shell access to the server box to join.
+A code stops working once the admin who minted it is no longer an admin,
+and a merge that demotes them deletes it for good.
+A code minted by an older server, which did not record who minted it,
+lasts until it expires.
 
 ## Roles
 

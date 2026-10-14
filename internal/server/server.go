@@ -425,6 +425,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		TailnetRequireKey: cfg.TailnetRequireKey,
 		TailnetHostname:   node.DNSName,
 		InvitesDir:        filepath.Join(cfg.DataDir, "invites"),
+		MergedDir:         filepath.Join(cfg.DataDir, "merged"),
 		Profiles:          prof,
 		Config:            sshd.NewConfigBackend(homes, s.db),
 		AuthorizationMu:   authMu,
@@ -471,6 +472,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		},
 	})
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
+		return nil, err
+	}
+	if err = s.ssh.RecoverMergeArchives(ctx); err != nil {
 		return nil, err
 	}
 	if cfg.EdgeURL != "" {

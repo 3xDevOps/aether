@@ -225,9 +225,10 @@ func respond(w io.Writer, resp protocol.Response, slot *afterResponse) error {
 }
 
 // afterResponse is one request's slot for work that must not run until the
-// server has tried to write its response. Only the server self-update uses
-// it: it re-executes the binary, and a client that never saw the result
-// could not tell a restart from a dropped connection.
+// server has tried to write its response. The server self-update uses it
+// because it re-executes the binary, and a member merge because it closes
+// the caller's connection: a client that never saw the result could not
+// tell either from a dropped connection.
 type afterResponse struct{ fn func() }
 
 type afterResponseKey struct{}

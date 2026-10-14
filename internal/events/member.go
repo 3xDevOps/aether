@@ -15,3 +15,18 @@ type MemberChangedPayload struct {
 func (MemberChangedPayload) EventType() Type { return TypeMemberChanged }
 
 func init() { registerPayload[MemberChangedPayload](TypeMemberChanged) }
+
+// TypeMemberMerged reports that a merge absorbed AbsorbedID into
+// SurvivorID; MergeID names its audit record. It is published under
+// ServerScope.
+const TypeMemberMerged Type = "member.merged"
+
+type MemberMergedPayload struct {
+	MergeID    string          `json:"merge_id"`
+	SurvivorID domain.MemberID `json:"survivor_id"`
+	AbsorbedID domain.MemberID `json:"absorbed_id"`
+}
+
+func (MemberMergedPayload) EventType() Type { return TypeMemberMerged }
+
+func init() { registerPayload[MemberMergedPayload](TypeMemberMerged) }

@@ -10,18 +10,23 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const defaultInviteTTL = 24 * time.Hour
 
+// inviteRecord is an open invite code. IssuedBy is the admin who minted
+// it, empty for codes minted before it was recorded.
 type inviteRecord struct {
-	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+	IssuedBy  domain.MemberID `json:"issued_by,omitempty"`
 }
 
 // parseInviteUser recognizes SSH usernames of the form invite:<code> or
@@ -55,7 +60,7 @@ func invitePath(dir, code string) string {
 	return filepath.Join(dir, code)
 }
 
-func mintInvite(dir string, ttl time.Duration) (code string, expires time.Time, err error) {
+func mintInvite(dir string, ttl time.Duration, issuer domain.MemberID) (code string, expires time.Time, err error) {
 	if dir == "" {
 		return "", time.Time{}, errors.New("sshd: invites directory not configured")
 	}
@@ -71,7 +76,7 @@ func mintInvite(dir string, ttl time.Duration) (code string, expires time.Time, 
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return "", time.Time{}, fmt.Errorf("sshd: create invites dir: %w", err)
 	}
-	rec := inviteRecord{ExpiresAt: expires}
+	rec := inviteRecord{ExpiresAt: expires, IssuedBy: issuer}
 	body, err := json.Marshal(rec)
 	if err != nil {
 		return "", time.Time{}, err
@@ -131,6 +136,21 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	if err != nil || !time.Now().Before(rec.ExpiresAt) {
 		return nil, errors.New("sshd: invite is invalid or expired")
 	}
+	// A code grants what its issuer could, so it dies with the issuer's
+	// admin role, through member.role or a merge that demoted them.
+	if rec.IssuedBy != "" {
+		admin, aerr := s.inviteIssuerAdmin(ctx, rec.IssuedBy)
+		if aerr != nil {
+			return nil, fmt.Errorf("sshd: invite join: %w", aerr)
+		}
+		if !admin {
+			refused := fmt.Errorf("sshd: invite was issued by %s, who is no longer an admin", rec.IssuedBy)
+			if berr := burnInvite(s.cfg.InvitesDir, code); berr != nil {
+				return nil, fmt.Errorf("%w; burn invite: %w", refused, berr)
+			}
+			return nil, refused
+		}
+	}
 	if err = burnInvite(s.cfg.InvitesDir, code); err != nil {
 		return nil, fmt.Errorf("sshd: burn invite: %w", err)
 	}
@@ -157,10 +177,68 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	return m, nil
 }
 
+// inviteIssuerAdmin reports whether issuer, or the member a merge made
+// it, is an admin. A removed issuer is not.
+func (s *Server) inviteIssuerAdmin(ctx context.Context, issuer domain.MemberID) (bool, error) {
+	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
+		into, err := ms.MergedInto(ctx, issuer)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if into != "" {
+			issuer = into
+		}
+	}
+	m, err := s.cfg.Store.GetMember(ctx, issuer)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return m.Role == domain.RoleAdmin, nil
+}
+
 func restoreInvite(dir, code string, rec inviteRecord) error {
 	body, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(invitePath(dir, code), append(body, '\n'), 0o600)
+}
+
+// revokeInvitesBy deletes the open invite codes any of issuers minted and
+// returns how to put them back.
+func revokeInvitesBy(dir string, issuers ...domain.MemberID) (func() error, error) {
+	revoked := map[string]inviteRecord{}
+	undo := func() error {
+		var errs []error
+		for code, rec := range revoked {
+			if err := restoreInvite(dir, code, rec); err != nil {
+				errs = append(errs, fmt.Errorf("sshd: put back invite %s a failed merge revoked: %w", code, err))
+			}
+		}
+		return errors.Join(errs...)
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return undo, nil
+	}
+	if err != nil {
+		return undo, fmt.Errorf("sshd: list invites: %w", err)
+	}
+	for _, e := range entries {
+		rec, lerr := loadInvite(dir, e.Name())
+		if lerr != nil || !slices.Contains(issuers, rec.IssuedBy) {
+			continue
+		}
+		if berr := burnInvite(dir, e.Name()); berr != nil && !errors.Is(berr, os.ErrNotExist) {
+			return undo, fmt.Errorf("sshd: revoke invite: %w", berr)
+		}
+		revoked[e.Name()] = rec
+	}
+	return undo, nil
 }

@@ -272,12 +272,13 @@ func deviceLabel(grant edgeproto.Grant, key ssh.PublicKey) string {
 
 // deviceAdmitted reports whether a connection may use dev: an approved
 // device on any path; one awaiting approval only on a relayed connection
-// under account access, where signing in admits it. The direct path
+// under account access, where signing in admits it, and not while it
+// waits on a link to an existing member. The direct path
 // accepts approved device keys only, under either policy: it never checks
 // that the edge still vouches for the account.
 func (s *Server) deviceAdmitted(dev *domain.Device, relayed bool) bool {
 	return dev.Status == domain.DeviceApproved ||
-		(relayed && dev.Status.AwaitsApproval() && s.cfg.EdgeAccess == edgeproto.PolicyAccount)
+		(relayed && dev.Status.AwaitsApproval() && dev.Invitation == "" && s.cfg.EdgeAccess == edgeproto.PolicyAccount)
 }
 
 func (s *Server) deviceRefusal(ctx context.Context, ids store.IdentityStore, dev *domain.Device, relayed bool) error {
@@ -372,8 +373,9 @@ func (s *Server) directDevice(ctx context.Context, key ssh.PublicKey) (*ssh.Perm
 
 // edgeInvitee handles an account no member holds. One that presents the
 // secret of an open invitation it matches joins under account access: it
-// becomes that invitation's member. Under approved-devices the connecting
-// device waits on the invitation instead, and nothing else changes until a
+// becomes that invitation's member. Under approved-devices, or for a link
+// to an existing member, the connecting device waits on the invitation
+// instead, and nothing else changes until a
 // person approves it. Without the secret nothing is recorded: the edge
 // never sees it, so an edge that signs a grant for an invited account
 // cannot create a member, bind an account, record a device or use up the
@@ -407,7 +409,10 @@ func (s *Server) edgeInvitee(ctx context.Context, ids store.IdentityStore, accou
 		}
 		return nil, err
 	}
-	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
+	// A link binds the account to an existing member, so that member
+	// approves the device first, under either policy, after the person
+	// joining was told whose member they would act as.
+	if s.cfg.EdgeAccess != edgeproto.PolicyAccount || inv.Member != "" {
 		return nil, s.invitationDevice(ctx, ids, inv, account, keyLine, label)
 	}
 	m, err := s.acceptInvitation(ctx, ids, inv, account)

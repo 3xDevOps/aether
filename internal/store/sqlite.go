@@ -616,16 +616,29 @@ const memberCols = `id, display_name, public_key, tailnet_login, pending, color,
 	git_name, git_email`
 
 func (d *DB) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
-	m, err := scanMember(d.db.QueryRowContext(ctx,
-		`SELECT `+memberCols+` FROM members WHERE id = ?`, id))
+	var mergedInto string
+	m, err := scanMember(extraScan{d.db.QueryRowContext(ctx,
+		`SELECT `+memberCols+`, merged_into FROM members WHERE id = ?`, id), &mergedInto})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get member: %w", err)
 	}
+	if mergedInto != "" {
+		return nil, fmt.Errorf("%w: member %s was merged into %s", ErrNotFound, id, mergedInto)
+	}
 	return m, nil
 }
+
+// extraScan scans a row's trailing columns into extra after the ones its
+// caller asks for.
+type extraScan struct {
+	row   interface{ Scan(...any) error }
+	extra *string
+}
+
+func (e extraScan) Scan(dest ...any) error { return e.row.Scan(append(dest, e.extra)...) }
 
 func (d *DB) GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error) {
 	key, err := normalizePublicKey(publicKey)
@@ -690,7 +703,7 @@ func (d *DB) UpdateMemberImage(ctx context.Context, id domain.MemberID, image st
 
 func (d *DB) ListMembers(ctx context.Context) ([]*domain.Member, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+memberCols+` FROM members ORDER BY created_at, rowid`)
+		`SELECT `+memberCols+` FROM members WHERE merged_into = '' ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list members: %w", err)
 	}

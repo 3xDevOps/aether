@@ -251,6 +251,9 @@ func (m *Manager) openHome(member domain.MemberID) (*os.Root, error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return nil, fmt.Errorf("memberhome: member %q: %w", member, err)
 	}
+	if m.isArchived(member) {
+		return nil, fmt.Errorf("memberhome: member %q was merged and its home moved aside: %w", member, fs.ErrNotExist)
+	}
 	roots, err := openManagedRoot(m.root, true)
 	if err != nil {
 		return nil, fmt.Errorf("memberhome: open root: %w", err)

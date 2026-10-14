@@ -23,6 +23,8 @@ type IdentityStore interface {
 	// member at all; otherwise it returns ErrConflict and creates nothing.
 	ClaimMember(ctx context.Context, m *domain.Member, identity *domain.Identity) error
 
+	// CreateInvitation stores inv. A link, an invitation with a Member,
+	// replaces that member's open link.
 	CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 	GetInvitation(ctx context.Context, id domain.InvitationID) (*domain.Invitation, error)
 	// ListInvitations returns the invitations not yet accepted, expired
@@ -327,11 +329,23 @@ func (d *DB) CreateInvitation(ctx context.Context, inv *domain.Invitation) error
 	if inv.Member != "" {
 		member = inv.Member
 	}
-	if _, err := d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin create invitation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM identity_invitations WHERE ? IS NOT NULL AND member_id = ? AND consumed_at IS NULL`, member, member); err != nil {
+		return fmt.Errorf("store: create invitation: replace open links: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO identity_invitations (`+invitationCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
 		id, inv.Provider, inv.Login, inv.Email, inv.Role, member, inv.CreatedBy, createdAt, expiresAt, inv.SecretHash,
 	); err != nil {
 		return fmt.Errorf("store: create invitation: %w", mapConstraint(err, ErrNotFound))
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit create invitation: %w", err)
 	}
 	inv.ID, inv.CreatedAt, inv.ConsumedAt = domain.InvitationID(id), ts, nil
 	return nil
