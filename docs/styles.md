@@ -352,24 +352,29 @@ entirely, and its CSS stops animation if the preference changes while it is
 visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.
 
-Live local control lights the edges of the terminal viewport or the Enhanced
-Session conversation and composer, excluding toolbars and Details: a 1.5px
-`--control-light` rim that brightens where light pools at five fixed points
-along the edges, a soft glow spilling inward from each pool, and a near-white
-core at its centre. `--control-light` is the accent teal in light theme and a
-brighter teal in dark; `--control-glow` dims the glow to 0.3 in light theme.
-The light is pointer-transparent and does not change layout. It appears only
-with live, acknowledged writable control. Terminal
-replay and history reading hide it; reading earlier Enhanced items does not
-disable the composer or hide its light. Acquisition and voluntary release
-carry the light from the side midpoints to the top and bottom centres, or
-back, over 720ms, decelerating toward the endpoint; the pools stay put and
-light up as it passes. A control-lost takeover turns the light red over
-540ms and retracts it over 1440ms. An occupied five-second hold fills **Take
-control** and the holder's **Release** diagonally in red and traces red light
-over the holder's teal along the same path; text on either side of the fill
-edge keeps its own contrast. A seven-second holder decision follows. Under
-`prefers-reduced-motion: reduce`, ownership changes are instant and takeover
-fills and light become static red indicators with countdowns; labels keep
-the state meaning. Loading spinners and delayed skeletons remain functional
+Live local control lights the top edge of the terminal viewport or the
+Enhanced Session conversation, just under the toolbar; the other edges stay
+dark. The light is a 1.5px `--control-light` rim that brightens where light
+pools, a soft glow spilling down from each pool, and a near-white core at its
+centre. Two pools are lit at a time. Every five seconds the older one fades
+over three seconds while a new one brightens to 70-100% at a random point at
+least a third of the width from the other, and each pool drifts 3% of the
+width over its 13-second life. `--control-light` is the accent teal in light
+theme and a brighter teal in dark; `--control-glow` dims the glow to 0.3 in
+light theme. **Release**, shown while you control, has the accent fill;
+**Take control** is a secondary button. The light is pointer-transparent and
+does not change layout. It appears only with live, acknowledged writable
+control. Terminal replay and history reading hide it; reading earlier
+Enhanced items does not disable the composer or hide its light. The right
+end, under **Take control** and **Release**, is the light's source:
+acquisition pours it leftward across the edge and voluntary release drains
+it back to the right, each over 720ms and decelerating toward the endpoint.
+A control-lost takeover turns the light red over 540ms and drains it to the
+right over 1440ms. An occupied five-second hold fills **Take control** and
+the holder's **Release** diagonally in red and spreads red light leftward
+from the right end of the holder's edge, replacing the teal it reaches; text
+on either side of the fill edge keeps its own contrast. A seven-second holder
+decision follows. Under `prefers-reduced-motion: reduce`, ownership changes
+are instant, two pools stay fixed, and takeover fills and light become
+static red indicators with countdowns; labels keep the state meaning. Loading spinners and delayed skeletons remain functional
 feedback.
