@@ -1,6 +1,7 @@
 import { Popover as PopoverPrimitive } from 'radix-ui'
 import type * as React from 'react'
-import { cn, surface } from '@/lib/utils'
+import { ChevronDown } from '@/components/icons'
+import { cn, field, surface } from '@/lib/utils'
 
 function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />
@@ -8,6 +9,24 @@ function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
 
 function PopoverTrigger(props: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
   return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
+}
+
+/** A field-shaped trigger, like SelectTrigger, for a popover that picks a value. */
+function PopoverFieldTrigger({ className, children, ...props }: React.ComponentProps<'button'>) {
+  return (
+    <PopoverPrimitive.Trigger asChild>
+      <button
+        type="button"
+        role="combobox"
+        data-slot="popover-field-trigger"
+        className={cn(field, 'flex items-center justify-between gap-2 text-left', className)}
+        {...props}
+      >
+        {children}
+        <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted" />
+      </button>
+    </PopoverPrimitive.Trigger>
+  )
 }
 
 function PopoverAnchor(props: React.ComponentProps<typeof PopoverPrimitive.Anchor>) {
@@ -38,4 +57,4 @@ function PopoverContent({
   )
 }
 
-export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger }
+export { Popover, PopoverAnchor, PopoverContent, PopoverFieldTrigger, PopoverTrigger }

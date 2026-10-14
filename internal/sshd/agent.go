@@ -19,6 +19,7 @@ import (
 func init() {
 	registerMethod(protocol.MethodAgentRegister, (*Server).agentRegister)
 	registerMethod(protocol.MethodAgentList, (*Server).agentList)
+	registerGuarded(protocol.MethodAgentModels, permissions.Launch, nil, (*Server).agentModels)
 	registerGuarded(protocol.MethodAgentInstall, permissions.Launch, nil, (*Server).agentInstall)
 }
 
@@ -67,6 +68,25 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		return nil, rpcError(serr)
 	}
 	return protocol.AgentRegisterResult(p), nil
+}
+
+func (s *Server) agentModels(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.AgentModelsParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.Name == "" {
+		return nil, invalidParams("name is required")
+	}
+	account, perr := s.launchAccount(ctx, member, p.AccountMemberID)
+	if perr != nil {
+		return nil, perr
+	}
+	result, err := s.cfg.Runs.AgentModels(ctx, member, account, p.Name, p.Refresh)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return result, nil
 }
 
 // agentList lists member's own definitions, not the account owner's, since a

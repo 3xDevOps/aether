@@ -19,6 +19,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -446,6 +447,13 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	defer f.mu.Unlock()
 	key := fmt.Sprintf("%s:%s:%s", member, account, harness)
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
+}
+
+func (f *fakeRuns) AgentModels(_ context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error) {
+	if err := f.record(fmt.Sprintf("models:%s:%s:%s:%t", member, account, harness, refresh)); err != nil {
+		return protocol.AgentModelsResult{}, err
+	}
+	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}}}, nil
 }
 
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {

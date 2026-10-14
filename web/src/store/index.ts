@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { clampTerminalFontSize } from '@/lib/term-font'
 import { batched } from '@/store/batch'
+import { createAgentModelsSlice, type AgentModelsSlice } from '@/store/agent-models'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
@@ -51,6 +52,7 @@ const v7OnboardingSteps: Record<string, OnboardingStep> = {
 }
 
 export type RootState = ServerSlice &
+  AgentModelsSlice &
   WorkspacesSlice &
   RunsSlice &
   MembersSlice &
@@ -111,6 +113,7 @@ export function createRootStore() {
     batched(persist(
       (...a) => ({
         ...createServerSlice(...a),
+        ...createAgentModelsSlice(...a),
         ...createWorkspacesSlice(...a),
         ...createRunsSlice(...a),
         ...createMembersSlice(...a),

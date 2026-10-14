@@ -1021,6 +1021,22 @@ export interface AgentInfo {
   enhanced_install_script?: string
 }
 
+/** One model agent.models discovered; `id` is what a launch sends as `model`. */
+export interface AgentModel {
+  id: string
+  name: string
+  description?: string
+}
+
+/** agent.models: `error` is the last failed discovery, even when `models` holds an older or fallback list. */
+export interface AgentModelsResult {
+  models: AgentModel[]
+  default_label?: string
+  source: 'agent' | 'cache' | 'fallback' | 'none'
+  fetched_at?: string
+  error?: string
+}
+
 /** agent.install: a failed command is a result with `error`, not a refusal. */
 export interface AgentInstallResult {
   log_tail: string

@@ -7,6 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
@@ -70,6 +71,9 @@ type RunController interface {
 	// on account can stand in for one on requested as a usage fallback,
 	// which never borrows the owner's installation.
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
+	// AgentModels lists the models harness offers on account, resolving the
+	// harness and the account owner's login as Launch does.
+	AgentModels(ctx context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error)
 	ContainerAddr(ctx context.Context, run domain.RunID) (string, error)
 	TerminalContainerAddr(ctx context.Context, member domain.MemberID) (string, error)
 	Kill(ctx context.Context, run domain.RunID, actor domain.MemberID) error

@@ -741,3 +741,35 @@ type AgentInstallResult struct {
 	EnhancedInstalled bool   `json:"enhanced_installed"`
 	Error             string `json:"error,omitempty"`
 }
+
+// AgentModelsParams: AccountMemberID as in AgentListParams; Refresh bypasses
+// the server's cache.
+type AgentModelsParams struct {
+	Name            string `json:"name"`
+	AccountMemberID string `json:"account_member_id,omitempty"`
+	Refresh         bool   `json:"refresh,omitempty"`
+}
+
+// AgentModel.ID is the value a launch passes as the model.
+type AgentModel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+const (
+	ModelSourceAgent    = "agent"
+	ModelSourceCache    = "cache"
+	ModelSourceFallback = "fallback"
+	ModelSourceNone     = "none"
+)
+
+// AgentModelsResult.Error is the last failed discovery's error, also when
+// Models holds an older or fallback list.
+type AgentModelsResult struct {
+	Models       []AgentModel `json:"models"`
+	DefaultLabel string       `json:"default_label,omitempty"`
+	Source       string       `json:"source"`
+	FetchedAt    string       `json:"fetched_at,omitempty"`
+	Error        string       `json:"error,omitempty"`
+}
