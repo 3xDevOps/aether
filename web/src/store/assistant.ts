@@ -1,5 +1,6 @@
 import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import { mobileScreen } from '@/lib/breakpoints'
+import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
 /** The assistant's transcript lives in `acpSessions` under this key, never in `runs`. */
@@ -11,6 +12,11 @@ export const defaultAssistantWidth = 400
 
 export function onPhone(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(mobileScreen).matches
+}
+
+/** Approvals and harness prompts the member has yet to answer. */
+export function assistantWaiting(s: Pick<RootState, 'assistantConfirmations' | 'acpSessions'>): number {
+  return s.assistantConfirmations.length + (s.acpSessions[assistantSessionID]?.pending.length ?? 0)
 }
 
 export function clampAssistantWidth(width: number): number {

@@ -23,7 +23,7 @@ import { cn, focusRing } from '@/lib/utils'
 import { requestTitle } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-import { clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
+import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
 
 export const assistantTriggerID = 'assistant-trigger'
@@ -159,9 +159,11 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
         actionsLabel="Assistant actions"
         actions={
           <>
-            <Button variant="ghost" size="icon-sm" label="New conversation" disabled={!ready} onClick={() => setConfirming(true)}>
-              <MessageSquarePlus />
-            </Button>
+            {ready && (
+              <Button variant="ghost" size="icon-sm" label="New conversation" onClick={() => setConfirming(true)}>
+                <MessageSquarePlus />
+              </Button>
+            )}
             <Button variant="ghost" size="icon-sm" label="Close assistant" onClick={onClose}>
               <X />
             </Button>
@@ -242,13 +244,13 @@ export function AssistantPanel() {
   const generation = useStore((s) => s.assistantGeneration)
   const identity = useStore((s) => s.identityKey)
   const state = useStore((s) => s.assistantStatus?.state)
-  const pendingConfirmations = useStore((s) => s.assistantConfirmations.length > 0)
+  const waiting = useStore(assistantWaiting) > 0
   const supported = cap.hasMethod('assistant.status')
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
   const hasSession = supported && state !== undefined && state !== 'setup' && state !== 'needs_restart'
   // Closed, the stream stays up only while the assistant works or waits on an approval.
-  const streamable = hasSession && (open || state === 'running' || state === 'starting' || pendingConfirmations)
+  const streamable = hasSession && (open || state === 'running' || state === 'starting' || waiting)
 
   useKeybindings('global', supported ? {
     assistant: (event) => {

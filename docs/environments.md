@@ -259,6 +259,12 @@ runtimes, for example with `sudo apt-get install -y postgresql-client`,
 Homebrew, or a language toolchain. The terminal is a persistent shell with
 the member home mounted at `$HOME`.
 
+Every new terminal container also gets two read-only mounts for the
+[assistant](assistant.md): `/run/aether-assistant`, the socket bound to your
+member, and `/opt/aether/aether-server`. A terminal created before the update
+has neither, and the assistant shows a restart prompt until you stop and
+reopen it.
+
 Environment images must include `/bin/sh`. The terminal starts `/bin/bash -l`
 when `/bin/bash` is executable; otherwise it starts `/bin/sh -l`.
 

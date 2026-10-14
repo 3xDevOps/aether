@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,12 @@ const (
 	stderrTail   = 4 << 10
 	maxKeys      = 128
 )
+
+// claudeSettings lets Claude Code call the Aether tools without asking: the
+// server holds the confirmed ones for the member's approval, and the shell
+// still asks.
+const claudeSettings = `{"permissions":{"allow":["mcp__aether"]}}
+`
 
 var (
 	// ErrNotRunning means the member's assistant has no live session.
@@ -88,7 +95,10 @@ type member struct {
 	// changed is closed when the live session starts or ends, or the
 	// conversation is reset, so a viewer resubscribes.
 	changed chan struct{}
-	keys    []string
+	// attempts holds the prompts by idempotency key: those in flight and
+	// the last maxKeys that succeeded.
+	attempts map[string]*attempt
+	done     []string
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -107,7 +117,7 @@ func (s *Service) member(id domain.MemberID) *member {
 	defer s.mu.Unlock()
 	m := s.members[id]
 	if m == nil {
-		m = &member{id: id, changed: make(chan struct{}), watchers: make(map[chan struct{}]struct{})}
+		m = &member{id: id, changed: make(chan struct{}), watchers: make(map[chan struct{}]struct{}), attempts: make(map[string]*attempt)}
 		m.confirms = newConfirmations(m.notify)
 		s.members[id] = m
 	}
@@ -240,11 +250,19 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 		status.State = protocol.AssistantStateStarting
 		return status, nil
 	}
-	if status.Agent, err = choose(agents, "", row.Agent); err != nil {
+	var notReady *AgentNotReadyError
+	if status.Agent, err = resolve(agents, "", row.Agent); errors.As(err, &notReady) {
+		status.Agent = row.Agent
+		if slices.ContainsFunc(agents, func(a protocol.AssistantAgent) bool { return a.Ready }) {
+			status.Error = err.Error()
+		} else {
+			status.Agent = ""
+		}
+	} else if err != nil {
 		return protocol.AssistantStatus{}, err
 	}
 	stale := false
-	if status.Agent != "" {
+	if status.Agent != "" && status.Error == "" {
 		if stale, err = s.cfg.Runs.AssistantTerminalStale(ctx, id); err != nil {
 			return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
 		}
@@ -254,7 +272,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 		status.State = protocol.AssistantStateSetup
 	case stale:
 		status.State = protocol.AssistantStateNeedsRestart
-	case failure != "":
+	case failure != "" || status.Error != "":
 		status.State = protocol.AssistantStateFailed
 	default:
 		status.State = protocol.AssistantStateIdle
@@ -278,7 +296,8 @@ func (s *Service) Start(ctx context.Context, id domain.MemberID, p protocol.Assi
 		}
 	}
 	_, err := s.ensure(ctx, id, p.Agent)
-	if err != nil && !errors.Is(err, scheduler.ErrAssistantNeedsRestart) && !errors.Is(err, ErrNoAgent) {
+	var notReady *AgentNotReadyError
+	if err != nil && !errors.Is(err, scheduler.ErrAssistantNeedsRestart) && !errors.Is(err, ErrNoAgent) && !errors.As(err, &notReady) {
 		return protocol.AssistantStatus{}, err
 	}
 	return s.Status(ctx, id)
@@ -293,6 +312,9 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
+	if s.ctx.Err() != nil {
+		return nil, ErrClosed
+	}
 	if live := m.live(); live != nil && (requested == "" || requested == live.agent) {
 		return live, nil
 	}
@@ -304,14 +326,14 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	if err != nil {
 		return nil, err
 	}
-	agent, err := choose(agents, requested, row.Agent)
+	agent, err := resolve(agents, requested, row.Agent)
 	if err != nil {
 		return nil, err
 	}
 	if agent == "" {
 		return nil, ErrNoAgent
 	}
-	if row.Agent != "" && row.Agent != agent {
+	if requested != "" && row.Agent != "" && row.Agent != agent {
 		if err = s.resetLocked(ctx, m); err != nil {
 			return nil, err
 		}
@@ -345,8 +367,9 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-		if err = s.cfg.Homes.HomeUpload(m.id, workDir+"/"+name, []byte(Instructions), true); err != nil {
+	files := map[string]string{"AGENTS.md": Instructions, "CLAUDE.md": Instructions, ".claude/settings.json": claudeSettings}
+	for name, content := range files {
+		if err = s.cfg.Homes.HomeUpload(m.id, workDir+"/"+name, []byte(content), true); err != nil {
 			return nil, fmt.Errorf("assistant: write %s: %w", name, err)
 		}
 	}
@@ -356,7 +379,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: m.confirms.confirm}
+	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: m.confirms.confirm, Member: string(m.id)}
 	s.wg.Go(func() {
 		if serveErr := srv.Serve(sessCtx, ln); serveErr != nil {
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)
@@ -427,7 +450,7 @@ func stopExec(exec runtime.ManagedExec) error {
 }
 
 // listen opens the member's tool socket, replacing a stale one.
-func (s *Service) listen(id domain.MemberID) (net.Listener, error) {
+func (s *Service) listen(id domain.MemberID) (*net.UnixListener, error) {
 	dir := scheduler.AssistantSocketDir(s.cfg.Dir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("assistant: create the socket directory: %w", err)
@@ -436,10 +459,13 @@ func (s *Service) listen(id domain.MemberID) (net.Listener, error) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("assistant: remove the stale socket: %w", err)
 	}
-	ln, err := net.Listen("unix", path)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		return nil, fmt.Errorf("assistant: listen on the tool socket: %w", err)
 	}
+	// A closed listener must not unlink the path: the next session's socket
+	// may already be there.
+	ln.SetUnlinkOnClose(false)
 	if err = os.Chmod(path, 0o666); err != nil {
 		_ = ln.Close()
 		return nil, fmt.Errorf("assistant: open the tool socket to the member: %w", err)
@@ -480,6 +506,30 @@ func (m *member) stop(ctx context.Context) error {
 	}
 }
 
+// AgentNotReadyError means the agent the conversation belongs to cannot run.
+// The assistant never switches to another agent unasked, because that ends
+// the conversation.
+type AgentNotReadyError struct{ Agent protocol.AssistantAgent }
+
+func (e *AgentNotReadyError) Error() string {
+	name := e.Agent.DisplayName
+	if name == "" {
+		name = e.Agent.Name
+	}
+	return fmt.Sprintf("%s is not ready: %s; sign in again or start with another agent", name, e.Agent.Reason)
+}
+
+// resolve is choose, except that an unrequested stored agent that is not
+// ready is an error instead of a switch to another agent.
+func resolve(agents []protocol.AssistantAgent, requested, stored string) (string, error) {
+	if requested == "" && stored != "" {
+		if i := slices.IndexFunc(agents, func(a protocol.AssistantAgent) bool { return a.Name == stored }); i >= 0 && !agents[i].Ready {
+			return stored, &AgentNotReadyError{Agent: agents[i]}
+		}
+	}
+	return choose(agents, requested, stored)
+}
+
 // resetLocked discards the conversation. The caller holds m.op.
 func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	if err := m.stop(ctx); err != nil {
@@ -498,6 +548,24 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	return nil
 }
 
+// Remove stops the member's session and deletes everything the assistant
+// keeps for them. Call it when the member is removed.
+func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
+	m := s.member(id)
+	m.op.Lock()
+	defer m.op.Unlock()
+	if err := m.stop(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.members, id)
+	s.mu.Unlock()
+	if err := os.RemoveAll(filepath.Join(s.cfg.Dir, string(id))); err != nil {
+		return fmt.Errorf("assistant: remove the member's files: %w", err)
+	}
+	return nil
+}
+
 // Reset stops the session and discards the conversation.
 func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.AssistantStatus, error) {
 	m := s.member(id)
@@ -510,49 +578,69 @@ func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.Assis
 	return s.Status(ctx, id)
 }
 
+// attempt is one prompt under an idempotency key; err is final once done is
+// closed.
+type attempt struct {
+	done chan struct{}
+	err  error
+}
+
 // Prompt sends text to the assistant, starting it first when needed, unless a
-// turn is running. A key that was already accepted is not sent again.
+// turn is running. A key that is in flight or was accepted is not sent again:
+// a duplicate waits for the first attempt and returns its result.
 func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string) error {
 	m := s.member(id)
-	if !m.claim(key) {
-		return nil
-	}
-	live, err := s.ensure(ctx, id, "")
-	if err == nil {
-		var started bool
-		if started, err = live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}); err == nil && !started {
-			err = ErrTurnRunning
+	a, first := m.begin(key)
+	if !first {
+		select {
+		case <-a.done:
+			return a.err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
+	err := s.send(ctx, id, text)
+	m.finish(key, a, err)
+	return err
+}
+
+func (s *Service) send(ctx context.Context, id domain.MemberID, text string) error {
+	live, err := s.ensure(ctx, id, "")
 	if err != nil {
-		m.release(key)
 		return err
 	}
-	return nil
+	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)})
+	if err == nil && !started {
+		err = ErrTurnRunning
+	}
+	return err
 }
 
-func (m *member) claim(key string) bool {
+func (m *member) begin(key string) (*attempt, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, k := range m.keys {
-		if k == key {
-			return false
-		}
+	if a := m.attempts[key]; a != nil {
+		return a, false
 	}
-	if m.keys = append(m.keys, key); len(m.keys) > maxKeys {
-		m.keys = m.keys[1:]
-	}
-	return true
+	a := &attempt{done: make(chan struct{})}
+	m.attempts[key] = a
+	return a, true
 }
 
-func (m *member) release(key string) {
+// finish records a's result. A failed key is forgotten, so the caller can
+// retry it.
+func (m *member) finish(key string, a *attempt, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for i, k := range m.keys {
-		if k == key {
-			m.keys = append(m.keys[:i], m.keys[i+1:]...)
-			return
-		}
+	a.err = err
+	close(a.done)
+	if err != nil {
+		delete(m.attempts, key)
+		return
+	}
+	if m.done = append(m.done, key); len(m.done) > maxKeys {
+		delete(m.attempts, m.done[0])
+		m.done = m.done[1:]
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -44,8 +45,8 @@ var tiers = map[string]string{
 	protocol.MethodAccountUsage:   tierRead,
 	protocol.MethodTerminalStatus: tierRead,
 	protocol.MethodAssistantDocs:  tierRead,
-	protocol.MethodRunLaunch:      tierReversible,
-	protocol.MethodRunInject:      tierReversible,
+	protocol.MethodRunLaunch:      tierConfirmed,
+	protocol.MethodRunInject:      tierConfirmed,
 	protocol.MethodRunPause:       tierReversible,
 	protocol.MethodRunResume:      tierReversible,
 	protocol.MethodRunKill:        tierConfirmed,
@@ -64,6 +65,9 @@ type Confirmer func(ctx context.Context, c protocol.AssistantConfirmation) error
 type Server struct {
 	Caller  Caller
 	Confirm Confirmer
+	// Member is the member the socket belongs to; "mine" in a run.list
+	// request selects their runs.
+	Member string
 }
 
 // Serve accepts connections until ctx is done or the listener fails.
@@ -129,7 +133,7 @@ func (s *Server) serve(ctx context.Context, conn net.Conn) {
 		}
 		req, resp, ok := protocol.ParseRequest(line)
 		if ok {
-			result, rpcErr := s.dispatch(ctx, req)
+			result, rpcErr := s.dispatchWatched(ctx, conn, r, req)
 			if rpcErr != nil {
 				resp.Error = rpcErr
 			} else {
@@ -144,6 +148,26 @@ func (s *Server) serve(ctx context.Context, conn net.Conn) {
 			return
 		}
 	}
+}
+
+// dispatchWatched runs req with a context that ends when the caller hangs up,
+// so a confirmation nobody can answer any more is withdrawn. The wait for a
+// confirmation outlasts the idle deadline, which is lifted meanwhile.
+func (s *Server) dispatchWatched(ctx context.Context, conn net.Conn, r *bufio.Reader, req protocol.Request) (json.RawMessage, *protocol.Error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	_ = conn.SetReadDeadline(time.Time{})
+	watching := make(chan struct{})
+	go func() {
+		defer close(watching)
+		if _, err := r.Peek(1); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			cancel()
+		}
+	}()
+	result, rpcErr := s.dispatch(ctx, req)
+	_ = conn.SetReadDeadline(time.Now())
+	<-watching
+	return result, rpcErr
 }
 
 func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMessage, *protocol.Error) {
@@ -163,9 +187,11 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
-	if err := checkParams(req.Params); err != nil {
+	params, err := s.prepare(req)
+	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
 	}
+	req.Params = params
 	switch {
 	case req.Method == protocol.MethodAssistantDocs:
 		return serveDocs(req.Params)
@@ -189,44 +215,135 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 }
 
 func (s *Server) summarize(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
-	if req.Method == protocol.MethodEnvSave {
+	switch req.Method {
+	case protocol.MethodEnvSave:
 		return "Save your environment as a new image; new runs and terminals start from it", nil
+	case protocol.MethodRunLaunch:
+		return s.summarizeLaunch(ctx, req)
+	case protocol.MethodRunInject:
+		return s.summarizeInject(ctx, req)
 	}
 	p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
 	if err != nil || p.RunID == "" {
 		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
 	}
-	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodRunGet, req.Params)
+	run, rpcErr := s.getRun(ctx, req.Params)
 	if rpcErr != nil {
 		return "", rpcErr
 	}
-	var got protocol.RunResult
-	if err := json.Unmarshal(raw, &got); err != nil {
-		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode run.get result: " + err.Error()}
-	}
-	label := got.Run.Title
-	if label == "" {
-		label = got.Run.Task
-	}
-	return fmt.Sprintf("Stop run %s (%q)", p.RunID, label), nil
+	return fmt.Sprintf("Stop run %s (%q)", p.RunID, runLabel(run)), nil
 }
 
-// checkParams requires an object and refuses any member selector: the
-// socket is bound to one member, so the wire never names one.
-func checkParams(raw json.RawMessage) error {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil
+func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.RunLaunchParams](req.Params)
+	if err != nil || p.WorkspaceID == "" || p.Harness == "" {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and harness are required"}
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return errors.New("params must be an object")
+	params, _ := json.Marshal(protocol.WorkspaceGetParams{WorkspaceID: p.WorkspaceID})
+	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodWorkspaceGet, params)
+	if rpcErr != nil {
+		return "", rpcErr
 	}
-	for name := range fields {
-		if strings.Contains(strings.ToLower(name), "member_id") {
-			return fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
+	var ws protocol.WorkspaceGetResult
+	if err := json.Unmarshal(raw, &ws); err != nil {
+		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace.get result: " + err.Error()}
+	}
+	mode := p.Mode
+	if mode == "" {
+		mode = "default mode"
+	}
+	return fmt.Sprintf("Launch %s (%s) in %s: %q", p.Harness, mode, ws.Workspace.Name, truncate(p.Task)), nil
+}
+
+func (s *Server) summarizeInject(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
+	if err != nil || p.RunID == "" {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+	}
+	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
+	run, rpcErr := s.getRun(ctx, params)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	owner := ""
+	if run.MemberID != s.Member {
+		raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		var members protocol.MemberListResult
+		if err := json.Unmarshal(raw, &members); err != nil {
+			return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
+		}
+		owner = ", owned by " + run.MemberID
+		for _, m := range members.Members {
+			if m.ID == run.MemberID {
+				owner = ", owned by " + m.DisplayName
+			}
 		}
 	}
-	return nil
+	return fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), owner, truncate(p.Message)), nil
+}
+
+func (s *Server) getRun(ctx context.Context, params json.RawMessage) (protocol.Run, *protocol.Error) {
+	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodRunGet, params)
+	if rpcErr != nil {
+		return protocol.Run{}, rpcErr
+	}
+	var got protocol.RunResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return protocol.Run{}, &protocol.Error{Code: protocol.CodeInternal, Message: "decode run.get result: " + err.Error()}
+	}
+	return got.Run, nil
+}
+
+func runLabel(run protocol.Run) string {
+	if run.Title != "" {
+		return run.Title
+	}
+	return run.Task
+}
+
+const maxSummaryText = 120
+
+func truncate(text string) string {
+	if r := []rune(text); len(r) > maxSummaryText {
+		return string(r[:maxSummaryText]) + "…"
+	}
+	return text
+}
+
+// prepare checks req's params. The socket is bound to one member, so the wire
+// never names one, except that run.list takes member_id as a read filter, and
+// "mine" there selects the socket's own member.
+func (s *Server) prepare(req protocol.Request) (json.RawMessage, error) {
+	if len(req.Params) == 0 || string(req.Params) == "null" {
+		return req.Params, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(req.Params, &fields); err != nil {
+		return nil, errors.New("params must be an object")
+	}
+	for name := range fields {
+		if strings.Contains(strings.ToLower(name), "member_id") && (req.Method != protocol.MethodRunList || name != "member_id") {
+			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
+		}
+	}
+	if req.Method != protocol.MethodRunList {
+		return req.Params, nil
+	}
+	var mine bool
+	if raw, ok := fields["mine"]; ok {
+		if err := json.Unmarshal(raw, &mine); err != nil {
+			return nil, errors.New("mine must be a boolean")
+		}
+		delete(fields, "mine")
+	}
+	if mine {
+		id, _ := json.Marshal(s.Member)
+		fields["member_id"] = id
+	}
+	return json.Marshal(fields)
 }
 
 func serveDocs(raw json.RawMessage) (json.RawMessage, *protocol.Error) {

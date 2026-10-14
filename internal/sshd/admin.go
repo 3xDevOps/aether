@@ -192,6 +192,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
 				return err
 			}
+			s.removeAssistant(ctx, id)
 			if s.cfg.Homes != nil {
 				if err := s.cfg.Homes.Remove(ctx, id); err != nil {
 					slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)

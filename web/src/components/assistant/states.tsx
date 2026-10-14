@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { enhancedSupported } from '@/components/agents/agent-copy'
 import { AgentSetup } from '@/components/agents/agent-setup'
 import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
@@ -33,6 +34,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
           key={settingUp.name}
           agent={settingUp}
           client={api}
+          requireEnhanced
           onDone={() => {
             reload()
             setSetting('')
@@ -58,7 +60,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
               </p>
               <p className="text-ui-sm break-words text-muted">{agent.ready ? 'Ready' : agent.reason}</p>
             </div>
-            {!agent.ready && agents?.some((item) => item.name === agent.name) && (
+            {!agent.ready && agents?.some((item) => item.name === agent.name && enhancedSupported(item)) && (
               <Button size="sm" variant="secondary" onClick={() => setSetting(agent.name)}>Set up</Button>
             )}
           </li>

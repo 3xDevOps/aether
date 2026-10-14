@@ -534,15 +534,18 @@ conversation bumps; `assistantOpen` and `assistantWidth` persist.
 `connectSessionStream` with the assistant endpoint. `AssistantPanel` reads
 `assistant.status` once on load and on each open, then connects unless the
 state is `setup` or `needs_restart`. It stays connected with the panel closed
-only while the state is `running` or `starting` or a confirmation is pending.
-After that, `status` frames carry the state and the whole confirmation set, so
-the UI makes no further status calls. A truncated item in the transcript is
-read with `assistant.item`. A pending confirmation puts a dot on the top bar
-button, named "Assistant, N actions waiting for approval". Only
+only while the state is `running` or `starting`, or a confirmation or a
+harness prompt is pending. After that, `status` frames carry the state and the
+whole confirmation set, so the UI makes no further status calls. A truncated
+item in the transcript is read with `assistant.item`. Each pending
+confirmation or prompt puts a dot on the top bar button, named "Assistant, N
+requests waiting". A confirmation card lists its params as labelled rows
+(`workspace_id` reads "Workspace"; task and message text stay whole), and its
+buttons stay disabled once answered until a status frame removes the card. Only
 `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
 
 Entry points: the top bar's **Assistant** button (row 1 on desktop, the phone
-toolbar under 768px), `Mod+/`, the palette's **Ask Aether**, a secondary
+toolbar under 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
 
@@ -4978,7 +4981,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘K` / `Ctrl+K` | global | Open the command palette |
 | `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
 | `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
-| `⌘/` / `Ctrl+/` | global | Open or close the assistant |
+| `⌘Shift+Space` / `Ctrl+Shift+Space` | global | Open or close the assistant |
 | `?` | global | Open the shortcuts dialog |
 | `n` | global | New run |
 | `u` | global | Open the next run that needs you |

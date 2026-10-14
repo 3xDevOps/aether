@@ -298,7 +298,7 @@ func TestIntegrationAssistant(t *testing.T) {
 	if !strings.HasSuffix(execs[0].spec.WorkingDir, "/.aether/assistant") {
 		t.Fatalf("adapter working directory = %q, want $HOME/.aether/assistant", execs[0].spec.WorkingDir)
 	}
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".claude/settings.json"} {
 		b, err := os.ReadFile(filepath.Join(env.data, "homes", string(env.member.ID), ".aether", "assistant", name))
 		if err != nil || len(b) == 0 {
 			t.Fatalf("%s in the assistant directory = %q, %v", name, b, err)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Code, CodeBlock } from '@/components/ui/code'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -21,9 +21,9 @@ function useAction() {
     setError(undefined)
     try {
       await work()
+      // Stays busy: the card leaves when the server's status drops it, and a second answer would be refused.
     } catch (err) {
       setError(message(err))
-    } finally {
       setBusy(null)
     }
   }
@@ -93,11 +93,22 @@ export function AssistantRequestCard({ request }: { request: SessionRequest }) {
   )
 }
 
+/** The params of a confirmed call as labelled rows: `workspace_id` reads "Workspace", text stays whole, nested values are JSON. */
+export function paramRows(params: unknown): [string, string][] {
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+    return params === undefined || params === null ? [] : [['Params', JSON.stringify(params)]]
+  }
+  return Object.entries(params).map(([key, value]) => {
+    const words = key.replace(/_id$/, '').replace(/_/g, ' ')
+    return [words.charAt(0).toUpperCase() + words.slice(1), typeof value === 'string' ? value : JSON.stringify(value)]
+  })
+}
+
 /** An Aether operation the assistant may not run until the member approves its exact parameters. */
 export function ConfirmationCard({ confirmation }: { confirmation: AssistantConfirmation }) {
   const { busy, error, run } = useAction()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
-  const params = JSON.stringify(confirmation.params, null, 2)
+  const params = paramRows(confirmation.params)
   return (
     <RequestCard
       title="Approve this action?"
@@ -109,8 +120,15 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
           <p className="text-ui-sm text-muted">
             <Code>{confirmation.method}</Code>
           </p>
-          {params !== undefined && params !== '{}' && params !== 'null' && (
-            <CodeBlock className="max-h-40 overflow-y-auto">{params}</CodeBlock>
+          {params.length > 0 && (
+            <dl className="grid max-h-48 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 overflow-y-auto text-ui-sm [&_dt]:text-muted">
+              {params.map(([key, value]) => (
+                <Fragment key={key}>
+                  <dt>{key}</dt>
+                  <dd className="min-w-0 break-words whitespace-pre-wrap">{value}</dd>
+                </Fragment>
+              ))}
+            </dl>
           )}
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={busy !== null} onClick={() => decide(true)}>

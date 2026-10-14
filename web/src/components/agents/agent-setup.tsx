@@ -42,15 +42,18 @@ export function AgentSetup({
   agent: initial,
   client,
   onDone,
+  requireEnhanced = false,
 }: {
   agent: AgentInfo
   client: Api
   onDone: (agent: AgentInfo) => void
+  /** Pins Enhanced for a caller that cannot work without its adapter, so the mode choice is skipped. */
+  requireEnhanced?: boolean
 }) {
   const caps = useCapability()
   const rememberLaunch = useStore((s) => s.rememberLaunch)
   const [agent, setAgent] = useState(initial)
-  const [mode, setMode] = useState<SetupMode>(() => setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
+  const [mode, setMode] = useState<SetupMode>(() => requireEnhanced ? 'acp' : setupMode(initial, useStore.getState().launchDefaults[initial.name]?.mode))
   const [installing, setInstalling] = useState(false)
   const [result, setResult] = useState<AgentInstallResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,6 +61,7 @@ export function AgentSetup({
   const [checking, setChecking] = useState(false)
   const [checked, setChecked] = useState(false)
   const name = label(agent)
+  const first = requireEnhanced ? 1 : 2
   const enhanced = mode === 'acp'
   const shipped = agent.source === 'shipped'
   const canInstall = shipped && !!agent.install_script && caps.hasMethod('agent.install')
@@ -99,7 +103,7 @@ export function AgentSetup({
   }
 
   const finish = () => {
-    rememberLaunch(agent.name, enhanced && agent.enhanced_installed ? 'acp' : 'tui')
+    if (!requireEnhanced) rememberLaunch(agent.name, enhanced && agent.enhanced_installed ? 'acp' : 'tui')
     onDone(agent)
   }
 
@@ -112,12 +116,16 @@ export function AgentSetup({
         Set up {name}
       </h2>
 
-      <SetupStep number={1} title="Choose how runs show it">
-        <ModeComparison agent={agent} value={mode} onChange={setMode} />
-        {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Runs of {name} use Standard.</p>}
-      </SetupStep>
+      {requireEnhanced ? (
+        <p className="text-ui text-text">The assistant uses {name} in Enhanced mode, so its Enhanced adapter is installed too.</p>
+      ) : (
+        <SetupStep number={1} title="Choose how runs show it">
+          <ModeComparison agent={agent} value={mode} onChange={setMode} />
+          {!enhancedSupported(agent) && <p className="text-ui-sm text-muted">Runs of {name} use Standard.</p>}
+        </SetupStep>
+      )}
 
-      <SetupStep number={2} title={canInstall ? 'Install and log in' : 'Install and log in in your environment'}>
+      <SetupStep number={first} title={canInstall ? 'Install and log in' : 'Install and log in in your environment'}>
         {canInstall ? (
           <>
             <p className="text-ui text-text">
@@ -178,7 +186,7 @@ export function AgentSetup({
         )}
       </SetupStep>
 
-      <SetupStep number={3} title="Check">
+      <SetupStep number={first + 1} title="Check">
         {checked && (
           <ul aria-label={`${name} status`} className="flex flex-col gap-1">
             <Fact ok={agent.installed === true}>{agent.installed === true ? 'Installed' : 'Not installed'}</Fact>

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,8 @@ type AssistantService interface {
 	Reset(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	History(member domain.MemberID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	Item(member domain.MemberID, seq int64) (acphost.Item, error)
+	// Remove deletes what the assistant keeps for a removed member.
+	Remove(ctx context.Context, member domain.MemberID) error
 	Subscribe(member domain.MemberID, afterSeq int64) (assistant.Stream, error)
 }
 
@@ -199,8 +202,20 @@ func (s *Server) assistantItem(_ context.Context, member domain.MemberID, raw js
 	return protocol.RunACPItemResult{Item: b}, nil
 }
 
+// removeAssistant drops a removed member's assistant files and session.
+func (s *Server) removeAssistant(ctx context.Context, member domain.MemberID) {
+	if svc := s.cfg.Services.Assistant; svc != nil {
+		if err := svc.Remove(ctx, member); err != nil {
+			slog.Warn("sshd: member assistant cleanup failed", "member", member, "error", err)
+		}
+	}
+}
+
 func assistantError(err error) *protocol.Error {
+	var notReady *assistant.AgentNotReadyError
 	switch {
+	case errors.As(err, &notReady):
+		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
 	case errors.Is(err, assistant.ErrNoConfirmation):
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, assistant.ErrTurnRunning):

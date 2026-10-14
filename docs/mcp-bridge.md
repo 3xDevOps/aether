@@ -188,13 +188,13 @@ conflict radar itself continues to operate.
 assistant (the built-in agent that runs in the member's environment container,
 not in a run). It dials `/run/aether-assistant/assistant.sock`; `-socket`
 overrides the path. The socket is bound to one member, so no tool takes a
-member id and the server rejects any param containing `member_id`.
+member id and the server rejects any param containing `member_id`, except the `run.list` read filter; `aether_list_runs` with `mine` filters to the socket's member.
 
 | Tier | Tools |
 | --- | --- |
 | Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs` |
-| Reversible | `aether_launch_run`, `aether_message_run`, `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_stop_run`, `aether_save_environment` |
+| Reversible | `aether_pause_run`, `aether_resume_run` |
+| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_stop_run`, `aether_save_environment` |
 
 A confirmed call blocks until the member approves it in the dashboard. A
 decline, timeout or closed session fails the call with the reason. `aether_docs`

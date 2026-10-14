@@ -17,8 +17,8 @@ func TestReadiness(t *testing.T) {
 		listed("claude", true, false, true),
 	})
 	want := []protocol.AssistantAgent{
-		{Name: "claude", DisplayName: "claude", Reason: "its Enhanced adapter is not installed"},
-		{Name: "codex", DisplayName: "codex", Reason: "no login was found"},
+		{Name: "claude", DisplayName: "claude", Reason: "Enhanced adapter not installed"},
+		{Name: "codex", DisplayName: "codex", Reason: "No sign-in found"},
 	}
 	if len(agents) != len(want) {
 		t.Fatalf("readiness = %+v, want only claude and codex", agents)
@@ -28,7 +28,7 @@ func TestReadiness(t *testing.T) {
 			t.Errorf("agent %d = %+v, want %+v", i, agents[i], want[i])
 		}
 	}
-	if got := readiness([]protocol.AgentInfo{listed("claude", false, false, false)}); got[0].Reason != "the agent is not installed" {
+	if got := readiness([]protocol.AgentInfo{listed("claude", false, false, false)}); got[0].Reason != "Not installed" {
 		t.Errorf("uninstalled agent reason = %q", got[0].Reason)
 	}
 }
@@ -36,8 +36,8 @@ func TestReadiness(t *testing.T) {
 func TestChoose(t *testing.T) {
 	ready := func(claude, codex bool) []protocol.AssistantAgent {
 		return []protocol.AssistantAgent{
-			{Name: "claude", Ready: claude, Reason: "no login was found"},
-			{Name: "codex", Ready: codex, Reason: "no login was found"},
+			{Name: "claude", Ready: claude, Reason: "No sign-in found"},
+			{Name: "codex", Ready: codex, Reason: "No sign-in found"},
 		}
 	}
 	tests := []struct {

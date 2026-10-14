@@ -14,6 +14,7 @@ import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { assistantWaiting } from '@/store/assistant'
 import { useCapability, useNeedsYouCount, useSelfRole } from '@/store/hooks'
 
 const titles: Record<string, string> = {
@@ -63,7 +64,7 @@ function AssistantButton() {
   const supported = useCapability().hasMethod('assistant.status')
   const open = useStore((s) => s.assistantOpen)
   const setOpen = useStore((s) => s.setAssistantOpen)
-  const waiting = useStore((s) => s.assistantConfirmations.length)
+  const waiting = useStore(assistantWaiting)
   if (!supported) return null
   return (
     <span className="relative shrink-0">
@@ -85,7 +86,7 @@ function AssistantButton() {
 }
 
 function assistantLabel(waiting: number): string {
-  return waiting > 0 ? `Assistant, ${waiting} ${waiting === 1 ? 'action' : 'actions'} waiting for approval` : 'Assistant'
+  return waiting > 0 ? `Assistant, ${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting` : 'Assistant'
 }
 
 function HeaderNavigation() {
@@ -217,7 +218,8 @@ function PhoneToolbar() {
   const needsYou = useNeedsYouCount()
   const assistant = cap.hasMethod('assistant.status')
   const setAssistantOpen = useStore((s) => s.setAssistantOpen)
-  const waiting = useStore((s) => s.assistantConfirmations.length)
+  const waiting = useStore(assistantWaiting)
+  const assistantOpen = useStore((s) => s.assistantOpen)
   const iconLaunch = useStore((s) => s.headerPrimaries > 0 || s.route.name === 'run')
   const title = route.name === 'run'
     ? 'Run'
@@ -250,7 +252,11 @@ function PhoneToolbar() {
         </Button>
         {assistant && (
           <span className="relative shrink-0">
-            <Button variant="ghost" size="icon" label={assistantLabel(waiting)} onClick={() => setAssistantOpen(true)}>
+            <Button variant="ghost" size="icon" label={assistantLabel(waiting)}
+              aria-expanded={assistantOpen}
+              aria-controls="assistant"
+              onClick={() => setAssistantOpen(true)}
+            >
               <Sparkles />
             </Button>
             {waiting > 0 && <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />}

@@ -28,12 +28,12 @@ Read tier, free to call:
 
 Reversible tier, runs immediately and can be undone:
 
-- `aether_launch_run`, `aether_message_run`, `aether_pause_run`,
-  `aether_resume_run`
+- `aether_pause_run`, `aether_resume_run`
 
 Confirmed tier, blocks until the member approves a card in the dashboard:
 
-- `aether_stop_run`, `aether_save_environment`
+- `aether_launch_run`, `aether_message_run`, `aether_stop_run`,
+  `aether_save_environment`
 
 If the member declines, or does not answer in time, the call fails. Report
 that and stop; do not retry the same call.

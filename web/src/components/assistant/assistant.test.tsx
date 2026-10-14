@@ -8,7 +8,7 @@ import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-typ
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
 import { item, resetItems, ScriptedSession, say } from '@/test/acp-stream'
-import { alice, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
 
@@ -121,7 +121,7 @@ describe('opening the assistant', () => {
 
   it('opens from the keyboard shortcut', async () => {
     render(<AppShell />)
-    await userEvent.keyboard('{Control>}/{/Control}')
+    await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
     expect(await panel()).toBeDefined()
   })
 
@@ -173,6 +173,44 @@ describe('states', () => {
     expect(agents.getByText('No login was found')).toBeDefined()
     expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
+  })
+
+  it('sets an agent up in Enhanced mode only and leaves setup once it is ready', async () => {
+    const setup = status({
+      state: 'setup',
+      agent: undefined,
+      agents: [
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Enhanced adapter not installed' },
+        { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not installed' },
+      ],
+    })
+    vi.mocked(api.assistantStatus).mockResolvedValue(setup)
+    const claude = agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', installed: true, enhanced_installed: false, login_found: true })
+    vi.mocked(api.agentList).mockResolvedValue([claude, agentInfo({ name: 'codex', enhanced: 'none', installed: false })])
+    const aside = await openPanel()
+    const buttons = await within(aside).findAllByRole('button', { name: 'Set up' })
+    expect(buttons).toHaveLength(1)
+    await userEvent.click(buttons[0]!)
+    expect(await within(aside).findByText(/uses Claude Code in Enhanced mode/)).toBeDefined()
+    expect(within(aside).queryByText('Choose how runs show it')).toBeNull()
+    expect(within(aside).getByRole('region', { name: 'Install and log in' })).toBeDefined()
+    expect(within(aside).getByRole('region', { name: 'Check' })).toBeDefined()
+
+    vi.mocked(api.agentList).mockResolvedValue([{ ...claude, enhanced_installed: true }])
+    const reads = vi.mocked(api.assistantStatus).mock.calls.length
+    vi.mocked(api.assistantStatus).mockResolvedValue(status())
+    await userEvent.click(within(aside).getByRole('button', { name: 'Check' }))
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(vi.mocked(api.assistantStatus).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('idle'))
+    expect(useStore.getState().launchDefaults).toEqual({})
+  })
+
+  it('hides New conversation until there is a conversation', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
+    const aside = await openPanel()
+    await within(aside).findByText(/closes any shells/)
+    expect(within(aside).queryByRole('button', { name: 'New conversation' })).toBeNull()
   })
 
   it('asks before restarting the environment', async () => {
@@ -231,6 +269,16 @@ describe('the conversation', () => {
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
+  it('does not send on Enter with a touch screen, where Enter is a newline', async () => {
+    atViewport(1200, { pointer: 'coarse' })
+    const aside = await openPanel()
+    acpOpen()
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'one{Enter}two')
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    expect((box as HTMLTextAreaElement).value).toBe('one\ntwo')
+  })
+
   it('sends with the Send button and shows a refusal without losing the draft', async () => {
     vi.mocked(api.assistantPrompt).mockRejectedValue(new Error('assistant is not running'))
     const aside = await openPanel()
@@ -272,6 +320,23 @@ describe('the conversation', () => {
 })
 
 describe('confirmations', () => {
+  it('renders the params of a launch and a message readably', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch a run', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', task: 'Fix the flaky login test\nthen open a PR' } },
+      { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
+    ] }) })
+    const launch = await within(aside).findByRole('group', { name: 'Approve this action? Launch a run' })
+    for (const [term, text] of [['Workspace', 'ws_1'], ['Harness', 'claude'], ['Mode', 'acp'], ['Task', /Fix the flaky login test\s+then open a PR/]]) {
+      expect(within(launch).getByText(term)).toBeDefined()
+      expect(within(launch).getByText(text)).toBeDefined()
+    }
+    const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a run' })
+    expect(within(inject).getByText('Message')).toBeDefined()
+    expect(within(inject).getByText('Please stop and summarise')).toBeDefined()
+  })
+
   it('approves and declines through assistant.confirm and clears on a status frame', async () => {
     vi.mocked(api.assistantConfirm).mockResolvedValue({})
     const aside = await openPanel()
@@ -279,11 +344,15 @@ describe('confirmations', () => {
     assistantSocket().send({ status: status({ confirmations: [stop, { ...stop, id: 'c2', summary: 'Save your environment' }] }) })
     const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
     expect(within(card).getByText('run.kill')).toBeDefined()
-    expect(within(card).getByText(/"run_id": "run-8x2"/)).toBeDefined()
+    expect(within(card).getByText('Run')).toBeDefined()
+    expect(within(card).getByText('run-8x2')).toBeDefined()
     expect(within(card).getByText(/expires/)).toBeDefined()
 
     await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
     expect(api.assistantConfirm).toHaveBeenCalledWith('c1', true)
+    for (const button of within(card).getAllByRole('button')) expect(button).toHaveProperty('disabled', true)
+    await userEvent.click(within(card).getByRole('button', { name: 'Decline' }))
+    expect(api.assistantConfirm).toHaveBeenCalledTimes(1)
     expect(within(aside).getByText(stop.summary)).toBeDefined()
 
     const second = within(aside).getByRole('group', { name: 'Approve this action? Save your environment' })
@@ -323,10 +392,23 @@ describe('while closed', () => {
   it('badges the button and keeps the stream up while an approval is pending', async () => {
     vi.mocked(api.assistantStatus).mockResolvedValue(status({ confirmations: [stop] }))
     render(<AppShell />)
-    expect(await screen.findByRole('button', { name: 'Assistant, 1 action waiting for approval' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Assistant, 1 request waiting' })).toBeDefined()
     await waitFor(() => expect(StubSocket.opened.some((s) => s.url.includes('/ws/assistant'))).toBe(true))
     assistantSocket().open().send({ status: status() })
     expect(await screen.findByRole('button', { name: 'Assistant' })).toBeDefined()
+  })
+
+  it('badges a harness prompt too and keeps the stream for it', async () => {
+    useStore.setState({ assistantStatus: status({ state: 'running' }) })
+    render(<AppShell />)
+    await waitFor(() => expect(StubSocket.opened.some((s) => s.url.includes('/ws/assistant'))).toBe(true))
+    assistantSocket().open({ state: { turn_in_flight: true, queued: 0, pending: [], last_activity: '', prompt_images: false } }).send(
+      { status: status() },
+      { seq: 1, item: item('request', 1, { request: { id: 'r', kind: 'question', title: 'Which branch?', status: 'pending', options: [{ id: 'accept', name: 'Answer' }] } }) },
+    )
+    expect(await screen.findByRole('button', { name: 'Assistant, 1 request waiting' })).toBeDefined()
+    assistantSocket().send({ status: status({ confirmations: [stop] }) })
+    expect(await screen.findByRole('button', { name: 'Assistant, 2 requests waiting' })).toBeDefined()
   })
 
   it('stays disconnected while idle with nothing pending', async () => {

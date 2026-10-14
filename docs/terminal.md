@@ -5,6 +5,9 @@ Aether draws three kinds of terminal:
 - **Environment**: your own persistent shell. It runs in one server-side
   container with your member home mounted at `$HOME`, so files, executables
   in `~/.local/bin`, and agent login state survive reconnects and new runs.
+  It also mounts `/run/aether-assistant` and `/opt/aether/aether-server`
+  read-only for the [assistant](assistant.md); a terminal created before
+  that shows **Restart your environment** in the assistant panel.
 - **A run's agent terminal**: the agent's PTY in a Standard run, shown in
   the run's **Terminal** view.
 - **Run shells**: extra shells in a run's container, listed beside the agent

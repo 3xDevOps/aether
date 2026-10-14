@@ -9,25 +9,35 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 type fakeCaller struct {
-	mu    sync.Mutex
-	calls []string
+	mu     sync.Mutex
+	calls  []string
+	params map[string]json.RawMessage
 }
 
-func (f *fakeCaller) Call(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, *protocol.Error) {
+func (f *fakeCaller) Call(_ context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, method)
+	if f.params == nil {
+		f.params = map[string]json.RawMessage{}
+	}
+	f.params[method] = params
 	f.mu.Unlock()
 	switch method {
 	case protocol.MethodRunGet:
-		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t"}}`), nil
+		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2"}}`), nil
 	case protocol.MethodRunList:
 		return json.RawMessage(`{"runs":[]}`), nil
+	case protocol.MethodWorkspaceGet:
+		return json.RawMessage(`{"workspace":{"id":"ws-1","name":"shop"}}`), nil
+	case protocol.MethodMemberList:
+		return json.RawMessage(`{"members":[{"id":"m1","display_name":"Ada"},{"id":"m2","display_name":"Grace"}]}`), nil
 	}
 	return json.RawMessage(`{}`), nil
 }
@@ -40,6 +50,11 @@ func (f *fakeCaller) called() []string {
 
 func start(t *testing.T, confirm Confirmer) (string, *fakeCaller) {
 	t.Helper()
+	return startAs(t, "m1", confirm)
+}
+
+func startAs(t *testing.T, member string, confirm Confirmer) (string, *fakeCaller) {
+	t.Helper()
 	sock := filepath.Join(t.TempDir(), "a.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -48,7 +63,7 @@ func start(t *testing.T, confirm Confirmer) (string, *fakeCaller) {
 	fc := &fakeCaller{}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- (&Server{Caller: fc, Confirm: confirm}).Serve(ctx, ln) }()
+	go func() { done <- (&Server{Caller: fc, Confirm: confirm, Member: member}).Serve(ctx, ln) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -72,9 +87,14 @@ func TestAllowlistAndMemberID(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeMethodNotFound || !strings.Contains(err.Error(), "run.launch") {
 		t.Fatalf("member.list: %v", err)
 	}
-	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunList, map[string]any{"member_id": "m2"}, nil)
+	for _, params := range []map[string]any{{"run_id": "run-1", "member_id": "m2"}, {"run_id": "run-1", "account_member_id": "m2"}} {
+		if rpcCode(t, coordtransport.Call(t.Context(), sock, protocol.MethodRunGet, params, nil)) != protocol.CodeInvalidParams {
+			t.Fatalf("%v accepted", params)
+		}
+	}
+	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunList, map[string]any{"account_member_id": "m2"}, nil)
 	if rpcCode(t, err) != protocol.CodeInvalidParams {
-		t.Fatalf("member_id: %v", err)
+		t.Fatalf("account_member_id on run.list: %v", err)
 	}
 	if got := fc.called(); len(got) != 0 {
 		t.Fatalf("caller reached: %v", got)
@@ -150,5 +170,91 @@ func TestDocs(t *testing.T) {
 	err := coordtransport.Call(t.Context(), sock, protocol.MethodAssistantDocs, protocol.AssistantDocsParams{Topic: "nope"}, nil)
 	if rpcCode(t, err) != protocol.CodeNotFound || !strings.Contains(err.Error(), "quickstart") {
 		t.Fatalf("unknown topic: %v", err)
+	}
+}
+
+func TestRunListFilters(t *testing.T) {
+	sock, fc := start(t, nil)
+	if err := coordtransport.Call(t.Context(), sock, protocol.MethodRunList, map[string]any{"member_id": "m2", "active_only": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fc.params[protocol.MethodRunList]); !strings.Contains(got, `"member_id":"m2"`) {
+		t.Fatalf("explicit filter: %s", got)
+	}
+	if err := coordtransport.Call(t.Context(), sock, protocol.MethodRunList, map[string]any{"mine": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fc.params[protocol.MethodRunList]); !strings.Contains(got, `"member_id":"m1"`) || strings.Contains(got, "mine") {
+		t.Fatalf("mine: %s", got)
+	}
+}
+
+func TestLaunchAndInjectAreConfirmed(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	sock, fc := start(t, func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return errors.New("no")
+	})
+	task := strings.Repeat("x", 200)
+	err := coordtransport.Call(t.Context(), sock, protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Mode: "acp", Task: task}, nil)
+	if rpcCode(t, err) != protocol.CodeDenied {
+		t.Fatalf("launch: %v", err)
+	}
+	if want := `Launch claude (acp) in shop: "` + strings.Repeat("x", 120) + `…"`; got.Summary != want {
+		t.Fatalf("launch summary %q, want %q", got.Summary, want)
+	}
+	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
+	if rpcCode(t, err) != protocol.CodeDenied {
+		t.Fatalf("inject: %v", err)
+	}
+	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want {
+		t.Fatalf("inject summary %q, want %q", got.Summary, want)
+	}
+	for _, m := range fc.called() {
+		if m == protocol.MethodRunLaunch || m == protocol.MethodRunInject {
+			t.Fatalf("%s ran after a decline", m)
+		}
+	}
+	sock, _ = startAs(t, "m2", func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return errors.New("no")
+	})
+	_ = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
+	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want {
+		t.Fatalf("own run summary %q, want %q", got.Summary, want)
+	}
+}
+
+func TestDisconnectWithdrawsConfirmation(t *testing.T) {
+	asked := make(chan struct{})
+	withdrawn := make(chan error, 1)
+	sock, fc := start(t, func(ctx context.Context, _ protocol.AssistantConfirmation) error {
+		close(asked)
+		<-ctx.Done()
+		withdrawn <- ctx.Err()
+		return ctx.Err()
+	})
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := json.Marshal(protocol.Request{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: protocol.MethodEnvSave})
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	<-asked
+	_ = conn.Close()
+	select {
+	case err := <-withdrawn:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("withdrawn with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the confirmation outlived its caller")
+	}
+	for _, m := range fc.called() {
+		if m == protocol.MethodEnvSave {
+			t.Fatal("env.save ran for a caller that left")
+		}
 	}
 }

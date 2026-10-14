@@ -80,6 +80,9 @@ while you sleep.**
   remotely in **Files**; changes are immediately visible, including to active
   runs. Vendor logins stay on the remote you own, through each vendor's own
   authentication flow, and are never extracted or proxied.
+- **An assistant that acts as you.** Ask in plain language from the dashboard; it
+  runs on your own agent login and asks before it stops a run or saves your
+  environment. See [docs/assistant.md](docs/assistant.md).
 - **Full support for solo developers.** Team features are present, never in the way.
   Linking a fresh server makes you its administrator, giving you full control for your solo workflow. 
 

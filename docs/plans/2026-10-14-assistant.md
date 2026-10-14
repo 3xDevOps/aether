@@ -31,14 +31,15 @@ Agent Client Protocol) and rendered in the dashboard.
    member id is accepted on the wire.
 4. **Three tool tiers, enforced by the server:**
    - *Read* (status, runs, workspaces, agents, usage, docs): free.
-   - *Reversible* (launch a run, message a run, pause, resume): free; the
-     resulting events carry the member as actor.
-   - *Confirmed* (stop a run, save the environment): the tool call blocks
+   - *Reversible* (pause, resume): free; the resulting events carry the
+     member as actor.
+   - *Confirmed* (launch a run, message a run, stop a run, save the
+     environment): the tool call blocks
      until the member approves a confirmation card naming the exact action.
      Denial, a 10-minute timeout or a closed session fails the call.
 5. **Shell work uses the harness's own tools under its own permission
    prompts.** The session starts in the harness's asking mode (Claude Code
-   `default`, Codex `auto`), never the bypass mode runs use; each prompt
+   `default`, Codex `agent`), never the bypass mode runs use; each prompt
    renders as a request card the member answers.
 6. **Text from runs is data.** Transcripts and run output the assistant
    reads are untrusted; the instructions say so, and the confirmed tier holds
@@ -83,8 +84,8 @@ Line-delimited JSON-RPC, the same framing as the run coordination socket
 | Tier | Method |
 | --- | --- |
 | Read | `run.list`, `run.get`, `run.acp.history`, `workspace.list`, `workspace.get`, `agent.list`, `account.usage`, `terminal.status`, `assistant.docs` |
-| Reversible | `run.launch`, `run.inject`, `run.pause`, `run.resume` |
-| Confirmed | `run.kill`, `env.save` |
+| Reversible | `run.pause`, `run.resume` |
+| Confirmed | `run.launch`, `run.inject`, `run.kill`, `env.save` |
 
 `assistant.docs {topic}` returns an embedded guide from `docs/`, or the topic
 list when `topic` is empty.
