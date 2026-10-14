@@ -4,9 +4,11 @@
 
      The backup agent walks each domain separately and matches a manifest
      exclude by exact canonical path, so an exclude on the root domain prunes
-     only the root walk: shared_prefs, where the server name lives, has its
+     only the root walk: shared_prefs, where the connection choice and server name live, has its
      own walk and needs its own line. Every domain is named here so a file
-     the app has not written yet is excluded too. See docs/privacy.md. -->
+     the app has not written yet is excluded too. The file domain holds the
+     Edge device key (edge-device-key) and edge-tokens.json under
+     .config/aether, which must never leave the phone. See docs/privacy.md. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" path="." />

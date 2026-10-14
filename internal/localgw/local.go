@@ -1,12 +1,12 @@
 package localgw
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -58,19 +58,46 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"workspace.selection": (*Gateway).localWorkspaceSelection,
 }
 
-var localVerbs = slices.Sorted(maps.Keys(localHandlers))
+// needsHost lists the verbs that need a git checkout, a service manager or
+// local coding agents, which a packaged gateway's phone has none of, and the
+// port forwards, whose loopback listener every app on a phone can reach.
+var needsHost = []string{
+	"daemon.install", "daemon.status", "env.agents", "forward.start", "forward.status", "forward.stop",
+	"git.identity", "link.repo", "pull", "pull.switch", "repo.fast-forward", "repo.push",
+	"sync.start", "sync.status", "sync.stop",
+}
+
+func localVerbsFor(packaged bool) []string {
+	return slices.Sorted(func(yield func(string) bool) {
+		for verb := range localHandlers {
+			if packaged && slices.Contains(needsHost, verb) {
+				continue
+			}
+			if !yield(verb) {
+				return
+			}
+		}
+	})
+}
+
+// dialLink is cli.Dial behind a variable so tests can switch links without
+// a server.
+var dialLink = cli.Dial
 
 // localState is the mutable client-machine state behind /local/v1:
 // the saved link config (link.repo updates it), the background sync
 // sessions, and the edge sign-in in progress.
 type localState struct {
-	mu      sync.Mutex
-	cfg     cli.Config
-	mtime   time.Time
-	backend Backend
-	sync    *localops.SyncManager
-	forward *localops.ForwardManager
-	edge    edgeLogin
+	mu sync.Mutex
+	// switching holds link.switch off while a sync or forward starts, so
+	// neither starts on the server being switched away from.
+	switching sync.RWMutex
+	cfg       cli.Config
+	mtime     time.Time
+	backend   Backend
+	sync      *localops.SyncManager
+	forward   *localops.ForwardManager
+	edge      edgeLogin
 }
 
 // newLocalState seeds the verb state from the gateway config. It never
@@ -148,7 +175,7 @@ func (g *Gateway) handleLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	verb := r.PathValue("verb")
 	handler, ok := localHandlers[verb]
-	if !ok {
+	if !ok || !slices.Contains(g.verbs, verb) {
 		webgate.WriteError(w, http.StatusNotFound, &protocol.Error{
 			Code:    protocol.CodeMethodNotFound,
 			Message: "unknown local verb " + verb,
@@ -210,8 +237,19 @@ func (g *Gateway) localLinkStatus(*http.Request, []byte) (any, *protocol.Error) 
 		ServerID         string    `json:"server_id,omitempty"`
 		Links            []linkRef `json:"links,omitempty"`
 		Active           string    `json:"active,omitempty"`
+		Default          *linkRef  `json:"default,omitempty"`
 	}{Linked: cfg.Repo != "", ServerConfigured: cfg.Addr != "" || cfg.ServerID != "", Addr: cfg.Addr, User: cfg.User, Repo: cfg.Repo,
-		EdgeURL: cfg.EdgeURL, ServerID: cfg.ServerID, Links: namedLinks(cfg), Active: cfg.Active}, nil
+		EdgeURL: cfg.EdgeURL, ServerID: cfg.ServerID, Links: namedLinks(cfg), Active: cfg.Active, Default: defaultLink()}, nil
+}
+
+// defaultLink describes the saved top-level link, nil when none is saved.
+// An edge link may have no address; its server id stands in.
+func defaultLink() *linkRef {
+	saved, err := cli.Load()
+	if err != nil {
+		return nil
+	}
+	return &linkRef{Addr: cmp.Or(saved.Addr, saved.ServerID), Repo: saved.Repo}
 }
 
 func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.Error) {
@@ -253,6 +291,11 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 // profile: its top-level fields are the profile's overlay, not the
 // default link. A requested profile of another name is saved beside it.
 func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.Error {
+	g.local.switching.Lock()
+	defer g.local.switching.Unlock()
+	if prev := g.local.snapshot(); prev.Active != "" && !sameServer(prev, result.Config) {
+		return g.addLink(result, requested)
+	}
 	saved := result.Config
 	if name := saved.Active; name != "" {
 		var err error
@@ -286,11 +329,49 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 	return nil
 }
 
-// localLinkSwitch always refuses. link.apply relinks in place because the
-// dashboard has nothing open yet; switching a linked gateway would leave
-// every live event stream and attach session pointed at the old host, so
-// it stays a process restart. The verb exists so the SPA can probe it and
-// render the instruction verbatim.
+func sameServer(a, b cli.Config) bool {
+	if a.ServerID != "" && b.ServerID != "" {
+		return a.ServerID == b.ServerID
+	}
+	return a.ServerID == "" && b.ServerID == "" && a.Addr != "" && a.Addr == b.Addr
+}
+
+// addLink saves a server linked from a named profile as a link of its own
+// and moves the gateway onto it, so no existing link changes. A server
+// that is already saved keeps its name; otherwise the link is named
+// requested, else its server id or address, made unique.
+func (g *Gateway) addLink(result cli.LinkResult, requested string) *protocol.Error {
+	saved, err := cli.Load()
+	if err != nil {
+		_ = result.Conn.Close()
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "load link config: " + err.Error()}
+	}
+	name := cmp.Or(requested, result.Config.ServerID, result.Config.Addr)
+	if i := slices.IndexFunc(saved.Links, func(l cli.NamedLink) bool {
+		return requested == "" && sameServer(cli.Config{Addr: l.Addr, ServerID: l.ServerID}, result.Config)
+	}); i >= 0 {
+		name = saved.Links[i].Name
+	} else {
+		base := name
+		for n := 2; slices.ContainsFunc(saved.Links, func(l cli.NamedLink) bool { return l.Name == name }); n++ {
+			name = fmt.Sprintf("%s-%d", base, n)
+		}
+	}
+	saved = cli.UpsertLink(saved, cli.NamedLinkFor(name, result.Config))
+	saved.GUIServer = name
+	if err := cli.Save(saved); err != nil {
+		_ = result.Conn.Close()
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
+	}
+	target, _ := saved.Named(name)
+	g.moveTo(target, result.Conn)
+	return nil
+}
+
+// localLinkSwitch moves the gateway onto a saved link in place and saves
+// it as the link `aether gui` starts on. Relink closes the old connection,
+// which ends every stream on it; the dashboard reloads after a switch so it
+// rehydrates against the new server.
 func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Name string `json:"name"`
@@ -298,12 +379,49 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	if perr := decodeParams(body, &params); perr != nil {
 		return nil, perr
 	}
-	if params.Name == "" {
-		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "name is required"}
+	g.local.switching.Lock()
+	defer g.local.switching.Unlock()
+	if g.local.snapshot().Active == params.Name {
+		return map[string]string{"active": params.Name}, nil
 	}
-	return nil, &protocol.Error{
-		Code:    protocol.CodeInvalidState,
-		Message: "restart aether gui --server " + params.Name + " to switch servers",
+	saved, err := cli.Load()
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "load link config: " + err.Error()}
+	}
+	target := saved
+	if params.Name != "" {
+		named, ok := target.Named(params.Name)
+		if !ok {
+			return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("no server named %q", params.Name)}
+		}
+		target = named
+	}
+	conn, err := dialLink(target)
+	if err != nil {
+		return nil, unreachableError(err)
+	}
+	saved.GUIServer, target.GUIServer = params.Name, params.Name
+	if err := cli.Save(saved); err != nil {
+		_ = conn.Close()
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
+	}
+	g.moveTo(target, conn)
+	return map[string]string{"active": target.Active}, nil
+}
+
+// moveTo points the gateway at target. Relink closes the old connection
+// first, so a forward blocked opening a channel on an unresponsive server
+// returns before Close waits on it. Forwards and syncs name the old
+// server's runs and would follow the backend onto the new one. The caller
+// holds switching.
+func (g *Gateway) moveTo(target cli.Config, conn *cli.Conn) {
+	g.local.mu.Lock()
+	g.local.cacheConfig(target)
+	g.cfg.Backend.Relink(target, conn)
+	g.local.mu.Unlock()
+	g.local.forward.Close()
+	for _, session := range g.local.sync.Status() {
+		_ = g.local.sync.Stop(session.RunID)
 	}
 }
 
@@ -663,6 +781,8 @@ func (g *Gateway) localSyncStart(_ *http.Request, body []byte) (any, *protocol.E
 	if params.RunID == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "run_id is required"}
 	}
+	g.local.switching.RLock()
+	defer g.local.switching.RUnlock()
 	cfg := g.local.snapshot()
 	if cfg.Repo == "" {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: "no linked repo; re-run aether link --repo"}
@@ -735,6 +855,8 @@ func (g *Gateway) localForwardStart(_ *http.Request, body []byte) (any, *protoco
 	if params.Port < 1 || params.Port > 65535 {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "port must be between 1 and 65535"}
 	}
+	g.local.switching.RLock()
+	defer g.local.switching.RUnlock()
 	err := g.local.forward.Ensure(params.Target, int(params.Port), func() (io.ReadWriteCloser, error) {
 		return g.cfg.Backend.Forward(params.Target, params.Port)
 	})

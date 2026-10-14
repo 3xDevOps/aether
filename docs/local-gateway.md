@@ -79,9 +79,9 @@ dashboard URL and load that.
 The fragment keys `join` and `claim` carry the other two deep links,
 `aether://join?edge=<relay origin>&server=<server id>&invitation=<invitation id>#<secret>`
 and `aether://claim?edge=<relay origin>&server=<server id>#<secret>`
-([edge.md](edge.md#join-page)). Only the desktop shell handles them; the
-Android app's dashboard is served by the server it points at, not a local
-gateway. The desktop shell checks every part of the link and refuses any
+([edge.md](edge.md#join-page)). The desktop shell and the Android app in Edge
+mode, whose dashboard is a local gateway, handle them; the Android app in
+Tailscale mode loads a server-hosted dashboard and does not. The shell checks every part of the link and refuses any
 other shape, then appends the whole link URL-encoded as
 `#join=<link>` or `#claim=<link>`; a browser never sends a fragment to the
 dashboard's server. The dashboard takes the fragment off the address
@@ -1421,7 +1421,7 @@ authority.
 | `edge.claim` | `{"code":"<claim code>","edge":"https://...","addr":"host[:port]","name":"..."}` (all but `code` optional) | as `edge.link` |
 | `edge.join` | `{"link":"<join link>","addr":"host[:port]","name":"..."}` (`addr` and `name` optional) | as `edge.link` |
 | `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
-| `link.switch` | `{"name":"..."}` | always `-32002` (invalid state): `restart aether gui --server <name> to switch servers` |
+| `link.switch` | `{"name":"..."}` (empty selects the default link) | `{"active":"<name>"}` after relinking the gateway in place; the dashboard reloads. It stops the gateway's forwards and syncs first and saves the choice as `gui_server` in `config.json`, which a later `aether gui` without `--server` starts on. Naming the active link changes nothing. An unknown name is `-32602`: `no server named "<name>"` |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |
@@ -1480,8 +1480,11 @@ does, with the same files in the config directory:
   and asks for a confirmation; a server id typed from the admin links
   without one.
 - `edge.link` and `edge.claim` save the link and swap the gateway connection
-  in place, as `link.apply` does; under `aether gui --server <name>` the
-  change is saved into that named profile. They move the clone's `aether`
+  in place, as `link.apply` does; under `aether gui --server <name>` a link
+  to the same server (same address or server id) is saved into that named
+  profile, and a link to another server is added as a new named link, called
+  `name`, else the server id or address (suffixed `-2`, `-3` when taken), and
+  becomes `gui_server`. No existing link changes. They move the clone's `aether`
   remote from the previous git host to the new one, and report a remote
   that could not be moved as `remote_error` without failing the call. `server_id` must be a server id, and the
   server's SSH host key is checked against it before anything is sent.
@@ -1687,6 +1690,19 @@ the server snapshot from loading.
   fixes in their own repository, the run branch held by another worktree
   above being the one such state, and `-32603` for anything else git ran
   and lost. Both carry git's own words.
+- A gateway started with `AETHER_PACKAGED` set, as the Android app does with
+  `Android app`, is part of an app that installs its own updates and has no git
+  checkout, service manager or local agents. It leaves out `daemon.install`,
+  `daemon.status`, `env.agents`, `git.identity`, `link.repo`, `pull`,
+  `pull.switch`, `repo.fast-forward`, `repo.push`, `sync.start`,
+  `sync.status` and `sync.stop` from `local`, and `forward.start`,
+  `forward.status` and `forward.stop` too: a forward listens on `127.0.0.1`,
+  which every app on a phone can reach. It never checks GitHub for releases,
+  and `aether update` refuses with `this aether is part of the Android app,
+  which installs its updates; update the Android app instead`.
+- On Android the CLI reads `AETHER_RESOLV_CONF`, a resolv.conf path, only when
+  `/etc/resolv.conf` is absent; the app writes the phone's DNS servers there
+  ([networking.md](networking.md#android-dns)).
 - `pull`, `pull.switch`, `repo.push`, `repo.fast-forward`, `sync.start`, and
   `sync.stop` refuse with `-32002` when no repo is linked.
 - A sync session's states are `starting` (the overlay is dialing the run

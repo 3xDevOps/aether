@@ -109,6 +109,9 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		return nil, perr
 	}
 	switch {
+	case check.Packaged != "":
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "this aether is part of the " + check.Packaged + ", which installs its updates; update the " + check.Packaged + " instead"}
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "this is a dev build with no release to update to; rebuild it with `make build`"}

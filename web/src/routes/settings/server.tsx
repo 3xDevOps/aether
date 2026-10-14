@@ -1,4 +1,4 @@
-import { useUpdateNotice } from '@/components/update-banner'
+import { packagedLine, useUpdateNotice } from '@/components/update-banner'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
@@ -30,6 +30,7 @@ export function ServerSection() {
   const info = useStore((s) => s.info)
   const admin = useIsAdmin()
   const update = useUpdateNotice(true)
+  const packaged = useStore((s) => s.update?.cli.packaged)
   const openUpdates = useStore((s) => s.setUpdatesOpen)
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const disk = info?.disk
@@ -38,7 +39,11 @@ export function ServerSection() {
     <SettingsSection title="Server">
       <SettingRow
         label="Version"
-        help={update ? `Aether ${info.server_version}, protocol ${info.protocol_version}. ${update.text}.` : `Aether ${info.server_version}, protocol ${info.protocol_version}.`}
+        help={[
+          `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
+          update && `${update.text}.`,
+          packaged && packagedLine(packaged),
+        ].filter(Boolean).join(' ')}
         control={update?.action && (
           <Button
             size="sm"

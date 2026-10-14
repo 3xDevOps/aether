@@ -973,20 +973,20 @@ img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action
 
 ## The dashboard
 
-The edge does not serve a dashboard in this release. A phone reaches a
-server's dashboard over a tailnet, as before
-([networking.md](networking.md#the-dashboard)); the Android app does not
-use the edge. On a computer, `aether gui` serves the dashboard locally and
-reaches the server over the same link as the CLI, through the edge when the
-link goes through one ([local-gateway.md](local-gateway.md)).
+The edge does not serve a dashboard in this release. Every dashboard that
+reaches a server through an edge is the local gateway's: `aether gui` on a
+computer, or the [Android app](install.md#android-app) in Edge mode, which
+runs the same gateway on the phone. Either reaches the server over the same
+link as the CLI ([local-gateway.md](local-gateway.md)). A phone without the
+Android app's Edge mode reaches a server's dashboard over a tailnet
+([networking.md](networking.md#the-dashboard)).
 
-The desktop app opens `aether://join` and `aether://claim` links at
-onboarding's Connect step, which joins with the local gateway's
-`edge.join` or claims with `edge.claim`. The Android app opens only
-`aether://run/<id>`: its dashboard is served by the server the phone points
-at, which must not read a secret meant for another server. Open a join or
-claim link on a computer, with the desktop app or `aether link`
-([dashboard-frontend.md](dashboard-frontend.md#onboarding-wizard)).
+The desktop app and the Android app in Edge mode open `aether://join` and
+`aether://claim` links at onboarding's Connect step, which joins with the
+local gateway's `edge.join` or claims with `edge.claim`. The Android app in
+Tailscale mode opens only `aether://run/<id>`: its dashboard is served by the
+server the phone points at, which must not read a secret meant for another
+server ([dashboard-frontend.md](dashboard-frontend.md#onboarding-wizard)).
 
 ## Running an edge
 

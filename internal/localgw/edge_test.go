@@ -18,6 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -264,7 +265,7 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	}
 }
 
-func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
+func TestEdgeLinkOfAnAddressOnlyNamedProfileIsAddedBesideIt(t *testing.T) {
 	useTempConfigDir(t)
 	initial := cli.Config{
 		Addr: "default:2222",
@@ -300,9 +301,11 @@ func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
 	if reloaded.Addr != initial.Addr || reloaded.EdgeURL != "" || reloaded.ServerID != "" {
 		t.Fatalf("default link changed: %+v", reloaded)
 	}
-	work, ok := reloaded.Named("work")
-	if !ok || work.Addr != "work:2222" || work.EdgeURL != connected.EdgeURL || work.ServerID != connected.ServerID {
-		t.Fatalf("reloaded named link = %+v, present %v", work, ok)
+	if work, ok := reloaded.Named("work"); !ok || work.Addr != "work:2222" || work.EdgeURL != "" || work.ServerID != "" {
+		t.Fatalf("named link work = %+v, present %v; want it unchanged", work, ok)
+	}
+	if edge, ok := reloaded.ByServerID(connected.ServerID); !ok || edge.EdgeURL != connected.EdgeURL || edge.Addr != "work:2222" {
+		t.Fatalf("edge link = %+v, present %v", edge, ok)
 	}
 	repo := t.TempDir()
 	localGit(t, repo, "init")
@@ -327,7 +330,7 @@ func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
 	g := newVerbGateway(t, workspaceListBackend(""), selected)
 	connected := selected
 	connected.EdgeURL, connected.ServerID = "https://edge.example", "aaaa"
-	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
+	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", AutoKey: true, EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
 	if perr := g.adoptLink(cli.LinkResult{Config: cli.UpsertLink(connected, requested)}, "laptop"); perr != nil {
 		t.Fatalf("adoptLink: %v", perr)
 	}
@@ -339,11 +342,112 @@ func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
 	if reloaded.Addr != initial.Addr || reloaded.ServerID != "" {
 		t.Fatalf("default link changed: %+v", reloaded)
 	}
-	want := []cli.NamedLink{
-		{Name: "work", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID},
-		requested,
-	}
+	want := []cli.NamedLink{initial.Links[0], requested}
 	if !slices.Equal(reloaded.Links, want) {
 		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
+	}
+}
+
+func TestLinkingAnotherServerFromANamedProfileAddsALink(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr: "default:2222",
+		User: "alice",
+		Links: []cli.NamedLink{
+			{Name: "work", Addr: "work:2222", User: "bob"},
+			{Name: "ab", Addr: "old:2222", ServerID: "other"},
+		},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("work")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	backend := &switchBackend{}
+	g := newVerbGateway(t, backend, selected)
+	linked := cli.Config{Addr: "new:2222", User: "carol", EdgeURL: "https://edge.example", ServerID: "ab"}
+	if perr := g.adoptLink(cli.LinkResult{Config: linked}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.User != initial.User || reloaded.GUIServer != "ab-2" {
+		t.Fatalf("default link = %+v, want it unchanged and gui_server ab-2", reloaded)
+	}
+	want := append(slices.Clone(initial.Links), cli.NamedLink{Name: "ab-2", Addr: "new:2222", User: "carol", AutoKey: true, EdgeURL: linked.EdgeURL, ServerID: "ab"})
+	if !slices.Equal(reloaded.Links, want) {
+		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
+	}
+	if got := g.local.snapshot(); got.Active != "ab-2" || got.Addr != "new:2222" {
+		t.Fatalf("cached link = %+v, want ab-2 active", got)
+	}
+	if len(backend.relinked) != 1 || backend.relinked[0].Active != "ab-2" {
+		t.Fatalf("relinked = %+v, want the new link", backend.relinked)
+	}
+}
+
+func TestLinkingANewServerIDAtTheSameAddressAddsALink(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		Links: []cli.NamedLink{{Name: "work", Addr: "work:2222", EdgeURL: "https://edge.example", ServerID: "old"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, _ := initial.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	linked := cli.Config{Addr: "work:2222", EdgeURL: "https://edge.example", ServerID: "new"}
+	if perr := g.adoptLink(cli.LinkResult{Config: linked}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != "default:2222" || reloaded.ServerID != "" || len(reloaded.Links) != 2 || reloaded.Links[0] != initial.Links[0] || reloaded.Links[1].ServerID != "new" {
+		t.Fatalf("saved config = %+v, want the default and work kept and new added", reloaded)
+	}
+}
+
+func TestAdoptLinkWaitsForARunningSwitch(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "default:2222", Links: []cli.NamedLink{{Name: "work", Addr: "work:2222"}}}
+	saveConfigAt(t, saved, time.Unix(1_700_000_000, 0))
+	selected, _ := saved.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	g.local.switching.Lock()
+	done := make(chan *protocol.Error, 1)
+	go func() {
+		done <- g.adoptLink(cli.LinkResult{Config: cli.Config{Addr: "new:2222", ServerID: "ab"}}, "")
+	}()
+	select {
+	case <-done:
+		t.Fatal("adoptLink saved the config while a switch held the lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	g.local.switching.Unlock()
+	if perr := <-done; perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+}
+
+func TestLinkingAnotherServerStopsForwardsToTheOldOne(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "default:2222", Links: []cli.NamedLink{{Name: "work", Addr: "work:2222"}}}
+	saveConfigAt(t, saved, time.Unix(1_700_000_000, 0))
+	selected, _ := saved.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	port := freeLocalForwardPort(t)
+	if rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true); rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+	if perr := g.adoptLink(cli.LinkResult{Config: cli.Config{Addr: "new:2222", ServerID: "ab"}}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+	rec := do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"forwards\":[]}\n" {
+		t.Fatalf("forward.status after linking another server = %d: %s", rec.Code, rec.Body)
 	}
 }

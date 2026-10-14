@@ -9,8 +9,8 @@ From the phone you can:
 • Edit the files in your member home.
 • Open a run straight from an aether://run link.
 
-What it needs: an Aether server on your Tailscale network with its dashboard turned on, and this phone signed in to the same tailnet. There is no account and no password. Tailscale identifies the phone, and the server decides what it may do.
+Two ways to connect. Tailscale: an Aether server on your Tailscale network with its dashboard turned on, and this phone signed in to the same tailnet; Tailscale identifies the phone. Aether Edge: no Tailscale needed; sign in with GitHub, pick your server, and approve the device where your server requires it. Either way the server decides what the phone may do.
 
-What it does not do: the app talks only to the server you name, over HTTPS. What the Data safety card lists as collected is what you type, pick or tap in the dashboard, and it goes to that one server - the one you or your team run - and nowhere else. Nothing is sent to the publisher. No ads, no analytics, no tracking. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md
+What it does not do: in Tailscale mode the app talks only to the server you name, over HTTPS. In Edge mode it talks to the Aether edge, which signs you in and relays the SSH connection to your server; the edge cannot read it. What you type, pick or tap in the dashboard goes to your server, the one you or your team run. The device key and sign-in tokens stay on the phone and are not backed up. No ads, no analytics, no tracking. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md
 
 Aether is open source under the GPL-3.0. Source, documentation and the server: https://github.com/3xDevOps/Aether

@@ -4335,7 +4335,9 @@ through either gateway:
 - **Notifications**: **Notify this device when a run needs me**, described
   under [Push notifications](#push-notifications).
 - **This computer**, only on the local gateway: the linked **Server** and
-  **Repository** (`link.status`), **Saved servers** with **Switch**, the
+  **Repository** (`link.status`) with **Link another server** (**Link a server**
+before any), **Saved servers** (the default link, then named ones) with
+**Switch**, which calls `link.switch` and reloads the dashboard, the
   **Sync daemon** (`daemon.status`), and **Mirror run files**, which starts
   and stops a live run's sync overlay (`sync.status`). Each row says in one
   sentence what it does and prefills its target read-only: the daemon the
@@ -4631,7 +4633,10 @@ shows nothing to link until one is chosen; the server list, link by id and
 claim then pass that edge to the gateway, as `--edge` does on the command
 line. A server picked from the list opens a **Confirm server** panel with its
 id and the host key fingerprint `edge.hostkey` read, and links only on **Link
-and pin**, because that id comes from the edge. **Other ways to link** holds
+and pin**, because that id comes from the edge. Opened from Settings > This computer > **Link another server**, the step
+starts on this picker with a server already linked; linking an edge server makes it the default and keeps the
+previous edge default as a saved server named by its server id. **Other ways to
+link** holds
 **Server id from your admin**, which the edge cannot substitute, and
 **Claim code or link**, which takes the claim link or code `aether-server
 setup` printed and refuses a claim link naming another edge than the one
@@ -4665,7 +4670,7 @@ the admin's side is the Needs you card ([Run state](#run-state)). A join
 or claim that succeeds but could not move the clone's `aether` remote
 shows the gateway's `remote_error` as an error toast; the link stays. A
 gateway without `edge.join` or `edge.claim`, such as the Android app's
-tailnet dashboard, shows the link and the `aether link` command to copy
+Tailscale-mode dashboard, shows the link and the `aether link` command to copy
 instead, with **Continue**.
 
 The Agent step opens with the two Standard and Enhanced cards
@@ -4718,7 +4723,10 @@ prompts are rows in that dialog, not banners stacked over the shell. The CLI
 and shell prompts read `update.check` from the local gateway, because the
 dashboard can update only the machine running `aether gui`. The server prompt
 asks the linked server about itself and appears wherever the member is an
-admin.
+admin. When the gateway reports the CLI as `packaged` (the Android app), the
+CLI prompt is gone and the dialog says `Updates come from the Android app:
+install its new version to update Aether.`; the workspace repository panel
+hides **Local clone** because the gateway has no `link.repo`.
 
 - **Two reads.** The host reads `update.check` on mount, again every half
   hour, and again whenever the window comes back to the front, on `focus` and
@@ -5329,8 +5337,9 @@ journalctl -u aether-server -f
 Prerequisites and the refusals a bad tailnet setup produces are in
 [networking.md](networking.md#the-dashboard).
 
-The [Android app](install.md#android-app) is the same page in a WebView, so
-the same expectations hold there. It is worth checking separately for two
+The [Android app](install.md#android-app) is the same page in a WebView, served
+by the server in Tailscale mode and by a local gateway in Edge mode, so the
+same expectations hold there. It is worth checking separately for two
 things the browser does not exercise: whether the top bar and the content
 clear the system bars, which depends on the WebView forwarding safe-area
 insets, and whether the soft keyboard shortens the layout rather than covering

@@ -925,9 +925,8 @@ export const api = {
     local<LinkApplyResult>('link.apply', params),
   localLinkRepo: (repo: string, workspaceID?: string) =>
     local<LinkRepoResult>('link.repo', { repo, workspace_id: workspaceID }),
-  // link.switch never succeeds: the gateway's SSH identity is fixed at
-  // process start, so it answers the restart instruction as an error.
-  localLinkSwitch: (name: string) => local<never>('link.switch', { name }),
+  /** An empty name is the top-level default link. */
+  localLinkSwitch: (name: string) => local<{ active: string }>('link.switch', { name }),
   /** Starts a sign-in at the edge; edge.status reports how it ends. */
   localEdgeLogin: (edge?: string) => local<EdgeLogin>('edge.login', edge ? { edge } : {}),
   localEdgeStatus: () => local<EdgeStatus>('edge.status'),

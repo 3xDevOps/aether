@@ -156,7 +156,8 @@ or whether each new device waits for a person to approve it
 (`approved-devices`, the default when the setting is missing). Tailnet
 identities and SSH keys work the same under both. The edge serves no
 dashboard in this release: a phone reaches it over the tailnet
-([The dashboard](#the-dashboard)), and a computer through `aether gui`.
+([The dashboard](#the-dashboard)) or through the Android app's Edge mode, and
+a computer through `aether gui`.
 [edge.md](edge.md) covers the two policies, claiming, what the edge can
 see, and running your own; invitations and device approval are in
 [teams.md](teams.md#through-an-edge).
@@ -278,10 +279,12 @@ what it bound:
 aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
 ```
 
-On Android, the [app on every release](install.md#android-app) wraps this same
-URL full screen. It is a WebView and nothing more, so everything below holds
-for it unchanged, except [notifications](#notifications), which a WebView
-cannot receive.
+On Android, the [app on every release](install.md#android-app) in its
+Tailscale mode wraps this same URL full screen. It is a WebView and nothing
+more, so everything below holds for it unchanged, except
+[notifications](#notifications), which a WebView cannot receive. Its Aether
+Edge mode needs no tailnet and no `web-port`: it runs the local gateway on the
+phone and reaches the server through the [edge](edge.md).
 
 `web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
 setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
@@ -424,8 +427,19 @@ exclusive: HTTP cannot present a key, so a server set to require one refuses
 to start with the dashboard on.
 
 Key-only and invite-code servers - anything with no tailscaled, including
-one reached through an edge - have no phone dashboard in this release.
-`aether gui` is the whole story there.
+one reached through an edge - have no server-hosted dashboard in this release.
+On a computer `aether gui` serves it; on a phone the Android app's Edge mode
+does, for a server reached through an edge.
+
+### Android DNS
+
+Go's pure resolver reads `/etc/resolv.conf`, which Android does not have. The
+[Android app](install.md#android-app) in Edge mode (permission
+`ACCESS_NETWORK_STATE`) writes the active network's DNS servers to
+`resolv.conf` in its private files directory, rewrites it on network change,
+and starts the bundled CLI with `AETHER_RESOLV_CONF` set to that path. The CLI
+honours the variable only when `/etc/resolv.conf` is absent, so it changes
+nothing on a computer.
 
 ### Where it refuses
 

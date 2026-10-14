@@ -30,13 +30,13 @@ export function ThisComputerSection({ client }: { client: Api }) {
 
 /** Read on every mount: `aether link` may have run in a terminal since. */
 function LinkRows({ client }: { client: Api }) {
+  const caps = useCapability()
   const link = useStore((s) => s.linkStatus)
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const navigate = useStore((s) => s.navigate)
   const [error, setError] = useState<string | null>(null)
-  // The gateway's SSH identity lives as long as its process, so link.switch
-  // always answers with a restart instruction; it is shown verbatim.
-  const [switchNote, setSwitchNote] = useState<string | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
   const configured = link?.server_configured === true
 
   useEffect(() => {
@@ -50,12 +50,19 @@ function LinkRows({ client }: { client: Api }) {
     }
   }, [client, setLinkStatus])
 
-  const switchTo = (name: string) => {
-    setSwitchNote(null)
-    client.localLinkSwitch(name).catch((err: unknown) => setSwitchNote(message(err)))
+  const switchTo = async (name: string) => {
+    setSwitchError(null)
+    setSwitching(true)
+    try {
+      await client.localLinkSwitch(name)
+      window.location.reload()
+    } catch (err) {
+      setSwitchError(message(err))
+      setSwitching(false)
+    }
   }
 
-  const saved = link?.links ?? []
+  const servers = [...(link?.default ? [{ ...link.default, label: 'Default' }] : []), ...(link?.links ?? []).map((l) => ({ ...l, label: l.name }))]
   return (
     <>
       <SettingRow
@@ -64,9 +71,24 @@ function LinkRows({ client }: { client: Api }) {
           !link
             ? 'Checking the link…'
             : configured
-              ? <>Connected to <Code>{linkTarget(link)}</Code> as {link.user}.</>
-              : <>No server yet. Run <Code>aether link</Code> in a terminal.</>
+              ? (
+                  <>
+                    Connected to <Code>{linkTarget(link)}</Code> as {link.user}.
+                  </>
+                )
+              : caps.hasLocal('edge.link')
+                ? 'No server yet.'
+                : <>No server yet. Run <Code>aether link</Code> in a terminal.</>
         }
+        control={caps.hasLocal('edge.link') && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => navigate('onboarding', { link: 'another' })}
+          >
+            {configured ? 'Link another server' : 'Link a server'}
+          </Button>
+        )}
       >
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
       </SettingRow>
@@ -77,20 +99,20 @@ function LinkRows({ client }: { client: Api }) {
           control={<Button size="sm" variant="secondary" onClick={() => navigate('workspaces')}>Manage workspaces</Button>}
         />
       )}
-      {saved.length > 0 && (
+      {servers.length > 0 && (
         <SettingRow label="Saved servers" help="Servers this computer has linked to.">
           <ul aria-label="Saved servers" className="flex min-w-0 flex-col">
-            {saved.map((entry) => (
+            {servers.map((entry) => (
               <li key={entry.name} className="flex min-h-8 min-w-0 items-center gap-2 text-ui">
-                <span className="font-code">{entry.name}</span>
+                <span className={entry.name ? 'shrink-0 font-code' : 'shrink-0'}>{entry.label}</span>
                 <span className="min-w-0 flex-1 truncate text-muted">{entry.addr}</span>
                 {entry.name === (link?.active ?? '')
-                  ? <Badge tone="done">Active</Badge>
-                  : <Button size="sm" variant="secondary" onClick={() => switchTo(entry.name)}>Switch</Button>}
+                  ? <Badge tone="done" className="shrink-0">Active</Badge>
+                  : <Button size="sm" variant="secondary" className="shrink-0" disabled={switching} onClick={() => void switchTo(entry.name)}>Switch</Button>}
               </li>
             ))}
           </ul>
-          {switchNote && <Callout tone="neutral">{switchNote}</Callout>}
+          {switchError && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{switchError}</Callout>}
         </SettingRow>
       )}
     </>

@@ -53,11 +53,16 @@ type Config struct {
 	// Supervised marks a gateway the desktop shell spawned: update.apply
 	// exits the process because the shell restarts it.
 	Supervised bool
+	// Packaged names the app that installs this binary's updates, such as
+	// "Android app". Such a gateway runs without a git checkout, a service
+	// manager or local coding agents, so it omits the verbs that need them.
+	Packaged string
 }
 
 type Gateway struct {
 	cfg      Config
 	local    *localState
+	verbs    []string
 	token    string
 	core     *webgate.Gateway
 	ln       net.Listener
@@ -101,6 +106,7 @@ func New(cfg Config) (*Gateway, error) {
 	g := &Gateway{
 		cfg:     cfg,
 		local:   newLocalState(cfg),
+		verbs:   localVerbsFor(cfg.Packaged != ""),
 		token:   token,
 		exit:    make(chan struct{}),
 		rebuild: newRebuildState(),
@@ -112,7 +118,7 @@ func New(cfg Config) (*Gateway, error) {
 		Capabilities: protocol.GatewayCapabilities{
 			Gateway: "local",
 			WS:      []string{"events", "attach", "acp", "terminal", "dev/browser"},
-			Local:   localVerbs,
+			Local:   g.verbs,
 		},
 		Static: cfg.Static,
 	})

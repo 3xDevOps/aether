@@ -193,6 +193,23 @@ func TestUpdateApplyRefusesDevBuild(t *testing.T) {
 	}
 }
 
+func TestUpdateApplyRefusesPackagedBuild(t *testing.T) {
+	pinVersion(t)
+	t.Setenv(selfupdate.PackagedEnv, "Android app")
+	g := updateGateway(t, &verbStubBackend{}, false)
+	stubApply(t, func(context.Context, string, string) ([]string, error) {
+		t.Fatal("a packaged build must not reach the binary swap")
+		return nil, nil
+	})
+
+	rec := do(g, http.MethodPost, "/local/v1/update.apply", "{}", true)
+	perr := decodeError(t, rec.Body.Bytes())
+	want := "this aether is part of the Android app, which installs its updates; update the Android app instead"
+	if perr.Code != protocol.CodeInvalidState || perr.Message != want {
+		t.Fatalf("error = %d %q, want %d %q", perr.Code, perr.Message, protocol.CodeInvalidState, want)
+	}
+}
+
 // TestUpdateCheckRefreshBypassesTheCache covers the read behind the Update
 // button: it names the tag that is about to be installed, so it may not be
 // served from an answer that is up to an hour old.

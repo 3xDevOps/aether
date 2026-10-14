@@ -3,13 +3,16 @@ package localgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -493,31 +496,159 @@ func TestLocalSnapshotKeepsCachedNamedConfigWhenProfileDisappears(t *testing.T) 
 	}
 }
 
-// link.switch never switches: the SSH identity is process-lifetime. It
-// answers the restart instruction so the SPA can show it verbatim.
+// switchBackend records the link a switch relinked onto.
+type switchBackend struct {
+	verbStubBackend
+	relinked []cli.Config
+}
+
+func (b *switchBackend) Relink(cfg cli.Config, _ *cli.Conn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.relinked = append(b.relinked, cfg)
+}
+
+// hangingForwardBackend blocks Forward the way OpenChannel does on an
+// unresponsive server, until Relink closes the old connection.
+type hangingForwardBackend struct {
+	switchBackend
+	opening  chan struct{}
+	released chan struct{}
+}
+
+func (b *hangingForwardBackend) Forward(string, uint32) (io.ReadWriteCloser, error) {
+	close(b.opening)
+	<-b.released
+	return nil, errors.New("ssh: connection closed")
+}
+
+func (b *hangingForwardBackend) Relink(cfg cli.Config, conn *cli.Conn) {
+	b.switchBackend.Relink(cfg, conn)
+	close(b.released)
+}
+
+func TestLocalLinkSwitchWithForwardOpeningChannel(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "home:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222"}}}
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	backend := &hangingForwardBackend{opening: make(chan struct{}), released: make(chan struct{})}
+	g := newVerbGateway(t, backend, saved)
+	stubDialLink(t, func(cli.Config) (*cli.Conn, error) { return nil, nil })
+	port := freeLocalForwardPort(t)
+	rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+	conn, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	<-backend.opening
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true) }()
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("switch = %d: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("link.switch hung waiting for a forward blocked opening a channel")
+	}
+}
+
+func stubDialLink(t *testing.T, fn func(cli.Config) (*cli.Conn, error)) {
+	t.Helper()
+	old := dialLink
+	t.Cleanup(func() { dialLink = old })
+	dialLink = fn
+}
+
 func TestLocalLinkSwitch(t *testing.T) {
-	cfg := cli.Config{Addr: "host:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "host:2222"}}}
-	g := newVerbGateway(t, &verbStubBackend{}, cfg)
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "home:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222", Repo: "/prod"}}}
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	backend := &switchBackend{}
+	g := newVerbGateway(t, backend, saved)
+	var dialed []string
+	stubDialLink(t, func(cfg cli.Config) (*cli.Conn, error) {
+		dialed = append(dialed, cfg.Addr)
+		if cfg.Addr == "home:2222" {
+			return nil, errors.New("dial tcp: connection refused")
+		}
+		return nil, nil
+	})
 
 	rec := do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"active":"prod"}` {
+		t.Fatalf("switch to prod = %d: %s", rec.Code, rec.Body)
 	}
-	perr := decodeError(t, rec.Body.Bytes())
-	if perr.Code != protocol.CodeInvalidState {
-		t.Errorf("code = %d, want %d", perr.Code, protocol.CodeInvalidState)
+	if len(backend.relinked) != 1 || backend.relinked[0].Addr != "prod:2222" || backend.relinked[0].Active != "prod" {
+		t.Fatalf("relinked = %+v, want the prod link", backend.relinked)
 	}
-	if perr.Message != "restart aether gui --server prod to switch servers" {
-		t.Errorf("message = %q", perr.Message)
+	if got := g.local.snapshot(); got.Active != "prod" || got.GUIServer != "prod" {
+		t.Fatalf("cached config = %+v, want prod active", got)
+	}
+	if onDisk, err := cli.Load(); err != nil || onDisk.GUIServer != "prod" || onDisk.Addr != "home:2222" {
+		t.Fatalf("saved config = %+v, %v; want gui_server prod beside the unchanged default", onDisk, err)
 	}
 
-	// A missing name is a params error, not the instruction.
-	rec = do(g, http.MethodPost, "/local/v1/link.switch", "{}", true)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("no-name status = %d, want 400: %s", rec.Code, rec.Body)
+	rec = do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"prod"}`, true)
+	if rec.Code != http.StatusOK || len(dialed) != 1 {
+		t.Fatalf("switch to the active link = %d %s, dialed %v; want a no-op", rec.Code, rec.Body, dialed)
 	}
-	if perr := decodeError(t, rec.Body.Bytes()); perr.Code != protocol.CodeInvalidParams {
-		t.Errorf("no-name code = %d, want %d", perr.Code, protocol.CodeInvalidParams)
+
+	rec = do(g, http.MethodPost, "/local/v1/link.switch", `{"name":"nope"}`, true)
+	if rec.Code != http.StatusBadRequest || decodeError(t, rec.Body.Bytes()).Message != `no server named "nope"` {
+		t.Fatalf("unknown name = %d: %s", rec.Code, rec.Body)
+	}
+
+	rec = do(g, http.MethodPost, "/local/v1/link.switch", `{}`, true)
+	perr := decodeError(t, rec.Body.Bytes())
+	if perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "connection refused") {
+		t.Fatalf("failed dial = %d %+v, want the classified refusal", rec.Code, perr)
+	}
+	if len(backend.relinked) != 1 {
+		t.Fatalf("a failed dial relinked the backend: %+v", backend.relinked)
+	}
+}
+
+func TestPackagedGatewayOmitsHostVerbs(t *testing.T) {
+	useTempConfigDir(t)
+	if err := cli.Save(cli.Config{Addr: "home:2222"}); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(Config{Backend: &verbStubBackend{}, CLI: cli.Config{Addr: "home:2222"}, Packaged: "Android app"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := do(g, http.MethodGet, "/api/v1/capabilities", "", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capabilities = %d: %s", rec.Code, rec.Body)
+	}
+	var caps protocol.GatewayCapabilities
+	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
+		t.Fatal(err)
+	}
+	for _, verb := range []string{"link.repo", "daemon.install", "sync.start", "forward.start"} {
+		if slices.Contains(caps.Local, verb) {
+			t.Errorf("capabilities offer %s on a packaged gateway", verb)
+		}
+	}
+	if !slices.Contains(caps.Local, "link.status") || !slices.Contains(caps.Local, "link.switch") {
+		t.Errorf("capabilities = %v, want link.status and link.switch", caps.Local)
+	}
+	if rec = do(g, http.MethodPost, "/local/v1/link.repo", `{}`, true); rec.Code != http.StatusNotFound {
+		t.Errorf("link.repo = %d, want 404: %s", rec.Code, rec.Body)
+	}
+	rec = do(g, http.MethodPost, "/local/v1/link.status", `{}`, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"default":{"name":"","addr":"home:2222"}`) {
+		t.Errorf("link.status = %d: %s", rec.Code, rec.Body)
 	}
 }
 

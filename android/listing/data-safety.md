@@ -5,16 +5,22 @@ does (see [docs/privacy.md](../../docs/privacy.md) for the same facts in
 prose). Play's form guide is at
 <https://support.google.com/googleplay/android-developer/answer/10787469>.
 
-The app itself sends nothing anywhere. The dashboard it shows is Aether's own
-code, so under Play's rule that a webview counts when "your app is in control
+In Tailscale mode the app itself sends nothing anywhere. In Aether Edge mode
+the bundled CLI also contacts the edge, see [Edge mode](#edge-mode). The
+dashboard it shows is Aether's own code, so under Play's rule that a webview counts when "your app is in control
 of the code/behavior delivered through that webview", what the dashboard sends
 to the member's server is declared as collected, even though the publisher
 never receives it. Declaring it cannot be held against the app; leaving it out
 can.
 
-What the dashboard keeps on the phone itself - its appearance settings, the
-last workspace and board grouping, the harness last launched per agent
-account, dismissed update notices - is not declared: "User data accessed by
+What the dashboard and the app keep on the phone itself - appearance
+settings, the last workspace and board grouping, the harness last launched
+per agent account, dismissed update notices, the chosen connection mode and,
+in Edge mode, the device private key, the edge sign-in tokens, the link
+config and the phone's DNS servers (`.config/aether/` and `resolv.conf` in
+the app's private files directory, excluded from backup and device transfer)
+- is not declared, because none of it is sent off the device (the private key
+never; the token only as the credential to the edge, below): "User data accessed by
 your app that is only processed locally on the user's device and not sent off
 device does not need to be disclosed." [docs/privacy.md](../../docs/privacy.md)
 lists it in full.
@@ -25,7 +31,7 @@ lists it in full.
 | --- | --- |
 | Does your app collect or share any of the required user data types? | Yes |
 | Is all of the user data collected by your app encrypted in transit? | Yes |
-| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data. Link: `https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#deleting-your-data` |
+| Do you provide a way for users to request that their data is deleted? | Yes. Uninstalling removes everything on the phone; the server's administrator deletes server-side data; the edge account is deleted on the edge's Account page. Link: `https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#deleting-your-data` |
 
 ## Data types
 
@@ -50,13 +56,32 @@ employer running the server is a third party, but the member types that
 server's name and every transmission above is something they typed, picked or
 tapped.
 
-Not collected, so leave unticked: Location, Personal info (the app sends no
-name, email or ID; the server learns the tailnet login from Tailscale, not
-from the app), Financial info, Health and fitness, Messages (the app has no
+Not collected, so leave unticked: Location, Financial info, Health and fitness, Messages (the app has no
 messaging feature; what a member writes goes to an agent, and is declared
 above as user-generated content that their teammates can also see), Videos,
 Audio, Calendar, Contacts, Web browsing, App info and performance (no crash
-logs or diagnostics leave the phone), Device or other IDs.
+logs or diagnostics leave the phone).
+
+## Edge mode
+
+Aether Edge mode adds one more recipient, the edge the publisher runs
+([docs/privacy.md](../../docs/privacy.md#what-an-edge-stores)). The CLI in the
+app signs in there and relays the encrypted SSH stream, which the edge cannot
+read. Declare these in addition, **collected**, **not shared**, **required**
+for Edge mode, **not processed ephemerally**, used for **App functionality**
+and **Account management** (sign-in and device approval):
+
+| Category | Type | What it is |
+| --- | --- | --- |
+| Personal info | User IDs | The edge account id and GitHub user id and login |
+| Personal info | Email address | The GitHub account's verified primary email |
+| Personal info | Name | The GitHub display name |
+| Device or other IDs | Device or other IDs | The device's public key and label, and a hash of its sign-in token |
+
+The GitHub sign-in itself happens in the phone's browser, not in the app.
+Everything is encrypted in transit. Deletion: the edge's Account page, linked
+from the privacy policy. The permission `ACCESS_NETWORK_STATE` reads the
+active network's DNS servers into `resolv.conf`; they are not sent anywhere.
 
 ## Other declarations on the same page
 
@@ -70,4 +95,4 @@ logs or diagnostics leave the phone), Device or other IDs.
 | Government app | No |
 | Financial features | None |
 | Health | None |
-| Account deletion | Not applicable: the app creates no accounts |
+| Account deletion | The app creates no accounts in Tailscale mode. In Edge mode the edge account is deleted on the edge's Account page (`https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md#what-an-edge-stores`) |

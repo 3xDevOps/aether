@@ -45,6 +45,13 @@ func runGUI(args []string) error {
 		// The dashboard's onboarding wizard links through link.apply.
 		cfg = cli.Config{}
 	}
+	if *server == "" && cfg.GUIServer != "" {
+		if _, ok := cfg.Named(cfg.GUIServer); ok {
+			*server = cfg.GUIServer
+		} else {
+			fmt.Fprintf(os.Stderr, "the server switched to last, %q, is no longer saved; serving the default link\n", cfg.GUIServer)
+		}
+	}
 	if *server != "" {
 		named, ok := cfg.Named(*server)
 		if !ok {
@@ -76,6 +83,8 @@ func runGUI(args []string) error {
 		Backend: localgw.NewSSHBackend(cfg),
 		CLI:     cfg,
 		Update:  checker,
+		// The Android app sets it and installs this binary's updates.
+		Packaged: os.Getenv(selfupdate.PackagedEnv),
 		// The desktop shell spawns `aether gui --json` and restarts it,
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,

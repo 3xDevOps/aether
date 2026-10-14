@@ -55,7 +55,7 @@ function StepChips({ first, current, furthest, skipped, onJump }: { first: numbe
   )
 }
 
-export function OnboardingRoute({ client = api }: RouteProps & { client?: Api }) {
+export function OnboardingRoute({ params, client = api }: RouteProps & { client?: Api }) {
   const caps = useCapability()
   useHeaderPrimary(true)
   const persistedStep = useStore((s) => s.onboardingStep)
@@ -66,8 +66,9 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
   const onboardingSource = useStore((s) => s.onboardingSource)
   const workspace = useStore((s) => (onboardingWorkspace ? s.workspaces[onboardingWorkspace] ?? null : null))
   const [handed, setHanded] = useState(handedLink)
+  const another = params.link === 'another'
   const firstStep = caps.hasLocal('link.status') || handed ? 0 : onboardingStepIndex('Repository')
-  const [step, setStepState] = useState(() => (handed ? 0 : Math.max(firstStep, onboardingStepIndex(persistedStep))))
+  const [step, setStepState] = useState(() => (handed || another ? 0 : Math.max(firstStep, onboardingStepIndex(persistedStep))))
   const currentStep = Math.max(firstStep, step)
   // Every step already reached stays reachable: a jump backwards must not
   // strand the member on a step whose own Back is gone.
@@ -109,7 +110,7 @@ export function OnboardingRoute({ client = api }: RouteProps & { client?: Api })
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col px-4 pt-6 sm:px-6">
           {current === 'Connect' && (
-            <ConnectStep client={client} caps={caps} onNext={() => setStep(onboardingStepIndex('Repository'))} />
+            <ConnectStep client={client} caps={caps} another={another} onNext={() => setStep(onboardingStepIndex('Repository'))} />
           )}
           {current === 'Repository' && (
             <RepositoryStep

@@ -70,7 +70,7 @@ in this order, so the listing reads as a tour:
 2. A run's terminal with the key bar showing.
 3. The approval inbox with a pending request.
 4. A run's diff.
-5. The first screen, **Aether server**, empty.
+5. The first screen, **Connect to Aether**, with its two choices.
 
 Tablet screenshots are optional and the app declares no tablet-specific
 layout; skip them.
@@ -88,7 +88,7 @@ beside each upload, in the same order as the lists above.
 | Screenshot 2 | A run's terminal filling the phone screen, with the key bar above the keyboard |
 | Screenshot 3 | The approval inbox with one pending request from an agent |
 | Screenshot 4 | A run's diff on the phone, added lines green and removed lines red |
-| Screenshot 5 | The app's first screen, "Aether server", with an empty server name field |
+| Screenshot 5 | The app's first screen, "Connect to Aether", with the Aether Edge and Tailscale choices |
 
 Check the feature graphic's alt text against the file before uploading: if the
 graphic's own line of copy differs from the one quoted here, copy the

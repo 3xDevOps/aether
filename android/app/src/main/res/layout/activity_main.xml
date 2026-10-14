@@ -2,7 +2,8 @@
 <!-- The WebView fills the window edge to edge; the dashboard pads itself back
      out of the cutout and the navigation bar with env(safe-area-inset-*). The
      button is the way back to the setup screen when a load fails, and sits
-     over the WebView's own error page rather than replacing it. -->
+     over the WebView's own error page rather than replacing it. The gateway
+     panel covers the WebView when the Edge sidecar gives up. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -15,11 +16,57 @@
         android:layout_height="match_parent" />
 
     <Button
-        android:id="@+id/change_server"
+        android:id="@+id/connection"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
         android:layout_margin="@dimen/edge_margin"
-        android:text="@string/server_address"
+        android:text="@string/connection"
         android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/gateway_error"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/window_background"
+        android:orientation="vertical"
+        android:padding="@dimen/edge_margin"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/gateway_stopped"
+            android:textAppearance="?android:attr/textAppearanceLarge" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="12dp"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/gateway_error_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textSize="12sp" />
+        </ScrollView>
+
+        <Button
+            android:id="@+id/gateway_retry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="48dp"
+            android:text="@string/gateway_retry" />
+
+        <Button
+            android:id="@+id/gateway_connection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/connection" />
+    </LinearLayout>
 </FrameLayout>

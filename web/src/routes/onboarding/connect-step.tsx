@@ -19,7 +19,7 @@ import { Step } from '@/routes/onboarding/layout'
 import { useStore } from '@/store'
 import type { Capability } from '@/store/hooks'
 
-export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capability; onNext: () => void }) {
+export function ConnectStep({ client, caps, another, onNext }: { client: Api; caps: Capability; another: boolean; onNext: () => void }) {
   const setLinkStatus = useStore((s) => s.setLinkStatus)
   const [status, setStatus] = useState<LinkStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
@@ -90,7 +90,7 @@ export function ConnectStep({ client, caps, onNext }: { client: Api; caps: Capab
 
   const loading = useDelayed(local && status === null && statusError === null)
   const connected = success !== null || edgeLinked !== null || status?.server_configured === true
-  const choosing = status !== null && !connected
+  const choosing = status !== null && (!connected || (another && success === null && edgeLinked === null))
   const handedClaim = handed?.kind === 'claim' && !edgeLinked && caps.hasLocal('edge.claim')
   const claim = handed?.kind === 'claim' ? parseClaim(handed.link) : null
 
