@@ -25,9 +25,7 @@ stub dpkg-query 'printf "%s" "${FAKE_INSTALLED:-}"; [ -n "${FAKE_INSTALLED:-}" ]
 stub uname 'echo "${FAKE_KERNEL:-6.8.0-45-generic}"'
 stub modinfo '[ -n "${FAKE_SHIFTFS:-}" ]'
 stub ip 'case "$*" in
-"route get "*) case "$3" in "${FAKE_SUPERNET:-none}"*) echo "local $3 dev br0" ;; *) echo "$3 via 10.0.0.1 dev eth0" ;; esac ;;
-"route") echo "default via 10.0.0.1 dev eth0" ;;
-"-4 -o route") echo "default via 10.0.0.1 dev eth0"; echo "10.0.0.0/24 dev eth0 scope link"; [ -z "${FAKE_ROUTE:-}" ] || echo "$FAKE_ROUTE dev br0 scope link" ;;
+"-4 -o route") echo "default via 10.0.0.1 dev eth0"; echo "10.0.0.0/24 dev eth0 scope link"; [ -z "${FAKE_ROUTE:-}" ] || echo "$FAKE_ROUTE dev eth0"; [ -z "${FAKE_DOCKER0:-}" ] || echo "172.20.0.0/16 dev docker0 proto kernel scope link src 172.20.0.1" ;;
 "-4 -o address show dev docker0") [ -z "${FAKE_DOCKER0:-}" ] || echo "3: docker0    inet $FAKE_DOCKER0 brd 172.20.255.255 scope global docker0" ;;
 "-4 -o address") echo "2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0"; [ -z "${FAKE_ADDR:-}" ] || echo "5: br0    inet $FAKE_ADDR scope global br0"; [ -z "${FAKE_DOCKER0:-}" ] || echo "3: docker0    inet $FAKE_DOCKER0 scope global docker0" ;;
 esac'
@@ -112,9 +110,12 @@ untouched() {
 	[ ! -s "$log" ] || { echo "install-sysbox-test: apt-get ran despite overlap" >&2; exit 1; }
 }
 
-run FAKE_SUPERNET=172.20.
+run 'FAKE_ROUTE=172.16.0.0/12 via 10.0.0.1'
 expect 1 "cannot add \"bip\": 172.20.0.1/16 overlaps a subnet on this host"
 untouched
+
+run FAKE_ROUTE=172.30.0.0/16
+expect 1 "checksum mismatch"
 
 run FAKE_ROUTE=172.20.5.0/24
 expect 1 "cannot add \"bip\": 172.20.0.1/16 overlaps"
@@ -124,7 +125,7 @@ run FAKE_ADDR=172.25.9.1/24
 expect 1 "cannot add \"default-address-pools\": 172.25.0.0/16 overlaps"
 untouched
 
-run FAKE_ROUTE=172.25.0.0/20 FAKE_SUPERNET=172.99.
+run FAKE_ROUTE=172.25.0.0/20
 expect 1 "cannot add \"default-address-pools\": 172.25.0.0/16 overlaps"
 untouched
 
@@ -133,7 +134,7 @@ run AETHER_SYSBOX_DAEMON_JSON="$tmp/etc/none.json" FAKE_ADDR=172.25.9.1/24
 expect 1 "172.25.0.0/16 overlaps"
 [ ! -e "$tmp/etc/none.json" ] || { echo "install-sysbox-test: daemon.json created despite overlap" >&2; exit 1; }
 
-run FAKE_DOCKER0=172.20.0.1/16 FAKE_SUPERNET=172.20.
+run FAKE_DOCKER0=172.20.0.1/16
 expect 1 "checksum mismatch"
 
 daemon_content='{}'

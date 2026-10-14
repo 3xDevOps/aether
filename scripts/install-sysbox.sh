@@ -98,30 +98,50 @@ docker0_has_bip=
 ip -4 -o address show dev docker0 2>/dev/null | grep -qF " $BIP " && docker0_has_bip=yes
 
 # Every IPv4 network on the host's routes and interfaces, except docker0's own
-# bip network.
+# bip network. A route without a prefix length is a host route.
 local_networks() {
-	ip -4 -o route | awk -v skip="$docker0_has_bip" '$1 != "default" && !(skip != "" && $0 ~ / dev docker0( |$)/) {print $1}'
+	ip -4 -o route | awk -v skip="$docker0_has_bip" '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ && !(skip != "" && $0 ~ / dev docker0( |$)/) {print $1}'
 	ip -4 -o address | awk -v skip="$docker0_has_bip" '!(skip != "" && $2 == "docker0") {print $4}'
 }
 
-# overlaps_local_subnet ADDRESS PREFIX: a route inside the proposed /16, or the
-# package's own check, under which an address overlaps unless the kernel routes
-# it through the default gateway (this catches a covering supernet).
+ipv4_to_int() {
+	old_ifs=$IFS
+	IFS=.
+	set -- $1
+	IFS=$old_ifs
+	echo $(($1 << 24 | $2 << 16 | $3 << 8 | $4))
+}
+
+# Two networks overlap when they agree on their first min(len1, len2) bits.
+networks_overlap() {
+	len_a=32
+	len_b=32
+	case "$1" in */*) len_a="${1#*/}" ;; esac
+	case "$2" in */*) len_b="${2#*/}" ;; esac
+	common=$((len_a < len_b ? len_a : len_b))
+	[ "$common" -gt 0 ] || return 0
+	shift_by=$((32 - common))
+	[ $(($(ipv4_to_int "${1%/*}") >> shift_by)) -eq $(($(ipv4_to_int "${2%/*}") >> shift_by)) ]
+}
+
 overlaps_local_subnet() {
-	local_networks | grep -q "^$2" && return 0
-	[ -z "$docker0_has_bip" ] || [ "$2" != '172\.20\.' ] || return 1
-	! ip route get "$1" | grep -q "via $(ip route | awk '/default/ {print $3}')"
+	while read -r network; do
+		networks_overlap "$network" "$1" && return 0
+	done <<EOF
+$(local_networks)
+EOF
+	return 1
 }
 
 add_bip=false
 add_pool=false
 if ! jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null 2>&1; then
-	overlaps_local_subnet "${BIP%/*}" '172\.20\.' &&
+	overlaps_local_subnet "172.20.0.0/16" &&
 		die "cannot add \"bip\": ${BIP} overlaps a subnet on this host. Set \"bip\" in ${DAEMON_JSON} to a free range, then re-run this script."
 	add_bip=true
 fi
 if ! jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null 2>&1; then
-	overlaps_local_subnet "${POOL_BASE%/*}" '172\.25\.' &&
+	overlaps_local_subnet "$POOL_BASE" &&
 		die "cannot add \"default-address-pools\": ${POOL_BASE} overlaps a subnet on this host. Set \"default-address-pools\" in ${DAEMON_JSON} to a free range, then re-run this script."
 	add_pool=true
 fi
