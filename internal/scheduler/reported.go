@@ -494,15 +494,26 @@ func (e *supervised) questionHeld(report agentstatus.Report) bool {
 	return e.idleShown && e.asks() && e.launchMode == domain.LaunchACP && report.State == agentstatus.Working
 }
 
-// answerReached clears a shown question once a member's message reached the
-// agent, and returns a working run to running. The question stays cleared
-// when persisting that fails: the agent has the answer, and the next sidecar
-// write or agent report repairs the rest.
-func (s *Scheduler) answerReached(run domain.RunID) error {
+// shownQuestion is the report id of the question run shows, if any.
+func (s *Scheduler) shownQuestion(run domain.RunID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry := s.runs[run]; entry != nil && entry.idleShown && entry.asks() {
+		return entry.idleReportID
+	}
+	return ""
+}
+
+// answerReached clears question, the report id shownQuestion gave when a
+// member sent a message, once that message reached the agent, and returns a
+// working run to running. A question asked after the message was sent stays.
+// The question stays cleared when persisting that fails: the agent has the
+// answer, and the next sidecar write or agent report repairs the rest.
+func (s *Scheduler) answerReached(run domain.RunID, question string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
-	if entry == nil || !entry.idleShown || !entry.asks() {
+	if entry == nil || question == "" || entry.idleReportID != question || !entry.idleShown || !entry.asks() {
 		return nil
 	}
 	entry.idleReason, entry.idleShown = "", false

@@ -222,6 +222,7 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		blocks = append(blocks, block)
 	}
 	untitled := run.Task == "" && run.Title == ""
+	question := d.s.shownQuestion(run.ID)
 	instructions, settle := d.claimInstructions(run.ID, sess)
 	if instructions != "" {
 		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
@@ -229,7 +230,7 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
 		settle(taken)
 		if taken == nil {
-			if answerErr := d.s.answerReached(run.ID); answerErr != nil {
+			if answerErr := d.s.answerReached(run.ID, question); answerErr != nil {
 				slog.Warn("scheduler: a member's message reached the agent", "run", run.ID, "error", answerErr)
 			}
 		}
