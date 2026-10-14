@@ -621,6 +621,13 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
+	row, err := s.stored(ctx, m.id)
+	if err != nil {
+		return err
+	}
+	if err = s.stopStale(ctx, m, row); err != nil {
+		return err
+	}
 	if _, err := s.cfg.Store.ResetAssistantSession(ctx, m.id); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}

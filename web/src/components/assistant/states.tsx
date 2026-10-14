@@ -5,6 +5,7 @@ import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Code } from '@/components/ui/code'
 import { StatusDot } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantStatus } from '@/lib/assistant-types'
@@ -94,7 +95,7 @@ export function AssistantRestart() {
         title="Restart your environment"
         actions={<Button size="sm" disabled={busy} onClick={() => void restart()}>{busy ? 'Restarting…' : 'Restart environment'}</Button>}
       >
-        The assistant needs a newer environment than the one running. Restarting it closes any shells open in it.
+        The assistant needs a newer environment than the one running. Restarting it closes any shells open in it and discards anything installed outside your home since you last saved the environment. Run <Code>aether env save</Code> first to keep those changes.
       </Callout>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
     </div>
