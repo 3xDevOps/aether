@@ -409,6 +409,19 @@ func TestPlanMergeRefusals(t *testing.T) {
 		t.Fatalf("pending handoff = %v", err)
 	}
 	mustExec(t, db, `UPDATE handoff_outbox SET publication_state = 'published', timeline_state = 'published', coauthor_state = 'published'`)
+	mustExec(t, db, `INSERT INTO room_messages (id, workspace_id, run_id, actor_id, actor_display_name, kind, body, idempotency_key, state, created_at, updated_at)
+		VALUES ('rm-steer', ?, ?, ?, 'B', 'steer_request', 'go', 'k', 'queued', 1, 1)`, w.ID, run.ID, b.ID)
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, "queued steer requests rm-steer") {
+		t.Fatalf("queued steer request = %v", err)
+	}
+	mustExec(t, db, `UPDATE room_messages SET state = 'sent'`)
+	mustExec(t, db, `INSERT INTO integration_candidates (id, workspace_id, actor_key, idempotency_key, digest, state, version, payload, created_at, expires_at)
+		VALUES ('cand-1', ?, 'member:x', 'k', 'd', 'frozen', 1, json_object('delivery_request', json_object('state', 'approved', 'decided_by', ?)), 1, 9999999999999)`,
+		w.ID, b.ID)
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, "approved deliveries of candidates cand-1") {
+		t.Fatalf("approved delivery = %v", err)
+	}
+	mustExec(t, db, `DELETE FROM integration_candidates`)
 	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
 	if err != nil {
 		t.Fatal(err)

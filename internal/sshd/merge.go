@@ -296,6 +296,10 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	before, err := ids.ListDevices(ctx, "")
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
 		if activeRuns, err = s.cfg.Store.ListActiveRuns(ctx); err != nil {
@@ -332,6 +336,18 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	if err := apply(); err != nil {
 		return nil, mergeError(err)
 	}
+	// Taking a lease does not hold authorizationMu, so a lease either
+	// member took after the check above is fenced now. A lease taken from
+	// here on is the survivor's, under its merged role.
+	for _, run := range activeRuns {
+		if !s.cfg.Control.HeldByMember(string(run.ID), absorbed, other) {
+			continue
+		}
+		if _, err := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, func() error { return nil }); err != nil {
+			slog.Warn("sshd: fence a lease taken during a merge", "merge", merge.ID, "run", run.ID, "error", err)
+		}
+	}
+	s.publishDroppedDevices(ctx, member, ids, before)
 	s.afterMerge(ctx, member, merge, devs)
 	return s.mergeResult(ctx, merge)
 }

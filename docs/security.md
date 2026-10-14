@@ -1325,7 +1325,8 @@ can do under each policy, with the tests that show it; the reasons follow.
   gains a permission: it takes the lower role, and stays admin only when
   the admin side asks for it, which an admin can already grant. When it is
   no longer an admin, the invitations, links and invite codes either member
-  created are revoked, and a merge that would leave the edge owner's
+  created are revoked (an invite code from an older server, which did not
+  record who minted it, lasts until it expires), and a merge that would leave the edge owner's
   account on a member who is not an admin is refused. The absorbed member
   stays as a tombstone that authenticates nothing, so history keeps naming
   it. A merge keeps an audit record with every setting it discarded and

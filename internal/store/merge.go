@@ -391,9 +391,9 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer dom
 }
 
 // refuseLiveWork refuses a merge while either member has a run that is not
-// finished, an Environment terminal, a role in an open swarm, or a handoff
-// still publishing: those still act as the member, beyond what a merge
-// moves.
+// finished, an Environment terminal, a role in an open swarm, a handoff
+// still publishing, a queued steer request or an approved delivery not yet
+// made: those still act as the member, beyond what a merge moves.
 func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error {
 	var live []string
 	for _, s := range domain.AllRunStatuses {
@@ -428,7 +428,24 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 	if err != nil {
 		return err
 	}
+	steers, err := queryStrings(ctx, tx, `SELECT id FROM room_messages
+		WHERE kind = 'steer_request' AND state = 'queued' AND actor_id IN (?1, ?2) ORDER BY id`, a, b)
+	if err != nil {
+		return err
+	}
+	deliveries, err := queryStrings(ctx, tx, `SELECT id FROM integration_candidates
+		WHERE json_extract(payload, '$.delivery_request.state') IN ('approved', 'delivering')
+		AND json_extract(payload, '$.delivery_request.decided_by') IN (?1, ?2) ORDER BY id`, a, b)
+	if err != nil {
+		return err
+	}
 	var stop []string
+	if len(steers) > 0 {
+		stop = append(stop, "queued steer requests "+strings.Join(steers, ", ")+" (approve or deny them in the run's room)")
+	}
+	if len(deliveries) > 0 {
+		stop = append(stop, "approved deliveries of candidates "+strings.Join(deliveries, ", ")+" (let them deliver, or deny them)")
+	}
 	if len(handoffs) > 0 {
 		stop = append(stop, "handoffs "+strings.Join(handoffs, ", ")+" (they finish publishing on their own; retry in a minute)")
 	}

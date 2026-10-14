@@ -13,8 +13,10 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -532,5 +534,70 @@ func TestDemotingMergeRevokesInviteCodes(t *testing.T) {
 	}
 	if inviteUsable(dir, code) {
 		t.Fatal("the demoted admin's invite code survived the merge")
+	}
+}
+
+// Accepting a merge fences the control leases the two members hold and no
+// one else's, and the devices waiting on their revoked account links are
+// published as revoked.
+func TestMergeFencesOnlyTheMembersLeasesAndDropsTheirLinks(t *testing.T) {
+	t.Parallel()
+	ctrl := control.New(control.Config{})
+	e, whois := mergeEnv(t, func(c *Config) { c.Control = ctrl })
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	ctx := context.Background()
+	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
+	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
+	viKey, vi := addMember(t, e, "Vi", domain.RoleCollaborator, false)
+	vc := controlAs(t, e, viKey)
+	_, zed := addMember(t, e, "Zed", domain.RoleCollaborator, false)
+	var runs []*domain.Run
+	for range 2 {
+		r := &domain.Run{WorkspaceID: e.ws.ID, MemberID: zed.ID, Task: "t", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+		if err := e.store.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		runs = append(runs, r)
+	}
+	if _, _, err := ctrl.Acquire(string(runs[0].ID), string(vi.ID), "vi-session", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ctrl.Acquire(string(runs[1].ID), string(zed.ID), "zed-session", false); err != nil {
+		t.Fatal(err)
+	}
+	e.invite(t, vc, protocol.MethodMemberIdentityLink, protocol.MemberIdentityLinkParams{Login: "octo"})
+	laptop := newSigner(t)
+	if _, _, err := e.dialEdge(t, grantFor(octo, laptop, "laptop"), laptop, e.edgeUser(t, octo)); err == nil {
+		t.Fatal("a device joined through a link without approval")
+	}
+	waiting, err := identities(t, e).GetDeviceByCredential(ctx, edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeMemberDevice}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close() //nolint:errcheck
+
+	proposal := mustPropose(t, tc, mergeStart(t, vc), string(tina.ID))
+	if _, err = mergeAccept(vc, proposal, false); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if ctrl.HeldByMember(string(runs[0].ID), vi.ID) {
+		t.Fatal("the absorbed member's lease survived the merge")
+	}
+	if holder, ok := ctrl.Status(string(runs[1].ID)); !ok || holder.MemberID != zed.ID {
+		t.Fatalf("another member's lease = %+v, %v; want it kept", holder, ok)
+	}
+	for {
+		select {
+		case ev := <-sub.Events():
+			if p, ok := ev.Payload.(events.MemberDevicePayload); ok && p.DeviceID == waiting.ID && p.Status == domain.DeviceRevoked {
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the device waiting on the revoked link was not published as revoked")
+		}
 	}
 }

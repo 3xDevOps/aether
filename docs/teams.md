@@ -209,10 +209,12 @@ a terminal it needs both. That records a proposal, open for 10 minutes.
 Back on the first sign-in:
 
 ```sh
-aether member merge accept [--keep-admin] [--yes]
+aether member merge accept [<proposal-id>] [--keep-admin] [--yes]
 ```
 
-shows the same plan and the choice made, and merges on `y`. `aether member
+shows the same plan and the choice made, and merges on `y`; with more
+than one proposal open, name the one you mean. `--yes` accepts the plan
+it printed. `aether member
 merge cancel`, on either side, drops your open codes and proposals. Every
 step is refused on a connection that signed in with a device no person
 approved, under either policy.
@@ -226,13 +228,17 @@ on, schedules, the finished swarms it owns, push subscriptions and the
 account shares it received become the survivor's, so the survivor reopens
 those runs. It stays as a
 tombstone that signs nothing in: history it made, such as events,
-comments, costs and swarm records, keeps naming it and shows the
-survivor's name. Its discarded settings are recorded, its account shares
+comments, costs and swarm records, keeps naming its id, which
+`member.list` maps to the survivor (`merged_into`); the CLI and the
+dashboard still show the old id there. Its discarded settings are recorded, its account shares
 are revoked, and its home (agent logins, git signing key, files) moves to
 `<data-dir>/merged/<merge id>/home` on the server. That directory, owner
 only and outside every member's home and Files view, still holds live
 agent logins; once nothing in it is needed, the machine's administrator
-removes it with `sudo rm -r <data-dir>/merged/<merge id>`. A merge
+removes it with `sudo rm -r <data-dir>/merged/<merge id>`. The home is
+moved by renaming it, so `<data-dir>/homes` and `<data-dir>/merged` must
+be on one filesystem; otherwise the merge is refused with the rename's
+error (`invalid cross-device link`) and nothing changes. A merge
 interrupted after the move and before it was recorded, by the server
 stopping, has the home put back when `aether-server` next starts. The absorbed
 member's saved environment image is removed by cache cleanup, like a
