@@ -5,6 +5,7 @@ import type {
   AccountAccess,
   AgentDefinition,
   AgentInstallResult,
+  AgentModelsResult,
   AgentInfo,
   Approval,
   BudgetReport,
@@ -38,6 +39,12 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  MemberIdentities,
+  MemberList,
+  MemberMerge,
+  MergeCode,
+  MergePlan,
+  MergeProposal,
   Mission,
   MissionCancelResult,
   MissionCreateResult,
@@ -201,11 +208,12 @@ import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-ty
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
+export const MAX_TERMINAL_FILE_BYTES = 64 * 1024 * 1024
 export const TERMINAL_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 
 type TerminalImageType = (typeof TERMINAL_IMAGE_TYPES)[number]
 
-function isTerminalImageType(type: string): type is TerminalImageType {
+export function isTerminalImageType(type: string): type is TerminalImageType {
   return (TERMINAL_IMAGE_TYPES as readonly string[]).includes(type)
 }
 
@@ -245,6 +253,22 @@ async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: 
   })
   if (!result.path.startsWith('/')) {
     throw new Error('The server returned an unusable image path.')
+  }
+  return result
+}
+
+async function uploadTerminalFile(file: File, runID?: string): Promise<{ path: string }> {
+  if (file.size > MAX_TERMINAL_FILE_BYTES) {
+    throw new Error('File must be 64 MiB or smaller.')
+  }
+  const content = await readFileBase64(file)
+  const result = await call<{ path: string }>('terminal.file', {
+    ...(runID ? { run_id: runID } : {}),
+    name: file.name,
+    content,
+  })
+  if (!result.path.startsWith('/')) {
+    throw new Error('The server returned an unusable file path.')
   }
   return result
 }
@@ -422,8 +446,7 @@ export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
   serverEdge: () => call<ServerEdge>('server.edge'),
   serverEdgeClaimCode: () => call<ServerEdgeClaimCode>('server.edge.claimcode'),
-  memberList: () =>
-    call<{ members: Member[] }>('member.list').then((r) => r.members),
+  memberList: () => call<MemberList>('member.list'),
   accountList: () => call<AccountAccess>('account.list'),
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
     call<UsageResult>('account.usage', params),
@@ -768,6 +791,23 @@ export const api = {
     call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
       (r) => r.device,
     ),
+  memberIdentityList: (memberID: string) => call<MemberIdentities>('member.identity.list', { member_id: memberID }),
+  /** Names an account the caller links to their own member; the link is shown only here. */
+  memberIdentityLink: (params: { login?: string; email?: string }) =>
+    call<InvitationResult>('member.identity.link', params),
+  memberMergeStart: () => call<MergeCode>('member.merge.start'),
+  memberMergePreview: (code: string) => call<MergePlan>('member.merge.preview', { code }),
+  memberMergePropose: (params: { code: string; keep_settings_of: string; plan_digest: string; discard_ack: true; keep_admin?: boolean }) =>
+    call<MergeProposal>('member.merge.propose', params),
+  memberMergePending: () =>
+    call<{ proposals: MergeProposal[] }>('member.merge.pending').then((r) => r.proposals),
+  memberMergeAccept: (params: { proposal_id: string; plan_digest: string; keep_admin?: boolean }) =>
+    call<{ merge: MemberMerge; member: Member }>('member.merge.accept', params),
+  /** Without a proposal, drops every open code and proposal of the caller. */
+  memberMergeCancel: (proposalID?: string) =>
+    call<{ cancelled: number }>('member.merge.cancel', { proposal_id: proposalID }),
+  memberMergeList: () =>
+    call<{ merges: MemberMerge[] }>('member.merge.list').then((r) => r.merges),
   memberInvitationList: () =>
     call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
   memberInvitationCreate: (params: {
@@ -880,6 +920,12 @@ export const api = {
     call<{ agents: AgentInfo[] }>('agent.list', {
       ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
     }).then((r) => r.agents),
+  agentModels: (name: string, accountMemberID?: string, refresh?: boolean) =>
+    call<AgentModelsResult>('agent.models', {
+      name,
+      ...(accountMemberID ? { account_member_id: accountMemberID } : {}),
+      ...(refresh ? { refresh } : {}),
+    }),
   agentRegister: (definition: AgentDefinition) =>
     call<unknown>('agent.register', { definition }),
   agentInstall: (name: string, enhanced: boolean) =>
@@ -996,6 +1042,8 @@ export const api = {
   terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
     call<TerminalHistoryResult>('terminal.history', params, signal),
   uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
+  /** Stores any file under its sanitised name in a fresh generated directory. */
+  uploadTerminalFile: (file: File, runID?: string) => uploadTerminalFile(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
   /** Finishes the GitHub connection the member started with `gh auth login`

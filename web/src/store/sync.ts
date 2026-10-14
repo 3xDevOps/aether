@@ -32,6 +32,7 @@ import { batchNotifications } from '@/store/batch'
 import { coalesce } from '@/store/coalesce'
 import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
+import { loadMergeProposals } from '@/store/members'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
 import { scheduleBudgetRead, type BudgetPayload } from '@/store/cost'
@@ -129,8 +130,15 @@ export async function hydrate(
         // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
         // A legacy remote monitor does not serve the endpoint; null keeps the
-        // client on its built-in assumptions.
-        client.capabilities().catch(() => null),
+        // client on its built-in assumptions. A fetch that got no answer
+        // (fetch's TypeError) says nothing about the gateway, so the
+        // connect probe's answer stands, or hydration fails and retries.
+        client.capabilities().catch((err: unknown) => {
+          if (!(err instanceof TypeError)) return null
+          const known = store.getState().capabilities
+          if (known) return known
+          throw err
+        }),
       ])
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
@@ -157,13 +165,13 @@ export async function hydrate(
       store.getState().resetFiles()
       store.getState().resetNotes()
       store.getState().resetAssistant()
-      store.setState({ invitations: null, revokingInvitations: [] })
+      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {} })
     }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
-    s.setMembers(identityChanged ? members : keptMembers)
+    s.setMemberList(identityChanged ? members : keptMembers)
     s.setRuns(runs.filter((run) => !store.getState().deletedWorkspaceIDs.has(run.workspace_id)))
     // The snapshot is authoritative for the paused badge; runs without the
     // wire field (a legacy gateway) stay unknown.
@@ -190,6 +198,7 @@ export async function hydrate(
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
+    await loadMergeProposals(store, client)
     await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
     // Nothing else fetches linkStatus before settings or onboarding opens, so
@@ -323,6 +332,7 @@ export async function applyEvent(
   store: RootStore,
   ev: Event,
   client: Api = api,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (ev.seq > 0 && ev.seq <= store.getState().lastSeq) {
     // Replay resumes strictly after the cursor, so equal is a duplicate. Below
@@ -341,7 +351,7 @@ export async function applyEvent(
   // No workspace.created event exists; without this a new workspace's runs
   // would be stored but rendered nowhere. Device events carry the server
   // scope, which names no workspace.
-  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
+  if (ev.type !== 'workspace.deleted' && ev.type !== 'member.device' && ev.type !== 'member.merged' && ev.workspace_id && !store.getState().workspaces[ev.workspace_id]) {
     await client
       .workspaceListFull()
       .then(store.getState().setWorkspaces)
@@ -349,8 +359,8 @@ export async function applyEvent(
   }
 
   // A new teammate has no event of their own; without this they render as a raw ID.
-  if (ev.actor_id && !store.getState().members[ev.actor_id]) {
-    await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
+  if (ev.actor_id && !store.getState().members[ev.actor_id] && !store.getState().mergedInto[ev.actor_id]) {
+    await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
   }
 
   if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
@@ -440,7 +450,7 @@ export async function applyEvent(
       break
     case 'member.changed': {
       const p = ev.payload as { member_id: string; display_name: string }
-      await store.getState().readMembers(client.memberList()).then(store.getState().setMembers).catch(ignore)
+      await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
       const info = store.getState().info
       if (info && info.member.id === p.member_id) {
         store.getState().setInfo({ ...info, member: { ...info.member, display_name: p.display_name } })
@@ -449,6 +459,10 @@ export async function applyEvent(
     }
     case 'member.device':
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      break
+    case 'member.merged':
+      // A merge moves runs and roles without publishing their events, and may change the viewer.
+      if (!(await hydrate(store, client, signal))) return false
       break
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
@@ -804,6 +818,8 @@ async function probeGateway(
  * and events queued meanwhile apply after the snapshot. Events apply one at a
  * time in sequence order. A reconnect with no cursor re-fetches.
  */
+const mergePollMs = 5000
+
 export function connect(store: RootStore, client: Api = api): () => void {
   const lifecycle = new AbortController()
   const { signal } = lifecycle
@@ -888,7 +904,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const drain = () => batchNotifications(store, async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
-      if (await applyEvent(store, ev, client)) {
+      if (await applyEvent(store, ev, client, signal)) {
         if (ev.type === 'mission.changed' && ev.workspace_id) {
           missionRefreshes.add(ev.workspace_id)
           refreshMissionRuns()
@@ -975,6 +991,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted) return
     if (!retryTimer) {
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      coalesce(store, 'merges', () => loadMergeProposals(store, client))
       return
     }
     clearTimeout(retryTimer)
@@ -982,6 +999,14 @@ export function connect(store: RootStore, client: Api = api): () => void {
     attempts = 0
     void load()
   })
+
+  // Proposing and cancelling a merge publish no event, so while a code or proposal is open it is polled.
+  const mergeTimer = setInterval(() => {
+    const s = store.getState()
+    if (s.mergeCodeUntil > Date.now() || s.mergeProposals.length > 0) {
+      coalesce(store, 'merges', () => loadMergeProposals(store, client))
+    }
+  }, mergePollMs)
 
   void probeGateway(store, client, signal).then((probe) => {
     if (signal.aborted) return
@@ -1016,6 +1041,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   return () => {
     lifecycle.abort()
     stopWake()
+    clearInterval(mergeTimer)
     stopSelection()
     stopOutcomeSeen()
     stopPush()

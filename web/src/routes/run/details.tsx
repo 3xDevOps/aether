@@ -12,6 +12,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
 import { isRetainedRun } from '@/lib/commands'
 import { formatBytes } from '@/lib/format'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { plainReason } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -43,8 +44,8 @@ function Section({ id, title, count, inset, children }: { id?: string; title: st
 }
 
 function Person({ id }: { id: string }) {
-  const member = useStore((s) => s.members[id])
-  const name = member?.display_name ?? id
+  const member = useStore((s) => resolveMember(s, id).member)
+  const name = useStore((s) => memberName(s, id))
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <Avatar name={name} color={member?.color} />

@@ -25,8 +25,16 @@ const ModelPlaceholder = "{model}"
 // DiscoveryInstruction points to live run identity, available capabilities, and
 // any assignment. It carries no authority, identity, or task details.
 const (
-	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified."
+	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified."
 	DiscoveryFileName    = "discovery.md"
+	// InteractiveReportInstruction tells an ordinary interactive run which
+	// turns end with a report.
+	InteractiveReportInstruction = "When you need the user's decision or information, you MUST run `aether-internal report --outcome needs-input --summary \"<your question>\"` and then end your turn; the reply arrives as your next prompt. When a task you were given is done or cannot be done, or an external blocker stops it, you MUST report success, failure or blocked with `aether-internal report` before ending that turn. A turn that only answers or discusses, or that ends waiting on workers, peers or mail, ends without a report."
+	// BackgroundReportInstruction tells a background run how it ends.
+	BackgroundReportInstruction = "Before your final turn ends you MUST run `aether-internal report` with outcome success or failure, or blocked if an external blocker stops you."
+	// AssignedReportInstruction points a mission worker or integrator at its
+	// role's rules.
+	AssignedReportInstruction = "Report outcomes only as `aether-internal skill` describes for your role; do not report while waiting on workers or peers."
 	// developer_instructions is the Codex config key for additional
 	// instructions; model_instructions_file would replace built-ins.
 	codexDiscoverySetting = "developer_instructions=\"" + DiscoveryInstruction + "\""
@@ -251,6 +259,14 @@ type Profile struct {
 	// ACPAskMode is the session mode that asks before acting, the one the
 	// assistant runs in. Empty when the agent has none.
 	ACPAskMode string
+	// ACPSystemPrompt marks an ACP server that appends session/new,
+	// session/resume and session/load _meta.systemPrompt.append to the
+	// agent's system prompt, so run instructions need no prompt of their own.
+	ACPSystemPrompt bool
+	// ACPClaudeCode marks Claude's ACP adapter, which forwards Claude Code's
+	// background task frames when session meta asks and runs a turn of its
+	// own, with no prompt open, when a background task ends.
+	ACPClaudeCode bool
 	// ACPTitleLookup marks an agent that titles a session at its first
 	// prompt, sends session_info_update only when that turn ends, and reports
 	// the title in session/list meanwhile.
@@ -379,14 +395,16 @@ var profiles = map[string]Profile{
 		DisplayName: "Claude Code",
 		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
-		HeadlessArgs:   []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
-		ACPArgs:        []string{claudeACP.Binary},
-		ACPInstall:     claudeACP,
-		ACPMode:        "bypassPermissions",
-		ACPAskMode:     "default",
-		ACPTitleLookup: true,
-		ModelArgs:      []string{"--model", ModelPlaceholder},
-		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
+		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
+		ACPArgs:         []string{claudeACP.Binary},
+		ACPInstall:      claudeACP,
+		ACPMode:         "bypassPermissions",
+		ACPAskMode:      "default",
+		ACPTitleLookup:  true,
+		ACPSystemPrompt: true,
+		ACPClaudeCode:   true,
+		ModelArgs:       []string{"--model", ModelPlaceholder},
+		ResumeArgs:      []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		HeadlessResumeArgs: []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 			"--resume", SessionPlaceholder, TaskPlaceholder},
 		ACPSessionShared: true,

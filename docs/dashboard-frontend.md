@@ -207,7 +207,7 @@ client screen and every surface uses the same action. The route is mirrored
 in the address bar (see [URL state](#url-state)).
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
-one file each (`server`, `workspaces`, `runs`, `members`, `env-terminal`,
+one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-terminal`,
 `terminal`, `board`, `palette`, `approvals`, `presence`, `cost`, `timeline`,
 `diff`, `files`, `collaboration`, `local`, `missions`, `messages`,
 `sessions`, `ui`). A new feature adds a slice file and one spread in
@@ -773,8 +773,13 @@ is the only thing that changes it. `setWorkspaces` keeps a valid selection;
 an unset selection or a workspace that has been deleted falls back to the
 first by ID, or clears the selection when none remain. An open deleted
 workspace route moves to the replacement workspace or **Manage workspaces**;
-an open run in a deleted workspace returns to the board. The capabilities
-fetch may fail without failing hydration; a legacy gateway then holds `null`.
+an open run in a deleted workspace returns to the board. A gateway that
+answers the capabilities fetch with an error status or a body that is not
+JSON is a legacy gateway: hydration succeeds and the store holds `null`. A
+fetch that gets no answer at all, such as Chromium's
+`net::ERR_NETWORK_CHANGED` after the host gains a network interface, keeps
+the capabilities the connect probe loaded; with none loaded, hydration fails
+and retries.
 The snapshot also seeds the board's paused map from each run's wire `paused`
 field, skipping runs that do not carry it.
 
@@ -1239,10 +1244,12 @@ comes back online, which catches a failed read and an approval made with
 | Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
 | Registered under `account`, on a server now under `approved-devices` (from `server.edge`) | an admin | laptop (github bob) signed in as Bob and is not approved | the same |
 | Pending, the viewer's own | the member, not an admin | New device laptop signed in as you | the same |
+| Pending, waiting on the viewer's account link | the member, not an admin | laptop (github bob-gh) is waiting on your account link | the same |
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. No card carries an
-approval code. Device cards list before
+approval code. Merge proposal cards ([Members, devices and
+Profile](#members-devices-and-profile)), then device cards, list before
 runs in the board's Needs you and above the Map. The sidebar's Needs you
 counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
@@ -1594,14 +1601,19 @@ stays disabled until one is written (`runLaunch` in
 `internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
 the wire: an empty task and `tui` are the server's defaults.
 
-**Model**, under Mode, is free text sent as `model` on `run.launch` and
-passed to the agent as is ([per-agent flags](harnesses.md#launch-argv)); the
-help line is "Optional. The agent's own default when empty." Its placeholder
-suggests values for the chosen agent: Claude Code "opus, sonnet, haiku or a
-full model id", Codex "a model id such as gpt-5-codex", OpenCode
-"provider/model, such as anthropic/claude-sonnet-4-5", pi "provider/model,
-optionally :<thinking>", oh-my-pi "opus, gpt-5.2 or openai/gpt-5.2". An
-empty field sends no `model`. A model that is not a single argument is
+**Model**, under Mode, is a searchable picker (`ModelPicker` in
+`src/components/launch/model-picker.tsx`) whose choice is sent as `model` on
+`run.launch` and passed to the agent as is
+([per-agent flags](harnesses.md#launch-argv)). Its first entry, **Agent
+default**, sends no `model` and shows what that default resolves to when the
+agent reports it. The rest come from `agent.models` for the chosen agent and
+account, fetched when the field first shows and kept for the page session;
+the refresh button asks again with `refresh: true`. The list says when it is
+the agent's cache or a fallback list, and shows a failed discovery's error
+verbatim without blocking a choice. Search matches id, name and description;
+text that matches no id is offered as **Use “<text>”**, so any id works,
+including for agents with no discovery. A saved model missing from the list
+stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
 The form remembers a mode and a model per agent in the persisted
@@ -1850,7 +1862,13 @@ automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
 `SessionView` reuses `TerminalControlBorder` around the Enhanced timeline and
-composer, excluding the frame toolbar and Details. Its appearance follows
+composer, excluding the frame toolbar and Details. The component is one SVG:
+the four side-midpoint-to-centre paths drawn three times, as a blurred wide
+glow and a tight halo under the `pool` mask, a rim under the `rim` mask, and a
+near-white core under the `hot` mask. Each mask holds the same five radial
+spots, so every layer brightens at the same pools; all layers inherit the
+SVG's animated `stroke-dashoffset` and colour, which is what the acquisition,
+release, hold and takeover animations drive. Its appearance follows
 the acknowledged ACP lease, not the unused agent terminal's history or
 connection state. Voluntary release retracts it; takeover feedback requires
 an explicit revocation matching the held session and generation.
@@ -1987,27 +2005,46 @@ The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
-an empty composer during a turn) or **Resume** (a paused run). `Mod+Enter` does
-what the pill says and nothing without text or images, `Mod+Shift+Enter`
-queues; on touch only the pill sends. The shared upload state in
-`composer-images.tsx` accepts file selection and native image paste, enforces
-the eight-image limit, and uses `terminal.image`. File-backed object URLs show
-thumbnails inside the input; removal, successful send and unmount revoke them.
-Enhanced sends pass text and ordered attachment references separately through
-`run.inject`; the server resolves them into ACP image blocks. Image-only
-messages are allowed, incomplete uploads block sending, and failures preserve
-the draft and previews. `prompt_images` from the ACP snapshot gates image input.
-Footer controls wrap on narrow screens.
+an empty composer during a turn) or **Resume** (a paused run). `Enter` does
+what the pill says and nothing without text or images, `Shift+Enter` adds a
+line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
+plain key, which the shortcut table stands down for inside a field, so the
+textarea answers it itself through `isPress`; the binding stays registered so
+the shortcuts reference lists it. A key still composing in an input method
+never sends. The shared upload state in
+`composer-images.tsx` accepts file selection and native file paste, enforces
+the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
+`terminal.image` and every other file through `terminal.file`. File-backed
+object URLs show image thumbnails inside the input, other files a chip with
+name and size; removal, successful send and unmount revoke them. Enhanced
+sends pass text and ordered attachment references separately through
+`run.inject`; the server resolves images into ACP image blocks and other files
+into `resource_link` blocks. Attachment-only messages are allowed, incomplete
+uploads block sending, and failures preserve the draft and previews.
+`prompt_images` from the ACP snapshot gates sending a message with an image
+(`hasImages`), not other files.
+
+The timeline rows and both composers share `sessionColumn`
+(`session-rows.tsx`): the 736px column with 16px gutters, so message text and
+the message box line up at every width. The box (`rounded-composer`, 14px)
+holds the textarea above one footer row: attach, the agent's mode, model and
+effort pickers, the context meter, and the send pill at the end. The pill is a
+round arrow while it reads **Send** and widens to its word otherwise. Hints
+and the 45-second delivery notice sit under the box. Footer controls wrap on
+narrow screens. The context meter shows the agent's last ACP `usage_update`
+(`state.usage` in the snapshot, replaced by each `usage` item) as a share of
+its context window, with token counts in its tooltip; it turns
+`state-needs-you` at 90%. An agent that reports no usage shows no meter.
 
 An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
-attached images with their uploaded paths, and the idempotency key of the last
+attached files with their uploaded paths, and the idempotency key of the last
 attempt to send them, so sending the same prompt again delivers it once. The
 Standard and Enhanced composers read the same draft, so it survives opening
 another run or page, an event-log restart that remounts the run, and a switch
 between Standard and Enhanced. A sent prompt empties the draft; deleting the
 run, or authenticating as another member or server, drops it.
 
-A send or an image upload outlives the composer that started it, so the
+A send or an upload outlives the composer that started it, so the
 request in flight and its error are part of the draft too. A composer that
 mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
 the request settles: nothing can be added to a prompt that is being sent, and
@@ -2026,12 +2063,17 @@ store, not a root-store slice: every root-store write rewrites `aether.ui`,
 and one made while events drain notifies on the next frame, which drops
 keystrokes in a controlled textarea.
 
-User rows keep room-message IDs and attachment indices, not image bytes.
-Image-bearing ACP rows match room messages by those IDs rather than caption
-text, so separate image-only messages remain separate. `message-images.tsx`
+User rows keep room-message IDs and attachment indices, not image bytes, and
+the container paths of other files. A path under
+`.aether/terminal-files/<random>/` is a file (`isAttachedFile`); any other
+attachment is an image. Image-bearing ACP rows match room messages by those IDs
+rather than caption text, so separate image-only messages remain separate; an
+ACP row whose `resource_link` URIs name attached files matches the room
+message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
-URLs when identity, run or row changes. Images sit outside the text-collapse
-area and remain available through history and reconnect.
+URLs when identity, run or row changes, and shows each other file as a chip
+named by its basename with the path as its title. Attachments sit outside the
+text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use
@@ -3161,8 +3203,8 @@ when the agent supports it; Background disabled with the reason
 `mission.create` gives: it exits after one turn), **Integrator model**
 (the same field as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has a model input, empty for the agent's
-default) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
+launchable agent; a ticked row has the same model picker, Agent default
+until changed) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
 use it and in Standard otherwise; the row says so ("Runs Standard: no
 Enhanced support"). Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
@@ -4222,6 +4264,64 @@ teammate shared or revoked since it was sent.
 A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 
+**Sign-ins** in Profile (`src/routes/members/sign-ins.tsx`) lists, from
+`member.identity.list` (readable by the member or an admin), the member's
+tailnet login, SSH key fingerprint, GitHub accounts and devices with their
+status, re-read whenever the devices are (a `member.device` event or a
+wake), since approving a device binds an account. **Link a GitHub account**
+sends `member.identity.link` for the viewer and shows the join link with
+the next step: open it on a device signed in as that account, or `aether
+link '<link>'`, then approve that device. **Merge with another member**
+opens a dialog with two tabs:
+
+- **Get a merge code** sends `member.merge.start` and shows the code, a
+  per-second expiry countdown and `aether member merge <code>`. Proposing
+  and cancelling publish no event, so `connect` re-reads
+  `member.merge.pending` every 5 seconds while that code is valid or a
+  proposal is open, dialog closed or not, and when the tab wakes. Only the
+  latest read lands, and a cancel or accept outdates reads already sent;
+  a failed read keeps the proposals shown and its error shows on the
+  board and in Sign-ins.
+- **I have a merge code** sends `member.merge.preview` and shows both
+  members side by side (role, sign-ins, devices, runs, schedules,
+  settings), stacked at phone width. **Keep settings from** has no
+  default; choosing a side lists what the other loses. When the roles
+  differ the resulting role is stated, and the admin side gets **Keep the
+  merged member an admin** only when the plan carries
+  `role_with_keep_admin`. **Propose merge** (danger style) stays disabled
+  until a side is chosen and **Discard the listed settings** is ticked,
+  then sends `member.merge.propose` with the plan's `plan_digest`; the
+  answer says the other sign-in must accept. A refused propose shows the
+  error and drops the preview, as does editing the code, so only a new
+  **Preview** can propose.
+
+A proposal for the viewer to accept (`member.merge.pending` where the
+viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
+card and as a row in the sidebar's Needs you; **Review** and the row open
+Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
+`store/ui.ts`), not the sidebar, so **Review** works with the sidebar
+collapsed or the phone drawer closed. It lists the proposer's sign-ins, the settings kept,
+what is discarded and the resulting role; **Accept and merge** (danger
+style) needs the same tick and sends `member.merge.accept` with the
+proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
+accept clears the tick and re-reads the proposals, so a `refusal` the
+server now reports disables **Accept and merge**. A proposal the server
+could not plan shows only its `refusal` and **Cancel**, and the viewer's
+own open proposals show with **Cancel**. Every RPC error shows verbatim,
+as a toast when it arrives after its dialog or Profile closed, unless the
+signed-in member changed. After a merge
+the record shows in Sign-ins; **Merge history** lists `member.merge.list`
+with the discarded settings, custom agent definitions included, and the
+archive path.
+
+`member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
+`resolveMember` in `lib/member-name.ts` follow it, so an id history names
+(events, runs, costs, comments, swarms, devices) shows the survivor's name
+with `(merged)`. A `member.merged` event (workspace id `server`) takes a
+fresh snapshot: a merge moves runs and roles without their own events, and
+a session absorbed by the merge then shows the survivor, with its role,
+without a reload.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
@@ -5000,7 +5100,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘[` / `Alt+←` | browser | Go back |
 | `⌘]` / `Alt+→` | browser | Go forward |
 | `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
-| `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
+| `Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
 | `1` to `4` | request | Pick that option of the focused Session request |
 
@@ -5307,7 +5407,11 @@ and answers a swarm; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette
 coming back once it is gone - needs a narrow window with a keyboard rather
-than a phone. `board-card`, `run-switch`, `run-attach-retry`,
+than a phone. `sign-ins-merge.spec.ts` gets a merge code
+as one member and previews it as another at phone width; both harness
+members have an SSH key, so it checks the server's refusal verbatim, and
+`src/routes/members/sign-ins.test.tsx` covers choosing, proposing and
+accepting. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and

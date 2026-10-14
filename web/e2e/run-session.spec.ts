@@ -28,7 +28,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
   await box.fill('ask permission')
-  await box.press('ControlOrMeta+Enter')
+  await box.press('Enter')
   const card = page.locator('#session-request-docked')
   await expect(card.getByText('rm -rf build')).toBeVisible()
   await expect(page.getByText('Answer the request above to continue.')).toBeVisible()
@@ -45,7 +45,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   }, { message: 'the answered reply sits inside the scrolled log' }).toBe(true)
 
   await box.fill('ask permission')
-  await box.press('ControlOrMeta+Enter')
+  await box.press('Enter')
   await expect(card.getByText('rm -rf build')).toBeVisible()
   await expect(card).not.toBeFocused()
   await card.getByRole('button', { name: 'Allow', exact: true }).click()
@@ -53,7 +53,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await page.screenshot({ path: testInfo.outputPath('enhanced-first-click-approval.png') })
 
   await box.fill('demo')
-  await box.press('ControlOrMeta+Enter')
+  await box.press('Enter')
   await expect(log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ })).toBeVisible({ timeout: 30_000 })
   await expect(log.getByText('Changed 1 file')).toBeVisible()
   await log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ }).click()
@@ -63,7 +63,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(log.getByText(/^Finished in \d+s$/)).toBeVisible()
 
   await box.fill('wait')
-  await box.press('ControlOrMeta+Enter')
+  await box.press('Enter')
   const interrupt = page.getByRole('button', { name: 'Interrupt the agent' })
   await expect(interrupt).toBeVisible()
   await box.fill('after the wait')
@@ -151,7 +151,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
 
     const ownerComposer = page.getByRole('combobox', { name: 'Message the agent' })
     await ownerComposer.fill('ask permission')
-    await ownerComposer.press('ControlOrMeta+Enter')
+    await ownerComposer.press('Enter')
     const permission = page.locator('#session-request-docked')
     await expect(permission.getByRole('button', { name: 'Allow', exact: true })).toBeVisible()
     await expect(bobPage.locator('#session-request-docked').getByRole('button', { name: 'Allow', exact: true })).toBeDisabled()

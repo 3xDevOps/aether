@@ -4,6 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { SectionLabel } from '@/components/ui/section-label'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
 import type { Api } from '@/lib/api'
+import { memberName } from '@/lib/member-name'
 import type { AgentInfo } from '@/lib/types'
 import { CandidateReview } from '@/routes/terminal/candidate-review'
 import { useStore } from '@/store'
@@ -21,6 +22,7 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
 function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: AgentInfo[] | null }) {
   const { mission, tasks, attempts, submissions } = detail
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const navigate = useStore((s) => s.navigate)
   const runLink = (runID: string) => (
     <Button variant="link" size="sm" className="font-code break-all whitespace-normal" onClick={() => navigate('run', { runId: runID })}>{runID}</Button>
@@ -38,7 +40,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
           <Fact term="Accepted set">{mission.accepted_set_version}</Fact>
           <Fact term="Execution choices">
             {mission.execution_choices
-              .map((c) => `${agentLabel(agents?.find((agent) => agent.name === c.harness), c.harness)} · ${modeLabel(c.mode)}${c.model ? ` · ${c.model}` : ''} · ${members[c.account_member_id]?.display_name ?? c.account_member_id}`)
+              .map((c) => `${agentLabel(agents?.find((agent) => agent.name === c.harness), c.harness)} · ${modeLabel(c.mode)}${c.model ? ` · ${c.model}` : ''} · ${memberName({ members, mergedInto }, c.account_member_id)}`)
               .join('\n')}
           </Fact>
           {tasks.map((task) => (

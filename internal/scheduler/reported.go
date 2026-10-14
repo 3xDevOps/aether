@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -26,6 +27,7 @@ const (
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"
 	blockedReasonPrefix           = "blocked: "
+	needsInputReasonPrefix        = "needs input: "
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "
 )
@@ -297,7 +299,7 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 		}
 		return fmt.Errorf("scheduler: record idle report for %s: %w", entry.runID, err)
 	}
-	if entry.turnEnded() && !entry.atPrompt() {
+	if entry.outcomeDue() && !entry.atPrompt() {
 		return s.parkIdleReportLocked(ctx, entry)
 	}
 	return nil
@@ -380,7 +382,24 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 // Same-turn Working callbacks do not erase it; the first resume after it is
 // shown does. The shared watermark fences replays, older reports and relaunches.
 func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
-	reason := blockedReasonPrefix + summary
+	return s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report", nil)
+}
+
+// ReportNeedsInput records an agent's question for its user like
+// ReportBlocked. A Background run ends at its turn end, before anyone answers,
+// and a finished run has no user left to answer, so both are refused.
+func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error {
+	s.mu.Lock()
+	entry := s.runs[run]
+	headless := entry != nil && entry.launchMode == domain.LaunchHeadless
+	s.mu.Unlock()
+	if headless {
+		return coord.ErrCannotAsk
+	}
+	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report", coord.ErrRunFinished)
+}
+
+func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string, finished error) error {
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
 		reason = string(runes[:maxPublicRunStatusReason])
 	}
@@ -388,26 +407,26 @@ func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportI
 	if entry := s.runs[run]; entry != nil {
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
-			return nil
+			return finished
 		}
-		return s.recordIdleReportLocked(ctx, entry, reportID, reason, reportedAt)
+		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}
 	s.mu.Unlock()
-	return s.requireFinished(ctx, run, "blocked report")
+	return s.requireFinished(ctx, run, what, finished)
 }
 
-// requireFinished is the answer for a run with no supervised owner: done
+// requireFinished is the answer for a run with no supervised owner: finished
 // when the row is terminal or deleted, retryable otherwise.
-func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what string) error {
+func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what string, finished error) error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil
+		return finished
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: %s %s: %w", what, run, err)
 	}
 	if r.Status.Terminal() {
-		return nil
+		return finished
 	}
 	return fmt.Errorf("scheduler: %s %s: the run is %s and has no live container yet", what, run, r.Status)
 }
@@ -439,7 +458,7 @@ func (s *Scheduler) finishOverdueReports() {
 			s.startReportedFinishLocked(entry)
 		}
 		if entry.idleReason != "" && !entry.idleShown &&
-			(entry.turnEnded() || (reportedIdleReason(entry.idleReason) && ready &&
+			(entry.outcomeDue() || (reportedIdleReason(entry.idleReason) && ready &&
 				now.Sub(entry.idleReportAt) >= reportFinishDeadline)) {
 			if err := s.parkIdleReportLocked(s.superCtx, entry); err != nil {
 				slog.Warn("scheduler: park reported outcome", "run", entry.runID, "error", err)
@@ -452,6 +471,59 @@ func (s *Scheduler) finishOverdueReports() {
 // The caller must hold s.mu.
 func (e *supervised) atPrompt() bool {
 	return len(e.pendingInputs) != 0
+}
+
+// asks reports whether the run's outcome is a question for its user. The
+// caller must hold s.mu.
+func (e *supervised) asks() bool {
+	return strings.HasPrefix(e.idleReason, needsInputReasonPrefix)
+}
+
+// outcomeDue reports whether the turn the outcome belongs to ended. A
+// question shows once its turn ended even while background tasks run, since
+// they may run long after it. The caller must hold s.mu.
+func (e *supervised) outcomeDue() bool {
+	return e.turnEnded() || (e.betweenTurns && e.asks())
+}
+
+// questionHeld reports whether a shown question outranks an Enhanced agent's
+// work: background tasks and turns the agent or its mail start go on until a
+// member's message reaches the agent (answerReached). A Standard run's next
+// working report is the user's answer. The caller must hold s.mu.
+func (e *supervised) questionHeld(report agentstatus.Report) bool {
+	return e.idleShown && e.asks() && e.launchMode == domain.LaunchACP && report.State == agentstatus.Working
+}
+
+// answerReached clears the run's question once a member's message sent after
+// it was asked reached the agent, whether or not the question shows yet, and
+// returns a run working under a shown question to running. A question asked
+// after the message was sent stays. The question stays cleared when
+// persisting that fails: the agent has the answer, and the next sidecar
+// write or agent report repairs the rest.
+func (s *Scheduler) answerReached(run domain.RunID, sent time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	if entry == nil || !entry.asks() || !entry.idleReportAt.Before(sent) {
+		return nil
+	}
+	shown := entry.idleShown
+	entry.idleReason, entry.idleShown = "", false
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		return fmt.Errorf("scheduler: persist the answered question of %s: %w", run, err)
+	}
+	if !shown || entry.status != domain.RunNeedsAttention || entry.agentReport.State != agentstatus.Working {
+		return nil
+	}
+	reason := agentstatus.ReasonResumed
+	if backgroundWork(entry.agentReport) {
+		reason = entry.agentReport.Reason
+	}
+	if err := s.transitionLocked(s.superCtx, run, entry.workspaceID, entry.status, domain.RunRunning, reason, ""); err != nil {
+		return fmt.Errorf("scheduler: resume the answered run %s: %w", run, err)
+	}
+	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+	return nil
 }
 
 // turnEnded must be called with s.mu held.

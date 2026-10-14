@@ -1021,6 +1021,22 @@ export interface AgentInfo {
   enhanced_install_script?: string
 }
 
+/** One model agent.models discovered; `id` is what a launch sends as `model`. */
+export interface AgentModel {
+  id: string
+  name: string
+  description?: string
+}
+
+/** agent.models: `error` is the last failed discovery, even when `models` holds an older or fallback list. */
+export interface AgentModelsResult {
+  models: AgentModel[]
+  default_label?: string
+  source: 'agent' | 'cache' | 'fallback' | 'none'
+  fetched_at?: string
+  error?: string
+}
+
 /** agent.install: a failed command is a result with `error`, not a refusal. */
 export interface AgentInstallResult {
   log_tail: string
@@ -1252,6 +1268,117 @@ export interface InvitationResult {
   invitation: Invitation
   link: string
   server_id: string
+}
+
+/** member.list. `merged_into` maps each member a merge absorbed, which
+ * history still names, to the member it is now. */
+export interface MemberList {
+  members: Member[]
+  merged_into?: Record<string, string>
+}
+
+/** An edge account bound to a member. */
+export interface Identity {
+  provider: string
+  subject: string
+  login?: string
+  email?: string
+  created_at: string
+}
+
+/** member.identity.list: every way the member signs in, and each device
+ * with the account it signed in as, revoked ones included. */
+export interface MemberIdentities {
+  tailnet_login?: string
+  public_key_fingerprint?: string
+  identities: Identity[]
+  devices: Device[]
+}
+
+/** member.merge.start: the code is shown once. */
+export interface MergeCode {
+  code: string
+  expires_at: string
+}
+
+export interface MergeSettings {
+  display_name: string
+  color: string
+  git_name?: string
+  git_email?: string
+  image?: string
+  harness_definitions: { name: string; definition?: string }[]
+  profile_heads: { harness: string; snapshot_id: string }[]
+  account_shared_with: string[]
+  mirror_workspaces: string[]
+  home: boolean
+}
+
+/** One side of a merge as it stands. */
+export interface MergeMember {
+  id: string
+  display_name: string
+  role: Member['role']
+  tailnet_login?: string
+  public_key_fingerprint?: string
+  identities: { provider: string; login: string }[]
+  devices: { id: string; label: string; status: Device['status'] }[]
+  runs: number
+  schedules: number
+  settings: MergeSettings
+}
+
+/** Keeping `keep_settings_of`'s settings absorbs `absorbed_id` and
+ * discards its settings in `discarded`. */
+export interface MergeChoice {
+  keep_settings_of: string
+  absorbed_id: string
+  discarded: MergeSettings
+}
+
+/** member.merge.preview. `minted` minted the code, `proposer` entered it.
+ * `role` is the merged member's role; `role_with_keep_admin` the role the
+ * admin side gets by asking with keep_admin, required to keep an admin on
+ * the server when `keep_admin_required`. */
+export interface MergePlan {
+  minted: MergeMember
+  proposer: MergeMember
+  role: Member['role']
+  role_with_keep_admin?: Member['role']
+  keep_admin_required?: boolean
+  sign_ins: string[]
+  choices: MergeChoice[]
+  plan_digest: string
+}
+
+/** member.merge.propose and member.merge.pending. `refusal` says why
+ * accepting would now be refused. */
+export interface MergeProposal {
+  id: string
+  minted_id: string
+  proposer_id: string
+  keep_settings_of: string
+  proposer_keep_admin?: boolean
+  plan_digest: string
+  expires_at: string
+  plan?: MergePlan
+  refusal?: string
+}
+
+/** member.merge.list: the audit record of one merge. */
+export interface MemberMerge {
+  id: string
+  survivor_id: string
+  absorbed_id: string
+  confirmed_by_kind: string
+  confirmed_by: string
+  survivor_role_before: Member['role']
+  absorbed_role_before: Member['role']
+  role_after: Member['role']
+  discarded: MergeSettings
+  absorbed: MergeMember
+  archive_path?: string
+  created_at: string
 }
 
 /** link.apply: the server identity linked to this local gateway. */

@@ -34,7 +34,7 @@ export function useSidebarGroups(): SidebarGroup[] {
   const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
   const mineOnly = useStore((s) => s.mineOnly)
-  const devices = useDeviceNeeds().length
+  const devices = useDeviceNeeds().length + useStore((s) => s.mergeProposals.filter((p) => p.minted_id === s.info?.member.id).length)
   return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }, devices), [workspace, mineOnly, ctx, devices])
 }
 
@@ -81,7 +81,7 @@ export function useRun(runID: string): RunRecord | undefined {
 
 /** Who is on a run, in the order `runPeople` gives; stable while that list is. */
 export function useRunPeople(run: RunRecord): string[] {
-  return useStore(useShallow((s) => runPeople(run, runWatchers(s.presence, run.id), s.members)))
+  return useStore(useShallow((s) => runPeople(run, runWatchers(s.presence, run.id), s)))
 }
 
 /** The IDs of a workspace's runs, every run when it is empty; stable while that set is. */

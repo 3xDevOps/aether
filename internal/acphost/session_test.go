@@ -119,7 +119,7 @@ func TestImagePromptCapabilityAndMetadata(t *testing.T) {
 			}
 			blocks := embeddedImagePrompt(t)
 			if idle {
-				if started, promptErr := s.PromptIdle(context.Background(), blocks); promptErr != nil || !started {
+				if started, promptErr := s.PromptIdle(context.Background(), blocks, nil); promptErr != nil || !started {
 					t.Fatalf("PromptIdle = %v, %v", started, promptErr)
 				}
 			} else if receipt, promptErr := s.Prompt(context.Background(), blocks, false, nil); promptErr != nil || receipt.Outcome != OutcomeSent {
@@ -181,7 +181,7 @@ func TestUnsupportedImagesNeverStartQueueOrSteer(t *testing.T) {
 						t.Fatalf("Prompt steer=%v = %+v, %v", steer, receipt, err)
 					}
 				}
-				if started, err := s.PromptIdle(context.Background(), blocks); started || !errors.Is(err, ErrUnsupportedImage) {
+				if started, err := s.PromptIdle(context.Background(), blocks, nil); started || !errors.Is(err, ErrUnsupportedImage) {
 					t.Fatalf("PromptIdle = %v, %v", started, err)
 				}
 				if s.State().Queued != 0 || len(items(t, s)) != before || m.called(methodSteering) {
@@ -1269,6 +1269,7 @@ func TestOptionsModesAndAuth(t *testing.T) {
 		_ = m.conn.SendNotification(context.Background(), "_auth/status_update", map[string]any{"authStatus": map[string]any{"kind": "api_key", "label": "Anthropic API key"}})
 		_ = m.conn.SendNotification(context.Background(), "_vendor/whatever", map[string]any{})
 		m.update(map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "plan"})
+		m.update(map[string]any{"sessionUpdate": "usage_update", "used": 53000, "size": 200000})
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
@@ -1290,7 +1291,8 @@ func TestOptionsModesAndAuth(t *testing.T) {
 	}
 	rec.waitIdle(t)
 	st := s.State()
-	if st.Mode != "plan" || !strings.Contains(string(st.ConfigOptions), `"currentValue":"plan"`) || !strings.Contains(string(st.Auth), "Anthropic API key") {
+	if st.Mode != "plan" || !strings.Contains(string(st.ConfigOptions), `"currentValue":"plan"`) || !strings.Contains(string(st.Auth), "Anthropic API key") ||
+		st.Usage == nil || st.Usage.Used != 53000 || st.Usage.Size != 200000 {
 		t.Fatalf("state %+v", st)
 	}
 }

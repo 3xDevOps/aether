@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -421,4 +423,77 @@ func (l *Log) Delete() error {
 		return fmt.Errorf("acphost: delete item log: %w", err)
 	}
 	return nil
+}
+
+// LastItem is the log's newest item of kind, or a zero Item when there is none
+// or the log cannot be read.
+func LastItem(log *Log, kind Kind) Item {
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return Item{}
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			if items[i].Kind == kind {
+				return items[i]
+			}
+		}
+		before = items[0].Seq
+	}
+}
+
+// Answered reports whether the agent answered a prompt since the log's last
+// reset other than by failing it, as it does when it refuses one.
+func Answered(log *Log) bool {
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return false
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			switch it := items[i]; {
+			case it.Kind == KindReset:
+				return false
+			case it.Kind == KindTurnEnd && !it.Autonomous && it.StopReason != "error":
+				return true
+			}
+		}
+		before = items[0].Seq
+	}
+}
+
+// Interrupted reports whether the agent session the log records lost work when
+// its connection ended: its last turn ended interrupted, as a host that closed
+// the connection logs it, or tasks the run waited for were live, and no turn
+// started since.
+func Interrupted(log *Log) bool {
+	ended, started := false, false
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return false
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			switch it := items[i]; it.Kind {
+			case KindReset:
+				return false
+			case KindTurnEnd:
+				if !ended && it.StopReason == "interrupted" {
+					return true
+				}
+				ended = true
+			case KindTurnStart:
+				started = true
+			case KindBackground:
+				if !started && (it.StopReason == "interrupted" || it.FollowUp || slices.ContainsFunc(it.Tasks, func(t Task) bool { return t.Holds })) {
+					return true
+				}
+				started = true
+			}
+			if ended && started {
+				return false
+			}
+		}
+		before = items[0].Seq
+	}
 }

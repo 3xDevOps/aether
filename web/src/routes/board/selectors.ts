@@ -1,6 +1,7 @@
 import { dequal } from 'dequal'
 import { useMemo, useRef } from 'react'
 import type { RunActionCandidate } from '@/lib/commands'
+import { resolveMember } from '@/lib/member-name'
 import type { StateContext } from '@/lib/needs-you'
 import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
 import type { Workspace } from '@/lib/types'
@@ -40,7 +41,7 @@ function archivedRows(s: RunsInput): RunRow[] {
       group: groupOf(shown.state),
       since: run.stateChangedAt,
       waitingSince: run.stateChangedAt,
-      owner: s.ctx.members[run.member_id],
+      owner: resolveMember(s.ctx, run.member_id).member,
     })
   }
   return rows

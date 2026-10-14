@@ -137,21 +137,6 @@ func (s *Scheduler) recordedMode(run domain.RunID) string {
 	return log.Mode()
 }
 
-func lastItem(log *acphost.Log, kind acphost.Kind) acphost.Item {
-	for before := int64(math.MaxInt64); ; {
-		items, err := log.ReadBefore(before, 512)
-		if err != nil || len(items) == 0 {
-			return acphost.Item{}
-		}
-		for i := len(items) - 1; i >= 0; i-- {
-			if items[i].Kind == kind {
-				return items[i]
-			}
-		}
-		before = items[0].Seq
-	}
-}
-
 func (s *Scheduler) openItemLog(run domain.RunID) (*acphost.Log, error) {
 	log, err := s.itemLogs.Open(s.cfg.PTY.ItemLogPath(run))
 	if errors.Is(err, os.ErrNotExist) {
@@ -233,12 +218,19 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 	if err != nil {
 		return err
 	}
-	started, err := sess.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(prompt)})
-	if err != nil {
-		return err
+	blocks := []acp.ContentBlock{acp.TextBlock(prompt)}
+	instructions, settle := s.acp.claimInstructions(run, sess)
+	if instructions != "" {
+		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
 	}
-	if !started {
-		return errACPBusy
+	started, err := sess.PromptIdle(ctx, blocks, settle)
+	if err == nil && !started {
+		err = errACPBusy
 	}
-	return nil
+	if !started && ctx.Err() == nil {
+		// No turn took the prompt; one awaiting acceptance settles through
+		// the callback.
+		settle(err)
+	}
+	return err
 }

@@ -51,6 +51,7 @@ const editorTheme = EditorView.theme({
   '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--font-code)' },
   '.cm-content': { padding: '8px 0', minHeight: '100%' },
   '.cm-line': { padding: '0 12px', lineHeight: '20px' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
   '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--text-muted)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
   '.cm-activeLine': { backgroundColor: 'var(--hover)' },

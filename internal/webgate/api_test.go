@@ -55,7 +55,7 @@ func post(g *Gateway, path, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-func TestTerminalImageAPIHasDedicatedBodyLimit(t *testing.T) {
+func TestTerminalUploadAPIsHaveDedicatedBodyLimits(t *testing.T) {
 	backend := &stubBackend{}
 	g, err := New(Config{Authorize: admitAll(backend)})
 	if err != nil {
@@ -86,6 +86,9 @@ func TestTerminalImageAPIHasDedicatedBodyLimit(t *testing.T) {
 	}
 	if len(backend.calls) != 1 {
 		t.Fatalf("over-cap image reached backend: %+v", backend.calls)
+	}
+	if rec := post(g, "/api/v1/terminal.file", overImageCap); rec.Code != http.StatusOK {
+		t.Fatalf("terminal.file body over image cap = %d, want 200: %s", rec.Code, rec.Body)
 	}
 }
 

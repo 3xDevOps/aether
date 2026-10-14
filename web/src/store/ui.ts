@@ -156,6 +156,7 @@ export interface UiSlice {
   dismissedUpdates: Record<UpdateKind, string>
   updatesOpen: boolean
   shortcutsOpen: boolean
+  profileOpen: boolean
   setTheme: (theme: Theme) => void
   setTextSize: (size: TextSize) => void
   setSidebarWidth: (width: number) => void
@@ -185,6 +186,7 @@ export interface UiSlice {
   clearDismissedUpdates: () => void
   setUpdatesOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
+  setProfileOpen: (open: boolean) => void
   setDetailsOpen: (open: boolean) => void
   setBrowserBeside: (beside: boolean) => void
   setBrowserBesideWidth: (width: number) => void
@@ -234,6 +236,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   dismissedUpdates: { cli: '', server: '', shell: '' },
   updatesOpen: false,
   shortcutsOpen: false,
+  profileOpen: false,
   setTheme: (theme) => set({ theme }),
   setTextSize: (textSize) => set({ textSize }),
   setSidebarWidth: (width) =>
@@ -313,6 +316,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setProfileOpen: (profileOpen) => set({ profileOpen }),
   setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
   setBrowserBeside: (browserBeside) => set({ browserBeside }),
   setBrowserBesideWidth: (browserBesideWidth) => set({ browserBesideWidth }),

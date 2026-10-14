@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -68,5 +69,76 @@ func TestSaveImageCreatesPrivateGeneratedPath(t *testing.T) {
 	}
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 		t.Fatalf("stored image mode/type = %v", info.Mode())
+	}
+}
+
+func TestSafeFileName(t *testing.T) {
+	long := strings.Repeat("é", 100) + ".pdf"
+	for _, tc := range []struct{ in, want string }{
+		{"Q3 report.pdf", "Q3 report.pdf"},
+		{"", "file"},
+		{"..", "file"},
+		{" .env", "env"},
+		{"../a/b\\c", "_a_b_c"},
+		{"x\x00y\n", "x_y_"},
+		{"\u202egpj.exe", "_gpj.exe"},
+		{"bad\xffbyte", "bad\ufffdbyte"},
+		{long, strings.Repeat("é", 62) + ".pdf"},
+	} {
+		got := SafeFileName(tc.in)
+		if got != tc.want || SafeFileName(got) != got || len(got) > maxFileNameBytes {
+			t.Errorf("SafeFileName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	dir := strings.Repeat("a", 32)
+	for _, invalid := range []string{"", "notes.txt", dir, dir + "/", dir + "/.env", dir + "/a/b", "../" + dir + "/a", strings.ToUpper(dir) + "/a", dir + "x/a"} {
+		if ValidFileName(invalid) {
+			t.Errorf("ValidFileName(%q) accepted", invalid)
+		}
+	}
+}
+
+func TestSaveFileKeepsSafeNameInPrivateGeneratedDirectory(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("%PDF-1.7\n")
+	rel, err := manager.SaveFile("member-1", "../Q3 report.pdf", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := strings.TrimPrefix(rel, terminalFileDir+"/")
+	if filepath.Base(rel) != "_Q3 report.pdf" || !ValidFileName(name) {
+		t.Fatalf("generated path = %q", rel)
+	}
+	size, mime, err := manager.StatFile("member-1", name)
+	if err != nil || size != int64(len(data)) || mime != "application/pdf" {
+		t.Fatalf("StatFile = %d, %q, %v", size, mime, err)
+	}
+	home, err := manager.Path("member-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(home, filepath.FromSlash(rel))
+	info, err := os.Stat(file)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		t.Fatalf("stored file = %v, %v", info, err)
+	}
+	outside := filepath.Join(t.TempDir(), "private.pdf")
+	if err := os.WriteFile(outside, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, file); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := manager.StatFile("member-1", name); err == nil {
+		t.Fatal("StatFile followed a symlink")
+	}
+	if _, err := manager.SaveFile("member-1", "big.bin", make([]byte, ConfigMaxFileBytes+1)); err == nil {
+		t.Fatal("oversized file accepted")
 	}
 }

@@ -8,7 +8,7 @@ export function Textarea({ variant = 'default', className, ...props }: React.Com
       className={cn(
         field,
         'h-auto min-h-16 resize-y py-1 transition-colors duration-100 motion-reduce:transition-none coarse:h-auto',
-        variant === 'embedded' && 'rounded-none border-0 focus-visible:outline-none focus-visible:shadow-none',
+        variant === 'embedded' && 'rounded-none border-0 bg-transparent px-4 pt-3 pb-1 read-only:bg-transparent focus-visible:outline-none focus-visible:shadow-none',
         className,
       )}
       {...props}

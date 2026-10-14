@@ -51,6 +51,17 @@ func (o *recordingOutcomes) ReportBlocked(_ context.Context, run domain.RunID, r
 	return nil
 }
 
+func (o *recordingOutcomes) ReportNeedsInput(_ context.Context, run domain.RunID, id, question string, at time.Time) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.err != nil {
+		return o.err
+	}
+	o.reportedAt = append(o.reportedAt, at)
+	o.calls = append(o.calls, outcomeCall{run: run, reason: "needs input: " + question, reportID: id})
+	return nil
+}
+
 func (o *recordingOutcomes) fail(err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -365,5 +376,81 @@ func TestInteractiveFollowupStillRequiresEvidence(t *testing.T) {
 	}
 	if got := outcomes.recorded(); len(got) != 2 || got[1].reportID != accepted.ReportID {
 		t.Fatalf("outcomes after evidence accepted = %+v, want both tasks", got)
+	}
+}
+
+// A needs-input report is not durable: it reaches the scheduler directly with
+// an id derived from the key, reserves nothing, and leaves the terminal slot free.
+func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
+	ctx := context.Background()
+	outcomes := &recordingOutcomes{}
+	h := newHarness(t, 2, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_needs_input"}
+		c.Outcomes = outcomes
+	})
+	run, worker := h.run(0), h.run(1)
+
+	result := report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion?", "ask-1")
+	report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion?", "ask-1")
+	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeNeedsInput || result.Summary != "which region?" {
+		t.Fatalf("result = %+v, want an id-less needs-input echo of the question", result)
+	}
+	want := outcomeCall{run: run, reason: "needs input: which region?", reportID: "needs-input:" + string(run) + ":ask-1"}
+	if got := outcomes.recorded(); len(got) != 2 || got[0] != want || got[1] != want {
+		t.Fatalf("scheduler calls = %+v, want the same id twice", got)
+	}
+	if _, err := h.db.GetCoordReportByIdempotency(ctx, run, "ask-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("durable report for needs-input = %v, want ErrNotFound", err)
+	}
+	report(t, h, run, protocol.CoordOutcomeSuccess, "done", "success-1")
+
+	for name, params := range map[string]protocol.CoordReportParams{
+		"evidence refs": {Outcome: protocol.CoordOutcomeNeedsInput, Summary: "q?", IdempotencyKey: "k", EvidenceRefs: []string{"ev"}},
+		"no summary":    {Outcome: protocol.CoordOutcomeNeedsInput, IdempotencyKey: "k"},
+		"no key":        {Outcome: protocol.CoordOutcomeNeedsInput, Summary: "q?"},
+	} {
+		if _, rpcErr := h.svc.CoordReport(ctx, run, params); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
+			t.Fatalf("%s: err = %+v, want invalid params", name, rpcErr)
+		}
+	}
+	h.svc.cfg.Mission = missionTransportStub{mission: []domain.RunID{worker}}
+	_, rpcErr := h.svc.CoordReport(ctx, worker, protocol.CoordReportParams{Outcome: protocol.CoordOutcomeNeedsInput, Summary: "q?", IdempotencyKey: "k"})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, "aether-internal ask") {
+		t.Fatalf("worker needs-input = %+v, want invalid params naming ask", rpcErr)
+	}
+	if got := outcomes.recorded(); len(got) != 3 {
+		t.Fatalf("scheduler calls = %+v, want only the accepted reports", got)
+	}
+}
+
+func TestCoordReportNeedsInputFromAFinishedRun(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	outcomes.fail(ErrRunFinished)
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_finished"}
+		c.Outcomes = outcomes
+	})
+	_, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeNeedsInput, Summary: "which region?", IdempotencyKey: "ask-1",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, ErrRunFinished.Error()) {
+		t.Fatalf("err = %+v, want invalid params carrying %q", rpcErr, ErrRunFinished)
+	}
+}
+
+// A scheduler that cannot take the user's answer, a Background run, rejects
+// the question with the reason the agent should read.
+func TestCoordReportNeedsInputFromARunThatCannotAsk(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	outcomes.fail(ErrCannotAsk)
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_cannot_ask"}
+		c.Outcomes = outcomes
+	})
+	_, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeNeedsInput, Summary: "which region?", IdempotencyKey: "ask-1",
+	})
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, ErrCannotAsk.Error()) {
+		t.Fatalf("err = %+v, want invalid params carrying %q", rpcErr, ErrCannotAsk)
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -282,8 +283,8 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(image) {
 		t.Fatalf("saved image = %q, want %q", got, image)
 	}
-	if err = e.sched.ValidateTerminalImage(t.Context(), run.ID, path); err != nil {
-		t.Fatalf("ValidateTerminalImage: %v", err)
+	if err = e.sched.ValidateAttachment(t.Context(), run.ID, path); err != nil {
+		t.Fatalf("ValidateAttachment: %v", err)
 	}
 
 	accountHome, err := e.cfg.Homes.Path(account.ID)
@@ -667,10 +668,14 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 		t.Fatalf("write first shell input: %v", err)
 	}
 	p.waitForOutput(t, "shell-interactive")
-	if _, err := p.master.Write([]byte("trap 'printf \"shell-%s\\n\" hup; exit 129' HUP; printf 'shell-%s\\n' replacement; while :; do IFS= read -r line; done\n")); err != nil {
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.master.Write([]byte("exec " + shellquote.QuoteAlways(testBinary) + " '-test.run=^TestSupervisorSignalChild$' -- shell\n")); err != nil {
 		t.Fatalf("write replacement shell input: %v", err)
 	}
-	p.waitForOutput(t, "shell-replacement")
+	p.waitForOutput(t, "shell-ready")
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal ready login shell: %v", err)
@@ -704,8 +709,11 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 
 func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 	t.Parallel()
-	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "trap 'printf \"harness-%s\\n\" term; exit 0' TERM; printf 'harness-%s\\n' ready; while :; do read -r line; done"})
-	p := startTestPTYProcess(t, wrapped)
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := startTestPTYProcess(t, wrapTUICommand([]string{testBinary, "-test.run=^TestSupervisorSignalChild$", "--", "harness"}))
 	defer func() {
 		_ = p.cmd.Process.Kill()
 		_ = p.master.Close()
@@ -1062,7 +1070,7 @@ func TestBaseCaptureFailureLeavesNoRunState(t *testing.T) {
 func TestCommandTemplates(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	argv, profile, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, "do it", "")
+	argv, profile, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "claude", domain.LaunchHeadless, false, "do it", "")
 	if err != nil {
 		t.Fatalf("command: %v", err)
 	}
@@ -1073,7 +1081,7 @@ func TestCommandTemplates(t *testing.T) {
 	if profile.Name != "claude" || len(profile.CredentialPaths) == 0 {
 		t.Fatalf("claude profile = %+v, want registry profile with credential paths", profile)
 	}
-	if _, _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, "x", ""); codexErr != nil {
+	if _, _, _, codexErr := e.sched.command(t.Context(), e.member.ID, e.member.ID, "codex", domain.LaunchTUI, false, "x", ""); codexErr != nil {
 		t.Fatalf("codex tui: %v", codexErr)
 	}
 	// A Config.Harnesses argv override replaces the registry template but
@@ -1081,7 +1089,7 @@ func TestCommandTemplates(t *testing.T) {
 	e2 := newTestEnv(t, func(cfg *Config) {
 		cfg.Harnesses = map[string]HarnessSpec{"claude": {TUIArgs: []string{"my-claude", "{task}"}}}
 	})
-	argv, profile, _, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, "go", "")
+	argv, profile, _, err = e2.sched.command(t.Context(), e2.member.ID, e2.member.ID, "claude", domain.LaunchTUI, false, "go", "")
 	if err != nil {
 		t.Fatalf("command with override: %v", err)
 	}
@@ -1092,7 +1100,7 @@ func TestCommandTemplates(t *testing.T) {
 		t.Fatalf("override lost registry profile: %+v", profile)
 	}
 	// "custom" ships with no command of its own: it requires an override.
-	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, "x", ""); err == nil {
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "custom", domain.LaunchTUI, false, "x", ""); err == nil {
 		t.Fatal("custom without an override accepted")
 	}
 }
@@ -1304,6 +1312,7 @@ func TestLegalTransitions(t *testing.T) {
 	allowed[[2]domain.RunStatus{domain.RunQueued, domain.RunProvisioning}] = true
 	allowed[[2]domain.RunStatus{domain.RunProvisioning, domain.RunRunning}] = true
 	allowed[[2]domain.RunStatus{domain.RunProvisioning, domain.RunFailed}] = true
+	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunRunning}] = true
 	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunNeedsAttention}] = true
 	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunCompleted}] = true
 	allowed[[2]domain.RunStatus{domain.RunRunning, domain.RunFailed}] = true
@@ -1550,7 +1559,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 			},
 		}
 	})
-	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "quoted; task", "")
+	argv, prof, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, false, "quoted; task", "")
 	if err != nil {
 		t.Fatalf("custom command: %v", err)
 	}
@@ -1560,7 +1569,7 @@ func TestCustomHarnessDefinition(t *testing.T) {
 	if prof.LocalRoot != "/home/aether/.aider" || len(prof.CredentialPaths) != 1 {
 		t.Fatalf("profile = %+v", prof)
 	}
-	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, "x", "opus"); err == nil || err.Error() != `scheduler: agent "aider" has no model flag; launch it without a model` {
+	if _, _, _, err := e.sched.command(t.Context(), e.member.ID, e.member.ID, "aider", domain.LaunchHeadless, false, "x", "opus"); err == nil || err.Error() != `scheduler: agent "aider" has no model flag; launch it without a model` {
 		t.Fatalf("custom command with a model = %v", err)
 	}
 }
@@ -1597,7 +1606,7 @@ func TestFakeHarnessDefinitionUsesEnvironment(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
-	argv, _, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, "integration task", "")
+	argv, _, _, err := s.command(t.Context(), "", "", "fake", domain.LaunchTUI, false, "integration task", "")
 	if err != nil {
 		t.Fatalf("fake command: %v", err)
 	}

@@ -281,19 +281,20 @@ member without the `steer` permission sees **You can watch this run but not
 type in it.** under the toolbar. **In control** and **Watching** are also
 listed in the run's **Details** panel.
 
-Live local ownership is shown by **You control** and **Release**. A 1px
-subdued teal border traces only the terminal viewport, never the toolbar,
-find bar, or UI above it. After this tab acknowledges live input, the border
-propagates from the left and right side midpoints, splitting up and down to
-meet at the top and bottom centers. An acknowledged voluntary release
+Live local ownership is shown by **You control** and **Release**. Teal light
+glows along the edges of the terminal viewport only, never the toolbar, find
+bar, or UI above it: a thin rim that brightens into a few pools of light,
+each spilling a soft glow inward. After this tab acknowledges live input, the
+light travels from the left and right side midpoints, splitting up and down
+to meet at the top and bottom centers. An acknowledged voluntary release
 reverses that path. Both decelerate toward their endpoints. An explicit
 server takeover notification for this session's current lease turns the
-border red, then retracts along the reverse path over about two seconds. A
-completed hold has already made the border red; it stays red through the
+light red, then retracts it along the reverse path over about two seconds. A
+completed hold has already made the light red; it stays red through the
 handoff. Presence names never trigger takeover feedback. Input is fenced
 immediately; the exit animation is decoration, not authority. Replay,
 recorded history, disconnects, permission loss, and other fencing hide the
-border without takeover feedback. A fresh read-only mirror has no border.
+light without takeover feedback. A fresh read-only mirror has no light.
 Reduced motion makes ownership changes instant and replaces moving takeover
 fills with static red indicators and countdowns. Resizing preserves the
 viewport boundary, and a rapid control change reverses from the visible
@@ -313,9 +314,9 @@ in its **Details** panel. Both read and write the run's durable, attributed
 messages (`run.room.list`, `run.room.post`).
 
 The Session view's composer sends a message to the agent: type it and press
-**Ctrl+Enter** (**Cmd+Enter** on macOS) or **Send**; on a touch screen
-**Send** is the only way, and Enter inserts a newline. The paperclip attaches
-images. A message from the current controller session, with its current
+**Enter** or **Send**; **Shift+Enter** inserts a newline. On a touch screen
+**Send** is the only way, and Enter inserts a newline. **Attach files**
+(**+**) attaches files of any type. A message from the current controller session, with its current
 lease, is delivered to the PTY at once; the composer says so (**Sends to the
 agent's terminal.**). The owner of a run nobody controls gets the same: **Send**
 takes the lease first, then sends. A message from anyone else waits 45
@@ -363,9 +364,10 @@ unanswered questions from anyone but the owner, so the run is in the owner's
 **Needs you** before anyone opens it. The question does not change the run's
 wire status.
 
-Message image attachments use the terminal upload rules: each message may
-include up to eight actual PNG, JPEG, GIF, or WebP files, each no larger than
-8 MiB. Aether validates and stores the bytes in the home the run's container
+Message attachments use the terminal upload rules: each message may include
+up to eight files. PNG, JPEG, GIF and WebP images of at most 8 MiB go through
+`terminal.image`; any other file of at most 64 MiB goes through
+`terminal.file`. Aether stores the bytes in the home the run's container
 mounts, then records the generated container-visible path with the message.
 A local filesystem path from clipboard text is not an upload. An attachment
 is a persistent file reference, not a second input channel; messages still
@@ -1075,11 +1077,18 @@ saved environment image. Stopping the environment, recreating its container,
 or running `aether env reset` leaves the member home (and these images)
 intact; there is no automatic image cleanup.
 
-To remove one known image from a terminal, substitute the exact generated
-filename and run:
+Other files attached to a run message are kept the same way under
+`$HOME/.aether/terminal-files/<random>/`, each in its own generated directory
+under its original name: `/`, `\` and unprintable characters become `_`,
+leading dots and spaces are dropped, names over 128 bytes are cut keeping the
+extension, and an empty name becomes `file`.
+
+To remove one known image or file from a terminal, substitute the exact
+generated name and run:
 
 ```sh
 rm -- "$HOME/.aether/terminal-images/image-<random>.<ext>"
+rm -r -- "$HOME/.aether/terminal-files/<random>"
 ```
 
 Do not replace the filename with a wildcard.

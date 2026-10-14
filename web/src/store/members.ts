@@ -1,6 +1,9 @@
-import type { Invitation, Member } from '@/lib/types'
-import type { RootState } from '@/store'
+import type { Api } from '@/lib/api'
+import { message } from '@/lib/format'
+import type { Invitation, Member, MemberList, MergeProposal } from '@/lib/types'
+import type { RootState, RootStore } from '@/store'
 import { byCreated } from '@/store/collaboration'
+import { capability } from '@/store/hooks'
 import type { SliceCreator } from '@/store/slice'
 
 /** A provisional invitation is one the dashboard shows before the server has assigned it an id. */
@@ -22,13 +25,18 @@ interface Lineage {
 
 export interface MembersSlice {
   members: Record<string, Member>
-  setMembers: (members: Member[]) => void
+  /** From `member.list`: each member a merge absorbed, to the member it became. */
+  mergedInto: Record<string, string>
+  /** Merges are permanent, so `mergedInto` adds to the map held and its
+   * absorbed members are left out, whatever an older read says. */
+  setMembers: (members: Member[], mergedInto?: Record<string, string>) => void
+  setMemberList: (list: MemberList) => void
   /** Returns false, writing nothing, when an answer to a later-started change already wrote these fields. */
   confirmMember: (id: string, fields: Partial<Member>, patch?: MemberPatch) => boolean
   /** Pass the same `order` to every retry of one change. */
   patchMember: (id: string, patch: Partial<Member>, order?: number) => MemberPatch
   /** Call with the read as it is sent, not once it has answered. */
-  readMembers: (read: Promise<Member[]>) => Promise<Member[]>
+  readMembers: (read: Promise<MemberList>) => Promise<MemberList>
   revertMember: (id: string, patch?: MemberPatch) => void
   invitations: ListedInvitation[] | null
   /** Ids of invitations whose revoke awaits the server. */
@@ -40,6 +48,14 @@ export interface MembersSlice {
   addInvitation: (invitation: ListedInvitation, replaces?: string) => void
   dropInvitation: (id: string) => void
   setRevokingInvitation: (id: string, pending: boolean) => void
+  /** From `member.merge.pending`: open proposals the viewer made or is asked to accept. */
+  mergeProposals: MergeProposal[]
+  /** The last `member.merge.pending` read's failure; the proposals shown are from before it. */
+  mergeProposalsError: string | null
+  setMergeProposals: (proposals: MergeProposal[], error?: string | null) => void
+  /** When the merge code this tab minted expires, in ms; proposals are polled until then. */
+  mergeCodeUntil: number
+  setMergeCodeUntil: (until: number) => void
 }
 
 function withMember(s: RootState, id: string, patch: Partial<Member>): Partial<RootState> {
@@ -79,8 +95,13 @@ const settle = (patch?: MemberPatch) => {
 
 export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   members: {},
-  setMembers: (members) =>
-    set({ members: Object.fromEntries(members.map((m) => [m.id, m])) }),
+  mergedInto: {},
+  setMembers: (members, mergedInto) =>
+    set((s) => {
+      const merged = { ...s.mergedInto, ...mergedInto }
+      return { members: Object.fromEntries(members.filter((m) => !merged[m.id]).map((m) => [m.id, m])), mergedInto: merged }
+    }),
+  setMemberList: (list) => get().setMembers(list.members, list.merged_into ?? {}),
   confirmMember: (id, fields, patch) => {
     settle(patch)
     changed(id)
@@ -133,7 +154,7 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
     reads.add(since)
     try {
       const list = await read
-      return list.map((m) => {
+      return { merged_into: list.merged_into ?? {}, members: list.members.map((m) => {
         const shown = get().members[m.id]
         if (!shown) return m
         if (since.has(m.id)) return shown
@@ -143,7 +164,7 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
         const kept = { ...m, ...Object.fromEntries(pending.map((key) => [key, shown[key]])) }
         lineages.set(kept, lineage)
         return kept
-      })
+      }) }
     } finally {
       reads.delete(since)
     }
@@ -180,4 +201,47 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   },
   setRevokingInvitation: (id, pending) =>
     set((s) => ({ revokingInvitations: [...s.revokingInvitations.filter((r) => r !== id), ...(pending ? [id] : [])] })),
+  mergeProposals: [],
+  mergeProposalsError: null,
+  setMergeProposals: (mergeProposals, error = null) => set({ mergeProposals, mergeProposalsError: error }),
+  mergeCodeUntil: 0,
+  setMergeCodeUntil: (mergeCodeUntil) => set({ mergeCodeUntil }),
 })
+
+const proposalReads = new WeakMap<RootStore, number>()
+const nextProposalRead = (store: RootStore) => {
+  const read = (proposalReads.get(store) ?? 0) + 1
+  proposalReads.set(store, read)
+  return read
+}
+
+/** Reads `member.merge.pending`. Only the latest read lands, a removal made
+ * since a read started outdates it, and a failure lands as
+ * `mergeProposalsError` beside the proposals already shown. */
+export async function loadMergeProposals(store: RootStore, client: Api): Promise<void> {
+  const read = nextProposalRead(store)
+  const s = store.getState()
+  if (!s.info || !capability(s.capabilities).hasMethod('member.merge.pending')) return s.setMergeProposals([])
+  let proposals: MergeProposal[] | undefined
+  let error: string | null = null
+  try {
+    proposals = await client.memberMergePending()
+  } catch (err) {
+    error = message(err)
+  }
+  const now = store.getState()
+  if (proposalReads.get(store) !== read || now.identityKey !== s.identityKey) return
+  now.setMergeProposals(proposals ?? now.mergeProposals, error)
+}
+
+export function addMergeProposal(store: RootStore, proposal: MergeProposal) {
+  nextProposalRead(store)
+  const s = store.getState()
+  s.setMergeProposals([...s.mergeProposals.filter((p) => p.id !== proposal.id), proposal], s.mergeProposalsError)
+}
+
+export function dropMergeProposal(store: RootStore, id: string) {
+  nextProposalRead(store)
+  const s = store.getState()
+  s.setMergeProposals(s.mergeProposals.filter((p) => p.id !== id), s.mergeProposalsError)
+}

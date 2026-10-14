@@ -109,6 +109,20 @@ describe('environment terminal methods', () => {
       content: 'iVBORw==',
     })
   })
+
+  it('sends any other file with its name', async () => {
+    const path = `/home/alice/.aether/terminal-files/${'a'.repeat(32)}/notes.txt`
+    const fetchSpy = fakeFetch({ path })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await expect(api.uploadTerminalFile(new File(['notes'], 'notes.txt', { type: 'text/plain' }), 'run_1')).resolves.toEqual({ path })
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/terminal.file')
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({
+      run_id: 'run_1',
+      name: 'notes.txt',
+      content: 'bm90ZXM=',
+    })
+  })
 })
 
 describe('local setup methods', () => {

@@ -7,13 +7,16 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -332,7 +335,7 @@ func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 				prompts = append(prompts, it.Message.Text)
 			}
 		}
-		return reset && slices.Equal(prompts, []string{s2.withCoAuthorInstruction(acpmock.PromptWait), s2.withCoAuthorInstruction(acpmock.PromptWait)})
+		return reset && slices.Equal(prompts, []string{s2.withCoAuthorInstruction(acpmock.PromptWait, false, false), s2.withCoAuthorInstruction(acpmock.PromptWait, false, false)})
 	})
 	if err := s2.ACPCancel(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
@@ -357,12 +360,258 @@ func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 			if run.ACP {
 				t.Fatal("the background run is driven over ACP")
 			}
-			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", e.sched.withCoAuthorInstruction("say pong")}) {
+			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", e.sched.withCoAuthorInstruction("say pong", false, true)}) {
 				t.Fatalf("container command %q, want the headless command line", cmd)
 			}
 			if execs := rt.all(); len(execs) != 0 {
 				t.Fatalf("started an ACP server: %+v", execs)
 			}
 		})
+	}
+}
+
+func (e *testEnv) runStatusEvents(sub events.Subscription, run domain.RunID) []events.RunStatusPayload {
+	var got []events.RunStatusPayload
+	for {
+		select {
+		case ev := <-sub.Events():
+			if p, ok := ev.Payload.(events.RunStatusPayload); ok && ev.RunID == run {
+				got = append(got, p)
+			}
+		default:
+			return got
+		}
+	}
+}
+
+// statusTrail collects the run's status events until done accepts them.
+func (e *testEnv) statusTrail(t *testing.T, sub events.Subscription, run domain.RunID, done func([]events.RunStatusPayload) bool) []events.RunStatusPayload {
+	t.Helper()
+	var trail []events.RunStatusPayload
+	waitFor(t, "the status events", func() bool {
+		trail = append(trail, e.runStatusEvents(sub, run)...)
+		return done(trail)
+	})
+	return trail
+}
+
+func (e *testEnv) launchClaudeACP(t *testing.T, task string) *domain.Run {
+	t.Helper()
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, task, "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	return run
+}
+
+func parkedIdle(trail []events.RunStatusPayload) bool {
+	return len(trail) > 0 && trail[len(trail)-1].To == domain.RunNeedsAttention && trail[len(trail)-1].Reason == agentstatus.ReasonIdle
+}
+
+func statusIndex(trail []events.RunStatusPayload, to domain.RunStatus, reason string) int {
+	return slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return p.To == to && p.Reason == reason })
+}
+
+func parks(trail []events.RunStatusPayload) int {
+	n := 0
+	for _, p := range trail {
+		if p.To == domain.RunNeedsAttention {
+			n++
+		}
+	}
+	return n
+}
+
+// An agent override like the test mock's drops the shipped profile's Claude
+// flags, so these runs use the shipped claude argv and the runtime's mock.
+func TestEnhancedClaudeRunStaysRunningWhileABackgroundTaskRuns(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchClaudeACP(t, acpmock.PromptBackground)
+	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
+	if i := statusIndex(trail, domain.RunRunning, "working in background: 1 task"); i < 0 || trail[i].From != domain.RunRunning {
+		t.Fatalf("status events %+v, want running -> running %q", trail, "working in background: 1 task")
+	}
+	if n := parks(trail); n != 1 {
+		t.Fatalf("status events %+v, want the one park after the follow-up", trail)
+	}
+	if !assistantSaidNow(e, run.ID, "background done") {
+		t.Fatal("the run parked before the background follow-up")
+	}
+	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got.Reason != agentstatus.ReasonIdle {
+		t.Fatalf("run reason %q, want %q", got.Reason, agentstatus.ReasonIdle)
+	}
+}
+
+func TestEnhancedClaudeRunCountsDownItsBackgroundTasks(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchClaudeACP(t, acpmock.PromptBackgroundPair)
+	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
+	two := statusIndex(trail, domain.RunRunning, "working in background: 2 tasks")
+	one := statusIndex(trail, domain.RunRunning, "working in background: 1 task")
+	if two < 0 || one < two {
+		t.Fatalf("status events %+v, want 2 tasks before 1 task", trail)
+	}
+	if n := parks(trail); n != 1 {
+		t.Fatalf("status events %+v, want the one park after both follow-ups", trail)
+	}
+}
+
+func TestEnhancedClaudeRunParksWhileADevServerRuns(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
+	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
+	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, acpBackgroundReason) }); i >= 0 {
+		t.Fatalf("status events %+v, want the dev server never to hold the run working", trail)
+	}
+}
+
+// Without Claude's task frames the host cannot tell a follow-up from noise,
+// so output after the turn leaves the run parked.
+func TestEnhancedRunOfAnotherAgentStaysParkedOnOutputAfterItsTurn(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchACP(t, acpmock.PromptBackground)
+	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
+	waitItems(t, e.sched, run.ID, "the late output", func(items []acphost.Item) bool {
+		return assistantSaid("background done")(items) && slices.ContainsFunc(items, func(it acphost.Item) bool { return it.Usage != nil })
+	})
+	trail = append(trail, e.runStatusEvents(sub, run.ID)...)
+	if last := trail[len(trail)-1]; last.To != domain.RunNeedsAttention || parks(trail) != 1 {
+		t.Fatalf("status events %+v, want one park and nothing after it", trail)
+	}
+	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, acpBackgroundReason) }); i >= 0 {
+		t.Fatalf("status events %+v, want no background reason", trail)
+	}
+}
+
+func TestEnhancedClaudeRunRestoredWithATaskPendingIsInterrupted(t *testing.T) {
+	delay := acpmock.BackgroundDelay
+	acpmock.BackgroundDelay = time.Hour
+	t.Cleanup(func() { acpmock.BackgroundDelay = delay })
+	e, _ := newACPEnv(t)
+	run := e.launchClaudeACP(t, acpmock.PromptBackground)
+	waitFor(t, "the turn to end with background work pending", func() bool {
+		sess := e.sched.acp.session(run.ID)
+		return sess != nil && assistantSaidNow(e, run.ID, "started") && sess.State().Background
+	})
+	waitFor(t, "the run to report its task", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == "working in background: 1 task"
+	})
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	startScheduler(t, s2)
+	waitFor(t, "the restored run to report the interrupted turn", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == acpInterruptedReason
+	})
+}
+
+func assistantSaidNow(e *testEnv, run domain.RunID, text string) bool {
+	page, err := e.sched.ACPHistory(run, 0, 0)
+	return err == nil && assistantSaid(text)(page.Items)
+}
+
+func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *testing.T) {
+	delay := acpmock.BackgroundDelay
+	acpmock.BackgroundDelay = 4 * time.Second
+	t.Cleanup(func() { acpmock.BackgroundDelay = delay })
+	e, _ := newACPEnv(t)
+	withCoordination(t, e)
+	sub := e.subscribe(t)
+	run := e.launchClaudeACP(t, "")
+	waitFor(t, "idle session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	inject := func(text string) {
+		t.Helper()
+		if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: text}, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inject(acpmock.PromptBackground)
+	waitFor(t, "the run to report its task", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == "working in background: 1 task"
+	})
+	inject(acpmock.PromptAskPermission)
+	var pending []domain.RunInputRequest
+	waitFor(t, "the permission request", func() bool {
+		pending = e.sched.PendingInputs(run.ID)
+		return len(pending) == 1
+	})
+	if err := e.sched.ReportNeedsInput(t.Context(), run.ID, "needs-input-1", "which region?", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
+		t.Fatalf("run = %+v, %v; want running until the turn ends", r, err)
+	}
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "allow", nil); err != nil {
+		t.Fatal(err)
+	}
+	const question = "needs input: which region?"
+	trail := e.statusTrail(t, sub, run.ID, func(trail []events.RunStatusPayload) bool {
+		return statusIndex(trail, domain.RunNeedsAttention, question) >= 0
+	})
+	if !sess.State().Background {
+		t.Fatalf("the question showed after the task drained, not at the turn end: %+v", sess.State())
+	}
+
+	waitItems(t, e.sched, run.ID, "the autonomous follow-up", func(items []acphost.Item) bool {
+		return assistantSaid("background done")(items) && slices.ContainsFunc(items, func(it acphost.Item) bool { return it.Usage != nil })
+	})
+	waitFor(t, "the follow-up to settle", func() bool { return !sess.State().Background && !sess.State().TurnInFlight })
+	trail = append(trail, e.runStatusEvents(sub, run.ID)...)
+	asked := statusIndex(trail, domain.RunNeedsAttention, question)
+	for _, p := range trail[asked+1:] {
+		if p.To != domain.RunNeedsAttention || p.Reason != question {
+			t.Fatalf("status events %+v, want nothing to move the run off its question", trail[asked:])
+		}
+	}
+	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunNeedsAttention || r.Reason != question {
+		t.Fatalf("run = %+v, %v; want the question kept after the tasks ended", r, err)
+	}
+
+	inject("thanks")
+	e.statusTrail(t, sub, run.ID, func(trail []events.RunStatusPayload) bool {
+		return slices.ContainsFunc(trail, func(p events.RunStatusPayload) bool { return p.To == domain.RunRunning })
+	})
+}
+
+func TestEnhancedClaudeRunParksAQuestionAskedBetweenTurnsWithTasksLive(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	withCoordination(t, e)
+	run := e.launchClaudeACP(t, acpmock.PromptHold)
+	waitFor(t, "the run to report its task", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == "working in background: 1 task"
+	})
+	if err := e.sched.ReportNeedsInput(t.Context(), run.ID, "needs-input-1", "which region?", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the question", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == "needs input: which region?"
+	})
+	if !e.sched.acp.session(run.ID).State().Background {
+		t.Fatal("the held task is not live")
 	}
 }

@@ -50,15 +50,20 @@ describe('session rows', () => {
     const steer = roomMessage({
       id: 'msg_1', kind: 'steer_request', state: 'sent', actor_id: bob.id, body: 'add a test', created_at: '2026-08-14T10:04:00Z',
     })
+    const file = `/home/bob/.aether/terminal-files/${'b'.repeat(32)}/notes.md`
     const queued = roomMessage({
       id: 'msg_2', kind: 'steer_request', state: 'queued', actor_id: bob.id, body: 'and docs',
       created_at: '2026-08-14T10:05:00Z', deliver_after: '2026-08-14T10:05:45Z',
+      attachments: [file, `/home/bob/.aether/terminal-images/image-${'c'.repeat(32)}.png`],
     })
     const events = [event('workspace.timeline', { kind: 'steer', message: 'add a test' }, '2026-08-14T10:04:01Z', bob.id)]
     const users = rows({ run: toRecord(run()), events, room: [steer, queued], memberName, paused: false }).filter((row) => row.kind === 'user')
     expect(users).toEqual([
       { kind: 'user', authorID: bob.id, body: 'add a test', delivery: 'Sent', deliverAfter: undefined, failure: undefined },
-      { kind: 'user', authorID: bob.id, body: 'and docs', delivery: 'Queued', deliverAfter: '2026-08-14T10:05:45Z', failure: undefined },
+      {
+        kind: 'user', authorID: bob.id, body: 'and docs', delivery: 'Queued', deliverAfter: '2026-08-14T10:05:45Z', failure: undefined,
+        images: [{ messageID: 'msg_2', index: 1 }], files: [file],
+      },
     ])
   })
 

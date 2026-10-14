@@ -50,6 +50,7 @@ type controlLink struct {
 }
 
 type logEntry struct {
+	link     *controlLink
 	serverID string
 	fromEdge bool
 	msg      edgeproto.Message
@@ -173,7 +174,7 @@ func (p *proxy) record(l *controlLink, fromEdge bool, m edgeproto.Message) logEn
 	case edgeproto.Ready:
 		l.serverID = m.ServerID
 	}
-	e := logEntry{serverID: l.serverID, fromEdge: fromEdge, msg: m}
+	e := logEntry{link: l, serverID: l.serverID, fromEdge: fromEdge, msg: m}
 	p.log = append(p.log, e)
 	close(p.changed)
 	p.changed = make(chan struct{})

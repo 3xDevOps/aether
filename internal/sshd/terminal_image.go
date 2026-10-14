@@ -13,11 +13,14 @@ import (
 
 const (
 	maxTerminalImageEncodedBytes = 4 * ((domain.MaxImageBytes + 2) / 3)
+	maxTerminalFileEncodedBytes  = 4 * ((memberhome.ConfigMaxFileBytes + 2) / 3)
 )
 
 func init() {
 	registerMethod(protocol.MethodTerminalImage, (*Server).terminalImage)
+	registerMethod(protocol.MethodTerminalFile, (*Server).terminalFile)
 }
+
 func (s *Server) terminalImage(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	params, perr := decodeParams[protocol.TerminalImageParams](raw)
 	if perr != nil {
@@ -42,7 +45,34 @@ func (s *Server) terminalImage(ctx context.Context, member domain.MemberID, raw 
 		return nil, rpcError(err)
 	}
 
-	return protocol.TerminalImageResult{Path: path}, nil
+	return protocol.TerminalUploadResult{Path: path}, nil
+}
+
+func (s *Server) terminalFile(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	params, perr := decodeParams[protocol.TerminalFileParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+
+	run := domain.RunID(params.RunID)
+	if run != "" {
+		if err := checkSteer(ctx, s.cfg.Store, member, run); err != nil {
+			return nil, rpcError(err)
+		}
+	}
+	data, err := decodeTerminalFile(params.Content)
+	if err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	if s.cfg.Runs == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "terminal.file: file upload is not available"}
+	}
+	path, err := s.cfg.Runs.SaveTerminalFile(ctx, member, run, params.Name, data)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+
+	return protocol.TerminalUploadResult{Path: path}, nil
 }
 
 func decodeTerminalImage(encoded string) ([]byte, string, error) {
@@ -61,4 +91,15 @@ func decodeTerminalImage(encoded string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return data, extension, nil
+}
+
+func decodeTerminalFile(encoded string) ([]byte, error) {
+	if len(encoded) > maxTerminalFileEncodedBytes {
+		return nil, fmt.Errorf("file exceeds the 64 MiB limit")
+	}
+	data, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("file content is not valid base64: %w", err)
+	}
+	return data, nil
 }

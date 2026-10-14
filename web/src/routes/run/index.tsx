@@ -5,6 +5,7 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useElementSize, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
+import { memberName } from '@/lib/member-name'
 import { cn } from '@/lib/utils'
 import { BrowserView } from '@/routes/browser'
 import { BrowserDock, minBesideWidth } from '@/routes/browser/dock'
@@ -60,6 +61,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const detailsPreference = useStore((s) => s.detailsOpen)
   const setDetailsPreference = useStore((s) => s.setDetailsOpen)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const [overlayDetails, setOverlayDetails] = useState(false)
   const [composing, setComposing] = useState(false)
   const [dialog, setDialog] = useState<'captures' | 'events' | null>(null)
@@ -297,7 +299,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       </span>
       <TakeoverDialog
         open={Boolean(agent.takeover.review)}
-        requesterName={requesterID ? members[requesterID]?.display_name || requesterID : ''}
+        requesterName={requesterID ? memberName({ members, mergedInto }, requesterID) : ''}
         seconds={agent.takeover.interaction.seconds}
         pending={agent.takeover.decisionPending}
         error={agent.session.takeoverError}

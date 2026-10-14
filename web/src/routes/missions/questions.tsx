@@ -8,6 +8,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import type { MissionQuestion } from '@/lib/types'
 import { useStore } from '@/store'
 import { useHeaderPrimary } from '@/store/hooks'
@@ -15,7 +16,7 @@ import { useHeaderPrimary } from '@/store/hooks'
 export const answerFormID = (question: MissionQuestion) => `swarm-answer-${question.id}`
 
 function useMemberName(memberID: string | undefined): string {
-  return useStore((s) => (memberID ? s.members[memberID]?.display_name ?? memberID : 'a human'))
+  return useStore((s) => (memberID ? memberName(s, memberID) : 'a human'))
 }
 
 function OpenQuestion({

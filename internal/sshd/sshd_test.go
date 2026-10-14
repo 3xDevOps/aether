@@ -19,6 +19,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -448,6 +449,13 @@ func (f *fakeRuns) CheckSharedLaunch(_ context.Context, member, account domain.M
 	return f.sharedLaunches[key], f.sharedRefusals[key], nil
 }
 
+func (f *fakeRuns) AgentModels(_ context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error) {
+	if err := f.record(fmt.Sprintf("models:%s:%s:%s:%t", member, account, harness, refresh)); err != nil {
+		return protocol.AgentModelsResult{}, err
+	}
+	return protocol.AgentModelsResult{Source: protocol.ModelSourceAgent, Models: []protocol.AgentModel{{ID: harness}}}, nil
+}
+
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
 	return true, nil
 }
@@ -794,6 +802,13 @@ func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, r
 		return "", err
 	}
 	return "/root/.aether/terminal-images/image-test" + extension, nil
+}
+
+func (f *fakeRuns) SaveTerminalFile(_ context.Context, actor domain.MemberID, run domain.RunID, name string, data []byte) (string, error) {
+	if err := f.record(fmt.Sprintf("terminal-file:%s:%s:%s:%d", actor, run, name, len(data))); err != nil {
+		return "", err
+	}
+	return "/root/.aether/terminal-files/" + strings.Repeat("0", 32) + "/" + name, nil
 }
 
 func (f *fakeRuns) ConnectGitHub(_ context.Context, member domain.MemberID) (domain.GitHubConnection, error) {

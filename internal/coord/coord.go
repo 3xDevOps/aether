@@ -47,6 +47,15 @@ var (
 	// ErrNoEvidenceCapture is returned when coord.report is used without the
 	// mandatory automatic evidence callback.
 	ErrNoEvidenceCapture = errors.New("coord: no evidence capture service is attached")
+	// ErrNoOutcomeSink is returned when a needs-input report arrives with no
+	// scheduler behind it.
+	ErrNoOutcomeSink = errors.New("coord: no run outcome sink is attached")
+	// ErrCannotAsk is returned by OutcomeSink.ReportNeedsInput for a run
+	// that cannot take its user's answer.
+	ErrCannotAsk = errors.New("a Background run cannot ask its user; report blocked or failure instead")
+	// ErrRunFinished is returned by OutcomeSink.ReportNeedsInput for a run
+	// that already finished.
+	ErrRunFinished = errors.New("the run already finished; its reported outcome stands, so it cannot ask its user")
 )
 
 // EvidenceCapture is the narrow evidence seam needed by coord.report.

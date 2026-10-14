@@ -44,14 +44,18 @@ function isImageType(type: string): boolean {
 }
 
 export function imageFiles(data: DataTransfer | null): File[] {
+  return clipboardFiles(data, isImageType)
+}
+
+export function clipboardFiles(data: DataTransfer | null, accept: (type: string) => boolean = () => true): File[] {
   if (!data) return []
-  const files = Array.from(data.files ?? []).filter((file) => isImageType(file.type))
+  const files = Array.from(data.files ?? []).filter((file) => accept(file.type))
   if (files.length) return files
 
   // Some Chromium clipboard providers expose the image only as a DataTransfer
   // item, not through `files`.
   return Array.from(data.items ?? [])
-    .filter((item) => item.kind === 'file' && isImageType(item.type))
+    .filter((item) => item.kind === 'file' && accept(item.type))
     .map((item) => item.getAsFile())
     .filter((file): file is File => file !== null)
 }

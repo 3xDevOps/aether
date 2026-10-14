@@ -3,10 +3,11 @@ import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
 import { formatBytes } from '@/lib/format'
+import { memberName, resolveMember } from '@/lib/member-name'
 import type { DiskUsage } from '@/lib/types'
 import { workspaceRuns } from '@/routes/board/selectors'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
-import { useStore } from '@/store'
+import { useStore, type RootState } from '@/store'
 import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
 function diskParts(disk: DiskUsage): string[] {
@@ -129,9 +130,14 @@ export function ServerSection() {
   )
 }
 
+function ownerName(s: Pick<RootState, 'members' | 'mergedInto'>, id: string): string | undefined {
+  return resolveMember(s, id).member ? memberName(s, id) : undefined
+}
+
 function ContainerSizes({ disk }: { disk: DiskUsage }) {
   const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const containers = disk.containers ?? []
   const total = containers.reduce((sum, c) => sum + c.bytes, 0)
   return (
@@ -147,7 +153,7 @@ function ContainerSizes({ disk }: { disk: DiskUsage }) {
         </summary>
         <ul className="flex min-w-0 flex-col gap-1">
           {containers.map((c) => {
-            const name = c.owner_kind === 'run' ? runs[c.owner_id]?.title : members[c.owner_id]?.display_name
+            const name = c.owner_kind === 'run' ? runs[c.owner_id]?.title : ownerName({ members, mergedInto }, c.owner_id)
             return (
               <li key={`${c.owner_kind}:${c.owner_id}`} className="min-w-0 break-words">
                 <span className="font-medium text-text">{c.owner_kind === 'run' ? 'run' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span> · {formatBytes(c.bytes)}
@@ -164,6 +170,7 @@ function ContainerSizes({ disk }: { disk: DiskUsage }) {
 function StorageOwners({ disk }: { disk: DiskUsage }) {
   const runs = useStore((s) => s.runs)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const workspaces = useStore((s) => s.workspaces)
   return (
     <SettingRow label="Largest storage owners" help="Attribution overlaps the categories above; these bytes are not additional totals.">
@@ -177,7 +184,7 @@ function StorageOwners({ disk }: { disk: DiskUsage }) {
             const name = id && (entry.owner_kind === 'workspace'
               ? workspaces[id]?.name
               : entry.owner_kind === 'member'
-                ? members[id]?.display_name
+                ? ownerName({ members, mergedInto }, id)
                 : entry.owner_kind === 'run'
                   ? runs[id]?.title
                   : undefined)

@@ -2,6 +2,7 @@ package acphost
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 )
@@ -263,4 +264,134 @@ func (s *Session) projectLocked(it Item) {
 		return
 	}
 	s.emitLocked(it)
+}
+
+// SetOption sets an advertised option, using the legacy API only for selectors
+// synthesized from the agent's models or modes.
+func (s *Session) SetOption(ctx context.Context, configID string, value any) error {
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	category, err := s.options.selection(configID, value)
+	nativeRevision := s.options.nativeRevision
+	modeRevision := s.options.mode.revision
+	var revision uint64
+	if category != "" {
+		revision = s.options.legacy(category).revision
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if category == "" {
+		opts, optionErr := s.conn.setOption(ctx, configID, value)
+		if optionErr != nil {
+			return optionErr
+		}
+		if present(opts) {
+			s.mu.Lock()
+			// Full catalog notifications own the entire snapshot. A mode-only
+			// notification owns just mode, not the other accepted response values.
+			if s.options.nativeRevision == nativeRevision {
+				mode, modeChanged := s.options.mode.current, s.options.mode.revision != modeRevision
+				s.options.replace(opts)
+				if modeChanged {
+					s.options.setCurrent("mode", mode)
+				}
+				s.publishOptionsLocked()
+			}
+			s.mu.Unlock()
+		}
+		return nil
+	}
+	return s.setLegacy(ctx, category, value.(string), revision) // selection checked the legacy value and type.
+}
+
+// setLegacy runs under optionMu; revision is the category's legacy revision
+// read before the call.
+func (s *Session) setLegacy(ctx context.Context, category, selected string, revision uint64) error {
+	var err error
+	if category == "model" {
+		err = s.conn.setModel(ctx, selected)
+	} else {
+		err = s.conn.setMode(ctx, selected)
+	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Notifications can supply the authoritative selection during the RPC.
+	// Only fill in the requested value when the agent did not send one.
+	if s.options.legacy(category).revision == revision {
+		if category == "mode" {
+			s.emitLocked(Item{Kind: KindModeChange, Mode: selected})
+		} else {
+			s.options.setCurrent(category, selected)
+			s.emitOptionsLocked()
+		}
+	}
+	return nil
+}
+
+// SetModel sets the agent's native model option when it advertises one, and
+// calls session/set_model otherwise.
+func (s *Session) SetModel(ctx context.Context, model string) error {
+	s.mu.Lock()
+	id := s.options.nativeModelID()
+	s.mu.Unlock()
+	if id != "" {
+		return s.SetOption(ctx, id, model)
+	}
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	revision := s.options.model.revision
+	s.mu.Unlock()
+	return s.setLegacy(ctx, "model", model, revision)
+}
+
+// ModelOptionID is the id SetOption takes to change the model: the native
+// model option, else the selector synthesized from the agent's model list,
+// else empty.
+func (s *Session) ModelOptionID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id := s.options.nativeModelID(); id != "" {
+		return id
+	}
+	return s.options.syntheticID("model")
+}
+
+// Model is the session's current model, empty when the agent reports none.
+func (s *Session) Model() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, option := range s.options.options {
+		if option.category() == "model" {
+			if current, ok := option.selectValue(); ok {
+				return current
+			}
+		}
+	}
+	return s.options.model.current
+}
+
+// SetMode switches the agent's mode for agents that expose modes but no
+// mode config option.
+func (s *Session) SetMode(ctx context.Context, modeID string) error {
+	s.optionMu.Lock()
+	defer s.optionMu.Unlock()
+	s.mu.Lock()
+	revision := s.options.mode.revision
+	s.mu.Unlock()
+	if err := s.conn.setMode(ctx, modeID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.options.mode.revision == revision {
+		s.emitLocked(Item{Kind: KindModeChange, Mode: modeID})
+	}
+	return nil
 }

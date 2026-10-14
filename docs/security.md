@@ -1003,6 +1003,15 @@ environment image. Like every file in that home, the images are readable in
 each container that mounts it: the member's environment and the runs
 they launch.
 
+`terminal.file` takes any other file a member attaches to a run message on the
+same terms: bytes only, the same targets and `Steer` check, a 96 MiB request
+for at most 64 MiB decoded. The content is not inspected. The server writes it
+with mode `0600` as `.aether/terminal-files/<random>/<name>`; `<name>` is the
+original name with `/`, `\` and unprintable characters replaced and leading
+dots dropped, so it stays one component inside its generated directory. An
+Enhanced agent receives the file's container path as an ACP `resource_link`,
+not its bytes. Retention is the same as for images.
+
 ### Chat image delivery and previews
 
 Enhanced chat keeps validated attachment references separate from prompt text.

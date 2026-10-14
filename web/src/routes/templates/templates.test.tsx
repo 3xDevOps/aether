@@ -1,13 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
-import { ApiError } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
 import { reopen } from '@/components/failure'
 import { TemplatesRoute } from '@/routes/templates'
 import { useStore, type RootState } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { alice, fakeApi, otherWorkspace, serverInfo, template, workspace } from '@/test/fixtures'
+import { chooseModel } from '@/test/model'
 import { pickOption } from '@/test/select'
 
 vi.mock('sonner', () => ({
@@ -25,6 +26,7 @@ const schedule: Schedule = {
 }
 
 function seed(extra: Partial<RootState> = {}) {
+  vi.spyOn(api, 'agentModels').mockResolvedValue({ models: [], source: 'none' })
   useStore.setState({
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
     activeWorkspace: workspace.id,
@@ -35,6 +37,7 @@ function seed(extra: Partial<RootState> = {}) {
     capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
     hydrated: true,
     hydrationError: null,
+    agentModels: {},
     route: { name: 'templates', params: {} },
     // A new identity drops the saves earlier tests left in flight.
     identityKey: crypto.randomUUID(),
@@ -75,7 +78,7 @@ describe('templates view', () => {
     fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep the flaky tests' } })
     await pickOption(dialog.getByLabelText(/^Mode$/), 'Standard')
-    fireEvent.change(dialog.getByLabelText(/^Model/), { target: { value: 'sonnet' } })
+    await chooseModel(dialog.getByRole('combobox', { name: /^Model/ }), 'sonnet')
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(client.templateSave).toHaveBeenCalledWith({
@@ -740,10 +743,10 @@ describe('templates view', () => {
       vi.useRealTimers()
     }
     const reopened = within(screen.getByRole('dialog', { name: 'Edit template' }))
-    fireEvent.change(reopened.getByLabelText(/^Model/), { target: { value: 'sonnet' } })
+    await chooseModel(reopened.getByRole('combobox', { name: /^Model/ }), 'sonnet')
     await act(async () => answer({ ...template, task: 'sweep instead' }))
 
-    expect((reopened.getByLabelText(/^Model/) as HTMLInputElement).value).toBe('sonnet')
+    expect(reopened.getByRole('combobox', { name: /^Model/ }).textContent).toBe('sonnet')
   })
 
   it('shows a reopened draft in place of the form open when Reopen is pressed', async () => {

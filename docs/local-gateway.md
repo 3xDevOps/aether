@@ -195,8 +195,8 @@ restart or dropped network) redials once and retries once before surfacing
 `dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004` and
-is not retried; `home.upload` and `home.download`, which carry up to 64 MiB,
-get 15 minutes. A server refusal passes through untouched as that `protocol.Error`;
+is not retried; `home.upload`, `home.download` and `terminal.file`, which
+carry up to 64 MiB, get 15 minutes. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
 triggers a redial only when a keepalive shows the connection is actually gone,
@@ -249,7 +249,8 @@ it answers `405` with a JSON error body instead of falling through to the SPA,
 so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
 bodies, including `/local/v1` calls, are capped at 1 MiB. `terminal.image` has
 a 12 MiB HTTP body cap for base64 and JSON framing; decoded images are capped
-separately at 8 MiB. File and configuration exceptions are listed below.
+separately at 8 MiB. `terminal.file` has 96 MiB for a decoded 64 MiB file.
+File and configuration exceptions are listed below.
 
 ### Chat image previews
 
@@ -783,11 +784,17 @@ carries `agent_delivery: "queued"` until the agent takes it
 ([enhanced-runs.md](enhanced-runs.md#permissions-and-input)).
 
 `run.inject` also accepts `attachments`, an ordered array of at most eight
-references returned by `terminal.image`. Text may be empty only when an image
-is attached. References remain separate in the persisted room message.
-Enhanced delivery resolves validated bytes into ACP image blocks; their short
-`aether://room/<message_id>/<index>` URIs identify authorized previews, not
-public download URLs. Image bytes are not copied into the session item log.
+references returned by `terminal.image` or `terminal.file`. Text may be empty
+only when something is attached. References remain separate in the persisted
+room message. Enhanced delivery resolves validated image bytes into ACP image
+blocks; their short `aether://room/<message_id>/<index>` URIs identify
+authorized previews, not public download URLs. Image bytes are not copied into
+the session item log. Each other file becomes a `resource_link` block whose
+`uri` is the `file://` URL of its container path, with `name`, `size` and a
+`mimeType` sniffed from its first 512 bytes; the agent reads the file itself,
+and the session item log keeps that URI. An image attached for an agent
+without `prompt_images` refuses the message as **Not sent**; other files need
+no capability.
 
 ### Candidate integration methods
 
@@ -836,6 +843,7 @@ unavailable owned source remains the server's protocol error.
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
 | `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found`, `default_mode` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-mode-adapters); `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
+| `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#model-discovery) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
@@ -858,7 +866,8 @@ unavailable owned source remains the server's protocol error.
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
 | `terminal.exec` | `{"command":"claude --version"}` | `{"exit_code":0,"stdout":"...","stderr":"..."}` - runs the command through a login shell in the caller's member environment, starting it if needed; a non-zero exit code is a result, not an error. Any approved member may call it. Answers within 10 minutes: a command still running then is killed and the call answers `-32603`, as it does for output past 1 MiB. See [terminal.md](terminal.md#run-one-command) |
-| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
+| `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
+| `terminal.file` | `TerminalFileParams` (`{"run_id":"<run-id>","name":"notes.md","content":"<base64-file-bytes>"}`; `run_id` optional) | `TerminalUploadResult` (`{"path":"/home/<account>/.aether/terminal-files/<random>/notes.md"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
 | `assistant.status` | none | `AssistantStatus` - `state` (`setup`, `needs_restart`, `idle`, `starting`, `running`, `failed`), `agent`, each agent's readiness and reason, `error` and the pending `confirmations`. `needs_restart` means the environment was created before the assistant existed and lacks its mounts |
@@ -1140,8 +1149,8 @@ delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` at 96 MiB. The 64 MiB file and per-request import limits
-remain authoritative after JSON decoding. The SSH control-channel line cap is
+and `config.import` and `terminal.file` at 96 MiB. The 64 MiB file and
+per-request import limits remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
 The HTTP gateway admits at most two imports at once, before reading their
 bodies, and retains admission through backend processing and the response.
@@ -1345,6 +1354,15 @@ mounts (the run's launcher's, also on a shared account) and returns its
 absolute path as mounted at `$HOME` there.
 The path and filename are server-generated; callers cannot choose a host path
 or ask this method to read an arbitrary path.
+
+`terminal.file` takes the same `run_id` and authorization for any file: strict
+base64 `content` of at most 64 MiB decoded, empty allowed, and the original
+`name`. The server writes it as `.aether/terminal-files/<random>/<name>` in
+the same home, with `/`, `\` and unprintable characters in `name` replaced by
+`_`, leading dots and spaces dropped, a name over 128 bytes cut keeping its
+extension, and an empty name stored as `file`. Invalid base64 and an oversized
+file are `-32602` with `file content is not valid base64: ...` or `file
+exceeds the 64 MiB limit`.
 
 - `run.patch` returns the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line.
@@ -2304,7 +2322,9 @@ does not run its agent over ACP`. Every frame is JSON text.
    options, commands, the agent's `auth` status and `auth_methods`,
    `prompt_images`: whether the agent accepts ACP image content, and
    `steering`: whether `run.inject` with `steer: true` can join a running
-   turn). A refusal carries `code` and `error` and closes 1008.
+   turn, and `usage`: the agent's last reported context window use,
+   `{"used":53000,"size":200000}`, absent until it reports one). A refusal
+   carries `code` and `error` and closes 1008.
 
    The replay is at most 200 items. When `after_seq` is 0, past the end of
    the log, or more than 200 items behind, the server sends the newest 200
@@ -2334,8 +2354,12 @@ does not run its agent over ACP`. Every frame is JSON text.
    drop what you hold and apply the replay that follows. Items are the
    `acphost.Item` kinds `message`, `thought`, `tool_call`, `plan`, `request`,
    `mode_change`, `config_options`, `commands`, `usage`, `auth_status`,
-   `session_info`, `notice`, `turn_start`, `turn_end` and `reset`; skip kinds
-   you do not know.
+   `session_info`, `notice`, `turn_start`, `turn_end`, `background` and
+   `reset`; skip kinds you do not know. `turn_start`, `turn_end` and
+   `background` carry the fields for autonomous turns and Claude's
+   background tasks described in
+   [enhanced-runs.md](enhanced-runs.md#the-session-item-log), which also
+   covers the ack `state` fields `background` and `tasks`.
 4. Lease frames are the attach's: the client sends
    `{"type":"control","request_id":1,"write":true}` to take control or
    `{"type":"control","request_id":2,"control_generation":7}` to release it,

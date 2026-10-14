@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
+import { memberName } from '@/lib/member-name'
 import { runLabel } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
@@ -17,14 +18,14 @@ import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
 import { RequestDock, requestTitle } from '@/routes/run/session-requests'
-import { flattenRows, rowGap, TimelineRow, type FlatRow, type RowContext } from '@/routes/run/session-rows'
+import { flattenRows, rowGap, sessionColumn, TimelineRow, type FlatRow, type RowContext } from '@/routes/run/session-rows'
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
 import { liveActivity, rowsOfTurn, type SessionRow } from '@/store/session-rows'
-import { deliveryOf, readSessionLog, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
+import { deliveryOf, readSessionLog, roomFiles, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
 
 const emptyRoom: RoomMessage[] = []
@@ -61,7 +62,7 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
     if (row.kind !== 'user') return row
     const imageMessageID = row.images?.[0]?.messageID
     const sameImageMessage = imageMessageID !== undefined && row.images!.every((image) => image.messageID === imageMessageID)
-    const sameText = (m: RoomMessage) => !used.has(m.id) && !m.attachments?.length && m.body.trim() === row.body.trim() &&
+    const sameText = (m: RoomMessage) => !used.has(m.id) && (m.attachments ?? []).join('\n') === (row.files ?? []).join('\n') && m.body.trim() === row.body.trim() &&
       Date.parse(m.created_at) <= Date.parse(row.at) + sameMessageWindow
     // The oldest copy of a repeated prompt may belong to a row that is not loaded,
     // so a delivered copy sent within the loaded items, before this row, comes first.
@@ -76,11 +77,11 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
       used.add(messageID)
     }
     if (!steer) return messageID ? { ...row, id: messageID } : row
-    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, authorID: steer.actor_id, ...deliveryOf(steer) }
+    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, files: roomFiles(steer) ?? row.files, authorID: steer.actor_id, ...deliveryOf(steer) }
   }).filter((row): row is SessionRow => row !== null)
   const waiting = steers
     .filter((m) => !used.has(m.id) && m.state !== 'cancelled' && (Date.parse(m.created_at) >= floor || deliveryOf(m).delivery === 'Queued'))
-    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), authorID: m.actor_id, ...deliveryOf(m) }))
+    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), files: roomFiles(m), authorID: m.actor_id, ...deliveryOf(m) }))
   return byTime(matched, waiting)
 }
 
@@ -98,6 +99,7 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const events = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]?.events))
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyRoom)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const paused = useStore((s) => s.pausedRuns[run.id] ?? run.paused ?? false)
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
@@ -105,12 +107,12 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
     const floor = historyFloor(session)
     const base = enhanced
       ? withSteers(enhancedRows(session), room, floor)
-      : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => members[id]?.display_name ?? id })
+      : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => memberName({ members, mergedInto }, id) })
     if (!showMessages) return base
     const reported = messages.some((m) => m.kind === 'report')
     const mail = messages.filter((m) => Date.parse(m.created_at) >= floor)
     return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, mail.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
-  }, [enhanced, session, room, run, events, members, messages, showMessages, paused])
+  }, [enhanced, session, room, run, events, members, mergedInto, messages, showMessages, paused])
   const roomIDs = new Set(room.map((m) => m.id))
   const missingRoomImages = enhanced && rows.some((row) => row.kind === 'user' && row.images?.some((image) => !roomIDs.has(image.messageID)))
   return { rows, session, missingRoomImages }
@@ -133,7 +135,7 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
 
 function SessionWelcome({ run, agentName }: { run: RunRecord; agentName: string }) {
   const workspace = useStore((s) => s.workspaces[run.workspace_id]?.name ?? run.workspace_id)
-  const owner = useStore((s) => s.members[run.member_id]?.display_name ?? run.member_id)
+  const owner = useStore((s) => memberName(s, run.member_id))
   return (
     <section aria-label="Run overview" className="flex min-h-0 flex-1 overflow-y-auto px-4 py-6 [scrollbar-gutter:stable_both-edges]">
       <div className="m-auto flex w-full min-w-0 max-w-sm flex-col items-center gap-6">
@@ -307,16 +309,18 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         />
       )}
       {hasMessages && (
-        <div className="mx-auto flex w-full max-w-[736px] shrink-0 justify-end px-4 pt-1">
+        <div className={cn(sessionColumn, 'flex shrink-0 justify-end pt-1')}>
           <Button size="sm" variant="ghost" aria-pressed={!showMessages} onClick={() => setShowMessages(!showMessages)}>
             {showMessages ? 'Hide agent messages' : 'Show agent messages'}
           </Button>
         </div>
       )}
       {session?.truncatedBefore && (
-        <Callout tone="needs-you" role="status" className="mx-4 mt-2 shrink-0">
-          Earlier Enhanced history has expired. Retained items and the current session remain available.
-        </Callout>
+        <div className={cn(sessionColumn, 'shrink-0 pt-2')}>
+          <Callout tone="needs-you" role="status">
+            Earlier Enhanced history has expired. Retained items and the current session remain available.
+          </Callout>
+        </div>
       )}
       <div
         ref={viewport}
@@ -328,7 +332,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         onPointerDownCapture={markInput}
       >
         {(log?.error || roomError || olderError) && (
-          <div className="mx-auto flex max-w-[736px] flex-col gap-2 px-4 pt-3">
+          <div className={cn(sessionColumn, 'flex flex-col gap-2 pt-3')}>
             {log?.error && (
               <Callout tone="failed" title="The session history could not be read" actions={<Button size="sm" variant="secondary" onClick={() => void readSessionLog(useStore, api, run)}>Retry</Button>}>
                 {log.error}
@@ -368,7 +372,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           onResize={loadEarlier}
         >
           {(item: FlatRow | null, index: number) => item === null ? (
-            <div key="older" className="mx-auto flex w-full max-w-[736px] justify-center px-4 pt-4">
+            <div key="older" className={cn(sessionColumn, 'flex justify-center pt-4')}>
               {enhanced ? (
                 <span role="status" className="flex h-7 items-center text-ui-sm text-muted">
                   {loadingOlder ? 'Loading earlier…' : ''}
@@ -386,7 +390,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
               aria-posinset={index + (older ? 0 : 1)}
               aria-setsize={flat.length}
               onFocus={() => setFocused(index)}
-              className={cn('mx-auto w-full max-w-[736px] px-4', rowGap(item), index === count - 1 && 'pb-4', index === 0 && 'pt-4')}
+              className={cn(sessionColumn, rowGap(item), index === count - 1 && 'pb-4', index === 0 && 'pt-4')}
             >
               <RunFileLinks run={run}>
                 <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
@@ -396,7 +400,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         </VList>
       </div>
       {enhanced && (
-        <div className="mx-auto w-full max-w-[736px] px-4 pb-2 empty:hidden">
+        <div className={cn(sessionColumn, 'pb-2 empty:hidden')}>
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
         </div>
       )}

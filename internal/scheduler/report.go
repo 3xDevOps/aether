@@ -79,15 +79,26 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	finishes := entry.reported != "" && turnEnd(execution) && len(pending) == 0
 	reason := report.Reason
 	showsIdle, clearsIdle := false, false
+	held := entry.questionHeld(execution)
+	settled := turnEnd(execution) || (entry.betweenTurns && entry.asks() && backgroundWork(execution))
 	switch {
-	case turnEnd(execution) && len(pending) == 0 && !finishes && entry.idleReason != "":
+	case settled && len(pending) == 0 && !finishes && entry.idleReason != "":
 		reason = entry.idleReason
 		showsIdle = !entry.idleShown
-	case report.State == agentstatus.Working && entry.idleShown:
+	case report.State == agentstatus.Working && entry.idleShown && !held:
 		clearsIdle = true
 	}
+	// The question already shows; the agent's own idle repeats it.
+	repeat := entry.idleShown && reason == entry.idleReason && entry.status == domain.RunNeedsAttention
+	parks := (report.State == agentstatus.Idle || showsIdle) && !finishes && !repeat &&
+		(entry.status != domain.RunNeedsAttention || reportChanged || showsIdle)
+	// Another reason replacing an Enhanced run's question ends its hold on
+	// the agent's work; the question stays pending and shows again at the
+	// next settled turn end.
+	unshows := parks && !showsIdle && reason != entry.idleReason &&
+		entry.idleShown && entry.asks() && entry.launchMode == domain.LaunchACP
 	var oldSidecar sidecar
-	persist := inputsChanged || reportChanged || showsIdle || clearsIdle
+	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows
 	if persist {
 		oldSidecar = entry.sidecar()
 		next := oldSidecar
@@ -102,6 +113,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		if showsIdle {
 			next.IdleShown = true
 		}
+		if unshows {
+			next.IdleShown = false
+		}
 		if clearsIdle {
 			next.IdleReason, next.IdleShown = "", false
 		}
@@ -113,7 +127,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	var transitionErr error
 	switch {
 	case report.State == agentstatus.Idle || showsIdle:
-		if !finishes && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
+		if parks {
 			cause := causeUnattended
 			if showsIdle {
 				cause = idleCause(reason)
@@ -121,10 +135,17 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
 				domain.RunNeedsAttention, reason, "", cause)
 		}
-	case report.State == agentstatus.Working:
-		if entry.status == domain.RunNeedsAttention {
+	case report.State == agentstatus.Working && !held:
+		// A run working in the background says so in its reason, so the
+		// sidebar can show it without the session open.
+		resumed := agentstatus.ReasonResumed
+		if backgroundWork(execution) {
+			resumed = execution.Reason
+		}
+		if entry.status == domain.RunNeedsAttention ||
+			(reportChanged && (backgroundWork(execution) || backgroundWork(entry.agentReport))) {
 			transitionErr = s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunRunning, agentstatus.ReasonResumed, "")
+				domain.RunRunning, resumed, "")
 		}
 	}
 	if transitionErr != nil {
@@ -148,7 +169,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		// A repeated working report remains a no-write heartbeat for the stall
 		// detector. Native hooks produce no terminal or file activity.
 		entry.lastWorking = time.Now().UTC()
-		entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+		if !held {
+			entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+		}
 	case agentstatus.Idle:
 		if !finishes {
 			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
@@ -162,6 +185,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	if showsIdle {
 		entry.idleShown = true
 		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+	}
+	if unshows {
+		entry.idleShown = false
 	}
 	if clearsIdle {
 		entry.idleReason, entry.idleShown = "", false

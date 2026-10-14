@@ -7,7 +7,7 @@ import {
   within,
 } from '@testing-library/react'
 import type { AetherDesktop } from '@/components/shell/window-bar'
-import type { Api } from '@/lib/api'
+import { api, type Api } from '@/lib/api'
 import type {
   AgentInfo,
   GatewayCapabilities,
@@ -27,6 +27,7 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
+import { chooseModel } from '@/test/model'
 
 // The local gateway's descriptor: full method map, event and attach sockets,
 // plus the client-machine verbs the wizard rides on.
@@ -107,6 +108,7 @@ afterEach(() => {
 })
 
 function seed(extra: Partial<RootState> = {}) {
+  vi.spyOn(api, 'agentModels').mockResolvedValue({ models: [], source: 'none' })
   useStore.setState({
     workspaces: { [workspace.id]: workspace },
     activeWorkspace: workspace.id,
@@ -117,6 +119,7 @@ function seed(extra: Partial<RootState> = {}) {
     hydrated: true,
     hydrationError: null,
     agentList: null,
+    agentModels: {},
     route: { name: 'onboarding', params: {} },
     onboarded: false,
     onboardingStep: 'Connect',
@@ -1612,7 +1615,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(screen.getByLabelText('Task'), {
       target: { value: 'write a result file' },
     })
-    fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'sonnet' } })
+    await chooseModel(screen.getByRole('combobox', { name: 'Model' }), 'sonnet')
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() => {
@@ -1807,7 +1810,7 @@ describe('onboarding wizard', () => {
     fireEvent.change(await screen.findByLabelText('Task'), {
       target: { value: 'add a health check endpoint' },
     })
-    fireEvent.change(await screen.findByLabelText('Model'), { target: { value: 'haiku' } })
+    await chooseModel(await screen.findByRole('combobox', { name: 'Model' }), 'haiku')
     const steps = screen.getByLabelText('Steps')
     fireEvent.click(
       within(steps).getByRole('button', {
@@ -1824,7 +1827,7 @@ describe('onboarding wizard', () => {
     expect(
       (await screen.findByLabelText<HTMLTextAreaElement>('Task')).value,
     ).toBe('add a health check endpoint')
-    await waitFor(() => expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('haiku'))
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Model' }).textContent).toBe('haiku'))
   })
 
   it('renders a launch refusal verbatim and lets the user retry', async () => {

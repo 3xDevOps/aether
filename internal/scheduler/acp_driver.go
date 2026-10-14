@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,13 +50,6 @@ var acpTitleLookupDelay = 3 * time.Second
 // ErrACPNotRunning rejects input for an enhanced run with no live session.
 var ErrACPNotRunning = errors.New("scheduler: the enhanced session is not running")
 
-// The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
-const (
-	acpFailedReason     = "enhanced session failed: "
-	acpEndedReason      = "enhanced session ended: "
-	acpTurnFailedReason = "enhanced turn failed: "
-)
-
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
 // stdio the acphost session owns. The adapter never outlives that pipe, so
@@ -90,6 +85,10 @@ type acpRun struct {
 	// untried marks a first task sent but not yet accepted, so a refusal
 	// fails a worker whichever of startOneShot or the turn end reports it.
 	untried bool
+	// instructions are the run instructions the first message or mail prompt
+	// a taskless session accepts carries, for an agent with no system prompt
+	// route.
+	instructions string
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {
@@ -211,10 +210,24 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	if prompt.Text != "" || len(prompt.Attachments) == 0 {
 		blocks = append(blocks, acp.TextBlock(prompt.Text))
 	}
-	if len(prompt.Attachments) > 0 && !sess.Info().PromptImages {
+	if !sess.Info().PromptImages && slices.ContainsFunc(prompt.Attachments, func(reference string) bool {
+		_, file := attachedFileName(reference)
+		return !file
+	}) {
 		return "", acphost.ErrUnsupportedImage
 	}
 	for index, reference := range prompt.Attachments {
+		if _, file := attachedFileName(reference); file {
+			size, mimeType, statErr := d.s.StatAttachedFile(ctx, run.ID, reference)
+			if statErr != nil {
+				return "", fmt.Errorf("%w: scheduler: stat prompt file: %w", domain.ErrPromptNotSent, statErr)
+			}
+			block := acp.ResourceLinkBlock(path.Base(reference), (&url.URL{Scheme: "file", Path: reference}).String())
+			n := int(size)
+			block.ResourceLink.MimeType, block.ResourceLink.Size = &mimeType, &n
+			blocks = append(blocks, block)
+			continue
+		}
 		data, mimeType, readErr := d.s.ReadImage(ctx, run.ID, reference)
 		if readErr != nil {
 			return "", fmt.Errorf("%w: scheduler: read prompt image: %w", domain.ErrPromptNotSent, readErr)
@@ -225,7 +238,18 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		blocks = append(blocks, block)
 	}
 	untitled := run.Task == "" && run.Title == ""
+	sent := time.Now().UTC()
+	instructions, settle := d.claimInstructions(run.ID, sess)
+	if instructions != "" {
+		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
+	}
 	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
+		settle(taken)
+		if taken == nil {
+			if answerErr := d.s.answerReached(run.ID, sent); answerErr != nil {
+				slog.Warn("scheduler: a member's message reached the agent", "run", run.ID, "error", answerErr)
+			}
+		}
 		if untitled && taken == nil {
 			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
 		}
@@ -233,10 +257,41 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 			delivered(taken)
 		}
 	})
+	if err != nil && ctx.Err() == nil {
+		// No turn took the prompt; one awaiting acceptance settles through
+		// the callback.
+		settle(err)
+	}
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
 	}
 	return receipt.Outcome, err
+}
+
+// claimInstructions takes the run instructions sess still owes for one
+// prompt. settle gives them back when that prompt never reached the agent;
+// only its first call counts.
+func (d *acpDriver) claimInstructions(run domain.RunID, sess *acphost.Session) (instructions string, settle func(error)) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r := d.runs[run]
+	if r == nil || r.session != sess || r.instructions == "" {
+		return "", func(error) {}
+	}
+	instructions, r.instructions = r.instructions, ""
+	var once sync.Once
+	return instructions, func(err error) {
+		once.Do(func() {
+			if err == nil {
+				return
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if d.runs[run] == r && r.instructions == "" {
+				r.instructions = instructions
+			}
+		})
+	}
 }
 
 func (d *acpDriver) session(run domain.RunID) *acphost.Session {
@@ -398,6 +453,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if profile.ACPTitleLookup {
 		titleLookup = acpTitleLookupDelay
 	}
+	prompt, systemPrompt := d.s.withCoAuthorInstruction(task, entry.missionAssigned, oneShot), ""
+	if profile.ACPSystemPrompt {
+		prompt, systemPrompt = task, d.s.runInstructions(entry.missionAssigned, oneShot)
+	}
 	runID := entry.runID
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
@@ -407,18 +466,20 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		RequireRestore: how == openSwitch || how == openContinue,
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
+		SystemPrompt:   systemPrompt,
+		ClaudeCode:     profile.ACPClaudeCode,
 		TitleLookup:    titleLookup,
-		OnState: func(working bool, reason string, failed error) {
-			if message, ok := acphost.UsageLimit(failed); ok {
+		OnState: func(st acphost.TurnState) {
+			if message, ok := acphost.UsageLimit(st.Failed); ok {
 				d.s.mu.Lock()
 				d.s.setUsageLimitLocked(entry, message)
 				d.s.mu.Unlock()
 				// The move stops this session, which waits for this
 				// callback to return.
-				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed, message) })
+				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
-			d.turnState(entry, oneShot, working, reason, failed)
+			d.turnState(entry, oneShot, st)
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})
@@ -450,6 +511,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
+	// A session that started anew, here or after a failed restore, or
+	// refused its prompts so far has not had them yet.
+	if task == "" && systemPrompt == "" && (fresh || !acphost.Answered(sess.Log())) {
+		r.instructions = d.s.runInstructions(entry.missionAssigned, oneShot)
+	}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
 	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
@@ -464,9 +530,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.endOneShot(entry, false, true, agentstatus.Report{State: agentstatus.Idle, Reason: "model not set: " + modelErr.Error()})
 	case how == openContinue:
 	case oneShot:
-		d.startOneShot(ctx, entry, sess, fresh, task)
+		d.startOneShot(ctx, entry, sess, fresh, prompt)
 	case fresh && task != "":
-		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(d.s.withCoAuthorInstruction(task))}, false, nil); err != nil {
+		if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, nil); err != nil {
 			slog.Warn("scheduler: send the task to the agent", "run", runID, "error", err)
 		}
 	case !fresh:
@@ -475,146 +541,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.wakeIdle(runID)
 	}
 	return nil
-}
-
-func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason string, failed error) {
-	if oneShot && !working {
-		if reason != "" {
-			d.endOneShot(entry, reason == "end_turn", false, turnEndReport(reason))
-		}
-		return
-	}
-	report := agentstatus.Report{State: agentstatus.Working}
-	switch {
-	case working:
-	case failed != nil:
-		// Not a turn end: a waiting outcome report must not finish the run
-		// on a turn that failed.
-		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
-	default:
-		report = agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
-	}
-	d.report(entry.runID, report)
-	if !working {
-		d.wakeIdle(entry.runID)
-	}
-}
-
-// usageLimit handles a turn that failed on the account's usage limit: the
-// run continues on another account, or stops with the reason why not.
-func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error, message string) {
-	outcome, stopped := d.s.continueLiveRun(entry, false, message)
-	switch outcome {
-	case usageContinued, usageShutdown, usageSkipped:
-		return
-	}
-	d.s.clearUsageLimit(entry)
-	switch outcome {
-	case usageRefused:
-		d.turnState(entry, oneShot, false, reason, failed)
-	case usageNoFallback:
-		report := agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
-		if !oneShot {
-			d.report(entry.runID, report)
-			return
-		}
-		d.s.mu.Lock()
-		entry.failReason = stopped
-		d.s.mu.Unlock()
-		d.endOneShot(entry, false, false, report)
-	}
-}
-
-func (d *acpDriver) startOneShot(ctx context.Context, entry *supervised, sess *acphost.Session, fresh bool, task string) {
-	prompt := d.s.withCoAuthorInstruction(task)
-	if !fresh {
-		last := lastItem(sess.Log(), acphost.KindTurnEnd)
-		reset := lastItem(sess.Log(), acphost.KindReset).Seq > last.Seq
-		switch last.StopReason {
-		case "":
-		case "interrupted":
-			if !reset {
-				prompt = oneShotResume
-			}
-		default:
-			d.endOneShot(entry, last.StopReason == "end_turn", false, turnEndReport(last.StopReason))
-			return
-		}
-	}
-	d.mu.Lock()
-	r := d.runs[entry.runID]
-	if r != nil && prompt != oneShotResume {
-		r.untried = true
-	}
-	d.mu.Unlock()
-	// The session reports acceptance before the turn's end.
-	accepted := func(_ bool, err error) {
-		if err == nil && r != nil {
-			d.mu.Lock()
-			r.untried = false
-			d.mu.Unlock()
-		}
-	}
-	if _, err := sess.Prompt(ctx, []acp.ContentBlock{acp.TextBlock(prompt)}, false, accepted); err != nil && !usageLimited(err) {
-		d.endOneShot(entry, false, false, agentstatus.Report{State: agentstatus.Idle, Reason: "send the task to the agent: " + err.Error()})
-	}
-}
-
-func turnEndReport(stop string) agentstatus.Report {
-	if stop == "end_turn" {
-		return agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
-	}
-	return agentstatus.Report{State: agentstatus.Idle, Reason: "the agent's turn ended: " + stop}
-}
-
-// Only the first call for a session ends it, and its session takes no input
-// from then on. A swarm worker's run is left to CompleteMission unless
-// untried: its agent never got the task, so there is nothing to judge.
-func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentstatus.Report) {
-	d.mu.Lock()
-	r := d.runs[entry.runID]
-	skip := d.closed || r == nil || r.stopping || r.ended
-	live := r != nil && r.session != nil
-	if !skip {
-		r.ended = true
-		untried = untried || (!ok && r.untried)
-		r.untried = false
-	}
-	d.mu.Unlock()
-	if skip {
-		return
-	}
-	go func() {
-		unlock := d.lockOp(entry.runID)
-		d.mu.Lock()
-		current := d.runs[entry.runID] == r
-		d.mu.Unlock()
-		if current && live {
-			if err := d.stopAdapterLocked(context.Background(), entry.runID); err != nil {
-				slog.Warn("scheduler: stop the background run's ACP server", "run", entry.runID, "error", err)
-			}
-		}
-		unlock()
-		d.s.mu.Lock()
-		assigned, cid := entry.missionAssigned && !untried, entry.containerID
-		if !ok && !assigned {
-			entry.exitDetail = idle.Reason
-		}
-		d.s.mu.Unlock()
-		if assigned {
-			d.report(entry.runID, idle)
-			return
-		}
-		signal := "USR2"
-		if ok {
-			signal = "USR1"
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), acpStopGrace+10*time.Second)
-		defer cancel()
-		if code, _, stderr, err := d.s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", "kill -" + signal + " 1"}, ""); err != nil || code != 0 {
-			slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
-		}
-	}()
 }
 
 func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {

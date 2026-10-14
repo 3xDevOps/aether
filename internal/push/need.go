@@ -10,19 +10,22 @@ import (
 
 // These mirror the scheduler's reasons: acp*Reason in
 // internal/scheduler/acp_driver.go, reported*Reason in
-// internal/scheduler/reported.go, and the blocked and stalled prefixes.
-var enhancedFailurePrefixes = []string{
-	"enhanced session failed: ",
-	"enhanced session ended: ",
-	"enhanced turn failed: ",
+// internal/scheduler/reported.go, and the blocked, needs-input and stalled
+// prefixes. The labels are the dashboard's (web/src/lib/needs-you.ts).
+var enhancedFailures = []struct{ prefix, label string }{
+	{"enhanced session failed: ", "Enhanced could not start: "},
+	{"enhanced session ended: ", "Agent disconnected: "},
+	{"enhanced turn failed: ", "Turn failed: "},
 }
 
 const (
-	blockedPrefix   = "blocked: "
-	stalledPrefix   = "stalled:"
-	reportedPrefix  = "agent reported "
-	reportedSuccess = reportedPrefix + "success"
-	reportedFailure = reportedPrefix + "failure"
+	blockedPrefix     = "blocked: "
+	needsInputPrefix  = "needs input: "
+	stalledPrefix     = "stalled:"
+	turnStoppedPrefix = "turn ended: "
+	reportedPrefix    = "agent reported "
+	reportedSuccess   = reportedPrefix + "success"
+	reportedFailure   = reportedPrefix + "failure"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -90,9 +93,12 @@ func statusBody(run *domain.Run, worker, background, paused bool) string {
 		if worker {
 			return ""
 		}
-		for _, prefix := range enhancedFailurePrefixes {
-			if rest, ok := strings.CutPrefix(run.Reason, prefix); ok {
-				return "Enhanced unavailable: " + rest
+		if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {
+			return rest
+		}
+		for _, failure := range enhancedFailures {
+			if rest, ok := strings.CutPrefix(run.Reason, failure.prefix); ok {
+				return failure.label + rest
 			}
 		}
 		if background {
@@ -108,7 +114,14 @@ func statusBody(run *domain.Run, worker, background, paused bool) string {
 			return ""
 		case strings.HasPrefix(run.Reason, stalledPrefix):
 			return "No activity"
-		case run.ACP:
+		case !run.ACP:
+		case run.Reason == "turn cancelled":
+			return "Turn cancelled"
+		case run.Reason == "turn interrupted":
+			return "Turn interrupted"
+		case strings.HasPrefix(run.Reason, turnStoppedPrefix):
+			return "Stopped: " + strings.TrimPrefix(run.Reason, turnStoppedPrefix)
+		default:
 			return "Waiting for your reply"
 		}
 		return "Agent idle"

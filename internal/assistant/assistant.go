@@ -454,7 +454,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 		}}},
 		SessionID: resume,
 		Logger:    slog.Default().With("assistant", m.id),
-		OnState:   func(bool, string, error) { m.notify() },
+		OnState:   func(acphost.TurnState) { m.notify() },
 	})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("assistant: open the %s session%s: %w", agent, stderr.suffix(), err), stopExec(exec))
@@ -720,7 +720,7 @@ func (s *Service) send(ctx context.Context, id domain.MemberID, text string) err
 	if err != nil {
 		return err
 	}
-	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)})
+	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
 	if err == nil && !started {
 		err = ErrTurnRunning
 	}

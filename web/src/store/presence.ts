@@ -1,4 +1,6 @@
-import type { Member, PresenceEntry, Run } from '@/lib/types'
+import { memberName } from '@/lib/member-name'
+import type { PresenceEntry, Run } from '@/lib/types'
+import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
 export interface PresenceSlice {
@@ -42,11 +44,11 @@ export function runWatchers(presence: PresenceEntry[], runID: string): string[] 
 export function runPeople(
   run: Pick<Run, 'controller_member_id' | 'last_controller_member_id'>,
   watchers: string[],
-  members: Record<string, Member>,
+  names: Pick<RootState, 'members' | 'mergedInto'>,
 ): string[] {
   const last = run.last_controller_member_id
   const lead = run.controller_member_id || (last && watchers.includes(last) ? last : undefined)
-  const name = (id: string) => members[id]?.display_name ?? id
+  const name = (id: string) => memberName(names, id)
   const rest = watchers
     .filter((id) => id !== lead)
     .sort((a, b) => name(a).localeCompare(name(b)) || a.localeCompare(b))

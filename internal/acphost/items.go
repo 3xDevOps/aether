@@ -27,6 +27,7 @@ const (
 	KindNotice        Kind = "notice"
 	KindTurnStart     Kind = "turn_start"
 	KindTurnEnd       Kind = "turn_end"
+	KindBackground    Kind = "background"
 	KindReset         Kind = "reset"
 	KindUnknown       Kind = "unknown"
 )
@@ -83,6 +84,19 @@ type Item struct {
 	Notice        *Notice         `json:"notice,omitempty"`
 	StopReason    string          `json:"stop_reason,omitempty"`
 	Raw           json.RawMessage `json:"raw,omitempty"`
+
+	// Autonomous marks the turn_start and turn_end of a turn the agent ran
+	// with no prompt from the host.
+	Autonomous bool `json:"autonomous,omitempty"`
+	// Origin is what the agent reported started an autonomous turn, such as
+	// Claude Code's "task-notification".
+	Origin string `json:"origin,omitempty"`
+	// Tasks is a background item's full set of live background tasks; an
+	// empty set is written when the last one ends.
+	Tasks []Task `json:"tasks,omitempty"`
+	// FollowUp marks a background item written while the agent owes the
+	// turn that reports back on a task that ended.
+	FollowUp bool `json:"follow_up,omitempty"`
 }
 
 // Message is one segment of a user message, assistant message, or thought.
@@ -118,6 +132,7 @@ type ToolCall struct {
 	ToolKind    string          `json:"tool_kind,omitempty"`
 	ToolName    string          `json:"tool_name,omitempty"`
 	Subagent    *Subagent       `json:"subagent,omitempty"`
+	Task        *ToolTask       `json:"task,omitempty"`
 	Status      string          `json:"status,omitempty"`
 	Locations   []Location      `json:"locations,omitempty"`
 	Content     []Content       `json:"content,omitempty"`
@@ -134,6 +149,16 @@ type ToolCall struct {
 type Subagent struct {
 	Description string `json:"description,omitempty"`
 	Type        string `json:"type,omitempty"`
+}
+
+// ToolTask is the Claude Code background task a tool call started.
+type ToolTask struct {
+	ID string `json:"id"`
+	// Type is Claude Code's task type, such as local_agent, local_workflow
+	// or local_bash, once the adapter reported it.
+	Type string `json:"type,omitempty"`
+	// Status is running, completed, failed or stopped.
+	Status string `json:"status"`
 }
 
 type Location struct {
@@ -361,13 +386,16 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 		return b, true, err
 	}
 	brief := Item{Seq: it.Seq, Epoch: it.Epoch, Time: it.Time, Turn: it.Turn, Kind: it.Kind, Truncated: true,
-		Mode: cut.Mode, StopReason: cut.StopReason, PlanParentID: cut.PlanParentID}
+		Mode: cut.Mode, StopReason: cut.StopReason, PlanParentID: cut.PlanParentID, FollowUp: cut.FollowUp}
+	for _, t := range cut.Tasks {
+		brief.Tasks = append(brief.Tasks, Task{ID: t.ID, Type: t.Type, Holds: t.Holds})
+	}
 	if m := cut.Message; m != nil {
 		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, ParentID: m.ParentID, Complete: m.Complete, Attachments: m.Attachments}
 	}
 	if tc := cut.ToolCall; tc != nil {
 		brief.ToolCall = &ToolCall{ID: tc.ID, ParentID: tc.ParentID, ToolKind: tc.ToolKind, ToolName: tc.ToolName,
-			Subagent: tc.Subagent, Status: tc.Status, ExitCode: tc.ExitCode}
+			Subagent: tc.Subagent, Task: tc.Task, Status: tc.Status, ExitCode: tc.ExitCode}
 	}
 	if r := cut.Request; r != nil {
 		brief.Request = &Request{ID: r.ID, Kind: r.Kind, ToolCallID: r.ToolCallID, Status: r.Status, Answer: r.Answer}

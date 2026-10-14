@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -1459,5 +1460,97 @@ func TestNoReporterDeadlineRespectsInputAndRunMode(t *testing.T) {
 				waitFor(t, "background container destroyed", func() bool { return e.rt.byName(string(run.ID)) == nil })
 			}
 		})
+	}
+}
+
+func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	report := func(r agentstatus.Report) {
+		t.Helper()
+		if err := e.sched.ReportAgentState(ctx, run.ID, r); err != nil {
+			t.Fatalf("report %s: %v", r.State, err)
+		}
+	}
+	reason := func() string {
+		t.Helper()
+		r, err := e.db.GetRun(ctx, run.ID)
+		if err != nil {
+			t.Fatalf("GetRun: %v", err)
+		}
+		return r.Reason
+	}
+	at := time.Now()
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at); err != nil {
+		t.Fatalf("ReportNeedsInput: %v", err)
+	}
+	report(agentstatus.Report{State: agentstatus.Working})
+	report(waitingForInput)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got := reason(); got != "needs input: which region?" {
+		t.Fatalf("parked reason = %q, want the question", got)
+	}
+
+	report(agentstatus.Report{State: agentstatus.Working})
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at); err != nil {
+		t.Fatalf("replayed ReportNeedsInput: %v", err)
+	}
+	report(waitingForInput)
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if got := reason(); got != agentstatus.ReasonIdle {
+		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
+	}
+}
+
+func TestNeedsInputSupersedesAnEarlierSuccessReport(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	at := time.Now()
+	if err := e.sched.FinishReported(ctx, run.ID, "success-1", domain.RunCompleted, at); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at.Add(time.Second)); err != nil {
+		t.Fatalf("ReportNeedsInput: %v", err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+		t.Fatalf("report %s: %v", waitingForInput.State, err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || row.Reason != "needs input: which region?" {
+		t.Fatalf("parked run = %+v, %v, want the question as the reason", row, err)
+	}
+}
+
+func TestNeedsInputIsRefusedForAFinishedRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	if err := e.sched.ReportNeedsInput(t.Context(), "run-gone", "needs-input-1", "which region?", time.Now()); !errors.Is(err, coord.ErrRunFinished) {
+		t.Fatalf("ReportNeedsInput = %v, want %v", err, coord.ErrRunFinished)
+	}
+}
+
+func TestNeedsInputIsRefusedForABackgroundRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, err := e.sched.Launch(ctx, e.ws.ID, e.member.ID, e.member.ID, "write docs", "fake", domain.LaunchHeadless)
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err = e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", time.Now()); !errors.Is(err, coord.ErrCannotAsk) {
+		t.Fatalf("ReportNeedsInput = %v, want %v", err, coord.ErrCannotAsk)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || row.Status != domain.RunRunning || row.Reason == "needs input: which region?" {
+		t.Fatalf("run after the refused question = %+v, %v", row, err)
 	}
 }

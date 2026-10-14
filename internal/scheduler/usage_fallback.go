@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/adapter"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -396,7 +397,7 @@ func (s *Scheduler) resumeUsageMove(entry *supervised) {
 		}
 		switch {
 		case acp:
-			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, "error", errors.New(message), message)
+			s.acp.usageLimit(entry, mode == domain.LaunchHeadless, acphost.TurnState{Reason: "error", Failed: errors.New(message)}, message)
 		case mode == domain.LaunchTUI:
 			s.continueStandard(entry, message)
 		case assigned:
@@ -897,7 +898,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 		// The follow-up move supersedes the continuation this one owed.
 		s.clearAccountSwap(entry, swap)
 		s.goMove(func() {
-			s.acp.usageLimit(entry, run.Mode == domain.LaunchHeadless, "error", errors.New(again), again)
+			s.acp.usageLimit(entry, run.Mode == domain.LaunchHeadless, acphost.TurnState{Reason: "error", Failed: errors.New(again)}, again)
 		})
 	case run.Mode == domain.LaunchTUI:
 		s.goMove(func() { s.continueStandard(entry, again) })

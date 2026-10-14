@@ -9,6 +9,7 @@ import { StateLine, StatusDot, type Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import { plainReason } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionAttemptState, MissionTask, MissionTaskScope } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -178,7 +179,7 @@ function ControlHold({ attempt, canRelease, client, onReleased }: {
   client: Api
   onReleased: () => void
 }) {
-  const holder = useStore((s) => (attempt.takeover_member_id ? s.members[attempt.takeover_member_id]?.display_name : undefined))
+  const holder = useStore((s) => (attempt.takeover_member_id ? memberName(s, attempt.takeover_member_id) : undefined))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const release = async () => {

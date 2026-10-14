@@ -1,10 +1,9 @@
 import { launchable } from '@/components/launch/agent-picker'
-import { modelHints } from '@/components/launch/models'
 import { agentLabel, modeRefusal } from '@/components/launch/modes'
+import { ModelPicker } from '@/components/launch/model-picker'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { AgentInfo, LaunchMode, Member } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -27,6 +26,7 @@ export function WorkerAgents({
   error,
   choices,
   mode,
+  ownAccountID,
   onToggle,
   onModel,
 }: {
@@ -35,6 +35,7 @@ export function WorkerAgents({
   error: string | null
   choices: WorkerChoice[]
   mode: LaunchMode
+  ownAccountID: string
   onToggle: (choice: WorkerChoice, on: boolean) => void
   onModel: (choice: WorkerChoice, model: string) => void
 }) {
@@ -72,13 +73,12 @@ export function WorkerAgents({
                 </label>
                 {picked && (
                   <div className="pr-2 pb-1 pl-8">
-                    <Input
+                    <ModelPicker
                       aria-label={`Model for ${name}`}
-                      placeholder={modelHints(agent.name).placeholder}
+                      harness={agent.name}
+                      accountMemberID={member.id === ownAccountID ? undefined : member.id}
                       value={picked.model ?? ''}
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(event) => onModel(picked, event.target.value)}
+                      onChange={(model) => onModel(picked, model)}
                     />
                   </div>
                 )}

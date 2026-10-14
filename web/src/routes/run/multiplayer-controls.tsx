@@ -2,6 +2,7 @@ import { Shield, Users } from '@/components/icons'
 import { connectionLabel } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { allowed } from '@/lib/permissions'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ControlButton } from '@/routes/terminal/control-button'
@@ -12,6 +13,7 @@ import type { RunRecord } from '@/store/runs'
 export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string {
   const self = useSelf()
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const status = useStore((s) => s.roomStatus[run.id])
   const statusControl = useStore((s) => s.roomStatusControl[run.id])
   const statusError = useStore((s) => s.roomStatusError[run.id])
@@ -21,7 +23,7 @@ export function usePresenceSummary(run: RunRecord, agent: AgentTerminal): string
   const controllerID = status.controller?.member_id
   const who = !controllerID ? 'Nobody controls'
     : controllerID === self.id ? 'You control in another tab'
-      : `${members[controllerID]?.display_name ?? controllerID} controls`
+      : `${memberName({ members, mergedInto }, controllerID)} controls`
   const connection = run.acp ? stream : agent.session.state.connection
   const stale = connection !== 'live' || statusControl !== agent.roomControl || Boolean(statusError)
   return stale ? `${who} (last known)` : who
@@ -34,6 +36,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
 }) {
   const self = useSelf()
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const summary = usePresenceSummary(run, agent)
   const status = useStore((s) => s.roomStatus[run.id])
   const presenceError = useStore((s) => s.roomStatusError[run.id])
@@ -44,8 +47,8 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   const controlError = session?.controlError ?? session?.takeoverError
   const connection = stream === 'refused' ? 'Offline' : connectionLabel[stream]
   const controllerID = agent.localControl ? self.id : status?.controller?.member_id
-  const controller = controllerID ? members[controllerID] : undefined
-  const controllerName = controller?.display_name ?? controllerID
+  const controller = controllerID ? resolveMember({ members, mergedInto }, controllerID).member : undefined
+  const controllerName = controllerID ? memberName({ members, mergedInto }, controllerID) : undefined
   const controllerSummary = controllerID === self.id && controllerName ? `${controllerName} · ${summary}` : summary
   const staleWatchers = stream !== 'live' || Boolean(presenceError)
 
@@ -60,8 +63,8 @@ export function MultiplayerControls({ run, agent, onPeople }: {
           <span className="shrink-0 text-muted">Watching{status && staleWatchers && ' (last known)'}</span>
           <div role="group" aria-label="Run watchers" tabIndex={status?.watchers.length ? 0 : undefined} className="flex min-w-0 flex-1 touch-pan-x items-center gap-3 overflow-x-auto whitespace-nowrap">
             {status ? status.watchers.length > 0 ? status.watchers.map((id) => {
-              const member = members[id]
-              const name = member?.display_name ?? id
+              const member = resolveMember({ members, mergedInto }, id).member
+              const name = memberName({ members, mergedInto }, id)
               return (
                 <span key={id} className="inline-flex shrink-0 items-center gap-1.5">
                   <Avatar name={name} color={member?.color} />

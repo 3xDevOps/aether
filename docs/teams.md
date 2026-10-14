@@ -145,7 +145,8 @@ That claims the server for the account this machine is signed in with at
 the server's edge, binds it to the admin's member, and approves this
 device ([edge.md](edge.md#server-id-and-claiming)). It is refused once
 the server has an owner. Any approved member links an account to their own
-member, never another's, by naming it:
+member, never another's, by naming it, in the dashboard with **Link a
+GitHub account** under Profile › Sign-ins, or:
 
 ```sh
 aether member link --github dana
@@ -194,7 +195,7 @@ then accept here: aether member merge accept
 
 The code is shown once, kept on the server only as a SHA-256 hash, valid
 for 10 minutes and used once; a new `start` replaces your open one. On the
-other sign-in:
+other sign-in, enter it in the dashboard (below) or run:
 
 ```sh
 aether member merge <code> [--keep <member id>] [--keep-admin] [--yes]
@@ -219,6 +220,18 @@ merge cancel`, on either side, drops your open codes and proposals. Every
 step is refused on a connection that signed in with a device no person
 approved, under either policy.
 
+In the dashboard, Profile › Sign-ins lists the member's tailnet login,
+SSH key fingerprint, GitHub accounts and devices (`member.identity.list`,
+which the member or an admin reads). **Merge with another
+member** › **Get a merge code** shows the code with its countdown, and
+the proposal to accept appears there, in Sign-ins and on Needs you, with
+the choice made, what is discarded and the resulting role. **I have a
+merge code** previews both members side by side; choose whose settings to
+keep, tick **Discard the listed settings** and press **Propose merge**.
+Accepting asks for the same tick; either side cancels an open proposal
+there. Each refusal shows the server's error.
+Merge history lists `member.merge.list`.
+
 The member whose settings prevail survives with its id, display name,
 color, git identity, saved image, custom agents, profiles, home and the
 account shares it grants. The other member is absorbed: its GitHub
@@ -229,8 +242,8 @@ account shares it received become the survivor's, so the survivor reopens
 those runs. It stays as a
 tombstone that signs nothing in: history it made, such as events,
 comments, costs and swarm records, keeps naming its id, which
-`member.list` maps to the survivor (`merged_into`); the CLI and the
-dashboard still show the old id there. Its discarded settings are recorded, its account shares
+`member.list` maps to the survivor (`merged_into`); the dashboard shows
+the survivor's name there, marked `(merged)`, and the CLI the old id. Its discarded settings are recorded, its account shares
 are revoked, and its home (agent logins, git signing key, files) moves to
 `<data-dir>/merged/<merge id>/home` on the server. That directory, owner
 only and outside every member's home and Files view, still holds live
@@ -1321,7 +1334,7 @@ or the delivery.
 The dashboard's launch dialog creates one on its **Swarm** tab: an
 objective, the **Integrator agent**, an **Integrator mode** (Standard or
 Enhanced; Background is refused because it exits after one turn), the
-**Integrator model**, **Agents for workers** with a model input on each
+**Integrator model**, **Agents for workers** with a model picker on each
 ticked row, and a **Worker mode** that defaults to Background. A
 worker whose agent cannot use the worker mode runs Standard, which its row
 says. An empty model keeps the agent's default. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the

@@ -5,13 +5,15 @@ import { describeEvent } from '@/components/event-words'
 import { Badge } from '@/components/ui/badge'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { typeLabel } from '@/lib/events'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { runLabel } from '@/lib/status'
 import type { Event } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 
 export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { event: Event; runLink?: boolean }) {
-  const actor = useStore((s) => s.members[event.actor_id])
+  const actor = useStore((s) => resolveMember(s, event.actor_id).member)
+  const actorName = useStore((s) => (resolveMember(s, event.actor_id).member ? memberName(s, event.actor_id) : undefined))
   const run = useStore((s) => (runLink ? s.runs[event.run_id] : undefined))
   const navigate = useStore((s) => s.navigate)
 
@@ -19,8 +21,8 @@ export const FeedEntry = memo(function FeedEntry({ event, runLink = false }: { e
     <li className="group grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 border-b border-seam px-3 py-2 text-ui transition-colors last:border-b-0 hover:bg-hover-chrome">
       <span
         role="img"
-        aria-label={actor?.display_name ?? 'system'}
-        title={actor?.display_name ?? 'system'}
+        aria-label={actorName ?? 'system'}
+        title={actorName ?? 'system'}
         className="mt-1 size-2 shrink-0 rounded-full bg-icon-faint/45"
         style={actor ? { backgroundColor: actor.color } : undefined}
       />

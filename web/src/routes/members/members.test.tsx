@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
-import type { Member } from '@/lib/types'
+import type { Member, MemberList } from '@/lib/types'
 import { CenterView } from '@/components/shell/center-view'
 import { MembersRoute } from '@/routes/members'
 import { useStore, type RootState } from '@/store'
@@ -44,7 +44,7 @@ describe('members page', () => {
   it('lists each member with role, account sharing and when they were last seen', async () => {
     const client = fakeApi({
       accountList: vi.fn(async () => ({ accounts: [alice, bob], shared_with: [] })),
-      memberList: vi.fn(async () => [alice, bob, vera]),
+      memberList: vi.fn(async () => ({ members: [alice, bob, vera] })),
     })
     seed({
       members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera },
@@ -67,7 +67,7 @@ describe('members page', () => {
   it('shows a pending member approved before the server answers, with no second Approve', async () => {
     let answer: (member: Member) => void = () => {}
     const client = fakeApi({
-      memberList: vi.fn(async () => [alice, bob, pendingCara]),
+      memberList: vi.fn(async () => ({ members: [alice, bob, pendingCara] })),
       memberApprove: vi.fn(() => new Promise<Member>((resolve) => (answer = resolve))),
     })
     seed()
@@ -85,7 +85,7 @@ describe('members page', () => {
 
   it('takes a refused approval back and renders the server refusal verbatim', async () => {
     const client = fakeApi({
-      memberList: vi.fn(async () => [alice, bob, pendingCara]),
+      memberList: vi.fn(async () => ({ members: [alice, bob, pendingCara] })),
       memberApprove: vi.fn(async () => {
         throw new ApiError(403, 'member.approve requires the admin role')
       }),
@@ -199,9 +199,9 @@ describe('members page', () => {
   })
 
   it('keeps a confirmed role when the roster read sent before it answers later', async () => {
-    let list: (members: Member[]) => void = () => {}
+    let list: (list: MemberList) => void = () => {}
     const client = fakeApi({
-      memberList: vi.fn(() => new Promise<Member[]>((resolve) => (list = resolve))),
+      memberList: vi.fn(() => new Promise<MemberList>((resolve) => (list = resolve))),
       memberRole: vi.fn(async () => ({ ...bob, role: 'admin' as const })),
     })
     seed()
@@ -209,28 +209,28 @@ describe('members page', () => {
 
     await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
     await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
-    await act(async () => list([alice, bob]))
+    await act(async () => list({ members: [alice, bob] }))
 
     expect(within(row('Bob')).getByText('Admin')).toBeDefined()
   })
 
   it('keeps a colour Profile saved while a roster read was pending', async () => {
-    let list: (members: Member[]) => void = () => {}
-    const client = fakeApi({ memberList: vi.fn(() => new Promise<Member[]>((resolve) => (list = resolve))) })
+    let list: (list: MemberList) => void = () => {}
+    const client = fakeApi({ memberList: vi.fn(() => new Promise<MemberList>((resolve) => (list = resolve))) })
     seed()
     render(<MembersRoute params={{}} client={client} />)
     await waitFor(() => expect(client.memberList).toHaveBeenCalled())
 
     const { patchMember, confirmMember } = useStore.getState()
     act(() => void confirmMember(alice.id, { color: '#3cb44b' }, patchMember(alice.id, { color: '#3cb44b' })))
-    await act(async () => list([alice, bob]))
+    await act(async () => list({ members: [alice, bob] }))
 
     expect(useStore.getState().members[alice.id].color).toBe('#3cb44b')
   })
 
   it('keeps a pending role over the roster re-read after a removal', async () => {
     const client = fakeApi({
-      memberList: vi.fn().mockResolvedValueOnce([alice, bob, vera]).mockResolvedValue([alice, bob]),
+      memberList: vi.fn().mockResolvedValueOnce({ members: [alice, bob, vera] }).mockResolvedValue({ members: [alice, bob] }),
       memberRole: vi.fn(() => new Promise<Member>(() => {})),
     })
     seed({ members: { [alice.id]: alice, [bob.id]: bob, [vera.id]: vera } })
@@ -254,16 +254,16 @@ describe('members page', () => {
 
     await pickMenu('Actions for Bob', 'Admin', 'menuitemradio')
     await waitFor(() => expect(client.memberRole).toHaveBeenCalled())
-    rerender(<MembersRoute params={{}} client={fakeApi({ memberList: vi.fn(async () => [alice, { ...bob, role: 'viewer' as const }]) })} />)
+    rerender(<MembersRoute params={{}} client={fakeApi({ memberList: vi.fn(async () => ({ members: [alice, { ...bob, role: 'viewer' as const }] })) })} />)
 
     await waitFor(() => expect(within(row('Bob')).getByText('Viewer')).toBeDefined())
   })
 
   it('takes a teammate\'s own rename from a roster read while their role change is pending, and still reverts the role', async () => {
     seed()
-    const { patchMember, readMembers, setMembers, revertMember } = useStore.getState()
+    const { patchMember, readMembers, setMemberList, revertMember } = useStore.getState()
     const patch = patchMember(bob.id, { role: 'admin' })
-    setMembers(await readMembers(Promise.resolve([alice, { ...bob, display_name: 'Robert' }])))
+    setMemberList(await readMembers(Promise.resolve({ members: [alice, { ...bob, display_name: 'Robert' }] })))
     expect(useStore.getState().members[bob.id]).toMatchObject({ role: 'admin', display_name: 'Robert' })
     revertMember(bob.id, patch)
 
@@ -352,7 +352,7 @@ describe('members page', () => {
   })
 
   it('gives a non-admin the roster as text, with no admin verbs', async () => {
-    const client = fakeApi({ memberList: vi.fn(async () => [alice, bob, vera, pendingCara]) })
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice, bob, vera, pendingCara] })) })
     // The local gateway forwards every method, so only the caller's role keeps the admin verbs off.
     seed({ info: { ...serverInfo, member: bob } })
     render(<MembersRoute params={{}} client={client} />)

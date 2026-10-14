@@ -33,6 +33,7 @@ import type {
   ServerUpdateWaiting,
   ServerUpdateWhen,
 } from '@/lib/types'
+import { memberName } from '@/lib/member-name'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -337,6 +338,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const progress = useStore((s) => s.serverUpdateProgress)
   const applyProgress = useStore((s) => s.applyServerUpdate)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const runs = useStore((s) => s.runs)
   const pausedRuns = useStore((s) => s.pausedRuns)
   const dismissed = useStore((s) => s.dismissedUpdates.server)
@@ -378,7 +380,7 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const active = activeRunCount(runs, pausedRuns)
   const waiting = waitingLine(status?.waiting)
   const scheduledBy =
-    flow.name === 'scheduled' ? (members[flow.by]?.display_name ?? flow.by) : ''
+    flow.name === 'scheduled' ? memberName({ members, mergedInto }, flow.by) : ''
 
   const NoticeIcon = flow.name === 'failed' || error ? CircleAlert : ServerCog
 
