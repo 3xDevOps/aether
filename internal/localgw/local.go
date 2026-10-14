@@ -291,6 +291,8 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 // profile: its top-level fields are the profile's overlay, not the
 // default link. A requested profile of another name is saved beside it.
 func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.Error {
+	g.local.switching.Lock()
+	defer g.local.switching.Unlock()
 	if prev := g.local.snapshot(); prev.Active != "" && !sameServer(prev, result.Config) {
 		return g.addLink(result, requested)
 	}

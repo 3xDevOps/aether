@@ -18,6 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -407,5 +408,27 @@ func TestLinkingANewServerIDAtTheSameAddressAddsALink(t *testing.T) {
 	}
 	if reloaded.Addr != "default:2222" || reloaded.ServerID != "" || len(reloaded.Links) != 2 || reloaded.Links[0] != initial.Links[0] || reloaded.Links[1].ServerID != "new" {
 		t.Fatalf("saved config = %+v, want the default and work kept and new added", reloaded)
+	}
+}
+
+func TestAdoptLinkWaitsForARunningSwitch(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "default:2222", Links: []cli.NamedLink{{Name: "work", Addr: "work:2222"}}}
+	saveConfigAt(t, saved, time.Unix(1_700_000_000, 0))
+	selected, _ := saved.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	g.local.switching.Lock()
+	done := make(chan *protocol.Error, 1)
+	go func() {
+		done <- g.adoptLink(cli.LinkResult{Config: cli.Config{Addr: "new:2222", ServerID: "ab"}}, "")
+	}()
+	select {
+	case <-done:
+		t.Fatal("adoptLink saved the config while a switch held the lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	g.local.switching.Unlock()
+	if perr := <-done; perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
 	}
 }
