@@ -399,7 +399,8 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
   const [plan, setPlan] = useState<{ code: string; plan: MergePlan } | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useActionError()
-  const [proposal, setProposal] = useState<MergeProposal | null>(null)
+  // Kept with the member it was proposed to: the code may have changed while the propose was answered.
+  const [proposal, setProposal] = useState<{ proposal: MergeProposal; minted: MergeMember } | null>(null)
 
   const preview = async () => {
     setPending(true)
@@ -415,10 +416,10 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
     }
   }
 
-  if (proposal && plan) {
+  if (proposal) {
     return (
       <div className="flex min-w-0 flex-col gap-3">
-        <Proposed proposal={proposal} minted={plan.plan.minted} />
+        <Proposed proposal={proposal.proposal} minted={proposal.minted} />
         <ProposalsReadError />
       </div>
     )
@@ -458,7 +459,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
           code={plan.code}
           plan={plan.plan}
           onProposed={(proposed) => {
-            setProposal(proposed)
+            setProposal({ proposal: proposed, minted: plan.plan.minted })
             void loadMergeProposals(useStore, client)
           }}
           onRefused={(refusal) => {
