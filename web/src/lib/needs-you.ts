@@ -229,8 +229,8 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 
 const blockedPrefix = 'blocked: '
 // Mirrors needsInputReasonPrefix in internal/scheduler/reported.go.
-const needsInputPrefix = 'needs input: '
-// Mirrors the acp*Reason constants in internal/scheduler/acp_driver.go.
+export const needsInputPrefix = 'needs input: '
+// Mirrors the acp*Reason constants in internal/scheduler/acp_turn.go.
 const enhancedFailureLabels = {
   'enhanced session failed: ': 'Enhanced could not start',
   'enhanced session ended: ': 'Agent disconnected',
@@ -249,19 +249,21 @@ function enhancedFailure(run: RunRecord): string | undefined {
 }
 
 const turnEndedPrefix = 'turn ended: '
-const stopReasons: Record<string, string> = {
+export const stopReasons: Record<string, string> = {
   max_tokens: 'the reply reached its token limit',
   max_turn_requests: 'too many model requests in one turn',
   refusal: 'the agent refused',
 }
 
-// Mirrors acpIdleReason in internal/scheduler/acp_driver.go.
+export const stoppedBecause = (stop: string) => `Stopped: ${stopReasons[stop] ?? stop}`
+
+// Mirrors acpIdleReason in internal/scheduler/acp_turn.go.
 function turnEndedReason(reason: string | undefined): string {
   if (reason === 'turn cancelled') return 'Turn cancelled'
   if (reason === 'turn interrupted') return 'Turn interrupted'
   if (reason?.startsWith(turnEndedPrefix)) {
     const stop = reason.slice(turnEndedPrefix.length)
-    return `Stopped: ${stopReasons[stop] ?? stop}`
+    return stoppedBecause(stop)
   }
   return 'Waiting for your reply'
 }

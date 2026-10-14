@@ -1965,24 +1965,25 @@ one with no tasks and `stop_reason: "interrupted"` clears them. A turn
 boundary sets `turn_in_flight` and, at `turn_end`, `background` from the held
 tasks. `backgroundWait` returns the live tasks while the stream is live,
 `background` is set, no turn is in flight, and the run is `running` or
-parked `stalled:`. A `running` run's wait adds a `live` row reading "Working
-in background: N tasks", counting held tasks.
+parked `stalled:` or `needs input:`. A `running` run's wait adds a `live`
+row reading "Working in background" when only a follow-up is owed, or
+"Working in background: N tasks" with N held tasks.
 
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
 an empty composer during a turn), **Stop waiting** (`run.acp.cancel`, an
-empty composer while `backgroundWait` holds, including a wait that stalled)
-or **Resume** (a paused run). **Stop waiting** ends the wait and parks the run `turn cancelled`; the
-agent's background tasks keep running, and a later follow-up opens a new
-autonomous turn. With text typed the pill is **Send**, which starts a turn.
-`Enter` does
-what the pill says and nothing without text or images, `Shift+Enter` adds a
-line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
-plain key, which the shortcut table stands down for inside a field, so the
-textarea answers it itself through `isPress`; the binding stays registered so
-the shortcuts reference lists it. A key still composing in an input method
+empty composer while `backgroundWait` holds, including a wait that stalled
+or shows a question) or **Resume** (a paused run). **Stop waiting** ends the
+wait and parks the run `turn cancelled`; the agent's background tasks keep
+running, and a later follow-up opens a new autonomous turn. With text typed
+the pill is **Send**, which starts a turn, so a reply to the question still
+goes out. `Enter` does what the pill says and nothing without text or
+images, `Shift+Enter` adds a line and `Mod+Shift+Enter` queues; on touch only
+the pill sends. `Enter` is a plain key, which the shortcut table stands down
+for inside a field, so the textarea answers it itself through `isPress`; the
+binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in
 `composer-images.tsx` accepts file selection and native file paste, enforces
 the eight-file limit, and uploads PNG, JPEG, GIF and WebP through

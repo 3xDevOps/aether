@@ -2,6 +2,8 @@ import {
   isPaused,
   memberName,
   needsYou,
+  stopReasons,
+  stoppedBecause,
   reportedOutcome,
   supervised,
   unreadMail,
@@ -60,9 +62,6 @@ function finishedReason(run: RunRecord): string {
 
 const turnEnds: Record<string, string> = {
   end_turn: 'The agent finished its turn',
-  max_tokens: 'The agent hit its output limit',
-  max_turn_requests: 'The agent hit its turn limit',
-  refusal: 'The agent refused to continue',
   cancelled: 'The turn was cancelled',
 }
 
@@ -90,8 +89,8 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],
   [/^turn cancelled$/, () => 'Turn cancelled'],
   [/^turn interrupted$/, () => 'Turn interrupted'],
-  [/^turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
-  [/^the agent's turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
+  [/^turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
+  [/^the agent's turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
   [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
   [/^review retained evidence$/, () => `Review ${savedResults}`],
   [/^resolve the blocker using the retained evidence$/, () => `Resolve the blocker using ${savedResults}`],

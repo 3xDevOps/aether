@@ -1,7 +1,7 @@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
-import { stalledPrefix } from '@/lib/needs-you'
+import { needsInputPrefix, stalledPrefix } from '@/lib/needs-you'
 import { plainReason } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
 import type { BackgroundTask, SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
@@ -175,13 +175,14 @@ function patchSession(s: SessionsSlice, runID: string, patch: Partial<AcpSession
 
 /**
  * The live background tasks of an Enhanced run that waits on background work with no turn running,
- * or null when it does not. A wait the run stalled in counts: Stop still ends it.
+ * or null when it does not. A wait the run stalled in or parked on a question in counts: Stop still ends it.
  */
 export function backgroundWait(run: Pick<RunRecord, 'status' | 'reason'>, session: AcpSession | undefined): BackgroundTask[] | null {
   const state = session?.stream === 'live' ? session.state : null
   if (!state?.background || state.turn_in_flight) return null
-  const stalled = run.status === 'needs-attention' && run.reason?.startsWith(stalledPrefix) === true
-  return run.status === 'running' || stalled ? state.tasks ?? [] : null
+  const parked =
+    run.status === 'needs-attention' && (run.reason?.startsWith(stalledPrefix) || run.reason?.startsWith(needsInputPrefix)) === true
+  return run.status === 'running' || parked ? state.tasks ?? [] : null
 }
 
 export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({

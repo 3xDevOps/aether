@@ -40,7 +40,7 @@ describe('enhanced sessions in the store', () => {
       return { turn_in_flight, background }
     }
 
-    const held = { id: 'bg1', type: 'local_bash', holds: true }
+    const held = { id: 'bg1', type: 'local_agent', holds: true }
     const wait = (store: ReturnType<typeof createRootStore>, over = {}) => backgroundWait(toRecord(run(over)), store.getState().acpSessions.run_1)
 
     it('follows the turn boundaries: tasks pending, an autonomous turn, a prompt turn, no tasks', () => {
@@ -103,7 +103,7 @@ describe('enhanced sessions in the store', () => {
       expect(wait(store)).toEqual([])
     })
 
-    it('waits on a running run or one stalled in the wait, not on one that asks or was cancelled', () => {
+    it('waits on a running run or one stalled or asking in the wait, not on one that was cancelled', () => {
       const store = createRootStore()
       store.getState().acpAck('run_1', ack({ state: state({ background: true, tasks: [held] }) }))
       store.getState().acpStream('run_1', 'live')
@@ -111,7 +111,7 @@ describe('enhanced sessions in the store', () => {
       expect(session.stream).toBe('live')
       expect(wait(store)).toEqual([held])
       expect(wait(store, { status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' })).toEqual([held])
-      expect(wait(store, { status: 'needs-attention', reason: 'needs input: Which port?' })).toBeNull()
+      expect(wait(store, { status: 'needs-attention', reason: 'needs input: Which port?' })).toEqual([held])
       expect(wait(store, { status: 'needs-attention', reason: 'turn cancelled' })).toBeNull()
       const running = toRecord(run())
       expect(backgroundWait(running, { ...session, stream: 'connecting' })).toBeNull()
