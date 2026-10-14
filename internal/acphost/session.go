@@ -225,10 +225,11 @@ type Session struct {
 	reported TurnState
 	idleStop string
 	holdIdle bool
-	// ended counts the turns whose end is recorded; turnEnded signals it
+	// answers counts session/prompt answers the answer barrier passed,
+	// ended the turns whose end is recorded; turnEnded signals ended
 	// changing.
-	ended     int64
-	turnEnded *sync.Cond
+	answers, ended int64
+	turnEnded      *sync.Cond
 }
 
 // Start initializes the agent over r and w, restores or creates its session
@@ -674,13 +675,13 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 func (s *Session) promptAnswered() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.answeredLocked()
+	s.answers++
+	s.awaitTurnEndsLocked(s.answers)
 }
 
-// answeredLocked waits until the end of every turn whose prompt the agent
-// answered so far is recorded.
-func (s *Session) answeredLocked() {
-	for s.ended < s.conn.answers.Load() && !s.closed {
+// awaitTurnEndsLocked waits until the ends of the first n turns are recorded.
+func (s *Session) awaitTurnEndsLocked(n int64) {
+	for s.ended < n && !s.closed {
 		s.turnEnded.Wait()
 	}
 }
@@ -889,7 +890,7 @@ func (s *Session) requestOpened(r Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Requests are not ordered with the answer barrier's notification.
-	s.answeredLocked()
+	s.awaitTurnEndsLocked(s.conn.answers.Load())
 	s.acceptedLocked()
 	s.openAutonomousLocked()
 	s.lastUpdate = time.Now()

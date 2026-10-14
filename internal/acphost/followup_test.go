@@ -345,3 +345,32 @@ func TestFollowUpTurnStartingDropsTheOwedFollowUpFromTheLog(t *testing.T) {
 		}
 	}
 }
+
+func TestQueuedPromptsAnsweredAtOnceAllRun(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	release := make(chan struct{})
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		if m.prompts() == 1 {
+			<-release
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	for i, text := range []string{"first", "a", "b", "c", "d", "e"} {
+		want := OutcomeQueued
+		if i == 0 {
+			want = OutcomeSent
+		}
+		if r, err := s.Prompt(context.Background(), textPrompt(text), false, nil); err != nil || r.Outcome != want {
+			t.Fatalf("%s: %+v %v", text, r, err)
+		}
+	}
+	close(release)
+	waitFor(t, "every queued prompt to run", func() bool {
+		st := s.State()
+		return m.prompts() == 6 && !st.TurnInFlight && st.Queued == 0
+	})
+	if reason := rec.waitIdle(t); reason != "end_turn" {
+		t.Fatalf("idle reason %q", reason)
+	}
+}
