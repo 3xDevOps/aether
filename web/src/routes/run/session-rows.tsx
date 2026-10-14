@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { Copy } from '@/components/icons'
 import { MessageRow as AgentMessage } from '@/components/messages/message-row'
-import { MessageImages } from '@/components/messages/message-images'
+import { MessageAttachments } from '@/components/messages/message-images'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -24,6 +24,8 @@ export type FlatRow =
   | { key: string; depth: 0; row: SessionRow }
   | { key: string; depth: 1; entry: WorkItem }
   | { key: string; depth: 2; entry: WorkItem }
+
+export const sessionColumn = 'mx-auto w-full max-w-[736px] px-4'
 
 const entryKey = (id: string) => `entry:${id}`
 
@@ -139,8 +141,8 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body
       return (
         <MessageRow
-          author={row.authorID ? name(row.authorID) : row.images?.length ? 'User' : name(ctx.ownerID)}
-          attachments={row.images?.length ? <MessageImages runID={ctx.runID} images={row.images} /> : undefined}
+          author={row.authorID ? name(row.authorID) : row.images?.length || row.files?.length ? 'User' : name(ctx.ownerID)}
+          attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
           meta={
             <>
               {row.delivery && (

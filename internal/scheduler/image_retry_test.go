@@ -46,7 +46,7 @@ func TestRoomImageReadFailureAllowsFreshKeyRetry(t *testing.T) {
 				Store: e.db, Runs: e.db, Workspaces: e.db, Bus: e.bus, Control: ctl,
 				Inject: e.sched.Inject, Now: func() time.Time { return now },
 				Attachments: func(ctx context.Context, _ domain.WorkspaceID, id domain.RunID, ref string) error {
-					if validationErr := e.sched.ValidateTerminalImage(ctx, id, ref); validationErr != nil {
+					if validationErr := e.sched.ValidateAttachment(ctx, id, ref); validationErr != nil {
 						return validationErr
 					}
 					admissions++

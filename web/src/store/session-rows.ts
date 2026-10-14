@@ -32,6 +32,12 @@ export interface MessageImageRef {
   index: number
 }
 
+/** Whether an attachment path is one terminal.file returned rather than a
+ * terminal.image one. */
+export function isAttachedFile(path: string): boolean {
+  return /\/\.aether\/terminal-files\/[0-9a-f]{32}\/[^/]+$/.test(path)
+}
+
 export type SessionRow =
   | {
       kind: 'user'
@@ -39,6 +45,8 @@ export type SessionRow =
       at: string
       body: string
       images?: MessageImageRef[]
+      /** Container paths of attached files that are not images. */
+      files?: string[]
       authorID?: string
       delivery?: Delivery
       deliverAfter?: string
@@ -175,7 +183,7 @@ function seconds(ms: number): string {
 
 type Slot =
   | { kind: 'row'; row: SessionRow }
-  | { kind: 'message'; id: string; role: string; first: SessionItem; text: string; images: MessageImageRef[]; complete: boolean }
+  | { kind: 'message'; id: string; role: string; first: SessionItem; text: string; images: MessageImageRef[]; files: string[]; complete: boolean }
   | { kind: 'tool'; id: string }
 
 function imageRefs(item: SessionItem): MessageImageRef[] {
@@ -194,6 +202,20 @@ function imageRefs(item: SessionItem): MessageImageRef[] {
     }
   }
   return images
+}
+
+function fileRefs(item: SessionItem): string[] {
+  const files: string[] = []
+  for (const content of item.message?.attachments ?? []) {
+    if (content.type !== 'resource_link' || !content.uri?.startsWith('file://')) continue
+    try {
+      const path = decodeURIComponent(new URL(content.uri).pathname)
+      if (isAttachedFile(path) && !files.includes(path)) files.push(path)
+    } catch {
+      // A malformed URI is not a file Aether attached.
+    }
+  }
+  return files
 }
 
 function appendImages(images: MessageImageRef[], incoming: MessageImageRef[]): void {
@@ -228,10 +250,11 @@ export function turnRows(turn: Turn): SessionRow[] {
         if (open) {
           open.text += m.text
           appendImages(open.images, imageRefs(item))
+          for (const file of fileRefs(item)) if (!open.files.includes(file)) open.files.push(file)
           open.complete ||= Boolean(m.complete)
           break
         }
-        const slot = { kind: 'message' as const, id: key, role: item.kind === 'thought' ? 'thought' : m.role, first: item, text: m.text, images: imageRefs(item), complete: Boolean(m.complete) }
+        const slot = { kind: 'message' as const, id: key, role: item.kind === 'thought' ? 'thought' : m.role, first: item, text: m.text, images: imageRefs(item), files: fileRefs(item), complete: Boolean(m.complete) }
         messages.set(key, slot)
         slots.push(slot)
         break
@@ -312,9 +335,10 @@ export function turnRows(turn: Turn): SessionRow[] {
     }
     const at = slot.first.time
     if (slot.role === 'user') {
-      if (!slot.images.length && inboxWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
-      else if (!slot.images.length && missionWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
-      else rows.push({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}) })
+      const attached = slot.images.length > 0 || slot.files.length > 0
+      if (!attached && inboxWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
+      else if (!attached && missionWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
+      else rows.push({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}), ...(slot.files.length ? { files: slot.files } : {}) })
     } else if (slot.role === 'thought') {
       rows.push({ kind: 'thinking', id: slot.id, at, text: slot.text })
     } else if (slot.text.trim()) {

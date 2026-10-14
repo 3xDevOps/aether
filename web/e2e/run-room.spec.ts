@@ -183,7 +183,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     const bobComposer = bobPage.getByRole('textbox', { name: 'Message the agent' })
     await expect(bobPage.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeVisible()
     await bobComposer.fill(deniedSteer)
-    await bobComposer.press('ControlOrMeta+Enter')
+    await bobComposer.press('Enter')
     await expect(bobComposer).toHaveValue('')
     const bobLog = bobPage.getByRole('log', { name: 'Session' })
     const deniedRow = bobLog.getByRole('article').filter({ hasText: deniedSteer })

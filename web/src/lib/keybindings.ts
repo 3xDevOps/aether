@@ -80,7 +80,7 @@ export const keybindings = [
     // A terminal keeps it: there it copies the selection.
     when: (event) => inBrowser(event) || !keyboardBusy(event),
   },
-  { id: 'composer-send', keys: '$mod+Enter', scope: 'composer', label: 'Send the message, or steer the running turn' },
+  { id: 'composer-send', keys: 'Enter', scope: 'composer', label: 'Send the message, or steer the running turn' },
   { id: 'composer-queue', keys: '$mod+Shift+Enter', scope: 'composer', label: 'Queue the message for after this turn' },
   { id: 'request-option-1', keys: '1', scope: 'request', label: 'Pick option 1 of the focused request' },
   { id: 'request-option-2', keys: '2', scope: 'request', label: 'Pick option 2 of the focused request' },

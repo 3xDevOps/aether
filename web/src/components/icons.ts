@@ -23,7 +23,6 @@ import {
   Lock as LucideLock,
   MessageSquare as LucideMessageSquare,
   PanelLeft as LucidePanelLeft,
-  Paperclip as LucidePaperclip,
   Pause as LucidePause,
   Pi as LucidePi,
   Play as LucidePlay,
@@ -164,7 +163,6 @@ export const LoaderCircle = icon(LucideLoaderCircle)
 export const Lock = icon(LucideLock)
 export const MessageSquare = icon(LucideMessageSquare)
 export const PanelLeft = icon(LucidePanelLeft)
-export const Paperclip = icon(LucidePaperclip)
 export const Pause = icon(LucidePause)
 export const Pi = icon(LucidePi)
 export const Play = icon(LucidePlay)

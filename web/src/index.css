@@ -115,9 +115,31 @@
   fill: none;
   stroke: currentColor;
   stroke-width: 1;
-  color: var(--accent-fill);
+  color: var(--control-light);
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
+}
+
+.terminal-control-border mask {
+  stroke: none;
+}
+
+.terminal-control-border .control-glow {
+  stroke-width: 40;
+  opacity: var(--control-glow);
+}
+
+.terminal-control-border .control-halo {
+  stroke-width: 6;
+}
+
+.terminal-control-border .control-rim {
+  stroke-width: 1.5;
+}
+
+.terminal-control-border .control-core {
+  stroke: color-mix(in oklab, currentColor 25%, white);
+  stroke-width: 2;
 }
 
 /* Design tokens, v2. docs/styles.md lists each role. The contrast pairs are
@@ -147,6 +169,8 @@
   --text-muted: #6b6b6b;
   --icon-faint: #8a8a8a;
   --accent-fill: #367f77;
+  --control-light: #367f77;
+  --control-glow: 0.3;
   --accent-text: #306f69;
   --on-accent: #ffffff;
   --selection: #dfebe9;
@@ -188,6 +212,8 @@
   --text-muted: #9a9a9a;
   --icon-faint: #7a7a7a;
   --accent-fill: #367f77;
+  --control-light: #4cc2b3;
+  --control-glow: 0.6;
   --accent-text: #5fb3a8;
   --on-accent: #ffffff;
   --selection: #17413d;
@@ -220,6 +246,7 @@
 @theme static {
   --radius-control: 4px;
   --radius-panel: 6px;
+  --radius-composer: 14px;
   --radius-sm: var(--radius-control);
   --radius-md: var(--radius-panel);
   --radius-lg: var(--radius-panel);

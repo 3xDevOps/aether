@@ -628,6 +628,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     terminalStatus: vi.fn(async () => ({ running: false, tabs: [] })),
     terminalHistory: vi.fn(async () => ({ lines: [], has_more: false })),
     uploadTerminalImage: vi.fn(async () => ({ path: '/home/alice/.aether/uploads/image.png' })),
+    uploadTerminalFile: vi.fn(async (file: File) => ({ path: `/home/alice/.aether/terminal-files/${'0'.repeat(32)}/${file.name}` })),
     terminalStop: vi.fn(async () => ({})),
     envSave: vi.fn(async () => ({ image: 'aether/member-1:123' })),
     envReset: vi.fn(async () => ({})),

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { File as FileIcon } from '@/components/icons'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useStore } from '@/store'
@@ -46,13 +47,19 @@ function MessageImage({ runID, messageID, index }: MessageImageRef & { runID: st
   )
 }
 
-export function MessageImages({ runID, images }: { runID: string; images: MessageImageRef[] }) {
+export function MessageAttachments({ runID, images = [], files = [] }: { runID: string; images?: MessageImageRef[]; files?: string[] }) {
   const identityKey = useStore((s) => s.identityKey)
   const cacheEpoch = useStore((s) => s.terminalCacheEpoch)
   return (
-    <div className="mt-2 flex flex-wrap gap-2" aria-label="Attached images">
+    <div className="mt-2 flex flex-wrap items-start gap-2" aria-label="Attachments">
       {images.map((image) => (
         <MessageImage key={JSON.stringify([identityKey, cacheEpoch, runID, image.messageID, image.index])} runID={runID} {...image} />
+      ))}
+      {files.map((path) => (
+        <div key={path} title={path} className="flex max-w-80 items-center gap-2 rounded-control border border-seam bg-canvas px-2 py-1">
+          <FileIcon className="shrink-0 text-muted" />
+          <span className="truncate text-ui-sm">{path.slice(path.lastIndexOf('/') + 1)}</span>
+        </div>
       ))}
     </div>
   )

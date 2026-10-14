@@ -1269,6 +1269,7 @@ func TestOptionsModesAndAuth(t *testing.T) {
 		_ = m.conn.SendNotification(context.Background(), "_auth/status_update", map[string]any{"authStatus": map[string]any{"kind": "api_key", "label": "Anthropic API key"}})
 		_ = m.conn.SendNotification(context.Background(), "_vendor/whatever", map[string]any{})
 		m.update(map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "plan"})
+		m.update(map[string]any{"sessionUpdate": "usage_update", "used": 53000, "size": 200000})
 		return map[string]any{"stopReason": "end_turn"}, nil
 	}
 	s, rec := startMock(t, m, Config{})
@@ -1290,7 +1291,8 @@ func TestOptionsModesAndAuth(t *testing.T) {
 	}
 	rec.waitIdle(t)
 	st := s.State()
-	if st.Mode != "plan" || !strings.Contains(string(st.ConfigOptions), `"currentValue":"plan"`) || !strings.Contains(string(st.Auth), "Anthropic API key") {
+	if st.Mode != "plan" || !strings.Contains(string(st.ConfigOptions), `"currentValue":"plan"`) || !strings.Contains(string(st.Auth), "Anthropic API key") ||
+		st.Usage == nil || st.Usage.Used != 53000 || st.Usage.Size != 200000 {
 		t.Fatalf("state %+v", st)
 	}
 }

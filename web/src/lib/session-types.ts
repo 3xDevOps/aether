@@ -75,6 +75,14 @@ export interface SessionRequest {
   answer?: string
 }
 
+/** Context window tokens the agent last reported. */
+export interface SessionUsage {
+  used: number
+  size: number
+  cost?: number
+  currency?: string
+}
+
 export interface SessionItem {
   seq: number
   epoch: number
@@ -90,7 +98,7 @@ export interface SessionItem {
   mode?: string
   config_options?: ConfigOption[]
   commands?: SessionCommand[]
-  usage?: { used: number; size: number; cost?: number; currency?: string }
+  usage?: SessionUsage
   auth?: AuthStatusUpdate
   title?: string
   notice?: { severity: string; title: string; description?: string }
@@ -127,6 +135,7 @@ export interface SessionState {
   steering?: boolean
   prompt_images: boolean
   auth_methods?: AuthMethod[]
+  usage?: SessionUsage
 }
 
 export interface ConfigOption {

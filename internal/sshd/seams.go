@@ -136,6 +136,9 @@ type RunController interface {
 	// SaveTerminalImage writes validated image bytes to the target account's
 	// persistent home and returns its absolute container-visible path.
 	SaveTerminalImage(ctx context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error)
+	// SaveTerminalFile is SaveTerminalImage for any file, kept under its
+	// sanitised original name.
+	SaveTerminalFile(ctx context.Context, actor domain.MemberID, run domain.RunID, name string, data []byte) (string, error)
 	// ConnectGitHub finishes the GitHub login the member started with gh
 	// auth login in their environment terminal.
 	ConnectGitHub(ctx context.Context, member domain.MemberID) (domain.GitHubConnection, error)

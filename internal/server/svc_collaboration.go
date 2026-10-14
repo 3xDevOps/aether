@@ -16,7 +16,7 @@ func init() {
 		}
 		var attachmentValidator collab.AttachmentValidator
 		if d.Runs != nil {
-			attachmentValidator = terminalImageReferenceValidator(d.Runs)
+			attachmentValidator = attachmentReferenceValidator(d.Runs)
 		}
 		svc, err := collab.New(collab.Config{
 			Store:      d.Store,
@@ -46,16 +46,16 @@ func init() {
 	})
 }
 
-// terminalImageReferenceValidator holds attachment references to the
+// attachmentReferenceValidator holds attachment references to the
 // scheduler's server-generated path contract; the room never reads one as
 // a host path.
-func terminalImageReferenceValidator(r interface {
-	ValidateTerminalImage(context.Context, domain.RunID, string) error
+func attachmentReferenceValidator(r interface {
+	ValidateAttachment(context.Context, domain.RunID, string) error
 }) collab.AttachmentValidator {
 	return func(ctx context.Context, _ domain.WorkspaceID, run domain.RunID, reference string) error {
 		if r == nil {
-			return fmt.Errorf("terminal image validator is unavailable")
+			return fmt.Errorf("attachment validator is unavailable")
 		}
-		return r.ValidateTerminalImage(ctx, run, reference)
+		return r.ValidateAttachment(ctx, run, reference)
 	}
 }

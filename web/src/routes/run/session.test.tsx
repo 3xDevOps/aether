@@ -302,6 +302,18 @@ describe('the Enhanced session view', () => {
     expect(within(log).getAllByText('Sent')).toHaveLength(1)
   })
 
+  it('shows a prompt with an attached file once, with the file under it', async () => {
+    const file = `/home/alice/.aether/terminal-files/${'a'.repeat(32)}/notes.md`
+    const prompt = item('message', 1, { message: { role: 'user', message_id: 'u', text: 'read the notes', complete: true, attachments: [{ type: 'resource_link', uri: `file://${file}` }] } })
+    open()
+    acpSocket().open({}, [item('turn_start', 1), prompt])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    act(() => useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_file', kind: 'steer_request', body: 'read the notes', attachments: [file], agent_delivery: 'delivered', created_at: prompt.time })))
+    expect(await within(log).findByText('Sent')).toBeDefined()
+    expect(within(log).getAllByText('read the notes')).toHaveLength(1)
+    expect(within(log).getByTitle(file).textContent).toBe('notes.md')
+  })
+
   it('shows a repeated prompt once while its earlier copies are not loaded', async () => {
     const [gone, reply, prompt] = [item('turn_start', 1), say(1, 'assistant', 'Rounded.'), say(1, 'user', 'continue')]
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)
@@ -362,14 +374,17 @@ describe('the Enhanced session view', () => {
   it('steers a running turn, and interrupts it when the box is empty', async () => {
     vi.mocked(api.runInject).mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'sent', actor_id: alice.id, body: 'also docs', created_at: new Date().toISOString() } } as never)
     open()
-    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, steering: true }) }, [item('turn_start', 1)])
+    const session = acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, steering: true, usage: { used: 86000, size: 200000 } }) }, [item('turn_start', 1)])
     const box = await screen.findByRole('combobox', { name: 'Message the agent' })
+    expect(screen.getByRole('meter', { name: 'Context window used' }).textContent).toBe('43%')
+    session.items(item('usage', 1, { usage: { used: 190000, size: 200000 } }))
+    await waitFor(() => expect(screen.getByRole('meter', { name: 'Context window used' }).textContent).toBe('95%'))
     expect(screen.getByRole('button', { name: 'Interrupt the agent' })).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
     expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
     await userEvent.type(box, 'also docs')
     expect(screen.getByText('Added to the current turn.')).toBeDefined()
-    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(api.runInject).toHaveBeenCalledWith('run_1', 'also docs', expect.any(String), expect.objectContaining({ steer: true, lease: expect.objectContaining({ control_generation: 4 }) })))
   })
 
@@ -398,7 +413,7 @@ describe('the Enhanced session view', () => {
     await userEvent.type(box, 'add tests')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      fireEvent.keyDown(box, { key: 'Enter' })
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     } finally {
@@ -410,12 +425,12 @@ describe('the Enhanced session view', () => {
     expect(box).toHaveProperty('value', 'add tests')
   })
 
-  it('does nothing on Mod+Enter with an empty box, and keeps Interrupt while a request waits', async () => {
+  it('does nothing on Enter with an empty box, and keeps Interrupt while a request waits', async () => {
     open()
     const session = acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, steering: true }) }, [item('turn_start', 1)])
     vi.mocked(api.runACPCancel).mockClear()
     const box = await screen.findByRole('combobox', { name: 'Message the agent' })
-    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(box, { key: 'Enter' })
     expect(api.runACPCancel).not.toHaveBeenCalled()
     session.items(item('request', 1, { request: permission }))
     act(() => useStore.getState().acpAck('run_1', { ok: true, seq: 100, replay: 0, epoch: 0, live: true, has_control: true, state: state({ turn_in_flight: true, pending: [permission] }) }))
@@ -510,8 +525,8 @@ describe('the Enhanced composer draft', () => {
     let uploaded = (_: { path: string }) => {}
     vi.mocked(api.uploadTerminalImage).mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
     const view = openBesideAnotherRun()
-    await userEvent.type(await box(), 'Round the totals{Enter}  then update the docs')
-    await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
+    await userEvent.type(await box(), 'Round the totals{Shift>}{Enter}{/Shift}  then update the docs')
+    await userEvent.upload(screen.getByLabelText('Choose files to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
 
     show('run_2')
     expect(await box()).toHaveProperty('value', '')
@@ -534,8 +549,8 @@ describe('the Enhanced composer draft', () => {
     expect(await box()).toHaveProperty('value', prompt)
 
     const tooMany = Array.from({ length: 8 }, (_, index) => new File(['png'], `extra-${index}.png`, { type: 'image/png' }))
-    await userEvent.upload(screen.getByLabelText('Choose images to attach'), tooMany)
-    expect(screen.getByText('Attach at most 8 images.')).toBeDefined()
+    await userEvent.upload(screen.getByLabelText('Choose files to attach'), tooMany)
+    expect(screen.getByText('Attach at most 8 files.')).toBeDefined()
     vi.mocked(api.runInject).mockResolvedValueOnce(sent)
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Message the agent' })).toHaveProperty('value', ''))
@@ -562,8 +577,8 @@ describe('the Enhanced composer draft', () => {
     const waiting = await box()
     expect(waiting).toMatchObject({ value: 'Round the totals', readOnly: true })
     expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
-    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
-    fireEvent.keyDown(waiting, { key: 'Enter', ctrlKey: true })
+    expect(screen.getByLabelText('Choose files to attach')).toHaveProperty('disabled', true)
+    fireEvent.keyDown(waiting, { key: 'Enter' })
     act(() => settle.resolve(sent))
     await waitFor(() => expect(waiting).toMatchObject({ value: '', readOnly: false }))
     expect(api.runInject).toHaveBeenCalledTimes(1)
@@ -583,13 +598,13 @@ describe('the Enhanced composer draft', () => {
     vi.mocked(api.uploadTerminalImage).mockReset().mockReturnValueOnce(new Promise((resolve) => { uploaded = resolve }))
     openBesideAnotherRun()
     await userEvent.type(await box(), 'Round the totals')
-    await userEvent.upload(screen.getByLabelText('Choose images to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
+    await userEvent.upload(screen.getByLabelText('Choose files to attach'), new File(['png'], 'totals.png', { type: 'image/png' }))
     show('run_2')
     show('run_1')
     await box()
     expect(screen.getByText('Uploading…')).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Retry image upload' })).toBeNull()
-    expect(screen.getByLabelText('Choose images to attach')).toHaveProperty('disabled', true)
+    expect(screen.queryByRole('button', { name: 'Retry upload' })).toBeNull()
+    expect(screen.getByLabelText('Choose files to attach')).toHaveProperty('disabled', true)
     act(() => uploaded({ path: '/home/alice/totals.png' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
     expect(api.uploadTerminalImage).toHaveBeenCalledTimes(1)
@@ -603,6 +618,20 @@ describe('the Enhanced composer draft', () => {
     const [first, resent] = vi.mocked(api.runInject).mock.calls
     expect(first![3]).toMatchObject({ attachments: ['/home/alice/totals.png'] })
     expect(resent).toEqual(first)
+  })
+
+  it('uploads a file that is not an image as a file and sends its path', async () => {
+    open()
+    acpSocket().open(lease)
+    await userEvent.type(await box(), 'Read the notes')
+    await userEvent.upload(screen.getByLabelText('Choose files to attach'), new File(['notes'], 'notes.txt', { type: 'text/plain' }))
+    expect(await screen.findByRole('button', { name: 'Remove attached file 1: notes.txt' })).toBeDefined()
+    expect(screen.getByText('5 B')).toBeDefined()
+    expect(api.uploadTerminalFile).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'notes.txt' }), 'run_1')
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(api.runInject).toHaveBeenLastCalledWith('run_1', 'Read the notes', expect.any(String), expect.objectContaining({
+      attachments: [`/home/alice/.aether/terminal-files/${'0'.repeat(32)}/notes.txt`],
+    })))
   })
 
   it('offers a restored partial command its suggestions again, and follows the selection', async () => {

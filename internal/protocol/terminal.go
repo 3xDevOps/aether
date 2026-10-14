@@ -39,9 +39,17 @@ type TerminalImageParams struct {
 	Content string `json:"content"`
 }
 
-// TerminalImageResult is the absolute path to the uploaded image inside the
-// target container.
-type TerminalImageResult struct {
+// TerminalFileParams carries one file's original name and base64-encoded
+// bytes; RunID selects the target as in TerminalImageParams.
+type TerminalFileParams struct {
+	RunID   string `json:"run_id,omitempty"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
+// TerminalUploadResult is the absolute path to the uploaded image or file
+// inside the target container.
+type TerminalUploadResult struct {
 	Path string `json:"path"`
 }
 

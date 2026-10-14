@@ -96,6 +96,7 @@ type State struct {
 	Steering      bool            `json:"steering,omitempty"`
 	PromptImages  bool            `json:"prompt_images"`
 	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
+	Usage         *Usage          `json:"usage,omitempty"`
 }
 
 // promptAcceptGrace is how long a prompt that starts a turn waits for the
@@ -795,6 +796,8 @@ func (s *Session) emitLocked(it Item) {
 		s.state.Commands = it.Commands
 	case KindAuthStatus:
 		s.state.Auth = it.Auth
+	case KindUsage:
+		s.state.Usage = it.Usage
 	case KindSessionInfo:
 		if s.cfg.OnTitle != nil {
 			s.callback(func() { s.cfg.OnTitle(it.Title) })

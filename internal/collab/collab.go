@@ -27,8 +27,8 @@ const (
 	SteeringDelay = 45 * time.Second
 	// DefaultBodyLimit bounds one room message body in bytes.
 	DefaultBodyLimit = 64 << 10
-	// DefaultAttachmentLimit bounds the number of image references on a
-	// message. Individual reference limits are enforced as well.
+	// DefaultAttachmentLimit bounds the number of attachment references on
+	// a message. Individual reference limits are enforced as well.
 	DefaultAttachmentLimit  = 8
 	DefaultAttachmentBytes  = 512
 	DefaultIdempotencyBytes = 256
@@ -64,10 +64,10 @@ const (
 // "queued" outcome as acphost.Session.Prompt says.
 type Injector func(ctx context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error)
 
-// AttachmentValidator accepts only an opaque reference to an image already
-// known to the image service. A validator is required whenever attachments
-// are supplied; the room service never interprets a reference as a filesystem
-// path.
+// AttachmentValidator accepts only an opaque reference to an image or file
+// already known to the upload service. A validator is required whenever
+// attachments are supplied; the room service never interprets a reference as
+// a filesystem path.
 type AttachmentValidator func(context.Context, domain.WorkspaceID, domain.RunID, string) error
 
 // AnchorValidator performs any repository/transcript existence check for an

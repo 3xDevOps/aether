@@ -160,11 +160,11 @@ request an occupied run; the holder has seven seconds to accept or deny
 before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
 
-In Session, the same animated teal control border as a Standard terminal
-surrounds the conversation and composer, not the toolbar or Details.
-**Release** retracts it; an incoming hold traces it red, and a takeover
-retracts the red border. Read-only tabs and disconnected sessions have no
-border. Reduced motion makes ownership changes instant and the takeover
+In Session, the same animated teal control light as a Standard terminal
+glows along the edges of the conversation and composer, not the toolbar or
+Details. **Release** retracts it; an incoming hold traces it red, and a
+takeover retracts the red light. Read-only tabs and disconnected sessions
+have no light. Reduced motion makes ownership changes instant and the takeover
 indicator static.
 
 ![Controller and watcher identities in the Enhanced run top bar](media/enhanced-multiplayer-controls.webp)
@@ -174,9 +174,9 @@ indicator static.
 These captures use fixture members and simulated server messages with the
 dashboard components, not live agents.
 
-The composer under the timeline sends with `Mod+Enter`; on a touch screen the
-button is the only way, and Enter adds a line. With control, its button
-changes with the turn:
+The composer under the timeline sends with `Enter`, and `Shift+Enter` adds a
+line; on a touch screen the button is the only way, and Enter adds a line.
+With control, its button changes with the turn:
 
 | Button | When | What the message does |
 | --- | --- | --- |
@@ -186,13 +186,17 @@ changes with the turn:
 | **Interrupt** | a turn runs and the box is empty | `run.acp.cancel`: stops the turn and cancels its requests |
 | **Resume** | the run is paused | resumes it |
 
-`Mod+Enter` does what the button says, and nothing without text or attached
+`Enter` does what the button says, and nothing without text or attached
 images, so it never interrupts; `Mod+Shift+Enter` always queues.
 
-An unsent message stays with its run: its text and attached images are still
+When the agent reports its context window use, the composer's footer shows it
+beside the model and effort pickers, for example **43%**; its tooltip gives
+the token counts. It turns amber from 90%.
+
+An unsent message stays with its run: its text and attached files are still
 in the composer after you open another run or page, switch the run between
-Standard and Enhanced, or reconnect. Sending it clears it. A send or image
-upload still running when you return keeps the composer locked, on
+Standard and Enhanced, or reconnect. Sending it clears it. A send or upload
+still running when you return keeps the composer locked, on
 **Sending…** or **Uploading…**, until it settles; one that fails shows its
 error there. Reloading the page discards every unsent message.
 
@@ -202,27 +206,34 @@ sooner in **Details > Needs you**; the message row shows the countdown and
 delivery result. This does not take the controller's lease. Model and mode
 menus stay disabled, and **Steer** and **Interrupt** are not offered.
 
-**Attach an image** selects PNG, JPEG, GIF or WebP files; pasting actual image
-data embeds it in the composer too. Thumbnails appear above the text, with a
-remove button for each image. A paste containing text and an image also inserts
-the text at the current selection. Attach at most eight images, each at most
-8 MiB. **Retry image upload** retries an incomplete upload without discarding
-the other images; sending stays disabled until all selected images are ready.
+**Attach files** selects any files; pasting files or image data adds them to
+the composer too. PNG, JPEG, GIF and WebP images show a thumbnail above the
+text; any other file shows its name and size. Each has a remove button. A
+paste containing text and a file also inserts the text at the current
+selection. Attach at most eight files: an image of at most 8 MiB, any other
+file of at most 64 MiB. **Retry upload** retries an incomplete upload without
+discarding the other files; sending stays disabled until all selected files
+are ready.
 
-Uploads use `terminal.image` and store files in the run's persistent member
-home, not its checkout. **Send**, **Steer** or **Queue** sends the image bytes
-as ACP image content alongside the text, not as filenames in the prompt.
-Uploading alone sends nothing to the agent. Images can be sent without text.
-The image control is disabled when the agent does not advertise image support.
+Images upload with `terminal.image` and other files with `terminal.file`;
+both are stored in the run's persistent member home, not its checkout.
+**Send**, **Steer** or **Queue** sends each image's bytes as ACP image content
+alongside the text, and each other file as an ACP `resource_link` to its path
+in the run's container, which the agent reads itself. Uploading alone sends
+nothing to the agent. Attachments can be sent without text. When the agent
+does not advertise image support, a message with an image is not sent until
+you remove the image; other files go to every agent.
 Standard runs keep their existing file-reference delivery to the terminal.
 
 Sent images remain visible in the conversation after reconnecting or opening
-history. Viewing them requires **View** on the run; a completed run's images
-remain readable while its message and member-home file are retained. Removing
-a draft thumbnail does not delete the stored file. Failed uploads show the
-server error, and failed sends keep the text and image previews for retry.
-An image-read failure before delivery is **Not sent**, not **Delivery uncertain**.
-After restoring or reattaching the image, retrying can submit a new request.
+history; other files show their name, with their path on hover. Viewing images
+requires **View** on the run; a completed run's images remain readable while
+its message and member-home file are retained. Removing a draft attachment
+does not delete the stored file. Failed uploads show the server error, and
+failed sends keep the text and attachment previews for retry. A failure to
+read an attached image or file before delivery is **Not sent**, not
+**Delivery uncertain**. After restoring or reattaching the file, retrying can
+submit a new request.
 
 The menus under the box set the agent's mode, model and effort
 (`run.acp.set_option`). The model picker searches names, IDs, descriptions and

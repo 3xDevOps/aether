@@ -75,6 +75,9 @@ const (
 	// returns the absolute path visible inside its container. An empty run
 	// ID targets the caller's environment terminal.
 	MethodTerminalImage = "terminal.image"
+	// MethodTerminalFile is terminal.image for any file: it keeps the
+	// sanitised original name in a generated directory.
+	MethodTerminalFile = "terminal.file"
 	// MethodEnvSave snapshots the caller's running environment terminal.
 	MethodEnvSave = "env.save"
 	// MethodEnvReset stops the caller's environment terminal and returns it to the standard image.
