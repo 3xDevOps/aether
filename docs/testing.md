@@ -701,7 +701,11 @@ amount of internal testing sees it coming.
 `TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
 headless template with no credentials at all and requires the run to fail
 for want of a login, never for want of a parseable command line - reaching
-the provider is proof the CLI accepted the flags. The `smoke` job builds
+the provider is proof the CLI accepted the flags. opencode needs no login,
+so its proof is the `> build` session header it prints before its first
+call to its free hosted model. The test destroys each container as soon as
+the proof appears, so no result depends on a model answering. On failure
+it prints the output captured so far. The `smoke` job builds
 `images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top of it to
 add the agent CLIs at whatever version their vendors ship that day, and
 points the gate variables at the result.
