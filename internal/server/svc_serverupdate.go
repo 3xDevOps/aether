@@ -25,6 +25,14 @@ func init() {
 			Host:       d.Config.SelfUpdate.Host,
 			Executable: d.Config.SelfUpdate.Executable,
 			Now:        d.Config.SelfUpdate.Now,
+			Hold: func() string {
+				// The sysbox service is built after this one, so it is read
+				// at call time.
+				if m, ok := d.SSH.Services.Sysbox.(interface{ Installing() bool }); ok && m.Installing() {
+					return "Sysbox is installing; update again when it finishes"
+				}
+				return ""
+			},
 		})
 		if err != nil {
 			// Self-update is a convenience; refusing to boot over it would

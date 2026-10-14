@@ -74,6 +74,24 @@ describe('Docker inside runs row', () => {
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
+  test('off with a reason shows it verbatim', async () => {
+    seed()
+    render(<ServerSection client={client([{ state: 'off', reason: 'Docker is not running' }])} />)
+    await settle()
+    expect(screen.getByText('Docker is not running')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Install' })).toBeTruthy()
+  })
+
+  test('the not-root reason hides Install and offers the command', async () => {
+    seed()
+    const reason = 'aether-server is not root; run: sudo aether-server sysbox install'
+    render(<ServerSection client={client([{ state: 'off', reason }])} />)
+    await settle()
+    expect(screen.getByText(reason)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy sudo aether-server sysbox install' })).toBeTruthy()
+  })
+
   test('install, poll, then on announces the change', async () => {
     seed()
     const api = client([{ state: 'off' }, { state: 'installing' }, { state: 'installing' }, { state: 'on' }])
@@ -142,6 +160,27 @@ describe('Docker nudge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     await settle()
     expect(api.sysboxInstall).toHaveBeenCalledTimes(1)
+  })
+
+  test('shows unsupported after an install from off, then Dismiss', async () => {
+    seed()
+    const api = client([{ state: 'off' }, { state: 'unsupported', reason: 'cannot query Docker' }], { state: 'unsupported', reason: 'cannot query Docker' })
+    render(<SysboxNudge client={api} />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+    await settle()
+    expect(screen.getByText('cannot query Docker')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText('cannot query Docker')).toBeNull()
+  })
+
+  test('shows the off reason and the not-root command', async () => {
+    seed()
+    render(<SysboxNudge client={client([{ state: 'off', reason: 'run: sudo aether-server sysbox install' }])} />)
+    await settle()
+    expect(screen.getByText('run: sudo aether-server sysbox install')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy sudo aether-server sysbox install' })).toBeTruthy()
   })
 
   test('stays hidden when on, unsupported, for non-admins and older servers', async () => {

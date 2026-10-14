@@ -42,7 +42,7 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	restart, err := s.apply(ctx, *state.Pending)
 	if err != nil {
-		if !errors.Is(err, ErrBusy) {
+		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) {
 			slog.Error("serverupdate: scheduled update failed", "version", state.Pending.Version, "error", err)
 		}
 		return
@@ -80,6 +80,11 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate) 
 	// replaces a binary on a server that cannot restart onto it.
 	if reason := s.incapableReason(); reason != "" {
 		return nil, fmt.Errorf("%w: %s", ErrIncapable, reason)
+	}
+	if s.cfg.Hold != nil {
+		if reason := s.cfg.Hold(); reason != "" {
+			return nil, fmt.Errorf("%w: %s", ErrHeld, reason)
+		}
 	}
 	if !s.claim() {
 		return nil, ErrBusy

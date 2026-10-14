@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -52,6 +53,25 @@ func Install(ctx context.Context, out io.Writer) error {
 	return runScript(ctx, scripts.InstallSysbox, out)
 }
 
+// waitDelay bounds how long Run waits for output after the process is gone.
+const waitDelay = 10 * time.Second
+
+// unitName is the transient systemd unit the installer runs in. A fixed name
+// keeps a second install from starting beside a running one.
+const unitName = "aether-sysbox-install"
+
+// systemdRun is the systemd-run path, or empty when this host does not run
+// systemd. Tests clear it.
+var systemdRun = findSystemdRun()
+
+func findSystemdRun() string {
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return ""
+	}
+	path, _ := exec.LookPath("systemd-run")
+	return path
+}
+
 func runScript(ctx context.Context, script string, out io.Writer) error {
 	// A file, not stdin: apt-get and docker read stdin and would swallow
 	// the rest of the script.
@@ -67,10 +87,14 @@ func runScript(ctx context.Context, script string, out io.Writer) error {
 		return fmt.Errorf("sysbox: write installer: %w", err)
 	}
 	last := &lastLine{}
-	cmd := exec.CommandContext(ctx, "/bin/sh", f.Name())
-	cmd.Stdout = io.MultiWriter(out, last)
-	cmd.Stderr = cmd.Stdout
-	err = cmd.Run()
+	w := io.MultiWriter(out, last)
+	if systemdRun != "" {
+		err = runInUnit(ctx, f.Name(), w)
+	} else {
+		cmd := exec.CommandContext(ctx, "/bin/sh", f.Name())
+		cmd.Stdout, cmd.Stderr, cmd.WaitDelay = w, w, waitDelay
+		err = cmd.Run()
+	}
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -82,6 +106,47 @@ func runScript(ctx context.Context, script string, out io.Writer) error {
 		return fmt.Errorf("sysbox: install: %w: %s", err, msg)
 	}
 	return fmt.Errorf("sysbox: install: %w", err)
+}
+
+// runInUnit runs the script in its own systemd unit, outside aether-server's
+// cgroup, so restarting the server does not SIGTERM apt and dpkg mid-install.
+// The unit writes to a file that is followed here, not to a pipe: once the
+// server is gone a pipe would hand the script SIGPIPE and kill it anyway.
+// systemd-run --wait exits with the unit's status.
+func runInUnit(ctx context.Context, script string, out io.Writer) error {
+	logFile, err := os.CreateTemp("", "install-sysbox-*.log")
+	if err != nil {
+		return fmt.Errorf("sysbox: create installer log: %w", err)
+	}
+	defer func() { _ = os.Remove(logFile.Name()) }()
+	defer func() { _ = logFile.Close() }()
+	cmd := exec.CommandContext(ctx, systemdRun, "--unit="+unitName, "--collect", "--wait", "--quiet",
+		"-p", "StandardOutput=append:"+logFile.Name(), "-p", "StandardError=append:"+logFile.Name(),
+		"/bin/sh", script)
+	cmd.Stdout, cmd.Stderr, cmd.WaitDelay = out, out, waitDelay
+	done := make(chan struct{})
+	followed := make(chan struct{})
+	go func() {
+		defer close(followed)
+		follow(logFile, out, done)
+	}()
+	err = cmd.Run()
+	close(done)
+	<-followed
+	return err
+}
+
+// follow copies a growing file to out until done closes, then once more.
+func follow(f *os.File, out io.Writer, done <-chan struct{}) {
+	for {
+		_, _ = io.Copy(out, f)
+		select {
+		case <-done:
+			_, _ = io.Copy(out, f)
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // lastLine keeps the last non-empty line written to it, minus the script's

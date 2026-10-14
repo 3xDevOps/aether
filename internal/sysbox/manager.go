@@ -67,22 +67,33 @@ func (m *Manager) Status(ctx context.Context) protocol.SysboxStatus {
 	return m.statusLocked(ctx)
 }
 
+// statusLocked ranks what it knows: an install in progress, then Docker
+// listing sysbox-runc, then how the last install ended, and only then a
+// plain off. An error from Docker must not hide the last install's outcome.
 func (m *Manager) statusLocked(ctx context.Context) protocol.SysboxStatus {
 	if m.state == protocol.SysboxInstalling {
 		return m.snapshot()
 	}
 	state, err := m.status(ctx)
 	switch {
-	case err != nil:
-		return protocol.SysboxStatus{State: protocol.SysboxOff, Reason: err.Error(), Log: m.log.String()}
-	case state == protocol.SysboxOn:
+	case err == nil && state == protocol.SysboxOn:
 		return protocol.SysboxStatus{State: protocol.SysboxOn, Log: m.log.String()}
 	case m.state == protocol.SysboxUnsupported || m.state == protocol.SysboxFailed:
 		return m.snapshot()
+	case err != nil:
+		return protocol.SysboxStatus{State: protocol.SysboxOff, Reason: err.Error(), Log: m.log.String()}
 	case !m.root():
 		return protocol.SysboxStatus{State: protocol.SysboxOff, Reason: notRoot}
 	}
 	return protocol.SysboxStatus{State: protocol.SysboxOff}
+}
+
+// Installing reports whether an install is running, which holds back a
+// server self-update: a restart would cut it off.
+func (m *Manager) Installing() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.state == protocol.SysboxInstalling
 }
 
 func (m *Manager) snapshot() protocol.SysboxStatus {

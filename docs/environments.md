@@ -294,6 +294,9 @@ sudo aether-server sysbox install
 aether-server sysbox status     # prints on or off
 ```
 
+`sysbox status` asks Docker, so run it as a user that can reach the Docker
+socket, or with `sudo`.
+
 The host must be Ubuntu or Debian on amd64 or arm64, run Docker, and have
 Linux 5.19 or newer or a kernel with the `shiftfs` module. On any other host
 the install stops with `Docker inside runs is unavailable on this host:
@@ -305,17 +308,24 @@ verifies its pinned SHA-256, installs the package and checks that
 `docker info` lists `sysbox-runc`. It exits 0 without changes when that
 version is already installed, 3 when the host cannot run Sysbox, and 1 on any
 other failure. Its output is shown as it runs; the dashboard keeps the last
-8 KiB.
+8 KiB. When the dashboard starts the install, the server runs it in a
+transient systemd unit, `aether-sysbox-install`, so restarting the server
+does not interrupt apt; a server update waits until it finishes. If an
+install is cut off anyway, running it again finishes the interrupted dpkg
+step first. The script needs `curl`, downloads and verifies the package
+before it edits `/etc/docker/daemon.json`, and waits up to 5 minutes for
+the apt lock.
 
 Sysbox's installer refuses to run while any container exists, stopped ones
 included, if it must restart Docker, and it must when `/etc/docker/daemon.json`
 lacks `bip` or `default-address-pools`. The script therefore adds a missing
 or empty key itself, keeping the other keys and never changing one that is
-set. It picks the first free /16 from `172.24.0.0` to `172.31.0.0`, then
-`10.200.0.0` to `10.254.0.0`, then `192.168.0.0`: `bip` takes the first as
+set. It picks the first free /16 from `10.200.0.0` to `10.254.0.0`, then
+`172.24.0.0` to `172.31.0.0`, then `192.168.0.0`: `bip` takes the first as
 `x.y.0.1/16`, and `default-address-pools` takes the next with size 24. A /16
 is free when it overlaps no IPv4 route, interface address or Docker network
-subnet on the host. The script prints each value it writes, and creates the
+subnet on the host. The 10.200 range comes first because 172.24 to 172.31 is
+still inside Docker's default pools until Docker restarts. The script prints each value it writes, and creates the
 file as `{}` if it is missing. If no free /16 is left it stops without
 changing the file; set the key to a free range yourself and run it again.
 The script does not restart Docker and running containers keep running;

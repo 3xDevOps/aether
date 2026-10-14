@@ -4642,8 +4642,13 @@ before any), **Saved servers** (the default link, then named ones) with
   region, because an existing Environment keeps its old container. On the
   board, an admin whose server reports `off` sees a neutral callout, `Let
   agents use Docker in their runs`, with **Install** and **Dismiss**
-  (`src/components/sysbox-nudge.tsx`); dismissal is persisted as
-  `sysboxNudgeDismissed`. Non-admins and older servers see neither.
+  (`src/components/sysbox-nudge.tsx`). It stays through `installing` and
+  `failed`, and shows `unsupported` (with the reason) only after an install
+  the admin started from it; it never shows for a plain `on` or
+  `unsupported`. Dismissal is persisted as `sysboxNudgeDismissed`.
+  Non-admins and older servers see neither. An `off` reason is shown
+  verbatim; the not-root reason, which contains `sudo aether-server sysbox
+  install`, hides **Install** and offers that command with a copy button.
 - **Remote access**, when the server answers `server.edge` (the `edge`
   store slice, read at hydration): the **Edge** URL or `off`, the copyable
   **Server id**, the **Access policy**, the **Owner** (`<login> (github)`

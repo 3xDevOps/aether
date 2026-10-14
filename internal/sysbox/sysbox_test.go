@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +13,38 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
+
+func TestMain(m *testing.M) {
+	systemdRun = ""
+	os.Exit(m.Run())
+}
+
+// The fake systemd-run honors the two properties runInUnit sets and runs the
+// script as the unit would: output appended to the log, status returned.
+func TestRunScriptInUnit(t *testing.T) {
+	fake := filepath.Join(t.TempDir(), "systemd-run")
+	args := filepath.Join(t.TempDir(), "args")
+	body := "#!/bin/sh\necho \"$*\" >" + args + "\nlog=\nwhile [ $# -gt 0 ]; do case \"$1\" in StandardOutput=append:*) log=${1#*:} ;; /bin/sh) shift; exec /bin/sh \"$@\" >>\"$log\" 2>&1 ;; esac; shift; done\n"
+	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	systemdRun = fake
+	t.Cleanup(func() { systemdRun = "" })
+
+	var out bytes.Buffer
+	var unsupported *UnsupportedError
+	err := runScript(t.Context(), "echo installing\necho 'install-sysbox: kernel too old' >&2\nexit 3\n", &out)
+	if !errors.As(err, &unsupported) || unsupported.Reason != "kernel too old" || !strings.Contains(out.String(), "installing") {
+		t.Fatalf("exit 3 = %v with output %q, want an UnsupportedError and the streamed output", err, out.String())
+	}
+	got, _ := os.ReadFile(args)
+	if !strings.Contains(string(got), "--unit=aether-sysbox-install --collect --wait --quiet") {
+		t.Errorf("systemd-run args = %q", got)
+	}
+	if err := runScript(t.Context(), "exit 1\n", &out); err == nil || errors.As(err, &unsupported) {
+		t.Fatalf("exit 1 = %v, want a plain failure", err)
+	}
+}
 
 func TestRunScriptExitCodes(t *testing.T) {
 	var unsupported *UnsupportedError
@@ -30,6 +64,27 @@ func TestRunScriptExitCodes(t *testing.T) {
 
 	if err := runScript(t.Context(), "exit 0\n", &out); err != nil {
 		t.Fatalf("exit 0 = %v", err)
+	}
+}
+
+func TestManagerOutcomeOutranksDockerError(t *testing.T) {
+	h := &fakeHost{root: true, err: &UnsupportedError{Reason: "docker not found"}}
+	m := newFakeManager(h)
+	t.Cleanup(func() { _ = m.Close() })
+	close(h.release)
+	m.status = func(context.Context) (string, error) { return "", errors.New("Cannot connect to the Docker daemon") }
+
+	if st := m.Status(t.Context()); st.State != protocol.SysboxOff || !strings.Contains(st.Reason, "Cannot connect") {
+		t.Fatalf("before any install = %+v, want off with Docker's error", st)
+	}
+	m.Install(t.Context())
+	waitState(t, m, protocol.SysboxUnsupported)
+	if st := m.Status(t.Context()); st.State != protocol.SysboxUnsupported || st.Reason != "docker not found" {
+		t.Fatalf("after the install = %+v, want the recorded outcome", st)
+	}
+	m.status = func(context.Context) (string, error) { return protocol.SysboxOn, nil }
+	if st := m.Status(t.Context()); st.State != protocol.SysboxOn {
+		t.Fatalf("with Sysbox listed = %+v, want on", st)
 	}
 }
 

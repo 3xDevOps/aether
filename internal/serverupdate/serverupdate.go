@@ -54,6 +54,10 @@ var ErrBadTag = errors.New("version must be a release tag: v plus semver, for ex
 // ErrBadWhen is returned for an unknown when value.
 var ErrBadWhen = errors.New(`when must be "now", "idle", or "cancel"`)
 
+// ErrHeld is returned when something that a restart would cut off, such as a
+// Sysbox install, is running; the update can be requested again once it ends.
+var ErrHeld = errors.New("a server update cannot be applied now")
+
 // ErrBusy is returned when an update is already being applied.
 var ErrBusy = errors.New("a server update is already being applied")
 
@@ -82,6 +86,9 @@ type Config struct {
 	// for. Nil reports an idle server: a deployment with no run engine has
 	// nothing to wait for.
 	Busy func(context.Context) domain.ServerBusy
+	// Hold returns why an update must not be applied right now, or "".
+	// Nil never holds.
+	Hold func() string
 	// Now reads the clock.
 	Now func() time.Time
 }

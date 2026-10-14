@@ -44,7 +44,7 @@ say() {
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo sh install-sysbox.sh"
 
-for tool in dpkg apt-get docker uname ip; do
+for tool in dpkg apt-get docker uname ip curl; do
 	command -v "$tool" >/dev/null 2>&1 || unsupported "${tool} not found; this script needs an Ubuntu or Debian host with Docker installed"
 done
 
@@ -84,15 +84,31 @@ case "$runtimes_out" in
 	die "Docker already lists sysbox-runc (sysbox-ce ${installed:-not installed from a package}). Upgrade by following https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md#upgrading-sysbox-or-sysbox-enterprise"
 	;;
 esac
+# A server restart or a lost session can interrupt dpkg mid-install, leaving
+# sysbox-ce half configured; finish that before judging what is installed.
+if [ -n "$(dpkg --audit 2>&1)" ]; then
+	say "finishing an interrupted package install: dpkg --configure -a"
+	dpkg --configure -a || die "dpkg --configure -a failed; its output is above"
+	runtimes_out="$(runtimes 2>&1)" || die "docker info failed: ${runtimes_out}"
+	installed="$(dpkg-query -W -f='${Version}' sysbox-ce 2>/dev/null || true)"
+	case "$runtimes_out" in
+	*'"sysbox-runc"'*)
+		if [ "$installed" = "${VERSION}.linux" ]; then
+			say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
+			exit 0
+		fi
+		;;
+	esac
+fi
 [ -z "$installed" ] || die "sysbox-ce ${installed} is installed but Docker does not list sysbox-runc. Run: systemctl restart docker, or purge it with: apt-get purge -y sysbox-ce"
 
 apt_updated=no
 apt_install() {
 	if [ "$apt_updated" = no ]; then
-		apt-get update || die "apt-get update failed; its output is above"
+		apt-get -o DPkg::Lock::Timeout=300 update || die "apt-get update failed; its output is above"
 		apt_updated=yes
 	fi
-	apt-get install -y "$@" || die "apt-get install $* failed; its output is above"
+	apt-get -o DPkg::Lock::Timeout=300 install -y "$@" || die "apt-get install $* failed; its output is above"
 }
 
 command -v jq >/dev/null 2>&1 || apt_install jq
@@ -100,14 +116,22 @@ command -v jq >/dev/null 2>&1 || apt_install jq
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 tmp_json="$tmp/daemon.json"
-# Every IPv4 network on the host's routes and interfaces. A route without a
-# prefix length is a host route.
+
+# Download and verify before touching daemon.json, so an offline host or a bad
+# download leaves it as it was.
+say "downloading ${deb}"
+curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
+got="$(sha256_of "$tmp/$deb")"
+[ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
+# Every IPv4 network on the host's routes and interfaces, from the output of
+# ip route and ip address. A route without a prefix length is a host route.
 local_networks() {
-	ip -4 -o route | awk '{net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print net}'
-	ip -4 -o address | awk '{print $4}'
+	echo "$routes" | awk '{net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print net}'
+	echo "$addrs" | awk '{print $4}'
 }
 
-# The IPv4 subnet of every Docker network, running or not.
+# The IPv4 subnet of every Docker network, running or not. It runs in a
+# subshell, so callers check its status.
 docker_networks() {
 	ids="$(docker network ls -q 2>&1)" || die "docker network ls failed: ${ids}"
 	[ -n "$ids" ] || return 0
@@ -145,16 +169,17 @@ EOT
 	return 1
 }
 
-# Once default-address-pools is set Docker stops allocating from 172.17-31, so
-# the candidates start there, then 10.200-254, then all of 192.168 as a last
-# resort.
+# 172.17-31 is Docker's default pool until Docker restarts and applies the
+# new keys, so a network created in between could take a 172.24-31 range and
+# collide with the new bip. 10.200-254 is outside it and comes first; 192.168
+# is the last resort.
 candidates() {
-	for n in 24 25 26 27 28 29 30 31; do echo "172.$n.0.0/16"; done
 	n=200
 	while [ "$n" -le 254 ]; do
 		echo "10.$n.0.0/16"
 		n=$((n + 1))
 	done
+	for n in 24 25 26 27 28 29 30 31; do echo "172.$n.0.0/16"; done
 	echo "192.168.0.0/16"
 }
 
@@ -181,10 +206,15 @@ jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/nul
 BIP=
 POOL_BASE=
 if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
-	used_networks="$(local_networks)
-$(docker_networks)
-$(jq -r '.bip // empty, ((."default-address-pools" // [])[].base)' "$DAEMON_JSON" 2>/dev/null || true)"
-	none_free="no free /16 among 172.24-31.0.0, 10.200-254.0.0 and 192.168.0.0 that avoids this host's routes, interfaces and Docker networks"
+	routes="$(ip -4 -o route 2>&1)" || die "ip route failed: ${routes}"
+	addrs="$(ip -4 -o address 2>&1)" || die "ip address failed: ${addrs}"
+	docker_nets="$(docker_networks)" || exit 1
+	local_nets="$(local_networks)"
+	set_nets="$(jq -r '.bip // empty, ((."default-address-pools" // [])[].base)' "$DAEMON_JSON" 2>/dev/null || true)"
+	used_networks="${local_nets}
+${docker_nets}
+${set_nets}"
+	none_free="no free /16 among 10.200-254.0.0, 172.24-31.0.0 and 192.168.0.0 that avoids this host's routes, interfaces and Docker networks"
 	if [ "$add_bip" = true ]; then
 		pick_network || die "cannot add \"bip\" to ${DAEMON_JSON}: ${none_free}. Set it to a free range, then re-run this script."
 		BIP="${picked%/*}"
@@ -211,11 +241,6 @@ if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
 	[ "$add_pool" = false ] || say "added \"default-address-pools\": [{\"base\": \"${POOL_BASE}\", \"size\": 24}] to ${DAEMON_JSON}"
 	say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
 fi
-
-say "downloading ${deb}"
-curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
-got="$(sha256_of "$tmp/$deb")"
-[ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
 
 say "installing ${deb}"
 apt_install "$tmp/$deb"

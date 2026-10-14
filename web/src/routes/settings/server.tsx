@@ -1,4 +1,5 @@
 import { packagedLine, useUpdateNotice } from '@/components/update-banner'
+import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code'
 import { Spinner } from '@/components/ui/spinner'
@@ -6,7 +7,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
 import { api, type Api } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
-import { useSysbox } from '@/lib/use-sysbox'
+import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { memberName, resolveMember } from '@/lib/member-name'
 import type { DiskUsage } from '@/lib/types'
 import { workspaceRuns } from '@/routes/board/selectors'
@@ -140,9 +141,10 @@ function DockerInRunsRow({ client }: { client: Api }) {
   if (!status) return null
   const { state, reason, log } = status
   const installing = state === 'installing'
+  const command = rootCommand(status)
   const states = {
     on: ['On', 'Agents can run docker, compose and buildx in their runs.'],
-    off: ['Off', 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
+    off: ['Off', reason ?? 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
     unsupported: ['Unavailable on this host', reason],
     installing: ['Installing', undefined],
     failed: ['Install failed', reason],
@@ -157,7 +159,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
           {detail && <p className="whitespace-pre-wrap break-words">{detail}</p>}
         </>
       )}
-      control={(state === 'off' || state === 'failed') && (
+      control={((state === 'off' && !command) || state === 'failed') && (
         <Button size="sm" variant="secondary" onClick={install}>
           {state === 'failed' ? 'Try again' : 'Install'}
         </Button>
@@ -167,6 +169,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
         {installing && <><Spinner />Installing… this takes a minute or two</>}
         {justInstalled && state === 'on' && 'New runs get it now. Reopen your Environment to use it there.'}
       </p>
+      {command && <CopyableCommand command={command} />}
       {error && <p role="alert" className="whitespace-pre-wrap break-words text-ui-sm text-state-failed">{error}</p>}
       {state === 'failed' && log && (
         <details className="min-w-0 text-ui-sm text-muted">

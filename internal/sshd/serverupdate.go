@@ -95,7 +95,7 @@ func serverUpdateError(err error) *protocol.Error {
 		}
 	case errors.Is(err, serverupdate.ErrBadTag), errors.Is(err, serverupdate.ErrBadWhen):
 		return invalidParams(err.Error())
-	case errors.Is(err, serverupdate.ErrBusy):
+	case errors.Is(err, serverupdate.ErrBusy), errors.Is(err, serverupdate.ErrHeld):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
 	}
 	return rpcError(err)
