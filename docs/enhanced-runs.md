@@ -373,7 +373,8 @@ working through both:
 - Agent output (`agent_message_chunk`, `agent_thought_chunk`, `tool_call` or
   `plan`) or a permission or question request with no prompt open starts an
   **autonomous turn**: a `turn_start` item with `"autonomous":true`. A lone
-  `tool_call_update` or metadata update does not start one. Updates the agent
+  `tool_call_update`, a metadata update or a subagent's output (it carries
+  `_meta.claudeCode.parentToolUseId`) does not start one. Updates the agent
   sends after answering a `session/prompt` wait until that turn's end is
   recorded, so they never land in the turn that just ended.
 - The autonomous turn ends at the `usage_update` with
@@ -410,8 +411,8 @@ Limits:
 
 - A task the run waits for that never ends keeps the run working until you
   press Stop.
-- A shell a subagent started does not hold the run. When it ends and wakes
-  that subagent, the run turns working again until the follow-up ends.
+- A shell a subagent started does not hold the run, and the subagent's
+  output after it ends is logged without changing the run's state.
 - `--stall-threshold` does not apply while a task the run waits for is
   live, since a task can work for long without telling the session. An
   autonomous turn that sends nothing for that long parks the run `stalled:`

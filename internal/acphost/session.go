@@ -872,7 +872,7 @@ func (s *Session) update(raw json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.acceptedLocked()
-	if opensTurn(head.Kind) {
+	if head.opensTurn() {
 		s.openAutonomousLocked()
 	}
 	s.proj.update(raw)

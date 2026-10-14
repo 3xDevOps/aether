@@ -395,3 +395,20 @@ func TestOversizedBackgroundItemKeepsItsTasksOnTheWire(t *testing.T) {
 		t.Fatalf("wire item %+v", got)
 	}
 }
+
+func TestSubagentOutputOpensNoMainAgentTurn(t *testing.T) {
+	m := workflowAgent(t)
+	s, rec := startWorkflow(t, m)
+	m.update(map[string]any{"sessionUpdate": "agent_message_chunk", "messageId": "sub", "content": map[string]any{"type": "text", "text": "subagent"},
+		"_meta": map[string]any{"claudeCode": map[string]any{"parentToolUseId": "toolu_1"}}})
+	waitFor(t, "the subagent output", func() bool {
+		return slices.ContainsFunc(ofKind(items(t, s), KindMessage), func(it Item) bool { return it.Message.Text == "subagent" })
+	})
+	if st := s.State(); st.TurnInFlight {
+		t.Fatalf("state %+v, want no turn for subagent output", st)
+	}
+	if ok, err := s.PromptIdle(context.Background(), textPrompt("mail"), nil); !ok || err != nil {
+		t.Fatalf("PromptIdle = %v, %v, want a turn", ok, err)
+	}
+	rec.waitStates(t, "working:prompt", "working:background", "working:prompt", "working:background")
+}

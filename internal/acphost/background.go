@@ -86,13 +86,20 @@ type updateHead struct {
 		Origin *struct {
 			Kind string `json:"kind"`
 		} `json:"_claude/origin"`
+		ClaudeCode struct {
+			ParentToolUseID string `json:"parentToolUseId"`
+		} `json:"claudeCode"`
 	} `json:"_meta"`
 }
 
-// opensTurn reports whether an update is the agent working. A tool call
-// update alone can trail a turn that already ended.
-func opensTurn(kind string) bool {
-	switch kind {
+// opensTurn reports whether an update is the main agent working: a
+// subagent's output carries its parent tool call, and a tool call update
+// alone can trail a turn that already ended.
+func (h updateHead) opensTurn() bool {
+	if h.Meta.ClaudeCode.ParentToolUseID != "" {
+		return false
+	}
+	switch h.Kind {
 	case "agent_message_chunk", "agent_thought_chunk", "tool_call", "plan":
 		return true
 	}
