@@ -821,20 +821,67 @@ func TestRestoreStopsTasksALostSessionLeftRunning(t *testing.T) {
 	}
 	_ = log.Close()
 	var statuses []string
-	var turns []int64
 	for range 2 {
 		m := newMockAgent(t, loadFixture(t, "claude"))
 		s, rec := startMock(t, m, Config{ClaudeCode: true, LogPath: path, SessionID: m.sessionID()})
 		rec.waitIdle(t)
-		statuses, turns = nil, nil
+		statuses = nil
 		for _, it := range ofKind(items(t, s), KindToolCall) {
 			statuses = append(statuses, it.ToolCall.Task.Status)
-			turns = append(turns, it.Turn)
 		}
 		_ = s.Close()
 	}
-	if !slices.Equal(statuses, []string{"running", "stopped"}) || !slices.Equal(turns, []int64{1, 1}) {
-		t.Fatalf("snapshots of the launching call went %v in turns %v, want running then one stopped, both in turn 1", statuses, turns)
+	if !slices.Equal(statuses, []string{"running", "stopped"}) {
+		t.Fatalf("snapshots of the launching call went %v, want running then one stopped", statuses)
+	}
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	s, rec := startMock(t, m, Config{ClaudeCode: true, LogPath: path, SessionID: m.sessionID()})
+	rec.waitIdle(t)
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	var starts []int64
+	for _, it := range ofKind(items(t, s), KindTurnStart) {
+		starts = append(starts, it.Turn)
+	}
+	if !slices.Equal(starts, []int64{1, 2, 3}) {
+		t.Fatalf("turn starts %v, want the prompt after a restore to start turn 3", starts)
+	}
+}
+
+func TestRestoreStopsATaskWhoseCallIDALaterTurnReused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.items.jsonl")
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := &ToolCall{ID: "call-1", Title: "Workflow", Status: "completed", Task: &ToolTask{ID: "bg-1", Type: "local_workflow", Status: "running"}}
+	reuse := &ToolCall{ID: "call-1", Title: "Read", Status: "completed"}
+	for _, it := range []Item{
+		{Kind: KindTurnStart, Turn: 1},
+		{Kind: KindToolCall, Turn: 1, ToolCall: launch},
+		{Kind: KindTurnEnd, Turn: 1, StopReason: "end_turn"},
+		{Kind: KindTurnStart, Turn: 2},
+		{Kind: KindToolCall, Turn: 2, ToolCall: reuse},
+		{Kind: KindTurnEnd, Turn: 2, StopReason: "end_turn"},
+	} {
+		if err := log.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = log.Close()
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	s, rec := startMock(t, m, Config{ClaudeCode: true, LogPath: path, SessionID: m.sessionID()})
+	rec.waitIdle(t)
+	stopped := 0
+	for _, it := range ofKind(items(t, s), KindToolCall) {
+		if it.ToolCall.Task != nil && it.ToolCall.Task.Status == "stopped" {
+			stopped++
+		}
+	}
+	if stopped != 1 {
+		t.Fatalf("%d stopped snapshots of bg-1, want 1", stopped)
 	}
 }
 
