@@ -494,6 +494,69 @@ outside, Escape or any navigation closes it, and navigation moves focus to the
 new view's heading. `Mod+B` closes it too, because it is the key that opened
 it; every other shell key stands down while it is open.
 
+### Assistant panel
+
+The assistant is a persistent conversation with an agent running in the
+member's own environment; the server side is
+[the assistant plan](plans/2026-10-14-assistant.md). `AssistantPanel`
+(`components/assistant/panel.tsx`) is mounted by `AppShell` as a flex sibling
+after `main`, so it is available on every route, onboarding included. It
+renders nothing unless the server lists `assistant.status` and the member can
+launch runs (`useAssistantAvailable`); the same check gates every entry point.
+
+- **Desktop:** an `aside` named "Assistant", 400px by default and resizable
+  from 320px to 640px by a `separator` on its left edge (same keys as the
+  sidebar's, mirrored: Left grows). **Close assistant** returns focus to the
+  Assistant button. The saved width is a preference: the rendered width is capped
+  to what the window leaves after the sidebar and 400px of `main`, and below
+  320px of room the sheet is used instead.
+- **Phone:** a right side sheet, a `dialog` named "Assistant".
+- **Header:** the agent and state, **New conversation** (confirms, then
+  `assistant.reset`) and **Close assistant**.
+- **Body:** by `assistant.status` state. `setup` lists each agent with its
+  reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
+  button that calls `assistant.start {restart_environment: true}`; `failed`
+  shows the server's error above the transcript with **Retry**
+  (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
+  the run Session's `TimelineRow` and `flattenRows` with the constant row
+  context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
+  newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
+  runs). An empty conversation offers four example prompts that fill the
+  composer. Harness permission and question prompts render as request cards
+  answered with `assistant.answer`; each pending confirmation renders as a
+  card with the summary, the method and exact params, a relative deadline,
+  **Approve** and **Decline** (`assistant.confirm`). A card leaves only when a
+  `confirmations` frame stops listing it.
+
+State lives in `store/assistant.ts`. The transcript is the `AcpSession` under
+`acpSessions.assistant`, built by the run reducers and kept out of `runs`, so
+it never reaches the board, sidebar or palette. The slice holds the status,
+the confirmation set, the composer draft and the generation a new
+conversation bumps; `assistantOpen` and `assistantWidth` persist.
+`store/assistant-stream.ts` connects `/ws/assistant` through
+`connectSessionStream` with the assistant endpoint. `AssistantPanel` reads
+`assistant.status` once on load and on each open, then connects unless the
+state is `setup` or `needs_restart`. It stays connected with the panel closed
+only while the state is `running` or `starting`, or a confirmation or a
+harness prompt is pending. After that, `status` frames carry the state and the
+whole confirmation set, so the UI makes no further status calls. A truncated
+item in the transcript is read with `assistant.item`. Each pending
+confirmation or prompt puts a dot on the Assistant button, named "Assistant, N
+requests waiting". A confirmation card lists its params as labelled rows
+(`workspace_id` reads "Workspace"; task and message text stay whole), and its
+buttons stay disabled once answered until a status frame removes the card. Only
+A prompt being sent and its idempotency key live in the slice next to the
+draft, so reopening the panel retries under the same key; a changed draft, a
+success or a new conversation clears them. `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
+
+Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
+component mounted in one place at a time: the sidebar's **New run** row (a secondary
+icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
+the phone toolbar under 768px; keeping it out of the top bar's row keeps every
+header destination visible at 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
+**Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
+each onboarding step.
+
 ### Landmarks and headers
 
 **Landmarks.** The skip link "Skip to content" is the first tab stop; the
@@ -1379,7 +1442,8 @@ port…** (local gateway), **Close run…**, **Kill run**, **Delete run**, **Fre
 container…**, **Archive run** / **Restore run**, **Protect run** /
 **Unprotect run**, **Reopen run**, **Pull branch** (local gateway) and **Hand
 off to <member>**. Board verbs (`boardCommands`): **Open the board**, **Open
-all workspaces**, **New run…**, **New swarm…**, **Launch from a template…**,
+all workspaces**, **Ask Aether** (opens the assistant; offered when the server
+serves `assistant.status`), **New run…**, **New swarm…**, **Launch from a template…**,
 **Archive closed runs…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
@@ -5117,6 +5181,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘K` / `Ctrl+K` | global | Open the command palette |
 | `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
 | `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
+| `⌘Shift+Space` / `Ctrl+Shift+Space` | global | Open or close the assistant |
 | `?` | global | Open the shortcuts dialog |
 | `n` | global | New run |
 | `u` | global | Open the next run that needs you |
@@ -5256,8 +5321,8 @@ the previous one when closing the last tab, or **Add terminal tab** when the
 dock becomes empty. On a shell tab the same keys open its close choices, or
 close a shell that has ended.
 
-**Resize handles are window splitters.** The sidebar's and the docks'
-`separator` handles take Tab, name the pane they size with `aria-controls`,
+**Resize handles are window splitters.** The sidebar's, the assistant's and the
+docks' `separator` handles take Tab, name the pane they size with `aria-controls`,
 report `aria-valuenow` against their available bounds, move 16px per arrow
 press, snap to those bounds on Home and End, and collapse the pane on Enter,
 handing focus to the control that restores it. Pointer dragging stays within

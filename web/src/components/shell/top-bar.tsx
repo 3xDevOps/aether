@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ListRow } from '@/components/ui/list-row'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { useIsMobile } from '@/lib/breakpoints'
+import { AssistantButton } from '@/components/assistant/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
@@ -22,6 +23,7 @@ const titles: Record<string, string> = {
 export function TopBar({ navigation = true }: { navigation?: boolean }) {
   const desktop = desktopBridge()
   const mobile = useIsMobile()
+  const collapsed = useStore((s) => s.sidebarCollapsed)
   const header = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const element = header.current
@@ -49,6 +51,7 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
           <span className="text-wordmark">aether</span>
         </div>
         {navigation && <HeaderNavigation />}
+        {navigation && !mobile && collapsed && <AssistantButton />}
         <WindowControls />
       </div>
       {navigation && mobile && <PhoneToolbar />}
@@ -213,6 +216,7 @@ function PhoneToolbar() {
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
+        <AssistantButton />
         {canLaunch({ cap, role }) && (iconLaunch ? (
           <Button variant="ghost" size="icon" label="New run" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />

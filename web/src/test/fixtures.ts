@@ -538,6 +538,15 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runResume: vi.fn(async () => ({})),
     runInject: vi.fn(async () => ({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })),
     roomImage: vi.fn(async () => needsOverride('roomImage')),
+    assistantStatus: vi.fn(async () => needsOverride('assistantStatus')),
+    assistantStart: vi.fn(async () => needsOverride('assistantStart')),
+    assistantPrompt: vi.fn(async () => needsOverride('assistantPrompt')),
+    assistantCancel: vi.fn(async () => needsOverride('assistantCancel')),
+    assistantAnswer: vi.fn(async () => needsOverride('assistantAnswer')),
+    assistantConfirm: vi.fn(async () => needsOverride('assistantConfirm')),
+    assistantItem: vi.fn(async () => needsOverride('assistantItem')),
+    assistantReset: vi.fn(async () => needsOverride('assistantReset')),
+    assistantHistory: vi.fn(async () => needsOverride('assistantHistory')),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),
     runACPSetOption: vi.fn(async () => needsOverride('runACPSetOption')),
@@ -621,6 +630,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
+    assistantSocket: vi.fn(() => 'ws://localhost/ws/assistant'),
     acpSocket: vi.fn((runID: string) => `ws://localhost/ws/acp/${runID}`),
     attachShellSocket: vi.fn(
       (runID: string, tab: string) =>

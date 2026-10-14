@@ -589,6 +589,10 @@ Your environment's home persists the executable and vendor login state across
 containers. **Environment** in the header (or **More navigation**) opens the same shell;
 [terminal.md](terminal.md) covers its tabs and **Stop environment**.
 
+Once one agent is ready, the dashboard's **Assistant** button (or `Ctrl+Shift+Space`)
+opens a chat that can list your runs, launch one, or install tools in your
+environment. See [assistant.md](assistant.md).
+
 No vendor login yet? [Prove the plumbing without an agent
 subscription](#prove-the-plumbing-without-an-agent-subscription) runs the
 whole path with a scripted stand-in.

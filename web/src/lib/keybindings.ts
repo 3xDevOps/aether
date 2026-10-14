@@ -36,6 +36,14 @@ export const keybindings = [
     // A terminal keeps it: Ctrl+B is a common tmux prefix.
     when: (event) => !keyboardBusy(event) && !inModal(event.target),
   },
+  {
+    id: 'assistant',
+    keys: '$mod+Shift+Space',
+    scope: 'global',
+    label: 'Open or close the assistant',
+    // A terminal and an editor keep their keys.
+    when: (event) => !keyboardBusy(event) && !inModal(event.target),
+  },
   { id: 'shortcuts', keys: '[Shift]+?', scope: 'global', label: 'Open this reference' },
   { id: 'launch', keys: 'n', scope: 'global', label: 'New run' },
   { id: 'next-needs-you', keys: 'u', scope: 'global', label: 'Open the next run that needs you' },
@@ -120,7 +128,7 @@ export function isSingleKey(binding: Keybinding): boolean {
 }
 
 const modifierLabels: Record<string, string> = { Control: 'Ctrl', Meta: '⌘', Alt: 'Alt', Shift: 'Shift' }
-const keyLabels: Record<string, string> = { Escape: 'Esc', Enter: 'Enter', ArrowLeft: '←', ArrowRight: '→' }
+const keyLabels: Record<string, string> = { Space: 'Space', Escape: 'Esc', Enter: 'Enter', ArrowLeft: '←', ArrowRight: '→' }
 
 /** A tinykeys string as this platform writes it: `⌘K` on macOS, `Ctrl+K`
  * elsewhere, `g then b` for a sequence. Optional modifiers are left out. */

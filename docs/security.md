@@ -461,6 +461,66 @@ of a secret's value is replaced with `***`. A value the script transforms
 first - encodes or splits - is not recognized and is not masked, and nothing
 masks what the agent or a verification command prints later.
 
+## The assistant
+
+The [assistant](assistant.md) is an agent running in a member's environment
+container, driven from the dashboard. The boundaries:
+
+- **Member authority, through the server.** Its Aether tools reach the server
+  over a Unix socket at `<data>/assistant/<member>/sock/assistant.sock`. The
+  server binds each socket to one member and runs every call as that member,
+  with the same permission checks as their own CLI. No tool takes a member id,
+  and the socket rejects any parameter containing `member_id`, including
+  `account_member_id`. The one exception is `run.list`, which accepts
+  `member_id` as a read filter: every member can see every run anyway. Only a fixed
+  allowlist of methods is served; anything else returns `method not found`.
+- **Socket placement.** The socket directory is mounted read-only at
+  `/run/aether-assistant` in that member's environment terminal only. No run
+  container and no other member's terminal receives it. A terminal created
+  before the assistant existed lacks the mount and reports `needs_restart`.
+- **Tiers, enforced by the server.** Read methods and `run.pause`/`run.resume` run at once.
+  `run.launch`, `run.inject`, `run.kill` and `env.save` block inside the
+  server until the member approves a card whose text the server builds from
+  the call and the stored run or workspace. A decline, a 10-minute timeout or
+  a closed session fails the call, and the card is withdrawn if the agent's
+  call goes away. The socket does not serve
+  `assistant.confirm`; the approval is a control call from the member's own
+  dashboard session.
+- **Shell work asks first.** The session starts in the harness's asking mode
+  (Claude Code `default`, Codex `agent`), not the bypass mode runs use. Each
+  prompt goes to the member as a request card.
+- **Run text is untrusted.** Transcripts and output the assistant reads can
+  contain injected instructions. The assistant's instructions say to treat
+  them as data, but the control is the server: a steered assistant still
+  cannot launch, message or stop a run, or save the environment, without a
+  click.
+- **No account sharing.** The assistant session always uses the sign-in in the
+  member's own home and counts against their own subscription. Runs it
+  launches may use quota fallback onto accounts shared with the member, the
+  same as the member's own launches.
+- **Claude Code settings.** The server writes
+  `~/.aether/assistant/.claude/settings.json` allowing the `aether` MCP tools,
+  so read tools do not each prompt. The confirmed tools are held by the
+  server, and the shell still asks.
+
+Stated plainly:
+
+- Anything that can write the member's home can influence the assistant while
+  it runs. The member's runs mount that home read-write, so a run can plant
+  `~/.claude` settings or hooks, or `.bashrc`, that the assistant then loads.
+- Code running in the member's environment container can reach the tool socket
+  while a session is live. It gets the read tools and pause/resume at once;
+  anything else still needs the member's approval on a card.
+- Every action beyond reading and pause/resume needs that approval, and the
+  card text comes from the server, not the agent.
+
+The agent is a process in the member's
+environment container, the same as `aether terminal`. It can read the member's
+home, including agent logins and other credentials, and run any command there
+subject only to the harness's permission prompts. Tiers gate Aether
+operations, not what the shell can do to the container. The assistant is told
+not to reveal secrets, which is an instruction, not a control.
+
 ## Remote development and browser isolation
 
 Development terminals, the shared app browser and transient captures require

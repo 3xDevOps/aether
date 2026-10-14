@@ -95,6 +95,23 @@ func (l *Local) ACP(ctx context.Context, req protocol.ACPStreamRequest) (io.Read
 	return stream, ack, nil
 }
 
+// Assistant opens the member's assistant stream: one protocol.AssistantFrame
+// per line after the ack. A refused ack is returned with the error.
+func (l *Local) Assistant(ctx context.Context, req protocol.AssistantStreamRequest) (io.ReadCloser, protocol.ACPStreamResponse, error) {
+	var ack protocol.ACPStreamResponse
+	stream, err := l.open(ctx, req, &ack, func(ctx context.Context, ch subsystemConn) {
+		l.s.serveAssistant(ctx, l.member, ch)
+	})
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = stream.Close()
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+	}
+	return stream, ack, nil
+}
+
 // Terminal opens the member's persistent environment terminal. Framed
 // requests receive geometry records in the same stream as output.
 func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*LocalTerminal, protocol.TerminalResponse, error) {

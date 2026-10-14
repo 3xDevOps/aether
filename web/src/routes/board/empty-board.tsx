@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -24,6 +25,18 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   const openDialog = useStore((s) => s.openPaletteDialog)
   const mobile = useIsMobile()
   const base = useBaseCheck(workspace?.id)
+  const ask = caps.hasMethod('assistant.status') && canLaunch({ cap: caps, role }) && (
+    <Button variant="secondary" onClick={() => useStore.getState().setAssistantOpen(true)}>
+      <Sparkles />
+      Ask Aether
+    </Button>
+  )
+  const withAsk = (primary: React.ReactNode) => (
+    <div className="flex flex-wrap items-center justify-center gap-2">
+      {primary}
+      {ask}
+    </div>
+  )
 
   const onboard = (step: OnboardingStep) => {
     const state = useStore.getState()
@@ -36,7 +49,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
     return (
       <EmptyState
         title="No workspace yet"
-        action={<Button onClick={() => onboard('Repository')}>Add your repository</Button>}
+        action={withAsk(<Button onClick={() => onboard('Repository')}>Add your repository</Button>)}
       >
         A workspace is a repository and the base branch every run starts from.
       </EmptyState>
@@ -56,7 +69,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
     return (
       <EmptyState
         title="Base branch missing"
-        action={<Button onClick={() => onboard('Repository')}>Push your base branch</Button>}
+        action={withAsk(<Button onClick={() => onboard('Repository')}>Push your base branch</Button>)}
       >
         Runs start from <code className="font-code">{workspace.base_branch}</code>, which the server cannot read yet:{' '}
         {base.error}
@@ -68,7 +81,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
     return (
       <EmptyState
         title="No agent installed"
-        action={<Button onClick={() => useStore.getState().navigate('agents')}>Set up an agent</Button>}
+        action={withAsk(<Button onClick={() => useStore.getState().navigate('agents')}>Set up an agent</Button>)}
       >
         An agent is the coding CLI a run starts, such as Claude Code or Codex.
       </EmptyState>
@@ -78,7 +91,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
     return (
       <EmptyState
         title="No runs of yours"
-        action={<Button onClick={() => useStore.getState().setMineOnly(false)}>Show everyone's runs</Button>}
+        action={withAsk(<Button onClick={() => useStore.getState().setMineOnly(false)}>Show everyone's runs</Button>)}
       >
         Mine is on, so runs started by teammates are hidden.
       </EmptyState>
@@ -87,7 +100,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   return (
     <EmptyState
       title="No runs yet"
-      action={canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New run</Button>}
+      action={withAsk(canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New run</Button>)}
     >
       A run is one agent working on its own branch in its own container.
     </EmptyState>

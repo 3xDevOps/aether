@@ -1,0 +1,415 @@
+// Package tools serves the assistant's member-scoped tool socket: the
+// allowlisted subset of the control surface the assistant may call, graded
+// into tiers, with approval gating on the destructive ones.
+package tools
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/3xDevOps/Aether/docs"
+	"github.com/3xDevOps/Aether/internal/protocol"
+)
+
+const (
+	maxRequestBytes = 64 << 10
+	maxConns        = 16
+	idleTimeout     = 5 * time.Minute
+)
+
+const (
+	tierRead       = "read"
+	tierReversible = "reversible"
+	tierConfirmed  = "confirmed"
+)
+
+var tiers = map[string]string{
+	protocol.MethodRunList:        tierRead,
+	protocol.MethodRunGet:         tierRead,
+	protocol.MethodRunACPHistory:  tierRead,
+	protocol.MethodWorkspaceList:  tierRead,
+	protocol.MethodWorkspaceGet:   tierRead,
+	protocol.MethodAgentList:      tierRead,
+	protocol.MethodAccountUsage:   tierRead,
+	protocol.MethodTerminalStatus: tierRead,
+	protocol.MethodAssistantDocs:  tierRead,
+	protocol.MethodRunLaunch:      tierConfirmed,
+	protocol.MethodRunInject:      tierConfirmed,
+	protocol.MethodRunPause:       tierReversible,
+	protocol.MethodRunResume:      tierReversible,
+	protocol.MethodRunKill:        tierConfirmed,
+	protocol.MethodEnvSave:        tierConfirmed,
+}
+
+type Caller interface {
+	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error)
+}
+
+type Confirmer func(ctx context.Context, c protocol.AssistantConfirmation) error
+
+type Server struct {
+	Caller  Caller
+	Confirm Confirmer
+	// Member is the member the socket belongs to; "mine" in a run.list
+	// request selects their runs.
+	Member string
+}
+
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+	slots := make(chan struct{}, maxConns)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			return fmt.Errorf("assistant tools: accept: %w", err)
+		}
+		select {
+		case slots <- struct{}{}:
+		default:
+			slog.Warn("assistant tools: connection refused at the concurrency cap", "cap", maxConns)
+			_ = conn.Close()
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer func() {
+				<-slots
+				wg.Done()
+			}()
+			s.serve(ctx, conn)
+		}()
+	}
+}
+
+func (s *Server) serve(ctx context.Context, conn net.Conn) {
+	defer func() { _ = conn.Close() }()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+	capped := &capReader{r: conn}
+	r := bufio.NewReaderSize(capped, 16<<10)
+	for {
+		capped.left = maxRequestBytes
+		if conn.SetReadDeadline(time.Now().Add(idleTimeout)) != nil {
+			return
+		}
+		line, err := protocol.ReadLine(r)
+		if err != nil {
+			return
+		}
+		if len(strings.TrimSpace(string(line))) == 0 {
+			continue
+		}
+		req, resp, ok := protocol.ParseRequest(line)
+		if ok {
+			result, rpcErr := s.dispatchWatched(ctx, conn, r, req)
+			if rpcErr != nil {
+				resp.Error = rpcErr
+			} else {
+				resp.Result = result
+			}
+		}
+		out, err := json.Marshal(resp)
+		if err != nil || conn.SetWriteDeadline(time.Now().Add(idleTimeout)) != nil {
+			return
+		}
+		if _, err := conn.Write(append(out, '\n')); err != nil {
+			return
+		}
+	}
+}
+
+// dispatchWatched runs req with a context that ends when the caller hangs up,
+// so a confirmation nobody can answer any more is withdrawn. The wait for a
+// confirmation outlasts the idle deadline, which is lifted meanwhile.
+func (s *Server) dispatchWatched(ctx context.Context, conn net.Conn, r *bufio.Reader, req protocol.Request) (json.RawMessage, *protocol.Error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	_ = conn.SetReadDeadline(time.Time{})
+	watching := make(chan struct{})
+	go func() {
+		defer close(watching)
+		if _, err := r.Peek(1); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			cancel()
+		}
+	}()
+	result, rpcErr := s.dispatch(ctx, req)
+	_ = conn.SetReadDeadline(time.Now())
+	<-watching
+	return result, rpcErr
+}
+
+func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMessage, *protocol.Error) {
+	tier, allowed := tiers[req.Method]
+	if !allowed {
+		slog.Info("assistant tool", "method", req.Method, "tier", "none", "outcome", "method_not_found")
+		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: fmt.Sprintf(
+			"method not found: %s; allowed methods: %s", req.Method, strings.Join(allowedMethods(), ", "))}
+	}
+	result, rpcErr := s.run(ctx, req, tier)
+	outcome := "ok"
+	if rpcErr != nil {
+		outcome = fmt.Sprintf("error %d", rpcErr.Code)
+	}
+	slog.Info("assistant tool", "method", req.Method, "tier", tier, "outcome", outcome)
+	return result, rpcErr
+}
+
+func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
+	params, err := s.prepare(req)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
+	}
+	req.Params = params
+	switch {
+	case req.Method == protocol.MethodAssistantDocs:
+		return serveDocs(req.Params)
+	case tier == tierConfirmed:
+		summary, rpcErr := s.summarize(ctx, req)
+		if rpcErr != nil {
+			return nil, rpcErr
+		}
+		now := time.Now().UTC()
+		if err := s.Confirm(ctx, protocol.AssistantConfirmation{
+			Method: req.Method, Summary: summary, Params: req.Params, CreatedAt: now,
+		}); err != nil {
+			var pe *protocol.Error
+			if errors.As(err, &pe) {
+				return nil, pe
+			}
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: req.Method + " was not approved: " + err.Error()}
+		}
+	}
+	return s.Caller.Call(ctx, req.Method, req.Params)
+}
+
+func (s *Server) summarize(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+	switch req.Method {
+	case protocol.MethodEnvSave:
+		return "Save your environment as a new image; new runs and terminals start from it", nil
+	case protocol.MethodRunLaunch:
+		return s.summarizeLaunch(ctx, req)
+	case protocol.MethodRunInject:
+		return s.summarizeInject(ctx, req)
+	}
+	p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
+	if err != nil || p.RunID == "" {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+	}
+	run, rpcErr := s.getRun(ctx, req.Params)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	return fmt.Sprintf("Stop run %s (%q)", p.RunID, runLabel(run)), nil
+}
+
+func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.RunLaunchParams](req.Params)
+	if err != nil || p.WorkspaceID == "" || p.Harness == "" {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and harness are required"}
+	}
+	params, _ := json.Marshal(protocol.WorkspaceGetParams{WorkspaceID: p.WorkspaceID})
+	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodWorkspaceGet, params)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	var ws protocol.WorkspaceGetResult
+	if err := json.Unmarshal(raw, &ws); err != nil {
+		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace.get result: " + err.Error()}
+	}
+	mode := p.Mode
+	if mode == "" {
+		mode = "default mode"
+	}
+	return fmt.Sprintf("Launch %s (%s) in %s: %q", p.Harness, mode, ws.Workspace.Name, truncate(p.Task)), nil
+}
+
+func (s *Server) summarizeInject(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
+	if err != nil || p.RunID == "" {
+		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+	}
+	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
+	run, rpcErr := s.getRun(ctx, params)
+	if rpcErr != nil {
+		return "", rpcErr
+	}
+	owner := ""
+	if run.MemberID != s.Member {
+		raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
+		if rpcErr != nil {
+			return "", rpcErr
+		}
+		var members protocol.MemberListResult
+		if err := json.Unmarshal(raw, &members); err != nil {
+			return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
+		}
+		owner = ", owned by " + run.MemberID
+		for _, m := range members.Members {
+			if m.ID == run.MemberID {
+				owner = ", owned by " + m.DisplayName
+			}
+		}
+	}
+	return fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), owner, truncate(p.Message)), nil
+}
+
+func (s *Server) getRun(ctx context.Context, params json.RawMessage) (protocol.Run, *protocol.Error) {
+	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodRunGet, params)
+	if rpcErr != nil {
+		return protocol.Run{}, rpcErr
+	}
+	var got protocol.RunResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		return protocol.Run{}, &protocol.Error{Code: protocol.CodeInternal, Message: "decode run.get result: " + err.Error()}
+	}
+	return got.Run, nil
+}
+
+func runLabel(run protocol.Run) string {
+	if run.Title != "" {
+		return run.Title
+	}
+	return run.Task
+}
+
+const maxSummaryText = 120
+
+func truncate(text string) string {
+	if r := []rune(text); len(r) > maxSummaryText {
+		return string(r[:maxSummaryText]) + "…"
+	}
+	return text
+}
+
+// prepare checks req's params. The socket is bound to one member, so the wire
+// never names one, except that run.list takes member_id as a read filter, and
+// "mine" there selects the socket's own member.
+func (s *Server) prepare(req protocol.Request) (json.RawMessage, error) {
+	if len(req.Params) == 0 || string(req.Params) == "null" {
+		return req.Params, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(req.Params, &fields); err != nil {
+		return nil, errors.New("params must be an object")
+	}
+	for name := range fields {
+		if strings.Contains(strings.ToLower(name), "member_id") && (req.Method != protocol.MethodRunList || name != "member_id") {
+			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
+		}
+	}
+	if req.Method != protocol.MethodRunList {
+		return req.Params, nil
+	}
+	var mine bool
+	if raw, ok := fields["mine"]; ok {
+		if err := json.Unmarshal(raw, &mine); err != nil {
+			return nil, errors.New("mine must be a boolean")
+		}
+		delete(fields, "mine")
+	}
+	if mine {
+		id, _ := json.Marshal(s.Member)
+		fields["member_id"] = id
+	}
+	return json.Marshal(fields)
+}
+
+func serveDocs(raw json.RawMessage) (json.RawMessage, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.AssistantDocsParams](raw)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "assistant.docs: " + err.Error()}
+	}
+	topics, err := docTopics()
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "assistant.docs: " + err.Error()}
+	}
+	var out protocol.AssistantDocsResult
+	switch {
+	case p.Topic == "":
+		out.Topics = topics
+	case slices.Contains(topics, p.Topic):
+		body, rerr := fs.ReadFile(docs.FS, p.Topic+".md")
+		if rerr != nil {
+			return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "assistant.docs: " + rerr.Error()}
+		}
+		out.Text = string(body)
+	default:
+		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf(
+			"assistant.docs: unknown topic %q; topics: %s", p.Topic, strings.Join(topics, ", "))}
+	}
+	result, err := json.Marshal(out)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "assistant.docs: " + err.Error()}
+	}
+	return result, nil
+}
+
+func docTopics() ([]string, error) {
+	entries, err := fs.ReadDir(docs.FS, ".")
+	if err != nil {
+		return nil, err
+	}
+	topics := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if name, ok := strings.CutSuffix(e.Name(), ".md"); ok {
+			topics = append(topics, name)
+		}
+	}
+	return topics, nil
+}
+
+func allowedMethods() []string {
+	names := make([]string, 0, len(tiers))
+	for name := range tiers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// capReader fails the read past left bytes so one oversized line cannot
+// make the server buffer it.
+type capReader struct {
+	r    io.Reader
+	left int
+}
+
+func (c *capReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, fmt.Errorf("assistant tools: request exceeds %d bytes", maxRequestBytes)
+	}
+	if len(p) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= n
+	return n, err
+}

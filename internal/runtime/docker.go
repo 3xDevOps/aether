@@ -872,10 +872,15 @@ func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
 	if info.Container.Config == nil {
 		return ContainerInfo{}, fmt.Errorf("runtime: inspect container %q: missing config", id)
 	}
+	targets := make([]string, len(info.Container.Mounts))
+	for i, m := range info.Container.Mounts {
+		targets[i] = m.Destination
+	}
 	return ContainerInfo{
-		Image: info.Container.Config.Image,
-		User:  info.Container.Config.User,
-		Env:   append([]string(nil), info.Container.Config.Env...),
+		Image:        info.Container.Config.Image,
+		User:         info.Container.Config.User,
+		Env:          append([]string(nil), info.Container.Config.Env...),
+		MountTargets: targets,
 	}, nil
 }
 

@@ -23,6 +23,7 @@ import {
   Rocket,
   Shield,
   ShieldOff,
+  Sparkles,
   Square,
   Sun,
   Trash2,
@@ -517,6 +518,15 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.navigate('overview'),
     },
   ]
+  if (ctx.cap.hasMethod('assistant.status') && canLaunch({ cap: ctx.cap, role })) {
+    list.push({
+      id: 'assistant',
+      label: 'Ask Aether',
+      Icon: Sparkles,
+      value: 'assistant ask question help',
+      perform: () => useStore.getState().setAssistantOpen(true),
+    })
+  }
   if (canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'launch',

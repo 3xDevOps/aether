@@ -579,6 +579,15 @@ func (s *Scheduler) terminalCoordinationMount(member domain.MemberID) ([]runtime
 	mounts := []runtime.Mount{{
 		HostPath: bin, ContainerPath: coordtransport.CLIPath, ReadOnly: true,
 	}}
+	if s.cfg.AssistantDir != "" {
+		sock := AssistantSocketDir(s.cfg.AssistantDir, member)
+		if err := os.MkdirAll(sock, 0o755); err != nil {
+			return nil, fmt.Errorf("create assistant socket directory: %w", err)
+		}
+		mounts = append(mounts,
+			runtime.Mount{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
+			runtime.Mount{HostPath: sock, ContainerPath: coordtransport.AssistantMountDir, ReadOnly: true})
+	}
 	if err := checkCoordinationMounts(mounts); err != nil {
 		return nil, err
 	}
@@ -624,7 +633,7 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 		if err != nil {
 			return fmt.Errorf("coordination mount %q: %w", m.ContainerPath, err)
 		}
-		wantDir := m.ContainerPath == coordtransport.MountDir
+		wantDir := m.ContainerPath == coordtransport.MountDir || m.ContainerPath == coordtransport.AssistantMountDir
 		if wantDir {
 			if !info.IsDir() {
 				return fmt.Errorf("coordination mount %q: source %q is the wrong kind of file", m.ContainerPath, source)

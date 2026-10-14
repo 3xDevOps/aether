@@ -350,10 +350,15 @@ func (r *e2eRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Containe
 	for key, value := range c.spec.Env {
 		env = append(env, key+"="+value)
 	}
+	targets := make([]string, len(c.spec.Mounts))
+	for i, m := range c.spec.Mounts {
+		targets[i] = m.ContainerPath
+	}
 	return runtime.ContainerInfo{
-		Image: c.spec.Image,
-		User:  c.spec.User,
-		Env:   env,
+		Image:        c.spec.Image,
+		User:         c.spec.User,
+		Env:          env,
+		MountTargets: targets,
 	}, nil
 }
 

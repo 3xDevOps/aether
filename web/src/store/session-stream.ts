@@ -4,6 +4,7 @@ import { message } from '@/lib/format'
 import type { SessionLease } from '@/lib/session-types'
 import type { ControlMetadata, TakeoverAction } from '@/routes/terminal/attach'
 import type { RootStore } from '@/store'
+import { assistantSessionID } from '@/store/assistant'
 import { batchNotifications } from '@/store/batch'
 
 interface Owned {
@@ -217,5 +218,15 @@ export async function loadOlderItems(store: RootStore, client: Api, runID: strin
 }
 
 export async function loadWholeItem(store: RootStore, client: Api, runID: string, seq: number): Promise<void> {
-  store.getState().acpReplaceItem(runID, await client.runACPItem(runID, seq))
+  const stamp = () => {
+    const state = store.getState()
+    const session = state.acpSessions[runID]
+    return `${state.assistantGeneration}:${session?.epoch}:${session?.historyGeneration}`
+  }
+  const before = stamp()
+  const item = runID === assistantSessionID ? await client.assistantItem(seq) : await client.runACPItem(runID, seq)
+  // The assistant's key is reused by the next conversation, whose seq numbers start over; a reset from
+  // another tab changes the epoch and history generation without touching ours.
+  if (runID === assistantSessionID && stamp() !== before) return
+  store.getState().acpReplaceItem(runID, item)
 }

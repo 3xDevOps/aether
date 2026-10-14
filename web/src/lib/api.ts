@@ -203,6 +203,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
+import type { AssistantStartParams, AssistantStatus } from '@/lib/assistant-types'
 import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
 export const API_BASE = '/api/v1'
@@ -616,6 +617,19 @@ export const api = {
       ...(values ? { values } : {}),
       ...lease,
     }),
+  assistantStatus: () => call<AssistantStatus>('assistant.status', {}),
+  assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
+  assistantPrompt: (text: string, idempotencyKey: string) =>
+    call<unknown>('assistant.prompt', { text, idempotency_key: idempotencyKey }),
+  assistantCancel: () => call<unknown>('assistant.cancel', {}),
+  assistantAnswer: (requestID: string, optionID: string, values?: Record<string, unknown>) =>
+    call<unknown>('assistant.answer', { request_id: requestID, option_id: optionID, ...(values ? { values } : {}) }),
+  assistantConfirm: (confirmationID: string, approve: boolean) =>
+    call<unknown>('assistant.confirm', { confirmation_id: confirmationID, approve }),
+  assistantItem: (seq: number) => call<{ item: SessionItem }>('assistant.item', { seq }).then((r) => r.item),
+  assistantReset: () => call<AssistantStatus>('assistant.reset', {}),
+  assistantHistory: (beforeSeq?: number, limit?: number) =>
+    call<SessionHistory>('assistant.history', { before_seq: beforeSeq, limit }),
   runACPCancel: (runID: string, lease: SessionLease) =>
     call<unknown>('run.acp.cancel', { run_id: runID, ...lease }),
   runACPSetOption: (runID: string, optionID: string, value: string | boolean, lease: SessionLease) =>
@@ -1053,6 +1067,7 @@ export const api = {
     socketURL(`/ws/attach/${encodeURIComponent(runID)}`),
   acpSocket: (runID: string) =>
     socketURL(`/ws/acp/${encodeURIComponent(runID)}`),
+  assistantSocket: () => socketURL('/ws/assistant'),
   attachShellSocket: (runID: string, tab: string) =>
     socketURL(
       `/ws/attach/${encodeURIComponent(runID)}?shell=${encodeURIComponent(tab)}`,

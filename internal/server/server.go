@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/adapter"
+	"github.com/3xDevOps/Aether/internal/assistant"
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/collab"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -171,22 +173,23 @@ const DefaultContainerRuntime = runtime.RuntimeAuto
 
 // Server is the assembled Aether server.
 type Server struct {
-	db       *store.DB
-	log      *events.SQLiteLog
-	bus      *events.InProc
-	rt       runtime.Runtime
-	docker   *runtime.Docker // set only when the server constructed it
-	git      *gitengine.Engine
-	pty      *ptyhost.Host
-	sched    *scheduler.Scheduler
-	control  *control.Service
-	evidence *evidence.Service
-	adapters *adapter.Manager
-	ssh      *sshd.Server
-	edge     *edgeagent.Agent
-	web      *servergw.Gateway
-	tailnet  servergw.Tailnet
-	services []namedService
+	db        *store.DB
+	log       *events.SQLiteLog
+	bus       *events.InProc
+	rt        runtime.Runtime
+	docker    *runtime.Docker // set only when the server constructed it
+	git       *gitengine.Engine
+	pty       *ptyhost.Host
+	sched     *scheduler.Scheduler
+	assistant *assistant.Service
+	control   *control.Service
+	evidence  *evidence.Service
+	adapters  *adapter.Manager
+	ssh       *sshd.Server
+	edge      *edgeagent.Agent
+	web       *servergw.Gateway
+	tailnet   servergw.Tailnet
+	services  []namedService
 
 	// controllerMu orders run.controller publishes: each reads the holder
 	// under it, so the last one published names the current holder.
@@ -375,6 +378,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		RunMemoryBytes:       cfg.RunMemoryBytes,
 		RunPidsLimit:         cfg.RunPidsLimit,
 		ServerBinary:         cfg.ServerBinary,
+		AssistantDir:         filepath.Join(cfg.DataDir, "assistant"),
 
 		HarnessUpdateDisabled: cfg.HarnessUpdateDisabled,
 	}); err != nil {
@@ -431,6 +435,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		AuthorizationMu:   authMu,
 		DeleteWorkspace:   workspaces.Delete,
 	}
+	s.assistant = assistant.New(assistant.Config{
+		Dir:    filepath.Join(cfg.DataDir, "assistant"),
+		Store:  s.db,
+		Homes:  homes,
+		Runs:   s.sched,
+		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+	})
+	sshCfg.Services.Assistant = s.assistant
 	sshCfg.EdgeAccess = cfg.EdgeAccess
 	sshCfg.Services.Usage = cfg.Usage
 	if sshCfg.Services.Usage == nil {
@@ -633,6 +645,9 @@ func (s *Server) Close() error {
 		}
 		if s.ssh != nil {
 			closeAll = append(closeAll, s.ssh.Close)
+		}
+		if s.assistant != nil {
+			closeAll = append(closeAll, s.assistant.Close)
 		}
 		if s.sched != nil {
 			closeAll = append(closeAll, s.sched.Close)

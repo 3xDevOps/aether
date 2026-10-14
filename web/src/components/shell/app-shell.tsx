@@ -1,3 +1,4 @@
+import { AssistantPanel } from '@/components/assistant/panel'
 import { CommandPalette } from '@/components/palette'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { CenterView, focusView } from '@/components/shell/center-view'
@@ -38,6 +39,7 @@ export function AppShell() {
         >
           <CenterView />
         </main>
+        <AssistantPanel />
       </div>
       <CommandPalette />
       <PaletteDialogs />

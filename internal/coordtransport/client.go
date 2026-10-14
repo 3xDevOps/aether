@@ -23,6 +23,9 @@ const (
 	callMargin          = 3 * time.Second
 	callReportTimeout   = 2*time.Minute + callMargin
 	callDeadlineCeiling = callReportTimeout
+	// callConfirmedTimeout covers the member's 10 minute answer to an
+	// assistant confirmation and then the call itself.
+	callConfirmedTimeout = 25 * time.Minute
 )
 
 func callTimeout(method string, params any) time.Duration {
@@ -36,6 +39,8 @@ func callTimeout(method string, params any) time.Duration {
 		}
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
+	case protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject:
+		timeout = callConfirmedTimeout
 	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
 		timeout = 30*time.Second + callMargin
 	case protocol.MethodDevBrowserNavigate, protocol.MethodDevBrowserAction, protocol.MethodDevBrowserWait:
@@ -46,7 +51,7 @@ func callTimeout(method string, params any) time.Duration {
 		// First launch includes image acquisition and companion readiness.
 		timeout = 90*time.Second + callMargin
 	}
-	if timeout > callDeadlineCeiling && !longPoll(method) {
+	if timeout > callDeadlineCeiling && !longPoll(method) && timeout != callConfirmedTimeout {
 		return callDeadlineCeiling
 	}
 	return timeout

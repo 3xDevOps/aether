@@ -5,6 +5,7 @@ import { batched } from '@/store/batch'
 import { createAgentModelsSlice, type AgentModelsSlice } from '@/store/agent-models'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
 import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
+import { createAssistantSlice, clampAssistantWidth, onPhone, type AssistantSlice } from '@/store/assistant'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
 import { createDevicesSlice, type DevicesSlice } from '@/store/devices'
@@ -73,6 +74,7 @@ export type RootState = ServerSlice &
   MissionsSlice &
   MessagesSlice &
   SessionsSlice &
+  AssistantSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -81,6 +83,9 @@ const persistedUi = (s: RootState) => ({
   textSize: s.textSize,
   sidebarWidth: s.sidebarWidth,
   sidebarCollapsed: s.sidebarCollapsed,
+  // A phone never reopens the sheet on load.
+  assistantOpen: s.assistantOpen && !onPhone(),
+  assistantWidth: s.assistantWidth,
   terminalDockHeight: s.terminalDockHeight,
   detailsOpen: s.detailsOpen,
   browserBeside: s.browserBeside,
@@ -134,6 +139,7 @@ export function createRootStore() {
         ...createMissionsSlice(...a),
         ...createMessagesSlice(...a),
         ...createSessionsSlice(...a),
+        ...createAssistantSlice(...a),
         ...createUiSlice(...a),
       }),
       {
@@ -190,6 +196,8 @@ export function createRootStore() {
             boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
+            assistantOpen: stored.assistantOpen === true && !onPhone(),
+            assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),

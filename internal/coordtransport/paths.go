@@ -10,6 +10,9 @@ const (
 	// Every wire version has its own name so a stale bridge cannot parse a
 	// newer status or message shape.
 	SocketName = "coord3.sock"
+	// AssistantMountDir is the read-only directory holding the assistant tool
+	// socket in a member's environment terminal.
+	AssistantMountDir = "/run/aether-assistant"
 	// BinaryPath is the staged server binary path. It serves the MCP entry
 	// point and harness lifecycle hooks.
 	BinaryPath = "/opt/aether/aether-server"

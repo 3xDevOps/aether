@@ -195,6 +195,9 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 		method == protocol.MethodHomeMkdir || method == protocol.MethodHomeRename ||
 		method == protocol.MethodHomeRemove || method == protocol.MethodHomeUpload ||
 		method == protocol.MethodTerminalExec ||
+		method == protocol.MethodAssistantPrompt || method == protocol.MethodAssistantAnswer ||
+		method == protocol.MethodAssistantConfirm || method == protocol.MethodAssistantStart ||
+		method == protocol.MethodAssistantReset ||
 		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
 		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
 		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||
@@ -277,6 +280,21 @@ func (b *sshBackend) ACP(_ context.Context, req protocol.ACPStreamRequest) (io.R
 	return out.stream, out.ack, err
 }
 
+func (b *sshBackend) Assistant(_ context.Context, req protocol.AssistantStreamRequest) (io.ReadCloser, protocol.ACPStreamResponse, error) {
+	type assistantResult struct {
+		stream io.ReadCloser
+		ack    protocol.ACPStreamResponse
+	}
+	out, err := stream(b, func(c *cli.Conn) (assistantResult, error) {
+		s, ack, err := c.AssistantStream(req)
+		if s == nil {
+			return assistantResult{ack: ack}, err
+		}
+		return assistantResult{stream: s, ack: ack}, err
+	})
+	return out.stream, out.ack, err
+}
+
 func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	type terminalResult struct {
 		term webgate.Terminal
@@ -321,4 +339,5 @@ func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownl
 var (
 	_ webgate.DevelopmentBackend = (*sshBackend)(nil)
 	_ webgate.ACPBackend         = (*sshBackend)(nil)
+	_ webgate.AssistantBackend   = (*sshBackend)(nil)
 )

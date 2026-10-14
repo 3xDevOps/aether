@@ -209,6 +209,21 @@ func (c *Conn) ACPStream(req protocol.ACPStreamRequest) (io.ReadWriteCloser, pro
 	return out, ack, nil
 }
 
+// AssistantStream opens the caller's assistant stream. A refused ack comes
+// back as *protocol.Error with the server's code.
+func (c *Conn) AssistantStream(req protocol.AssistantStreamRequest) (io.ReadCloser, protocol.ACPStreamResponse, error) {
+	var ack protocol.ACPStreamResponse
+	out, err := c.openStream(protocol.SubsystemAssistant, nil, req, "assistant", &ack)
+	if err != nil {
+		return nil, ack, err
+	}
+	if !ack.OK {
+		_ = out.Close()
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+	}
+	return out, ack, nil
+}
+
 // TerminalStream sends the geometry as an SSH pty-req before the JSON
 // header, matching AttachStream.
 func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, protocol.TerminalResponse, error) {

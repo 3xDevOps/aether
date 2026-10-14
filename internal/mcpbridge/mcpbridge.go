@@ -29,8 +29,11 @@ const (
 // and speaks MCP over the process's stdin and stdout.
 type Config struct {
 	// Socket is the coordination socket to bridge; empty means the mounted
-	// coordtransport.SocketPath.
+	// coordtransport.SocketPath, or AssistantSocketPath with Assistant.
 	Socket string
+	// Assistant serves the member assistant's tool set instead of the run
+	// coordination tools.
+	Assistant bool
 	// In and Out are the MCP stdio streams; nil means os.Stdin/os.Stdout.
 	In  io.ReadCloser
 	Out io.WriteCloser
@@ -40,6 +43,9 @@ type Config struct {
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.Socket == "" {
 		cfg.Socket = coordtransport.SocketPath
+		if cfg.Assistant {
+			cfg.Socket = AssistantSocketPath
+		}
 	}
 	if cfg.In == nil {
 		cfg.In = os.Stdin
@@ -50,7 +56,11 @@ func Run(ctx context.Context, cfg Config) error {
 
 	g := newGate()
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, nil)
-	registerTools(srv, cfg.Socket, g)
+	if cfg.Assistant {
+		registerAssistantTools(srv, cfg.Socket)
+	} else {
+		registerTools(srv, cfg.Socket, g)
+	}
 	if err := srv.Run(ctx, &mcp.IOTransport{
 		Reader: g.reader(cfg.In),
 		Writer: g.writer(cfg.Out),

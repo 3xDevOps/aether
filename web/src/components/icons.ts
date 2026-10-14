@@ -31,6 +31,7 @@ import {
   Search as LucideSearch,
   Settings as LucideSettings,
   Shield as LucideShield,
+  Sparkles as LucideSparkles,
   Square as LucideSquare,
   SquarePi as LucideSquarePi,
   SquareTerminal as LucideSquareTerminal,
@@ -172,6 +173,7 @@ export const Search = icon(LucideSearch)
 export const Settings = icon(LucideSettings)
 export const Shield = icon(LucideShield)
 /** Interrupt. */
+export const Sparkles = icon(LucideSparkles)
 export const Square = icon(LucideSquare)
 export const SquarePi = icon(LucideSquarePi)
 export const SquareTerminal = icon(LucideSquareTerminal)

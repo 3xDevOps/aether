@@ -100,7 +100,7 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
   return byTime(matched, waiting)
 }
 
-function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
+export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
   if (!turns) return []
   const held = new Set(turns.map((turn) => turn.turn))
   const lost = [...extras].flatMap(([turn, { orphans, files }]): SessionRow[] => (orphans && !held.has(turn)
