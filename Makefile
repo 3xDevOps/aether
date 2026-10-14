@@ -240,9 +240,16 @@ vet:
 # which is what CI lints with too: setup-go installs the `go` directive's
 # version and the default GOTOOLCHAIN=auto re-execs into the `toolchain` line.
 # Go downloads that toolchain on demand, so no local setup is needed.
+GOLANGCI_LINT_MODULE = github.com/golangci/golangci-lint/v2@v2.10.1
+GOLANGCI_LINT = GOTOOLCHAIN=$(or $(GO_TOOLCHAIN),$(error go.mod has no go or toolchain version to pin the linter to)) \
+	go run $(subst @,/cmd/golangci-lint@,$(GOLANGCI_LINT_MODULE))
+
+# `run` ignores unknown keys in .golangci.yml, so verify it first, against the
+# schema in the pinned module rather than one fetched from golangci-lint.run.
 lint:
-	GOTOOLCHAIN=$(or $(GO_TOOLCHAIN),$(error go.mod has no go or toolchain version to pin the linter to)) \
-		go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.10.1 run
+	$(GOLANGCI_LINT) config verify \
+		--schema "file://$$(go env GOMODCACHE)/$(GOLANGCI_LINT_MODULE)/jsonschema/golangci.next.jsonschema.json"
+	$(GOLANGCI_LINT) run
 
 lint-workflows:
 	@command -v shellcheck >/dev/null 2>&1 || { \
@@ -347,8 +354,9 @@ dashboard:
 deploy: dashboard
 	sh scripts/deploy.sh
 
-# Keep the local full release, including Android, while CI builds Go lanes
-# independently with SERVER_PLATFORMS, EDGE_PLATFORMS and CLI_PLATFORMS.
+# Keep the local full release, including Android, while the release workflow
+# builds Go lanes independently with SERVER_PLATFORMS, EDGE_PLATFORMS and
+# CLI_PLATFORMS.
 release: release-binaries
 	@$(MAKE) android
 
