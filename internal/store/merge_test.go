@@ -280,6 +280,46 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 }
 
+// A merge that fails after the absorbed member's home was moved puts the
+// home back and changes no row.
+func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	a := mustCreateMember(t, db)
+	b := &domain.Member{DisplayName: "B", TailnetLogin: "b@", Color: "#3cb44b", Role: domain.RoleCollaborator}
+	admin := &domain.Member{DisplayName: "Root", TailnetLogin: "root@", Color: "#ffe119", Role: domain.RoleAdmin}
+	for _, m := range []*domain.Member{b, admin} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: plan.Digest, Now: now, Expires: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `CREATE TRIGGER fail_merge BEFORE INSERT ON member_merges BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	moved, restored := false, false
+	_, err = db.AcceptMerge(ctx, MergeAccept{ProposalID: pm.ProposalID, Caller: a.ID, Digest: plan.Digest, Now: now,
+		Archive: func(string, domain.MemberID) (string, func(), error) {
+			moved = true
+			return "/merged/x", func() { restored = true }, nil
+		}})
+	if err == nil || !moved || !restored {
+		t.Fatalf("AcceptMerge = %v, home moved %v, restored %v; want a failure that puts the home back", err, moved, restored)
+	}
+	if m, err := db.GetMember(ctx, b.ID); err != nil || m.ID != b.ID || m.TailnetLogin != "b@" {
+		t.Fatalf("absorbed member after the failed merge = %+v, %v", m, err)
+	}
+}
+
 func TestPlanMergeRefusals(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

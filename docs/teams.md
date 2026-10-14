@@ -221,8 +221,9 @@ The member whose settings prevail survives with its id, display name,
 color, git identity, saved image, custom agents, profiles, home and the
 account shares it grants. The other member is absorbed: its GitHub
 accounts, devices (each keeping its status, revoked ones included),
-tailnet login or SSH key, runs, schedules, push subscriptions and the
-account shares it received become the survivor's. It stays as a
+tailnet login or SSH key, runs with the agent account and home they run
+on, schedules, push subscriptions and the account shares it received
+become the survivor's, so the survivor reopens those runs. It stays as a
 tombstone that signs nothing in: history it made, such as events,
 comments, costs and swarm records, keeps naming it and shows the
 survivor's name. Its discarded settings are recorded, its account shares

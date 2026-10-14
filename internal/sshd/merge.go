@@ -219,12 +219,12 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	var absorbed domain.MemberID
+	var absorbed, other domain.MemberID
 	for _, pm := range pending {
 		if pm.ProposalID == p.ProposalID {
-			absorbed = pm.Minted
+			absorbed, other = pm.Minted, pm.Proposer
 			if pm.Keep == pm.Minted {
-				absorbed = pm.Proposer
+				absorbed, other = pm.Proposer, pm.Minted
 			}
 		}
 	}
@@ -278,7 +278,12 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 			return err
 		})
 	}
+	// Only a run either member controls has a lease the merge changes:
+	// the absorbed member's ends, and the survivor's role may drop.
 	for _, run := range activeRuns {
+		if holder, ok := s.cfg.Control.Status(string(run.ID)); !ok || (holder.MemberID != absorbed && holder.MemberID != other) {
+			continue
+		}
 		if _, err := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, apply); err != nil {
 			return nil, mergeError(err)
 		}
@@ -319,7 +324,7 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 }
 
 func (s *Server) memberMergeCancel(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	ms, perr := s.mergeStore()
+	ms, perr := s.mergeCaller(ctx, protocol.MethodMemberMergeCancel)
 	if perr != nil {
 		return nil, perr
 	}

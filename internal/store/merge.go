@@ -204,7 +204,7 @@ type PendingMerge struct {
 // server's owner at its edge, empty without one. Archive moves the
 // absorbed member's home aside for the merge and returns where it went,
 // empty when it had none; it runs in the transaction once every row is
-// merged, and undo puts the home back when the commit fails.
+// merged, and undo puts the home back when the merge then fails.
 type MergeAccept struct {
 	ProposalID      string
 	Caller          domain.MemberID
@@ -694,14 +694,22 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 	if merge.ID, err = newID("mrg"); err != nil {
 		return nil, err
 	}
+	committed := false
 	demoted := role != domain.RoleAdmin && (survivor.Member.Role == domain.RoleAdmin || absorbed.Member.Role == domain.RoleAdmin)
 	if err = mergeRows(ctx, tx, survivor.Member, absorbed.Member, role, demoted); err != nil {
 		return nil, err
 	}
-	var undo func()
 	if a.Archive != nil {
+		var undo func()
 		if merge.ArchivePath, undo, err = a.Archive(merge.ID, absorbed.Member.ID); err != nil {
 			return nil, fmt.Errorf("store: merge: archive the absorbed member's home: %w", err)
+		}
+		if undo != nil {
+			defer func() {
+				if !committed {
+					undo()
+				}
+			}()
 		}
 	}
 	if err = insertMerge(ctx, tx, merge); err != nil {
@@ -715,12 +723,10 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 		consumed, merge.ID, code.hash); err != nil {
 		return nil, fmt.Errorf("store: merge: consume code: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		if undo != nil {
-			undo()
-		}
+	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit merge: %w", err)
 	}
+	committed = true
 	return merge, nil
 }
 

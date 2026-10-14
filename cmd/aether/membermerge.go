@@ -164,9 +164,14 @@ func acceptDecision(p protocol.MemberMergeProposal, keepAdmin, yes bool, in *buf
 	if err := printMergeChoice(out, plan, p.KeepSettingsOf); err != nil {
 		return params, err
 	}
-	if plan.RoleWithKeepAdmin != "" && plan.Minted.Role == "admin" && !keepAdmin && !yes {
+	if plan.RoleWithKeepAdmin != "" && plan.Minted.Role == "admin" && !keepAdmin && !yes && !p.ProposerKeepAdmin {
 		params.KeepAdmin = askKeepAdmin(out, in, plan)
 	}
+	role := plan.Role
+	if plan.RoleWithKeepAdmin != "" && (params.KeepAdmin || (p.ProposerKeepAdmin && plan.Proposer.Role == "admin")) {
+		role = plan.RoleWithKeepAdmin
+	}
+	_, _ = fmt.Fprintf(out, "\nthe merged member will be %s\n", role)
 	if !yes {
 		_, _ = fmt.Fprint(out, "accept this merge? [y/N]: ")
 		if !yesAnswer(in) {

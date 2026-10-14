@@ -538,9 +538,6 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 		if replaced, err = ids.ListDevices(ctx, ""); err != nil {
 			return nil, rpcError(err)
 		}
-		if err := ids.DeleteOpenLinks(ctx, inv.Member); err != nil {
-			return nil, rpcError(err)
-		}
 	}
 	entries, err := s.EdgeDirectory(ctx)
 	if err != nil {

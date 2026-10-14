@@ -10,7 +10,8 @@ import (
 
 // memberRefs classifies every column that holds a member id. A merge
 // moves the reassigned ones, what grants access or carries the person's
-// ongoing work, to the survivor. History keeps naming the absorbed
+// ongoing work, a run's account and home included since reopening it
+// reads them, to the survivor. History keeps naming the absorbed
 // member, which stays as a tombstone; GetMember resolves it to the
 // survivor for display. A new column is added here, or
 // TestMergeClassifiesEveryMemberColumn fails.
@@ -24,6 +25,9 @@ var memberRefs = map[string]bool{
 	"push_subscriptions.member_id":                         true,
 	"run_steerers.member_id":                               true,
 	"runs.member_id":                                       true,
+	"runs.account_member_id":                               true,
+	"runs.home_member_id":                                  true,
+	"runs.requested_account_member_id":                     true,
 	"schedules.member_id":                                  true,
 	"approvals.decided_by":                                 false,
 	"events.actor_id":                                      false,
@@ -68,9 +72,6 @@ var memberRefs = map[string]bool{
 	"run_account_segments.account_member_id":               false,
 	"run_cost_deletions.member_id":                         false,
 	"run_costs.member_id":                                  false,
-	"runs.account_member_id":                               false,
-	"runs.home_member_id":                                  false,
-	"runs.requested_account_member_id":                     false,
 	"server_update_state.pending_requested_by":             false,
 	"workspace_budgets.updated_by":                         false,
 	"workspace_mirrors.github_member_id":                   false,
@@ -95,6 +96,11 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"identities", `UPDATE member_identities SET member_id = ?2 WHERE member_id = ?1`},
 		{"devices", `UPDATE member_devices SET member_id = ?2 WHERE member_id = ?1`},
 		{"runs", `UPDATE runs SET member_id = ?2 WHERE member_id = ?1`},
+		{"run accounts", `UPDATE runs SET account_member_id = ?2 WHERE account_member_id = ?1`},
+		{"run homes", `UPDATE runs SET home_member_id = ?2 WHERE home_member_id = ?1`},
+		{"run accounts", `UPDATE runs SET requested_account_member_id = ?2 WHERE requested_account_member_id = ?1`},
+		{"run fallback order", `UPDATE runs SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
+			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},
 		{"merge records", `UPDATE member_merges SET survivor_id = ?2 WHERE survivor_id = ?1`},
