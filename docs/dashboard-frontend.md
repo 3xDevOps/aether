@@ -1165,7 +1165,7 @@ first that applies:
 | Enhanced failure (`enhanced session failed: ` reason) | owner | Enhanced could not start: … |
 | Enhanced failure (`enhanced session ended: ` reason) | owner | Agent disconnected: … |
 | Enhanced failure (`enhanced turn failed: ` reason) | owner | Turn failed: … |
-| Agent question (`needs input: <question>` reason) | owner | Agent asks: … |
+| Agent question (`needs input: <question>` reason, also while background tasks run) | owner | Agent asks: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
 | Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | by reason: `agent idle` Waiting for your reply; `turn cancelled` Turn cancelled; `turn interrupted` Turn interrupted; `turn ended: <stop>` Stopped: … |
@@ -1207,9 +1207,13 @@ workspace's stopped integrator appears once you select that workspace. A
 Background (`headless`) run reaches Needs you only through a pending Aether
 approval, the swarm rows, a blocked report, an Enhanced failure, a usage
 limit or an unreviewed finish. A Working run's reason is what its agent is doing ("Reading
-src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working";
-an Enhanced run whose session stream is open and that waits on background
-tasks reads "Working in background: 2 tasks" instead.
+src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working".
+A `running` run whose reason starts `working in background` reads "Working
+in background", "Working in background: 1 task" or "Working in background:
+<n> tasks" ahead of its activity, from the run record alone, so the sidebar,
+board, header and Details show it with no session stream open. It is never
+Needs you. A `needs input: <question>` the agent asked while its tasks run
+parks the run and outranks it: the run reads "Agent asks: …".
 
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
 message's time, else the state change); Working and Finished sort by latest
@@ -1952,23 +1956,25 @@ toggle their detail, are left as text.
 A `turn_start` with `autonomous` is a turn the agent ran with no prompt
 (Claude Code reacting to a finished background task). It opens a turn as a
 prompt does, so its rows, `live` row and **Steer**, **Queue** and
-**Interrupt** work the same. A `turn_end` may carry `background_tasks`, the
-tasks still awaiting their follow-up. `advance` mirrors the ack's
-`background` from the turn boundaries, and `backgroundWait`
-(`store/sessions.ts`) returns the newest boundary's task ids while the ack
-says `background`, no turn is in flight, the run is `running` and the stream
-is live. Cancelling the wait or losing the connection logs no item, so a
-parked run shows none. The wait adds a `live` row and the run's state-line
-reason "Working in background: N tasks" (`useRunPresentation`); it never makes
-a run Needs you.
+**Interrupt** work the same. The ack's `state` carries `background` and
+`tasks`; `advance` (`store/sessions.ts`) updates them from items newer than
+the ack's `seq` only, so a replay of older items cannot bring back tasks the
+ack no longer lists. A `background` item replaces `tasks`, and with no turn
+in flight sets `background` while a task `holds` or a `follow_up` is owed;
+one with no tasks and `stop_reason: "interrupted"` clears them. A turn
+boundary sets `turn_in_flight` and, at `turn_end`, `background` from the held
+tasks. `backgroundWait` returns the live tasks while the stream is live,
+`background` is set, no turn is in flight, and the run is `running` or
+parked `stalled:`. A `running` run's wait adds a `live` row reading "Working
+in background: N tasks", counting held tasks.
 
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
 an empty composer during a turn), **Stop waiting** (`run.acp.cancel`, an
-empty composer while only `backgroundWait` holds) or **Resume** (a paused
-run). **Stop waiting** ends the wait and parks the run `turn cancelled`; the
+empty composer while `backgroundWait` holds, including a wait that stalled)
+or **Resume** (a paused run). **Stop waiting** ends the wait and parks the run `turn cancelled`; the
 agent's background tasks keep running, and a later follow-up opens a new
 autonomous turn. With text typed the pill is **Send**, which starts a turn.
 `Enter` does

@@ -40,43 +40,91 @@ describe('enhanced sessions in the store', () => {
       return { turn_in_flight, background }
     }
 
+    const held = { id: 'bg1', type: 'local_bash', holds: true }
+    const wait = (store: ReturnType<typeof createRootStore>, over = {}) => backgroundWait(toRecord(run(over)), store.getState().acpSessions.run_1)
+
     it('follows the turn boundaries: tasks pending, an autonomous turn, a prompt turn, no tasks', () => {
       const store = createRootStore()
       store.getState().acpAck('run_1', ack())
       store.getState().acpFrames('run_1', frames(item('turn_start', 1)))
       expect(flags(store)).toEqual({ turn_in_flight: true, background: false })
-      store.getState().acpFrames('run_1', frames(item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1'] })))
+      store.getState().acpFrames('run_1', frames(item('background', 1, { tasks: [held] }), item('turn_end', 1, { stop_reason: 'end_turn' })))
       expect(flags(store)).toEqual({ turn_in_flight: false, background: true })
       store.getState().acpFrames('run_1', frames(item('turn_start', 2, { autonomous: true })))
       expect(flags(store)).toEqual({ turn_in_flight: true, background: true })
-      store.getState().acpFrames('run_1', frames(item('turn_end', 2, { autonomous: true, stop_reason: 'end_turn' })))
+      store.getState().acpFrames('run_1', frames(item('background', 2, { tasks: [] }), item('turn_end', 2, { autonomous: true, stop_reason: 'end_turn' })))
       expect(flags(store)).toEqual({ turn_in_flight: false, background: false })
       store.getState().acpFrames('run_1', frames(item('turn_start', 3)))
       expect(flags(store).background).toBe(false)
     })
 
-    it('rebuilds the same picture after a reconnect from the ack and the replayed frames', () => {
+    it('ignores replayed frames the ack already covers, so a reconnect shows no stale tasks', () => {
       const store = createRootStore()
-      store.getState().acpAck('run_1', ack({ seq: 2, replay: 2, state: state({ background: true }) }))
-      store.getState().acpFrames('run_1', frames(item('turn_start', 1), item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1', 'bg2'] })))
-      expect(flags(store)).toEqual({ turn_in_flight: false, background: true })
+      store.getState().acpAck('run_1', ack({ seq: 4, replay: 4, state: state({ background: true, tasks: [held] }) }))
+      store.getState().acpFrames('run_1', frames(
+        item('turn_start', 1),
+        item('background', 1, { tasks: [{ id: 'old', holds: true }] }),
+        item('turn_end', 1, { stop_reason: 'end_turn' }),
+        item('background', 1, { tasks: [], stop_reason: 'interrupted' }),
+      ))
       store.getState().acpStream('run_1', 'live')
-      expect(backgroundWait(toRecord(run()), store.getState().acpSessions.run_1)).toEqual(['bg1', 'bg2'])
+      expect(flags(store)).toEqual({ turn_in_flight: false, background: true })
+      expect(store.getState().acpSessions.run_1!.state!.tasks).toEqual([held])
+      expect(wait(store)).toEqual([held])
     })
 
-    it('waits only on a running run, on a live stream, with no turn in flight', () => {
+    it('waits on the tasks of a live background item when no turn runs', () => {
       const store = createRootStore()
-      store.getState().acpAck('run_1', ack({ state: state({ background: true }) }))
-      store.getState().acpFrames('run_1', frames(item('turn_start', 1), item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1'] })))
+      store.getState().acpAck('run_1', ack({ state: state({ background: false }) }))
+      store.getState().acpFrames('run_1', frames(item('background', 1, { tasks: [held] })))
+      store.getState().acpStream('run_1', 'live')
+      expect(wait(store)).toEqual([held])
+    })
+
+    it('stops waiting when an interrupted background item clears the tasks', () => {
+      const store = createRootStore()
+      store.getState().acpAck('run_1', ack({ state: state({ background: true, tasks: [held] }) }))
+      store.getState().acpStream('run_1', 'live')
+      expect(wait(store)).toEqual([held])
+      store.getState().acpFrames('run_1', frames(item('background', 1, { tasks: [], stop_reason: 'interrupted' })))
+      expect(flags(store).background).toBe(false)
+      expect(wait(store)).toBeNull()
+    })
+
+    it('does not wait on tasks Stop dismissed, but does on a follow-up with none', () => {
+      const store = createRootStore()
+      store.getState().acpAck('run_1', ack())
+      store.getState().acpStream('run_1', 'live')
+      store.getState().acpFrames('run_1', frames(item('background', 1, { tasks: [{ id: 'bg1', holds: false }] })))
+      expect(flags(store).background).toBe(false)
+      expect(wait(store)).toBeNull()
+      store.getState().acpFrames('run_1', frames(item('background', 1, { follow_up: true })))
+      expect(flags(store).background).toBe(true)
+      expect(wait(store)).toEqual([])
+    })
+
+    it('waits on a running run or one stalled in the wait, not on one that asks or was cancelled', () => {
+      const store = createRootStore()
+      store.getState().acpAck('run_1', ack({ state: state({ background: true, tasks: [held] }) }))
       store.getState().acpStream('run_1', 'live')
       const session = store.getState().acpSessions.run_1!
-      const running = toRecord(run())
       expect(session.stream).toBe('live')
-      expect(backgroundWait(running, session)).toEqual(['bg1'])
-      expect(backgroundWait(toRecord(run({ status: 'needs-attention', reason: 'turn cancelled' })), session)).toBeNull()
+      expect(wait(store)).toEqual([held])
+      expect(wait(store, { status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' })).toEqual([held])
+      expect(wait(store, { status: 'needs-attention', reason: 'needs input: Which port?' })).toBeNull()
+      expect(wait(store, { status: 'needs-attention', reason: 'turn cancelled' })).toBeNull()
+      const running = toRecord(run())
       expect(backgroundWait(running, { ...session, stream: 'connecting' })).toBeNull()
-      expect(backgroundWait(running, { ...session, state: { ...session.state!, turn_in_flight: true } })).toBeNull()
       expect(backgroundWait(running, undefined)).toBeNull()
+    })
+
+    it('does not wait during an autonomous turn', () => {
+      const store = createRootStore()
+      store.getState().acpAck('run_1', ack({ state: state({ background: true, tasks: [held] }) }))
+      store.getState().acpStream('run_1', 'live')
+      store.getState().acpFrames('run_1', frames(item('turn_start', 1, { autonomous: true })))
+      expect(flags(store)).toEqual({ turn_in_flight: true, background: true })
+      expect(wait(store)).toBeNull()
     })
   })
 

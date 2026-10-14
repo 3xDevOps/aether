@@ -1,9 +1,10 @@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
+import { stalledPrefix } from '@/lib/needs-you'
 import { plainReason } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
-import type { SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
+import type { BackgroundTask, SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import type { TakeoverSnapshot } from '@/routes/terminal/session'
@@ -12,7 +13,6 @@ import { toolTenses, type AgentPayload } from '@/store/activity'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
-  backgroundTasks,
   isAttachedFile,
   itemCount,
   prependItems,
@@ -49,6 +49,8 @@ export interface AcpSession {
   historyGeneration: number
   turns: Turn[]
   state: SessionState | null
+  /** The ack's seq: its state already covers items up to it, so a replay of them must not roll it back. */
+  stateSeq: number
   pending: SessionRequest[]
   live: boolean
   stream: StreamState
@@ -106,6 +108,7 @@ const emptySession: AcpSession = {
   historyGeneration: 0,
   turns: [],
   state: null,
+  stateSeq: 0,
   pending: [],
   live: false,
   stream: 'connecting',
@@ -117,10 +120,13 @@ function itemsOf(frames: SessionFrame[]): SessionItem[] {
   return frames.flatMap((frame) => (frame.item ? [frame.truncated ? { ...frame.item, truncated: true } : frame.item] : []))
 }
 
+const holds = (tasks: BackgroundTask[] | undefined) => tasks?.some((task) => task.holds) === true
+
 function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 'state' | 'pending'> {
   let state = session.state
   let pending = session.pending
   for (const item of items) {
+    if (item.seq <= session.stateSeq) continue
     switch (item.kind) {
       case 'request': {
         const request = item.request
@@ -132,13 +138,16 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
       case 'turn_start':
       case 'turn_end':
         if (state) {
-          state = {
-            ...state,
-            turn_in_flight: item.kind === 'turn_start',
-            background: item.kind === 'turn_start' ? item.autonomous === true : (item.background_tasks?.length ?? 0) > 0,
-          }
+          const start = item.kind === 'turn_start'
+          state = { ...state, turn_in_flight: start, background: start ? item.autonomous === true : holds(state.tasks) }
         }
         if (item.kind === 'turn_end') pending = []
+        break
+      case 'background':
+        if (state) {
+          const tasks = item.tasks ?? []
+          state = { ...state, tasks, background: state.turn_in_flight ? state.background : holds(tasks) || item.follow_up === true }
+        }
         break
       case 'mode_change':
         if (state) state = { ...state, mode: item.mode }
@@ -165,12 +174,14 @@ function patchSession(s: SessionsSlice, runID: string, patch: Partial<AcpSession
 }
 
 /**
- * The background tasks an Enhanced run waits on with no turn running, or null when it waits on none.
- * A cancelled or lost wait logs no item, so only a running run on a live stream has one.
+ * The live background tasks of an Enhanced run that waits on background work with no turn running,
+ * or null when it does not. A wait the run stalled in counts: Stop still ends it.
  */
-export function backgroundWait(run: Pick<RunRecord, 'status'>, session: AcpSession | undefined): string[] | null {
-  if (run.status !== 'running' || session?.stream !== 'live' || !session.state?.background || session.state.turn_in_flight) return null
-  return backgroundTasks(session.turns)
+export function backgroundWait(run: Pick<RunRecord, 'status' | 'reason'>, session: AcpSession | undefined): BackgroundTask[] | null {
+  const state = session?.stream === 'live' ? session.state : null
+  if (!state?.background || state.turn_in_flight) return null
+  const stalled = run.status === 'needs-attention' && run.reason?.startsWith(stalledPrefix) === true
+  return run.status === 'running' || stalled ? state.tasks ?? [] : null
 }
 
 export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
@@ -207,7 +218,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const base = restart
         ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
         : {}
-      return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, pending: ack.state?.pending ?? [] })
+      return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, stateSeq: ack.seq, pending: ack.state?.pending ?? [] })
     }),
   acpFrames: (runID, frames) =>
     set((s) => {
@@ -235,6 +246,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
             historyGeneration: session.historyGeneration + 1,
             olderLoading: false, olderError: undefined,
             pending: sameEpoch ? session.pending : [],
+            stateSeq: sameEpoch ? session.stateSeq : 0,
             epoch: frame.epoch ?? session.epoch + 1,
           }
           continue

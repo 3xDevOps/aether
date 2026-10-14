@@ -10,6 +10,7 @@ import {
   type NeedsYouCondition,
   type StateContext,
 } from '@/lib/needs-you'
+import type { BackgroundTask } from '@/lib/session-types'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 export type PresentationState = 'needs-you' | 'working' | 'paused' | 'done' | 'failed'
@@ -23,17 +24,21 @@ export interface RunPresentation {
   unread?: number
 }
 
-export function backgroundReason(tasks: string[]): string {
-  return tasks.length === 0 ? 'Working in background' : `Working in background: ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`
+// Mirrors acpBackgroundReason in internal/scheduler/acp_turn.go.
+const backgroundPrefix = 'working in background'
+
+export function backgroundReason(tasks: BackgroundTask[]): string {
+  const held = tasks.filter((task) => task.holds).length
+  return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-function workingReason(run: RunRecord, ctx: StateContext, background?: string[] | null): string {
+function workingReason(run: RunRecord, ctx: StateContext): string {
   if (run.status === 'queued') return 'Queued'
   if (run.status === 'provisioning') return 'Starting'
   const waiter = waitingOn(run, ctx)
   if (waiter !== undefined) return `Waiting for ${memberName(waiter, ctx)}`
   if (supervised(run, ctx) && run.status === 'needs-attention') return 'Waiting for the integrator'
-  if (background) return backgroundReason(background)
+  if (run.status === 'running' && run.reason?.startsWith(backgroundPrefix)) return plainReason(run.reason)
   if (run.activity) return `${run.activity.verb} ${run.activity.target}`.trimEnd()
   return run.status === 'needs-attention' ? 'Agent idle' : 'Agent working'
 }
@@ -82,6 +87,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
   [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
   [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
+  [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],
   [/^turn cancelled$/, () => 'Turn cancelled'],
   [/^turn interrupted$/, () => 'Turn interrupted'],
   [/^turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
@@ -100,7 +106,7 @@ export function plainReason(reason: string): string {
   return reason
 }
 
-export function presentRun(run: RunRecord, ctx: StateContext, background?: string[] | null): RunPresentation {
+export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const condition = needsYou(run, ctx)
   if (condition) return { state: 'needs-you', reason: condition.reason(run, ctx), needsYou: condition }
   if (isTerminal(run.status)) {
@@ -121,7 +127,7 @@ export function presentRun(run: RunRecord, ctx: StateContext, background?: strin
       reason: `Agent reported ${outcome}. Run remains open for follow-up.`,
     }
   }
-  return { state: 'working', reason: workingReason(run, ctx, background) }
+  return { state: 'working', reason: workingReason(run, ctx) }
 }
 
 export function groupOf(state: PresentationState): RunGroup {

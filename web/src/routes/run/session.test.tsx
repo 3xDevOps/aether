@@ -374,16 +374,27 @@ describe('the Enhanced session view', () => {
   const waitingItems = () => [
     item('turn_start', 1),
     say(1, 'user', 'start the build'),
-    item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1'] }),
+    item('background', 1, { tasks: [{ id: 'bg1', holds: true }] }),
+    item('turn_end', 1, { stop_reason: 'end_turn' }),
   ]
 
   it('shows a run waiting on a background task and stops the wait from the composer', async () => {
     open()
-    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true }) }, waitingItems())
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
     const log = await screen.findByRole('log', { name: 'Session' })
     expect(await within(log).findByText('Working in background: 1 task')).toBeDefined()
     expect(screen.getByText(/Stops waiting for background work/)).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Stop waiting for background work' }))
+    expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
+  it('offers Stop waiting for a wait the run stalled in, without the live row', async () => {
+    open({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' })
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('start the build')).toBeDefined()
+    expect(within(log).queryByText(/Working in background/)).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop waiting for background work' }))
     expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
   })
 

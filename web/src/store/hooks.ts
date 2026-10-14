@@ -6,7 +6,6 @@ import { presentRun, type PresentationState, type RunPresentation } from '@/lib/
 import type { GatewayCapabilities, Member, Run } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
-import { backgroundWait } from '@/store/sessions'
 import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
 import {
@@ -54,7 +53,7 @@ export function useNeedsYouByWorkspace(): Record<string, number> {
 export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
-    const shown = presentRun(run, stateContextOf(s, now), backgroundWait(run, s.acpSessions[run.id]))
+    const shown = presentRun(run, stateContextOf(s, now))
     return JSON.stringify([shown.state, shown.reason])
   })
   return useMemo(() => {

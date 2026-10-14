@@ -206,12 +206,13 @@ describe('board columns', () => {
   it('puts a running Enhanced run in Working and one asking a question in Needs you', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     seed([
-      run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running' }),
+      run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', reason: 'working in background: 2 tasks' }),
       run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', reason: 'needs input: Which database?' }),
     ])
     renderBoard()
 
     expect(column('Working').getByText('busy agent')).toBeDefined()
+    expect(column('Working').getByText('Working in background: 2 tasks')).toBeDefined()
     expect(column('Needs you').getByText('asking agent')).toBeDefined()
     expect(column('Needs you').getByText('Agent asks: Which database?')).toBeDefined()
   })

@@ -100,13 +100,13 @@ describe('run rows', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     useStore.setState({
       runs: Object.fromEntries([
-        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running' }),
+        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', reason: 'working in background: 2 tasks' }),
         run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', reason: 'needs input: Which database?' }),
       ].map((r) => [r.id, toRecord(r)])),
     })
     render(<AppShell />)
 
-    expect(runList().getByRole('button', { name: /^Working · busy agent/ })).toBeDefined()
+    expect(runList().getByRole('button', { name: /^Working · busy agent · Working in background: 2 tasks/ })).toBeDefined()
     expect(runList().getByRole('button', { name: /^Needs you · asking agent · Agent asks: Which database\?/ })).toBeDefined()
   })
 

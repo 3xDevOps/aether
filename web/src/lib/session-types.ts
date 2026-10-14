@@ -16,6 +16,7 @@ export type SessionItemKind =
   | 'notice'
   | 'turn_start'
   | 'turn_end'
+  | 'background'
   | 'reset'
   | 'unknown'
 
@@ -105,8 +106,17 @@ export interface SessionItem {
   stop_reason?: string
   autonomous?: boolean
   origin?: string
-  background_tasks?: string[]
+  tasks?: BackgroundTask[]
+  follow_up?: boolean
   raw?: unknown
+}
+
+/** A live Claude Code background task; `holds` marks one the run waits for. */
+export interface BackgroundTask {
+  id: string
+  type?: string
+  description?: string
+  holds?: boolean
 }
 
 /** After a reset the client drops what it holds. A truncated item was cut to
@@ -129,6 +139,7 @@ export interface SessionHistory {
 export interface SessionState {
   turn_in_flight: boolean
   background?: boolean
+  tasks?: BackgroundTask[]
   queued: number
   pending: SessionRequest[]
   last_activity: string

@@ -90,7 +90,7 @@ function enhancedRows(run: RunRecord, session: AcpSession | undefined): SessionR
   const rows = session.turns.flatMap(rowsOfTurn)
   const open = session.turns.at(-1)
   const live = session.live ? liveActivity(open) : null
-  const tasks = live ? null : backgroundWait(run, session)
+  const tasks = live || run.status !== 'running' ? null : backgroundWait(run, session)
   if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
   else if (tasks) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? session.state!.last_activity, label: backgroundReason(tasks), waiting: false })
   return rows

@@ -1,5 +1,5 @@
 import type { SessionItem } from '@/lib/session-types'
-import { appendItems, backgroundTasks, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { appendItems, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
 beforeEach(resetItems)
@@ -103,7 +103,7 @@ describe('session rows from the item log', () => {
 })
 
 describe('autonomous turns and background tasks', () => {
-  const prompt = [item('turn_start', 1), item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1'] })]
+  const prompt = [item('turn_start', 1), item('turn_end', 1, { stop_reason: 'end_turn' })]
 
   it('opens a turn for an autonomous turn_start, names its work and closes it on turn_end', () => {
     const turns = appendItems([], [...prompt, item('turn_start', 2, { autonomous: true })])
@@ -114,13 +114,6 @@ describe('autonomous turns and background tasks', () => {
     const ended = appendItems(working, [item('turn_end', 2, { autonomous: true, origin: 'task-notification', stop_reason: 'end_turn' })])
     expect(liveActivity(ended.at(-1))).toBeNull()
     expect(rowsOfTurn(ended.at(-1)!).at(-1)).toMatchObject({ kind: 'finished', text: 'Finished in 2s', tone: 'done' })
-  })
-
-  it('reads the tasks off the newest turn boundary', () => {
-    expect(backgroundTasks(appendItems([], prompt))).toEqual(['bg1'])
-    expect(backgroundTasks(appendItems([], [...prompt, item('turn_start', 2, { autonomous: true })]))).toEqual([])
-    expect(backgroundTasks(appendItems([], [item('usage', 1)]))).toEqual([])
-    expect(backgroundTasks([])).toEqual([])
   })
 
   it('words a cancelled turn as Cancelled and one cut off by a restart as Interrupted', () => {

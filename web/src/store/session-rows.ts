@@ -383,16 +383,6 @@ export function rowsOfTurn(turn: Turn): SessionRow[] {
   return rows
 }
 
-export function backgroundTasks(turns: Turn[]): string[] {
-  for (let t = turns.length - 1; t >= 0; t--) {
-    const items = turns[t]!.items
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i]!.kind === 'turn_start' || items[i]!.kind === 'turn_end') return items[i]!.background_tasks ?? []
-    }
-  }
-  return []
-}
-
 export interface LiveActivity {
   label: string
   waiting: boolean

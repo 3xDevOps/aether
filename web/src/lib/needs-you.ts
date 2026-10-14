@@ -237,7 +237,7 @@ const enhancedFailureLabels = {
   'enhanced turn failed: ': 'Turn failed',
 } as const
 export const enhancedReasonPrefixes = Object.keys(enhancedFailureLabels) as (keyof typeof enhancedFailureLabels)[]
-const stalledPrefix = 'stalled:'
+export const stalledPrefix = 'stalled:'
 // Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
 const usageLimitPrefix = 'Usage limit reached on '
 
