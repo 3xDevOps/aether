@@ -57,25 +57,19 @@ func requireSmokeImage(t *testing.T, name string) string {
 // already printed the refusal by then.
 func runSmoke(t *testing.T, image string, argv []string, env map[string]string) string {
 	t.Helper()
-	out, _ := smokeRun(t, image, argv, env, false)
-	return out
+	return smokeRun(t, image, argv, env, nil)
 }
 
-// runSmokeToExit reads argv's output to the end and returns it with the
-// process exit code. Every headless launch exits on its own, and only by
-// waiting for that is the code meaningful - stopping at quiescence would
-// report "still running" whenever an agent paused mid-answer for longer
-// than the quiet window.
-func runSmokeToExit(t *testing.T, image string, argv []string, env map[string]string) (string, int) {
+// runSmokeUntil reads argv's output until done reports it holds what the
+// caller needs, or the process exits, and the container is destroyed
+// either way. Stopping at quiescence instead would end the read whenever
+// an agent paused mid-answer for longer than the quiet window.
+func runSmokeUntil(t *testing.T, image string, argv []string, env map[string]string, done func(string) bool) string {
 	t.Helper()
-	return smokeRun(t, image, argv, env, true)
+	return smokeRun(t, image, argv, env, done)
 }
 
-// exitStillRunning is the code reported for a process that had not exited
-// when smokeRun stopped reading it.
-const exitStillRunning = -1
-
-func smokeRun(t *testing.T, image string, argv []string, env map[string]string, waitForExit bool) (string, int) {
+func smokeRun(t *testing.T, image string, argv []string, env map[string]string, done func(string) bool) string {
 	t.Helper()
 	d, err := runtime.NewDocker(runtime.WithLabels(map[string]string{"aether.test": t.Name()}))
 	if err != nil {
@@ -123,39 +117,28 @@ func smokeRun(t *testing.T, image string, argv []string, env map[string]string, 
 			}
 		}
 	}()
-	out, closed, err := collectOutput(ctx, chunks, waitForExit, 2*time.Minute, 2*time.Second)
+	out, err := collectOutput(ctx, chunks, done, 2*time.Minute, 2*time.Second)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v; output so far:\n%s", err, out)
 	}
-	if !closed {
-		return out, exitStillRunning
-	}
-	// The stream closed, so the process is gone and Wait returns its code
-	// without blocking.
-	status, waitErr := d.Wait(ctx, id)
-	if waitErr != nil {
-		t.Fatalf("Wait: %v", waitErr)
-	}
-	return out, status.Code
+	return out
 }
 
-// collectOutput reads chunks until the run gives an answer and reports
-// whether the stream closed, which is the caller's cue that the process
-// is gone and its exit code is there to be read. firstOutput bounds the
-// wait for anything at all; quietFor ends the read once output has
-// settled, and only when the caller is not waiting for an exit code.
-func collectOutput(ctx context.Context, chunks <-chan string, waitForExit bool, firstOutput, quietFor time.Duration) (string, bool, error) {
+// collectOutput reads chunks until the run gives an answer: with done set,
+// until done matches or the stream closes; without it, until output has
+// settled for quietFor. firstOutput bounds the wait for anything at all.
+func collectOutput(ctx context.Context, chunks <-chan string, done func(string) bool, firstOutput, quietFor time.Duration) (string, error) {
 	var b strings.Builder
 	first := time.After(firstOutput)
 	for {
 		var quiet <-chan time.Time
-		if b.Len() > 0 && !waitForExit {
+		if b.Len() > 0 && done == nil {
 			quiet = time.After(quietFor)
 		}
 		select {
 		case chunk, ok := <-chunks:
 			if !ok {
-				return b.String(), true, nil
+				return b.String(), nil
 			}
 			// The first-output deadline has done its job; left armed it
 			// would kill a headless run that printed and then kept working
@@ -166,15 +149,18 @@ func collectOutput(ctx context.Context, chunks <-chan string, waitForExit bool, 
 			if b.Len() < 32<<10 {
 				b.WriteString(chunk)
 			}
-			if b.Len() >= 32<<10 && !waitForExit {
-				return b.String(), false, nil
+			if done != nil && done(b.String()) {
+				return b.String(), nil
+			}
+			if b.Len() >= 32<<10 && done == nil {
+				return b.String(), nil
 			}
 		case <-quiet:
-			return b.String(), false, nil
+			return b.String(), nil
 		case <-first:
-			return b.String(), false, errors.New("no output before deadline")
+			return b.String(), errors.New("no output before deadline")
 		case <-ctx.Done():
-			return b.String(), false, errors.New("context deadline before output")
+			return b.String(), fmt.Errorf("run gave no answer: %w", ctx.Err())
 		}
 	}
 }
@@ -187,14 +173,13 @@ func TestCollectOutputClearsFirstDeadlineAfterOutput(t *testing.T) {
 	chunks := make(chan string, 1)
 	chunks <- "starting\n"
 	type result struct {
-		out    string
-		closed bool
-		err    error
+		out string
+		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, closed, err := collectOutput(t.Context(), chunks, true, 50*time.Millisecond, time.Second)
-		done <- result{out, closed, err}
+		out, err := collectOutput(t.Context(), chunks, func(string) bool { return false }, 50*time.Millisecond, time.Second)
+		done <- result{out, err}
 	}()
 
 	select {
@@ -205,8 +190,20 @@ func TestCollectOutputClearsFirstDeadlineAfterOutput(t *testing.T) {
 
 	close(chunks)
 	got := <-done
-	if got.err != nil || !got.closed || got.out != "starting\n" {
-		t.Fatalf("collector = %+v, want the chunk and a closed stream", got)
+	if got.err != nil || got.out != "starting\n" {
+		t.Fatalf("collector = %+v, want the chunk", got)
+	}
+}
+
+// opencode prints its proof and then works on against a hosted model that
+// can take longer than the test's deadline to answer.
+func TestCollectOutputStopsAtProofOnOpenStream(t *testing.T) {
+	chunks := make(chan string, 2)
+	chunks <- "\x1b[0m\r\n"
+	chunks <- "> build · big-pickle\r\n"
+	out, err := collectOutput(t.Context(), chunks, func(s string) bool { return strings.Contains(s, "> build") }, time.Second, time.Second)
+	if err != nil || !strings.Contains(out, "> build") {
+		t.Fatalf("collector = %q, %v; want the proof without waiting for the stream to close", out, err)
 	}
 }
 
@@ -229,27 +226,17 @@ var argvRejections = []string{
 	"requires --", "only works with --", "show help",
 }
 
-// noLoginProof is what a harness must show, with no credentials anywhere,
-// to prove it accepted the shipped argv and got as far as real work. A
-// refused command line shows none of it.
-type noLoginProof struct {
-	// output holds substrings, any one of which is that proof.
-	output []string
-	// cleanExit accepts a zero exit code as the same proof, for a harness
-	// that can finish the task with no login at all.
-	cleanExit bool
-}
-
-// Claude Code and codex must authenticate, so being turned away by the
-// provider is the proof: only a CLI that parsed its argv gets that far.
-// opencode needs no login of its own - it answers from a bundled provider -
-// so it proves the same thing by finishing, or, when that provider is
-// unreachable, by still printing the session header it prints only once the
-// command is accepted.
-var noLoginProofs = map[string]noLoginProof{
-	"claude":   {output: []string{"authentication_failed", "not logged in", "invalid api key"}},
-	"codex":    {output: []string{"401", "unauthorized"}},
-	"opencode": {output: []string{"> build"}, cleanExit: true},
+// noLoginProofs holds, per harness, output substrings any one of which
+// proves, with no credentials anywhere, that the CLI accepted the shipped
+// argv and got as far as real work. A refused command line shows none of
+// them. Claude Code and codex must authenticate, so being turned away by
+// the provider is the proof. opencode needs no login: it would run real
+// inference on its free hosted model, so the proof is the session header it
+// prints once the command is accepted and before that first model call.
+var noLoginProofs = map[string][]string{
+	"claude":   {"authentication_failed", "not logged in", "invalid api key"},
+	"codex":    {"401", "unauthorized"},
+	"opencode": {"> build"},
 }
 
 // assertArgvAccepted fails when the harness rejected its flags: every
@@ -357,13 +344,14 @@ func TestSmokeHeadlessNoLogin(t *testing.T) {
 			if !found {
 				t.Fatalf("Lookup(%q) missing", name)
 			}
-			want := noLoginProofs[name]
-			out, exit := runSmokeToExit(t, image, Argv(p.HeadlessArgs, smokeTask, nil), launchEnv(p))
+			proven := func(out string) bool {
+				lower := strings.ToLower(out)
+				return slices.ContainsFunc(noLoginProofs[name], func(m string) bool { return strings.Contains(lower, m) })
+			}
+			out := runSmokeUntil(t, image, Argv(p.HeadlessArgs, smokeTask, nil), launchEnv(p), proven)
 			assertArgvAccepted(t, name, "headless-no-login", out)
-			lower := strings.ToLower(out)
-			started := slices.ContainsFunc(want.output, func(m string) bool { return strings.Contains(lower, m) })
-			if !started && !(want.cleanExit && exit == 0) {
-				t.Fatalf("%s headless with no login never got past its own argument parsing (exit %d):\n%s", name, exit, out)
+			if !proven(out) {
+				t.Fatalf("%s headless with no login never got past its own argument parsing:\n%s", name, out)
 			}
 		})
 	}
