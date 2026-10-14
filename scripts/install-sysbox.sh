@@ -5,12 +5,14 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install-sysbox.sh | sudo sh
 #
-# The package registers the sysbox-runc runtime with Docker. When
-# /etc/docker/daemon.json lacks "bip" or "default-address-pools" it adds them
-# and restarts Docker, which stops every running container unless
-# "live-restore" is on. This script refuses to run into that while containers
-# are running. It then checks that bind mounts are ID-mapped, which Sysbox
-# needs and which takes Linux 5.19 or newer, or the shiftfs module.
+# The package registers the sysbox-runc runtime with Docker. Its installer
+# refuses to run while any container exists, stopped ones included, if it must
+# restart Docker, and it must when /etc/docker/daemon.json lacks "bip" or
+# "default-address-pools". This script adds those two keys itself, with the
+# values Sysbox would choose, so the installer only reloads Docker's runtimes.
+# Docker applies the new keys at its next restart; running containers keep
+# running. It then checks that bind mounts are ID-mapped, which Sysbox needs
+# and which takes Linux 5.19 or newer, or the shiftfs module.
 set -eu
 
 VERSION="0.7.1"
@@ -32,7 +34,7 @@ say() {
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo sh install-sysbox.sh"
 
-for tool in dpkg apt-get docker uname; do
+for tool in dpkg apt-get docker uname ip; do
 	command -v "$tool" >/dev/null 2>&1 || die "${tool} not found; this script needs an Ubuntu or Debian host with Docker installed"
 done
 
@@ -85,24 +87,41 @@ apt_install() {
 
 command -v jq >/dev/null 2>&1 || apt_install jq
 
-# The package adds "bip" and "default-address-pools" when either is missing,
-# and a daemon.json edit of those needs a Docker restart. Only the running
-# daemon's live-restore setting keeps containers up through it.
-restart_safe=no
-live_restore="$(docker info --format '{{.LiveRestoreEnabled}}' 2>&1)" || die "docker info failed: ${live_restore}"
-if [ "$live_restore" = true ]; then
-	restart_safe=yes
-elif [ -s "$DAEMON_JSON" ] && jq -e '(.bip // "") != "" and ((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null; then
-	restart_safe=yes
-fi
-running_ids="$(docker ps -q 2>&1)" || die "docker ps failed: ${running_ids}"
-running="$(printf '%s' "$running_ids" | grep -c . || true)"
-if [ "$restart_safe" = no ] && [ "$running" -gt 0 ]; then
-	die "${running} containers are running and the Sysbox package may restart Docker, which stops them. Stop them first (docker stop \$(docker ps -q)), or add \"live-restore\": true to ${DAEMON_JSON} and run: systemctl reload docker, then check that docker info reports Live Restore Enabled: true. Then re-run this script."
-fi
-
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+tmp_json="$tmp/daemon.json"
+daemon_json_changed=
+BIP="172.20.0.1/16"
+POOL_BASE="172.25.0.0/16"
+
+# Mirrors the package's own check: an address overlaps a local subnet unless
+# the kernel routes it through the default gateway.
+overlaps_local_subnet() {
+	! ip route get "$1" | grep -q "via $(ip route | awk '/default/ {print $3}')"
+}
+
+mkdir -p "$(dirname "$DAEMON_JSON")"
+[ -s "$DAEMON_JSON" ] || echo '{}' >"$DAEMON_JSON"
+
+if ! jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null; then
+	if overlaps_local_subnet "${BIP%/*}" && ! ip -4 address show dev docker0 2>/dev/null | grep -q "$BIP"; then
+		die "cannot add \"bip\": ${BIP} overlaps a subnet on this host. Set \"bip\" in ${DAEMON_JSON} to a free range, then re-run this script."
+	fi
+	jq --arg bip "$BIP" --indent 4 '. + {"bip": $bip}' "$DAEMON_JSON" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
+	cat "$tmp_json" >"$DAEMON_JSON"
+	say "added \"bip\": \"${BIP}\" to ${DAEMON_JSON}"
+	daemon_json_changed=yes
+fi
+if ! jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null; then
+	if overlaps_local_subnet "${POOL_BASE%/*}"; then
+		die "cannot add \"default-address-pools\": ${POOL_BASE} overlaps a subnet on this host. Set \"default-address-pools\" in ${DAEMON_JSON} to a free range, then re-run this script."
+	fi
+	jq --arg base "$POOL_BASE" --indent 4 '. + {"default-address-pools": [{"base": $base, "size": 24}]}' "$DAEMON_JSON" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
+	cat "$tmp_json" >"$DAEMON_JSON"
+	say "added \"default-address-pools\": [{\"base\": \"${POOL_BASE}\", \"size\": 24}] to ${DAEMON_JSON}"
+	daemon_json_changed=yes
+fi
+[ -z "$daemon_json_changed" ] || say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
 
 say "downloading ${deb}"
 curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"

@@ -292,13 +292,17 @@ sudo systemctl restart aether-server
 
 The script downloads Sysbox CE 0.7.1, verifies its pinned SHA-256, installs
 the package and checks that `docker info` lists `sysbox-runc`. It exits 0
-without changes when that version is already installed. Sysbox's installer
-may restart Docker, which stops every running container, so the script
-refuses with the number of running containers unless the running daemon
-reports `docker info --format '{{.LiveRestoreEnabled}}'` as `true`, or
-`/etc/docker/daemon.json` sets both `bip` and `default-address-pools`. Stop
-the runs, or set `"live-restore": true` in `daemon.json` and run
-`sudo systemctl reload docker`, then run it again.
+without changes when that version is already installed.
+
+Sysbox's installer refuses to run while any container exists, stopped ones
+included, if it must restart Docker, and it must when `/etc/docker/daemon.json`
+lacks `bip` or `default-address-pools`. The script therefore adds a missing
+or empty key itself, keeping the other keys: `"bip": "172.20.0.1/16"` and
+`"default-address-pools": [{"base": "172.25.0.0/16", "size": 24}]`. It creates
+the file as `{}` if it is missing. If a range overlaps a subnet on the host,
+the script stops without changing the file; set that key to a free range
+yourself and run it again. The script does not restart Docker and running
+containers keep running; Docker applies the new keys at its next restart.
 
 The script ends by running `docker run --runtime sysbox-runc -u 1000:1000`
 against a host directory owned by 1000:1000. It fails with "bind mounts are

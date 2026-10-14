@@ -1,6 +1,6 @@
 #!/bin/sh
 # Exercises scripts/install-sysbox.sh with stubbed id, dpkg, dpkg-query,
-# uname, modinfo, docker, apt-get and curl. The real package is never downloaded, so the
+# uname, modinfo, ip, docker, apt-get and curl. The real package is never downloaded, so the
 # checksum failure stands in for the install path: it must stop before
 # apt-get runs.
 set -eu
@@ -24,10 +24,13 @@ stub dpkg 'echo "${FAKE_ARCH:-amd64}"'
 stub dpkg-query 'printf "%s" "${FAKE_INSTALLED:-}"; [ -n "${FAKE_INSTALLED:-}" ]'
 stub uname 'echo "${FAKE_KERNEL:-6.8.0-45-generic}"'
 stub modinfo '[ -n "${FAKE_SHIFTFS:-}" ]'
+stub ip 'case "$1 $2" in
+"route get") case "$3" in "${FAKE_OVERLAP:-none}"*) echo "local $3 dev br0" ;; *) echo "$3 via 10.0.0.1 dev eth0" ;; esac ;;
+"-4 address") ;;
+"route ") echo "default via 10.0.0.1 dev eth0" ;;
+esac'
 stub docker 'case "$1" in
-info) case "$*" in *LiveRestoreEnabled*) echo "${FAKE_LIVE_RESTORE:-false}" ;; *) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;; esac ;;
-ps) [ -z "${FAKE_PS_FAIL:-}" ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
-	i=0; while [ "$i" -lt "${FAKE_RUNNING:-0}" ]; do echo "c$i"; i=$((i + 1)); done ;;
+info) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;;
 esac'
 stub apt-get 'echo "apt-get $*" >>"$CMD_LOG"'
 stub curl 'out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; echo not-a-deb >"$out"'
@@ -35,12 +38,13 @@ stub jq 'exec "$REAL_JQ" "$@"'
 REAL_JQ=$(command -v jq) || { echo "install-sysbox-test: jq is required" >&2; exit 1; }
 export REAL_JQ CMD_LOG="$log"
 
-printf '{}\n' >"$tmp/empty.json"
-printf '{"live-restore": true}\n' >"$tmp/live.json"
+daemon_json="$tmp/daemon.json"
+daemon_content='{}'
 
 run() {
 	: >"$log"
-	if env PATH="$bin:$PATH" AETHER_SYSBOX_DAEMON_JSON="$tmp/empty.json" "$@" sh "$script" >"$tmp/out" 2>&1; then
+	printf '%s\n' "$daemon_content" >"$daemon_json"
+	if env PATH="$bin:$PATH" AETHER_SYSBOX_DAEMON_JSON="$daemon_json" "$@" sh "$script" >"$tmp/out" 2>&1; then
 		status=0
 	else
 		status=$?
@@ -77,20 +81,40 @@ expect 1 "checksum mismatch"
 run FAKE_KERNEL=5.19.2
 expect 1 "checksum mismatch"
 
-run FAKE_PS_FAIL=1
-expect 1 "docker ps failed: Cannot connect to the Docker daemon"
+daemon_content='{"log-level": "warn", "bip": "10.9.0.1/24"}'
+run
+expect 1 "checksum mismatch"
+expect 1 "added \"default-address-pools\""
+want='{"log-level":"warn","bip":"10.9.0.1/24","default-address-pools":[{"base":"172.25.0.0/16","size":24}]}'
+[ "$(jq -c . "$daemon_json")" = "$want" ] || { echo "install-sysbox-test: daemon.json is $(jq -c . "$daemon_json"), want $want" >&2; exit 1; }
+expect 1 "running containers keep running"
 
-run FAKE_RUNNING=3
-expect 1 "3 containers are running"
-[ ! -s "$log" ] || { echo "install-sysbox-test: apt-get ran despite running containers" >&2; exit 1; }
+daemon_content='{"bip": "10.9.0.1/24", "default-address-pools": [{"base": "10.10.0.0/16", "size": 24}]}'
+run
+expect 1 "checksum mismatch"
+[ "$(jq -c . "$daemon_json")" = "$(printf '%s' "$daemon_content" | jq -c .)" ] || { echo "install-sysbox-test: existing keys were rewritten" >&2; exit 1; }
 
-run FAKE_RUNNING=3 AETHER_SYSBOX_DAEMON_JSON="$tmp/live.json"
-expect 1 "3 containers are running"
+daemon_content='{}'
+run
+expect 1 "added \"bip\": \"172.20.0.1/16\""
+[ "$(jq -r '.bip, .["default-address-pools"][0].base' "$daemon_json" | tr '\n' ' ')" = "172.20.0.1/16 172.25.0.0/16 " ] || { echo "install-sysbox-test: empty daemon.json not filled in" >&2; exit 1; }
 
-run FAKE_RUNNING=3 FAKE_LIVE_RESTORE=true
-expect 1 "checksum mismatch for sysbox-ce_0.7.1.linux_amd64.deb"
+rm -f "$daemon_json"
+mkdir -p "$tmp/etc"
+run AETHER_SYSBOX_DAEMON_JSON="$tmp/etc/new.json"
+expect 1 "checksum mismatch"
+[ -s "$tmp/etc/new.json" ] || { echo "install-sysbox-test: missing daemon.json not created" >&2; exit 1; }
 
-run FAKE_ARCH=arm64 FAKE_RUNNING=0
+run FAKE_OVERLAP=172.20.
+expect 1 "cannot add \"bip\": 172.20.0.1/16 overlaps a subnet on this host"
+[ "$(jq -c . "$daemon_json")" = '{}' ] || { echo "install-sysbox-test: daemon.json changed despite overlap" >&2; exit 1; }
+[ ! -s "$log" ] || { echo "install-sysbox-test: apt-get ran despite overlap" >&2; exit 1; }
+
+run FAKE_OVERLAP=172.25.
+expect 1 "cannot add \"default-address-pools\": 172.25.0.0/16 overlaps"
+
+daemon_content='{}'
+run FAKE_ARCH=arm64
 expect 1 "checksum mismatch for sysbox-ce_0.7.1.linux_arm64.deb"
 [ ! -s "$log" ] || { echo "install-sysbox-test: apt-get ran after a checksum mismatch" >&2; exit 1; }
 
