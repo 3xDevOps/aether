@@ -129,8 +129,13 @@ export async function hydrate(
         // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
         // A legacy remote monitor does not serve the endpoint; null keeps the
-        // client on its built-in assumptions.
-        client.capabilities().catch(() => null),
+        // client on its built-in assumptions. A fetch that got no answer
+        // (fetch's TypeError) says nothing about the gateway, so it fails
+        // hydration and is retried instead of hiding every newer feature.
+        client.capabilities().catch((err: unknown) => {
+          if (err instanceof TypeError) throw err
+          return null
+        }),
       ])
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin

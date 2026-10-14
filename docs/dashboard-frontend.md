@@ -714,8 +714,12 @@ is the only thing that changes it. `setWorkspaces` keeps a valid selection;
 an unset selection or a workspace that has been deleted falls back to the
 first by ID, or clears the selection when none remain. An open deleted
 workspace route moves to the replacement workspace or **Manage workspaces**;
-an open run in a deleted workspace returns to the board. The capabilities
-fetch may fail without failing hydration; a legacy gateway then holds `null`.
+an open run in a deleted workspace returns to the board. A gateway that
+answers the capabilities fetch with anything but the descriptor is a legacy
+gateway: hydration succeeds and the store holds `null`. A fetch that gets no
+answer at all, such as Chromium's `net::ERR_NETWORK_CHANGED` after the host
+gains a network interface, fails hydration and retries, keeping the
+capabilities already known.
 The snapshot also seeds the board's paused map from each run's wire `paused`
 field, skipping runs that do not carry it.
 
