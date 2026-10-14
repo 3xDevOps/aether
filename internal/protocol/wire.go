@@ -754,7 +754,6 @@ type AgentModel struct {
 	Description string `json:"description,omitempty"`
 }
 
-// Model discovery sources.
 const (
 	ModelSourceAgent    = "agent"
 	ModelSourceCache    = "cache"

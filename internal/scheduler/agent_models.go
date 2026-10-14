@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -171,7 +171,7 @@ func (s *Scheduler) readCodexModelsCache(account domain.MemberID) (modelList, st
 		return modelList{}, "", nil
 	}
 	data, err := s.cfg.Homes.HomeDownload(account, codexModelsCache)
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, memberhome.ErrConfigNotFound) {
 		return modelList{}, "", nil
 	}
 	if err != nil {
@@ -189,9 +189,6 @@ func (s *Scheduler) readCodexModelsCache(account domain.MemberID) (modelList, st
 	for _, m := range file.Models {
 		if m.Visibility != "list" {
 			continue
-		}
-		if list.defaultLabel == "" {
-			list.defaultLabel = m.DisplayName
 		}
 		list.models = append(list.models, protocol.AgentModel{ID: m.Slug, Name: m.DisplayName, Description: m.Description})
 	}

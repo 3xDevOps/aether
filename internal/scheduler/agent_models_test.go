@@ -121,7 +121,7 @@ func TestAgentModelsCodexFallsBackToItsCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := modelIDs(got)
-	if got.Source != protocol.ModelSourceCache || got.FetchedAt != "2026-10-13T23:02:00Z" || got.DefaultLabel != "GPT-6.1-Sol" ||
+	if got.Source != protocol.ModelSourceCache || got.FetchedAt != "2026-10-13T23:02:00Z" || got.DefaultLabel != "" ||
 		ids[0] != "gpt-6.1-sol" || len(ids) != 8 || slices.Contains(ids, "codex-auto-review") || !strings.Contains(got.Error, "sh: 1: codex: not found") {
 		t.Fatalf("with the cache file: %+v", got)
 	}
