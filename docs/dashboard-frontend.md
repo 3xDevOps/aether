@@ -1995,7 +1995,8 @@ and its report (the completed
 call's text content). Until a known subagent's launch call is loaded it pages
 `run.acp.history`, at most five pages, then offers **Load earlier history**;
 an id the loaded history does not name pages only on that button. A failed
-page shows the server's error with **Retry**. Changed files list in the
+page, or a failed read of the whole launch item, shows the server's error
+with **Retry**. Changed files list in the
 transcript of the agent that made them, and the main turn that launched it
 lists them in its changed-files row, each path once.
 
