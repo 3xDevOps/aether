@@ -102,7 +102,7 @@ test('an Enhanced run holding background work stays working, asks while it waits
   const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
   const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText(/^Finished/)).toBeVisible({ timeout: 60_000 })
 
   await box.fill('hold in background')
   await box.press('Enter')
