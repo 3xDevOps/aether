@@ -1942,8 +1942,9 @@ an empty composer during a turn) or **Resume** (a paused run). `Enter` does
 what the pill says and nothing without text or images, `Shift+Enter` adds a
 line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
 plain key, which the shortcut table stands down for inside a field, so the
-textarea answers it itself through `isPress`; a key still composing in an
-input method never sends. The shared upload state in
+textarea answers it itself through `isPress`; the binding stays registered so
+the shortcuts reference lists it. A key still composing in an input method
+never sends. The shared upload state in
 `composer-images.tsx` accepts file selection and native file paste, enforces
 the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
 `terminal.image` and every other file through `terminal.file`. File-backed

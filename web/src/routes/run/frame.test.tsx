@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { Run } from '@/lib/types'
+import { ShortcutsDialog } from '@/components/shortcuts'
 import { openRunLink } from '@/routes/browser/open'
 import { openInFiles } from '@/routes/files/open'
 import { lookupRoute } from '@/routes/registry'
@@ -801,12 +802,24 @@ describe('the session composer', () => {
     await userEvent.upload(screen.getByLabelText('Choose files to attach'), tooMany)
     expect(screen.getByRole('alert').textContent).toContain('Attach at most 8 files.')
     await userEvent.type(box, 'run the tests')
+    const posts = vi.mocked(api.runRoomPost).mock.calls.length
     fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'steer_request', body: 'run the tests', control_generation: 3,
     })))
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
+    expect(vi.mocked(api.runRoomPost).mock.calls.length).toBe(posts + 1)
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('lists Enter as Send in the shortcuts reference while the composer has focus', async () => {
+    open({}, 'session')
+    attached(true)
+    render(<ShortcutsDialog />)
+    act(() => screen.getByRole('textbox', { name: 'Message the agent' }).focus())
+    act(() => useStore.getState().setShortcutsOpen(true))
+    const reference = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })
+    expect(within(reference).getByText('Send the message, or steer the running turn')).toBeDefined()
   })
 
   it('focuses the composer when the route asks for it', async () => {

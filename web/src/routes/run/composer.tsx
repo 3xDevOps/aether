@@ -117,11 +117,19 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   useEffect(() => {
     if (autoFocus) textarea.current?.focus()
   }, [autoFocus, textarea])
-  useKeybindings('composer', focused && !coarse && onQueue ? {
-    'composer-queue': (event) => {
+  // The table stands plain keys down inside a field, so the textarea answers
+  // Enter itself; this registration keeps Send listed in the shortcuts reference.
+  useKeybindings('composer', focused && !coarse ? {
+    'composer-send': (event) => {
       event.preventDefault()
-      onQueue()
+      onSend()
     },
+    ...(onQueue ? {
+      'composer-queue': (event: KeyboardEvent) => {
+        event.preventDefault()
+        onQueue()
+      },
+    } : {}),
   } : {})
   return (
     <div className="relative">
