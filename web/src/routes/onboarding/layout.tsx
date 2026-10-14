@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
+import { useAssistantAvailable } from '@/components/assistant/button'
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
 
 /** Sticky because a step can be taller than the window, and Back must stay in reach. */
 export const actionRow =
@@ -23,7 +23,7 @@ export function Step({
   actions?: ReactNode
   children?: ReactNode
 }) {
-  const assistant = useCapability().hasMethod('assistant.status')
+  const assistant = useAssistantAvailable()
   return (
     <section aria-label={label} className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-col gap-1">

@@ -94,7 +94,7 @@ async function openPanel() {
 }
 
 describe('opening the assistant', () => {
-  it('opens from the top bar and closes from its header, returning focus to the button', async () => {
+  it('opens from the New run row and closes from its header, returning focus to the button', async () => {
     render(<AppShell />)
     const button = screen.getByRole('button', { name: 'Assistant' })
     expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -111,6 +111,23 @@ describe('opening the assistant', () => {
     await waitFor(() => expect(document.activeElement).toBe(button))
   })
 
+  it('puts the button beside New run in the sidebar, and in the top bar only when the sidebar is hidden', async () => {
+    render(<AppShell />)
+    const sidebar = within(screen.getByRole('navigation', { name: 'Aether' }))
+    const assistant = sidebar.getByRole('button', { name: 'Assistant' })
+    expect(assistant.parentElement?.parentElement).toBe(sidebar.getByRole('button', { name: /New run/ }).parentElement)
+    expect(assistant.parentElement?.parentElement).not.toBe(sidebar.getByRole('button', { name: 'Search' }).parentElement)
+    const header = screen.getAllByRole('banner')[0]!
+    expect(within(header).queryByRole('button', { name: 'Assistant' })).toBeNull()
+
+    act(() => useStore.getState().toggleSidebar())
+    expect(screen.queryByRole('navigation', { name: 'Aether' })).toBeNull()
+    const button = within(header).getByRole('button', { name: 'Assistant' })
+    await userEvent.click(button)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getAllByRole('button', { name: 'Assistant' })).toHaveLength(1)
+  })
+
   it('opens from the palette command Ask Aether', async () => {
     render(<AppShell />)
     act(() => useStore.getState().togglePalette(true))
@@ -123,6 +140,21 @@ describe('opening the assistant', () => {
     render(<AppShell />)
     await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
     expect(await panel()).toBeDefined()
+  })
+
+  it('is absent for a viewer, who cannot launch, on every surface', async () => {
+    useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } }, members: { [alice.id]: { ...alice, role: 'viewer' } } })
+    render(<AppShell />)
+    expect(screen.queryByRole('button', { name: 'Assistant' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Ask Aether' })).toBeNull()
+    act(() => useStore.getState().toggleSidebar())
+    expect(screen.queryByRole('button', { name: 'Assistant' })).toBeNull()
+    act(() => useStore.getState().togglePalette(true))
+    await screen.findByRole('dialog')
+    expect(screen.queryByRole('option', { name: /Ask Aether/ })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
   })
 
   it('is absent from a server that does not serve assistant.status', async () => {

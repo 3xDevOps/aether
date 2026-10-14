@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { AssistantButton } from '@/components/assistant/button'
 import { PanelLeft, Plus, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
 import { SidebarFooter, UpdateNotice } from '@/components/shell/sidebar-footer'
@@ -239,7 +240,7 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
         </Button>
       </div>
       {canLaunch({ cap, role }) && (
-        <div className="shrink-0 px-2 pb-1">
+        <div className="flex shrink-0 items-center gap-1 px-2 pb-1">
           <Button
             hint={blocked ?? `New run · ${shortcutLabel('launch')}`}
             aria-disabled={blocked ? true : undefined}
@@ -248,11 +249,12 @@ function SidebarContent({ onHide }: { onHide: () => void }) {
               setDrawerOpen(false)
               openDialog('launch')
             }}
-            className="w-full"
+            className="min-w-0 flex-1"
           >
             <Plus />
             New run
           </Button>
+          {!mobile && <AssistantButton variant="secondary" />}
         </div>
       )}
       <SidebarRuns />

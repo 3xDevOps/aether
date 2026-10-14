@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Ellipsis, PanelLeft, Plus, Search, Sparkles } from '@/components/icons'
+import { Ellipsis, PanelLeft, Plus, Search } from '@/components/icons'
 import { focusView } from '@/components/shell/center-view'
 import { ConnectionLine } from '@/components/shell/connection'
 import { desktopBridge, WindowControls } from '@/components/shell/window-bar'
@@ -7,14 +7,12 @@ import { Button } from '@/components/ui/button'
 import { ListRow } from '@/components/ui/list-row'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { useIsMobile } from '@/lib/breakpoints'
-import { assistantTriggerID } from '@/components/assistant/panel'
+import { AssistantButton } from '@/components/assistant/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
-import { shortcutLabel } from '@/lib/keybindings'
 import { runLabel } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
-import { assistantWaiting } from '@/store/assistant'
 import { useCapability, useNeedsYouCount, useSelfRole } from '@/store/hooks'
 
 const titles: Record<string, string> = {
@@ -25,6 +23,7 @@ const titles: Record<string, string> = {
 export function TopBar({ navigation = true }: { navigation?: boolean }) {
   const desktop = desktopBridge()
   const mobile = useIsMobile()
+  const collapsed = useStore((s) => s.sidebarCollapsed)
   const header = useRef<HTMLElement>(null)
   useLayoutEffect(() => {
     const element = header.current
@@ -52,41 +51,12 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
           <span className="text-wordmark">aether</span>
         </div>
         {navigation && <HeaderNavigation />}
-        {navigation && !mobile && <AssistantButton />}
+        {navigation && !mobile && collapsed && <AssistantButton />}
         <WindowControls />
       </div>
       {navigation && mobile && <PhoneToolbar />}
     </header>
   )
-}
-
-function AssistantButton() {
-  const supported = useCapability().hasMethod('assistant.status')
-  const open = useStore((s) => s.assistantOpen)
-  const setOpen = useStore((s) => s.setAssistantOpen)
-  const waiting = useStore(assistantWaiting)
-  if (!supported) return null
-  return (
-    <span className="relative shrink-0">
-    <Button
-      id={assistantTriggerID}
-      variant="ghost"
-      size="icon"
-      label={assistantLabel(waiting)}
-      hint={`Assistant (${shortcutLabel('assistant')})`}
-      aria-expanded={open}
-      aria-controls="assistant"
-      onClick={() => setOpen(!open)}
-    >
-      <Sparkles />
-    </Button>
-    {waiting > 0 && <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />}
-    </span>
-  )
-}
-
-function assistantLabel(waiting: number): string {
-  return waiting > 0 ? `Assistant, ${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting` : 'Assistant'
 }
 
 function HeaderNavigation() {
@@ -216,10 +186,6 @@ function PhoneToolbar() {
   const togglePalette = useStore((s) => s.togglePalette)
   const openDialog = useStore((s) => s.openPaletteDialog)
   const needsYou = useNeedsYouCount()
-  const assistant = cap.hasMethod('assistant.status')
-  const setAssistantOpen = useStore((s) => s.setAssistantOpen)
-  const waiting = useStore(assistantWaiting)
-  const assistantOpen = useStore((s) => s.assistantOpen)
   const iconLaunch = useStore((s) => s.headerPrimaries > 0 || s.route.name === 'run')
   const title = route.name === 'run'
     ? 'Run'
@@ -250,18 +216,7 @@ function PhoneToolbar() {
         <Button variant="ghost" size="icon" label="Search" onClick={() => togglePalette(true)}>
           <Search />
         </Button>
-        {assistant && (
-          <span className="relative shrink-0">
-            <Button variant="ghost" size="icon" label={assistantLabel(waiting)}
-              aria-expanded={assistantOpen}
-              aria-controls="assistant"
-              onClick={() => setAssistantOpen(true)}
-            >
-              <Sparkles />
-            </Button>
-            {waiting > 0 && <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />}
-          </span>
-        )}
+        <AssistantButton />
         {canLaunch({ cap, role }) && (iconLaunch ? (
           <Button variant="ghost" size="icon" label="New run" hint={blocked} aria-disabled={blocked ? true : undefined} onClick={() => !blocked && openDialog('launch')}>
             <Plus />

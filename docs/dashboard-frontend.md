@@ -501,12 +501,13 @@ member's own environment; the server side is
 [the assistant plan](plans/2026-10-14-assistant.md). `AssistantPanel`
 (`components/assistant/panel.tsx`) is mounted by `AppShell` as a flex sibling
 after `main`, so it is available on every route, onboarding included. It
-renders nothing unless the server lists `assistant.status`.
+renders nothing unless the server lists `assistant.status` and the member can
+launch runs (`useAssistantAvailable`); the same check gates every entry point.
 
 - **Desktop:** an `aside` named "Assistant", 400px by default and resizable
   from 320px to 640px by a `separator` on its left edge (same keys as the
   sidebar's, mirrored: Left grows). **Close assistant** returns focus to the
-  top bar button. The saved width is a preference: the rendered width is capped
+  Assistant button. The saved width is a preference: the rendered width is capped
   to what the window leaves after the sidebar and 400px of `main`, and below
   320px of room the sheet is used instead.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
@@ -540,7 +541,7 @@ only while the state is `running` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
 whole confirmation set, so the UI makes no further status calls. A truncated
 item in the transcript is read with `assistant.item`. Each pending
-confirmation or prompt puts a dot on the top bar button, named "Assistant, N
+confirmation or prompt puts a dot on the Assistant button, named "Assistant, N
 requests waiting". A confirmation card lists its params as labelled rows
 (`workspace_id` reads "Workspace"; task and message text stay whole), and its
 buttons stay disabled once answered until a status frame removes the card. Only
@@ -548,8 +549,11 @@ A prompt being sent and its idempotency key live in the slice next to the
 draft, so reopening the panel retries under the same key; a changed draft, a
 success or a new conversation clears them. `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
 
-Entry points: the top bar's **Assistant** button (row 1 on desktop, the phone
-toolbar under 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
+Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
+component mounted in one place at a time: the sidebar's **New run** row (a secondary
+icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
+the phone toolbar under 768px; keeping it out of the top bar's row keeps every
+header destination visible at 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
 

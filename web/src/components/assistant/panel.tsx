@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
+import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
@@ -22,11 +23,8 @@ import { splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
 import { requestTitle } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
 import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
-
-export const assistantTriggerID = 'assistant-trigger'
 
 const stateWord: Record<AssistantState, string> = {
   setup: 'Needs setup',
@@ -254,7 +252,6 @@ function DesktopAside({ children, room }: { children: React.ReactNode; room: num
 }
 
 export function AssistantPanel() {
-  const cap = useCapability()
   const phone = useIsMobile()
   const room = useRoom()
   // Too narrow for the sidebar, a usable main and the smallest panel: the sheet takes over.
@@ -265,7 +262,7 @@ export function AssistantPanel() {
   const identity = useStore((s) => s.identityKey)
   const state = useStore((s) => s.assistantStatus?.state)
   const waiting = useStore(assistantWaiting) > 0
-  const supported = cap.hasMethod('assistant.status')
+  const supported = useAssistantAvailable()
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
   const hasSession = supported && state !== undefined && state !== 'setup' && state !== 'needs_restart'

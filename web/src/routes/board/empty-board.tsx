@@ -25,7 +25,7 @@ export function EmptyBoard({ agents, hiddenByMine }: { agents: AgentInfo[] | nul
   const openDialog = useStore((s) => s.openPaletteDialog)
   const mobile = useIsMobile()
   const base = useBaseCheck(workspace?.id)
-  const ask = caps.hasMethod('assistant.status') && (
+  const ask = caps.hasMethod('assistant.status') && canLaunch({ cap: caps, role }) && (
     <Button variant="secondary" onClick={() => useStore.getState().setAssistantOpen(true)}>
       <Sparkles />
       Ask Aether

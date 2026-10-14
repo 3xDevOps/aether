@@ -518,7 +518,7 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.navigate('overview'),
     },
   ]
-  if (ctx.cap.hasMethod('assistant.status')) {
+  if (ctx.cap.hasMethod('assistant.status') && canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'assistant',
       label: 'Ask Aether',

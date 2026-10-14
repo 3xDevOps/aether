@@ -18,7 +18,7 @@ as soon as one agent is set up. The server writes its instructions to
 
 Every entry point is offered only when the server supports the assistant.
 
-- The **Assistant** button in the top bar. A dot on it means an action waits
+- The **Assistant** button in the sidebar beside **New run**, or in the top bar while the sidebar is hidden, or in the phone toolbar. Every entry point is hidden from members who cannot launch runs, because the assistant needs that capability. A dot on it means an action waits
   for your approval.
 - The command palette entry **Ask Aether**.
 - `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel. It is
