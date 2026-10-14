@@ -191,7 +191,7 @@ export function indexItems(index: AgentIndex, items: SessionItem[], older = fals
         if (agent.launchSeq === undefined || item.seq < agent.launchSeq) {
           if (agent.launchSeq !== undefined) unsorted.add(agent.parentID)
           agent.launchSeq = item.seq
-          agent.opened = !settles(call)
+          agent.opened = !callSettled(call)
           agent.startedAt = agent.opened ? item.time : undefined
           agent.turn = item.turn
           agent.turnEndedAt = endedTurns.get(item.turn)?.time
@@ -219,6 +219,11 @@ export function indexItems(index: AgentIndex, items: SessionItem[], older = fals
     if (call?.diffs?.length && (!older || !index.agents[owner]?.edits?.[call.id])) {
       const agent = edit(owner)
       agent.edits = { ...agent.edits, [call.id]: editCounts(call) }
+    } else if (call && !older && !item.truncated && agents[owner]?.edits?.[call.id]) {
+      const agent = edit(owner)
+      const edits = { ...agent.edits }
+      delete edits[call.id]
+      agent.edits = edits
     }
   }
 
@@ -308,8 +313,12 @@ function editCounts(call: SessionToolCall): ChangedFile[] {
   return (call.diffs ?? []).map((diff) => ({ path: diff.path, ...patchCounts(diff.patch) }))
 }
 
+function callSettled(call: SessionToolCall): boolean {
+  return call.status === 'completed' || call.status === 'failed'
+}
+
 function settles(call: SessionToolCall): boolean {
-  return call.task ? call.task.status !== 'running' : call.status === 'completed' || call.status === 'failed'
+  return call.task ? call.task.status !== 'running' : callSettled(call)
 }
 
 const taskStates: Record<NonNullable<SessionToolCall['task']>['status'], AgentState> = {

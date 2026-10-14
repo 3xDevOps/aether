@@ -268,6 +268,24 @@ describe('indexing subagents', () => {
     expect(after.map((row) => row.kind)).toEqual(['subagents', 'user'])
   })
 
+  it('counts a replay starting at a background ack as not opened', () => {
+    const ack = launch(1, 'w', 'completed', { tool_name: 'Workflow', subagent: undefined, task: { id: 't1', status: 'running' } })
+    const agent = index([ack]).index.agents.w!
+    expect(agent.opened).toBe(false)
+    expect(agent.startedAt).toBeUndefined()
+    expect(agentLoaded(agent, 0)).toBe(false)
+  })
+
+  it('drops a call from the edit counts once a newer whole snapshot has no diffs', () => {
+    const edited = tool(1, 'e1', 'edit', 'Edit a.go', 'in_progress', { parent_id: 'a1', diffs: [{ path: 'a.go', patch: '+x\n' }] })
+    const { index: idx } = index([launch(1, 'a1'), edited])
+    expect(idx.agents.a1!.edits).toEqual({ e1: [{ path: 'a.go', additions: 1, deletions: 0 }] })
+    const cut = { ...tool(1, 'e1', 'edit', 'Edit a.go', 'completed', { parent_id: 'a1' }), truncated: true }
+    expect(index([cut], false, idx).index.agents.a1!.edits).toEqual(idx.agents.a1!.edits)
+    const text = tool(1, 'e1', 'edit', 'Edit a.go', 'failed', { parent_id: 'a1', content: [{ type: 'text', text: 'rejected' }] })
+    expect(index([text], false, idx).index.agents.a1!.edits).toEqual({})
+  })
+
   it('orders activity against a settle or turn end by seq when their times tie', () => {
     const raw_input = { run_in_background: true }
     const ack = launch(1, 'a1', 'completed', { raw_input })
