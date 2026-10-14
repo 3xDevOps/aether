@@ -206,17 +206,13 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 			return modelList{}, fmt.Errorf("%s models: %w", key.name, err)
 		}
 	}
-	s.mu.Lock()
-	sup := s.terminals[key.account]
-	if sup == nil || sup.cleanupPending {
-		s.mu.Unlock()
+	sup := s.lookupLiveTerminal(key.account)
+	if sup == nil {
 		if !start {
 			return modelList{}, fmt.Errorf("%s models: the account owner's environment is not running; start it to list this login's models", key.name)
 		}
 		return modelList{}, fmt.Errorf("%s models: %w", key.name, ErrTerminalNotRunning)
 	}
-	containerID, home := sup.containerID, sup.home
-	s.mu.Unlock()
 
 	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)
 	for _, name := range passthrough {
@@ -224,7 +220,7 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 			argv = append(argv, name+"="+value)
 		}
 	}
-	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, containerID, argv, home)
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, sup.containerID, argv, sup.home)
 	if err != nil {
 		return modelList{}, fmt.Errorf("%s models: run in the environment terminal: %w", key.name, err)
 	}
