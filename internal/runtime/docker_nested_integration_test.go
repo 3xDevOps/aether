@@ -124,7 +124,7 @@ YAML`)
 	defer func() {
 		_, _, _, _ = docker.Exec(context.Background(), id, []string{"docker", "compose", "-f", "/tmp/compose/compose.yaml", "down", "-v"}, "/tmp")
 	}()
-	body := execOK(t, ctx, docker, id, `for i in $(seq 30); do wget -qO- http://127.0.0.1:18080/index.html && exit 0; sleep 1; done; exit 1`)
+	body := execOK(t, ctx, docker, id, `for i in $(seq 30); do curl -fsS http://127.0.0.1:18080/index.html && exit 0; sleep 1; done; exit 1`)
 	if strings.TrimSpace(body) != "nested-ok" {
 		t.Fatalf("published port body = %q, want nested-ok", body)
 	}
