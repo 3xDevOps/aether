@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 const defaultInviteTTL = 24 * time.Hour
@@ -134,16 +135,23 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	if err != nil || !time.Now().Before(rec.ExpiresAt) {
 		return nil, errors.New("sshd: invite is invalid or expired")
 	}
+	// A code grants what its issuer could, so it dies with the issuer's
+	// admin role, through member.role or a merge that demoted them.
+	if rec.IssuedBy != "" {
+		admin, aerr := s.inviteIssuerAdmin(ctx, rec.IssuedBy)
+		if aerr != nil {
+			return nil, fmt.Errorf("sshd: invite join: %w", aerr)
+		}
+		if !admin {
+			refused := fmt.Errorf("sshd: invite was issued by %s, who is no longer an admin", rec.IssuedBy)
+			if berr := burnInvite(s.cfg.InvitesDir, code); berr != nil {
+				return nil, fmt.Errorf("%w; burn invite: %w", refused, berr)
+			}
+			return nil, refused
+		}
+	}
 	if err = burnInvite(s.cfg.InvitesDir, code); err != nil {
 		return nil, fmt.Errorf("sshd: burn invite: %w", err)
-	}
-	// A code grants what its issuer could, so it dies with the issuer's
-	// admin role, through member.role or a merge.
-	if rec.IssuedBy != "" {
-		issuer, ierr := s.cfg.Store.GetMember(ctx, rec.IssuedBy)
-		if ierr != nil || issuer.ID != rec.IssuedBy || issuer.Role != domain.RoleAdmin {
-			return nil, fmt.Errorf("sshd: invite was issued by %s, who is no longer an admin", rec.IssuedBy)
-		}
 	}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
@@ -166,6 +174,31 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	slog.Info("sshd: invite join: collaborator registered",
 		"member", m.ID, "key", fingerprintOf(keyLine), "display", display)
 	return m, nil
+}
+
+// inviteIssuerAdmin reports whether issuer, or the member a merge made
+// it, is an admin. A removed issuer is not.
+func (s *Server) inviteIssuerAdmin(ctx context.Context, issuer domain.MemberID) (bool, error) {
+	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
+		into, err := ms.MergedInto(ctx, issuer)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if into != "" {
+			issuer = into
+		}
+	}
+	m, err := s.cfg.Store.GetMember(ctx, issuer)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return m.Role == domain.RoleAdmin, nil
 }
 
 func restoreInvite(dir, code string, rec inviteRecord) error {

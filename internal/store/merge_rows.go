@@ -11,7 +11,7 @@ import (
 // memberRefs classifies every column that holds a member id. A merge
 // moves the reassigned ones, what grants access or carries the person's
 // ongoing work, a run's account and home included since reopening it
-// reads them, to the survivor. History keeps naming the absorbed
+// reads them, and a finished swarm's owner, to the survivor. History keeps naming the absorbed
 // member, which stays as a tombstone that GetMember refuses; member.list
 // maps it to the survivor for display. A new column is added here, or
 // TestMergeClassifiesEveryMemberColumn fails.
@@ -22,6 +22,7 @@ var memberRefs = map[string]bool{
 	"member_identities.member_id":                          true,
 	"member_merges.survivor_id":                            true,
 	"members.merged_into":                                  true,
+	"missions.accountable_human_id":                        true,
 	"push_subscriptions.member_id":                         true,
 	"run_steerers.member_id":                               true,
 	"runs.member_id":                                       true,
@@ -61,7 +62,6 @@ var memberRefs = map[string]bool{
 	"mission_questions.answered_by_member_id":              false,
 	"mission_task_revisions.accepted_by_member_id":         false,
 	"mission_worker_takeovers.member_id":                   false,
-	"missions.accountable_human_id":                        false,
 	"missions.integrator_account_member_id":                false,
 	"missions.integrator_authorizing_human_id":             false,
 	"missions.integrator_run_owner_id":                     false,
@@ -103,6 +103,7 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"run fallback order", `UPDATE runs SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
+		{"swarm owners", `UPDATE missions SET accountable_human_id = ?2 WHERE accountable_human_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},
 		{"merge records", `UPDATE member_merges SET survivor_id = ?2 WHERE survivor_id = ?1`},
 		{"tombstones", `UPDATE members SET merged_into = ?2 WHERE merged_into = ?1`},

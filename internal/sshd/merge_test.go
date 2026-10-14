@@ -20,13 +20,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// mergeEnv is a server whose seeded run is finished, with a tailnet
-// resolver that answers only while tailnetDial dials.
-func mergeEnv(t *testing.T, policy edgeproto.AccessPolicy, mod func(*Config)) (*testEnv, *fakeWhoIs) {
+// mergeEnv is a server under account access whose seeded run is
+// finished, with a tailnet resolver that answers only while tailnetDial
+// dials.
+func mergeEnv(t *testing.T, mod func(*Config)) (*testEnv, *fakeWhoIs) {
 	t.Helper()
 	whois := &fakeWhoIs{err: errors.New("not on the tailnet")}
 	e := newTestEnv(t, func(c *Config) {
-		c.WhoIs, c.EdgeAccess = whois, policy
+		c.WhoIs, c.EdgeAccess = whois, edgeproto.PolicyAccount
 		if mod != nil {
 			mod(c)
 		}
@@ -122,7 +123,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	merged := filepath.Join(t.TempDir(), "merged")
-	e, whois := mergeEnv(t, edgeproto.PolicyAccount, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
+	e, whois := mergeEnv(t, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
 	ctx := context.Background()
 	tina := addTailnetMember(t, e, "octo@example.com", domain.RoleCollaborator)
 	tailnet := tailnetDial(t, e, whois, tina.TailnetLogin)
@@ -237,7 +238,7 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 
 func TestMergeRefusals(t *testing.T) {
 	t.Parallel()
-	e, whois := mergeEnv(t, edgeproto.PolicyAccount, nil)
+	e, whois := mergeEnv(t, nil)
 	ctx := context.Background()
 	admin := controlClient(t, e)
 	viewerKey, viewer := addMember(t, e, "Vi", domain.RoleViewer, false)
@@ -311,7 +312,7 @@ func TestMergeRefusals(t *testing.T) {
 // member who is not an admin is refused.
 func TestMergeLastAdminNeedsKeepAdmin(t *testing.T) {
 	t.Parallel()
-	e, whois := mergeEnv(t, edgeproto.PolicyAccount, nil)
+	e, whois := mergeEnv(t, nil)
 	ctx := context.Background()
 	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleCollaborator)
 	tc := tailnetDial(t, e, whois, tina.TailnetLogin)
@@ -459,5 +460,34 @@ func TestRecoverMergeArchivesPutsBackAnUncommittedHome(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("archive left behind: %v", err)
+	}
+}
+
+// An invite code an absorbed admin minted keeps working when the merged
+// member stays admin.
+func TestInviteCodeFollowsAMergedIssuer(t *testing.T) {
+	t.Parallel()
+	e, _ := mergeEnv(t, nil)
+	ctx := context.Background()
+	ms := e.store.(store.MergeStore)
+	tina := addTailnetMember(t, e, "tina@example.com", domain.RoleAdmin)
+	now := time.Now().UTC()
+	if err := ms.CreateMergeCode(ctx, tina.ID, "code", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := ms.PlanMerge(ctx, "code", e.member.ID, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err := ms.ProposeMerge(ctx, store.MergeProposal{CodeHash: "code", Proposer: e.member.ID, Keep: tina.ID,
+		Digest: plan.Digest, Now: now, Expires: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ms.AcceptMerge(ctx, store.MergeAccept{ProposalID: pm.ProposalID, Caller: tina.ID, Digest: plan.Digest, Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	if admin, err := e.srv.inviteIssuerAdmin(ctx, e.member.ID); err != nil || !admin {
+		t.Fatalf("issuer merged into an admin = %v, %v; want still an admin", admin, err)
 	}
 }

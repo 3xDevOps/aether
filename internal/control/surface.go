@@ -3,6 +3,7 @@ package control
 import (
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -396,4 +397,26 @@ func (s *Service) RevokeRunSurfaces(run string, revoke func() error) ([]SurfaceS
 		return nil, err
 	}
 	return s.fenceSurfacesLocked(domain.RunID(run)), nil
+}
+
+// HeldByMember reports whether a member in members holds run's primary
+// lease or one of its surfaces, connected or within its reconnect window.
+func (s *Service) HeldByMember(run string, members ...domain.MemberID) bool {
+	if holder, ok := s.Status(run); ok && slices.Contains(members, holder.MemberID) {
+		return true
+	}
+	s.mu.Lock()
+	var surfaces []Surface
+	for key := range s.surfaces {
+		if key.run == domain.RunID(run) {
+			surfaces = append(surfaces, key.surface)
+		}
+	}
+	s.mu.Unlock()
+	for _, surface := range surfaces {
+		if snap, ok := s.SurfaceStatus(run, surface); ok && slices.Contains(members, snap.Principal.MemberID) {
+			return true
+		}
+	}
+	return false
 }

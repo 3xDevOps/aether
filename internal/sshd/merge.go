@@ -283,10 +283,11 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 		merge, err = ms.AcceptMerge(ctx, accept)
 		return err
 	}
-	// Only a run either member controls has a lease the merge changes:
-	// the absorbed member's ends, and the survivor's role may drop.
+	// Only a run where either member holds the lease or a browser or shell
+	// surface has control the merge changes: the absorbed member's ends,
+	// and the survivor's role may drop. AdmitRevoke fences both.
 	for _, run := range activeRuns {
-		if holder, ok := s.cfg.Control.Status(string(run.ID)); !ok || (holder.MemberID != absorbed && holder.MemberID != other) {
+		if !s.cfg.Control.HeldByMember(string(run.ID), absorbed, other) {
 			continue
 		}
 		if _, err := s.cfg.Control.AdmitRevoke(string(run.ID), control.RevocationPermission, apply); err != nil {
@@ -335,6 +336,8 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 	s.notifyDirectory()
 	ev := events.Event{WorkspaceID: events.ServerScope, ActorID: merge.SurvivorID,
 		Payload: events.MemberMergedPayload{MergeID: merge.ID, SurvivorID: merge.SurvivorID, AbsorbedID: merge.AbsorbedID}}
+	// The merge is committed, so a failed publish is logged, not returned,
+	// as for member.device.
 	if _, err := s.cfg.Bus.Publish(ctx, ev); err != nil {
 		slog.Warn("sshd: publish member.merged", "merge", merge.ID, "error", err)
 	}

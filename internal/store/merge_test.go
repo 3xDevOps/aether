@@ -390,6 +390,32 @@ func TestPlanMergeRefusals(t *testing.T) {
 	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, string(run.ID)) {
 		t.Fatalf("live run = %v", err)
 	}
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `INSERT INTO handoff_outbox (id, workspace_id, run_id, actor_id, from_member_id, to_member_id, evidence_state,
+		publication_state, created_at, updated_at) VALUES ('ho-1', ?, ?, ?, ?, ?, 'available', 'pending', 1, 1)`,
+		w.ID, run.ID, b.ID, b.ID, a.ID)
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, "handoffs ho-1") {
+		t.Fatalf("pending handoff = %v", err)
+	}
+	mustExec(t, db, `UPDATE handoff_outbox SET publication_state = 'published', timeline_state = 'published', coauthor_state = 'published'`)
+	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: plan.Digest, Now: now, Expires: now.Add(time.Minute)}
+	first, err := db.ProposeMerge(ctx, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := db.ProposeMerge(ctx, proposal); err != nil || again.ProposalID != first.ProposalID {
+		t.Fatalf("the same proposal made again = %+v, %v; want %s", again, err, first.ProposalID)
+	}
+	proposal.Keep = b.ID
+	if _, err := db.ProposeMerge(ctx, proposal); !isRefusal(err, "already used") {
+		t.Fatalf("another proposal on a used code = %v", err)
+	}
 }
 
 func isRefusal(err error, contains string) bool {

@@ -25,7 +25,8 @@ type MergeStore interface {
 	// would do at now. A merge the plan refuses is a *MergeRefusal.
 	PlanMerge(ctx context.Context, hash string, caller domain.MemberID, policy string, now time.Time) (*MergePlan, error)
 	// ProposeMerge records p on its code while the plan still has
-	// p.Digest; the code then takes no other proposal.
+	// p.Digest; the code then takes no other proposal. The same proposal
+	// made again returns the one recorded.
 	ProposeMerge(ctx context.Context, p MergeProposal) (*PendingMerge, error)
 	// PendingMerges returns the open proposals member made or is asked
 	// to accept, each with its plan recomputed.
@@ -43,6 +44,9 @@ type MergeStore interface {
 	// ListMerges returns the merges into survivor, or every merge when
 	// survivor is empty, newest first.
 	ListMerges(ctx context.Context, survivor domain.MemberID) ([]*MemberMerge, error)
+	// MergedInto returns the member a merge absorbed member into, empty
+	// when it was not merged; ErrNotFound when it never existed.
+	MergedInto(ctx context.Context, member domain.MemberID) (domain.MemberID, error)
 }
 
 var _ MergeStore = (*DB)(nil)
@@ -380,8 +384,9 @@ func planInTx(ctx context.Context, tx *sql.Tx, hash string, minted, proposer dom
 }
 
 // refuseLiveWork refuses a merge while either member has a run that is not
-// finished, an Environment terminal, or a role in an open swarm: those
-// hold the member's id in memory, beyond what a merge moves.
+// finished, an Environment terminal, a role in an open swarm, or a handoff
+// still publishing: those still act as the member, beyond what a merge
+// moves.
 func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error {
 	var live []string
 	for _, s := range domain.AllRunStatuses {
@@ -410,7 +415,16 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 	if err != nil {
 		return err
 	}
+	handoffs, err := queryStrings(ctx, tx, `SELECT id FROM handoff_outbox
+		WHERE (actor_id IN (?1, ?2) OR from_member_id IN (?1, ?2) OR to_member_id IN (?1, ?2))
+		AND 'pending' IN (evidence_state, publication_state, timeline_state, coauthor_state) ORDER BY id`, a, b)
+	if err != nil {
+		return err
+	}
 	var stop []string
+	if len(handoffs) > 0 {
+		stop = append(stop, "handoffs "+strings.Join(handoffs, ", ")+" (they finish publishing on their own; retry in a minute)")
+	}
 	if len(runs) > 0 {
 		stop = append(stop, "runs "+strings.Join(runs, ", ")+" (aether kill <run-id>, or aether close <run-id>)")
 	}
@@ -550,6 +564,12 @@ func (d *DB) ProposeMerge(ctx context.Context, p MergeProposal) (*PendingMerge, 
 		return nil, fmt.Errorf("store: begin propose merge: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if made, merr := getMergeCode(ctx, tx, `code_hash = ?`, p.CodeHash); merr == nil && made.proposalID != "" && !made.consumed &&
+		made.proposer == p.Proposer && made.keep == p.Keep && made.digest == p.Digest && made.proposerKeepAdmin == p.KeepAdmin &&
+		p.Now.Before(made.expires) {
+		return &PendingMerge{ProposalID: made.proposalID, CodeHash: made.hash, Minted: made.member, Proposer: made.proposer,
+			Keep: made.keep, ProposerKeepAdmin: made.proposerKeepAdmin, Digest: made.digest, ExpiresAt: made.expires}, nil
+	}
 	code, err := openCode(ctx, tx, p.CodeHash, p.Now)
 	if err != nil {
 		return nil, err
@@ -820,4 +840,16 @@ func (d *DB) ListMerges(ctx context.Context, survivor domain.MemberID) ([]*Membe
 		return nil, fmt.Errorf("store: list merges: %w", err)
 	}
 	return collect(rows, scanMerge)
+}
+
+func (d *DB) MergedInto(ctx context.Context, member domain.MemberID) (domain.MemberID, error) {
+	var into domain.MemberID
+	err := d.db.QueryRowContext(ctx, `SELECT merged_into FROM members WHERE id = ?`, member).Scan(&into)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: merged into: %w", err)
+	}
+	return into, nil
 }

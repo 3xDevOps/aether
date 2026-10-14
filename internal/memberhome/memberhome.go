@@ -22,6 +22,9 @@ type Manager struct {
 	mu         sync.Mutex
 	locks      map[string]*sync.Mutex
 	cacheLocks map[domain.MemberID]*sync.Mutex
+	// archived holds the members whose home Archive moved, so a write
+	// that passed its checks before the move cannot create a new home.
+	archived map[domain.MemberID]bool
 }
 
 // New creates a manager with separate home and cache roots. Neither root is
@@ -51,6 +54,7 @@ func New(homeRoot, cacheRoot string, removeHome func(ctx context.Context, path s
 	return &Manager{
 		root: homeRoot, cacheRoot: cacheRoot, removeHome: removeHome,
 		locks: make(map[string]*sync.Mutex), cacheLocks: make(map[domain.MemberID]*sync.Mutex),
+		archived: make(map[domain.MemberID]bool),
 	}, nil
 }
 
@@ -122,7 +126,9 @@ func validateMemberID(id string) error {
 }
 
 // Archive moves member's home to dest, creating dest's parent owner-only,
-// and reports whether the member had a home. dest must not exist.
+// and reports whether the member had a home. dest must not exist. Until
+// Unarchive, no home is created for member again: a write that opened the
+// home before the move lands in dest, and a later one fails.
 func (m *Manager) Archive(member domain.MemberID, dest string) (bool, error) {
 	if err := validateMemberID(string(member)); err != nil {
 		return false, fmt.Errorf("memberhome: member %q: %w", member, err)
@@ -137,10 +143,28 @@ func (m *Manager) Archive(member domain.MemberID, dest string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return false, fmt.Errorf("memberhome: archive home %q: %w", home, err)
 	}
+	m.setArchived(member, true)
 	if err := os.Rename(home, dest); err != nil {
+		m.setArchived(member, false)
 		return false, fmt.Errorf("memberhome: archive home %q: %w", home, err)
 	}
 	return true, nil
+}
+
+func (m *Manager) setArchived(member domain.MemberID, archived bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if archived {
+		m.archived[member] = true
+	} else {
+		delete(m.archived, member)
+	}
+}
+
+func (m *Manager) isArchived(member domain.MemberID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.archived[member]
 }
 
 // Unarchive moves a home Archive moved to src back to member's home.
@@ -152,6 +176,7 @@ func (m *Manager) Unarchive(member domain.MemberID, src string) error {
 	if err := os.Rename(src, filepath.Join(m.root, string(member))); err != nil {
 		return fmt.Errorf("memberhome: restore home from %q: %w", src, err)
 	}
+	m.setArchived(member, false)
 	return nil
 }
 

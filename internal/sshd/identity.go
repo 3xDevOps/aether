@@ -563,7 +563,19 @@ func (s *Server) createInvitation(ctx context.Context, ids store.IdentityStore, 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	if len(entries) >= edgeproto.MaxDirectoryEntries {
+	room := edgeproto.MaxDirectoryEntries
+	if inv.Member != "" {
+		open, err := ids.ListInvitations(ctx)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		for _, o := range open {
+			if o.Member == inv.Member && time.Now().Before(o.ExpiresAt) {
+				room++
+			}
+		}
+	}
+	if len(entries) >= room {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
 			"%s: the edge directory already holds %d members and open invitations, the most an edge accepts; revoke an open invitation first",
 			method, len(entries))}

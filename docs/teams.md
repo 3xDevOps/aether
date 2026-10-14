@@ -222,8 +222,9 @@ color, git identity, saved image, custom agents, profiles, home and the
 account shares it grants. The other member is absorbed: its GitHub
 accounts, devices (each keeping its status, revoked ones included),
 tailnet login or SSH key, runs with the agent account and home they run
-on, schedules, push subscriptions and the account shares it received
-become the survivor's, so the survivor reopens those runs. It stays as a
+on, schedules, the finished swarms it owns, push subscriptions and the
+account shares it received become the survivor's, so the survivor reopens
+those runs. It stays as a
 tombstone that signs nothing in: history it made, such as events,
 comments, costs and swarm records, keeps naming it and shows the
 survivor's name. Its discarded settings are recorded, its account shares
@@ -252,8 +253,8 @@ GitHub account at the edge on a member who is not an admin, is refused
 A merge is refused, with what to do, when the code is unknown, expired or
 used; both members have a tailnet login, or both an SSH key; either is
 pending (`aether member approve <id>` first); either has a run that has
-not finished, an Environment terminal or a role in an open swarm (stop
-those first); or the members changed since the preview or proposal
+not finished, an Environment terminal, a role in an open swarm (stop
+those first) or a handoff still publishing (retry in a minute); or the members changed since the preview or proposal
 (`the members changed since the preview; preview again`). Entering your
 own code answers `already the same member`; accepting again from the
 merged member returns the recorded merge.
