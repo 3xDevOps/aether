@@ -12,9 +12,10 @@ import (
 )
 
 // The allocation exceeds only the disposable container's 64MiB ceiling, never
-// the host budget. The kill is read from the cgroup's oom_kill counter, which
-// the kernel raises before the victim dies. Docker's OOMKilled flag and oom
-// event arrive from containerd asynchronously, after the exit or not at all
+// the host budget. The kill is read from the cgroup's oom_kill counter
+// (memory.events on cgroup v2, memory.oom_control on v1), which the kernel
+// raises before the victim dies. Docker's OOMKilled flag and oom event arrive
+// from containerd asynchronously, after the exit or not at all
 // (containerd/containerd#8180, #12260). A second live container and a fresh
 // daemon RPC prove that memory pressure is contained rather than taking down
 // the worker host.
@@ -37,9 +38,14 @@ print(len(chunks), flush=True)
 	if err != nil || code != 137 {
 		t.Fatalf("expected the allocation to be SIGKILLed: code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
 	}
-	code, events, stderr, err := d.Exec(ctx, oom, []string{"cat", "/sys/fs/cgroup/memory.events"}, "")
+	code, events, stderr, err := d.Exec(ctx, oom, []string{"sh", "-c", `
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  cat /sys/fs/cgroup/memory.events
+else
+  cat /sys/fs/cgroup/memory/memory.oom_control
+fi`}, "")
 	if err != nil || code != 0 {
-		t.Fatalf("read memory.events: code=%d stderr=%q err=%v", code, stderr, err)
+		t.Fatalf("read the cgroup OOM counter: code=%d stderr=%q err=%v", code, stderr, err)
 	}
 	killed := false
 	for line := range strings.Lines(events) {
@@ -48,7 +54,7 @@ print(len(chunks), flush=True)
 		}
 	}
 	if !killed {
-		t.Fatalf("expected a cgroup OOM kill, not an allocation or setup failure: memory.events=%q", events)
+		t.Fatalf("expected a cgroup OOM kill, not an allocation or setup failure: cgroup OOM counter=%q", events)
 	}
 	if _, err = d.cli.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Fatalf("daemon did not survive OOM: %v", err)
