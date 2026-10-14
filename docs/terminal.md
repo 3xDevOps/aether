@@ -281,17 +281,18 @@ member without the `steer` permission sees **You can watch this run but not
 type in it.** under the toolbar. **In control** and **Watching** are also
 listed in the run's **Details** panel.
 
-Live local ownership is shown by **You control** and **Release**. Teal light
-glows along the edges of the terminal viewport only, never the toolbar, find
-bar, or UI above it: a thin rim that brightens into a few pools of light,
-each spilling a soft glow inward. After this tab acknowledges live input, the
-light travels from the left and right side midpoints, splitting up and down
-to meet at the top and bottom centers. An acknowledged voluntary release
-reverses that path. Both decelerate toward their endpoints. An explicit
-server takeover notification for this session's current lease turns the
-light red, then retracts it along the reverse path over about two seconds. A
-completed hold has already made the light red; it stays red through the
-handoff. Presence names never trigger takeover feedback. Input is fenced
+Live local ownership is shown by **You control** and a teal **Release**. Teal
+light glows along the top edge of the terminal viewport only, never the
+toolbar, find bar, or UI above it: a thin rim with two pools of light that
+slowly hand off to new spots, each spilling a soft glow downward. After this
+tab acknowledges live input, the light pours leftward from the right end,
+under **Release**. An acknowledged voluntary release drains it back to the
+right. Both decelerate toward their endpoints. While another member holds
+**Take control**, red light spreads leftward from the right end over the
+teal. An explicit server takeover notification for this session's current
+lease turns the light red, then drains it to the right over about two
+seconds. A completed hold has already made the light red; it stays red
+through the handoff. Presence names never trigger takeover feedback. Input is fenced
 immediately; the exit animation is decoration, not authority. Replay,
 recorded history, disconnects, permission loss, and other fencing hide the
 light without takeover feedback. A fresh read-only mirror has no light.

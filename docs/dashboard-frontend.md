@@ -1874,14 +1874,19 @@ do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
-`SessionView` reuses `TerminalControlBorder` around the Enhanced timeline and
-composer, excluding the frame toolbar and Details. The component is one SVG:
-the four side-midpoint-to-centre paths drawn three times, as a blurred wide
-glow and a tight halo under the `pool` mask, a rim under the `rim` mask, and a
-near-white core under the `hot` mask. Each mask holds the same five radial
+`SessionView` reuses `TerminalControlBorder` along the top of the Enhanced
+timeline, under the frame toolbar. The component is one SVG strip, 8rem tall,
+over the top of its parent: a single top-edge path, drawn from right to left
+so the light pours out of the control button, rendered as a blurred wide
+glow and a tight halo under the `pool` mask, a rim under the `rim` mask, and
+a near-white core under the `hot` mask. Each mask holds the same radial
 spots, so every layer brightens at the same pools; all layers inherit the
 SVG's animated `stroke-dashoffset` and colour, which is what the acquisition,
-release, hold and takeover animations drive. Its appearance follows
+release, hold and takeover animations drive. While lit, a timer adds a pool
+every five seconds and drops pools older than their 13-second life; each
+spot runs the `control-pool` CSS keyframes with its own peak, drift and a
+negative delay, so the two seed pools start mid-life. During a hold the teal
+copy takes a dash pattern that leaves out the span the red copy covers. Its appearance follows
 the acknowledged ACP lease, not the unused agent terminal's history or
 connection state. Voluntary release retracts it; takeover feedback requires
 an explicit revocation matching the held session and generation.
@@ -2200,7 +2205,7 @@ the selected shell under one toolbar, a 32px strip (44px on touch): the
 terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
 `ControlButton` (click to take a free lease, hold five seconds to request an
-occupied one; **Release** is a ghost button) and the connection word only
+occupied one; **Release** has the accent fill) and the connection word only
 while a live run's attach is not live. A finished run reads "Container
 removed · read-only" in muted text there.
 Refusals, lost steering and presence errors are one line under the strip. A
@@ -2245,7 +2250,7 @@ refusal, a release or a dropped connection discards them. If the server
 answers with a full replay instead of resuming, that redraw stays on screen
 rather than behind "Restoring terminal history", which would blur the terminal
 mid-word.
-The toolbar reads "You control" with a ghost **Release**, or "<name> controls"
+The toolbar reads "You control" with an accent-filled **Release**, or "<name> controls"
 / "The agent controls" with **Take control**, which confirms; with nobody
 controlling it shows neither. Under 768px the controller's name moves to the
 line under the toolbar. Leaving the Terminal view releases the lease, and a
@@ -2465,11 +2470,10 @@ and the Environment keep native xterm scrollback.
   mirror shows who controls ("Nobody controls", "<name> controls", "You
   control in another tab", with "(last known)" while the status is stale)
   and **Take control**. Live, acknowledged local control reads "You control"
-  with **Release**, plus a steady 1px teal inset outline around the terminal
-  while input is writable. The pointer-transparent outline uses `--primary`,
-  the **Release** button's fill, in both themes. It never changes layout or
-  animates, and is absent during replay or history reading, and on release,
-  mirroring, disconnect or a refused write. Starting runs keep their spinner;
+  with an accent-filled **Release**, plus the control light along the
+  terminal's top edge while input is writable ([styles.md](styles.md)). It
+  never changes layout, and is hidden during replay or history reading and
+  after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
   has ended and left no recorded terminal to replay.** Whether a member may
   write is the server's answer: `-32001` downgrades the attach to a mirror

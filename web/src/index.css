@@ -107,11 +107,11 @@
 
 .terminal-control-border {
   position: absolute;
-  inset: 0;
+  inset: 0 0 auto;
   z-index: 40;
   pointer-events: none;
   width: 100%;
-  height: 100%;
+  height: min(8rem, 100%);
   fill: none;
   stroke: currentColor;
   stroke-width: 1;
@@ -140,6 +140,26 @@
 .terminal-control-border .control-core {
   stroke: color-mix(in oklab, currentColor 25%, white);
   stroke-width: 2;
+}
+
+@keyframes control-pool {
+  0% {
+    opacity: 0;
+    transform: none;
+    animation-timing-function: ease-in-out;
+  }
+  23% {
+    opacity: var(--peak);
+    animation-timing-function: linear;
+  }
+  77% {
+    opacity: var(--peak);
+    animation-timing-function: ease-in-out;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(var(--drift));
+  }
 }
 
 /* Design tokens, v2. docs/styles.md lists each role. The contrast pairs are
