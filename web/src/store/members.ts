@@ -49,6 +49,9 @@ export interface MembersSlice {
   /** From `member.merge.pending`: open proposals the viewer made or is asked to accept. */
   mergeProposals: MergeProposal[]
   setMergeProposals: (proposals: MergeProposal[]) => void
+  /** When the merge code this tab minted expires, in ms; proposals are polled until then. */
+  mergeCodeUntil: number
+  setMergeCodeUntil: (until: number) => void
 }
 
 function withMember(s: RootState, id: string, patch: Partial<Member>): Partial<RootState> {
@@ -193,6 +196,8 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
     set((s) => ({ revokingInvitations: [...s.revokingInvitations.filter((r) => r !== id), ...(pending ? [id] : [])] })),
   mergeProposals: [],
   setMergeProposals: (mergeProposals) => set({ mergeProposals }),
+  mergeCodeUntil: 0,
+  setMergeCodeUntil: (mergeCodeUntil) => set({ mergeCodeUntil }),
 })
 
 /** Reads `member.merge.pending`; an answer for a viewer who has since changed is dropped. */

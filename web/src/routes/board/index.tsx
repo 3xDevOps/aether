@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -12,7 +12,7 @@ import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { DeviceCard } from '@/routes/board/device-card'
 import { MergeProposalCard } from '@/routes/board/merge-card'
-import { useProposalsToAccept } from '@/routes/members/sign-ins'
+import { useOpenProposals } from '@/routes/members/sign-ins'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
@@ -41,7 +41,8 @@ export function Board() {
   }, [archivedCards.length])
 
   const devices = useDeviceNeeds()
-  const merges = useProposalsToAccept()
+  const { toAccept, unplanned } = useOpenProposals()
+  const merges = useMemo(() => [...toAccept, ...unplanned], [toAccept, unplanned])
   const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length + merges.length
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && total === 0)

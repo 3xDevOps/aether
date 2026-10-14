@@ -34,7 +34,7 @@ export function useSidebarGroups(): SidebarGroup[] {
   const ctx = useStateContext()
   const workspace = useStore((s) => s.activeWorkspace)
   const mineOnly = useStore((s) => s.mineOnly)
-  const devices = useDeviceNeeds().length
+  const devices = useDeviceNeeds().length + useStore((s) => s.mergeProposals.filter((p) => p.minted_id === s.info?.member.id).length)
   return useMemo(() => sidebarGroups({ workspace, mineOnly, ctx }, devices), [workspace, mineOnly, ctx, devices])
 }
 

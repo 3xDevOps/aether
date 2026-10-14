@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { MemberMerge, MergeMember, MergePlan, MergeProposal, MergeSettings } from '@/lib/types'
-import { ProposalToAccept, ProposeForm, SignInsSection } from '@/routes/members/sign-ins'
+import { ProposeForm, SignInsSection } from '@/routes/members/sign-ins'
 import { useStore } from '@/store'
 import { alice, bob, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
@@ -60,6 +60,13 @@ function seed() {
   })
 }
 
+function enterCode() {
+  fireEvent.click(screen.getByRole('button', { name: 'Merge with another member' }))
+  const dialog = within(screen.getByRole('dialog', { name: 'Merge with another member' }))
+  fireEvent.mouseDown(dialog.getByRole('tab', { name: 'I have a merge code' }))
+  return dialog
+}
+
 const discarded = () => within(screen.getByRole('list', { name: 'Discarded settings' })).getAllByRole('listitem').map((li) => li.textContent)
 
 describe('sign-ins', () => {
@@ -116,7 +123,7 @@ describe('propose a merge', () => {
     seed()
     const onProposed = vi.fn()
     const client = fakeApi({ memberMergePropose: vi.fn(async () => proposal) })
-    render(<ProposeForm client={client} self={alice} code="ABCD-EFGH" plan={plan} onProposed={onProposed} />)
+    render(<ProposeForm client={client} self={alice} code="ABCD-EFGH" plan={plan} onProposed={onProposed} onRefused={() => {}} />)
 
     const merge = screen.getByRole('button', { name: 'Propose merge' }) as HTMLButtonElement
     expect(within(screen.getByRole('radiogroup')).getAllByRole('radio').every((r) => r.getAttribute('aria-checked') === 'false')).toBe(true)
@@ -138,26 +145,49 @@ describe('propose a merge', () => {
 
   it('states the resulting role and offers keeping admin to the admin side only', () => {
     seed()
-    const { rerender } = render(<ProposeForm client={fakeApi()} self={alice} code="C" plan={plan} onProposed={() => {}} />)
+    const { rerender } = render(<ProposeForm client={fakeApi()} self={alice} code="C" plan={plan} onProposed={() => {}} onRefused={() => {}} />)
     expect(screen.getByText(/The merged member will be/).textContent).toContain('will be Collaborator.')
     fireEvent.click(screen.getByRole('checkbox', { name: 'Keep the merged member an admin' }))
     expect(screen.getByText(/The merged member will be/).textContent).toContain('will be Admin.')
 
     const asCollaborator = { ...plan, minted: { ...minted, role: 'admin' as const }, proposer: { ...proposer, role: 'collaborator' as const } }
-    rerender(<ProposeForm key="other" client={fakeApi()} self={alice} code="C" plan={asCollaborator} onProposed={() => {}} />)
+    rerender(<ProposeForm key="other" client={fakeApi()} self={alice} code="C" plan={asCollaborator} onProposed={() => {}} onRefused={() => {}} />)
     expect(screen.queryByRole('checkbox', { name: 'Keep the merged member an admin' })).toBeNull()
     expect(screen.getByText(/The merged member will be/).textContent).toContain('or Admin if the admin side keeps admin when it accepts')
   })
 
-  it('shows a refused proposal verbatim', async () => {
+  it('shows a refused proposal verbatim and drops the plan, so only a new preview proposes', async () => {
     seed()
     const refusal = 'member.merge.propose: the members changed since the preview; preview again'
-    const client = fakeApi({ memberMergePropose: vi.fn(async () => Promise.reject(new ApiError(200, refusal, -32010))) })
-    render(<ProposeForm client={client} self={alice} code="C" plan={plan} onProposed={() => {}} />)
-    fireEvent.click(screen.getByRole('radio', { name: 'Alice (this sign-in)' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Discard the listed settings' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Propose merge' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(refusal)
+    const client = fakeApi({
+      memberMergePreview: vi.fn(async () => plan),
+      memberMergePropose: vi.fn(async () => Promise.reject(new ApiError(200, refusal, -32010))),
+    })
+    render(<SignInsSection client={client} self={alice} />)
+    const dialog = enterCode()
+    fireEvent.change(dialog.getByLabelText('Merge code'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Preview' }))
+    fireEvent.click(await dialog.findByRole('radio', { name: 'Alice (this sign-in)' }))
+    fireEvent.click(dialog.getByRole('checkbox', { name: 'Discard the listed settings' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Propose merge' }))
+
+    expect((await dialog.findByRole('alert')).textContent).toBe(refusal)
+    expect(dialog.queryByRole('button', { name: 'Propose merge' })).toBeNull()
+    expect((dialog.getByRole('button', { name: 'Preview' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(client.memberMergePropose).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops the previewed plan when the code is edited', async () => {
+    seed()
+    const client = fakeApi({ memberMergePreview: vi.fn(async () => plan) })
+    render(<SignInsSection client={client} self={alice} />)
+    const dialog = enterCode()
+    fireEvent.change(dialog.getByLabelText('Merge code'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Preview' }))
+    expect(await dialog.findByRole('button', { name: 'Propose merge' })).toBeDefined()
+
+    fireEvent.change(dialog.getByLabelText('Merge code'), { target: { value: 'WXYZ-EFGH' } })
+    expect(dialog.queryByRole('button', { name: 'Propose merge' })).toBeNull()
   })
 
   it('shows a refused preview verbatim and the proposal once proposed', async () => {
@@ -168,9 +198,7 @@ describe('propose a merge', () => {
       memberMergePropose: vi.fn(async () => proposal),
     })
     render(<SignInsSection client={client} self={alice} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Merge with another member' }))
-    const dialog = within(screen.getByRole('dialog', { name: 'Merge with another member' }))
-    fireEvent.mouseDown(dialog.getByRole('tab', { name: 'I have a merge code' }))
+    const dialog = enterCode()
     fireEvent.change(dialog.getByLabelText('Merge code'), { target: { value: 'ABCD-EFGH' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Preview' }))
     expect((await dialog.findByRole('alert')).textContent).toBe(refusal)
@@ -209,14 +237,17 @@ describe('accept a merge', () => {
     archive_path: '/var/lib/aether/merged/merge_1/home', created_at: '2026-10-14T00:05:00Z',
   }
 
-  it('accepts the proposed plan by its digest once the discard is acknowledged', async () => {
+  const asBob = (client: ReturnType<typeof fakeApi>) => {
     seed()
-    useStore.setState({ info: { ...serverInfo, member: bob } })
-    const onMerged = vi.fn()
-    const client = fakeApi({ memberMergeAccept: vi.fn(async () => ({ merge, member: alice })) })
-    render(<ProposalToAccept client={client} proposal={proposed} onMerged={onMerged} />)
+    useStore.setState({ info: { ...serverInfo, member: bob }, mergeProposals: [proposed] })
+    render(<SignInsSection client={client} self={bob} />)
+  }
 
-    const banner = within(screen.getByRole('region', { name: 'Merge proposal from Alice' }))
+  it('accepts the proposed plan by its digest once the discard is acknowledged', async () => {
+    const client = fakeApi({ memberMergePending: vi.fn(async () => [proposed]), memberMergeAccept: vi.fn(async () => ({ merge, member: alice })) })
+    asBob(client)
+
+    const banner = within(await screen.findByRole('region', { name: 'Merge proposal from Alice' }))
     expect(banner.getByText(/Their sign-ins: SSH key SHA256:alicekey/)).toBeDefined()
     expect(discarded()).toEqual(['Display name Bob', 'Colour #e6194b', 'Git name Bob B'])
     expect(banner.getByText(/The merged member will be/).textContent).toBe('The merged member will be Admin.')
@@ -226,18 +257,15 @@ describe('accept a merge', () => {
     fireEvent.click(banner.getByRole('checkbox', { name: 'Discard the listed settings' }))
     fireEvent.click(accept)
 
-    await waitFor(() => expect(onMerged).toHaveBeenCalledWith(merge))
+    expect((await screen.findByRole('status')).textContent).toContain('was merged into')
     expect(client.memberMergeAccept).toHaveBeenCalledWith({ proposal_id: 'prop_1', plan_digest: 'digest-2' })
   })
 
   it('shows the merge record after accepting from Sign-ins', async () => {
-    seed()
-    useStore.setState({ info: { ...serverInfo, member: bob }, mergeProposals: [proposed] })
-    const client = fakeApi({
+    asBob(fakeApi({
       memberMergePending: vi.fn().mockResolvedValueOnce([proposed]).mockResolvedValue([]),
       memberMergeAccept: vi.fn(async () => ({ merge, member: alice })),
-    })
-    render(<SignInsSection client={client} self={bob} />)
+    }))
     const banner = within(await screen.findByRole('region', { name: 'Merge proposal from Alice' }))
     fireEvent.click(banner.getByRole('checkbox', { name: 'Discard the listed settings' }))
     await act(async () => fireEvent.click(banner.getByRole('button', { name: 'Accept and merge' })))
@@ -248,13 +276,50 @@ describe('accept a merge', () => {
     expect(screen.queryByRole('region', { name: 'Merge proposal from Alice' })).toBeNull()
   })
 
-  it('shows a refused accept verbatim', async () => {
+  it('shows a refused accept verbatim, re-reads the proposal and asks for the tick again', async () => {
+    const refusal = 'member.merge.accept: the members changed since the preview; preview again'
+    const changed = { ...proposed, refusal: 'the members changed since the preview; preview again' }
+    const client = fakeApi({
+      memberMergePending: vi.fn().mockResolvedValueOnce([proposed]).mockResolvedValue([changed]),
+      memberMergeAccept: vi.fn(async () => Promise.reject(new ApiError(200, refusal, -32010))),
+    })
+    asBob(client)
+    const banner = within(await screen.findByRole('region', { name: 'Merge proposal from Alice' }))
+    fireEvent.click(banner.getByRole('checkbox', { name: 'Discard the listed settings' }))
+    fireEvent.click(banner.getByRole('button', { name: 'Accept and merge' }))
+
+    await waitFor(() => expect(screen.getAllByRole('alert').map((a) => a.textContent)).toContain(refusal))
+    await waitFor(() => expect(banner.getByRole('checkbox', { name: 'Discard the listed settings' }).getAttribute('aria-checked')).toBe('false'))
+    expect(banner.getByText('the members changed since the preview; preview again')).toBeDefined()
+    fireEvent.click(banner.getByRole('checkbox', { name: 'Discard the listed settings' }))
+    expect((banner.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('lists a proposal whose plan the server refused, and the viewer\'s own, each with Cancel', async () => {
     seed()
-    const refusal = 'member.merge.accept: stop these first, then merge: run run_1 has not finished'
-    const client = fakeApi({ memberMergeAccept: vi.fn(async () => Promise.reject(new ApiError(200, refusal, -32010))) })
-    render(<ProposalToAccept client={client} proposal={proposed} onMerged={() => {}} />)
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Discard the listed settings' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(refusal)
+    const unplanned: MergeProposal = { id: 'prop_2', minted_id: alice.id, proposer_id: bob.id, keep_settings_of: bob.id, plan_digest: 'd', expires_at: '2026-10-14T00:10:00Z', refusal: 'member mem_bob is pending; approve first: aether member approve mem_bob' }
+    const outgoing: MergeProposal = { id: 'prop_3', minted_id: minted.id, proposer_id: alice.id, keep_settings_of: alice.id, plan_digest: 'd', expires_at: '2026-10-14T00:10:00Z', plan }
+    const client = fakeApi({ memberMergePending: vi.fn(async () => [unplanned, outgoing]), memberMergeCancel: vi.fn(async () => ({ cancelled: 1 })) })
+    render(<SignInsSection client={client} self={alice} />)
+
+    const refused = within(await screen.findByRole('region', { name: 'Merge proposal from Bob' }))
+    expect(refused.getByRole('alert').textContent).toBe(unplanned.refusal)
+    const mine = within(screen.getByRole('region', { name: 'Your merge proposal to Alice on GitHub' }))
+    expect(mine.getByText(/waits for them to accept it/)).toBeDefined()
+
+    fireEvent.click(refused.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Merge proposal from Bob' })).toBeNull())
+    expect(client.memberMergeCancel).toHaveBeenCalledWith('prop_2')
+  })
+
+  it('re-reads the sign-ins when a merge maps another member', async () => {
+    seed()
+    const client = fakeApi()
+    render(<SignInsSection client={client} self={alice} />)
+    await waitFor(() => expect(client.memberIdentityList).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setMembers([alice], { [bob.id]: alice.id }))
+    await waitFor(() => expect(client.memberIdentityList).toHaveBeenCalledTimes(2))
+    act(() => useStore.getState().setMembers([alice], { [bob.id]: alice.id }))
+    expect(client.memberIdentityList).toHaveBeenCalledTimes(2)
   })
 })

@@ -451,18 +451,10 @@ export async function applyEvent(
     case 'member.device':
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
       break
-    case 'member.merged': {
-      const p = ev.payload as { survivor_id: string; absorbed_id: string }
-      const viewer = store.getState().info?.member.id
-      // The viewer's member or role changed: only a fresh snapshot shows the survivor.
-      if (viewer === p.survivor_id || viewer === p.absorbed_id) {
-        if (!(await hydrate(store, client))) return false
-      } else {
-        await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
-        await loadMergeProposals(store, client).catch(ignore)
-      }
+    case 'member.merged':
+      // A merge moves runs and roles without publishing their events, and may change the viewer.
+      if (!(await hydrate(store, client))) return false
       break
-    }
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
       if (!store.getState().runs[ev.run_id]) {
@@ -817,6 +809,8 @@ async function probeGateway(
  * and events queued meanwhile apply after the snapshot. Events apply one at a
  * time in sequence order. A reconnect with no cursor re-fetches.
  */
+const mergePollMs = 5000
+
 export function connect(store: RootStore, client: Api = api): () => void {
   const lifecycle = new AbortController()
   const { signal } = lifecycle
@@ -988,6 +982,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted) return
     if (!retryTimer) {
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      coalesce(store, 'merges', () => loadMergeProposals(store, client).catch(ignore))
       return
     }
     clearTimeout(retryTimer)
@@ -995,6 +990,14 @@ export function connect(store: RootStore, client: Api = api): () => void {
     attempts = 0
     void load()
   })
+
+  // Proposing and cancelling a merge publish no event, so while a code or proposal is open it is polled.
+  const mergeTimer = setInterval(() => {
+    const s = store.getState()
+    if (s.mergeCodeUntil > Date.now() || s.mergeProposals.length > 0) {
+      coalesce(store, 'merges', () => loadMergeProposals(store, client).catch(ignore))
+    }
+  }, mergePollMs)
 
   void probeGateway(store, client, signal).then((probe) => {
     if (signal.aborted) return
@@ -1029,6 +1032,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   return () => {
     lifecycle.abort()
     stopWake()
+    clearInterval(mergeTimer)
     stopSelection()
     stopOutcomeSeen()
     stopPush()

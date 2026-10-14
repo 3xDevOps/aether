@@ -221,13 +221,15 @@ step is refused on a connection that signed in with a device no person
 approved, under either policy.
 
 In the dashboard, Profile › Sign-ins lists the member's tailnet login,
-SSH key fingerprint, GitHub accounts and devices. **Merge with another
+SSH key fingerprint, GitHub accounts and devices (`member.identity.list`,
+which the member or an admin reads). **Merge with another
 member** › **Get a merge code** shows the code with its countdown, and
 the proposal to accept appears there, in Sign-ins and on Needs you, with
 the choice made, what is discarded and the resulting role. **I have a
 merge code** previews both members side by side; choose whose settings to
 keep, tick **Discard the listed settings** and press **Propose merge**.
-Accepting asks for the same tick. Each refusal shows the server's error.
+Accepting asks for the same tick; either side cancels an open proposal
+there. Each refusal shows the server's error.
 Merge history lists `member.merge.list`.
 
 The member whose settings prevail survives with its id, display name,

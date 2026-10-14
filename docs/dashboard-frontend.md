@@ -4164,16 +4164,19 @@ A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 
 **Sign-ins** in Profile (`src/routes/members/sign-ins.tsx`) lists, from
-`member.identity.list`, the member's tailnet login, SSH key fingerprint,
-GitHub accounts and devices with their status. **Link a GitHub account**
+`member.identity.list` (readable by the member or an admin), the member's
+tailnet login, SSH key fingerprint, GitHub accounts and devices with their
+status. **Link a GitHub account**
 sends `member.identity.link` for the viewer and shows the join link with
 the next step: open it on a device signed in as that account, or `aether
 link '<link>'`, then approve that device. **Merge with another member**
 opens a dialog with two tabs:
 
 - **Get a merge code** sends `member.merge.start` and shows the code, a
-  per-second expiry countdown and `aether member merge <code>`. While the
-  code is open it re-reads `member.merge.pending` every 5 seconds.
+  per-second expiry countdown and `aether member merge <code>`. Proposing
+  and cancelling publish no event, so `connect` re-reads
+  `member.merge.pending` every 5 seconds while that code is valid or a
+  proposal is open, dialog closed or not, and when the tab wakes.
 - **I have a merge code** sends `member.merge.preview` and shows both
   members side by side (role, sign-ins, devices, runs, schedules,
   settings), stacked at phone width. **Keep settings from** has no
@@ -4183,16 +4186,21 @@ opens a dialog with two tabs:
   `role_with_keep_admin`. **Propose merge** (danger style) stays disabled
   until a side is chosen and **Discard the listed settings** is ticked,
   then sends `member.merge.propose` with the plan's `plan_digest`; the
-  answer says the other sign-in must accept.
+  answer says the other sign-in must accept. A refused propose shows the
+  error and drops the preview, as does editing the code, so only a new
+  **Preview** can propose.
 
 A proposal for the viewer to accept (`member.merge.pending` where the
-viewer minted the code, read at hydration and on `member.merged`) shows in
-Sign-ins, in the code tab, and as a Needs you card whose **Review** opens
+viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
+card and as a row in the sidebar's Needs you; **Review** and the row open
 Profile at Sign-ins. It lists the proposer's sign-ins, the settings kept,
 what is discarded and the resulting role; **Accept and merge** (danger
 style) needs the same tick and sends `member.merge.accept` with the
-proposal's digest, and **Cancel** sends `member.merge.cancel`. A refusal
-the proposal carries, and every RPC error, shows verbatim. After a merge
+proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
+accept clears the tick and re-reads the proposals, so a `refusal` the
+server now reports disables **Accept and merge**. A proposal the server
+could not plan shows only its `refusal` and **Cancel**, and the viewer's
+own open proposals show with **Cancel**. Every RPC error shows verbatim. After a merge
 the record shows in Sign-ins; **Merge history** lists `member.merge.list`
 with the discarded settings, custom agent definitions included, and the
 archive path.
@@ -4200,10 +4208,10 @@ archive path.
 `member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
 `resolveMember` in `lib/member-name.ts` follow it, so an id history names
 (events, runs, costs, comments, swarms, devices) shows the survivor's name
-with `(merged)`. A `member.merged` event (workspace id `server`) re-reads
-`member.list`; when the viewer is either member it takes a fresh snapshot
-instead, so a session absorbed by the merge shows the survivor, with its
-role, without a reload.
+with `(merged)`. A `member.merged` event (workspace id `server`) takes a
+fresh snapshot: a merge moves runs and roles without their own events, and
+a session absorbed by the merge then shows the survivor, with its role,
+without a reload.
 
 ## Manage workspaces
 

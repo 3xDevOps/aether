@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Copy } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,11 +25,71 @@ import { useCapability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
 import { loadMergeProposals } from '@/store/members'
 
-/** Open proposals the viewer minted the code for, and so must accept or cancel. */
-export function useProposalsToAccept(): (MergeProposal & { plan: MergePlan })[] {
+type Planned = MergeProposal & { plan: MergePlan }
+
+/** The viewer's open proposals: those to accept, those to accept whose plan
+ * the server refused to compute (only Cancel is left), and those the viewer made. */
+export function useOpenProposals(): { toAccept: Planned[]; unplanned: MergeProposal[]; outgoing: MergeProposal[] } {
   const self = useStore((s) => s.info?.member.id)
   const proposals = useStore((s) => s.mergeProposals)
-  return proposals.filter((p): p is MergeProposal & { plan: MergePlan } => p.minted_id === self && p.plan !== undefined)
+  return useMemo(() => ({
+    toAccept: proposals.filter((p): p is Planned => p.minted_id === self && p.plan !== undefined),
+    unplanned: proposals.filter((p) => p.minted_id === self && p.plan === undefined),
+    outgoing: proposals.filter((p) => p.proposer_id === self),
+  }), [proposals, self])
+}
+
+function dropProposal(id: string) {
+  const { mergeProposals, setMergeProposals } = useStore.getState()
+  setMergeProposals(mergeProposals.filter((p) => p.id !== id))
+}
+
+/** Errors go to `onFailed`, so one outlives a proposal that a reload removes. */
+function OpenProposals({ client, onMerged, onFailed }: { client: Api; onMerged: (merge: MemberMerge) => void; onFailed: (error: string) => void }) {
+  const { toAccept, unplanned, outgoing } = useOpenProposals()
+  const names = useNames()
+  return (
+    <>
+      {toAccept.map((proposal) => (
+        <ProposalToAccept key={proposal.id} client={client} proposal={proposal} onMerged={onMerged} onFailed={onFailed} />
+      ))}
+      {unplanned.map((proposal) => (
+        <Callout key={proposal.id} tone="needs-you" role="region" aria-label={`Merge proposal from ${names.member(proposal.proposer_id)}`}
+          title={`${names.member(proposal.proposer_id)} proposes merging into your member`}
+          actions={<CancelProposal client={client} proposal={proposal} onFailed={onFailed} />}
+        >
+          <p role="alert" className="text-state-failed">{proposal.refusal}</p>
+        </Callout>
+      ))}
+      {outgoing.map((proposal) => (
+        <Callout key={proposal.id} tone="neutral" role="region" aria-label={`Your merge proposal to ${proposal.plan?.minted.display_name ?? names.member(proposal.minted_id)}`}
+          actions={<CancelProposal client={client} proposal={proposal} onFailed={onFailed} />}
+        >
+          <p>
+            Your proposal to merge with {proposal.plan?.minted.display_name ?? names.member(proposal.minted_id)} waits for them to accept it, until{' '}
+            <RelativeTime at={proposal.expires_at} />.
+          </p>
+          {proposal.refusal && <p role="alert" className="text-state-failed">{proposal.refusal}</p>}
+        </Callout>
+      ))}
+    </>
+  )
+}
+
+function CancelProposal({ client, proposal, onFailed }: { client: Api; proposal: MergeProposal; onFailed: (error: string) => void }) {
+  const [pending, setPending] = useState(false)
+  const cancel = async () => {
+    setPending(true)
+    try {
+      await client.memberMergeCancel(proposal.id)
+      dropProposal(proposal.id)
+    } catch (err) {
+      onFailed(message(err))
+    } finally {
+      setPending(false)
+    }
+  }
+  return <Button size="sm" variant="secondary" disabled={pending} onClick={() => void cancel()}>{pending ? 'Cancelling…' : 'Cancel'}</Button>
 }
 
 function useNames() {
@@ -45,7 +105,6 @@ function useNames() {
 export function SignInsSection({ client, self, focus }: { client: Api; self: Member; focus?: boolean }) {
   const caps = useCapability()
   const merges = useStore((s) => Object.keys(s.mergedInto).length)
-  const toAccept = useProposalsToAccept()
   const [identities, setIdentities] = useState<MemberIdentities | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [linking, setLinking] = useState(false)
@@ -76,9 +135,7 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
     <section ref={ref} aria-label="Sign-ins" className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h3">Sign-ins</SectionLabel>
       <p className="text-ui-sm text-muted">Every way you reach this server as this member.</p>
-      {toAccept.map((proposal) => (
-        <ProposalToAccept key={proposal.id} client={client} proposal={proposal} onMerged={onMerged} />
-      ))}
+      <OpenProposals client={client} onMerged={onMerged} onFailed={setError} />
       {merged && <MergeRecord merge={merged} />}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       {identities && <SignInList identities={identities} />}
@@ -229,8 +286,6 @@ function useCountdown(until: string | undefined): string {
   return left === 0 ? 'expired' : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
 }
 
-const proposalPollMs = 5000
-
 function MergeDialog({ client, self, onMerged, onClose }: { client: Api; self: Member; onMerged: (merge: MemberMerge) => void; onClose: () => void }) {
   const [tab, setTab] = useState('code')
   return (
@@ -267,20 +322,14 @@ function GetCode({ client, self, onMerged }: { client: Api; self: Member; onMerg
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const countdown = useCountdown(code?.expires_at)
-  const toAccept = useProposalsToAccept()
-  const open = Boolean(code) && countdown !== 'expired'
-
-  useEffect(() => {
-    if (!open) return
-    const timer = setInterval(() => void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err))), proposalPollMs)
-    return () => clearInterval(timer)
-  }, [client, open])
 
   const start = async () => {
     setPending(true)
     setError(null)
     try {
-      setCode(await client.memberMergeStart())
+      const minted = await client.memberMergeStart()
+      setCode(minted)
+      useStore.getState().setMergeCodeUntil(Date.parse(minted.expires_at))
     } catch (err) {
       setError(message(err))
     } finally {
@@ -306,9 +355,7 @@ function GetCode({ client, self, onMerged }: { client: Api; self: Member; onMerg
         <p className="text-ui text-muted">The code is valid for 10 minutes and shown once. A new code replaces your open one.</p>
       )}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
-      {toAccept.map((proposal) => (
-        <ProposalToAccept key={proposal.id} client={client} proposal={proposal} onMerged={onMerged} />
-      ))}
+      <OpenProposals client={client} onMerged={onMerged} onFailed={setError} />
       <div className="flex justify-end">
         <Button variant={code ? 'secondary' : 'primary'} disabled={pending} onClick={() => void start()}>
           {pending ? 'Getting a code…' : code ? 'Get a new code' : 'Get a merge code'}
@@ -352,12 +399,38 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
         }}
       >
         <FormField label="Merge code" className="min-w-0 flex-[1_1_12rem]">
-          <Input className="font-code" value={code} placeholder="ABCD-EFGH-IJKL-MNOP" autoComplete="off" disabled={pending} onChange={(e) => setCode(e.target.value)} />
+          <Input
+            className="font-code"
+            value={code}
+            placeholder="ABCD-EFGH-IJKL-MNOP"
+            autoComplete="off"
+            disabled={pending}
+            onChange={(e) => {
+              setCode(e.target.value)
+              setPlan(null)
+            }}
+          />
         </FormField>
         <Button type="submit" variant="secondary" disabled={pending || !code.trim()}>{pending ? 'Previewing…' : 'Preview'}</Button>
       </form>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
-      {plan && <ProposeForm key={plan.plan.plan_digest} client={client} self={self} code={plan.code} plan={plan.plan} onProposed={setProposal} />}
+      {plan && (
+        <ProposeForm
+          key={plan.plan.plan_digest}
+          client={client}
+          self={self}
+          code={plan.code}
+          plan={plan.plan}
+          onProposed={(proposed) => {
+            setProposal(proposed)
+            void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err)))
+          }}
+          onRefused={(refusal) => {
+            setPlan(null)
+            setError(refusal)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -371,36 +444,38 @@ function Proposed({ proposal, minted }: { proposal: MergeProposal; minted: Merge
   )
 }
 
-export function ProposeForm({ client, self, code, plan, onProposed }: {
+/** A refused propose ends this form: the plan it previewed may no longer hold, so the caller previews again. */
+export function ProposeForm({ client, self, code, plan, onProposed, onRefused }: {
   client: Api
   self: Member
   code: string
   plan: MergePlan
   onProposed: (proposal: MergeProposal) => void
+  onRefused: (error: string) => void
 }) {
   const [form, setForm] = useState<ProposeForm>({ keep: null, discardAck: false, keepAdmin: false })
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const shown = proposeOutcome(plan, form)
   const keepId = useId()
 
   const propose = async () => {
     if (!form.keep) return
     setPending(true)
-    setError(null)
+    let proposed: MergeProposal
     try {
-      onProposed(await client.memberMergePropose({
+      proposed = await client.memberMergePropose({
         code,
         keep_settings_of: form.keep,
         plan_digest: plan.plan_digest,
         discard_ack: true,
         ...(shown.keepAdminOffered && form.keepAdmin && { keep_admin: true }),
-      }))
+      })
     } catch (err) {
-      setError(message(err))
-    } finally {
       setPending(false)
+      return onRefused(message(err))
     }
+    setPending(false)
+    onProposed(proposed)
   }
 
   return (
@@ -428,7 +503,6 @@ export function ProposeForm({ client, self, code, plan, onProposed }: {
           Discard the listed settings
         </CheckRow>
       )}
-      {error && <Callout tone="failed" role="alert">{error}</Callout>}
       <div className="flex justify-end">
         <Button variant="danger" disabled={pending || !shown.canSubmit} onClick={() => void propose()}>
           {pending ? 'Proposing…' : 'Propose merge'}
@@ -520,22 +594,21 @@ function Side({ title, member }: { title: string; member: MergeMember }) {
   )
 }
 
-export function ProposalToAccept({ client, proposal, onMerged }: {
+function ProposalToAccept({ client, proposal, onMerged, onFailed }: {
   client: Api
-  proposal: MergeProposal & { plan: MergePlan }
+  proposal: Planned
   onMerged: (merge: MemberMerge) => void
+  onFailed: (error: string) => void
 }) {
   const [discardAck, setDiscardAck] = useState(false)
   const [keepAdmin, setKeepAdmin] = useState(false)
   const [pending, setPending] = useState<'accept' | 'cancel' | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const { plan } = proposal
   const shown = acceptOutcome(proposal, discardAck, keepAdmin)
   const names = useNames()
 
   const act = async (verb: 'accept' | 'cancel') => {
     setPending(verb)
-    setError(null)
     try {
       if (verb === 'accept') {
         const result = await client.memberMergeAccept({
@@ -548,10 +621,12 @@ export function ProposalToAccept({ client, proposal, onMerged }: {
         await client.memberMergeCancel(proposal.id)
       }
       // After an accept the server closes this connection; the next snapshot re-reads the rest.
-      const { mergeProposals, setMergeProposals } = useStore.getState()
-      setMergeProposals(mergeProposals.filter((p) => p.id !== proposal.id))
+      dropProposal(proposal.id)
     } catch (err) {
-      setError(message(err))
+      onFailed(message(err))
+      setDiscardAck(false)
+      // A refused accept usually means the plan changed; the re-read shows why and disables Accept.
+      await loadMergeProposals(useStore, client).catch((reload: unknown) => onFailed(`${message(err)}; reading the open proposals failed: ${message(reload)}`))
     } finally {
       setPending(null)
     }
@@ -584,7 +659,6 @@ export function ProposalToAccept({ client, proposal, onMerged }: {
           <CheckRow checked={keepAdmin} onChange={setKeepAdmin}>Keep the merged member an admin</CheckRow>
         )}
         <CheckRow checked={discardAck} onChange={setDiscardAck}>Discard the listed settings</CheckRow>
-        {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <div className="flex flex-wrap justify-end gap-2">
           <Button size="sm" variant="secondary" disabled={pending !== null} onClick={() => void act('cancel')}>{pending === 'cancel' ? 'Cancelling…' : 'Cancel'}</Button>
           <Button size="sm" variant="danger" disabled={pending !== null || !shown.canSubmit} onClick={() => void act('accept')}>

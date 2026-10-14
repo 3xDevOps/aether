@@ -127,6 +127,11 @@ func TestMemberIdentityListAndRemove(t *testing.T) {
 		own.PublicKeyFingerprint != ssh.FingerprintSHA256(bob.PublicKey()) {
 		t.Fatalf("own identity list = %+v, %v; want the SSH key fingerprint", own, err)
 	}
+	var asAdmin protocol.MemberIdentityListResult
+	if err := controlClient(t, e).Call(protocol.MethodMemberIdentityList, protocol.MemberIdentityListParams{MemberID: string(bobMember.ID)}, &asAdmin); err != nil ||
+		asAdmin.PublicKeyFingerprint != own.PublicKeyFingerprint {
+		t.Fatalf("admin's identity list of bob = %+v, %v; want the SSH key fingerprint", asAdmin, err)
+	}
 	var pe *protocol.Error
 	for method, params := range map[string]any{
 		protocol.MethodMemberIdentityList:   protocol.MemberIdentityListParams{MemberID: string(m.ID)},

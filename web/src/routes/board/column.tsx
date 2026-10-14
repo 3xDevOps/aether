@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { DeviceNeed } from '@/lib/needs-you'
-import type { MergePlan, MergeProposal } from '@/lib/types'
+import type { MergeProposal } from '@/lib/types'
 import { DeviceCard } from '@/routes/board/device-card'
 import { MergeProposalCard } from '@/routes/board/merge-card'
 import { RunCard } from '@/routes/board/run-card'
@@ -29,7 +29,7 @@ export function Column({
   actions?: ReactNode
   footer?: ReactNode
   devices?: DeviceNeed[]
-  merges?: (MergeProposal & { plan: MergePlan })[]
+  merges?: MergeProposal[]
 }) {
   const [open, setOpen] = useState(!collapsed)
   const count = devices.length + merges.length + column.cards.length

@@ -1797,8 +1797,7 @@ describe('applyEvent', () => {
     }), client)
 
     expect(memberName(store.getState(), bob.id)).toBe('Vera (merged)')
-    expect(client.serverInfo).not.toHaveBeenCalled()
-    expect(client.workspaceListFull).not.toHaveBeenCalled()
+    expect(client.runList).toHaveBeenCalled()
   })
 
   it('takes a fresh snapshot when the viewer was merged away', async () => {

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { reopen } from '@/components/failure'
 import { RunDetails, RunDetailsGroup } from '@/components/shell/run-details'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
@@ -165,6 +166,7 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         {group.key === 'working' && <MineToggle />}
       </div>
       <ul id={listID} hidden={!expanded}>
+        {expanded && group.key === 'needs-you' && <MergesRow />}
         {expanded && group.key === 'needs-you' && <DevicesRow />}
         {expanded && group.runs.map((tree) => (
           <li key={tree.run.id}>
@@ -182,6 +184,18 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
         ))}
       </ul>
     </div>
+  )
+}
+
+function MergesRow() {
+  const waiting = useStore((s) => s.mergeProposals.filter((p) => p.minted_id === s.info?.member.id).length)
+  if (waiting === 0) return null
+  return (
+    <li>
+      <ListRow data-run-row="" leading={<StatusDot tone="needs-you" />} onClick={() => reopen('sign-ins', null)}>
+        {waiting === 1 ? 'A merge proposal' : `${waiting} merge proposals`} waiting for you
+      </ListRow>
+    </li>
   )
 }
 
