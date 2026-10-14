@@ -29,6 +29,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -667,10 +668,14 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 		t.Fatalf("write first shell input: %v", err)
 	}
 	p.waitForOutput(t, "shell-interactive")
-	if _, err := p.master.Write([]byte("trap 'printf \"shell-%s\\n\" hup; exit 129' HUP; printf 'shell-%s\\n' replacement; while :; do IFS= read -r line; done\n")); err != nil {
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.master.Write([]byte("exec " + shellquote.QuoteAlways(testBinary) + " '-test.run=^TestSupervisorSignalChild$' -- shell\n")); err != nil {
 		t.Fatalf("write replacement shell input: %v", err)
 	}
-	p.waitForOutput(t, "shell-replacement")
+	p.waitForOutput(t, "shell-ready")
 
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal ready login shell: %v", err)
@@ -704,8 +709,11 @@ func TestTUIWrapperKeepsNormalShellsAndForwardsStop(t *testing.T) {
 
 func TestTUIWrapperForwardsTERMToHarness(t *testing.T) {
 	t.Parallel()
-	wrapped := wrapTUICommand([]string{"/bin/sh", "-c", "trap 'printf \"harness-%s\\n\" term; exit 0' TERM; printf 'harness-%s\\n' ready; while :; do read -r line; done"})
-	p := startTestPTYProcess(t, wrapped)
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := startTestPTYProcess(t, wrapTUICommand([]string{testBinary, "-test.run=^TestSupervisorSignalChild$", "--", "harness"}))
 	defer func() {
 		_ = p.cmd.Process.Kill()
 		_ = p.master.Close()

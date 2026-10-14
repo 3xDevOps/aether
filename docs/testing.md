@@ -794,8 +794,10 @@ make build && (cd web && bunx playwright test run-session.spec.ts)
 `TestSupervisorSwapsItsChild` waits for the fallback login shell to execute a
 readiness command before requesting another swap. The harness exit banner
 is printed before that shell starts.
-Signal-only fixtures register a buffered SIGTERM channel before announcing
-readiness. After the forced swap, the test executes a command in the replacement
+Signal fixtures register a buffered SIGTERM or SIGHUP channel before announcing
+readiness; a login shell under test `exec`s one instead of trapping the signal,
+because a shell trap stays pending when the signal lands just before `read`
+blocks. After the forced swap, the test executes a command in the replacement
 login shell.
 
 [Mode switching](enhanced-runs.md#switching-a-running-agent) is proven the

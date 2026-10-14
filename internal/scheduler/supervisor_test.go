@@ -53,10 +53,8 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	p.waitForOutput(t, "resumed-up")
 	waitState("n1 exited 7")
 	p.waitForOutput(t, "[aether] harness exited with code 7")
-	// Keep each login shell in a builtin read after installing its HUP
-	// handler. A printf followed by the host's prompt/readline is not a
-	// handshake for the signal path this test is about to exercise.
-	if _, err := p.master.Write([]byte("trap 'printf \"fallback-%s\\n\" hup; exit 0' HUP; printf 'fallback-%s\\n' ready; while :; do read -r line; done\n")); err != nil {
+	signalChild := "exec " + shellquote.QuoteAlways(testBinary) + " '-test.run=^TestSupervisorSignalChild$' -- "
+	if _, err := p.master.Write([]byte(signalChild + "fallback\n")); err != nil {
 		t.Fatal(err)
 	}
 	p.waitForOutput(t, "fallback-ready")
@@ -64,13 +62,13 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	swap("# n2\n")
 	p.waitForOutput(t, "fallback-hup")
 	waitState("n2 started")
-	if _, err := p.master.Write([]byte("trap 'printf \"shell-%s\\n\" hup; exit 0' HUP; printf 'shell-%s\\n' ok; while :; do read -r line; done\n")); err != nil {
+	if _, err := p.master.Write([]byte(signalChild + "shell\n")); err != nil {
 		t.Fatal(err)
 	}
-	p.waitForOutput(t, "shell-ok")
+	p.waitForOutput(t, "shell-ready")
 
 	// Acknowledge TERM without exiting so the force signal cannot race it.
-	swap("# n3\nexec " + shellquote.QuoteAlways(testBinary) + " '-test.run=^TestSupervisorSignalChild$' -- stubborn\n")
+	swap("# n3\n" + signalChild + "stubborn\n")
 	p.waitForOutput(t, "shell-hup")
 	p.waitForOutput(t, "stubborn-up")
 	swap("# n4\n")
@@ -92,28 +90,36 @@ func TestSupervisorSwapsItsChild(t *testing.T) {
 	}
 }
 
-// A shell trap can remain pending if TERM arrives just before its read
-// syscall blocks. Register a buffered signal channel before readiness instead.
+// A shell trap can remain pending forever if its signal arrives just before
+// a read syscall blocks. Register a buffered signal channel before readiness
+// instead. "fallback" and "shell" stand in for login shells, which the
+// supervisor stops with HUP.
 func TestSupervisorSignalChild(t *testing.T) {
 	i := slices.Index(os.Args, "--")
 	if i < 0 {
 		return
 	}
 	args := os.Args[i+1:]
-	if len(args) != 1 || args[0] != "harness" && args[0] != "stubborn" {
+	if len(args) != 1 {
 		t.Fatalf("unexpected helper arguments: %q", args)
 	}
-	name, ready := args[0], "ready"
-	if name == "stubborn" {
+	name, ready, sig, word := args[0], "ready", syscall.SIGTERM, "term"
+	switch name {
+	case "harness":
+	case "stubborn":
 		ready = "up"
+	case "fallback", "shell":
+		sig, word = syscall.SIGHUP, "hup"
+	default:
+		t.Fatalf("unexpected helper arguments: %q", args)
 	}
-	terms := make(chan os.Signal, 1)
-	signal.Notify(terms, syscall.SIGTERM)
-	defer signal.Stop(terms)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, sig)
+	defer signal.Stop(signals)
 	fmt.Printf("%s-%s\n", name, ready)
-	for range terms {
-		fmt.Printf("%s-term\n", name)
-		if name == "harness" {
+	for range signals {
+		fmt.Printf("%s-%s\n", name, word)
+		if name != "stubborn" {
 			return
 		}
 	}
