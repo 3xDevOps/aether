@@ -566,7 +566,9 @@ end with the old adapter, the log gets a **Background work interrupted**
 notice naming them, and a `background` item with no tasks and
 `stop_reason: "interrupted"` records that none outlived the connection. A
 follow-up turn owed when the connection ended counts as interrupted work
-too. A run whose wait you stopped is not interrupted.
+too. A tool call whose task the log still records as `running` gets a new
+snapshot with `stopped`, as on a clean close. A run whose wait you stopped
+is not interrupted.
 Messages still queued behind that turn read **Not sent**
 (`agent_disconnected`), also after a crash, since the next server records
 them when it starts; send them again once the session is back. The restored

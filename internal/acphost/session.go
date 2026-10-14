@@ -269,7 +269,18 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.mu.Unlock()
 	}
 	if cfg.ClaudeCode {
+		running, err := RunningTaskCalls(log)
+		if err != nil {
+			_ = w.Close()
+			s.stop()
+			s.notify.close(nil)
+			return nil, errors.Join(fmt.Errorf("acphost: scan running tasks: %w", err), log.Close())
+		}
 		s.mu.Lock()
+		for _, it := range running {
+			s.taskCalls[it.ToolCall.Task.ID] = *it.ToolCall
+			s.taskEndedLocked(it.ToolCall.Task.ID, "stopped")
+		}
 		s.interruptTasksLocked(LastItem(log, KindBackground))
 		s.mu.Unlock()
 	}
