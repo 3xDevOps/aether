@@ -127,7 +127,8 @@ func (s *Session) sdkMessage(raw json.RawMessage) {
 			live[lt.TaskID] = true
 			t := s.tasks[lt.TaskID]
 			if t == nil {
-				t = &liveTask{typ: lt.TaskType, description: lt.Description}
+				description, _ := cutTail(lt.Description, maxShrunkString)
+				t = &liveTask{typ: lt.TaskType, description: description}
 				s.tasks[lt.TaskID] = t
 			}
 			t.ambient = lt.Ambient

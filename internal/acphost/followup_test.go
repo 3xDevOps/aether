@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -372,5 +373,25 @@ func TestQueuedPromptsAnsweredAtOnceAllRun(t *testing.T) {
 	})
 	if reason := rec.waitIdle(t); reason != "end_turn" {
 		t.Fatalf("idle reason %q", reason)
+	}
+}
+
+func TestOversizedBackgroundItemKeepsItsTasksOnTheWire(t *testing.T) {
+	long := strings.Repeat("x", maxShrunkString)
+	it := Item{Kind: KindBackground, FollowUp: true, Tasks: []Task{
+		{ID: "wf-1", Type: "local_workflow", Description: long, Holds: true},
+		{ID: "sh-1", Type: "local_bash", Description: long},
+	}}
+	b, truncated, err := it.Wire(4 << 10)
+	if err != nil || !truncated {
+		t.Fatalf("Wire: truncated %v, %v", truncated, err)
+	}
+	var got Item
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []Task{{ID: "wf-1", Type: "local_workflow", Holds: true}, {ID: "sh-1", Type: "local_bash"}}
+	if !got.FollowUp || !slices.Equal(got.Tasks, want) {
+		t.Fatalf("wire item %+v", got)
 	}
 }

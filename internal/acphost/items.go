@@ -386,7 +386,10 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 		return b, true, err
 	}
 	brief := Item{Seq: it.Seq, Epoch: it.Epoch, Time: it.Time, Turn: it.Turn, Kind: it.Kind, Truncated: true,
-		Mode: cut.Mode, StopReason: cut.StopReason, PlanParentID: cut.PlanParentID}
+		Mode: cut.Mode, StopReason: cut.StopReason, PlanParentID: cut.PlanParentID, FollowUp: cut.FollowUp}
+	for _, t := range cut.Tasks {
+		brief.Tasks = append(brief.Tasks, Task{ID: t.ID, Type: t.Type, Holds: t.Holds})
+	}
 	if m := cut.Message; m != nil {
 		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, ParentID: m.ParentID, Complete: m.Complete, Attachments: m.Attachments}
 	}
