@@ -24,7 +24,7 @@ import { roleLabel } from '@/routes/members/roster'
 import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
-import { dropMergeProposal, loadMergeProposals } from '@/store/members'
+import { addMergeProposal, dropMergeProposal, loadMergeProposals } from '@/store/members'
 
 type Planned = MergeProposal & { plan: MergePlan }
 
@@ -460,6 +460,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
           plan={plan.plan}
           onProposed={(proposed) => {
             setProposal({ proposal: proposed, minted: plan.plan.minted })
+            addMergeProposal(useStore, proposed)
             void loadMergeProposals(useStore, client)
           }}
           onRefused={(refusal) => {

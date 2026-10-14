@@ -27,7 +27,8 @@ export interface MembersSlice {
   members: Record<string, Member>
   /** From `member.list`: each member a merge absorbed, to the member it became. */
   mergedInto: Record<string, string>
-  /** Without `mergedInto`, the map already held stays. */
+  /** Merges are permanent, so `mergedInto` adds to the map held and its
+   * absorbed members are left out, whatever an older read says. */
   setMembers: (members: Member[], mergedInto?: Record<string, string>) => void
   setMemberList: (list: MemberList) => void
   /** Returns false, writing nothing, when an answer to a later-started change already wrote these fields. */
@@ -96,7 +97,10 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   members: {},
   mergedInto: {},
   setMembers: (members, mergedInto) =>
-    set({ members: Object.fromEntries(members.map((m) => [m.id, m])), ...(mergedInto && { mergedInto }) }),
+    set((s) => {
+      const merged = { ...s.mergedInto, ...mergedInto }
+      return { members: Object.fromEntries(members.filter((m) => !merged[m.id]).map((m) => [m.id, m])), mergedInto: merged }
+    }),
   setMemberList: (list) => get().setMembers(list.members, list.merged_into ?? {}),
   confirmMember: (id, fields, patch) => {
     settle(patch)
@@ -228,6 +232,12 @@ export async function loadMergeProposals(store: RootStore, client: Api): Promise
   const now = store.getState()
   if (proposalReads.get(store) !== read || now.identityKey !== s.identityKey) return
   now.setMergeProposals(proposals ?? now.mergeProposals, error)
+}
+
+export function addMergeProposal(store: RootStore, proposal: MergeProposal) {
+  nextProposalRead(store)
+  const s = store.getState()
+  s.setMergeProposals([...s.mergeProposals.filter((p) => p.id !== proposal.id), proposal], s.mergeProposalsError)
 }
 
 export function dropMergeProposal(store: RootStore, id: string) {

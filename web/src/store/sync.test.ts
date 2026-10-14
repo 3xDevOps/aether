@@ -9,7 +9,7 @@ import { loadDevices } from '@/store/devices'
 import { homeKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
-import { dropMergeProposal, loadMergeProposals } from '@/store/members'
+import { addMergeProposal, dropMergeProposal, loadMergeProposals } from '@/store/members'
 import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -1815,6 +1815,16 @@ describe('applyEvent', () => {
     expect(store.getState().info?.member.id).toBe(alice.id)
   })
 
+  it('keeps a merge when an older member list lands after it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().setMemberList({ members: [alice], merged_into: { [bob.id]: alice.id } })
+    store.getState().setMemberList({ members: [alice, bob] })
+
+    expect(store.getState().members[bob.id]).toBeUndefined()
+    expect(memberName(store.getState(), bob.id)).toBe('Alice (merged)')
+  })
+
   it('takes a fresh snapshot when the viewer was merged away', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) }))
@@ -1854,6 +1864,14 @@ describe('applyEvent', () => {
       before.answer([proposal('prop_1')])
       await read
       expect(store.getState().mergeProposals).toEqual([])
+    })
+
+    it('keeps a proposal just made when the read after it fails', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      addMergeProposal(store, proposal('prop_mine'))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => Promise.reject(new Error('member.merge.pending: server unreachable'))) }))
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_mine'])
     })
 
     it('keeps the proposals shown and records a failed read', async () => {
