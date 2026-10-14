@@ -741,11 +741,8 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	attB.waitOutput(t, "fixture-sent:")
 	attA.waitOutput(t, "fixture-acked:")
 	attB.waitOutput(t, "fixture-acked:")
-	// These lines are emitted by two different shell fixtures only after each
-	// has observed a peer and completed the durable send/inbox exchange.
-	attA.waitOutput(t, "fixture-reported:")
-	attB.waitOutput(t, "fixture-reported:")
-
+	// The server closes a worker's run once its report is accepted, so the
+	// durable submissions, not later output, show that both reported.
 	shown := waitMissionSubmissions(ctx, t, adaCtrl, missionID, 2)
 	if len(shown.Submissions) != 2 {
 		t.Fatalf("mission submissions = %d, want two retained submissions", len(shown.Submissions))
@@ -1100,7 +1097,6 @@ if ! reported=$(/usr/local/bin/aether-internal report --outcome success --summar
 	echo "fixture-report-failed:$reported"
 	exit 1
 fi
-echo "fixture-reported:$AETHER_RUN_ID"
 `)
 	uid, gid := os.Getuid(), os.Getgid()
 	if uid == 0 {
