@@ -407,6 +407,16 @@ func TestReadRecentCastUsesBoundedNewestSegments(t *testing.T) {
 		t.Fatalf("recent replay = %q", got)
 	}
 
+	// A long lineage holds one chunk per segment, so a short segment must not
+	// reserve the caller's whole remaining budget.
+	chunk, used, err := readCastTailWindow(path, 1<<20, 8<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(chunk) != "second-life\n" || cap(chunk) > used {
+		t.Fatalf("short segment chunk = %q with capacity %d from %d raw bytes", chunk, cap(chunk), used)
+	}
+
 	// A huge newest event cannot make the helper read past its fixed raw
 	// window. Starting in the middle of that event returns no partial output.
 	large := filepath.Join(t.TempDir(), "large.cast")

@@ -270,7 +270,8 @@ func readCastTailWindow(path string, maxBytes, maxRawBytes int) ([]byte, int, er
 		raw = raw[i+1:]
 	}
 
-	out := make([]byte, 0, maxBytes)
+	// Decoding never expands a cast line, so the window bounds the output.
+	out := make([]byte, 0, min(maxBytes, len(raw)))
 	for _, line := range bytes.Split(raw, []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
