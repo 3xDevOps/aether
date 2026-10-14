@@ -1463,9 +1463,6 @@ func TestNoReporterDeadlineRespectsInputAndRunMode(t *testing.T) {
 	}
 }
 
-// TestNeedsInputReasonParksAtTurnEndAndClearsOnResume: the question is shown
-// as the Needs you reason like a blocked summary, and a replay of its id
-// does not bring it back after the agent resumes.
 func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, nil)
@@ -1509,8 +1506,6 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	}
 }
 
-// TestNeedsInputSupersedesAnEarlierSuccessReport: the newest report in a turn
-// speaks for an interactive run, so a question after a success is shown.
 func TestNeedsInputSupersedesAnEarlierSuccessReport(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, nil)
@@ -1534,8 +1529,6 @@ func TestNeedsInputSupersedesAnEarlierSuccessReport(t *testing.T) {
 	}
 }
 
-// TestNeedsInputIsRefusedForAFinishedRun: a run the server no longer
-// supervises has no user left to answer.
 func TestNeedsInputIsRefusedForAFinishedRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -1544,8 +1537,6 @@ func TestNeedsInputIsRefusedForAFinishedRun(t *testing.T) {
 	}
 }
 
-// TestNeedsInputIsRefusedForABackgroundRun: nobody can answer a headless run
-// before its turn ends, so the question is refused and the run is left alone.
 func TestNeedsInputIsRefusedForABackgroundRun(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
