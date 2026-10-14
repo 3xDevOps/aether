@@ -1945,6 +1945,65 @@ announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
 
+A subagent is the agent that Claude Code's `Agent` or `Task` tool launches;
+a dynamic workflow is its `Workflow` tool. Their items carry a parent link
+([session item log](enhanced-runs.md#the-session-item-log)), and
+`store/subagents.ts` keeps them out of the conversation. Each session holds
+an index keyed by the launching tool call's id, with the call's latest
+snapshot, the subagent's own items, nested subagents, tool count, latest
+activity, and start and settle times. `acpFrames` and `acpOlder` update it
+incrementally; a history page that arrives out of order prepends, and a
+reset starts it over. Only the turns' own items reach `turnRows`, so a
+child item re-renders its card, not the conversation. A launch call
+becomes a `subagents` row, and consecutive launches share one row:
+"3 subagents · 2 running", expanded by default. Each card shows a status dot,
+the description, the subagent type, the tool and nested counts, and the
+elapsed time. A running card shows its latest activity, a settled one the
+first line of its report, without Markdown marks. The state comes from the
+launch call: `completed` is done, `failed` failed, a call still open when its
+turn ended and silent since is stopped, and a call whose snapshot is not
+loaded is unknown. Elapsed time counts from the call's opening snapshot, so a
+card whose replay starts after it shows none until history reaches it. A
+Workflow call, or an Agent call with `run_in_background`, completes as soon
+as its work starts. When the call carries `tool_call.task`
+([session item log](enhanced-runs.md#the-session-item-log)), the card follows
+the task: running, then done, failed or stopped, with elapsed time to the
+snapshot that settled it. Without it, the card reads "Launched in the
+background", and running once a child item is logged after the call
+completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
+A subagent whose launch call is not loaded, or was trimmed, shows its card at
+its first held item until a history page brings the launch; without the
+call its state is unknown. A launch id seen again after
+its call settled names a new subagent, keyed `<id>@<seq>`. While the main
+agent only waits on its subagents, the live row reads "Waiting on 2
+subagents". Codex, opencode and the others send no parent link, so their
+sessions render as before.
+
+A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
+at `?agent=<tool call id>`. At 1280px and wider it is an inline aside that
+replaces Details while open; narrower, it is a side sheet, and a bottom
+sheet on phones. It shows breadcrumbs back to **Session** through nested
+subagents, **Previous subagent** and **Next subagent** among siblings, and
+**Close subagent**; `Esc` closes it before it leaves the run. Stepping
+between siblings and closing replace the history entry, so Back does not
+reopen it. Below them,
+one virtualized list holds the prompt (`raw_input.prompt`, read whole with
+`run.acp.item` when the item was cut; a launch input over the log's
+16 KiB raw limit is kept cut, so the prompt reads as unavailable), the
+subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`,
+and its report (the completed
+call's text content). Until a known subagent's launch call is loaded it pages
+`run.acp.history`, at most five pages, then offers **Load earlier history**;
+an id the loaded history does not name pages only on that button. A failed
+page, or a failed read of the whole launch item, shows the server's error
+with **Retry**. Changed files list in the
+transcript of the agent that made them, and the main turn that launched it
+lists them in its changed-files row, each path once.
+
+A tool call snapshot logged in a later turn than the call's first, as
+when a call outlives its turn, joins that first turn. The call keeps one row and
+its diff counts once.
+
 A path the agent names opens that file in the run's
 [Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
 and inline code, in a `work` entry's command and output tail, and in a

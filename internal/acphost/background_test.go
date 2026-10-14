@@ -856,7 +856,7 @@ func TestSessionMetaCarriesTheSystemPromptAndTaskFrames(t *testing.T) {
 					}
 					if claude {
 						wantKeys++
-						if string(got["claudeCode"]) != `{"emitRawSDKMessages":`+string(frames)+`}` {
+						if string(got["claudeCode"]) != `{"emitRawSDKMessages":`+string(frames)+`,"options":{"forwardSubagentText":true}}` {
 							t.Fatalf("%s _meta %s", tc.method, meta)
 						}
 					}

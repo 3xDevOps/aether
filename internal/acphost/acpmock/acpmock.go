@@ -61,6 +61,10 @@ const (
 	// subagents the way Claude's adapter reports them: nested, concurrent,
 	// and with later updates that omit the parent link.
 	PromptSubagents = "subagents"
+	// PromptWorkflow launches a dynamic workflow and a background Agent
+	// the way Claude's adapter reports them: calls that complete once their
+	// work runs in the background, and the Agent's work after that.
+	PromptWorkflow = "workflow"
 )
 
 // BackgroundDelay is how long after PromptBackground's turn ends its
@@ -379,6 +383,9 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		time.AfterFunc(BackgroundDelay, func() { a.finish(HeldTaskID) })
 		a.text(ctx, "releasing")
 		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptWorkflow:
+		a.workflow(ctx)
+		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {
 		case <-cancelled:
@@ -535,7 +542,9 @@ func (a *Agent) subagents(ctx context.Context) {
 		prose("task-3", "Rounding the total."),
 		prose("task-2", "Both tests pass."),
 		done("task-2-bash", "", ""),
-		done("task-3-edit", "", "Edit"),
+		claudeUpdate(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "task-3-edit", "status": "completed", "content": []any{map[string]any{
+			"type": "diff", "path": "src/billing.js", "oldText": "  return a + b\n", "newText": "  return Math.round((a + b) * 100) / 100\n",
+		}}}, "", "Edit"),
 		done("task-2", "", "Agent"),
 		done("task-3", "", "Agent"),
 		prose("", "All three subagents finished."),
@@ -601,4 +610,35 @@ func (a *Agent) sdk(ctx context.Context, message map[string]any) {
 	if frames {
 		_ = a.conn.SendNotification(ctx, "_claude/sdkMessage", map[string]any{"sessionId": session, "message": message})
 	}
+}
+
+func (a *Agent) workflow(ctx context.Context) {
+	input := map[string]any{"name": "audit-billing", "description": "Audit the billing module", "script": "agent('List every function in src/billing.js')"}
+	a.update(ctx, claudeUpdate(map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "workflow-1", "kind": "other", "title": "Workflow", "status": "in_progress", "rawInput": input,
+	}, "", "Workflow"))
+	done, _ := json.Marshal(map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "workflow-1", "status": "completed",
+		"content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "Workflow audit-billing is running in the background."}}},
+		"_meta": map[string]any{"claudeCode": map[string]any{"toolName": "Workflow", "toolResponse": map[string]any{
+			"status": "async_launched", "taskId": "mock-workflow-task", "taskType": "local_workflow", "workflowName": "audit-billing",
+		}}},
+	})
+	a.update(ctx, done)
+	in := map[string]any{"description": "Watch the build", "subagent_type": "general-purpose", "prompt": "Watch the build log.", "run_in_background": true}
+	a.update(ctx, claudeUpdate(map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "background-1", "kind": "think", "title": "Watch the build", "status": "in_progress", "rawInput": in,
+	}, "", "Agent"))
+	a.update(ctx, claudeUpdate(map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "background-1", "status": "completed",
+		"content": []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "Async agent launched successfully."}}},
+		"_meta": map[string]any{"claudeCode": map[string]any{"toolName": "Agent", "toolResponse": map[string]any{
+			"status": "async_launched", "agentId": "mock-background-agent",
+		}}},
+	}, "", ""))
+	time.Sleep(20 * time.Millisecond)
+	a.update(ctx, claudeUpdate(map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "background-1-read", "kind": "read", "title": "Read build.log", "status": "in_progress",
+	}, "background-1", "Read"))
+	a.text(ctx, "The workflow is running.")
 }

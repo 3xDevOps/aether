@@ -781,7 +781,10 @@ Anything an agent or a tool prints, a secret included, can be in it;
 Items carry the subagent tree that Claude's adapter reports. A subagent is
 the agent that Claude Code's `Agent` or `Task` tool launches; its
 messages, thoughts, tool calls and plans arrive in the same session as the
-main agent's.
+main agent's. Claude's adapter forwards a subagent's text and thinking only
+to a session opened with `_meta.claudeCode.options.forwardSubagentText`,
+which a Claude Enhanced run sets on `session/new`, `session/resume` and
+`session/load`.
 
 | Field | Set on |
 |---|---|

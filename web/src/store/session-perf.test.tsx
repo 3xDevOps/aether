@@ -3,6 +3,7 @@ import type { SessionItem } from '@/lib/session-types'
 import { createRootStore } from '@/store'
 import { batchNotifications } from '@/store/batch'
 import { rowsOfTurn } from '@/store/session-rows'
+import { agentTurn, extrasSig } from '@/store/subagents'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
 const perf = process.env.RUN_PERF === '1' ? describe : describe.skip
@@ -56,5 +57,35 @@ perf('session stream budget', () => {
     expect(rows.length).toBeGreaterThan(0)
     expect(took).toBeLessThan(150)
     process.stdout.write(`2000 items to ${rows.length} rows: ${took.toFixed(1)} ms\n`)
+  })
+
+  it('streams 20 concurrent subagents without re-deriving the main turns', () => {
+    const store = createRootStore()
+    const agents = Array.from({ length: 20 }, (_, i) => `agent${i}`)
+    const launches = [
+      item('turn_start', 1),
+      ...agents.map((id) => tool(1, id, 'other', `Agent ${id}`, 'in_progress', { tool_name: 'Agent', subagent: { description: id, type: 'Explore' } })),
+    ]
+    const children = Array.from({ length: 245 }, (_, n) => agents.map((id) => {
+      const call = Math.floor(n / 2)
+      return tool(1, `${id}-${call}`, 'read', `Read f${call}.go`, n % 2 ? 'completed' : 'in_progress', { parent_id: id })
+    })).flat()
+    const batch = 25
+    const started = performance.now()
+    store.getState().acpFrames('run_1', frames(launches))
+    const turns = store.getState().acpSessions.run_1!.turns
+    for (let i = 0; i < children.length; i += batch) {
+      store.getState().acpFrames('run_1', frames(children.slice(i, i + batch)))
+      expect(store.getState().acpSessions.run_1!.turns).toBe(turns)
+      expect(extrasSig(store.getState().acpSessions.run_1!.agents, 0)).toBe('')
+    }
+    store.getState().acpFrames('run_1', frames([tool(1, 'agent0', 'other', 'Agent agent0', 'completed', { tool_name: 'Agent', subagent: { description: 'agent0' } })]))
+    const agent = store.getState().acpSessions.run_1!.agents.agents.agent0!
+    const rows = rowsOfTurn(agentTurn(agent))
+    const took = performance.now() - started
+    expect(agent.items).toHaveLength(245)
+    expect(rows).toBe(rowsOfTurn(agentTurn(agent)))
+    expect(took).toBeLessThan(1500)
+    process.stdout.write(`${launches.length + children.length} items across 20 subagents: ${took.toFixed(0)} ms of work\n`)
   })
 })

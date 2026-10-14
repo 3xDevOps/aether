@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Copy } from '@/components/icons'
 import { MessageRow as AgentMessage } from '@/components/messages/message-row'
 import { MessageAttachments } from '@/components/messages/message-images'
@@ -14,10 +14,13 @@ import { message } from '@/lib/format'
 import { memberName } from '@/lib/member-name'
 import { inputHint } from '@/lib/run-requests'
 import { PathText } from '@/routes/files/path-link'
+import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { AnsweredText } from '@/routes/run/session-requests'
+import { SubagentGroup } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
+import type { RunRecord } from '@/store/runs'
 import type { SessionRow, WorkItem } from '@/store/session-rows'
 import { loadWholeItem } from '@/store/session-stream'
 
@@ -68,6 +71,24 @@ export interface RowContext {
   /** Opens the Changes view at one file. */
   openChange: (path: string) => void
   reveal: RunNavigation['reveal']
+}
+
+export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavigation): RowContext {
+  const latest = useRef({ agent, nav })
+  latest.current = { agent, nav }
+  return useMemo(() => ({
+    runID: run.id,
+    task: run.task,
+    ownerID: run.member_id,
+    hasAgentTerminal: agent.hasAgentTerminal,
+    openTerminal: () => {
+      const { agent: current, nav: to } = latest.current
+      to.go('terminal')
+      if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
+    },
+    openChange: (path) => useStore.getState().navigate('run', { runId: run.id, view: 'changes', file: path }),
+    reveal: (id) => latest.current.nav.reveal(id),
+  }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
 }
 
 function useExpanded(runID: string, id: string): boolean {
@@ -186,6 +207,8 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       return <EventRow detail={<Markdown text={row.text} />}>Thought</EventRow>
     case 'work':
       return <WorkRow row={row} runID={ctx.runID} />
+    case 'subagents':
+      return <SubagentGroup runID={ctx.runID} rowID={row.id} ids={row.ids} />
     case 'live':
       return <LiveActivityRow waiting={row.waiting}>{row.label}</LiveActivityRow>
     case 'terminal-note':

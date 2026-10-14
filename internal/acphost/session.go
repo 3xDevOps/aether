@@ -283,7 +283,9 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.conn.sessionMeta["systemPrompt"] = map[string]any{"append": cfg.SystemPrompt}
 	}
 	if cfg.ClaudeCode {
-		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames}
+		// Claude's adapter forwards a subagent's text and thinking only when
+		// asked; they arrive stamped with the subagent's parent link.
+		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames, "options": map[string]any{"forwardSubagentText": true}}
 	}
 	if err := s.open(ctx); err != nil {
 		_ = w.Close()
