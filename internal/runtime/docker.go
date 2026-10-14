@@ -79,6 +79,7 @@ type Docker struct {
 	runtimeMu        sync.Mutex
 	sysboxFound      bool
 	sysboxMissingAt  time.Time
+	sysboxVeto       func() bool
 }
 
 // sysboxRecheck is how long a daemon without Sysbox is trusted to stay
@@ -198,6 +199,15 @@ func (d *Docker) SysboxRegistered(ctx context.Context) (bool, error) {
 	return ok, nil
 }
 
+// VetoSysbox makes RuntimeAuto skip sysbox-runc while veto returns true, for a
+// Sysbox that is registered but failed its probe. It must not call back into
+// this Docker.
+func (d *Docker) VetoSysbox(veto func() bool) {
+	d.runtimeMu.Lock()
+	defer d.runtimeMu.Unlock()
+	d.sysboxVeto = veto
+}
+
 // ForgetRuntime makes the next RuntimeAuto lookup ask the daemon again.
 func (d *Docker) ForgetRuntime() {
 	d.runtimeMu.Lock()
@@ -213,6 +223,9 @@ func (d *Docker) resolveRuntime(ctx context.Context) (string, error) {
 	}
 	d.runtimeMu.Lock()
 	defer d.runtimeMu.Unlock()
+	if d.sysboxVeto != nil && d.sysboxVeto() {
+		return "", nil
+	}
 	if d.sysboxFound {
 		return runtimeSysbox, nil
 	}

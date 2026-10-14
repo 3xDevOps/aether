@@ -29,28 +29,34 @@ stub dpkg-query 'printf "%s" "${FAKE_INSTALLED:-}"; [ -n "${FAKE_INSTALLED:-}" ]
 stub uname 'echo "${FAKE_KERNEL:-6.8.0-45-generic}"'
 stub modinfo '[ -n "${FAKE_SHIFTFS:-}" ]'
 stub ip 'case "$*" in
-"-4 -o route") echo "default via 10.0.0.1 dev eth0"; echo "10.0.0.0/24 dev eth0 scope link"; [ -z "${FAKE_ROUTE:-}" ] || echo "$FAKE_ROUTE dev eth0" ;;
+"-4 -o route show table all") echo "default via 10.0.0.1 dev eth0"; echo "10.0.0.0/24 dev eth0 scope link"; echo "local 10.0.0.5 dev eth0 table local"; echo "broadcast 10.0.0.255 dev eth0 table local"; [ -z "${FAKE_LOCAL:-}" ] || echo "local $FAKE_LOCAL dev lo table local"; [ -z "${FAKE_ROUTE:-}" ] || echo "$FAKE_ROUTE dev eth0" ;;
 "-4 -o address") echo "2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global eth0"; [ -z "${FAKE_ADDR:-}" ] || echo "5: br0    inet $FAKE_ADDR scope global br0" ;;
 esac'
 stub docker 'case "$1" in
-info) echo "${FAKE_RUNTIMES:-{\"runc\":{}\}}" ;;
+info) if [ -n "${FAKE_RUNTIMES:-}" ]; then echo "$FAKE_RUNTIMES"; elif [ -e "$STATE_FILE" ]; then echo "{\"runc\":{},\"sysbox-runc\":{}}"; else echo "{\"runc\":{}}"; fi ;;
+pull) [ -z "${FAKE_PULL_FAIL:-}" ] || { echo "pull access denied"; exit 1; } ;;
+run) exit "${FAKE_PROBE_RC:-0}" ;;
 network) case "$2" in
 	ls) [ -z "${FAKE_NET_FAIL:-}" ] || { echo "Cannot connect to the Docker daemon"; exit 1; }; echo abc ;;
 	inspect) echo "172.17.0.0/16 ${FAKE_DOCKER_NETS:-} " ;;
 	esac ;;
 esac'
-stub apt-get 'echo "apt-get $*" >>"$CMD_LOG"; case "$*" in *.deb*) echo "E: Unmet dependencies"; exit 100 ;; esac'
+stub apt-get 'echo "apt-get $*" >>"$CMD_LOG"; case "$*" in
+*.deb*) [ -n "${FAKE_APT_OK:-}" ] || { echo "E: Unmet dependencies"; exit 100; }; touch "$STATE_FILE" ;;
+*purge*) [ -z "${FAKE_PURGE_FAIL:-}" ] || { echo "E: dpkg was interrupted"; exit 100; }; rm -f "$STATE_FILE" ;;
+esac'
 stub sha256sum 'case "${FAKE_ARCH:-amd64}" in arm64) h=04ca894ae0b53f0fa54eaacc173ce40363c9a95ea5450f773716a84ef650a69b ;; *) h=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5 ;; esac; echo "${FAKE_SHA:-$h}  $1"'
 stub curl 'out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; echo not-a-deb >"$out"'
 stub jq 'exec "$REAL_JQ" "$@"'
 REAL_JQ=$(command -v jq) || { echo "install-sysbox-test: jq is required" >&2; exit 1; }
-export REAL_JQ CMD_LOG="$log"
+export REAL_JQ CMD_LOG="$log" STATE_FILE="$tmp/sysbox-registered"
 
 daemon_json="$tmp/daemon.json"
 daemon_content='{}'
 
 run() {
 	: >"$log"
+	rm -f "$STATE_FILE"
 	printf '%s\n' "$daemon_content" >"$daemon_json"
 	if env PATH="$bin:$PATH" AETHER_SYSBOX_DAEMON_JSON="$daemon_json" "$@" sh "$script" >"$tmp/out" 2>&1; then
 		status=0
@@ -207,6 +213,41 @@ expect 1 "dpkg --configure -a failed"
 run FAKE_INSTALLED=0.7.1.linux
 expect 1 "is installed but Docker does not list sysbox-runc"
 ! grep -q "dpkg --configure" "$log" || { echo "install-sysbox-test: dpkg --configure ran on a clean dpkg" >&2; exit 1; }
+
+# A probe that fails after the package registered the runtime removes it
+# again; one that cannot be removed exits 4.
+daemon_content='{}'
+run FAKE_APT_OK=1
+expect 0 "bind-mount probe passed"
+grep -q purge "$log" && { echo "install-sysbox-test: a passing probe purged Sysbox" >&2; exit 1; }
+
+run FAKE_APT_OK=1 FAKE_PROBE_RC=42
+expect 1 "bind mounts are not ID-mapped on this host"
+expect 1 "Sysbox was removed again"
+grep -qF "apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce" "$log" || { echo "install-sysbox-test: the failed probe did not purge Sysbox" >&2; exit 1; }
+[ ! -e "$STATE_FILE" ] || { echo "install-sysbox-test: Docker still lists sysbox-runc" >&2; exit 1; }
+
+run FAKE_APT_OK=1 FAKE_PROBE_RC=125
+expect 1 "cannot start the bind-mount probe container (exit 125)"
+expect 1 "Sysbox was removed again"
+
+run FAKE_APT_OK=1 FAKE_PROBE_RC=42 FAKE_PURGE_FAIL=1
+expect 4 "apt-get purge -y sysbox-ce also failed"
+expect 4 "Docker still lists sysbox-runc"
+
+run FAKE_APT_OK=1 FAKE_PULL_FAIL=1
+expect 1 "cannot pull the probe image"
+grep -q purge "$log" && { echo "install-sysbox-test: a pull failure purged Sysbox" >&2; exit 1; }
+
+run FAKE_INSTALLED=0.7.1.linux 'FAKE_RUNTIMES={"runc":{},"sysbox-runc":{}}' FAKE_PROBE_RC=42
+expect 4 "bind mounts are not ID-mapped on this host"
+
+# Routes in other tables count, local and broadcast entries do not.
+run 'FAKE_ROUTE=10.200.0.0/16 dev wg0 table 100'
+expect 1 "apt-get install"
+chosen "10.201.0.1/16 10.202.0.0/16"
+run FAKE_LOCAL=10.200.0.1
+chosen "10.200.0.1/16 10.201.0.0/16"
 
 daemon_content='{}'
 run FAKE_ARCH=arm64 FAKE_SHA=bad

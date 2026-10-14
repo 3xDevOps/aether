@@ -23,6 +23,15 @@ import (
 // run Sysbox, as opposed to an install that failed.
 const unsupportedExit = 3
 
+// brokenExit is the install script's exit status for a Sysbox that Docker
+// lists but that failed the bind-mount probe and could not be removed.
+const brokenExit = 4
+
+// BrokenError is a registered Sysbox runtime that must not be used.
+type BrokenError struct{ Reason string }
+
+func (e *BrokenError) Error() string { return e.Reason }
+
 // UnsupportedError is the install script's refusal to run on this host.
 type UnsupportedError struct{ Reason string }
 
@@ -101,6 +110,8 @@ func runScript(ctx context.Context, script string, out io.Writer) error {
 		return nil
 	case errors.As(err, &exit) && exit.ExitCode() == unsupportedExit:
 		return &UnsupportedError{Reason: last.String()}
+	case errors.As(err, &exit) && exit.ExitCode() == brokenExit:
+		return &BrokenError{Reason: last.String()}
 	}
 	if msg := last.String(); msg != "" {
 		return fmt.Errorf("sysbox: install: %w: %s", err, msg)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -29,6 +30,11 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// broken is set by an install that left a registered runtime failing
+	// the bind-mount probe. It is atomic because the Docker runtime reads
+	// it while holding its own lock.
+	broken atomic.Bool
 
 	mu     sync.Mutex
 	state  string
@@ -74,6 +80,9 @@ func (m *Manager) statusLocked(ctx context.Context) protocol.SysboxStatus {
 	if m.state == protocol.SysboxInstalling {
 		return m.snapshot()
 	}
+	if m.broken.Load() {
+		return m.snapshot()
+	}
 	state, err := m.status(ctx)
 	switch {
 	case err == nil && state == protocol.SysboxOn:
@@ -87,6 +96,10 @@ func (m *Manager) statusLocked(ctx context.Context) protocol.SysboxStatus {
 	}
 	return protocol.SysboxStatus{State: protocol.SysboxOff}
 }
+
+// Broken reports whether the last install left a registered Sysbox that
+// failed its probe, so new containers must not use it.
+func (m *Manager) Broken() bool { return m.broken.Load() }
 
 // Installing reports whether an install is running, which holds back a
 // server self-update: a restart would cut it off.
@@ -121,14 +134,19 @@ func (m *Manager) Install(ctx context.Context) protocol.SysboxStatus {
 
 func (m *Manager) finish(err error) {
 	var unsupported *UnsupportedError
+	var broken *BrokenError
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch {
 	case err == nil:
+		m.broken.Store(false)
 		m.state, m.reason = protocol.SysboxOn, ""
 		if m.Recheck != nil {
 			m.Recheck()
 		}
+	case errors.As(err, &broken):
+		m.broken.Store(true)
+		m.state, m.reason = protocol.SysboxFailed, broken.Reason
 	case errors.As(err, &unsupported):
 		m.state, m.reason = protocol.SysboxUnsupported, unsupported.Reason
 	default:

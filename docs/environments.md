@@ -306,8 +306,8 @@ the install stops with `Docker inside runs is unavailable on this host:
 binary and the script are the same release. It downloads Sysbox CE 0.7.1,
 verifies its pinned SHA-256, installs the package and checks that
 `docker info` lists `sysbox-runc`. It exits 0 without changes when that
-version is already installed, 3 when the host cannot run Sysbox, and 1 on any
-other failure. Its output is shown as it runs; the dashboard keeps the last
+version is already installed, 3 when the host cannot run Sysbox, 4 when a registered
+Sysbox failed its probe and could not be removed, and 1 on any other failure. Its output is shown as it runs; the dashboard keeps the last
 8 KiB. When the dashboard starts the install, the server runs it in a
 transient systemd unit, `aether-sysbox-install`, so restarting the server
 does not interrupt apt; a server update waits until it finishes. If an
@@ -334,8 +334,14 @@ Docker applies the new keys at its next restart.
 The script ends by pulling `busybox:1.36` and running it with
 `--runtime sysbox-runc -u 1000:1000` against a host directory owned by
 1000:1000. It fails with "bind mounts are not ID-mapped on this host" only if
-the container user cannot write the directory; a pull or start failure reports
-Docker's own error.
+the container user cannot write the directory; a pull failure reports Docker's
+own error. When the probe fails, the script runs `apt-get purge -y sysbox-ce`,
+waits until Docker no longer lists `sysbox-runc`, and exits 1 with the probe's
+reason and "Sysbox was removed again"; the `bip` and `default-address-pools`
+keys stay. If the purge fails it exits 4. The dashboard then shows the install
+as failed, and the server stops using `sysbox-runc` for new containers until an
+install succeeds. Running the script again on a host that already has the
+package runs the probe too, and exits 4 if it fails.
 
 The server picks its container runtime from `--container-runtime` (config
 key `container-runtime`). With `auto` it keeps `sysbox-runc` once it sees it

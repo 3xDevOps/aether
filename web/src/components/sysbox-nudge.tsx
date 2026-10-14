@@ -32,11 +32,11 @@ export function SysboxNudge({ client = api }: { client?: Api } = {}) {
         {state === 'installing' && <><Spinner />Installing… this takes a minute or two</>}
         {justInstalled && state === 'on' && 'New runs get it now. Reopen your Environment to use it there.'}
       </p>
-      {state === 'off' && <p className="whitespace-pre-wrap break-words text-muted">{reason ?? 'Agents can build and run containers inside their own runs, isolated from this server.'}</p>}
+      {state === 'off' && <p className="whitespace-pre-wrap break-words text-muted">{reason || 'Agents can build and run containers inside their own runs, isolated from this server.'}</p>}
       {command && <CopyableCommand command={command} />}
       {state === 'unsupported' && <p className="whitespace-pre-wrap break-words text-muted">{reason}</p>}
       {(state === 'failed' || error) && (
-        <p role="alert" className="whitespace-pre-wrap break-words text-state-failed">{error ?? reason ?? 'Install failed'}</p>
+        <p role="alert" className="whitespace-pre-wrap break-words text-state-failed">{error ?? (reason || 'Install failed')}</p>
       )}
     </Callout>
   )

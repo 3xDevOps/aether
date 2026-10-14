@@ -62,6 +62,12 @@ func TestRunScriptExitCodes(t *testing.T) {
 		t.Fatalf("exit 1 = %v, want a plain failure carrying the last message", err)
 	}
 
+	var broken *BrokenError
+	err = runScript(t.Context(), "echo 'install-sysbox: purge failed' >&2\nexit 4\n", &out)
+	if !errors.As(err, &broken) || broken.Reason != "purge failed" {
+		t.Fatalf("exit 4 = %v, want a BrokenError carrying the last message", err)
+	}
+
 	if err := runScript(t.Context(), "exit 0\n", &out); err != nil {
 		t.Fatalf("exit 0 = %v", err)
 	}
@@ -85,6 +91,32 @@ func TestManagerOutcomeOutranksDockerError(t *testing.T) {
 	m.status = func(context.Context) (string, error) { return protocol.SysboxOn, nil }
 	if st := m.Status(t.Context()); st.State != protocol.SysboxOn {
 		t.Fatalf("with Sysbox listed = %+v, want on", st)
+	}
+}
+
+// A Sysbox that Docker lists but that failed its probe is failed, not on, and
+// the runtime must not use it, until an install succeeds.
+func TestManagerBrokenOutranksOn(t *testing.T) {
+	h := &fakeHost{root: true, err: &BrokenError{Reason: "bind mounts are not ID-mapped; purge failed"}}
+	m := newFakeManager(h)
+	t.Cleanup(func() { _ = m.Close() })
+	close(h.release)
+	m.status = func(context.Context) (string, error) {
+		if h.runs.Load() > 0 {
+			return protocol.SysboxOn, nil // the package registered it
+		}
+		return protocol.SysboxOff, nil
+	}
+
+	m.Install(t.Context())
+	if st := waitState(t, m, protocol.SysboxFailed); !strings.Contains(st.Reason, "purge failed") || !m.Broken() {
+		t.Fatalf("status = %+v, broken = %v, want failed and broken while Docker lists the runtime", st, m.Broken())
+	}
+	h.err = nil
+	m.Install(t.Context())
+	waitState(t, m, protocol.SysboxOn)
+	if m.Broken() {
+		t.Error("a successful install left the runtime broken")
 	}
 }
 

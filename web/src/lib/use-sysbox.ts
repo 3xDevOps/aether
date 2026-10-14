@@ -67,9 +67,9 @@ export function useSysbox(client: Api = api) {
     setJustInstalled(false)
     const before = previous.current
     previous.current = 'installing'
-    client.sysboxInstall().then(apply, (err) => {
+    client.sysboxInstall().then(apply, (installErr) => {
       previous.current = before
-      setError(message(err))
+      client.sysboxStatus().then(apply, () => setError(message(installErr)))
     })
   }, [client, apply])
 

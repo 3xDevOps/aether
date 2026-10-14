@@ -82,6 +82,40 @@ describe('Docker inside runs row', () => {
     expect(screen.getByRole('button', { name: 'Install' })).toBeTruthy()
   })
 
+  test('off with an empty reason keeps the explanation', async () => {
+    seed()
+    render(<ServerSection client={client([{ state: 'off', reason: '' }])} />)
+    await settle()
+    expect(screen.getByText(/isolated from this server/)).toBeTruthy()
+  })
+
+  test('a lost install response re-reads status and polls', async () => {
+    seed()
+    const api = client([{ state: 'off' }, { state: 'installing' }, { state: 'on' }])
+    api.sysboxInstall.mockRejectedValueOnce(new Error('network down'))
+    render(<ServerSection client={api} />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+    await settle()
+    expect(api.sysboxInstall).toHaveBeenCalledTimes(1)
+    expect(screen.getByText(/Installing…/)).toBeTruthy()
+    expect(screen.queryByText('network down')).toBeNull()
+    await tick(2000)
+    expect(screen.getByText('On')).toBeTruthy()
+  })
+
+  test('an install error shows only when the status read also fails', async () => {
+    seed()
+    const api = client([{ state: 'off' }])
+    api.sysboxInstall.mockRejectedValueOnce(new Error('network down'))
+    api.sysboxStatus.mockResolvedValueOnce({ state: 'off' }).mockRejectedValueOnce(new Error('still down'))
+    render(<ServerSection client={api} />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+    await settle()
+    expect(screen.getByText('network down')).toBeTruthy()
+  })
+
   test('the not-root reason hides Install and offers the command', async () => {
     seed()
     const reason = 'aether-server is not root; run: sudo aether-server sysbox install'
@@ -172,6 +206,13 @@ describe('Docker nudge', () => {
     expect(screen.getByText('cannot query Docker')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText('cannot query Docker')).toBeNull()
+  })
+
+  test('off with an empty reason keeps the explanation', async () => {
+    seed()
+    render(<SysboxNudge client={client([{ state: 'off', reason: '' }])} />)
+    await settle()
+    expect(screen.getByText(/isolated from this server/)).toBeTruthy()
   })
 
   test('shows the off reason and the not-root command', async () => {

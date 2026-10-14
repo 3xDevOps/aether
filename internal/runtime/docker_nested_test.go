@@ -96,6 +96,24 @@ func TestResolveRuntimeRechecksMissingSysbox(t *testing.T) {
 	resolve(runtimeSysbox, 3)
 }
 
+func TestResolveRuntimeVeto(t *testing.T) {
+	sysbox := system.Info{Runtimes: map[string]system.RuntimeWithStatus{"runc": {}, runtimeSysbox: {}}}
+	d, _ := runtimeInfoDocker(t, RuntimeAuto, func(int32) (int, system.Info) { return http.StatusOK, sysbox })
+	vetoed := true
+	d.VetoSysbox(func() bool { return vetoed })
+	if got, err := d.resolveRuntime(t.Context()); err != nil || got != "" {
+		t.Fatalf("vetoed resolveRuntime() = %q, %v; want the daemon default", got, err)
+	}
+	vetoed = false
+	if got, err := d.resolveRuntime(t.Context()); err != nil || got != runtimeSysbox {
+		t.Fatalf("resolveRuntime() = %q, %v; want %q once the veto lifts", got, err, runtimeSysbox)
+	}
+	vetoed = true
+	if got, _ := d.resolveRuntime(t.Context()); got != "" {
+		t.Fatalf("resolveRuntime() = %q after the cached hit; want the veto to win", got)
+	}
+}
+
 func TestResolveRuntimeDoesNotCacheInfoError(t *testing.T) {
 	d, calls := runtimeInfoDocker(t, RuntimeAuto, func(call int32) (int, system.Info) {
 		if call == 1 {

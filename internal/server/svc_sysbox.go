@@ -10,8 +10,12 @@ func init() {
 			return nil, nil
 		}
 		m := sysbox.NewManager()
-		if docker, ok := d.Runtime.(interface{ ForgetRuntime() }); ok {
+		if docker, ok := d.Runtime.(interface {
+			ForgetRuntime()
+			VetoSysbox(func() bool)
+		}); ok {
 			m.Recheck = docker.ForgetRuntime
+			docker.VetoSysbox(m.Broken)
 		}
 		d.SSH.Services.Sysbox = m
 		return m, nil

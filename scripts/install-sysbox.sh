@@ -16,8 +16,9 @@
 # and which takes Linux 5.19 or newer, or the shiftfs module.
 #
 # Exit status: 0 installed, 3 the host cannot run Sysbox (not Debian or
-# Ubuntu, unsupported architecture, no ID-mapped mounts, no Docker), 1 any
-# other failure.
+# Ubuntu, unsupported architecture, no ID-mapped mounts, no Docker), 4 Sysbox
+# is registered with Docker but failed the bind-mount probe and could not be
+# removed, 1 any other failure.
 set -eu
 
 VERSION="0.7.1"
@@ -74,12 +75,46 @@ runtimes() { docker info --format '{{json .Runtimes}}'; }
 
 runtimes_out="$(runtimes 2>&1)" || die "docker info failed: ${runtimes_out}"
 
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+# Sets probe_reason and returns 1 when a container on sysbox-runc cannot write
+# a host directory it owns, which means bind mounts are not ID-mapped. A failed
+# image pull says nothing about Sysbox and dies instead.
+run_probe() {
+	probe="$tmp/probe"
+	mkdir -p "$probe"
+	chown 1000:1000 "$probe"
+	pull_out="$(docker pull busybox:1.36 2>&1)" || die "cannot pull the probe image busybox:1.36: ${pull_out}"
+	probe_rc=0
+	probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 sh -c 'touch /m/probe || exit 42' 2>&1)" || probe_rc=$?
+	case "$probe_rc" in
+	0) return 0 ;;
+	42) probe_reason="bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
+	*) probe_reason="cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
+	esac
+	return 1
+}
+
+# Sysbox is registered but unusable, and this script is not removing it.
+broken() {
+	echo "install-sysbox: $1. Docker still lists sysbox-runc; remove it with: sudo apt-get purge -y sysbox-ce" >&2
+	exit 4
+}
+
+# Already installed: the probe still decides, so a retry cannot report success
+# for a Sysbox that failed it.
+already_installed() {
+	run_probe || broken "$probe_reason"
+	say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
+	exit 0
+}
+
 installed="$(dpkg-query -W -f='${Version}' sysbox-ce 2>/dev/null || true)"
 case "$runtimes_out" in
 *'"sysbox-runc"'*)
 	if [ "$installed" = "${VERSION}.linux" ]; then
-		say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
-		exit 0
+		already_installed
 	fi
 	die "Docker already lists sysbox-runc (sysbox-ce ${installed:-not installed from a package}). Upgrade by following https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md#upgrading-sysbox-or-sysbox-enterprise"
 	;;
@@ -94,8 +129,7 @@ if [ -n "$(dpkg --audit 2>&1)" ]; then
 	case "$runtimes_out" in
 	*'"sysbox-runc"'*)
 		if [ "$installed" = "${VERSION}.linux" ]; then
-			say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
-			exit 0
+			already_installed
 		fi
 		;;
 	esac
@@ -113,8 +147,6 @@ apt_install() {
 
 command -v jq >/dev/null 2>&1 || apt_install jq
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 tmp_json="$tmp/daemon.json"
 
 # Download and verify before touching daemon.json, so an offline host or a bad
@@ -123,10 +155,12 @@ say "downloading ${deb}"
 curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
 got="$(sha256_of "$tmp/$deb")"
 [ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
-# Every IPv4 network on the host's routes and interfaces, from the output of
-# ip route and ip address. A route without a prefix length is a host route.
+# Every IPv4 network on the host's routes, in every routing table, and on its
+# interfaces, from the output of ip route and ip address. A route without a
+# prefix length is a host route; local and broadcast entries only repeat an
+# interface address.
 local_networks() {
-	echo "$routes" | awk '{net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print net}'
+	echo "$routes" | awk '$1 ~ /^(local|broadcast|multicast|anycast)$/ {next} {net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print net}'
 	echo "$addrs" | awk '{print $4}'
 }
 
@@ -206,7 +240,7 @@ jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/nul
 BIP=
 POOL_BASE=
 if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
-	routes="$(ip -4 -o route 2>&1)" || die "ip route failed: ${routes}"
+	routes="$(ip -4 -o route show table all 2>&1)" || die "ip route failed: ${routes}"
 	addrs="$(ip -4 -o address 2>&1)" || die "ip address failed: ${addrs}"
 	docker_nets="$(docker_networks)" || exit 1
 	local_nets="$(local_networks)"
@@ -254,17 +288,18 @@ done
 
 say "Docker lists sysbox-runc"
 
-probe="$tmp/probe"
-mkdir "$probe"
-chown 1000:1000 "$probe"
-pull_out="$(docker pull busybox:1.36 2>&1)" || die "cannot pull the probe image busybox:1.36: ${pull_out}"
-probe_rc=0
-probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 sh -c 'touch /m/probe || exit 42' 2>&1)" || probe_rc=$?
-case "$probe_rc" in
-0) ;;
-42) die "bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
-*) die "cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
-esac
+if ! run_probe; then
+	echo "install-sysbox: ${probe_reason}" >&2
+	say "removing Sysbox again: apt-get purge -y sysbox-ce"
+	apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce || broken "${probe_reason}; apt-get purge -y sysbox-ce also failed"
+	tries=0
+	while runtimes | grep -q '"sysbox-runc"'; do
+		tries=$((tries + 1))
+		[ "$tries" -lt 15 ] || broken "${probe_reason}; Docker still lists sysbox-runc after the purge"
+		sleep 1
+	done
+	die "${probe_reason}. Sysbox was removed again"
+fi
 say "bind-mount probe passed"
 echo
 echo "New runs and terminals use Sysbox within a minute. Existing containers keep their runtime."

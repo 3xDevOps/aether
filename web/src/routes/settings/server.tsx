@@ -144,7 +144,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
   const command = rootCommand(status)
   const states = {
     on: ['On', 'Agents can run docker, compose and buildx in their runs.'],
-    off: ['Off', reason ?? 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
+    off: ['Off', reason || 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
     unsupported: ['Unavailable on this host', reason],
     installing: ['Installing', undefined],
     failed: ['Install failed', reason],
