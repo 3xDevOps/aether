@@ -170,10 +170,12 @@ Layers, per the design spec's testing strategy:
   `workers: 1`. Each runner builds the browser and standard images itself,
   reading the `browser-amd64-main` and `standard-amd64-main` build caches
   that the `browser` and `smoke` jobs write on pushes to `main`, so it starts
-  without waiting for those jobs. A pull request that changes an image's
-  Dockerfile or its inputs misses that cache from the changed step on, and
-  every shard, and `integration-server-rest`, rebuilds those layers itself,
-  network downloads included. Each runner then
+  without waiting for those jobs. A change to an image's Dockerfile or its
+  inputs misses that cache from the changed step on, in its pull request,
+  its merge queue entry and the push to `main` that lands it: those runs
+  read the cache before `browser` and `smoke` write the new layers. In each
+  of them every shard, and `integration-server-rest`, rebuilds those layers
+  itself, network downloads included. Each runner then
   runs `make test-e2e` with
   `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
   `make test-e2e` remains unsharded and still builds the embedded dashboard
