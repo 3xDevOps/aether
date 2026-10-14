@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
-import { item, resetItems, ScriptedSession, say } from '@/test/acp-stream'
+import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
 import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
@@ -325,7 +325,7 @@ describe('the conversation', () => {
   it('shows Stop while a turn runs and cancels it', async () => {
     vi.mocked(api.assistantCancel).mockResolvedValue({})
     const aside = await openPanel()
-    acpOpen([item('turn_start', 1), say(1, 'user', 'Install Rust')])
+    assistantSocket().open({ state: state({ turn_in_flight: true }) }, [item('turn_start', 1), say(1, 'user', 'Install Rust')])
     await userEvent.click(await within(aside).findByRole('button', { name: 'Stop' }))
     expect(api.assistantCancel).toHaveBeenCalled()
   })

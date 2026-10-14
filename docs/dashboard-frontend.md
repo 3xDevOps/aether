@@ -1099,7 +1099,7 @@ both show:
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
 | Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
-| Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
+| Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Usage limit with no account to move to | **Open** |
 | Teammate's message waiting for the controller | **Review message** |
@@ -1108,7 +1108,7 @@ both show:
 
 Every action but Approve and the card's Reply goes where the condition's
 `target` points: the run (requests and questions), its Terminal view
-(blocked, held, Enhanced unavailable), its Changes view for an unreviewed
+(blocked, held, Enhanced failure), its Changes view for an unreviewed
 finish, or the swarm page.
 
 While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
@@ -1225,10 +1225,13 @@ first that applies:
 | Open swarm question | accountable human or an admin | The integrator asks: … |
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue / Integrator failed to launch, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
-| Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
+| Enhanced failure (`enhanced session failed: ` reason) | owner | Enhanced could not start: … |
+| Enhanced failure (`enhanced session ended: ` reason) | owner | Agent disconnected: … |
+| Enhanced failure (`enhanced turn failed: ` reason) | owner | Turn failed: … |
+| Agent question (`needs input: <question>` reason, also while background tasks run) | owner | Agent asks: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
-| Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | Waiting for your reply |
+| Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | by reason: `agent idle` Waiting for your reply; `turn cancelled` Turn cancelled; `turn interrupted` Turn interrupted; `turn ended: <stop>` Stopped: … |
 | Parked at `needs-attention` without a reported outcome (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
 
@@ -1268,6 +1271,12 @@ Background (`headless`) run reaches Needs you only through a pending Aether
 approval, the swarm rows, a blocked report, an Enhanced failure, a usage
 limit or an unreviewed finish. A Working run's reason is what its agent is doing ("Reading
 src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working".
+A `running` run whose reason starts `working in background` reads "Working
+in background", "Working in background: 1 task" or "Working in background:
+<n> tasks" ahead of its activity, from the run record alone, so the sidebar,
+board, header and Details show it with no session stream open. It is never
+Needs you. A `needs input: <question>` the agent asked while its tasks run
+parks the run and outranks it: the run reads "Agent asks: …".
 
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
 message's time, else the state change); Working and Finished sort by latest
@@ -1988,7 +1997,10 @@ and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
 `answered`, `event` (notices, mode changes, a new
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
-answer") with the amber dot while a request is pending. A person's
+answer") with the amber dot while a request is pending. A `finished` row
+reads **Finished**, **Cancelled** (stop reason `cancelled`) or **Interrupted**
+(`interrupted`, a turn a restart or lost connection cut off), matching the
+run reasons `turn cancelled` and `turn interrupted`. A person's
 message is matched to the room message that carried it for its author. While
 older items remain and the same text was sent more than once, a delivered
 room message sent within the loaded items, before the row, is matched first.
@@ -1996,6 +2008,65 @@ One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
+
+A subagent is the agent that Claude Code's `Agent` or `Task` tool launches;
+a dynamic workflow is its `Workflow` tool. Their items carry a parent link
+([session item log](enhanced-runs.md#the-session-item-log)), and
+`store/subagents.ts` keeps them out of the conversation. Each session holds
+an index keyed by the launching tool call's id, with the call's latest
+snapshot, the subagent's own items, nested subagents, tool count, latest
+activity, and start and settle times. `acpFrames` and `acpOlder` update it
+incrementally; a history page that arrives out of order prepends, and a
+reset starts it over. Only the turns' own items reach `turnRows`, so a
+child item re-renders its card, not the conversation. A launch call
+becomes a `subagents` row, and consecutive launches share one row:
+"3 subagents · 2 running", expanded by default. Each card shows a status dot,
+the description, the subagent type, the tool and nested counts, and the
+elapsed time. A running card shows its latest activity, a settled one the
+first line of its report, without Markdown marks. The state comes from the
+launch call: `completed` is done, `failed` failed, a call still open when its
+turn ended and silent since is stopped, and a call whose snapshot is not
+loaded is unknown. Elapsed time counts from the call's opening snapshot, so a
+card whose replay starts after it shows none until history reaches it. A
+Workflow call, or an Agent call with `run_in_background`, completes as soon
+as its work starts. When the call carries `tool_call.task`
+([session item log](enhanced-runs.md#the-session-item-log)), the card follows
+the task: running, then done, failed or stopped, with elapsed time to the
+snapshot that settled it. Without it, the card reads "Launched in the
+background", and running once a child item is logged after the call
+completed. The launch acknowledgement is never shown as a report. A workflow card lists the subagents whose items name it as parent.
+A subagent whose launch call is not loaded, or was trimmed, shows its card at
+its first held item until a history page brings the launch; without the
+call its state is unknown. A launch id seen again after
+its call settled names a new subagent, keyed `<id>@<seq>`. While the main
+agent only waits on its subagents, the live row reads "Waiting on 2
+subagents". Codex, opencode and the others send no parent link, so their
+sessions render as before.
+
+A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
+at `?agent=<tool call id>`. At 1280px and wider it is an inline aside that
+replaces Details while open; narrower, it is a side sheet, and a bottom
+sheet on phones. It shows breadcrumbs back to **Session** through nested
+subagents, **Previous subagent** and **Next subagent** among siblings, and
+**Close subagent**; `Esc` closes it before it leaves the run. Stepping
+between siblings and closing replace the history entry, so Back does not
+reopen it. Below them,
+one virtualized list holds the prompt (`raw_input.prompt`, read whole with
+`run.acp.item` when the item was cut; a launch input over the log's
+16 KiB raw limit is kept cut, so the prompt reads as unavailable), the
+subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`,
+and its report (the completed
+call's text content). Until a known subagent's launch call is loaded it pages
+`run.acp.history`, at most five pages, then offers **Load earlier history**;
+an id the loaded history does not name pages only on that button. A failed
+page, or a failed read of the whole launch item, shows the server's error
+with **Retry**. Changed files list in the
+transcript of the agent that made them, and the main turn that launched it
+lists them in its changed-files row, each path once.
+
+A tool call snapshot logged in a later turn than the call's first, as
+when a call outlives its turn, joins that first turn. The call keeps one row and
+its diff counts once.
 
 A path the agent names opens that file in the run's
 [Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
@@ -2005,16 +2076,37 @@ opens there as well, where it used to open a dead address in a new tab.
 Fenced code blocks, a person's own messages and the entry labels, which
 toggle their detail, are left as text.
 
+A `turn_start` with `autonomous` is a turn the agent ran with no prompt
+(Claude Code reacting to a finished background task). It opens a turn as a
+prompt does, so its rows, `live` row and **Steer**, **Queue** and
+**Interrupt** work the same. The ack's `state` carries `background` and
+`tasks`; `advance` (`store/sessions.ts`) updates them from items newer than
+the ack's `seq` only, so a replay of older items cannot bring back tasks the
+ack no longer lists. A `background` item replaces `tasks`, and with no turn
+in flight sets `background` while a task `holds` or a `follow_up` is owed;
+one with no tasks and `stop_reason: "interrupted"` clears them. A turn
+boundary sets `turn_in_flight` and, at `turn_end`, `background` from the held
+tasks. `backgroundWait` returns the live tasks while the stream is live,
+`background` is set, no turn is in flight, and the run is `running` or
+parked `stalled:` or `needs input:`. A `running` run's wait adds a `live`
+row reading "Working in background" when only a follow-up is owed, or
+"Working in background: N tasks" with N held tasks.
+
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
-an empty composer during a turn) or **Resume** (a paused run). `Enter` does
-what the pill says and nothing without text or images, `Shift+Enter` adds a
-line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
-plain key, which the shortcut table stands down for inside a field, so the
-textarea answers it itself through `isPress`; the binding stays registered so
-the shortcuts reference lists it. A key still composing in an input method
+an empty composer during a turn), **Stop waiting** (`run.acp.cancel`, an
+empty composer while `backgroundWait` holds, including a wait that stalled
+or shows a question) or **Resume** (a paused run). **Stop waiting** ends the
+wait and parks the run `turn cancelled`; the agent's background tasks keep
+running, and a later follow-up opens a new autonomous turn. With text typed
+the pill is **Send**, which starts a turn, so a reply to the question still
+goes out. `Enter` does what the pill says and nothing without text or
+images, `Shift+Enter` adds a line and `Mod+Shift+Enter` queues; on touch only
+the pill sends. `Enter` is a plain key, which the shortcut table stands down
+for inside a field, so the textarea answers it itself through `isPress`; the
+binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in
 `composer-images.tsx` accepts file selection and native file paste, enforces
 the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
@@ -3306,7 +3398,7 @@ The body is one column, in this order:
    cancelled "The swarm was cancelled. Its workers and integrator run are
    stopped." A stopped or missing integrator adds a callout with
    **Replace integrator…** (see below). An integrator that needs you for its
-   own reason, such as `Enhanced unavailable: <error>`, adds a callout `The
+   own reason, such as `Enhanced could not start: <error>`, adds a callout `The
    integrator needs you` with that reason, and the reason leads the state
    line ahead of any `N questions for you`.
 2. **Questions for you**, only when the integrator asked any. An open

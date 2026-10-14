@@ -22,6 +22,7 @@ import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import { sessionLease } from '@/store/session-stream'
+import { backgroundWait } from '@/store/sessions'
 import { cn, focusRing } from '@/lib/utils'
 
 interface ComposerProps {
@@ -88,6 +89,7 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   steer: { label: 'Steer', Icon: CornerUpRight, variant: 'primary' },
   queue: { label: 'Queue', Icon: ListPlus, variant: 'primary' },
   interrupt: { label: 'Interrupt', Icon: Square, variant: 'danger' },
+  'stop-waiting': { label: 'Stop waiting', Icon: Square, variant: 'danger' },
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
@@ -200,7 +202,7 @@ function SendActions({ pill, label, hint, disabled, onClick, onCancel }: {
   onCancel?: () => void
 }) {
   const look = pillLook[pill]
-  const icon = <look.Icon className={cn(pill === 'interrupt' && 'fill-current')} />
+  const icon = <look.Icon className={cn((pill === 'interrupt' || pill === 'stop-waiting') && 'fill-current')} />
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1">
       {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
@@ -213,7 +215,7 @@ function SendActions({ pill, label, hint, disabled, onClick, onCancel }: {
           size="pill"
           variant={look.variant}
           hint={hint ? `${look.label} (${hint})` : undefined}
-          aria-label={pill === 'interrupt' ? 'Interrupt the agent' : undefined}
+          aria-label={pill === 'interrupt' ? 'Interrupt the agent' : pill === 'stop-waiting' ? 'Stop waiting for background work' : undefined}
           disabled={disabled}
           onClick={onClick}
         >
@@ -361,11 +363,12 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   })
   const moderated = !control.canAct
   const turnRunning = state?.turn_in_flight ?? false
+  const waiting = backgroundWait(run, session) !== null
   const supportsImages = state?.prompt_images === true
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
   const refusedImages = !supportsImages && hasImages(images.previews)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
-  const pill = moderated ? 'send' : pillFor({ paused, turnRunning, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
+  const pill = moderated ? 'send' : pillFor({ paused, turnRunning, backgroundWait: waiting, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
 
   const [dismissed, setDismissed] = useState(false)
   const trigger = focused && !dismissed ? triggerAt(body, caret) : null
@@ -438,6 +441,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         void attempt(() => api.runResume(run.id))
         return
       case 'interrupt':
+      case 'stop-waiting':
         if (lease) void attempt(() => api.runACPCancel(run.id, lease))
         return
       default:
@@ -466,8 +470,8 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     )
   }
 
-  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
-  const keyHint = coarse ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
+  const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
+  const keyHint = coarse || pill === 'stop-waiting' ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
 
   return (
     <ComposerFrame>
@@ -528,7 +532,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           if (hasContent) act(turnRunning ? 'queue' : 'send')
         }}
         onEscape={onEscape}
-        placeholder={turnRunning ? 'Message the agent while it works' : 'Message the agent, / for commands, @ for files'}
+        placeholder={turnRunning || waiting ? 'Message the agent while it works' : 'Message the agent, / for commands, @ for files'}
         describedBy={hintID}
         combobox={{ expanded: suggestions.length > 0, controls: listID, active: suggestions.length ? `${listID}-${current}` : undefined }}
         menu={<SuggestionList id={listID} items={suggestions} active={current} onPick={pick} />}
@@ -548,7 +552,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         }}
       />
       <ComposerHint id={hintID} status={images.uploading}>
-        {images.uploading ? 'Uploading…' : moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'resume' ? pillHint[pill] : ''}
+        {images.uploading ? 'Uploading…' : moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''}
       </ComposerHint>
     </ComposerFrame>
   )

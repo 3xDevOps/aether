@@ -2,6 +2,8 @@ import {
   isPaused,
   memberName,
   needsYou,
+  stopReasons,
+  stoppedBecause,
   reportedOutcome,
   supervised,
   unreadMail,
@@ -10,6 +12,7 @@ import {
   type NeedsYouCondition,
   type StateContext,
 } from '@/lib/needs-you'
+import type { BackgroundTask } from '@/lib/session-types'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 export type PresentationState = 'needs-you' | 'working' | 'paused' | 'done' | 'failed'
@@ -23,12 +26,21 @@ export interface RunPresentation {
   unread?: number
 }
 
+// Mirrors acpBackgroundReason in internal/scheduler/acp_turn.go.
+const backgroundPrefix = 'working in background'
+
+export function backgroundReason(tasks: BackgroundTask[]): string {
+  const held = tasks.filter((task) => task.holds).length
+  return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
+}
+
 function workingReason(run: RunRecord, ctx: StateContext): string {
   if (run.status === 'queued') return 'Queued'
   if (run.status === 'provisioning') return 'Starting'
   const waiter = waitingOn(run, ctx)
   if (waiter !== undefined) return `Waiting for ${memberName(waiter, ctx)}`
   if (supervised(run, ctx) && run.status === 'needs-attention') return 'Waiting for the integrator'
+  if (run.status === 'running' && run.reason?.startsWith(backgroundPrefix)) return plainReason(run.reason)
   if (run.activity) return `${run.activity.verb} ${run.activity.target}`.trimEnd()
   return run.status === 'needs-attention' ? 'Agent idle' : 'Agent working'
 }
@@ -50,9 +62,6 @@ function finishedReason(run: RunRecord): string {
 
 const turnEnds: Record<string, string> = {
   end_turn: 'The agent finished its turn',
-  max_tokens: 'The agent hit its output limit',
-  max_turn_requests: 'The agent hit its turn limit',
-  refusal: 'The agent refused to continue',
   cancelled: 'The turn was cancelled',
 }
 
@@ -76,7 +85,12 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
   [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
-  [/^the agent's turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
+  [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
+  [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],
+  [/^turn cancelled$/, () => 'Turn cancelled'],
+  [/^turn interrupted$/, () => 'Turn interrupted'],
+  [/^turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
+  [/^the agent's turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
   [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
   [/^review retained evidence$/, () => `Review ${savedResults}`],
   [/^resolve the blocker using the retained evidence$/, () => `Resolve the blocker using ${savedResults}`],

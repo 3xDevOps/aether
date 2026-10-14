@@ -14,6 +14,7 @@ describe('route in the query string', () => {
     [{ name: 'board', params: {} }, ''],
     [{ name: 'run', params: { runId: 'run_1' } }, 'run=run_1'],
     [{ name: 'run', params: { runId: 'run_1', view: 'changes' } }, 'run=run_1&view=changes'],
+    [{ name: 'run', params: { runId: 'run_1', view: 'session', agent: 'toolu_1' } }, 'run=run_1&view=session&agent=toolu_1'],
     [{ name: 'settings', params: {} }, 'page=settings'],
     [{ name: 'missions', params: { missionId: 'mis_1' } }, 'page=missions&id=mis_1'],
     [{ name: 'workspace', params: { workspaceId: 'wsp_1' } }, 'page=workspace&id=wsp_1'],
@@ -34,6 +35,8 @@ describe('route in the query string', () => {
   it('keeps every other query parameter and the hash', () => {
     expect(hrefFor('http://h/?keep=1&page=files#x', { name: 'run', params: { runId: 'r' } }))
       .toBe('http://h/?keep=1&run=r#x')
+    expect(hrefFor('http://h/?run=r&agent=old&keep=1', { name: 'run', params: { runId: 'r' } }))
+      .toBe('http://h/?keep=1&run=r')
   })
 })
 

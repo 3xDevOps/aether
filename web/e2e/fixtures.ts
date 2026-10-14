@@ -75,6 +75,13 @@ export interface Aether {
    * form`, `wait`, `refuse`.
    */
   installACPMock: (member: Member, memberID: string) => Promise<void>
+  /**
+   * Installs acpmock as `claude`'s Enhanced adapter (`claude-agent-acp`)
+   * beside a no-op `claude`, so a `claude` Enhanced run gets the shipped
+   * profile's background-task tracking. Adds the words `hold in background`
+   * and `release background`.
+   */
+  installClaudeACPMock: (memberID: string) => void
 }
 
 let acpMock: string | undefined
@@ -244,6 +251,12 @@ export const test = base.extend<{ aether: Aether; serverOptions: ServerOptions }
         await member.api.rpc('agent.register', {
           definition: { name: 'mock', executable: 'acp-mock', tui_args: ['acp-mock'], headless_args: ['acp-mock'], acp_args: ['acp-mock'] },
         })
+      },
+      installClaudeACPMock: (memberID) => {
+        const bin = path.join(server.memberHome(memberID), '.local', 'bin')
+        mkdirSync(bin, { recursive: true })
+        writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\n', { mode: 0o755 })
+        copyFileSync(buildACPMock(), path.join(bin, 'claude-agent-acp'))
       },
       giveCodexLogin: (memberID) => {
         const dir = path.join(server.memberHome(memberID), '.codex')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MissingRun } from '@/components/missing-run'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
@@ -6,6 +6,7 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { useElementSize, useMediaQuery } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { memberName } from '@/lib/member-name'
+import { redirectRoute } from '@/lib/url-state'
 import { cn } from '@/lib/utils'
 import { BrowserView } from '@/routes/browser'
 import { BrowserDock, minBesideWidth } from '@/routes/browser/dock'
@@ -25,6 +26,7 @@ import { useRunRoom } from '@/routes/run/room'
 import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
+import { SubagentInspector } from '@/routes/run/subagent-inspector'
 import { TerminalView } from '@/routes/run/terminal-view'
 import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
 import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
@@ -91,11 +93,25 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const shells = useRunShells(run.id, view === 'terminal')
   const room = useRunRoom(run, agent.roomControl)
 
-  const detailsOpen = inline ? detailsPreference : overlayDetails
+  const agentID = defaultView(run) === 'session' ? params.agent : undefined
+  const agentOpener = useRef<HTMLElement | null>(null)
+  const inlineNow = useRef(inline)
+  inlineNow.current = inline
+  const closeAgent = useCallback(() => redirectRoute(useStore, { name: 'run', params: { runId: run.id, view } }), [run.id, view])
+
+  const detailsOpen = inline ? detailsPreference && !agentID : overlayDetails
   const setDetails = useCallback((open: boolean) => {
+    if (inline && open && agentID) closeAgent()
     if (inline) setDetailsPreference(open)
     else setOverlayDetails(open)
-  }, [inline, setDetailsPreference])
+  }, [inline, setDetailsPreference, agentID, closeAgent])
+  useLayoutEffect(() => {
+    if (!agentID) return
+    agentOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    return () => {
+      if (inlineNow.current && agentOpener.current?.isConnected) agentOpener.current.focus()
+    }
+  }, [Boolean(agentID)])
 
   const go = useCallback((next: RunView) => navigate('run', { runId: run.id, view: next }), [navigate, run.id])
   useEffect(() => {
@@ -151,7 +167,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
 
   const step = (delta: number) => go(views[(views.indexOf(view) + delta + views.length) % views.length]!)
   useKeybindings('run', {
-    'leave-run': () => navigate('board'),
+    'leave-run': () => (agentID ? closeAgent() : navigate('board')),
     'run-view-next': () => step(1),
     'run-view-previous': () => step(-1),
     'run-details': (event) => {
@@ -242,6 +258,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           {docked && <BrowserDock available={frame.width}>{browserView}</BrowserDock>}
         </div>
       </div>
+      {inline && agentID && (
+        <aside aria-label="Subagent" className="flex w-[28rem] shrink-0 flex-col border-l border-seam bg-canvas">
+          <SubagentInspector key={agentID} run={run} agentID={agentID} agent={agent} nav={nav} onClose={closeAgent} />
+        </aside>
+      )}
       {inline && detailsOpen && (
         <aside id="run-details" aria-label="Run details" className="w-80 shrink-0 overflow-y-auto border-l border-seam bg-canvas">
           {details(true)}
@@ -268,6 +289,25 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
               <DialogTitle>Run details</DialogTitle>
               {details(false)}
             </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      {!inline && (
+        <Dialog open={Boolean(agentID)} onOpenChange={(open) => !open && closeAgent()}>
+          <DialogContent
+            variant={mobile ? 'bottom' : 'side'}
+            showCloseButton={false}
+            aria-describedby={undefined}
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onCloseAutoFocus={(event) => {
+              if (!agentOpener.current?.isConnected) return
+              event.preventDefault()
+              agentOpener.current.focus()
+            }}
+            className={mobile ? 'flex h-[calc(85dvh-var(--keyboard-inset,0px))] min-h-0 flex-col p-0' : 'w-[28rem]'}
+          >
+            <DialogTitle className="sr-only">Subagent</DialogTitle>
+            {agentID && <SubagentInspector key={agentID} run={run} agentID={agentID} agent={agent} nav={nav} onClose={closeAgent} />}
           </DialogContent>
         </Dialog>
       )}

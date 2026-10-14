@@ -442,6 +442,37 @@ func LastItem(log *Log, kind Kind) Item {
 	}
 }
 
+// RunningTaskCalls returns, for every background task since the log's last
+// reset, the tool call snapshot that last reported it when the task is still
+// running. Calls without a task are ignored.
+func RunningTaskCalls(log *Log) ([]Item, error) {
+	var running []Item
+	seen := map[string]bool{}
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) == 0 {
+			return running, nil
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			it := items[i]
+			if it.Kind == KindReset {
+				return running, nil
+			}
+			if it.Kind != KindToolCall || it.ToolCall.Task == nil || seen[it.ToolCall.Task.ID] {
+				continue
+			}
+			seen[it.ToolCall.Task.ID] = true
+			if it.ToolCall.Task.Status == "running" {
+				running = append(running, it)
+			}
+		}
+		before = items[0].Seq
+	}
+}
+
 // Answered reports whether the agent answered a prompt since the log's last
 // reset other than by failing it, as it does when it refuses one.
 func Answered(log *Log) bool {

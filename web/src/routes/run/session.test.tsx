@@ -371,6 +371,58 @@ describe('the Enhanced session view', () => {
     expect(api.runInputAnswer).toHaveBeenCalledWith('run_1', 'req_2', 'accept', expect.anything(), { db: 'postgres' })
   })
 
+  const waitingItems = () => [
+    item('turn_start', 1),
+    say(1, 'user', 'start the build'),
+    item('background', 1, { tasks: [{ id: 'bg1', holds: true }] }),
+    item('turn_end', 1, { stop_reason: 'end_turn' }),
+  ]
+
+  it('shows a run waiting on a background task and stops the wait from the composer', async () => {
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('Working in background: 1 task')).toBeDefined()
+    expect(screen.getByText(/Stops waiting for background work/)).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'Stop waiting for background work' }))
+    expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
+  it('offers Stop waiting for a wait the run stalled in, without the live row', async () => {
+    open({ status: 'needs-attention', reason: 'stalled: no output or file changes for 10m0s' })
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true, tasks: [{ id: 'bg1', holds: true }] }) }, waitingItems())
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('start the build')).toBeDefined()
+    expect(within(log).queryByText(/Working in background/)).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop waiting for background work' }))
+    expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+  })
+
+  it('offers neither once the wait was cancelled and the run is parked', async () => {
+    open({ status: 'needs-attention', reason: 'turn cancelled' })
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ background: true }) }, waitingItems())
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('start the build')).toBeDefined()
+    expect(within(log).queryByText(/Working in background/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop waiting for background work' })).toBeNull()
+  })
+
+  it('treats an autonomous turn as a running turn: live row, Interrupt, and Steer with text', async () => {
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, background: true, steering: true }) }, [
+      ...waitingItems(),
+      item('turn_start', 2, { autonomous: true }),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('Working')).toBeDefined()
+    expect(within(log).queryByText(/Working in background/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop waiting for background work' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Interrupt the agent' }))
+    expect(api.runACPCancel).toHaveBeenCalledWith('run_1', expect.objectContaining({ control_generation: 4 }))
+    await userEvent.type(await screen.findByRole('combobox', { name: 'Message the agent' }), 'also docs')
+    expect(screen.getByRole('button', { name: 'Steer' })).toBeDefined()
+  })
+
   it('steers a running turn, and interrupts it when the box is empty', async () => {
     vi.mocked(api.runInject).mockResolvedValue({ message: { id: 'm', run_id: 'run_1', workspace_id: workspace.id, kind: 'steer_request', state: 'sent', actor_id: alice.id, body: 'also docs', created_at: new Date().toISOString() } } as never)
     open()

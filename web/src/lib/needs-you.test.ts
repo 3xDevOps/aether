@@ -146,13 +146,19 @@ const rows: {
     id: 'enhanced-failure',
     run: record({ status: 'needs-attention', reason: 'enhanced session failed: acphost: initialize: EOF' }),
     ctx: {},
-    reason: 'Enhanced unavailable: acphost: initialize: EOF',
+    reason: 'Enhanced could not start: acphost: initialize: EOF',
   },
   {
     id: 'blocked',
     run: record({ ...worker, status: 'needs-attention', reason: 'blocked: no database access' }),
     ctx: { runs: runRecords(integrator), missions: { mission_1: mission() } },
     reason: 'Worker blocked: no database access',
+  },
+  {
+    id: 'needs-input',
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'needs input: Which database?' }),
+    ctx: {},
+    reason: 'Agent asks: Which database?',
   },
   {
     id: 'usage-limit',
@@ -217,17 +223,52 @@ describe('needs you conditions', () => {
   })
 
   it.each([
-    ["enhanced session ended: the agent's ACP server exited with code 1", "the agent's ACP server exited with code 1"],
+    ['enhanced session failed: start claude-agent-acp: not found', 'Enhanced could not start: start claude-agent-acp: not found'],
+    ["enhanced session ended: the agent's ACP server exited with code 1", "Agent disconnected: the agent's ACP server exited with code 1"],
     [
       'enhanced turn failed: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}',
-      'acphost: session/prompt: {"code":-32000,"message":"Authentication required"}',
+      'Turn failed: acphost: session/prompt: {"code":-32000,"message":"Authentication required"}',
     ],
-  ])("surfaces the server's reason %s as Enhanced unavailable", (reason, error) => {
+  ])('labels the server reason %s', (reason, shown) => {
     const parked = record({ status: 'needs-attention', reason })
-    expect(presentRun(parked, stateContext())).toMatchObject({
-      state: 'needs-you',
-      reason: `Enhanced unavailable: ${error}`,
-    })
+    expect(needsYou(parked, stateContext())?.id).toBe('enhanced-failure')
+    expect(presentRun(parked, stateContext())).toMatchObject({ state: 'needs-you', reason: shown })
+  })
+
+  it.each([
+    ['agent idle', 'turn-ended', 'Waiting for your reply'],
+    ['turn cancelled', 'turn-ended', 'Turn cancelled'],
+    ['turn interrupted', 'turn-ended', 'Turn interrupted'],
+    ['turn ended: max_tokens', 'turn-ended', 'Stopped: the reply reached its token limit'],
+    ['turn ended: max_turn_requests', 'turn-ended', 'Stopped: too many model requests in one turn'],
+    ['turn ended: refusal', 'turn-ended', 'Stopped: the agent refused'],
+    ['turn ended: something_new', 'turn-ended', 'Stopped: something_new'],
+    ['needs input: Which database?', 'needs-input', 'Agent asks: Which database?'],
+  ])('tells an Enhanced owner what parked the run: %s', (reason, id, shown) => {
+    const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', reason })
+    expect(needsYou(parked, stateContext())?.id).toBe(id)
+    expect(presentRun(parked, stateContext())).toMatchObject({ state: 'needs-you', reason: shown })
+  })
+
+  it.each(['agent idle', 'turn cancelled', 'turn interrupted', 'turn ended: refusal', 'needs input: Which database?'])(
+    'does not need anyone while an Enhanced run is running after %s',
+    (reason) => {
+      const running = record({ mode: 'acp', acp: true, status: 'running', reason })
+      expect(needsYou(running, stateContext())).toBeUndefined()
+      expect(presentRun(running, stateContext()).state).toBe('working')
+    },
+  )
+
+  it("does not need a member other than the owner for the agent's question", () => {
+    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'needs input: Which database?' })
+    const ctx = stateContext({ viewerID: bob.id, viewerRole: bob.role })
+    expect(needsYou(asking, ctx)).toBeUndefined()
+    expect(presentRun(asking, ctx)).toEqual({ state: 'working', reason: 'Waiting for Alice' })
+  })
+
+  it("shows a paused run as Paused, not the agent's question", () => {
+    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'needs input: Which database?' })
+    expect(presentRun(asking, stateContext({ pausedRuns: { [asking.id]: true } }))).toEqual({ state: 'paused', reason: 'Paused' })
   })
 
   it.each([

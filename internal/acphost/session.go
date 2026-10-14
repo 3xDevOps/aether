@@ -269,7 +269,18 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.mu.Unlock()
 	}
 	if cfg.ClaudeCode {
+		running, err := RunningTaskCalls(log)
+		if err != nil {
+			_ = w.Close()
+			s.stop()
+			s.notify.close(nil)
+			return nil, errors.Join(fmt.Errorf("acphost: scan running tasks: %w", err), log.Close())
+		}
 		s.mu.Lock()
+		for _, it := range running {
+			s.taskCalls[it.ToolCall.Task.ID] = *it.ToolCall
+			s.taskEndedLocked(it.ToolCall.Task.ID, "stopped")
+		}
 		s.interruptTasksLocked(LastItem(log, KindBackground))
 		s.mu.Unlock()
 	}
@@ -283,7 +294,9 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.conn.sessionMeta["systemPrompt"] = map[string]any{"append": cfg.SystemPrompt}
 	}
 	if cfg.ClaudeCode {
-		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames}
+		// Claude's adapter forwards a subagent's text and thinking only when
+		// asked; they arrive stamped with the subagent's parent link.
+		s.conn.sessionMeta["claudeCode"] = map[string]any{"emitRawSDKMessages": claudeTaskFrames, "options": map[string]any{"forwardSubagentText": true}}
 	}
 	if err := s.open(ctx); err != nil {
 		_ = w.Close()

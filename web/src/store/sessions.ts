@@ -1,9 +1,10 @@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
+import { needsInputPrefix, stalledPrefix } from '@/lib/needs-you'
 import { plainReason } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
-import type { SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
+import type { BackgroundTask, SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
 import type { ControlMetadata } from '@/routes/terminal/attach'
 import type { TakeoverSnapshot } from '@/routes/terminal/session'
@@ -13,8 +14,8 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
   isAttachedFile,
-  itemCount,
   prependItems,
+  rehome,
   replaceItem,
   trimTurns,
   workSummary,
@@ -24,6 +25,7 @@ import {
   type WorkItem,
 } from '@/store/session-rows'
 import type { SliceCreator } from '@/store/slice'
+import { indexItems, localItem, noAgents, replaceAgentItem, trimAgents, type AgentIndex } from '@/store/subagents'
 
 export type { Delivery, SessionRow }
 
@@ -47,7 +49,10 @@ export interface AcpSession {
   truncatedBefore: boolean
   historyGeneration: number
   turns: Turn[]
+  agents: AgentIndex
   state: SessionState | null
+  /** The ack's seq: its state already covers items up to it, so a replay of them must not roll it back. */
+  stateSeq: number
   pending: SessionRequest[]
   live: boolean
   stream: StreamState
@@ -104,7 +109,9 @@ const emptySession: AcpSession = {
   truncatedBefore: false,
   historyGeneration: 0,
   turns: [],
+  agents: noAgents,
   state: null,
+  stateSeq: 0,
   pending: [],
   live: false,
   stream: 'connecting',
@@ -116,10 +123,13 @@ function itemsOf(frames: SessionFrame[]): SessionItem[] {
   return frames.flatMap((frame) => (frame.item ? [frame.truncated ? { ...frame.item, truncated: true } : frame.item] : []))
 }
 
+const holds = (tasks: BackgroundTask[] | undefined) => tasks?.some((task) => task.holds) === true
+
 function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 'state' | 'pending'> {
   let state = session.state
   let pending = session.pending
   for (const item of items) {
+    if (item.seq <= session.stateSeq) continue
     switch (item.kind) {
       case 'request': {
         const request = item.request
@@ -130,8 +140,17 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
       }
       case 'turn_start':
       case 'turn_end':
-        if (state) state = { ...state, turn_in_flight: item.kind === 'turn_start' }
+        if (state) {
+          const start = item.kind === 'turn_start'
+          state = { ...state, turn_in_flight: start, background: start ? item.autonomous === true : holds(state.tasks) }
+        }
         if (item.kind === 'turn_end') pending = []
+        break
+      case 'background':
+        if (state) {
+          const tasks = item.tasks ?? []
+          state = { ...state, tasks, background: state.turn_in_flight ? state.background : holds(tasks) || item.follow_up === true }
+        }
         break
       case 'mode_change':
         if (state) state = { ...state, mode: item.mode }
@@ -155,6 +174,18 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
 
 function patchSession(s: SessionsSlice, runID: string, patch: Partial<AcpSession>): Pick<SessionsSlice, 'acpSessions'> {
   return { acpSessions: { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), ...patch } } }
+}
+
+/**
+ * The live background tasks of an Enhanced run that waits on background work with no turn running,
+ * or null when it does not. A wait the run stalled in or parked on a question in counts: Stop still ends it.
+ */
+export function backgroundWait(run: Pick<RunRecord, 'status' | 'reason'>, session: AcpSession | undefined): BackgroundTask[] | null {
+  const state = session?.stream === 'live' ? session.state : null
+  if (!state?.background || state.turn_in_flight) return null
+  const parked =
+    run.status === 'needs-attention' && (run.reason?.startsWith(stalledPrefix) || run.reason?.startsWith(needsInputPrefix)) === true
+  return run.status === 'running' || parked ? state.tasks ?? [] : null
 }
 
 export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
@@ -189,9 +220,9 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const held = s.acpSessions[runID] ?? emptySession
       const restart = ack.epoch !== held.epoch || ack.oldest_seq !== undefined
       const base = restart
-        ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
+        ? { turns: [], agents: noAgents, seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
         : {}
-      return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, pending: ack.state?.pending ?? [] })
+      return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, stateSeq: ack.seq, pending: ack.state?.pending ?? [] })
     }),
   acpFrames: (runID, frames) =>
     set((s) => {
@@ -199,10 +230,12 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       let batch: SessionItem[] = []
       const flush = () => {
         if (batch.length === 0) return
+        const { index, main, home } = indexItems(session.agents, batch)
         session = {
           ...session,
           ...advance(session, batch),
-          turns: appendItems(session.turns, batch),
+          turns: appendItems(session.turns, main, (item) => home.get(item)),
+          agents: index,
           seq: batch.at(-1)!.seq,
           oldestSeq: session.oldestSeq || batch[0]!.seq,
         }
@@ -213,12 +246,13 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
           flush()
           const sameEpoch = frame.epoch === session.epoch
           session = {
-            ...session, turns: [], seq: 0, oldestSeq: 0,
+            ...session, turns: [], agents: noAgents, seq: 0, oldestSeq: 0,
             more: sameEpoch && session.more,
             truncatedBefore: sameEpoch && session.truncatedBefore,
             historyGeneration: session.historyGeneration + 1,
             olderLoading: false, olderError: undefined,
             pending: sameEpoch ? session.pending : [],
+            stateSeq: sameEpoch ? session.stateSeq : 0,
             epoch: frame.epoch ?? session.epoch + 1,
           }
           continue
@@ -234,8 +268,10 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const session = s.acpSessions[runID]
       if (!session) return {}
       const older = itemsOf(frames).filter((item) => !session.oldestSeq || item.seq < session.oldestSeq)
+      const { index, main, rehomed, home } = indexItems(session.agents, older, true)
       return patchSession(s, runID, {
-        turns: prependItems(session.turns, older),
+        turns: rehome(prependItems(session.turns, main, (item) => home.get(item)), rehomed),
+        agents: index,
         oldestSeq: older[0]?.seq ?? session.oldestSeq,
         more: more && older.length > 0,
         truncatedBefore: session.truncatedBefore || truncatedBefore,
@@ -247,7 +283,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
   acpReplaceItem: (runID, item) =>
     set((s) => {
       const session = s.acpSessions[runID]
-      return session ? patchSession(s, runID, { turns: replaceItem(session.turns, item) }) : {}
+      return session ? patchSession(s, runID, { turns: replaceItem(session.turns, localItem(session.agents, item)), agents: replaceAgentItem(session.agents, item) }) : {}
     }),
   acpStream: (runID, stream, error) => set((s) => patchSession(s, runID, { stream, streamError: error })),
   acpControl: (runID, control, error) => set((s) => patchSession(s, runID, { control, controlError: error })),
@@ -260,9 +296,11 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
         .sort(([, a], [, b]) => b.touched - a.touched)
       const room = Math.max(0, residentSessions - 1 - Object.keys(sessions).filter((id) => id !== runID && open(id)).length)
       for (const [id, session] of idle.slice(room)) {
-        if (itemCount(session.turns) <= keptItems) continue
-        const turns = trimTurns(session.turns, keptItems)
-        sessions[id] = { ...session, turns, oldestSeq: turns[0]?.items[0]?.seq ?? session.oldestSeq, more: true }
+        const seqs = [...session.turns, ...Object.values(session.agents.agents)].flatMap((held) => held.items.map((item) => item.seq))
+        if (seqs.length <= keptItems) continue
+        seqs.sort((a, b) => a - b)
+        const { turns, floor } = trimTurns(session.turns, seqs[seqs.length - keptItems]!)
+        sessions[id] = { ...session, turns, agents: trimAgents(session.agents, floor), oldestSeq: floor, more: true }
       }
       return { acpSessions: sessions }
     }),

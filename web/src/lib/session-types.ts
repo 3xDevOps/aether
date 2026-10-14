@@ -16,6 +16,7 @@ export type SessionItemKind =
   | 'notice'
   | 'turn_start'
   | 'turn_end'
+  | 'background'
   | 'reset'
   | 'unknown'
 
@@ -24,6 +25,8 @@ export type SessionItemKind =
 export interface SessionMessage {
   role: 'user' | 'assistant' | 'thought'
   message_id: string
+  /** The Agent or Task tool call that launched the subagent that wrote it. */
+  parent_id?: string
   text: string
   attachments?: SessionContent[]
   complete?: boolean
@@ -41,8 +44,17 @@ export interface SessionContent {
  * except output, which appends. */
 export interface SessionToolCall {
   id: string
+  /** The Agent or Task tool call that launched the subagent that made it. */
+  parent_id?: string
   title: string
   tool_kind?: string
+  /** The agent's own tool name, such as Claude Code's `Bash` or `Agent`. */
+  tool_name?: string
+  /** Set on a call that launches a subagent. */
+  subagent?: { description?: string; type?: string }
+  /** The Claude Code background task the call started; a later snapshot of
+   * the call settles it. */
+  task?: { id: string; type?: string; status: 'running' | 'completed' | 'failed' | 'stopped' }
   status?: string
   locations?: { path: string; line?: number }[]
   content?: SessionContent[]
@@ -94,6 +106,7 @@ export interface SessionItem {
   message?: SessionMessage
   tool_call?: SessionToolCall
   plan?: { content: string; priority?: string; status?: string }[]
+  plan_parent_id?: string
   request?: SessionRequest
   mode?: string
   config_options?: ConfigOption[]
@@ -103,7 +116,19 @@ export interface SessionItem {
   title?: string
   notice?: { severity: string; title: string; description?: string }
   stop_reason?: string
+  autonomous?: boolean
+  origin?: string
+  tasks?: BackgroundTask[]
+  follow_up?: boolean
   raw?: unknown
+}
+
+/** A live Claude Code background task; `holds` marks one the run waits for. */
+export interface BackgroundTask {
+  id: string
+  type?: string
+  description?: string
+  holds?: boolean
 }
 
 /** After a reset the client drops what it holds. A truncated item was cut to
@@ -125,6 +150,8 @@ export interface SessionHistory {
 /** Snapshot of a live session sent in the /ws/acp ack. */
 export interface SessionState {
   turn_in_flight: boolean
+  background?: boolean
+  tasks?: BackgroundTask[]
   queued: number
   pending: SessionRequest[]
   last_activity: string

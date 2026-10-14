@@ -566,7 +566,9 @@ end with the old adapter, the log gets a **Background work interrupted**
 notice naming them, and a `background` item with no tasks and
 `stop_reason: "interrupted"` records that none outlived the connection. A
 follow-up turn owed when the connection ended counts as interrupted work
-too. A run whose wait you stopped is not interrupted.
+too. A tool call whose task the log still records as `running` gets a new
+snapshot with `stopped`, as on a clean close. A run whose wait you stopped
+is not interrupted.
 Messages still queued behind that turn read **Not sent**
 (`agent_disconnected`), also after a crash, since the next server records
 them when it starts; send them again once the session is back. The restored
@@ -781,7 +783,10 @@ Anything an agent or a tool prints, a secret included, can be in it;
 Items carry the subagent tree that Claude's adapter reports. A subagent is
 the agent that Claude Code's `Agent` or `Task` tool launches; its
 messages, thoughts, tool calls and plans arrive in the same session as the
-main agent's.
+main agent's. Claude's adapter forwards a subagent's text and thinking only
+to a session opened with `_meta.claudeCode.options.forwardSubagentText`,
+which a Claude Enhanced run sets on `session/new`, `session/resume` and
+`session/load`.
 
 | Field | Set on |
 |---|---|

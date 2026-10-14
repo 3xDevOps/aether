@@ -9,12 +9,13 @@ import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { loadOlderAssistant } from '@/store/assistant-stream'
 import type { AcpSession } from '@/store/sessions'
+import { noAgents, turnExtras } from '@/store/subagents'
 
 const bottomSlack = 24
 
 export function assistantRows(session: AcpSession) {
   // Changed-files rows open a run's Changes view, which the assistant has none of.
-  return enhancedRows(session).filter((row) => row.kind !== 'changed-files')
+  return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null).filter((row) => row.kind !== 'changed-files')
 }
 
 export function Transcript({ session }: { session: AcpSession }) {
