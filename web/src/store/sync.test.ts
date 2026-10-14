@@ -9,6 +9,7 @@ import { loadDevices } from '@/store/devices'
 import { homeKey } from '@/store/files'
 import { capability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
+import { dropMergeProposal, loadMergeProposals } from '@/store/members'
 import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -1810,6 +1811,44 @@ describe('applyEvent', () => {
     }), client)
 
     expect(store.getState().info?.member.id).toBe(alice.id)
+  })
+
+  describe('merge proposals', () => {
+    const proposal = (id: string) => ({ id, minted_id: alice.id, proposer_id: bob.id, keep_settings_of: bob.id, plan_digest: 'd', expires_at: '2026-10-14T00:10:00Z' })
+    const held = () => {
+      let answer!: (proposals: ReturnType<typeof proposal>[]) => void
+      return { promise: new Promise<ReturnType<typeof proposal>[]>((resolve) => { answer = resolve }), answer: (p: ReturnType<typeof proposal>[]) => answer(p) }
+    }
+
+    it('lands only the latest read', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      const older = held()
+      const first = loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(() => older.promise) }))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_new')]) }))
+      older.answer([])
+      await first
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_new'])
+    })
+
+    it('keeps a cancelled proposal out of a read sent before the cancel', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_1')]) }))
+      const before = held()
+      const read = loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(() => before.promise) }))
+      dropMergeProposal(store, 'prop_1')
+      before.answer([proposal('prop_1')])
+      await read
+      expect(store.getState().mergeProposals).toEqual([])
+    })
+
+    it('keeps the proposals shown and records a failed read', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_1')]) }))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => Promise.reject(new Error('member.merge.pending: server unreachable'))) }))
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_1'])
+      expect(store.getState().mergeProposalsError).toBe('member.merge.pending: server unreachable')
+    })
   })
 
   it('re-reads the devices on a device event', async () => {

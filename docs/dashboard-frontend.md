@@ -1180,6 +1180,7 @@ comes back online, which catches a failed read and an approval made with
 | Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
 | Registered under `account`, on a server now under `approved-devices` (from `server.edge`) | an admin | laptop (github bob) signed in as Bob and is not approved | the same |
 | Pending, the viewer's own | the member, not an admin | New device laptop signed in as you | the same |
+| Pending, waiting on the viewer's account link | the member, not an admin | laptop (github bob-gh) is waiting on your account link | the same |
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. No card carries an
@@ -4177,7 +4178,10 @@ opens a dialog with two tabs:
   per-second expiry countdown and `aether member merge <code>`. Proposing
   and cancelling publish no event, so `connect` re-reads
   `member.merge.pending` every 5 seconds while that code is valid or a
-  proposal is open, dialog closed or not, and when the tab wakes.
+  proposal is open, dialog closed or not, and when the tab wakes. Only the
+  latest read lands, and a cancel or accept outdates reads already sent;
+  a failed read keeps the proposals shown and its error shows on the
+  board and in Sign-ins.
 - **I have a merge code** sends `member.merge.preview` and shows both
   members side by side (role, sign-ins, devices, runs, schedules,
   settings), stacked at phone width. **Keep settings from** has no

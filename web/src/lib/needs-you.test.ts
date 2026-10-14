@@ -447,6 +447,16 @@ describe('device cards', () => {
     }])
   })
 
+  it('asks a member to approve a device waiting on their own account link', () => {
+    const linking = pendingDevice({ account: 'bob-gh', display_name: 'Bob' })
+    expect(deviceNeeds([linking], collaborator, 'account')).toEqual([{
+      device: linking,
+      reason: 'laptop (github bob-gh) is waiting on your account link',
+      admits: 'admits as: Bob (collaborator)',
+      waitingSince: linking.created_at,
+    }])
+  })
+
   it('asks for a device registered under account once the server is under approved-devices', () => {
     const device = pendingDevice({ status: 'registered', member_id: bob.id, invitation_id: undefined, account: 'bob', display_name: 'Bob' })
     expect(deviceNeeds([device], admin, 'account')).toEqual([])

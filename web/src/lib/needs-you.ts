@@ -457,7 +457,8 @@ export function deviceNeeds(
   const waiting = (device: Device) =>
     admin
       ? device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
-      : device.status === 'pending' && device.member_id === viewer.viewerID
+      // The server lists a non-admin's link devices (an invitation naming a member) only to that member.
+      : device.status === 'pending' && (device.member_id === viewer.viewerID || (!device.member_id && Boolean(device.invitation_id && device.display_name)))
   return devices
     .filter(waiting)
     .map((device) => {
@@ -465,7 +466,7 @@ export function deviceNeeds(
       return {
         device,
         reason: !admin
-          ? `New device ${device.label} signed in as you`
+          ? device.member_id ? `New device ${device.label} signed in as you` : `${who} is waiting on your account link`
           : device.status === 'registered'
           ? `${who} signed in as ${device.display_name} and is not approved`
           : device.display_name

@@ -337,7 +337,7 @@ describe('accept a merge', () => {
     fireEvent.click(dialog.getByRole('button', { name: 'Propose merge' }))
 
     expect(await dialog.findByRole('status')).toBeDefined()
-    expect((await dialog.findByRole('alert')).textContent).toBe('member.merge.pending: connection closed')
+    expect((await dialog.findByRole('alert')).textContent).toBe('Reading the open merge proposals failed: member.merge.pending: connection closed')
   })
 
   it('re-reads the sign-ins when a merge maps another member', async () => {

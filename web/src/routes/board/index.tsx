@@ -12,7 +12,7 @@ import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { DeviceCard } from '@/routes/board/device-card'
 import { MergeProposalCard } from '@/routes/board/merge-card'
-import { useOpenProposals } from '@/routes/members/sign-ins'
+import { ProposalsReadError, useOpenProposals } from '@/routes/members/sign-ins'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { EmptyBoard } from '@/routes/board/empty-board'
 import { registerRoute } from '@/routes/registry'
@@ -42,6 +42,7 @@ export function Board() {
 
   const devices = useDeviceNeeds()
   const { toAccept, unplanned } = useOpenProposals()
+  const mergeError = useStore((s) => s.mergeProposalsError)
   const merges = useMemo(() => [...toAccept, ...unplanned], [toAccept, unplanned])
   const total = columns.reduce((n, c) => n + c.cards.length, 0) + archivedCards.length + devices.length + merges.length
   const unreachable = error !== null
@@ -128,6 +129,7 @@ export function Board() {
             if (!(event.relatedTarget instanceof Element && event.currentTarget.contains(event.relatedTarget))) setFocusedCard(null)
           }}
         >
+          {mergeError && <div className="shrink-0 px-4 pt-4"><ProposalsReadError /></div>}
           {body}
           {focusedCard?.isConnected && <CardKeys card={focusedCard} />}
         </TabsContent>

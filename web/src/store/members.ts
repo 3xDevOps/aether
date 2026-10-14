@@ -1,4 +1,5 @@
 import type { Api } from '@/lib/api'
+import { message } from '@/lib/format'
 import type { Invitation, Member, MemberList, MergeProposal } from '@/lib/types'
 import type { RootState, RootStore } from '@/store'
 import { byCreated } from '@/store/collaboration'
@@ -48,7 +49,9 @@ export interface MembersSlice {
   setRevokingInvitation: (id: string, pending: boolean) => void
   /** From `member.merge.pending`: open proposals the viewer made or is asked to accept. */
   mergeProposals: MergeProposal[]
-  setMergeProposals: (proposals: MergeProposal[]) => void
+  /** The last `member.merge.pending` read's failure; the proposals shown are from before it. */
+  mergeProposalsError: string | null
+  setMergeProposals: (proposals: MergeProposal[], error?: string | null) => void
   /** When the merge code this tab minted expires, in ms; proposals are polled until then. */
   mergeCodeUntil: number
   setMergeCodeUntil: (until: number) => void
@@ -195,15 +198,40 @@ export const createMembersSlice: SliceCreator<MembersSlice> = (set, get) => ({
   setRevokingInvitation: (id, pending) =>
     set((s) => ({ revokingInvitations: [...s.revokingInvitations.filter((r) => r !== id), ...(pending ? [id] : [])] })),
   mergeProposals: [],
-  setMergeProposals: (mergeProposals) => set({ mergeProposals }),
+  mergeProposalsError: null,
+  setMergeProposals: (mergeProposals, error = null) => set({ mergeProposals, mergeProposalsError: error }),
   mergeCodeUntil: 0,
   setMergeCodeUntil: (mergeCodeUntil) => set({ mergeCodeUntil }),
 })
 
-/** Reads `member.merge.pending`; an answer for a viewer who has since changed is dropped. */
+const proposalReads = new WeakMap<RootStore, number>()
+const nextProposalRead = (store: RootStore) => {
+  const read = (proposalReads.get(store) ?? 0) + 1
+  proposalReads.set(store, read)
+  return read
+}
+
+/** Reads `member.merge.pending`. Only the latest read lands, a removal made
+ * since a read started outdates it, and a failure lands as
+ * `mergeProposalsError` beside the proposals already shown. */
 export async function loadMergeProposals(store: RootStore, client: Api): Promise<void> {
+  const read = nextProposalRead(store)
   const s = store.getState()
   if (!s.info || !capability(s.capabilities).hasMethod('member.merge.pending')) return s.setMergeProposals([])
-  const proposals = await client.memberMergePending()
-  if (store.getState().identityKey === s.identityKey) store.getState().setMergeProposals(proposals)
+  let proposals: MergeProposal[] | undefined
+  let error: string | null = null
+  try {
+    proposals = await client.memberMergePending()
+  } catch (err) {
+    error = message(err)
+  }
+  const now = store.getState()
+  if (proposalReads.get(store) !== read || now.identityKey !== s.identityKey) return
+  now.setMergeProposals(proposals ?? now.mergeProposals, error)
+}
+
+export function dropMergeProposal(store: RootStore, id: string) {
+  nextProposalRead(store)
+  const s = store.getState()
+  s.setMergeProposals(s.mergeProposals.filter((p) => p.id !== id), s.mergeProposalsError)
 }

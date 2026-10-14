@@ -190,7 +190,7 @@ export async function hydrate(
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
-    await loadMergeProposals(store, client).catch(ignore)
+    await loadMergeProposals(store, client)
     await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
     // Nothing else fetches linkStatus before settings or onboarding opens, so
@@ -982,7 +982,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted) return
     if (!retryTimer) {
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
-      coalesce(store, 'merges', () => loadMergeProposals(store, client).catch(ignore))
+      coalesce(store, 'merges', () => loadMergeProposals(store, client))
       return
     }
     clearTimeout(retryTimer)
@@ -995,7 +995,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const mergeTimer = setInterval(() => {
     const s = store.getState()
     if (s.mergeCodeUntil > Date.now() || s.mergeProposals.length > 0) {
-      coalesce(store, 'merges', () => loadMergeProposals(store, client).catch(ignore))
+      coalesce(store, 'merges', () => loadMergeProposals(store, client))
     }
   }, mergePollMs)
 

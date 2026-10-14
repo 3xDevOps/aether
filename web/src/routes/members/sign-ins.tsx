@@ -23,7 +23,7 @@ import { roleLabel } from '@/routes/members/roster'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
-import { loadMergeProposals } from '@/store/members'
+import { dropMergeProposal, loadMergeProposals } from '@/store/members'
 
 type Planned = MergeProposal & { plan: MergePlan }
 
@@ -39,9 +39,9 @@ export function useOpenProposals(): { toAccept: Planned[]; unplanned: MergePropo
   }), [proposals, self])
 }
 
-function dropProposal(id: string) {
-  const { mergeProposals, setMergeProposals } = useStore.getState()
-  setMergeProposals(mergeProposals.filter((p) => p.id !== id))
+export function ProposalsReadError() {
+  const error = useStore((s) => s.mergeProposalsError)
+  return error && <Callout tone="failed" role="alert">Reading the open merge proposals failed: {error}</Callout>
 }
 
 /** Errors go to `onFailed`, so one outlives a proposal that a reload removes. */
@@ -82,7 +82,7 @@ function CancelProposal({ client, proposal, onFailed }: { client: Api; proposal:
     setPending(true)
     try {
       await client.memberMergeCancel(proposal.id)
-      dropProposal(proposal.id)
+      dropMergeProposal(useStore, proposal.id)
     } catch (err) {
       onFailed(message(err))
     } finally {
@@ -121,7 +121,7 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
 
   useEffect(() => {
     void reload()
-    void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err)))
+    void loadMergeProposals(useStore, client)
   }, [client, reload, merges, devices])
 
   useEffect(() => {
@@ -137,6 +137,7 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
     <section ref={ref} aria-label="Sign-ins" className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h3">Sign-ins</SectionLabel>
       <p className="text-ui-sm text-muted">Every way you reach this server as this member.</p>
+      <ProposalsReadError />
       <OpenProposals client={client} onMerged={onMerged} onFailed={setError} />
       {merged && <MergeRecord merge={merged} />}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
@@ -357,6 +358,7 @@ function GetCode({ client, self, onMerged }: { client: Api; self: Member; onMerg
         <p className="text-ui text-muted">The code is valid for 10 minutes and shown once. A new code replaces your open one.</p>
       )}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      <ProposalsReadError />
       <OpenProposals client={client} onMerged={onMerged} onFailed={setError} />
       <div className="flex justify-end">
         <Button variant={code ? 'secondary' : 'primary'} disabled={pending} onClick={() => void start()}>
@@ -392,7 +394,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
     return (
       <div className="flex min-w-0 flex-col gap-3">
         <Proposed proposal={proposal} minted={plan.plan.minted} />
-        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        <ProposalsReadError />
       </div>
     )
   }
@@ -432,7 +434,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
           plan={plan.plan}
           onProposed={(proposed) => {
             setProposal(proposed)
-            void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err)))
+            void loadMergeProposals(useStore, client)
           }}
           onRefused={(refusal) => {
             setPlan(null)
@@ -630,12 +632,12 @@ function ProposalToAccept({ client, proposal, onMerged, onFailed }: {
         await client.memberMergeCancel(proposal.id)
       }
       // After an accept the server closes this connection; the next snapshot re-reads the rest.
-      dropProposal(proposal.id)
+      dropMergeProposal(useStore, proposal.id)
     } catch (err) {
       onFailed(message(err))
       setDiscardAck(false)
       // A refused accept usually means the plan changed; the re-read shows why and disables Accept.
-      await loadMergeProposals(useStore, client).catch((reload: unknown) => onFailed(`${message(err)}; reading the open proposals failed: ${message(reload)}`))
+      await loadMergeProposals(useStore, client)
     } finally {
       setPending(null)
     }
