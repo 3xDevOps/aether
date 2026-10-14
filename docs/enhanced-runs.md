@@ -383,7 +383,9 @@ working through both:
   turn, which Claude Code starts right after: the run stays working until
   that turn starts, for at most two minutes.
 - The run is idle once no prompt or autonomous turn runs, no task it waits
-  for is live, and no follow-up is owed.
+  for is live, and no follow-up is owed. It parks with the stop reason of
+  the prompt that started the wait when that was not `end_turn`, such as
+  `turn ended: max_tokens`.
 
 A message sent during an autonomous turn waits behind it or steers into it,
 like one sent during a prompt's turn, and mail waits for it to end. With
@@ -436,7 +438,8 @@ gets them too, and its task prompt is the bare task. Every other agent gets
 them appended to its task prompt. Without a task, they go in a separate text
 block after the first message or mail prompt the agent accepts. A message
 that waited and was never delivered keeps them for the next one, as does a
-session that started anew after a failed restore. That block is part of the
+session that started anew after a failed restore or has refused every
+prompt so far. That block is part of the
 logged prompt. An agent that ends a turn without reporting still parks with
 `agent idle`.
 

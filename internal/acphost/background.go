@@ -263,6 +263,7 @@ func (s *Session) settleLocked() {
 	}
 	if s.reported.Working {
 		s.stateLocked(TurnState{Reason: s.idleStop})
+		s.idleStop = ""
 	}
 }
 
@@ -308,7 +309,11 @@ func (s *Session) endAutonomousLocked(stop string) {
 	s.proj.endTurn()
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin})
 	s.autonomous, s.resulted, s.origin = false, false, ""
-	s.idleStop = stop
+	// A prompt that stopped short before its background wait keeps its
+	// reason through the follow-ups.
+	if s.idleStop == "" || s.idleStop == "end_turn" {
+		s.idleStop = stop
+	}
 	if len(s.queue) > 0 && !s.closingLocked() {
 		next := s.queue[0]
 		s.queue = s.queue[1:]

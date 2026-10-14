@@ -455,6 +455,36 @@ func TestFailedPromptWithTasksPendingWaitsForTheFollowUp(t *testing.T) {
 	}
 }
 
+func TestShortStopKeepsItsReasonThroughTheBackgroundWait(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "claude"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		m.liveTasks([2]string{"wf-1", "local_workflow"})
+		return map[string]any{"stopReason": "max_tokens"}, nil
+	}
+	s, rec := startMock(t, m, Config{ClaudeCode: true})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitStates(t, "working:prompt", "working:background")
+	m.taskDone("wf-1")
+	m.chunk("follow-up")
+	m.marker()
+	if states := rec.waitFinished(t); states[len(states)-1] != "idle:max_tokens" {
+		t.Fatalf("states %v, want the prompt's max_tokens kept", states)
+	}
+
+	n := len(rec.snapshot())
+	m.chunk("on its own")
+	m.marker()
+	waitFor(t, "the autonomous turn's idle", func() bool {
+		states := rec.snapshot()
+		return len(states) > n && strings.HasPrefix(states[len(states)-1], "idle:")
+	})
+	if states := rec.snapshot(); states[len(states)-1] != "idle:end_turn" {
+		t.Fatalf("states %v, want the autonomous turn's own end_turn", states)
+	}
+}
+
 func TestConnectionEndWhileATaskHolds(t *testing.T) {
 	m := workflowAgent(t)
 	s, rec := startWorkflow(t, m)

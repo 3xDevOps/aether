@@ -639,7 +639,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 	case failed != nil:
 		// Tasks still report back; the failure shows until the agent works
 		// again.
-		s.holdIdle = true
+		s.holdIdle, s.idleStop = true, ""
 		s.stateLocked(TurnState{Reason: reason, Failed: failed})
 	case reason == "interrupted":
 		s.stateLocked(TurnState{Reason: reason})
