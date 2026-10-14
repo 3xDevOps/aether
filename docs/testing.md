@@ -77,7 +77,10 @@ Layers, per the design spec's testing strategy:
   `TestRecoveredTerminalUsesCapturedUserAndHomeForImages` must stay covered.
   The `smoke` job runs `internal/harness` on the images it builds natively
   on amd64 and arm64, alongside `scripts/standard-image-smoke.sh` toolchain
-  and native Git checks.
+  and native Git checks. The `nested-docker` job installs Sysbox with
+  `scripts/install-sysbox.sh` on `ubuntu-24.04` and `ubuntu-24.04-arm` and runs
+  `TestDockerNestedDocker` and `scripts/nested-docker-smoke.sh`
+  ([below](#running-the-docker-suites-inside-a-run)).
   A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
   the release matrix. A markdown file anywhere else, including a dashboard
