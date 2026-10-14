@@ -168,7 +168,8 @@ function patchCounts(patch: string): { additions: number; deletions: number } {
 
 const stopText: Record<string, [string, Tone]> = {
   end_turn: ['Finished', 'done'],
-  cancelled: ['Interrupted', 'paused'],
+  cancelled: ['Cancelled', 'paused'],
+  interrupted: ['Interrupted', 'failed'],
   max_tokens: ['Stopped: the reply reached its token limit', 'failed'],
   max_turn_requests: ['Stopped: too many model requests in one turn', 'failed'],
   refusal: ['Stopped: the agent refused', 'failed'],

@@ -77,17 +77,18 @@ useStore.subscribe((state, previous) => {
   else if (state.runs !== previous.runs) useDrafts.setState(pruneRuns(useDrafts.getState(), (runID) => runID in state.runs), true)
 })
 
-export type Pill = 'send' | 'steer' | 'queue' | 'interrupt' | 'resume'
+export type Pill = 'send' | 'steer' | 'queue' | 'interrupt' | 'stop-waiting' | 'resume'
 
-export function pillFor({ paused, turnRunning, steering, queueHeld, empty }: {
+export function pillFor({ paused, turnRunning, backgroundWait, steering, queueHeld, empty }: {
   paused: boolean
   turnRunning: boolean
+  backgroundWait: boolean
   steering: boolean
   queueHeld: boolean
   empty: boolean
 }): Pill {
   if (paused) return 'resume'
-  if (!turnRunning) return 'send'
+  if (!turnRunning) return backgroundWait && empty ? 'stop-waiting' : 'send'
   if (empty) return 'interrupt'
   return queueHeld || !steering ? 'queue' : 'steer'
 }
@@ -97,6 +98,7 @@ export const pillHint: Record<Pill, string> = {
   steer: 'Added to the current turn.',
   queue: 'Queued, runs after this turn.',
   interrupt: 'Stops the agent’s turn and cancels its open requests.',
+  'stop-waiting': 'Stops waiting for background work. Tasks already started keep running and can start a new turn.',
   resume: 'The run is paused. Resume it to continue.',
 }
 

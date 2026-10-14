@@ -1036,7 +1036,7 @@ both show:
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
 | Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
-| Native permission or question on a Standard run; blocked, held, or Enhanced unavailable | **Open terminal** |
+| Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Usage limit with no account to move to | **Open** |
 | Teammate's message waiting for the controller | **Review message** |
@@ -1045,7 +1045,7 @@ both show:
 
 Every action but Approve and the card's Reply goes where the condition's
 `target` points: the run (requests and questions), its Terminal view
-(blocked, held, Enhanced unavailable), its Changes view for an unreviewed
+(blocked, held, Enhanced failure), its Changes view for an unreviewed
 finish, or the swarm page.
 
 While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
@@ -1162,10 +1162,13 @@ first that applies:
 | Open swarm question | accountable human or an admin | The integrator asks: … |
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue / Integrator failed to launch, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
-| Enhanced failure (`enhanced session failed: `, `enhanced session ended: ` or `enhanced turn failed: ` reason) | owner | Enhanced unavailable: … |
+| Enhanced failure (`enhanced session failed: ` reason) | owner | Enhanced could not start: … |
+| Enhanced failure (`enhanced session ended: ` reason) | owner | Agent disconnected: … |
+| Enhanced failure (`enhanced turn failed: ` reason) | owner | Turn failed: … |
+| Agent question (`needs input: <question>` reason, also while background tasks run) | owner | Agent asks: … |
 | Parked `blocked: <summary>` | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
-| Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | Waiting for your reply |
+| Enhanced turn ended (`acp`, parked without a stall or reported outcome) | owner | by reason: `agent idle` Waiting for your reply; `turn cancelled` Turn cancelled; `turn interrupted` Turn interrupted; `turn ended: <stop>` Stopped: … |
 | Parked at `needs-attention` without a reported outcome (Standard, or any stall) | owner | Agent idle for 3 min / No activity for 12 min |
 | Unreviewed outcome (`outcome_unseen`) | owner | Review the reported result; interactive runs remain open for follow-up |
 
@@ -1205,6 +1208,12 @@ Background (`headless`) run reaches Needs you only through a pending Aether
 approval, the swarm rows, a blocked report, an Enhanced failure, a usage
 limit or an unreviewed finish. A Working run's reason is what its agent is doing ("Reading
 src/auth.ts", from `run.agent`), else "Queued", "Starting" or "Agent working".
+A `running` run whose reason starts `working in background` reads "Working
+in background", "Working in background: 1 task" or "Working in background:
+<n> tasks" ahead of its activity, from the run record alone, so the sidebar,
+board, header and Details show it with no session stream open. It is never
+Needs you. A `needs input: <question>` the agent asked while its tasks run
+parks the run and outranks it: the run reads "Agent asks: …".
 
 Needs you sorts oldest wait first (`waitingSince`: the approval's or
 message's time, else the state change); Working and Finished sort by latest
@@ -1924,7 +1933,10 @@ and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
 `answered`, `event` (notices, mode changes, a new
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
-answer") with the amber dot while a request is pending. A person's
+answer") with the amber dot while a request is pending. A `finished` row
+reads **Finished**, **Cancelled** (stop reason `cancelled`) or **Interrupted**
+(`interrupted`, a turn a restart or lost connection cut off), matching the
+run reasons `turn cancelled` and `turn interrupted`. A person's
 message is matched to the room message that carried it for its author. While
 older items remain and the same text was sent more than once, a delivered
 room message sent within the loaded items, before the row, is matched first.
@@ -1941,16 +1953,37 @@ opens there as well, where it used to open a dead address in a new tab.
 Fenced code blocks, a person's own messages and the entry labels, which
 toggle their detail, are left as text.
 
+A `turn_start` with `autonomous` is a turn the agent ran with no prompt
+(Claude Code reacting to a finished background task). It opens a turn as a
+prompt does, so its rows, `live` row and **Steer**, **Queue** and
+**Interrupt** work the same. The ack's `state` carries `background` and
+`tasks`; `advance` (`store/sessions.ts`) updates them from items newer than
+the ack's `seq` only, so a replay of older items cannot bring back tasks the
+ack no longer lists. A `background` item replaces `tasks`, and with no turn
+in flight sets `background` while a task `holds` or a `follow_up` is owed;
+one with no tasks and `stop_reason: "interrupted"` clears them. A turn
+boundary sets `turn_in_flight` and, at `turn_end`, `background` from the held
+tasks. `backgroundWait` returns the live tasks while the stream is live,
+`background` is set, no turn is in flight, and the run is `running` or
+parked `stalled:` or `needs input:`. A `running` run's wait adds a `live`
+row reading "Working in background" when only a follow-up is owed, or
+"Working in background: N tasks" with N held tasks.
+
 The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
-an empty composer during a turn) or **Resume** (a paused run). `Enter` does
-what the pill says and nothing without text or images, `Shift+Enter` adds a
-line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
-plain key, which the shortcut table stands down for inside a field, so the
-textarea answers it itself through `isPress`; the binding stays registered so
-the shortcuts reference lists it. A key still composing in an input method
+an empty composer during a turn), **Stop waiting** (`run.acp.cancel`, an
+empty composer while `backgroundWait` holds, including a wait that stalled
+or shows a question) or **Resume** (a paused run). **Stop waiting** ends the
+wait and parks the run `turn cancelled`; the agent's background tasks keep
+running, and a later follow-up opens a new autonomous turn. With text typed
+the pill is **Send**, which starts a turn, so a reply to the question still
+goes out. `Enter` does what the pill says and nothing without text or
+images, `Shift+Enter` adds a line and `Mod+Shift+Enter` queues; on touch only
+the pill sends. `Enter` is a plain key, which the shortcut table stands down
+for inside a field, so the textarea answers it itself through `isPress`; the
+binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in
 `composer-images.tsx` accepts file selection and native file paste, enforces
 the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
@@ -3242,7 +3275,7 @@ The body is one column, in this order:
    cancelled "The swarm was cancelled. Its workers and integrator run are
    stopped." A stopped or missing integrator adds a callout with
    **Replace integrator…** (see below). An integrator that needs you for its
-   own reason, such as `Enhanced unavailable: <error>`, adds a callout `The
+   own reason, such as `Enhanced could not start: <error>`, adds a callout `The
    integrator needs you` with that reason, and the reason leads the state
    line ahead of any `N questions for you`.
 2. **Questions for you**, only when the integrator asked any. An open

@@ -52,7 +52,7 @@ describe('composer drafts', () => {
 })
 
 describe('the composer pill', () => {
-  const base = { paused: false, turnRunning: false, steering: true, queueHeld: false, empty: false }
+  const base = { paused: false, turnRunning: false, backgroundWait: false, steering: true, queueHeld: false, empty: false }
   it.each([
     [{}, 'send'],
     [{ turnRunning: true }, 'steer'],
@@ -60,6 +60,12 @@ describe('the composer pill', () => {
     [{ turnRunning: true, steering: false }, 'queue'],
     [{ turnRunning: true, empty: true }, 'interrupt'],
     [{ paused: true, turnRunning: true }, 'resume'],
+    [{ backgroundWait: true, empty: true }, 'stop-waiting'],
+    [{ backgroundWait: true }, 'send'],
+    [{ backgroundWait: true, empty: true, paused: true }, 'resume'],
+    [{ backgroundWait: true, turnRunning: true }, 'steer'],
+    [{ backgroundWait: true, turnRunning: true, queueHeld: true }, 'queue'],
+    [{ backgroundWait: true, turnRunning: true, empty: true }, 'interrupt'],
   ] as const)('%j reads %s', (over, pill) => {
     expect(pillFor({ ...base, ...over })).toBe(pill)
   })
