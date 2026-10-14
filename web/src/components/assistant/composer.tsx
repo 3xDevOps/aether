@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type * as React from 'react'
 import { ArrowUp, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -19,29 +19,29 @@ export function AssistantComposer({ textarea, running, dock }: {
   const setDraft = useStore((s) => s.setAssistantDraft)
   const coarse = useMediaQuery(coarsePointer)
   const [focused, setFocused] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const busy = useStore((s) => s.assistantSending)
   const [error, setError] = useState<string>()
-  const attempt = useRef<{ text: string; key: string }>(null)
-  const generation = useStore((s) => s.assistantGeneration)
-  useEffect(() => {
-    attempt.current = null
-  }, [generation])
 
   const send = async () => {
     const text = draft.trim()
     if (!text || busy || running) return
+    const state = useStore.getState()
     // A retry of the same text reuses its key, so a lost reply cannot send it twice.
-    if (attempt.current?.text !== text) attempt.current = { text, key: crypto.randomUUID() }
-    setBusy(true)
+    const attempt = state.assistantAttempt?.text === text ? state.assistantAttempt : { text, key: crypto.randomUUID() }
+    const generation = state.assistantGeneration
+    state.setAssistantAttempt(attempt)
+    state.setAssistantSending(true)
     setError(undefined)
     try {
-      await api.assistantPrompt(text, attempt.current.key)
-      attempt.current = null
-      if (useStore.getState().assistantDraft.trim() === text) setDraft('')
+      await api.assistantPrompt(text, attempt.key)
+      const now = useStore.getState()
+      if (now.assistantGeneration !== generation) return
+      now.setAssistantAttempt(null)
+      if (now.assistantDraft.trim() === text) setDraft('')
     } catch (err) {
       setError(message(err))
     } finally {
-      setBusy(false)
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantSending(false)
     }
   }
   const stop = async () => {

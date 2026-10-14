@@ -418,6 +418,41 @@ describe('while closed', () => {
   })
 })
 
+describe('a retained draft', () => {
+  it('is retried under the same key after the panel is closed and reopened', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new Error('reply lost')).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    await userEvent.type(await within(aside).findByRole('textbox', { name: 'Message the assistant' }), 'install rust')
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    await within(aside).findByRole('alert')
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close assistant' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    const reopened = await panel()
+    acpOpen()
+    await userEvent.click(await within(reopened).findByRole('button', { name: /^Send/ }))
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
+    const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
+    expect(second![1]).toBe(first![1])
+    expect(useStore.getState().assistantAttempt).toBeNull()
+  })
+
+  it('gets a new key once its text changes', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new Error('lost')).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'one')
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    await within(aside).findByRole('alert')
+    await userEvent.type(box, ' two')
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
+    const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
+    expect(second![1]).not.toBe(first![1])
+  })
+})
+
 describe('a new conversation', () => {
   it('clears the transcript when a reconnect meets a new epoch', async () => {
     const aside = await openPanel()
@@ -474,6 +509,7 @@ describe('truncated items', () => {
 
 describe('width', () => {
   it('resizes from the keyboard and persists open and width', async () => {
+    atViewport(1600)
     const aside = await openPanel()
     const handle = within(aside).getByRole('separator', { name: 'Resize assistant' })
     expect(handle.getAttribute('aria-valuenow')).toBe('400')
@@ -499,6 +535,27 @@ describe('width', () => {
     expect(JSON.parse(localStorage.getItem('aether.ui')!).state.assistantOpen).toBe(false)
     localStorage.setItem('aether.ui', JSON.stringify({ state: { assistantOpen: true }, version: 8 }))
     expect(createRootStore().getState().assistantOpen).toBe(false)
+  })
+
+  it('clamps to the room beside the sidebar and re-clamps on resize', async () => {
+    useStore.setState({ assistantWidth: 640, sidebarWidth: 260, sidebarCollapsed: false })
+    const resize = atViewport(1400)
+    const aside = await openPanel()
+    expect(aside.style.width).toBe('640px')
+    resize(1000)
+    await waitFor(() => expect(aside.style.width).toBe('340px'))
+    expect(useStore.getState().assistantWidth).toBe(640)
+    resize(1400)
+    await waitFor(() => expect(aside.style.width).toBe('640px'))
+  })
+
+  it('becomes a sheet when even the smallest panel does not fit', async () => {
+    useStore.setState({ assistantWidth: 400, sidebarWidth: 260, sidebarCollapsed: false })
+    atViewport(768)
+    render(<AppShell />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    expect(await screen.findByRole('dialog', { name: 'Assistant' })).toBeDefined()
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
   })
 
   it('restores a stored width within its bounds', () => {

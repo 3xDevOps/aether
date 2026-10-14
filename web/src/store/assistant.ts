@@ -29,6 +29,9 @@ export interface AssistantSlice {
   assistantStatusError: string | null
   assistantConfirmations: AssistantConfirmation[]
   assistantDraft: string
+  /** The prompt being sent and its idempotency key. Kept with the draft so reopening the panel retries under the same key. */
+  assistantAttempt: { text: string; key: string } | null
+  assistantSending: boolean
   /** Bumped by a new conversation so the stream reconnects from sequence 0. */
   assistantGeneration: number
   setAssistantOpen: (open: boolean) => void
@@ -36,6 +39,8 @@ export interface AssistantSlice {
   setAssistantStatus: (status: AssistantStatus) => void
   setAssistantStatusError: (error: string | null) => void
   setAssistantDraft: (draft: string) => void
+  setAssistantAttempt: (attempt: { text: string; key: string } | null) => void
+  setAssistantSending: (sending: boolean) => void
   restartAssistantConversation: () => void
   /** A different signed-in member must not see the previous one's assistant. */
   resetAssistant: () => void
@@ -48,17 +53,25 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantStatusError: null,
   assistantConfirmations: [],
   assistantDraft: '',
+  assistantAttempt: null,
+  assistantSending: false,
   assistantGeneration: 0,
   setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
   setAssistantWidth: (width) => set({ assistantWidth: clampAssistantWidth(width) }),
   setAssistantStatus: (assistantStatus) =>
     set({ assistantStatus, assistantStatusError: null, assistantConfirmations: assistantStatus.confirmations ?? [] }),
   setAssistantStatusError: (assistantStatusError) => set({ assistantStatusError }),
-  setAssistantDraft: (assistantDraft) => set({ assistantDraft }),
+  setAssistantDraft: (assistantDraft) =>
+    set((s) => ({
+      assistantDraft,
+      assistantAttempt: s.assistantAttempt?.text === assistantDraft.trim() ? s.assistantAttempt : null,
+    })),
+  setAssistantAttempt: (assistantAttempt) => set({ assistantAttempt }),
+  setAssistantSending: (assistantSending) => set({ assistantSending }),
   restartAssistantConversation: () =>
     set((s) => {
       const { [assistantSessionID]: _dropped, ...rest } = s.acpSessions
-      return { acpSessions: rest, assistantConfirmations: [], assistantGeneration: s.assistantGeneration + 1 }
+      return { acpSessions: rest, assistantConfirmations: [], assistantAttempt: null, assistantSending: false, assistantGeneration: s.assistantGeneration + 1 }
     }),
   resetAssistant: () => {
     get().restartAssistantConversation()

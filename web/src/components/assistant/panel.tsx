@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
@@ -190,8 +190,25 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   )
 }
 
-function DesktopAside({ children }: { children: React.ReactNode }) {
-  const width = useStore((s) => clampAssistantWidth(s.assistantWidth))
+/** What `main` keeps beside the assistant. */
+const minMainWidth = 400
+
+function subscribeResize(notify: () => void) {
+  window.addEventListener('resize', notify)
+  return () => window.removeEventListener('resize', notify)
+}
+
+/** The width the window leaves the assistant after the sidebar and a usable `main`. */
+function useRoom(): number {
+  const sidebar = useStore((s) => (s.sidebarCollapsed ? 0 : s.sidebarWidth))
+  const innerWidth = useSyncExternalStore(subscribeResize, () => window.innerWidth)
+  return innerWidth - sidebar - minMainWidth
+}
+
+function DesktopAside({ children, room }: { children: React.ReactNode; room: number }) {
+  const preferred = useStore((s) => clampAssistantWidth(s.assistantWidth))
+  const width = Math.min(preferred, room)
+  const maxWidth = Math.min(maxAssistantWidth, room)
   const setWidth = useStore((s) => s.setAssistantWidth)
   const beginDrag = useDrag()
 
@@ -205,7 +222,7 @@ function DesktopAside({ children }: { children: React.ReactNode }) {
     }
   }
   const resizeKey = (event: React.KeyboardEvent) => {
-    const next = splitterTarget(event.key, { value: width, min: minAssistantWidth, max: maxAssistantWidth, grow: 'ArrowLeft', shrink: 'ArrowRight' })
+    const next = splitterTarget(event.key, { value: width, min: minAssistantWidth, max: maxWidth, grow: 'ArrowLeft', shrink: 'ArrowRight' })
     if (next === null) return
     event.preventDefault()
     setWidth(next)
@@ -226,7 +243,7 @@ function DesktopAside({ children }: { children: React.ReactNode }) {
         aria-controls="assistant"
         aria-valuenow={Math.round(width)}
         aria-valuemin={minAssistantWidth}
-        aria-valuemax={maxAssistantWidth}
+        aria-valuemax={maxWidth}
         tabIndex={0}
         onPointerDown={startResize}
         onKeyDown={resizeKey}
@@ -238,7 +255,10 @@ function DesktopAside({ children }: { children: React.ReactNode }) {
 
 export function AssistantPanel() {
   const cap = useCapability()
-  const mobile = useIsMobile()
+  const phone = useIsMobile()
+  const room = useRoom()
+  // Too narrow for the sidebar, a usable main and the smallest panel: the sheet takes over.
+  const mobile = phone || room < minAssistantWidth
   const open = useStore((s) => s.assistantOpen)
   const setOpen = useStore((s) => s.setAssistantOpen)
   const generation = useStore((s) => s.assistantGeneration)
@@ -303,6 +323,6 @@ export function AssistantPanel() {
     )
   }
   return (
-    <DesktopAside>{content}</DesktopAside>
+    <DesktopAside room={room}>{content}</DesktopAside>
   )
 }
