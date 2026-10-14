@@ -302,3 +302,46 @@ func TestTaskProgressTouchesActivityOnly(t *testing.T) {
 	waitFor(t, "activity", func() bool { return s.State().LastActivity.After(before) })
 	rec.noMoreStates(t, "working:prompt", "working:background")
 }
+
+func TestFollowUpTurnStartingDropsTheOwedFollowUpFromTheLog(t *testing.T) {
+	shortenWaits(t, 5*time.Second, 15*time.Minute)
+	m := workflowAgent(t)
+	s, rec := startWorkflow(t, m)
+	m.workflowDone()
+	waitFor(t, "owed follow-up", func() bool { return lastBackgroundOrZero(s, t).FollowUp })
+
+	m.chunk("report")
+	waitFor(t, "follow-up dropped", func() bool { return !lastBackgroundOrZero(s, t).FollowUp })
+	m.marker()
+	waitFor(t, "follow-up turn ended", func() bool {
+		states := rec.snapshot()
+		return len(states) > 0 && states[len(states)-1] == "idle:end_turn"
+	})
+	if bg := lastBackground(t, s); bg.FollowUp || len(bg.Tasks) != 0 {
+		t.Fatalf("background item %+v, want no tasks and no follow-up", bg)
+	}
+
+	_ = s.Close()
+	_ = m.stdout.Close()
+	<-s.Done()
+	log, err := OpenLog(s.cfg.LogPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := Interrupted(log)
+	_ = log.Close()
+	if interrupted {
+		t.Fatal("a log whose follow-up turn ended reads as interrupted")
+	}
+
+	next := newMockAgent(t, loadFixture(t, "claude"))
+	restored, rrec := startMock(t, next, Config{ClaudeCode: true, LogPath: s.cfg.LogPath, SessionID: next.sessionID()})
+	if reason := rrec.waitIdle(t); reason != "" {
+		t.Fatalf("restored idle reason %q, want none", reason)
+	}
+	for _, bg := range ofKind(items(t, restored), KindBackground) {
+		if bg.StopReason == "interrupted" {
+			t.Fatalf("restore appended background item %+v", bg)
+		}
+	}
+}

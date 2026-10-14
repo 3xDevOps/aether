@@ -235,12 +235,14 @@ func (s *Session) logTasksLocked() {
 }
 
 // relogTasksLocked records the live task set again after a turn start, which
-// fences the set logged before it out of Interrupted.
+// fences the set logged before it out of Interrupted, and drops a follow-up
+// the log still owes: the turn starting is that follow-up.
 func (s *Session) relogTasksLocked() {
-	s.loggedTasks, s.loggedOwed = nil, false
-	if tasks := s.tasksLocked(); len(tasks) > 0 {
-		s.logTasksLocked()
+	tasks := s.tasksLocked()
+	if len(tasks) > 0 || s.loggedOwed {
+		s.emitLocked(Item{Kind: KindBackground, Tasks: tasks})
 	}
+	s.loggedTasks, s.loggedOwed = tasks, false
 }
 
 // oweLocked waits up to d for the turn that reports back on an ended task.
