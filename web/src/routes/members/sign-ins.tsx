@@ -742,11 +742,14 @@ function MergeSummary({ merge, names }: { merge: MemberMerge; names: ReturnType<
 function MergeHistory({ client }: { client: Api }) {
   const names = useNames()
   const merged = useStore((s) => Object.keys(s.mergedInto).length)
+  const identity = useStore((s) => s.identityKey)
   const [merges, setMerges] = useState<MemberMerge[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
+    setMerges(null)
+    setError(null)
     client.memberMergeList().then(
       (list) => live && setMerges(list),
       (err: unknown) => live && setError(message(err)),
@@ -754,7 +757,7 @@ function MergeHistory({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, merged])
+  }, [client, merged, identity])
 
   return (
     <section aria-label="Merge history" className="flex min-w-0 flex-col gap-2 pt-2">

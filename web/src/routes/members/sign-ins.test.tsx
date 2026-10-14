@@ -372,6 +372,26 @@ describe('accept a merge', () => {
     expect((await dialog.findByRole('alert')).textContent).toBe('Reading the open merge proposals failed: member.merge.pending: connection closed')
   })
 
+  it('re-reads the merge history for a new signed-in identity, dropping the old one', async () => {
+    seed()
+    useStore.setState({ identityKey: 'server\u0000mem_alice' })
+    const first: MemberMerge = {
+      id: 'merge_old', survivor_id: alice.id, absorbed_id: 'mem_gone', confirmed_by_kind: 'ssh', confirmed_by: 'SHA256:k',
+      survivor_role_before: 'admin', absorbed_role_before: 'viewer', role_after: 'viewer',
+      discarded: settings('Gone'), absorbed: side('mem_gone', 'Gone', 'viewer'), created_at: '2026-10-14T00:05:00Z',
+    }
+    let second!: (merges: MemberMerge[]) => void
+    const client = fakeApi({ memberMergeList: vi.fn().mockResolvedValueOnce([first]).mockImplementation(() => new Promise((resolve) => { second = resolve })) })
+    render(<SignInsSection client={client} self={alice} />)
+    const history = within(screen.getByRole('region', { name: 'Merge history' }))
+    expect(await history.findByText(/Gone \(mem_gone\) was merged into/)).toBeDefined()
+
+    act(() => useStore.setState({ identityKey: 'server\u0000mem_bob' }))
+    expect(history.queryByText(/Gone \(mem_gone\)/)).toBeNull()
+    await act(async () => second([]))
+    expect(history.getByText('No merges.')).toBeDefined()
+  })
+
   it('re-reads the sign-ins when a merge maps another member', async () => {
     seed()
     const client = fakeApi()

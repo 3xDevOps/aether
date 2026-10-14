@@ -58,7 +58,7 @@ export function Board() {
     body = (
       <>
         {merges.length > 0 && (
-          <div aria-label="Merge proposals waiting for you" role="region" className="grid shrink-0 grid-cols-1 gap-2 border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
+          <div aria-label="Merge proposals waiting for you" role="region" className="grid max-h-[40%] shrink-0 grid-cols-1 gap-2 overflow-y-auto border-b border-seam p-4 md:grid-cols-2 xl:grid-cols-3">
             {merges.map((proposal) => <MergeProposalCard key={proposal.id} proposal={proposal} />)}
           </div>
         )}
