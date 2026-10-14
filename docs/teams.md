@@ -243,8 +243,8 @@ The merged member never gains a permission: it takes the lower of the two
 roles. When one of them is an admin, that side keeps it admin with
 `--keep-admin`: the admin who minted the code when accepting, or the admin
 who proposes. When the merged member is no longer an admin, the open
-invitations and links either member created are revoked, and so are their
-invite codes. A
+invitations and links either member created are revoked, and so are the
+invite codes they minted ([By invite code](#by-invite-code-fallback)). A
 merge that would leave the server without an admin, or leave its owner's
 GitHub account at the edge on a member who is not an admin, is refused
 (`aether member transfer` first).
@@ -453,6 +453,8 @@ linked to my-server:2222 as Dana (collaborator)
 Invited members are collaborators immediately - no approval step, because the
 code was the approval. Nobody needs shell access to the server box to join.
 A code stops working once the admin who minted it is no longer an admin.
+A code minted by an older server, which did not record who minted it,
+lasts until it expires.
 
 ## Roles
 

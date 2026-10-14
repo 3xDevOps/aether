@@ -191,7 +191,9 @@ func (s *Server) memberMergePending(ctx context.Context, member domain.MemberID,
 
 // memberMergeAccept merges under registerMu, so the last-admin check
 // holds, and authorizationMu, so no run, swarm or terminal is admitted for
-// either member while their rows move. The absorbed member's connections
+// either member while their rows move. Nothing changes, no terminal stops
+// and no lease is fenced, until the proposal is the caller's to accept as
+// it was proposed. The absorbed member's connections
 // close afterwards, the caller's once it has the result: they reconnect
 // as the survivor.
 func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -221,13 +223,22 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	var absorbed, other domain.MemberID
-	for _, pm := range pending {
-		if pm.ProposalID == p.ProposalID {
-			absorbed, other = pm.Minted, pm.Proposer
-			if pm.Keep == pm.Minted {
-				absorbed, other = pm.Proposer, pm.Minted
-			}
+	pm, perr := acceptable(pending, p, member)
+	if perr != nil {
+		return nil, perr
+	}
+	absorbed, other := pm.Minted, pm.Proposer
+	if pm.Keep == pm.Minted {
+		absorbed, other = pm.Proposer, pm.Minted
+	}
+	for _, m := range []domain.MemberID{pm.Minted, pm.Proposer} {
+		status, terr := s.cfg.Runs.TerminalStatus(ctx, m)
+		if terr != nil {
+			return nil, rpcError(terr)
+		}
+		if status.Running {
+			return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+				"stop these first, then merge: the Environment terminal of member %s (aether terminal stop on that sign-in)", m)}
 		}
 	}
 	accept := store.MergeAccept{ProposalID: p.ProposalID, Caller: member, Digest: p.PlanDigest, KeepAdmin: p.KeepAdmin,
@@ -241,12 +252,6 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 		if owner != nil {
 			accept.OwnerProvider, accept.OwnerSubject = owner.Provider, owner.Subject
 		}
-	}
-	if absorbed == "" {
-		if _, err = ms.AcceptMerge(ctx, accept); err == nil {
-			err = fmt.Errorf("%s: proposal %s is not open for member %s", method, p.ProposalID, member)
-		}
-		return nil, mergeError(err)
 	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {
@@ -267,18 +272,16 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 		if merge != nil {
 			return nil
 		}
-		return s.cfg.Runs.WithStoppedTerminal(ctx, absorbed, func() error {
-			if s.cfg.Homes != nil {
-				unlock := s.cfg.Homes.LockCaches(absorbed)
-				defer unlock()
-				if err := s.cfg.Homes.EnsureCacheMetadata(absorbed, memberhome.CachePoolTerminal); err != nil {
-					return fmt.Errorf("%s: keep the absorbed member's caches discoverable for cleanup: %w", method, err)
-				}
+		if s.cfg.Homes != nil {
+			unlock := s.cfg.Homes.LockCaches(absorbed)
+			defer unlock()
+			if err := s.cfg.Homes.EnsureCacheMetadata(absorbed, memberhome.CachePoolTerminal); err != nil {
+				return fmt.Errorf("%s: keep the absorbed member's caches discoverable for cleanup: %w", method, err)
 			}
-			var err error
-			merge, err = ms.AcceptMerge(ctx, accept)
-			return err
-		})
+		}
+		var err error
+		merge, err = ms.AcceptMerge(ctx, accept)
+		return err
 	}
 	// Only a run either member controls has a lease the merge changes:
 	// the absorbed member's ends, and the survivor's role may drop.
@@ -295,6 +298,29 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	}
 	s.afterMerge(ctx, member, merge, devs)
 	return s.mergeResult(ctx, merge)
+}
+
+// acceptable returns the open proposal id from pending when member minted
+// its code and its plan is unchanged and still has digest.
+func acceptable(pending []*store.PendingMerge, p protocol.MemberMergeAcceptParams, member domain.MemberID) (*store.PendingMerge, *protocol.Error) {
+	refuse := func(format string, args ...any) *protocol.Error {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(format, args...)}
+	}
+	for _, pm := range pending {
+		if pm.ProposalID != p.ProposalID {
+			continue
+		}
+		switch {
+		case pm.Minted != member:
+			return nil, refuse("only member %s, which minted the code, accepts this proposal: run aether member merge accept on that sign-in", pm.Minted)
+		case pm.Refusal != "":
+			return nil, refuse("%s", pm.Refusal)
+		case pm.Digest != p.PlanDigest:
+			return nil, refuse("this is not the plan that was proposed; read it again with aether member merge accept")
+		}
+		return pm, nil
+	}
+	return nil, refuse("merge proposal %s is not open: it is unknown, cancelled, expired or accepted already", p.ProposalID)
 }
 
 // afterMerge closes the absorbed member's connections, the caller's once

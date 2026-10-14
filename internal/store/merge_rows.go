@@ -12,8 +12,8 @@ import (
 // moves the reassigned ones, what grants access or carries the person's
 // ongoing work, a run's account and home included since reopening it
 // reads them, to the survivor. History keeps naming the absorbed
-// member, which stays as a tombstone; GetMember resolves it to the
-// survivor for display. A new column is added here, or
+// member, which stays as a tombstone that GetMember refuses; member.list
+// maps it to the survivor for display. A new column is added here, or
 // TestMergeClassifiesEveryMemberColumn fails.
 var memberRefs = map[string]bool{
 	"account_shares.owner_member_id":                       true,
@@ -82,7 +82,8 @@ var memberRefs = map[string]bool{
 // and role. Account shares absorbed granted go with its discarded
 // settings; shares it received move, once each, and none to itself. Open
 // account links of either member are revoked, and when demoted, so are
-// the open invitations either created, as member.role does.
+// the open invitations either created, as member.role does; otherwise
+// the survivor becomes their creator, so a later demotion revokes them.
 func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member, role domain.Role, demoted bool) error {
 	sur, abs := survivor.ID, absorbed.ID
 	steps := []struct{ what, query string }{
@@ -111,6 +112,8 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		steps = append(steps, struct{ what, query string }{"invitations",
 			`DELETE FROM identity_invitations WHERE consumed_at IS NULL AND created_by IN (?1, ?2)`})
 	}
+	steps = append(steps, struct{ what, query string }{"invitations",
+		`UPDATE identity_invitations SET created_by = ?2 WHERE consumed_at IS NULL AND created_by = ?1`})
 	for _, s := range steps {
 		if _, err := tx.ExecContext(ctx, s.query, abs, sur); err != nil {
 			return fmt.Errorf("store: merge %s: %w", s.what, err)

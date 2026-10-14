@@ -216,8 +216,8 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if got.TailnetLogin != "ada@" || got.PublicKey != a.PublicKey || got.Role != domain.RoleCollaborator || got.DisplayName != "Ada" {
 		t.Fatalf("survivor = %+v", got)
 	}
-	if m, gerr := db.GetMember(ctx, b.ID); gerr != nil || m.ID != a.ID {
-		t.Fatalf("the absorbed member resolves to %+v, %v; want the survivor", m, gerr)
+	if m, gerr := db.GetMember(ctx, b.ID); !errors.Is(gerr, ErrNotFound) || !strings.Contains(gerr.Error(), "merged into "+string(a.ID)) {
+		t.Fatalf("the absorbed member = %+v, %v; want it refused as merged into the survivor", m, gerr)
 	}
 	if members, gerr := db.ListMembers(ctx); gerr != nil || len(members) != 2 {
 		t.Fatalf("ListMembers = %d members, %v; want the survivor and Cy", len(members), gerr)
@@ -317,6 +317,50 @@ func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
 	}
 	if m, err := db.GetMember(ctx, b.ID); err != nil || m.ID != b.ID || m.TailnetLogin != "b@" {
 		t.Fatalf("absorbed member after the failed merge = %+v, %v", m, err)
+	}
+}
+
+// When the merged member stays an admin, the open invitations the absorbed
+// admin created become the survivor's, so demoting the survivor revokes
+// them.
+func TestMergeHandsOpenInvitationsToTheSurvivor(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	a := &domain.Member{DisplayName: "A", TailnetLogin: "a@", Color: "#3cb44b", Role: domain.RoleAdmin}
+	b := &domain.Member{DisplayName: "B", PublicKey: testKey(t, "b"), Color: "#ffe119", Role: domain.RoleAdmin}
+	for _, m := range []*domain.Member{a, b} {
+		if err := db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inv := &domain.Invitation{Provider: "github", Email: "x@example.com", Role: domain.RoleAdmin, CreatedBy: b.ID, ExpiresAt: now.Add(time.Hour)}
+	if err := db.CreateInvitation(ctx, inv); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: plan.Digest, Now: now, Expires: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.AcceptMerge(ctx, MergeAccept{ProposalID: pm.ProposalID, Caller: a.ID, Digest: plan.Digest, Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetInvitation(ctx, inv.ID)
+	if err != nil || got.CreatedBy != a.ID {
+		t.Fatalf("invitation after the merge = %+v, %v; want it created by the survivor", got, err)
+	}
+	if err = db.DeleteInvitationsBy(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.GetInvitation(ctx, inv.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("invitation after demoting the survivor: %v; want it revoked", err)
 	}
 }
 

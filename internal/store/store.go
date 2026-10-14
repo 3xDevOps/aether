@@ -75,8 +75,8 @@ type Store interface {
 	DeleteWorkspaceMirror(ctx context.Context, id domain.WorkspaceID) error
 
 	CreateMember(ctx context.Context, m *domain.Member) error
-	// GetMember returns the member id, or for a member a merge absorbed,
-	// the member it was merged into: the returned ID then differs from id.
+	// GetMember returns the member id. A member a merge absorbed is
+	// ErrNotFound, naming the member it was merged into.
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetMemberByPublicKey(ctx context.Context, publicKey string) (*domain.Member, error)
 	GetMemberByTailnetLogin(ctx context.Context, login string) (*domain.Member, error)

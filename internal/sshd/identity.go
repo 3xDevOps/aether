@@ -416,10 +416,9 @@ func (s *Server) memberInvitationCreate(ctx context.Context, member domain.Membe
 
 // memberIdentityLink names an edge account to bind to the caller's own
 // member, never another's. Naming it proves nothing: the account is bound
-// only when the join link is opened while signed in with it, and, unless
-// the member is an admin under account access, only once the member
-// approves that device. A new link replaces the member's open one, so no
-// member fills the edge directory.
+// only when the join link is opened while signed in with it and, under
+// either policy, the member then approves that device. A new link
+// replaces the member's open one, so no member fills the edge directory.
 func (s *Server) memberIdentityLink(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	if perr := s.requireApprovedCaller(ctx, protocol.MethodMemberIdentityLink, true); perr != nil {
 		return nil, perr

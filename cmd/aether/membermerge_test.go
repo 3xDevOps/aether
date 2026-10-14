@@ -38,7 +38,7 @@ func TestMergeProposal(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
-			got, err := mergeProposal(testMergePlan, "C", tc.keep, false, tc.yes, bufio.NewReader(strings.NewReader(tc.input)), &out)
+			got, err := mergeProposal(testMergePlan, "C", tc.keep, false, tc.yes, true, bufio.NewReader(strings.NewReader(tc.input)), &out)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
@@ -63,7 +63,7 @@ func TestAcceptDecisionAsksTheAdminSide(t *testing.T) {
 	plan := testMergePlan
 	p := protocol.MemberMergeProposal{ID: "mrp-1", MintedID: "m-admin", ProposerID: "m-gh", KeepSettingsOf: "m-admin", PlanDigest: "d", Plan: &plan}
 	var out strings.Builder
-	got, err := acceptDecision(p, false, false, bufio.NewReader(strings.NewReader("y\ny\n")), &out)
+	got, err := acceptDecision(p, false, false, true, bufio.NewReader(strings.NewReader("y\ny\n")), &out)
 	if err != nil || got != (protocol.MemberMergeAcceptParams{ProposalID: "mrp-1", PlanDigest: "d", KeepAdmin: true}) {
 		t.Fatalf("accept = %+v, %v", got, err)
 	}
@@ -71,5 +71,35 @@ func TestAcceptDecisionAsksTheAdminSide(t *testing.T) {
 		if !strings.Contains(out.String(), w) {
 			t.Errorf("output lacks %q:\n%s", w, out.String())
 		}
+	}
+}
+
+// Accepting without naming a proposal is refused while several are open,
+// and without a terminal only after the plan is printed.
+func TestAcceptNamesTheProposal(t *testing.T) {
+	plan := testMergePlan
+	open := []protocol.MemberMergeProposal{
+		{ID: "mrp-1", MintedID: "m-admin", ProposerID: "m-gh", KeepSettingsOf: "m-admin", PlanDigest: "d", Plan: &plan},
+		{ID: "mrp-2", MintedID: "m-admin", ProposerID: "m-mallory", KeepSettingsOf: "m-admin", PlanDigest: "e", Plan: &plan},
+		{ID: "mrp-3", MintedID: "m-other", ProposerID: "m-admin", PlanDigest: "f", Plan: &plan},
+	}
+	if _, err := pickProposal(open, "m-admin", ""); err == nil || !strings.Contains(err.Error(), "2 proposals are open") {
+		t.Fatalf("accept without an id = %v", err)
+	}
+	p, err := pickProposal(open, "m-admin", "mrp-2")
+	if err != nil || p.ID != "mrp-2" {
+		t.Fatalf("accept mrp-2 = %+v, %v", p, err)
+	}
+	if _, err = pickProposal(open, "m-admin", "mrp-3"); err == nil {
+		t.Fatal("accepted a proposal made with another member's code")
+	}
+	var out strings.Builder
+	_, err = acceptDecision(*p, false, false, false, bufio.NewReader(strings.NewReader("")), &out)
+	if err == nil || !strings.Contains(err.Error(), "pass --yes") || !strings.Contains(out.String(), "proposes merging") {
+		t.Fatalf("accept without a terminal = %v, output %q; want the plan printed, then a refusal", err, out.String())
+	}
+	got, err := acceptDecision(*p, false, true, false, bufio.NewReader(strings.NewReader("")), &out)
+	if err != nil || got.PlanDigest != plan.PlanDigest {
+		t.Fatalf("accept --yes = %+v, %v; want the printed plan's digest", got, err)
 	}
 }

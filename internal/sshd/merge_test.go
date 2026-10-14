@@ -168,6 +168,17 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	}
 	_, err = mergeAccept(github, proposal, false)
 	wantRefusal(t, err, "only member "+string(tina.ID))
+	if err = e.store.PutTerminal(ctx, &domain.Terminal{Member: tina.ID, ContainerID: "c1", Image: "img", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = mergeAccept(tailnet, proposal, false)
+	wantRefusal(t, err, "the Environment terminal of member "+string(tina.ID))
+	if calls := e.runs.Calls(); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "terminal-stop:") }) {
+		t.Fatalf("a refused accept stopped a terminal: %v", calls)
+	}
+	if err = e.store.DeleteTerminal(ctx, tina.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	var pending protocol.MemberMergePendingResult
 	if err = tailnet.Call(protocol.MethodMemberMergePending, struct{}{}, &pending); err != nil || len(pending.Proposals) != 1 ||
@@ -193,8 +204,21 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if m := serverInfoMember(t, tailnetDial(t, e, whois, tina.TailnetLogin)); m.ID != string(tina.ID) {
 		t.Fatalf("the tailnet login reconnects as %s", m.ID)
 	}
-	if m, gerr := e.store.GetMember(ctx, domain.MemberID(gh.ID)); gerr != nil || m.ID != tina.ID {
-		t.Fatalf("the absorbed member shows as %+v, %v; want the survivor", m, gerr)
+	var members protocol.MemberListResult
+	if err = tailnet.Call(protocol.MethodMemberList, struct{}{}, &members); err != nil || members.MergedInto[gh.ID] != string(tina.ID) {
+		t.Fatalf("member.list = %+v, %v; want the absorbed member mapped to the survivor", members, err)
+	}
+	for _, call := range []struct {
+		method string
+		params any
+	}{
+		{protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: gh.ID, Role: string(domain.RoleViewer)}},
+		{protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: gh.ID}},
+	} {
+		wantRefusal(t, controlClient(t, e).Call(call.method, call.params, nil), "was merged into "+string(tina.ID))
+	}
+	if m, _ := e.store.GetMember(ctx, tina.ID); m.Role != domain.RoleCollaborator {
+		t.Fatalf("a call naming the absorbed member changed the survivor: %+v", m)
 	}
 	if entries, gerr := e.srv.EdgeDirectory(ctx); gerr != nil || len(entries) != 1 || entries[0].Subject != octo.Subject {
 		t.Fatalf("edge directory = %+v, %v", entries, gerr)
@@ -278,7 +302,7 @@ func TestMergeRefusals(t *testing.T) {
 		t.Fatalf("member.merge.cancel = %+v, %v", cancelled, err)
 	}
 	_, err = mergeAccept(admin, proposal, false)
-	wantRefusal(t, err, "unknown or cancelled")
+	wantRefusal(t, err, "is not open")
 }
 
 // Merging the server's only admin into a collaborator demotes it unless
