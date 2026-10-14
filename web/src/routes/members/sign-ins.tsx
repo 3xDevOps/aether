@@ -44,7 +44,7 @@ function useNames() {
 
 export function SignInsSection({ client, self, focus }: { client: Api; self: Member; focus?: boolean }) {
   const caps = useCapability()
-  const mergedInto = useStore((s) => s.mergedInto)
+  const merges = useStore((s) => Object.keys(s.mergedInto).length)
   const toAccept = useProposalsToAccept()
   const [identities, setIdentities] = useState<MemberIdentities | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +61,7 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
   useEffect(() => {
     void reload()
     void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err)))
-  }, [client, reload, mergedInto])
+  }, [client, reload, merges])
 
   useEffect(() => {
     if (focus) ref.current?.scrollIntoView({ block: 'start' })
@@ -547,7 +547,9 @@ export function ProposalToAccept({ client, proposal, onMerged }: {
       } else {
         await client.memberMergeCancel(proposal.id)
       }
-      await loadMergeProposals(useStore, client)
+      // After an accept the server closes this connection; the next snapshot re-reads the rest.
+      const { mergeProposals, setMergeProposals } = useStore.getState()
+      setMergeProposals(mergeProposals.filter((p) => p.id !== proposal.id))
     } catch (err) {
       setError(message(err))
     } finally {
@@ -627,7 +629,7 @@ function MergeSummary({ merge, names }: { merge: MemberMerge; names: ReturnType<
 
 function MergeHistory({ client }: { client: Api }) {
   const names = useNames()
-  const mergedInto = useStore((s) => s.mergedInto)
+  const merged = useStore((s) => Object.keys(s.mergedInto).length)
   const [merges, setMerges] = useState<MemberMerge[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -640,7 +642,7 @@ function MergeHistory({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, mergedInto])
+  }, [client, merged])
 
   return (
     <section aria-label="Merge history" className="flex min-w-0 flex-col gap-2 pt-2">
