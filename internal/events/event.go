@@ -245,6 +245,8 @@ type FileDiffStat struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
+	// Status is "added", "deleted" or "modified"; empty where the producer does not know it.
+	Status string `json:"status,omitempty"`
 }
 
 // RunDiffPayload is a point-in-time snapshot of a run worktree's diff

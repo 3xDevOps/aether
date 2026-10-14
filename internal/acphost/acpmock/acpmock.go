@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +57,8 @@ const (
 	// and runs its follow-up turn.
 	PromptRelease = "release background"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
-	// command with output, an edit with a diff and a markdown answer.
+	// command with output, an edit with a diff and a markdown answer. The
+	// edit is written to src/billing.js under the session's cwd.
 	PromptDemo = "demo"
 	// PromptSubagents plays a turn in which the main agent launches
 	// subagents the way Claude's adapter reports them: nested, concurrent,
@@ -124,6 +127,7 @@ type Agent struct {
 
 	mu      sync.Mutex
 	session string
+	cwd     string
 	// frames says the session asked for Claude Code's task frames; live
 	// maps each live background task to its type.
 	frames  bool
@@ -212,6 +216,7 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 	a.mu.Unlock()
 	var p struct {
 		SessionID string `json:"sessionId"`
+		Cwd       string `json:"cwd"`
 		Prompt    []struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
@@ -228,7 +233,7 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		return a.fix.Initialize, nil
 	case acp.AgentMethodSessionNew:
 		a.mu.Lock()
-		a.session, a.frames = a.fix.SessionID(), frames
+		a.session, a.cwd, a.frames = a.fix.SessionID(), p.Cwd, frames
 		a.mu.Unlock()
 		return a.fix.SessionNew, nil
 	case acp.AgentMethodSessionResume, acp.AgentMethodSessionLoad:
@@ -405,6 +410,21 @@ const demoAnswer = "The totals now round to cents before they are returned.\n\n"
 	"```js\nexport function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n```\n\n" +
 	"Run `npm test` again after you change the rounding rule."
 
+const demoNewBilling = "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n"
+
+func (a *Agent) writeDemoEdit() error {
+	a.mu.Lock()
+	cwd := a.cwd
+	a.mu.Unlock()
+	if cwd == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(cwd, "src"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(cwd, "src", "billing.js"), []byte(demoNewBilling), 0o644)
+}
+
 func demoPlan(done int) json.RawMessage {
 	steps := []string{"Read the billing module", "Run the tests", "Round totals to cents"}
 	entries := make([]map[string]any, len(steps))
@@ -456,11 +476,12 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		{demoTool("demo-edit", "edit", "Edit src/billing.js", "completed", map[string]any{"content": []any{map[string]any{
 			"type": "diff", "path": "src/billing.js",
 			"oldText": "export function total(a, b) {\n  return a + b\n}\n",
-			"newText": "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n",
+			"newText": demoNewBilling,
 		}}})},
 		{demoPlan(3)},
 	}
-	for _, step := range steps {
+	editStep := len(steps) - 2
+	for i, step := range steps {
 		select {
 		case <-cancelled:
 			return map[string]any{"stopReason": "cancelled"}
@@ -470,6 +491,11 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		}
 		for _, u := range step {
 			a.update(ctx, u)
+		}
+		if i == editStep {
+			if err := a.writeDemoEdit(); err != nil {
+				a.text(ctx, "write failed: "+err.Error())
+			}
 		}
 	}
 	for _, word := range strings.SplitAfter(demoAnswer, " ") {

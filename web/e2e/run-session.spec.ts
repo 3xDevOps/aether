@@ -56,12 +56,24 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await box.fill('demo')
   await box.press('Enter')
   await expect(log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ })).toBeVisible({ timeout: 30_000 })
-  await expect(log.getByText('Changed 1 file')).toBeVisible()
   await log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ }).click()
   await log.getByRole('button', { name: /Edited src\/billing\.js/ }).click()
   await expect(log.locator('[data-slot="diff-block"]')).toContainText('Math.round')
   // The mock advertises steering but does not implement it, so wait for the turn to end.
   await expect(log.getByText(/^Finished in \d+s$/)).toBeVisible()
+  await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
+
+  const changes = page.getByRole('region', { name: 'Changes' })
+  const changed = changes.getByRole('button', { name: /^1 file changed/ })
+  await expect(changed).toBeVisible({ timeout: 30_000 })
+  await expect(changed).toContainText('+3')
+  await expect(changed).toHaveAttribute('aria-expanded', 'false')
+  await changed.click()
+  await changes.getByRole('button', { name: /billing\.js/ }).click()
+  await expect(page.getByRole('tab', { name: 'Changes', selected: true })).toBeVisible()
+  await expect(page.getByRole('tabpanel', { name: 'Changes' }).getByText('Math.round((a + b) * 100) / 100')).toBeVisible()
+  await page.getByRole('tab', { name: 'Session' }).click()
+  await expect(changed).toHaveAttribute('aria-expanded', 'true')
 
   await box.fill('wait')
   await box.press('Enter')
@@ -82,6 +94,10 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
     return sent && `${sent.state}/${sent.agent_delivery}`
   }, { message: 'the queued message is recorded as delivered' }).toBe('sent/delivered')
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+
+  await page.reload()
+  await expect(changed).toBeVisible({ timeout: 30_000 })
+  await expect(changed).toContainText('+3')
 })
 
 test('an Enhanced run holding background work stays working, asks while it waits and stops on Stop waiting', async ({ page, aether }) => {
@@ -158,8 +174,6 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
-  const changed = log.locator('[data-slot="changed-files"]')
-  const changedBefore = await changed.count()
   await box.fill('subagents')
   await box.press('Enter')
   await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
@@ -171,8 +185,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await expect(log.getByRole('button', { name: 'Round totals to cents, Done' })).toBeVisible()
   await expect(log.getByText('Reading the billing module.')).toHaveCount(0)
   await expect(log.getByText('Read src/billing.js')).toHaveCount(0)
-  await expect(changed).toHaveCount(changedBefore + 1)
-  await expect(changed.last()).toContainText('src/billing.js')
+  await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
 
   await billing.click()
   await expect(page).toHaveURL(/&agent=/)

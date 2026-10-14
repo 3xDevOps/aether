@@ -276,16 +276,6 @@ describe('indexing subagents', () => {
     expect(agentLoaded(agent, 0)).toBe(false)
   })
 
-  it('drops a call from the edit counts once a newer whole snapshot has no diffs', () => {
-    const edited = tool(1, 'e1', 'edit', 'Edit a.go', 'in_progress', { parent_id: 'a1', diffs: [{ path: 'a.go', patch: '+x\n' }] })
-    const { index: idx } = index([launch(1, 'a1'), edited])
-    expect(idx.agents.a1!.edits).toEqual({ e1: [{ path: 'a.go', additions: 1, deletions: 0 }] })
-    const cut = { ...tool(1, 'e1', 'edit', 'Edit a.go', 'completed', { parent_id: 'a1' }), truncated: true }
-    expect(index([cut], false, idx).index.agents.a1!.edits).toEqual(idx.agents.a1!.edits)
-    const text = tool(1, 'e1', 'edit', 'Edit a.go', 'failed', { parent_id: 'a1', content: [{ type: 'text', text: 'rejected' }] })
-    expect(index([text], false, idx).index.agents.a1!.edits).toEqual({})
-  })
-
   it('orders activity against a settle or turn end by seq when their times tie', () => {
     const raw_input = { run_in_background: true }
     const ack = launch(1, 'a1', 'completed', { raw_input })
@@ -298,13 +288,6 @@ describe('indexing subagents', () => {
     expect(agentState(index([launch(1, 'c1'), before, { ...item('turn_end', 1), time: before.time }]).index.agents.c1!)).toBe('stopped')
   })
 
-  it('recounts a subagent edit when its whole item replaces a cut one', () => {
-    const cut = tool(1, 'e1', 'edit', 'Edit a.go', 'completed', { parent_id: 'a1', diffs: [{ path: 'a.go', patch: '+x\n' }] })
-    const { index: idx } = index([launch(1, 'a1'), cut])
-    const whole = { ...cut, tool_call: { ...cut.tool_call!, diffs: [{ path: 'a.go', patch: '+x\n+y\n-z\n' }] } }
-    expect(replaceAgentItem(idx, whole).agents.a1!.edits).toEqual({ e1: [{ path: 'a.go', additions: 2, deletions: 1 }] })
-  })
-
   it('collects a subagent whose launch is not loaded as an orphan until an older page delivers it', () => {
     const main = [item('turn_start', 1), say(1, 'user', 'go'), read(1, 'ghost', 'r1'), say(1, 'assistant', 'done'), item('turn_end', 1, { stop_reason: 'end_turn' })]
     const { index: idx, main: held } = index(main)
@@ -315,29 +298,12 @@ describe('indexing subagents', () => {
     expect(turnExtras(index([launch(1, 'ghost')], true, idx).index, 0).get(1)?.orphans).toBeUndefined()
   })
 
-  it('folds subagent edits into the main changed-files row once per path, or adds the row before finished', () => {
-    const subEdit = tool(1, 'e1', 'edit', 'Edit a.go', 'completed', { parent_id: 'a1', tool_name: 'Edit', diffs: [{ path: 'a.go', patch: '+x\n-y\n' }] })
-    const mainEdit = tool(1, 'e2', 'edit', 'Edit a.go', 'completed', { diffs: [{ path: 'a.go', patch: '+z\n+w\n' }] })
-    const rowsFor = (items: SessionItem[]) => {
-      const { index: idx, main } = index(items)
-      return withAgentRows(rowsOfTurn({ turn: 1, items: main, closed: true }), 1, turnExtras(idx, 0))
-    }
-    const end = item('turn_end', 1, { stop_reason: 'end_turn' })
-    const both = rowsFor([item('turn_start', 1), launch(1, 'a1'), subEdit, mainEdit, end])
-    expect(both.filter((row) => row.kind === 'changed-files')).toEqual([expect.objectContaining({ id: 'files:1', files: [{ path: 'a.go', additions: 3, deletions: 1 }] })])
-    const only = rowsFor([item('turn_start', 1), launch(1, 'a1'), subEdit, item('turn_end', 1, { stop_reason: 'end_turn' })])
-    expect(only.map((row) => row.kind).slice(-2)).toEqual(['changed-files', 'finished'])
-    expect(only.find((row) => row.kind === 'changed-files')).toMatchObject({ id: 'files:1', files: [{ path: 'a.go', additions: 1, deletions: 1 }] })
-  })
-
   it('prefixes a subagent row ids so they never collide with the main turn', () => {
     const edit = tool(1, 'e1', 'edit', 'Edit a.go', 'completed', { parent_id: 'a1', diffs: [{ path: 'a.go', patch: '+x\n' }] })
     const agent = index([item('turn_start', 1), launch(1, 'a1'), edit]).index.agents.a1!
     const rows = rowsOfTurn(agentTurn(agent))
-    expect(rows.map((row) => row.id)).toContain('files:1')
     const own = agentRows(agent, rows).map((row) => row.id)
     expect(own.every((id) => id.startsWith('agent:a1/'))).toBe(true)
-    expect(own).not.toContain('files:1')
     expect(agentRows(agent, rows)).toBe(agentRows(agent, rows))
   })
 

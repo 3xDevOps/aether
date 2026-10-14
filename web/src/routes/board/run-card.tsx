@@ -11,6 +11,7 @@ import type { MissionPhase } from '@/lib/types'
 import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
+import { diffTotals } from '@/store/diff'
 import type { SwarmSummary } from '@/store/selectors'
 
 const phaseWord: Record<MissionPhase, string> = {
@@ -97,17 +98,6 @@ function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
   if (card.unread) return card.reason
   return phase ? phaseWord[phase] : 'Swarm'
-}
-
-function diffTotals(files: { additions: number; deletions: number }[] | undefined) {
-  if (!files) return undefined
-  let additions = 0
-  let deletions = 0
-  for (const file of files) {
-    additions += file.additions
-    deletions += file.deletions
-  }
-  return { additions, deletions }
 }
 
 function swarmCounts({ counts }: SwarmSummary): string {

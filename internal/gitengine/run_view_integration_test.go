@@ -114,6 +114,54 @@ func TestLinkedWorktreesStayOutOfTheRunsChanges(t *testing.T) {
 	}
 }
 
+// Each stat carries the change kind against the fork point; an untracked
+// file counts as added.
+func TestDiffStatsCarryStatus(t *testing.T) {
+	e := newTestEngine(t, nil)
+	url := serveTransport(t, e)
+	ctx := t.Context()
+	if _, err := e.InitWorkspaceRepo(ctx, "ws1"); err != nil {
+		t.Fatal(err)
+	}
+	src := t.TempDir()
+	gitc(t, src, "init")
+	for _, name := range []string{"edit.txt", "gone.txt"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitc(t, src, "add", "-A")
+	gitc(t, src, "commit", "-m", "initial")
+	gitc(t, src, "push", url("ws1"), "main")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run1", "main", "status", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := bareRevParse(t, e, "ws1", "refs/heads/main")
+	for name, content := range map[string]string{"edit.txt": "two\n", "staged.txt": "new\n", "untracked.txt": "new\n"} {
+		if err = os.WriteFile(filepath.Join(checkout, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.Remove(filepath.Join(checkout, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+	gitc(t, checkout, "add", "staged.txt")
+
+	files, _, err := e.diffStats(ctx, "run1", checkout, base)
+	if err != nil {
+		t.Fatalf("diffStats: %v", err)
+	}
+	got := make([]string, 0, len(files))
+	for _, file := range files {
+		got = append(got, file.Path+" "+file.Status)
+	}
+	want := []string{"edit.txt modified", "gone.txt deleted", "staged.txt added", "untracked.txt added"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("statuses = %v, want %v", got, want)
+	}
+}
+
 // The checkout is materialized under the fork point's attributes, so a file
 // declared eol=crlf sits in the worktree with CRLF over an LF blob. Read
 // back without those attributes it looks rewritten from top to bottom.

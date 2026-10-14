@@ -1,5 +1,5 @@
 import type { SessionItem, SessionToolCall } from '@/lib/session-types'
-import { isLaunch, patchCounts, toolLabel, toolStatus, type ChangedFile, type Rehome, type SessionRow, type Turn } from '@/store/session-rows'
+import { isLaunch, toolLabel, toolStatus, type Rehome, type SessionRow, type Turn } from '@/store/session-rows'
 
 /** A background task's own status wins; otherwise done and failed come from
  * the launching call's status; stopped is a call still in progress when its
@@ -32,8 +32,6 @@ export interface Subagent {
   /** Outlives latest, which a trim frees. Order is by seq: times can tie. */
   activeSeq?: number
   tools: number
-  /** Line counts of the latest diffs of each of its own tool calls. */
-  edits?: Record<string, ChangedFile[]>
 }
 
 export interface AgentIndex {
@@ -216,15 +214,6 @@ export function indexItems(index: AgentIndex, items: SessionItem[], older = fals
       agent.latest = item
       agent.activeSeq = item.seq
     }
-    if (call?.diffs?.length && (!older || !index.agents[owner]?.edits?.[call.id])) {
-      const agent = edit(owner)
-      agent.edits = { ...agent.edits, [call.id]: editCounts(call) }
-    } else if (call && !older && !item.truncated && agents[owner]?.edits?.[call.id]) {
-      const agent = edit(owner)
-      const edits = { ...agent.edits }
-      delete edits[call.id]
-      agent.edits = edits
-    }
   }
 
   for (const [id, list] of collected) {
@@ -287,13 +276,10 @@ export function replaceAgentItem(index: AgentIndex, whole: SessionItem): AgentIn
   if (owner && at !== -1) {
     const items = owner.items.slice()
     items[at] = whole
-    const call = whole.tool_call
-    const newest = call?.diffs?.length && !items.slice(at + 1).some((later) => later.tool_call?.id === call.id && later.tool_call.diffs?.length)
     agents[owner.id] = {
       ...owner,
       items,
       latest: owner.latest?.seq === whole.seq ? whole : owner.latest,
-      ...(newest ? { edits: { ...owner.edits, [call.id]: editCounts(call) } } : {}),
     }
     matched = true
   }
@@ -307,10 +293,6 @@ export function replaceAgentItem(index: AgentIndex, whole: SessionItem): AgentIn
 
 function runsInBackground(call: SessionToolCall): boolean {
   return (call.raw_input as Record<string, unknown> | undefined)?.run_in_background === true
-}
-
-function editCounts(call: SessionToolCall): ChangedFile[] {
-  return (call.diffs ?? []).map((diff) => ({ path: diff.path, ...patchCounts(diff.patch) }))
 }
 
 function callSettled(call: SessionToolCall): boolean {
@@ -420,57 +402,28 @@ export function ancestry(index: AgentIndex, id: string): Subagent[] {
 }
 
 interface TurnExtras {
-  files?: ChangedFile[]
-  orphans?: { ids: string[]; at: string }
+  orphans: { ids: string[]; at: string }
   sig: string
 }
 
 const extrasCache = new WeakMap<AgentIndex, { oldestSeq: number; extras: Map<number, TurnExtras> }>()
 
-function subtreeEdits(index: AgentIndex, id: string, files: Map<string, ChangedFile>, seen: Set<string>): void {
-  const agent = index.agents[id]
-  if (!agent || seen.has(id)) return
-  seen.add(id)
-  for (const list of Object.values(agent.edits ?? {})) addFiles(files, list)
-  for (const child of agent.children) subtreeEdits(index, child, files, seen)
-}
-
-function addFiles(files: Map<string, ChangedFile>, list: ChangedFile[]): void {
-  for (const file of list) {
-    const prior = files.get(file.path)
-    files.set(file.path, { path: file.path, additions: (prior?.additions ?? 0) + file.additions, deletions: (prior?.deletions ?? 0) + file.deletions })
-  }
-}
-
-/** Per main turn: the files its subagents changed, and the subagents none of
- * whose launch snapshots is held, placed at their first held item. */
+/** Per main turn: the subagents none of whose launch snapshots is held,
+ * placed at their first held item. */
 export function turnExtras(index: AgentIndex, oldestSeq: number): Map<number, TurnExtras> {
   const cached = extrasCache.get(index)
   if (cached?.oldestSeq === oldestSeq) return cached.extras
   const held = (agent: Subagent) => agent.launchSeq !== undefined && Math.max(agent.launchSeq, agent.callSeq ?? -1) >= oldestSeq
-  const files = new Map<number, Map<string, ChangedFile>>()
   const orphans = new Map<number, { ids: string[]; at: string }>()
-  const seen = new Set<string>()
   for (const agent of Object.values(index.agents)) {
-    const orphan = !held(agent) && agent.items.length > 0
-    if (!orphan && (agent.parentID || !held(agent))) continue
-    const turn = orphan ? agent.items[0]!.turn : agent.turn!
-    if (orphan) {
-      const held = orphans.get(turn)
-      if (held) held.ids.push(agent.id)
-      else orphans.set(turn, { ids: [agent.id], at: agent.items[0]!.time })
-    }
-    const changed = files.get(turn) ?? new Map<string, ChangedFile>()
-    subtreeEdits(index, agent.id, changed, seen)
-    if (changed.size) files.set(turn, changed)
+    if (held(agent) || agent.items.length === 0) continue
+    const turn = agent.items[0]!.turn
+    const lost = orphans.get(turn)
+    if (lost) lost.ids.push(agent.id)
+    else orphans.set(turn, { ids: [agent.id], at: agent.items[0]!.time })
   }
   const extras = new Map<number, TurnExtras>()
-  for (const turn of new Set([...files.keys(), ...orphans.keys()])) {
-    const changed = files.get(turn) && [...files.get(turn)!.values()]
-    const lost = orphans.get(turn)
-    const sig = [...(changed ?? []).map((f) => `${f.path}+${f.additions}-${f.deletions}`), ...(lost ? [lost.at, ...lost.ids] : [])].join('|')
-    extras.set(turn, { files: changed, orphans: lost, sig })
-  }
+  for (const [turn, lost] of orphans) extras.set(turn, { orphans: lost, sig: [lost.at, ...lost.ids].join('|') })
   extrasCache.set(index, { oldestSeq, extras })
   return extras
 }
@@ -482,30 +435,16 @@ export function extrasSig(index: AgentIndex, oldestSeq: number): string {
 
 const merged = new WeakMap<SessionRow[], { sig: string; rows: SessionRow[] }>()
 
-/** Folds a main turn's subagent file changes into its changed-files row,
- * each path once, and shows subagents whose launch is not loaded. */
+/** Shows a main turn's subagents whose launch is not loaded. */
 export function withAgentRows(rows: SessionRow[], turn: number, extras: Map<number, TurnExtras>): SessionRow[] {
   const extra = extras.get(turn)
   if (!extra) return rows
   const held = merged.get(rows)
   if (held?.sig === extra.sig) return held.rows
   const out = rows.slice()
-  if (extra.orphans) {
-    const { ids, at } = extra.orphans
-    const after = out.findIndex((row) => Date.parse(row.at) > Date.parse(at))
-    out.splice(after === -1 ? out.length : after, 0, { kind: 'subagents', id: `orphans:${turn}`, at, ids })
-  }
-  if (extra.files) {
-    const at = out.findIndex((row) => row.kind === 'changed-files')
-    const files = new Map<string, ChangedFile>()
-    const own = at === -1 ? undefined : out[at] as Extract<SessionRow, { kind: 'changed-files' }>
-    addFiles(files, own?.files ?? [])
-    addFiles(files, extra.files)
-    const end = out.findIndex((row) => row.kind === 'finished')
-    const row: SessionRow = { kind: 'changed-files', id: `files:${turn}`, at: own?.at ?? out[end]?.at ?? out.at(-1)?.at ?? '', files: [...files.values()] }
-    if (own) out[at] = row
-    else out.splice(end === -1 ? out.length : end, 0, row)
-  }
+  const { ids, at } = extra.orphans
+  const after = out.findIndex((row) => Date.parse(row.at) > Date.parse(at))
+  out.splice(after === -1 ? out.length : after, 0, { kind: 'subagents', id: `orphans:${turn}`, at, ids })
   merged.set(rows, { sig: extra.sig, rows: out })
   return out
 }

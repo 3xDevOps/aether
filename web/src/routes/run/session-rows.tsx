@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { RequestCard } from '@/components/ui/request-card'
-import { ChangedFiles, DiffBlock, OutputTail, PlanCard } from '@/components/ui/session-blocks'
+import { DiffBlock, OutputTail, PlanCard } from '@/components/ui/session-blocks'
 import { AssistantRow, duration, EventRow, LiveActivityRow, MessageRow, WorkDetail, WorkEntry, WorkGroup } from '@/components/ui/timeline'
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
@@ -68,8 +68,6 @@ export interface RowContext {
   ownerID: string
   hasAgentTerminal: boolean
   openTerminal: () => void
-  /** Opens the Changes view at one file. */
-  openChange: (path: string) => void
   reveal: RunNavigation['reveal']
 }
 
@@ -86,7 +84,6 @@ export function useRowContext(run: RunRecord, agent: AgentTerminal, nav: RunNavi
       to.go('terminal')
       if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
     },
-    openChange: (path) => useStore.getState().navigate('run', { runId: run.id, view: 'changes', file: path }),
     reveal: (id) => latest.current.nav.reveal(id),
   }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
 }
@@ -220,8 +217,6 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       )
     case 'plan':
       return <PlanCard entries={row.entries} />
-    case 'changed-files':
-      return <ChangedFiles files={row.files} onOpen={ctx.openChange} />
     case 'answered':
       return (
         <EventRow tone={row.request.status === 'cancelled' ? 'neutral' : 'done'} trailing={<RelativeTime at={row.at} />}>

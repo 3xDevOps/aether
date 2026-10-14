@@ -1929,6 +1929,21 @@ screens, opening Details narrows the pane rather than overlaying the composer.
 Its focus highlight follows the outer border around the textarea and attachments.
 Transcript rows retain their 736px reading width.
 
+The changes bar (`changes-bar.tsx`) sits above the composer: one line,
+"14 files changed +612 −140" and **Review**. It counts the run's whole
+worktree against its fork point, the Changes view's **Current diff**, so
+edits made by shell commands count too. Its source is the newest `run.diff`
+stat set; a page load that has seen none reads one with `workspace.timeline`
+(`types: ["run.diff"]`, `newest: true`, `limit: 1`), and a resumed event
+stream replays any it missed. It starts collapsed and stays expanded per run
+once opened. Expanded, it lists each file with its status letter and
+`+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
+the Changes view at that file; **Review** opens the Changes view. A
+`truncated` snapshot shows no line counts, because they are only a floor.
+The bar is hidden while nothing has changed and once the checkout is gone; a
+failed read shows the server's error with **Retry**. Conversation rows carry
+no file lists: each edit's diff stays in its `work` entry.
+
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#the-session-item-log) instead.
 With no conversation rows or older-history control, the pane shows a
@@ -1993,8 +2008,7 @@ so only the streaming block re-renders, code highlighted with the Lezer
 languages), `thinking`, `work` (folded by kind; expanded entries and their
 detail - command, output tail, `DiffBlock` - splice into the same list,
 and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
-`plan`, `changed-files` (each row opens the Changes view at that file),
-`answered`, `event` (notices, mode changes, a new
+`plan`, `answered`, `event` (notices, mode changes, a new
 agent session, an inbox wake), `finished` and `agent-message`. The `live`
 row reads "Waiting for your approval: <command>" (or "Waiting for your
 answer") with the amber dot while a request is pending. A `finished` row
@@ -2060,13 +2074,10 @@ call's text content). Until a known subagent's launch call is loaded it pages
 `run.acp.history`, at most five pages, then offers **Load earlier history**;
 an id the loaded history does not name pages only on that button. A failed
 page, or a failed read of the whole launch item, shows the server's error
-with **Retry**. Changed files list in the
-transcript of the agent that made them, and the main turn that launched it
-lists them in its changed-files row, each path once.
+with **Retry**.
 
 A tool call snapshot logged in a later turn than the call's first, as
-when a call outlives its turn, joins that first turn. The call keeps one row and
-its diff counts once.
+when a call outlives its turn, joins that first turn and keeps one row.
 
 A path the agent names opens that file in the run's
 [Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
@@ -2636,8 +2647,8 @@ both what it renders and the overlap set the conflict chips read.
   and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
   `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
-  file and scrolls to it once the diff has it. Each row of the Session view's
-  **Changed N files** navigates this way. `file` is not written to the
+  file and scrolls to it once the diff has it. Each file in the Session view's
+  changes bar navigates this way. `file` is not written to the
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
   of lines of the diff, held in this browser until it is sent to the agent.
