@@ -346,6 +346,10 @@ func (r *fakeRuntime) Exec(ctx context.Context, id runtime.ID, argv []string, wo
 	case <-ctx.Done():
 		return 0, "", "", ctx.Err()
 	case got := <-done:
+		// A handler may have set what its exec wrote to stderr.
+		r.mu.Lock()
+		stderr = r.execStderr
+		r.mu.Unlock()
 		return got.code, got.stdout, stderr, got.err
 	}
 }

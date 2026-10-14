@@ -123,6 +123,7 @@ type RunController interface {
 	// The callback may lock member caches but must not reenter terminal lifecycle.
 	WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error
 	TerminalStatus(ctx context.Context, member domain.MemberID) (domain.TerminalStatus, error)
+	ExecTerminal(ctx context.Context, member domain.MemberID, command string) (int, string, string, error)
 	SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error)
 	ResetEnvironment(ctx context.Context, member domain.MemberID) error
 	// InstallAgent returns the end of the install command's output and its

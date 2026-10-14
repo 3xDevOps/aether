@@ -110,6 +110,8 @@ func callBound(method string) time.Duration {
 		return protocol.AgentInstallTimeout + callTimeout
 	case protocol.MethodHomeUpload, protocol.MethodHomeDownload:
 		return transferTimeout
+	case protocol.MethodTerminalExec:
+		return protocol.TerminalExecTimeout + callTimeout
 	}
 	return callTimeout
 }
@@ -192,6 +194,7 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
 		method == protocol.MethodHomeMkdir || method == protocol.MethodHomeRename ||
 		method == protocol.MethodHomeRemove || method == protocol.MethodHomeUpload ||
+		method == protocol.MethodTerminalExec ||
 		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
 		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
 		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||

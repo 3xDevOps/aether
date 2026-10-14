@@ -190,7 +190,7 @@ the tailnet.
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). `config.import`, `workspace.import`, `agent.install`,
-`github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
+`terminal.exec`, `github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
 `home.mkdir`, `home.rename`, `home.remove`, `home.upload`,
 `dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
 so uncertainty surfaces immediately. A subsequent explicit request can
@@ -855,6 +855,7 @@ unavailable owned source remains the server's protocol error.
 | `home.download` | `{"path":"notes/logo.png"}` | `{"content_base64":"...","size":1234}` |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `terminal.exec` | `{"command":"claude --version"}` | `{"exit_code":0,"stdout":"...","stderr":"..."}` - runs the command through a login shell in the caller's member environment, starting it if needed; a non-zero exit code is a result, not an error. Any approved member may call it. Answers within 10 minutes: a command still running then is killed and the call answers `-32603`, as it does for output past 1 MiB. See [terminal.md](terminal.md#run-one-command) |
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
@@ -2329,4 +2330,6 @@ Closing the socket detaches without stopping the shell. A normal shell exit
 closes with **1000**. Membership loss closes with **1008**. `terminal.status`
 reports the running container's `image`, its `saved_image` when set, start
 time, and active tabs; `terminal.stop` stops the container and deletes its tab
-sessions while preserving the member home.
+sessions while preserving the member home. `terminal.exec` runs one command
+in the same container without a tab
+([terminal.md](terminal.md#run-one-command)).
