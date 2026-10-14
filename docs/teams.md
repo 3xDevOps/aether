@@ -1334,7 +1334,7 @@ or the delivery.
 The dashboard's launch dialog creates one on its **Swarm** tab: an
 objective, the **Integrator agent**, an **Integrator mode** (Standard or
 Enhanced; Background is refused because it exits after one turn), the
-**Integrator model**, **Agents for workers** with a model input on each
+**Integrator model**, **Agents for workers** with a model picker on each
 ticked row, and a **Worker mode** that defaults to Background. A
 worker whose agent cannot use the worker mode runs Standard, which its row
 says. An empty model keeps the agent's default. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the

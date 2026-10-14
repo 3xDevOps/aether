@@ -4,6 +4,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,11 +12,13 @@ import (
 )
 
 // The allocation exceeds only the disposable container's 64MiB ceiling, never
-// the host budget. The allocation waits a second after start so the OOM event
-// is observable before the exit; containerd loses it for a container killed
-// within tens of milliseconds of starting (containerd/containerd#8180,
-// #12260). A second live container and a fresh daemon RPC prove that
-// memory pressure is contained rather than taking down the worker host.
+// the host budget. The kill is read from the cgroup's oom_kill counter
+// (memory.events on cgroup v2, memory.oom_control on v1), which the kernel
+// raises before the victim dies. Docker's OOMKilled flag and oom event arrive
+// from containerd asynchronously, after the exit or not at all
+// (containerd/containerd#8180, #12260). A second live container and a fresh
+// daemon RPC prove that memory pressure is contained rather than taking down
+// the worker host.
 func TestDockerOOMContained(t *testing.T) {
 	d := newTestDocker(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
@@ -24,35 +27,39 @@ func TestDockerOOMContained(t *testing.T) {
 	if err := d.Start(ctx, survivor); err != nil {
 		t.Fatal(err)
 	}
-	oom := createContainer(t, d, Spec{
-		Image: "python:3.13-alpine",
-		Command: []string{"python3", "-c", `
-import time
-print("ready", flush=True)
-time.sleep(1)
-chunks = [b"x" * (1 << 20) for _ in range(256)]
-print(len(chunks), flush=True)
-`},
-		CPULimit: 0.5, MemoryLimitBytes: 64 << 20, PidsLimit: 32,
-	})
+	oom := createContainer(t, d, Spec{Image: "python:3.13-alpine", Command: []string{"sleep", "180"}, CPULimit: 0.5, MemoryLimitBytes: 64 << 20, PidsLimit: 32})
 	if err := d.Start(ctx, oom); err != nil {
 		t.Fatal(err)
 	}
-	exit, err := d.Wait(ctx, oom)
-	if err != nil {
-		t.Fatal(err)
+	code, out, stderr, err := d.Exec(ctx, oom, []string{"python3", "-c", `
+chunks = [b"x" * (1 << 20) for _ in range(256)]
+print(len(chunks), flush=True)
+`}, "")
+	if err != nil || code != 137 {
+		t.Fatalf("expected the allocation to be SIGKILLed: code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
 	}
-	info, err := d.cli.ContainerInspect(ctx, string(oom), client.ContainerInspectOptions{})
-	if err != nil {
-		t.Fatal(err)
+	code, events, stderr, err := d.Exec(ctx, oom, []string{"sh", "-c", `
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  cat /sys/fs/cgroup/memory.events
+else
+  cat /sys/fs/cgroup/memory/memory.oom_control
+fi`}, "")
+	if err != nil || code != 0 {
+		t.Fatalf("read the cgroup OOM counter: code=%d stderr=%q err=%v", code, stderr, err)
 	}
-	if exit.Code != 137 || info.Container.State == nil || !info.Container.State.OOMKilled {
-		t.Fatalf("expected cgroup OOM kill, not an allocation or setup failure: exit=%+v state=%+v", exit, info.Container.State)
+	killed := false
+	for line := range strings.Lines(events) {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "oom_kill" && f[1] != "0" {
+			killed = true
+		}
 	}
-	if _, err := d.cli.Ping(ctx, client.PingOptions{}); err != nil {
+	if !killed {
+		t.Fatalf("expected a cgroup OOM kill, not an allocation or setup failure: cgroup OOM counter=%q", events)
+	}
+	if _, err = d.cli.Ping(ctx, client.PingOptions{}); err != nil {
 		t.Fatalf("daemon did not survive OOM: %v", err)
 	}
-	code, out, stderr, err := d.Exec(ctx, survivor, []string{"sh", "-c", "printf alive"}, "")
+	code, out, stderr, err = d.Exec(ctx, survivor, []string{"sh", "-c", "printf alive"}, "")
 	if err != nil || code != 0 || out != "alive" {
 		t.Fatalf("other container did not survive OOM: code=%d out=%q stderr=%q err=%v", code, out, stderr, err)
 	}

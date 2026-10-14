@@ -701,7 +701,11 @@ amount of internal testing sees it coming.
 `TestSmokeHeadlessNoLogin` is the one that runs in CI. It launches each
 headless template with no credentials at all and requires the run to fail
 for want of a login, never for want of a parseable command line - reaching
-the provider is proof the CLI accepted the flags. The `smoke` job builds
+the provider is proof the CLI accepted the flags. opencode needs no login,
+so its proof is the `> build` session header it prints before its first
+call to its free hosted model. The test destroys each container as soon as
+the proof appears, so no result depends on a model answering. On failure
+it prints the output captured so far. The `smoke` job builds
 `images/standard/Dockerfile`, then `images/smoke/Dockerfile` on top of it to
 add the agent CLIs at whatever version their vendors ship that day, and
 points the gate variables at the result.
@@ -794,8 +798,10 @@ make build && (cd web && bunx playwright test run-session.spec.ts)
 `TestSupervisorSwapsItsChild` waits for the fallback login shell to execute a
 readiness command before requesting another swap. The harness exit banner
 is printed before that shell starts.
-Signal-only fixtures register a buffered SIGTERM channel before announcing
-readiness. After the forced swap, the test executes a command in the replacement
+Signal fixtures register a buffered SIGTERM or SIGHUP channel before announcing
+readiness; a login shell under test `exec`s one instead of trapping the signal,
+because a shell trap stays pending when the signal lands just before `read`
+blocks. After the forced swap, the test executes a command in the replacement
 login shell.
 
 [Mode switching](enhanced-runs.md#switching-a-running-agent) is proven the

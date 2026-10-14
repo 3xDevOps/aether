@@ -27,7 +27,10 @@ func localExec(ctx context.Context, _ runtime.ID, argv []string, dir string) (in
 		}
 		cmd.Env = append(cmd.Env, value)
 	}
-	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+	// Auto maintenance detaches and writes lock files after the command
+	// returns, racing tests that walk or remove the repository.
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=maintenance.auto", "GIT_CONFIG_VALUE_0=false")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()

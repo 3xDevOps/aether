@@ -376,7 +376,7 @@ and is never delivered, but still lists, without `acked_at`.
 A task-bearing run receives this capability-neutral launch instruction automatically:
 
 ```
-Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified.
 ```
 
 No skill package, manual identity argument, or credential setup is required.
@@ -664,9 +664,10 @@ Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image
 history. Resizing to the current width and height preserves the viewport
 identity and cached frame. A changed viewport fences out old-geometry frames
-before Chromium renders its replacement. On controller release, revocation or
-disconnect, the server clears
-held browser keys, buttons and touches before admitting another controller.
+before Chromium renders its replacement, then restarts an active screencast so
+a static page still streams a frame at the new size. On controller release,
+revocation or disconnect, the server clears held browser keys, buttons and
+touches before admitting another controller.
 If cleanup cannot be confirmed, new control remains fenced.
 
 Page inventories and physical-input acknowledgements use cached, best-effort

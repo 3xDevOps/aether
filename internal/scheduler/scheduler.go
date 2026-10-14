@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/control"
@@ -209,6 +211,9 @@ type Scheduler struct {
 	// agentInstalls maps a member with an agent.install in flight to its home's
 	// host path.
 	agentInstalls map[domain.MemberID]string
+	agentModelsMu sync.Mutex
+	agentModels   map[agentModelsKey]agentModelsEntry
+	modelProbes   singleflight.Group
 	// GitHub OAuth commands belong to the scheduler, not to an RPC channel.
 	githubOAuthMu     sync.Mutex
 	githubOAuth       map[domain.MemberID]*githubOAuthAttempt

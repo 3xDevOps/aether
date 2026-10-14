@@ -1,4 +1,4 @@
-import { limits, requireValue } from './session.mjs';
+import { limits, requireValue, screencast } from './session.mjs';
 
 // Wire record: uint32be JSON length, uint32be image length, JSON metadata, JPEG.
 // Each viewer retains at most one pending record, replaced by the newest frame.
@@ -76,7 +76,7 @@ export async function streamPage(session, request, response) {
         for (const stream of state.streams) stream.frame(state.latestFrame);
       };
       cdp.on('Page.screencastFrame', state.frameListener);
-      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 75, maxWidth: 2560, maxHeight: 1600, everyNthFrame: 1 });
+      await cdp.send('Page.startScreencast', screencast);
     }
     if (state.latestFrame) viewer.frame(state.latestFrame);
     if (ended) return;

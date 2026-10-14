@@ -207,7 +207,7 @@ client screen and every surface uses the same action. The route is mirrored
 in the address bar (see [URL state](#url-state)).
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
-one file each (`server`, `workspaces`, `runs`, `members`, `env-terminal`,
+one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-terminal`,
 `terminal`, `board`, `palette`, `approvals`, `presence`, `cost`, `timeline`,
 `diff`, `files`, `collaboration`, `local`, `missions`, `messages`,
 `sessions`, `ui`). A new feature adds a slice file and one spread in
@@ -714,8 +714,13 @@ is the only thing that changes it. `setWorkspaces` keeps a valid selection;
 an unset selection or a workspace that has been deleted falls back to the
 first by ID, or clears the selection when none remain. An open deleted
 workspace route moves to the replacement workspace or **Manage workspaces**;
-an open run in a deleted workspace returns to the board. The capabilities
-fetch may fail without failing hydration; a legacy gateway then holds `null`.
+an open run in a deleted workspace returns to the board. A gateway that
+answers the capabilities fetch with an error status or a body that is not
+JSON is a legacy gateway: hydration succeeds and the store holds `null`. A
+fetch that gets no answer at all, such as Chromium's
+`net::ERR_NETWORK_CHANGED` after the host gains a network interface, keeps
+the capabilities the connect probe loaded; with none loaded, hydration fails
+and retries.
 The snapshot also seeds the board's paused map from each run's wire `paused`
 field, skipping runs that do not carry it.
 
@@ -1536,14 +1541,19 @@ stays disabled until one is written (`runLaunch` in
 `internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
 the wire: an empty task and `tui` are the server's defaults.
 
-**Model**, under Mode, is free text sent as `model` on `run.launch` and
-passed to the agent as is ([per-agent flags](harnesses.md#launch-argv)); the
-help line is "Optional. The agent's own default when empty." Its placeholder
-suggests values for the chosen agent: Claude Code "opus, sonnet, haiku or a
-full model id", Codex "a model id such as gpt-5-codex", OpenCode
-"provider/model, such as anthropic/claude-sonnet-4-5", pi "provider/model,
-optionally :<thinking>", oh-my-pi "opus, gpt-5.2 or openai/gpt-5.2". An
-empty field sends no `model`. A model that is not a single argument is
+**Model**, under Mode, is a searchable picker (`ModelPicker` in
+`src/components/launch/model-picker.tsx`) whose choice is sent as `model` on
+`run.launch` and passed to the agent as is
+([per-agent flags](harnesses.md#launch-argv)). Its first entry, **Agent
+default**, sends no `model` and shows what that default resolves to when the
+agent reports it. The rest come from `agent.models` for the chosen agent and
+account, fetched when the field first shows and kept for the page session;
+the refresh button asks again with `refresh: true`. The list says when it is
+the agent's cache or a fallback list, and shows a failed discovery's error
+verbatim without blocking a choice. Search matches id, name and description;
+text that matches no id is offered as **Use “<text>”**, so any id works,
+including for agents with no discovery. A saved model missing from the list
+stays selected. A model that is not a single argument is
 refused by `run.launch` and shown under "Launch failed".
 
 The form remembers a mode and a model per agent in the persisted
@@ -3103,8 +3113,8 @@ when the agent supports it; Background disabled with the reason
 `mission.create` gives: it exits after one turn), **Integrator model**
 (the same field as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
-launchable agent; a ticked row has a model input, empty for the agent's
-default) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
+launchable agent; a ticked row has the same model picker, Agent default
+until changed) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
 use it and in Standard otherwise; the row says so ("Runs Standard: no
 Enhanced support"). Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops

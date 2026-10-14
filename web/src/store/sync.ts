@@ -130,8 +130,15 @@ export async function hydrate(
         // An unreachable conflict radar leaves the chips off; it must not fail hydration.
         client.runOverlaps().catch(() => []),
         // A legacy remote monitor does not serve the endpoint; null keeps the
-        // client on its built-in assumptions.
-        client.capabilities().catch(() => null),
+        // client on its built-in assumptions. A fetch that got no answer
+        // (fetch's TypeError) says nothing about the gateway, so the
+        // connect probe's answer stands, or hydration fails and retries.
+        client.capabilities().catch((err: unknown) => {
+          if (!(err instanceof TypeError)) return null
+          const known = store.getState().capabilities
+          if (known) return known
+          throw err
+        }),
       ])
     if (signal?.aborted) return false
     const origin = typeof window === 'undefined' ? '' : window.location.origin
@@ -157,7 +164,7 @@ export async function hydrate(
       // Reconnects retain drafts; a different authenticated owner must not.
       store.getState().resetFiles()
       store.getState().resetNotes()
-      store.setState({ invitations: null, revokingInvitations: [], mergedInto: {} })
+      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {} })
     }
     s.setIdentityKey(incomingIdentity)
     s.setInfo(info)

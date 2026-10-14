@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AgentPicker, customAgent, launchable } from '@/components/launch/agent-picker'
 import { ModeControl } from '@/components/launch/mode-control'
-import { modelHints } from '@/components/launch/models'
+import { ModelPicker } from '@/components/launch/model-picker'
 import { initialMode, modeRefusal, refusals } from '@/components/launch/modes'
 import { FormField } from '@/components/ui/form-field'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -78,6 +77,7 @@ export function useAgentChoice({ account, ownAccountID, preferred, preferredMode
     agents,
     agentError,
     agent,
+    accountMemberID: account && account !== ownAccountID ? account : undefined,
     harness,
     mode,
     setMode,
@@ -132,39 +132,23 @@ export function RunFields({
       {harness && (
         <ModeControl label="Mode" value={mode} onChange={(next) => { onChoice?.(); choice.setMode(next) }} refused={refusals(agent, harness)} onSetUp={onSetUp} />
       )}
-      {harness && <ModelField harness={harness} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
+      {harness && <ModelField harness={harness} accountMemberID={choice.accountMemberID} value={choice.model} onChange={(next) => { onChoice?.(); choice.setModel(next) }} disabled={disabled} />}
     </>
   )
 }
 
-export function ModelField({ label = 'Model', harness, value, onChange, disabled = false }: {
+export function ModelField({ label = 'Model', harness, accountMemberID, value, onChange, disabled = false }: {
   label?: string
   harness: string
+  accountMemberID?: string
   value: string
   onChange: (model: string) => void
   disabled?: boolean
 }) {
-  const listId = useId()
-  const { placeholder, suggestions } = modelHints(harness)
   return (
-    <>
-      <FormField label={label} help="Optional. The agent's own default when empty.">
-        <Input
-          value={value}
-          placeholder={placeholder}
-          list={suggestions.length ? listId : undefined}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </FormField>
-      {suggestions.length > 0 && (
-        <datalist id={listId}>
-          {suggestions.map((model) => <option key={model} value={model} />)}
-        </datalist>
-      )}
-    </>
+    <FormField label={label}>
+      <ModelPicker harness={harness} accountMemberID={accountMemberID} value={value} onChange={onChange} disabled={disabled} />
+    </FormField>
   )
 }
 

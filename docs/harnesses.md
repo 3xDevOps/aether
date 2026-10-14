@@ -945,7 +945,7 @@ Task-bearing and taskless launches use the same capability-neutral discovery
 instruction:
 
 ```
-Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified.
 ```
 
 For a taskless launch, the same instruction is delivered through the
@@ -1098,6 +1098,55 @@ A model that is not a single argument is refused before launch:
 ```text
 model "x y" must be a single argument: no whitespace or control characters, not starting with "-", at most 128 bytes
 ```
+
+### Model discovery
+
+`agent.models` lists the models the installed CLI offers on an account's
+login, so the dashboard can offer them instead of a free-form field. The
+server asks the agent itself, in the account's environment terminal (started
+if needed for your own account), with the account's home as `HOME` and working directory:
+
+| `--agent` | How | When it fails |
+| --- | --- | --- |
+| `claude` | Pipes one `initialize` control request into `claude -p --safe-mode --input-format stream-json --output-format stream-json --verbose --no-session-persistence` and reads `models` from the response | `opus`, `sonnet`, `haiku` |
+| `codex` | Sends `initialize` and `model/list` to `codex app-server` (25 second limit); hidden models are dropped | The models listed in `~/.codex/models_cache.json` (`visibility` `list`, by `priority`), else none |
+| every other agent | Not discovered | None; type the model |
+
+The probe passes the same server API-key variables a run gets (the harness's
+`EnvPassthrough` names that are set and non-empty in the server's environment).
+
+The executable is the first word of the agent's `tui` argv, so an `--agent-definitions` override of `claude` or `codex` is the binary that gets probed.
+
+Each model's `id` is the value a launch passes as the model, in every mode:
+Claude's aliases and full names and Codex's model slugs are accepted as is by
+`--model` and by both Enhanced adapters' `model` option. The CLI's own
+`default` entry is not a model; its description becomes `default_label`, and
+an empty model still means the agent's default.
+
+`source` says where the list came from: `agent` (the CLI), `cache` (Codex's
+own cache file), `fallback` (Claude's aliases, which every Claude Code
+version accepts), or `none`. `error` carries the failed discovery's error as
+the CLI or shell printed it, for example:
+
+```text
+codex exited 127: sh: 3: codex: not found
+```
+
+The server keeps each account's list per agent for an hour; `refresh`
+discovers again. A failed refresh keeps the last list and reports the new
+`error`. Concurrent requests for the same list share one discovery, and a
+discovery that takes over 30 seconds fails.
+
+On a shared account, discovery runs in the account owner's environment with
+the owner's login and installation, since that login decides which models a
+launch can use. It needs the `Launch` permission and the launch's own checks
+pass first; otherwise `agent.models` answers with the launch's refusal. It
+never starts the owner's environment: if the owner's terminal is not running,
+nothing runs and the result is the fallback above with an `error` saying so.
+
+A `fallback` or `none` result is cached for a minute, not an hour, so the next
+request retries discovery. A failed discovery keeps the last list only when
+it came from `agent`; a `cache` result reads `models_cache.json` again.
 
 These are the vendors' own flags, and vendors rename them and tighten how
 they combine - `claude` now refuses `--output-format stream-json` unless
