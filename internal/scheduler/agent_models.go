@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -23,13 +24,18 @@ const (
 	codexModelsCache   = ".codex/models_cache.json"
 
 	claudeModelsRequest = `{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}`
-	claudeModelsScript  = `printf '%s\n' "$2" | timeout -s KILL 25 "$1" -p --safe-mode --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
+	claudeModelsScript  = `exe=$1; req=$2; shift 2
+printf '%s\n' "$req" | timeout -s KILL 25 env "$@" "$exe" -p --safe-mode --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
+
+	// The script's arguments are the executable, its JSON requests, then the
+	// KEY=VALUE assignments for env.
 
 	// codex exits on stdin EOF before it answers, so stdin stays open until
 	// the model/list answer shows up in its output or codex exits.
-	codexModelsScript = `out=$(mktemp) || exit 1
-{ printf '%s\n' "$2" "$3"
-  i=0; while [ $i -lt 250 ] && [ ! -e "$out.code" ] && ! grep -q '"id":2[,}]' "$out"; do sleep 0.1; i=$((i+1)); done; } | { timeout -s KILL 25 "$1" app-server; echo $? >"$out.code"; } >"$out"
+	codexModelsScript = `exe=$1; init=$2; list=$3; shift 3
+out=$(mktemp) || exit 1
+{ printf '%s\n' "$init" "$list"
+  i=0; while [ $i -lt 250 ] && [ ! -e "$out.code" ] && ! grep -q '"id":2[,}]' "$out"; do sleep 0.1; i=$((i+1)); done; } | { timeout -s KILL 25 env "$@" "$exe" app-server; echo $? >"$out.code"; } >"$out"
 code=$(cat "$out.code")
 cat "$out"; rm -f "$out" "$out.code"; exit "${code:-1}"`
 	codexModelsList = `{"id":2,"method":"model/list","params":{}}`
@@ -76,7 +82,7 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 	if name != "claude" && name != "codex" {
 		return protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}, nil
 	}
-	profile, _, err := s.launchProfile(ctx, member, account, name)
+	profile, argvs, err := s.launchProfile(ctx, member, account, name)
 	if err != nil {
 		return protocol.AgentModelsResult{}, err
 	}
@@ -96,16 +102,16 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 	}
 	start := account == member
 	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
-		return s.probeAgentModels(context.WithoutCancel(ctx), key, profile.TUIArgs[0], start), nil
+		return s.probeAgentModels(context.WithoutCancel(ctx), key, argvs[domain.LaunchTUI][0], profile.EnvPassthrough, start), nil
 	})
 	return result.(protocol.AgentModelsResult), nil
 }
 
-func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, start bool) protocol.AgentModelsResult {
+func (s *Scheduler) probeAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) protocol.AgentModelsResult {
 	ctx, cancel := context.WithTimeout(ctx, agentModelsTimeout)
 	defer cancel()
 	now := s.cfg.Now().UTC()
-	list, err := s.execAgentModels(ctx, key, executable, start)
+	list, err := s.execAgentModels(ctx, key, executable, passthrough, start)
 	var result protocol.AgentModelsResult
 	if err == nil {
 		result = protocol.AgentModelsResult{
@@ -184,7 +190,7 @@ func (s *Scheduler) readCodexModelsCache(account domain.MemberID) (modelList, st
 	return list, file.FetchedAt, nil
 }
 
-func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, executable string, start bool) (modelList, error) {
+func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, executable string, passthrough []string, start bool) (modelList, error) {
 	script, args, parse := claudeModelsScript, []string{claudeModelsRequest}, parseClaudeModels
 	if key.name == "codex" {
 		script, parse = codexModelsScript, parseCodexModels
@@ -207,7 +213,13 @@ func (s *Scheduler) execAgentModels(ctx context.Context, key agentModelsKey, exe
 	containerID, home := sup.containerID, sup.home
 	s.mu.Unlock()
 
-	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, containerID, append([]string{"/bin/sh", "-c", script, "sh", executable}, args...), home)
+	argv := append([]string{"/bin/sh", "-c", script, "sh", executable}, args...)
+	for _, name := range passthrough {
+		if value, ok := os.LookupEnv(name); ok && value != "" {
+			argv = append(argv, name+"="+value)
+		}
+	}
+	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, containerID, argv, home)
 	if err != nil {
 		return modelList{}, fmt.Errorf("%s models: run in the environment terminal: %w", key.name, err)
 	}

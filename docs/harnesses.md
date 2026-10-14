@@ -1112,6 +1112,9 @@ if needed for your own account), with the account's home as `HOME` and working d
 | `codex` | Sends `initialize` and `model/list` to `codex app-server` (25 second limit); hidden models are dropped | The models listed in `~/.codex/models_cache.json` (`visibility` `list`, by `priority`), else none |
 | every other agent | Not discovered | None; type the model |
 
+The probe passes the same server API-key variables a run gets (the harness's
+`EnvPassthrough` names that are set and non-empty in the server's environment).
+
 The executable is the first word of the agent's `tui` argv, so an `--agent-definitions` override of `claude` or `codex` is the binary that gets probed.
 
 Each model's `id` is the value a launch passes as the model, in every mode:

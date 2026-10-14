@@ -306,12 +306,12 @@ func TestCodexModelsScriptAnswersWithoutStdinEOF(t *testing.T) {
 		t.Skip("timeout is not on PATH")
 	}
 	fake := filepath.Join(t.TempDir(), "codex")
-	body := "#!/bin/sh\nread a; read b\nprintf '%s\\n' '{\"id\":2,\"result\":{\"data\":[{\"model\":\"m1\",\"displayName\":\"M1\",\"description\":\"d\",\"hidden\":false,\"isDefault\":true}]}}'\ncat >/dev/null\n"
+	body := "#!/bin/sh\nread a; read b\nprintf '%s\\n' '{\"id\":2,\"result\":{\"data\":[{\"model\":\"m1\",\"displayName\":\"'\"$AETHER_TEST_KEY\"'\",\"description\":\"d\",\"hidden\":false,\"isDefault\":true}]}}'\ncat >/dev/null\n"
 	if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	out, err := exec.Command("/bin/sh", "-c", codexModelsScript, "sh", fake, `{"id":1}`, codexModelsList).Output()
+	out, err := exec.Command("/bin/sh", "-c", codexModelsScript, "sh", fake, `{"id":1}`, codexModelsList, "AETHER_TEST_KEY=secret").Output()
 	if err != nil {
 		t.Fatalf("script: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestCodexModelsScriptAnswersWithoutStdinEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list.models) != 1 || list.models[0].ID != "m1" {
+	if len(list.models) != 1 || list.models[0].ID != "m1" || list.models[0].Name != "secret" {
 		t.Fatalf("models = %+v", list.models)
 	}
 }
