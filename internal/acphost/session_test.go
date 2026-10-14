@@ -119,7 +119,7 @@ func TestImagePromptCapabilityAndMetadata(t *testing.T) {
 			}
 			blocks := embeddedImagePrompt(t)
 			if idle {
-				if started, promptErr := s.PromptIdle(context.Background(), blocks); promptErr != nil || !started {
+				if started, promptErr := s.PromptIdle(context.Background(), blocks, nil); promptErr != nil || !started {
 					t.Fatalf("PromptIdle = %v, %v", started, promptErr)
 				}
 			} else if receipt, promptErr := s.Prompt(context.Background(), blocks, false, nil); promptErr != nil || receipt.Outcome != OutcomeSent {
@@ -181,7 +181,7 @@ func TestUnsupportedImagesNeverStartQueueOrSteer(t *testing.T) {
 						t.Fatalf("Prompt steer=%v = %+v, %v", steer, receipt, err)
 					}
 				}
-				if started, err := s.PromptIdle(context.Background(), blocks); started || !errors.Is(err, ErrUnsupportedImage) {
+				if started, err := s.PromptIdle(context.Background(), blocks, nil); started || !errors.Is(err, ErrUnsupportedImage) {
 					t.Fatalf("PromptIdle = %v, %v", started, err)
 				}
 				if s.State().Queued != 0 || len(items(t, s)) != before || m.called(methodSteering) {

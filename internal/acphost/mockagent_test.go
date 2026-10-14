@@ -202,9 +202,12 @@ func (r *recorder) config(c Config) Config {
 		r.mu.Lock()
 		r.failed = st.Failed
 		r.turns = append(r.turns, st)
-		if st.Working {
+		switch {
+		case st.Autonomous:
+			r.states = append(r.states, "working:autonomous")
+		case st.Working:
 			r.states = append(r.states, "working:"+st.Reason)
-		} else {
+		default:
 			r.states = append(r.states, "idle:"+st.Reason)
 		}
 		r.mu.Unlock()

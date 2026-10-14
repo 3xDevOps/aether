@@ -108,8 +108,8 @@ func (m *mockAgent) liveTasks(tasks ...[2]string) {
 	m.sdk(map[string]any{"type": "system", "subtype": "background_tasks_changed", "tasks": set})
 }
 
-func (m *mockAgent) taskDone(id string) {
-	m.sdk(map[string]any{"type": "system", "subtype": "task_notification", "task_id": id, "status": "completed"})
+func (m *mockAgent) workflowDone() {
+	m.sdk(map[string]any{"type": "system", "subtype": "task_notification", "task_id": "wf-1", "status": "completed"})
 }
 
 func (m *mockAgent) chunk(text string) {
@@ -291,7 +291,7 @@ func TestPromptsLeaveTheTrackedWorkflowAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitStates(t, "working:prompt", "working:background", "working:prompt", "working:background")
-	if ok, err := s.PromptIdle(context.Background(), textPrompt("mail")); !ok || err != nil {
+	if ok, err := s.PromptIdle(context.Background(), textPrompt("mail"), nil); !ok || err != nil {
 		t.Fatalf("PromptIdle = %v, %v, want true, nil: tasks alone do not make the run busy", ok, err)
 	}
 	want := []string{"working:prompt", "working:background", "working:prompt", "working:background", "working:prompt", "working:background"}
@@ -393,7 +393,7 @@ func TestCancelEndsAnAutonomousTurnAndTheWait(t *testing.T) {
 	if err := s.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	rec.waitStates(t, "working:prompt", "working:background", "idle:cancelled")
+	rec.waitStates(t, "working:prompt", "working:background", "working:autonomous", "idle:cancelled")
 	end := turnEnds(s, t)[1]
 	if !end.Autonomous || end.StopReason != "cancelled" {
 		t.Fatalf("turn end %+v", end)
@@ -441,10 +441,10 @@ func TestFailedPromptWithTasksPendingWaitsForTheFollowUp(t *testing.T) {
 
 	m.chunk("follow-up")
 	waitFor(t, "the working state", func() bool { return len(rec.snapshot()) == 3 })
-	if got := rec.snapshot(); got[2] != "working:background" {
-		t.Fatalf("states %v, want working:background after the follow-up began", got)
+	if got := rec.snapshot(); got[2] != "working:autonomous" {
+		t.Fatalf("states %v, want working:autonomous after the follow-up began", got)
 	}
-	m.taskDone("wf-1")
+	m.workflowDone()
 	m.marker()
 	states := rec.waitFinished(t)
 	if states[len(states)-1] != "idle:end_turn" || slices.Contains(states[2:len(states)-1], "idle:error") {
@@ -466,7 +466,7 @@ func TestShortStopKeepsItsReasonThroughTheBackgroundWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitStates(t, "working:prompt", "working:background")
-	m.taskDone("wf-1")
+	m.workflowDone()
 	m.chunk("follow-up")
 	m.marker()
 	if states := rec.waitFinished(t); states[len(states)-1] != "idle:max_tokens" {
@@ -529,7 +529,7 @@ func TestQueuedPromptWaitsForTheAutonomousTurn(t *testing.T) {
 	s, rec := startWorkflow(t, m)
 	m.chunk("finished")
 	waitFor(t, "autonomous turn", func() bool { return s.State().TurnInFlight })
-	if ok, err := s.PromptIdle(context.Background(), textPrompt("idle?")); ok || err != nil {
+	if ok, err := s.PromptIdle(context.Background(), textPrompt("idle?"), nil); ok || err != nil {
 		t.Fatalf("PromptIdle = %v, %v, want false, nil", ok, err)
 	}
 	if r, err := s.Prompt(context.Background(), textPrompt("later"), false, nil); err != nil || r.Outcome != OutcomeQueued {
@@ -538,10 +538,12 @@ func TestQueuedPromptWaitsForTheAutonomousTurn(t *testing.T) {
 	if m.prompts() != 1 {
 		t.Fatal("a prompt reached the agent during its autonomous turn")
 	}
-	m.taskDone("wf-1")
+	m.workflowDone()
 	m.marker()
 	states := rec.waitFinished(t)
-	if n := len(states); states[n-2] != "working:prompt" || states[n-1] != "idle:end_turn" || m.prompts() != 2 {
+	// wf-1 ended during the autonomous turn, so its follow-up may trail the
+	// queued prompt's turn.
+	if n := len(states); states[n-3] != "working:prompt" || states[n-2] != "working:background" || states[n-1] != "idle:end_turn" || m.prompts() != 2 {
 		t.Fatalf("states %v after the queued prompt, %d prompts", states, m.prompts())
 	}
 }
@@ -564,20 +566,20 @@ func TestAutonomousTurnWithoutAMarker(t *testing.T) {
 	t.Run("goes quiet", func(t *testing.T) {
 		m, _, rec := plain(t)
 		m.chunk("hello")
-		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous", "idle:end_turn")
 	})
 
 	t.Run("an open tool call holds the turn", func(t *testing.T) {
 		m, s, rec := plain(t)
 		m.openTool("t9")
-		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background")
+		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous")
 		time.Sleep(3 * autonomousQuiet)
-		rec.noMoreStates(t, "working:prompt", "idle:end_turn", "working:background")
+		rec.noMoreStates(t, "working:prompt", "idle:end_turn", "working:autonomous")
 		if !s.State().TurnInFlight {
 			t.Fatal("turn ended with a tool call open")
 		}
 		m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t9", "status": "completed"})
-		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous", "idle:end_turn")
 	})
 
 	t.Run("a call left running by an ended turn does not hold it", func(t *testing.T) {
@@ -592,7 +594,7 @@ func TestAutonomousTurnWithoutAMarker(t *testing.T) {
 		}
 		rec.waitStates(t, "working:prompt", "idle:end_turn")
 		m.chunk("hello")
-		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous", "idle:end_turn")
 	})
 
 	t.Run("stragglers do not open a turn", func(t *testing.T) {
@@ -624,7 +626,7 @@ func TestStaleToolCallEndsTheAutonomousTurn(t *testing.T) {
 	rec.waitStates(t, "working:prompt", "idle:end_turn")
 	opened := time.Now()
 	m.openTool("lost")
-	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous", "idle:end_turn")
 	if elapsed := time.Since(opened); elapsed < 4*autonomousQuiet {
 		t.Fatalf("the turn ended after %v, before the stale limit counted from its open call", elapsed)
 	}
@@ -734,7 +736,7 @@ func TestAnsweringAnAutonomousQuestionRestartsTheQuietWait(t *testing.T) {
 	}
 	rec.waitStates(t, "working:prompt", "idle:end_turn")
 	m.chunk("hello")
-	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background")
+	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous")
 
 	replied := make(chan string, 1)
 	go func() {
@@ -763,7 +765,7 @@ func TestAnsweringAnAutonomousQuestionRestartsTheQuietWait(t *testing.T) {
 	if n := len(turnEnds(s, t)); n != 1 {
 		t.Fatalf("%d turn ends %v after the answer, want only the first prompt's", n, autonomousQuiet/3)
 	}
-	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+	rec.waitStates(t, "working:prompt", "idle:end_turn", "working:autonomous", "idle:end_turn")
 }
 
 func TestRestoreReportsAnInterruptedTurn(t *testing.T) {
@@ -803,6 +805,9 @@ func TestSessionMetaCarriesTheSystemPromptAndTaskFrames(t *testing.T) {
 	frames, err := json.Marshal(claudeTaskFrames)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(frames), `{"subtype":"task_progress","type":"system"}`) {
+		t.Fatalf("task frames %s lack task_progress", frames)
 	}
 	for _, tc := range []struct {
 		name   string

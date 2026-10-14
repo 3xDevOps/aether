@@ -485,7 +485,7 @@ func Interrupted(log *Log) bool {
 			case KindTurnStart:
 				started = true
 			case KindBackground:
-				if !started && slices.ContainsFunc(it.Tasks, func(t Task) bool { return t.Holds }) {
+				if !started && (it.StopReason == "interrupted" || it.FollowUp || slices.ContainsFunc(it.Tasks, func(t Task) bool { return t.Holds })) {
 					return true
 				}
 				started = true

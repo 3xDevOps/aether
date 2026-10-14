@@ -82,6 +82,8 @@ type TurnState struct {
 	Reason  string
 	// Tasks counts the background tasks a background state waits for.
 	Tasks int
+	// Autonomous says a background state's agent runs a turn of its own.
+	Autonomous bool
 	// Failed is the error a turn's prompt failed with while the agent stayed
 	// connected.
 	Failed error
@@ -203,23 +205,30 @@ type Session struct {
 	origin      string
 	tasks       map[string]*liveTask
 	loggedTasks []Task
-	// taskCalls holds the last snapshot of each tool call whose task runs.
+	loggedOwed  bool
+	// taskCalls holds the last snapshot of each tool call whose task runs;
+	// endedTasks the status of tasks that ended before their tool call
+	// arrived, oldest first in endedOrder.
 	taskCalls  map[string]ToolCall
+	endedTasks map[string]string
+	endedOrder []string
 	lastUpdate time.Time
 	// quietAt is when the armed check of the autonomous turn's quiet fires.
 	quietAt time.Time
-	// owed is when a task the run waited for ended with no turn running.
-	owed time.Time
+	// owedUntil bounds the wait for the turn reporting back on a task the
+	// run waited for; endedInTurn says such a task ended during a turn.
+	owedUntil   time.Time
+	endedInTurn bool
 	// reported is the latest state OnState got; idleStop is the stop reason
 	// idle reports once background work drains. holdIdle keeps a failed
 	// turn's idle until the agent works again.
 	reported TurnState
 	idleStop string
 	holdIdle bool
-	// answers counts session/prompt answers read from the agent, ended the
-	// turns whose end is recorded; turnEnded signals ended changing.
-	answers, ended int64
-	turnEnded      *sync.Cond
+	// ended counts the turns whose end is recorded; turnEnded signals it
+	// changing.
+	ended     int64
+	turnEnded *sync.Cond
 }
 
 // Start initializes the agent over r and w, restores or creates its session
@@ -234,14 +243,15 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		return nil, err
 	}
 	s := &Session{
-		cfg:       cfg,
-		log:       log,
-		logger:    cfg.Logger,
-		notify:    newSerialQueue(),
-		done:      make(chan struct{}),
-		subs:      make(map[chan Item]struct{}),
-		tasks:     make(map[string]*liveTask),
-		taskCalls: make(map[string]ToolCall),
+		cfg:        cfg,
+		log:        log,
+		logger:     cfg.Logger,
+		notify:     newSerialQueue(),
+		done:       make(chan struct{}),
+		subs:       make(map[chan Item]struct{}),
+		tasks:      make(map[string]*liveTask),
+		taskCalls:  make(map[string]ToolCall),
+		endedTasks: make(map[string]string),
 	}
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
@@ -254,6 +264,11 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		s.mu.Lock()
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "The agent connection ended before the turn finished."}})
 		s.emitLocked(Item{Kind: KindTurnEnd, StopReason: "interrupted"})
+		s.mu.Unlock()
+	}
+	if cfg.ClaudeCode {
+		s.mu.Lock()
+		s.interruptTasksLocked(LastItem(log, KindBackground))
 		s.mu.Unlock()
 	}
 
@@ -474,9 +489,10 @@ func awaitAccept(ctx context.Context, ack *turnAck) (Receipt, error) {
 }
 
 // PromptIdle starts a turn only when no prompt or autonomous turn is running
-// and no prompt is queued, and reports whether it did once the agent accepted
-// the prompt.
-func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bool, error) {
+// or owed and no prompt is queued, and reports whether it did once the agent
+// accepted the prompt. delivered, if set, is called once for a prompt that
+// started a turn, as for Prompt.
+func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock, delivered func(error)) (bool, error) {
 	if err := s.validatePromptImages(blocks); err != nil {
 		return false, err
 	}
@@ -485,11 +501,11 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock) (bo
 		s.mu.Unlock()
 		return false, ErrClosed
 	}
-	if s.turnActive || s.autonomous || len(s.queue) > 0 {
+	if s.turnActive || s.autonomous || s.owingLocked() || len(s.queue) > 0 {
 		s.mu.Unlock()
 		return false, nil
 	}
-	ack := s.startTurnLocked(blocks, nil)
+	ack := s.startTurnLocked(blocks, delivered)
 	s.mu.Unlock()
 	if _, err := awaitAccept(ctx, ack); err != nil {
 		return false, err
@@ -512,7 +528,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 	ack := &turnAck{done: make(chan struct{}), delivered: delivered}
 	s.starting = ack
 	s.turn++
-	s.turnActive, s.holdIdle, s.owed = true, false, time.Time{}
+	s.turnActive, s.holdIdle, s.owedUntil = true, false, time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart})
 	s.relogTasksLocked()
 	s.userMessageLocked(blocks)
@@ -591,15 +607,17 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
 	stop, err := s.conn.prompt(s.ctx, blocks)
 	sent()
-	if err != nil && s.conn.closed() {
-		// Record what the agent sent before it went away ahead of the
-		// interruption.
-		s.conn.delivered()
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ended++
 	s.turnEnded.Broadcast()
+	if err != nil && s.conn.closed() {
+		// Record what the agent sent before it went away ahead of the
+		// interruption. Its answer barrier, released above, is among it.
+		s.mu.Unlock()
+		s.conn.delivered()
+		s.mu.Lock()
+	}
 	s.resolveLocked(ack, err)
 	if s.starting == ack {
 		s.starting = nil
@@ -624,6 +642,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Prompt failed", Description: err.Error()}})
 	}
 	if reason == "cancelled" {
+		s.endedInTurn = false
 		s.dismissLocked()
 	}
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: reason})
@@ -634,6 +653,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		s.startTurnLocked(next.blocks, next.delivered)
 		return
 	}
+	s.followUpLocked()
 	s.idleStop = reason
 	switch {
 	case failed != nil:
@@ -654,8 +674,13 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 func (s *Session) promptAnswered() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.answers++
-	for s.ended < s.answers && !s.closed {
+	s.answeredLocked()
+}
+
+// answeredLocked waits until the end of every turn whose prompt the agent
+// answered so far is recorded.
+func (s *Session) answeredLocked() {
+	for s.ended < s.conn.answers.Load() && !s.closed {
 		s.turnEnded.Wait()
 	}
 }
@@ -863,6 +888,8 @@ func (s *Session) authStatus(raw json.RawMessage) {
 func (s *Session) requestOpened(r Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Requests are not ordered with the answer barrier's notification.
+	s.answeredLocked()
 	s.acceptedLocked()
 	s.openAutonomousLocked()
 	s.lastUpdate = time.Now()
@@ -900,6 +927,7 @@ func (s *Session) watch() {
 	if held := s.heldTasksLocked(); len(held) > 0 {
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Background work interrupted", Description: "The agent connection closed while these background tasks ran: " + strings.Join(held, ", ")}})
 	}
+	s.interruptTasksLocked(Item{Tasks: s.loggedTasks, FollowUp: s.loggedOwed})
 	if s.turnActive || s.autonomous {
 		s.proj.endTurn()
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "error", Title: "Turn interrupted", Description: "The agent connection closed before the turn finished."}})
@@ -940,60 +968,4 @@ func (s *Session) watch() {
 	}
 	s.mu.Unlock()
 	s.notify.close(s.done)
-}
-
-// serialQueue runs callbacks one at a time in push order on its own
-// goroutine, so callbacks may call back into the Session.
-type serialQueue struct {
-	mu     sync.Mutex
-	fns    []func()
-	closed bool
-	done   chan struct{}
-	wake   chan struct{}
-}
-
-func newSerialQueue() *serialQueue { return &serialQueue{wake: make(chan struct{}, 1)} }
-
-func (q *serialQueue) push(f func()) {
-	q.mu.Lock()
-	q.fns = append(q.fns, f)
-	q.mu.Unlock()
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
-}
-
-// close stops the queue after the callbacks already pushed and then closes
-// done, if given.
-func (q *serialQueue) close(done chan struct{}) {
-	q.mu.Lock()
-	q.closed, q.done = true, done
-	q.mu.Unlock()
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
-}
-
-func (q *serialQueue) run() {
-	for {
-		q.mu.Lock()
-		fns, closed, done := q.fns, q.closed, q.done
-		q.fns = nil
-		q.mu.Unlock()
-		for _, f := range fns {
-			f()
-		}
-		if len(fns) > 0 {
-			continue
-		}
-		if closed {
-			if done != nil {
-				close(done)
-			}
-			return
-		}
-		<-q.wake
-	}
 }

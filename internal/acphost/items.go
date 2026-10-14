@@ -94,6 +94,9 @@ type Item struct {
 	// Tasks is a background item's full set of live background tasks; an
 	// empty set is written when the last one ends.
 	Tasks []Task `json:"tasks,omitempty"`
+	// FollowUp marks a background item written while the agent owes the
+	// turn that reports back on a task that ended.
+	FollowUp bool `json:"follow_up,omitempty"`
 }
 
 // Message is one segment of a user message, assistant message, or thought.

@@ -19,13 +19,24 @@ var autonomousQuiet = 2 * time.Minute
 // minutes, so such a call lost its end update.
 var autonomousStale = 15 * time.Minute
 
+// followUpGrace keeps a run working after a turn during which a task it
+// waited for ended: Claude Code starts the turn that reports back on the task
+// about 100 ms after the previous turn's result.
+var followUpGrace = 2 * time.Second
+
+// endedTaskMemory bounds the task ends kept for launching tool calls that
+// have not arrived yet.
+const endedTaskMemory = 32
+
 // claudeTaskFrames are the raw Claude Code SDK messages Claude's adapter
 // forwards as _claude/sdkMessage when session meta lists them in
-// claudeCode.emitRawSDKMessages.
+// claudeCode.emitRawSDKMessages. task_progress changes no state; it arrives
+// on every tool use of a task, which keeps a long task's run active.
 var claudeTaskFrames = []map[string]string{
 	{"type": "system", "subtype": "task_notification"},
 	{"type": "system", "subtype": "task_updated"},
 	{"type": "system", "subtype": "background_tasks_changed"},
+	{"type": "system", "subtype": "task_progress"},
 }
 
 // Task is one live Claude Code background task.
@@ -125,11 +136,14 @@ func (s *Session) sdkMessage(raw json.RawMessage) {
 	default:
 		return
 	}
-	if s.heldLocked() < held && !s.turnActive && !s.autonomous {
-		// Claude Code reports back on the task in a turn of its own that
-		// starts right after.
-		s.owed = time.Now()
-		time.AfterFunc(autonomousQuiet, s.quietCheck)
+	if s.heldLocked() < held {
+		// Claude Code reports back on the task in a turn of its own, which
+		// starts right after the running turn, if any, ends.
+		if s.turnActive || s.autonomous {
+			s.endedInTurn = true
+		} else {
+			s.oweLocked(autonomousQuiet)
+		}
 	}
 	s.logTasksLocked()
 	s.settleLocked()
@@ -140,6 +154,13 @@ func (s *Session) sdkMessage(raw json.RawMessage) {
 func (s *Session) trackTaskCallLocked(it *Item) {
 	task := it.ToolCall.Task
 	if task == nil || task.Status != "running" {
+		return
+	}
+	if status, ok := s.endedTasks[task.ID]; ok {
+		ended := *task
+		ended.Status = status
+		it.ToolCall.Task = &ended
+		s.proj.setTask(it.ToolCall.ID, &ended)
 		return
 	}
 	if t := s.tasks[task.ID]; t != nil && task.Type == "" {
@@ -156,6 +177,15 @@ func (s *Session) trackTaskCallLocked(it *Item) {
 func (s *Session) taskEndedLocked(id, status string) {
 	call, ok := s.taskCalls[id]
 	if !ok {
+		// The task may end before the tool result that launched it.
+		if _, seen := s.endedTasks[id]; !seen {
+			if len(s.endedOrder) == endedTaskMemory {
+				delete(s.endedTasks, s.endedOrder[0])
+				s.endedOrder = s.endedOrder[1:]
+			}
+			s.endedTasks[id] = status
+			s.endedOrder = append(s.endedOrder, id)
+		}
 		return
 	}
 	delete(s.taskCalls, id)
@@ -193,31 +223,63 @@ func (s *Session) heldTasksLocked() []string {
 	return ids
 }
 
-// logTasksLocked records the live task set when it differs from the one the
-// log holds last.
+// logTasksLocked records the live task set and the owed follow-up when they
+// differ from what the log holds last.
 func (s *Session) logTasksLocked() {
-	tasks := s.tasksLocked()
-	if slices.Equal(tasks, s.loggedTasks) {
+	tasks, owing := s.tasksLocked(), s.owingLocked()
+	if slices.Equal(tasks, s.loggedTasks) && owing == s.loggedOwed {
 		return
 	}
-	s.loggedTasks = tasks
-	s.emitLocked(Item{Kind: KindBackground, Tasks: tasks})
+	s.loggedTasks, s.loggedOwed = tasks, owing
+	s.emitLocked(Item{Kind: KindBackground, Tasks: tasks, FollowUp: owing})
 }
 
 // relogTasksLocked records the live task set again after a turn start, which
 // fences the set logged before it out of Interrupted.
 func (s *Session) relogTasksLocked() {
-	s.loggedTasks = nil
+	s.loggedTasks, s.loggedOwed = nil, false
 	if tasks := s.tasksLocked(); len(tasks) > 0 {
 		s.logTasksLocked()
 	}
 }
 
+// oweLocked waits up to d for the turn that reports back on an ended task.
+func (s *Session) oweLocked(d time.Duration) {
+	s.owedUntil = time.Now().Add(d)
+	time.AfterFunc(d, s.quietCheck)
+	s.logTasksLocked()
+}
+
+func (s *Session) owingLocked() bool { return time.Now().Before(s.owedUntil) }
+
+// followUpLocked owes the turn reporting back on a task that ended during
+// the turn that just ended.
+func (s *Session) followUpLocked() {
+	if s.endedInTurn {
+		s.endedInTurn = false
+		s.oweLocked(followUpGrace)
+	}
+}
+
+// interruptTasksLocked records that no task outlived the agent connection
+// whose tasks the log lists last: interrupted when the run waited for one.
+func (s *Session) interruptTasksLocked(last Item) {
+	if len(last.Tasks) == 0 && !last.FollowUp {
+		return
+	}
+	marker := Item{Kind: KindBackground}
+	if last.FollowUp || slices.ContainsFunc(last.Tasks, func(t Task) bool { return t.Holds }) {
+		marker.StopReason = "interrupted"
+	}
+	s.loggedTasks, s.loggedOwed = nil, false
+	s.emitLocked(marker)
+}
+
 // backgroundLocked reports whether the agent works with no prompt open: an
 // autonomous turn runs, tasks it reports back on are live, or one ended and
-// the turn reporting back on it has not started within autonomousQuiet.
+// the turn reporting back on it is still owed.
 func (s *Session) backgroundLocked() bool {
-	return s.autonomous || s.heldLocked() > 0 || (!s.owed.IsZero() && time.Since(s.owed) < autonomousQuiet)
+	return s.autonomous || s.heldLocked() > 0 || s.owingLocked()
 }
 
 func (s *Session) trackLocked(head updateHead) {
@@ -238,7 +300,7 @@ func (s *Session) openAutonomousLocked() {
 	s.proj.closeText()
 	s.turn++
 	s.autonomous, s.resulted, s.origin, s.holdIdle = true, false, "", false
-	s.lastUpdate, s.owed = time.Now(), time.Time{}
+	s.lastUpdate, s.owedUntil = time.Now(), time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart, Autonomous: true})
 	s.relogTasksLocked()
 }
@@ -256,7 +318,7 @@ func (s *Session) settleLocked() {
 		}
 	}
 	if s.backgroundLocked() && (s.autonomous || !s.holdIdle) {
-		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked()}
+		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked(), Autonomous: s.autonomous}
 		if s.reported != st {
 			s.stateLocked(st)
 		}
@@ -303,6 +365,8 @@ func (s *Session) quietCheck() {
 	if !s.quietAt.After(time.Now()) {
 		s.quietAt = time.Time{}
 	}
+	// Drops the follow-up from the log once it is no longer owed.
+	s.logTasksLocked()
 	s.settleLocked()
 }
 
@@ -319,7 +383,9 @@ func (s *Session) endAutonomousLocked(stop string) {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
 		s.startTurnLocked(next.blocks, next.delivered)
+		return
 	}
+	s.followUpLocked()
 }
 
 func (s *Session) stateLocked(st TurnState) {
@@ -345,8 +411,8 @@ func (s *Session) cancelBackgroundLocked() {
 	if s.turnActive || s.closed || !s.backgroundLocked() {
 		return
 	}
+	s.owedUntil, s.endedInTurn, s.idleStop = time.Time{}, false, "cancelled"
 	s.dismissLocked()
-	s.owed, s.idleStop = time.Time{}, "cancelled"
 	if s.autonomous {
 		s.endAutonomousLocked("cancelled")
 	}

@@ -134,7 +134,10 @@ type Conn struct {
 	sessionID    atomic.Value
 	replaying    atomic.Bool
 	lastActivity atomic.Int64
-	autoAllow    bool
+	// answers counts session/prompt answers read from the agent, in wire
+	// order with requests.
+	answers   atomic.Int64
+	autoAllow bool
 	// sessionMeta is the _meta of session/new, session/resume and
 	// session/load.
 	sessionMeta map[string]any
@@ -261,6 +264,9 @@ func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
 			// Matched before the SDK sees the answer, which can start the
 			// next prompt.
 			answered := ended && lineStart && c.w.answersPrompt(chunk)
+			if answered {
+				c.answers.Add(1)
+			}
 			_, werr := dst.Write(chunk)
 			if werr == nil && answered {
 				_, werr = dst.Write(answeredLine)
