@@ -2,6 +2,9 @@ package profile
 
 import (
 	"fmt"
+	"path"
+	"slices"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/secretscan"
 )
@@ -40,10 +43,62 @@ var defaultIgnores = map[string][]string{
 	},
 }
 
+// configIgnores are defaultIgnores plus what only aether config push and the
+// config.* methods leave out: more runtime state, and what the agent's own
+// account sync, plugin install, or package manager recreates on the server.
+// Aether profile push keeps carrying these, vendored plugins included.
+var configIgnores = withDefaultIgnores(map[string][]string{
+	"claude": {
+		"transcripts/", "sessions/", "session-env/", "cache/", "backups/",
+		"plugins/cache/", "plugins/marketplaces/", "plugins/synced/",
+		"skills/synced/",
+	},
+	// Codex's state databases carry a schema version in their names.
+	"codex": {
+		"history.jsonl", "cache/", "log/", "shell_snapshots/",
+		"plugins/cache/", "skills/.system/",
+		"*.sqlite", "*.sqlite-shm", "*.sqlite-wal",
+	},
+	"omp":      {"agent/blobs/", "wt/", "remote-host/", "ssh-control/"},
+	"opencode": {"node_modules/", ".git/"},
+})
+
+func withDefaultIgnores(extra map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(defaultIgnores)+len(extra))
+	for name, patterns := range defaultIgnores {
+		out[name] = slices.Clone(patterns)
+	}
+	for name, patterns := range extra {
+		out[name] = append(out[name], patterns...)
+	}
+	return out
+}
+
 // DefaultIgnores returns the immutable-by-convention runtime/history patterns
 // for harnessName. The returned slice must not be mutated.
 func DefaultIgnores(harnessName string) []string {
 	return defaultIgnores[harnessName]
+}
+
+// ConfigIgnores returns the patterns aether config push and the config.*
+// methods leave out for harnessName. The returned slice must not be mutated.
+func ConfigIgnores(harnessName string) []string {
+	return configIgnores[harnessName]
+}
+
+// Ignored reports whether rel, slash-separated and relative to the profile
+// root, or a directory above it, matches one of patterns. A pattern is
+// case-sensitive and anchored at the root; * matches within one component.
+func Ignored(patterns []string, rel string) bool {
+	for _, pattern := range patterns {
+		pattern = strings.TrimSuffix(pattern, "/")
+		for prefix := rel; prefix != "." && prefix != "/"; prefix = path.Dir(prefix) {
+			if ok, _ := path.Match(pattern, prefix); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ScanFiles rejects files that gitleaks flags unless allow[path] is set.

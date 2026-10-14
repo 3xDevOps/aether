@@ -160,6 +160,7 @@ func TestHomeRPCListsButNeverReadsCredentials(t *testing.T) {
 	locked := []string{
 		".claude/.credentials.json", ".codex/auth.json", ".config/gh/hosts.yml",
 		".git-credentials", ".netrc", ".ssh/id_ed25519", ".ssh/config", "keys/server.pem",
+		"project/.env", "project/.env.local",
 	}
 	for _, rel := range locked {
 		e.seed(t, rel, "secret")

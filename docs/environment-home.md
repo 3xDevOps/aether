@@ -370,15 +370,19 @@ the commands, what is always left out, and the output.
 The server advertises effective `credential_names` and `runtime_ignores` for
 each agent in `config.roots`, and `aether config push` applies them before
 reading a file. Credential names match any path component
-case-insensitively, and `*.pem` files are always excluded. Runtime paths use
-exact, case-sensitive, root-relative component-prefix matching.
-`.aether-profile-ignore` is also excluded; its rules apply only to
+case-insensitively, and `*.pem`, `.env`, and `.env.*` files are always
+excluded. Runtime patterns are case-sensitive and anchored at the agent's
+directory; one covers a path and everything below it, and `*` matches within
+one name. `.aether-profile-ignore` is also excluded; its rules apply only to
 `aether profile push`. Known runtime files are excluded before the 64 MiB
 size check, including OMP's statistics database and SQLite sidecars. See the
 [runtime policy](harnesses.md#agent-configuration-import-and-files).
 For a required larger asset, run `aether terminal` and install or download it
 directly into the agent's directory in your persistent home. Neither
 **Files** nor `aether profile push` is a large-file upload alternative.
+
+A push never replaces a server file that differs unless it is run with
+`--overwrite`, and it skips a file that is already identical there.
 
 Empty files and binary assets are preserved. New files get the permission
 bits sent with them (`0644` when none are sent); existing files retain their
@@ -408,8 +412,9 @@ replacing an existing file ask first; there is no trash. One file is at most
 Credential files are listed with a lock and cannot be opened, edited,
 downloaded, renamed, or moved in Files: agent logins such as `~/.claude/.credentials.json`,
 everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
-`~/.git-credentials`, `~/.netrc`, and `*.pem`. Deleting one and uploading
-over one work. Do the rest in the Environment terminal. Symlinks are listed and never followed.
+`~/.git-credentials`, `~/.netrc`, `*.pem`, `.env`, and `.env.*`. Deleting
+one and uploading over one work. Do the rest in the Environment terminal.
+Symlinks are listed and never followed.
 
 Text edits are complete UTF-8 text up to 64 MiB; binary and oversized files
 are read-only. Save explicitly with **Save** or

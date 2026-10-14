@@ -575,7 +575,8 @@ func rejectMode(mode uint32) error {
 }
 
 // CredentialNames returns the effective credential basenames for import previews.
-// Matching is case-insensitive in every path component; *.pem is always denied.
+// Matching is case-insensitive in every path component; *.pem, .env and
+// .env.* are always denied.
 func CredentialNames(harnessDeny []string) []string {
 	names := make([]string, 0, len(extraDeniedNames)+len(harnessDeny))
 	names = append(names, extraDeniedNames...)
@@ -593,7 +594,7 @@ func deniedBasename(rel string, harnessDeny []string) bool {
 			return true
 		}
 		lower := strings.ToLower(base)
-		if strings.HasSuffix(lower, ".pem") {
+		if strings.HasSuffix(lower, ".pem") || lower == ".env" || strings.HasPrefix(lower, ".env.") {
 			return true
 		}
 		for _, n := range extraDeniedNames {
