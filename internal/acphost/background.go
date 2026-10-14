@@ -164,7 +164,8 @@ func (s *Session) taskEndedLocked(id, status string) {
 	if t := s.tasks[id]; t != nil && task.Type == "" {
 		task.Type = t.typ
 	}
-	call.Task = &task
+	// Output is a delta the launch snapshot already carried.
+	call.Task, call.Output = &task, ""
 	s.proj.setTask(call.ID, &task)
 	s.emitLocked(Item{Kind: KindToolCall, ToolCall: &call})
 }
