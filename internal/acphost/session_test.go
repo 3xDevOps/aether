@@ -563,7 +563,7 @@ func TestToolNameAndParentAreKept(t *testing.T) {
 	}
 }
 
-func TestToolUpdatesAfterTheTurnAreThrottled(t *testing.T) {
+func TestEveryToolUpdateAfterTheTurnIsWritten(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
 		m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "x", "status": "in_progress"})
@@ -574,7 +574,7 @@ func TestToolUpdatesAfterTheTurnAreThrottled(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitIdle(t)
-	for range 6 {
+	for range 2 {
 		m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1"})
 	}
 	m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed"})
@@ -582,8 +582,8 @@ func TestToolUpdatesAfterTheTurnAreThrottled(t *testing.T) {
 	for {
 		tools := ofKind(items(t, s), KindToolCall)
 		if tools[len(tools)-1].ToolCall.Status == "completed" {
-			if len(tools) != 3 {
-				t.Fatalf("%d tool items, want the open, the first update after the turn and the completion", len(tools))
+			if len(tools) != 4 {
+				t.Fatalf("%d tool items, want the open, both updates after the turn and the completion", len(tools))
 			}
 			return
 		}

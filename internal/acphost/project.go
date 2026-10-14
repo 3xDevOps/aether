@@ -63,8 +63,8 @@ type toolState struct {
 	emittedTitle  string
 	skipped       int
 	updated       uint64
-	// ended is set when a turn ends; late, once the call has updated since.
-	ended, late bool
+	// ended is set when a turn ends.
+	ended bool
 }
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
@@ -377,9 +377,7 @@ func (p *projector) tool(id string, patch toolPatch) {
 
 	final := c.Status == string(acp.ToolCallStatusCompleted) || c.Status == string(acp.ToolCallStatusFailed)
 	// No later endTurn writes what a call that outlived its turn holds back.
-	afterTurn := st.ended && !st.late
-	st.late = st.ended
-	if !known || final || afterTurn || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
+	if !known || final || st.ended || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
 		len(st.output) >= toolOutputGrowth || st.skipped+1 >= toolSkipLimit {
 		p.emitTool(st)
 		if !final {
@@ -419,7 +417,7 @@ func (p *projector) endTurn() {
 			delete(p.plans, id)
 			continue
 		}
-		st.ended, st.late = true, false
+		st.ended = true
 	}
 	if drop := len(p.tools) - maxKeptTools; drop > 0 {
 		ids := slices.SortedFunc(maps.Keys(p.tools), func(a, b string) int { return cmp.Compare(p.tools[a].updated, p.tools[b].updated) })
