@@ -538,7 +538,7 @@ func TestLocalLinkSwitch(t *testing.T) {
 	if len(backend.relinked) != 1 || backend.relinked[0].Addr != "prod:2222" || backend.relinked[0].Active != "prod" {
 		t.Fatalf("relinked = %+v, want the prod link", backend.relinked)
 	}
-	if got := g.local.snapshot(); got.Active != "prod" {
+	if got := g.local.snapshot(); got.Active != "prod" || got.GUIServer != "prod" {
 		t.Fatalf("cached config = %+v, want prod active", got)
 	}
 	if onDisk, err := cli.Load(); err != nil || onDisk.GUIServer != "prod" || onDisk.Addr != "home:2222" {

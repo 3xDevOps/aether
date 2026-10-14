@@ -356,7 +356,7 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 	if err != nil {
 		return nil, unreachableError(err)
 	}
-	saved.GUIServer = params.Name
+	saved.GUIServer, target.GUIServer = params.Name, params.Name
 	if err := cli.Save(saved); err != nil {
 		_ = conn.Close()
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
