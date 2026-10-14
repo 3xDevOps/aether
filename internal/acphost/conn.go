@@ -167,21 +167,27 @@ type rpcHead struct {
 }
 
 func (in *agentInput) Write(p []byte) (int, error) {
+	var m rpcHead
+	prompt := bytes.Contains(p, []byte(`"`+acp.AgentMethodSessionPrompt+`"`)) && json.Unmarshal(p, &m) == nil &&
+		m.Method == acp.AgentMethodSessionPrompt
+	if prompt {
+		// Before the write: the agent can answer before Write returns.
+		in.mu.Lock()
+		in.promptID = string(m.ID)
+		in.mu.Unlock()
+	}
 	n, err := in.WriteCloser.Write(p)
 	if err != nil {
 		in.broken.Store(true)
 		_ = in.output.Close()
 	}
-	var m rpcHead
-	if !bytes.Contains(p, []byte(`"`+acp.AgentMethodSessionPrompt+`"`)) || json.Unmarshal(p, &m) != nil || m.Method != acp.AgentMethodSessionPrompt {
-		return n, err
-	}
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.promptID = string(m.ID)
-	if in.unsent != nil {
-		close(in.unsent)
-		in.unsent = nil
+	if prompt {
+		in.mu.Lock()
+		if in.unsent != nil {
+			close(in.unsent)
+			in.unsent = nil
+		}
+		in.mu.Unlock()
 	}
 	return n, err
 }
@@ -252,8 +258,11 @@ func (c *Conn) relay(dst *io.PipeWriter, src io.Reader) {
 		chunk, err := br.ReadSlice('\n')
 		if len(chunk) > 0 {
 			ended := chunk[len(chunk)-1] == '\n'
+			// Matched before the SDK sees the answer, which can start the
+			// next prompt.
+			answered := ended && lineStart && c.w.answersPrompt(chunk)
 			_, werr := dst.Write(chunk)
-			if werr == nil && ended && lineStart && c.w.answersPrompt(chunk) {
+			if werr == nil && answered {
 				_, werr = dst.Write(answeredLine)
 			}
 			if werr != nil {
