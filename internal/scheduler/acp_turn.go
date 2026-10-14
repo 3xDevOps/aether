@@ -78,7 +78,9 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpIdleReason(st.Reason)}
 	}
 	d.report(entry.runID, report)
-	if !st.Working {
+	// Between turns a mail prompt can start one; PromptIdle refuses while a
+	// follow-up is owed, and the follow-up's end wakes again.
+	if !st.Working || (st.Reason == "background" && !st.Autonomous) {
 		d.wakeIdle(entry.runID)
 	}
 }

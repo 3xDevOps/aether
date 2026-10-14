@@ -486,11 +486,42 @@ func (e *supervised) outcomeDue() bool {
 	return e.turnEnded() || (e.betweenTurns && e.asks())
 }
 
-// questionHeld reports whether a shown question outranks the agent's
-// background work, which goes on until the user answers. The caller must
-// hold s.mu.
+// questionHeld reports whether a shown question outranks an Enhanced agent's
+// work: background tasks and turns the agent or its mail start go on until a
+// member's message reaches the agent (answerReached). A Standard run's next
+// working report is the user's answer. The caller must hold s.mu.
 func (e *supervised) questionHeld(report agentstatus.Report) bool {
-	return e.idleShown && e.asks() && backgroundWork(report)
+	return e.idleShown && e.asks() && e.launchMode == domain.LaunchACP && report.State == agentstatus.Working
+}
+
+// answerReached clears a shown question once a member's message reached the
+// agent, and returns a working run to running.
+func (s *Scheduler) answerReached(run domain.RunID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	if entry == nil || !entry.idleShown || !entry.asks() {
+		return
+	}
+	old := entry.sidecar()
+	entry.idleReason, entry.idleShown = "", false
+	if err := s.writeSidecar(entry.sidecar()); err != nil {
+		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
+		slog.Warn("scheduler: clear the answered question", "run", run, "error", err)
+		return
+	}
+	if entry.status != domain.RunNeedsAttention || entry.agentReport.State != agentstatus.Working {
+		return
+	}
+	reason := agentstatus.ReasonResumed
+	if backgroundWork(entry.agentReport) {
+		reason = entry.agentReport.Reason
+	}
+	if err := s.transitionLocked(s.superCtx, run, entry.workspaceID, entry.status, domain.RunRunning, reason, ""); err != nil {
+		slog.Warn("scheduler: resume the answered run", "run", run, "error", err)
+		return
+	}
+	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 }
 
 // turnEnded must be called with s.mu held.
