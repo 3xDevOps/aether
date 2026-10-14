@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -492,6 +493,27 @@ func TestTerminalControlStatusAndStopAreMemberScoped(t *testing.T) {
 	calls := e.runs.Calls()
 	if len(calls) < 2 || calls[len(calls)-2] != "terminal-status:"+string(e.member.ID) || calls[len(calls)-1] != "terminal-stop:"+string(e.member.ID) {
 		t.Fatalf("RunController calls = %v", calls)
+	}
+}
+
+func TestTerminalExecReturnsTheCommandResult(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+
+	var got protocol.TerminalExecResult
+	if err := c.Call(protocol.MethodTerminalExec, protocol.TerminalExecParams{Command: "claude --version"}, &got); err != nil {
+		t.Fatalf("terminal.exec: %v", err)
+	}
+	if want := (protocol.TerminalExecResult{ExitCode: 3, Stdout: "out\n", Stderr: "err\n"}); got != want {
+		t.Fatalf("terminal.exec = %+v, want %+v", got, want)
+	}
+	var refused *protocol.Error
+	if err := c.Call(protocol.MethodTerminalExec, protocol.TerminalExecParams{Command: " \n"}, nil); !errors.As(err, &refused) || refused.Code != protocol.CodeInvalidParams {
+		t.Fatalf("terminal.exec without a command = %v, want invalid params", err)
+	}
+	if calls, want := e.runs.Calls(), []string{"terminal-exec:" + string(e.member.ID) + ":claude --version"}; !slices.Equal(calls, want) {
+		t.Fatalf("RunController calls = %v, want %v", calls, want)
 	}
 }
 

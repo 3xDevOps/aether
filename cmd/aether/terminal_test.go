@@ -13,6 +13,9 @@ func TestTerminalUsageRejectsMalformedSubcommands(t *testing.T) {
 		{"stop", "extra"},
 		{"--tab"},
 		{"--tab", "dev", "status"},
+		{"exec"},
+		{"exec", " "},
+		{"--tab", "dev", "exec", "true"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			err := runTerminal(args)

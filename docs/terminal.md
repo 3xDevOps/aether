@@ -19,6 +19,7 @@ aether terminal
 aether terminal --tab t2
 aether terminal status
 aether terminal stop
+aether terminal exec <command>...
 ```
 
 In the dashboard, select **Environment** in the header or its **More
@@ -62,6 +63,51 @@ prefix. A final replacement refusal settles the bootstrap gate before its
 server error is shown. For a run terminal, this bootstrap is compact
 current-screen state captured without scanning the retained archive; the
 live view never fetches that archive.
+
+### Run one command
+
+`aether terminal exec` runs one command in your environment without opening
+a tab. It is for a script or a coding agent on your machine, which has no
+terminal to type into:
+
+```sh
+aether terminal exec claude --version
+aether terminal exec 'echo "$HOME"; uname -sm'
+```
+
+The arguments are joined with spaces and run by the login shell a tab starts
+(`/bin/bash -lc`, or `/bin/sh -lc` in an image without bash) in your member
+home, so `$HOME` and `PATH` are the ones a tab sees. Quote the command to
+keep your local shell from expanding it first. A stopped environment is
+started, as `aether terminal` starts it. The command has no terminal and no
+input.
+
+When the command ends, its stdout and stderr are written to yours and
+`aether` exits with its exit code. When `aether` itself fails, it exits 1
+and prints `aether: <error>` to stderr. Interrupting `aether` does not stop
+the command, which may keep running until it ends or reaches the time limit.
+
+The server enforces two limits. A call that passes either fails and returns
+none of the command's output:
+
+- **10 minutes.** The command is killed in the container, with everything
+  it started. In an image without `setsid`, only the command's shell is:
+
+  ```text
+  aether: rpc error -32603: terminal exec: the command passed the 10m0s time limit
+  ```
+
+- **1 MiB of stdout and stderr together.** The command is not stopped and
+  may keep running until it ends or reaches the time limit. Redirect long
+  output to a file in the environment and read the part you need.
+
+  ```text
+  aether: rpc error -32603: terminal exec: exec output: output passed the 1048576 byte limit
+  ```
+
+Output is returned as text: bytes that are not valid UTF-8 arrive as U+FFFD.
+The control-channel method is `terminal.exec`, listed in
+[local-gateway.md](local-gateway.md).
 
 ### Terminal font
 

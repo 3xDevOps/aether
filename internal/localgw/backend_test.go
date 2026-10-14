@@ -224,6 +224,7 @@ func TestSSHBackendTransportFailureRetryPolicy(t *testing.T) {
 		{name: "mirror_refresh_no_replay", method: protocol.MethodWorkspaceMirrorRefresh, wantCalls: 1, wantError: true},
 		{name: "mirror_adopt_no_replay", method: protocol.MethodWorkspaceMirrorAdopt, wantCalls: 1, wantError: true},
 		{name: "mirror_disable_no_replay", method: protocol.MethodWorkspaceMirrorDisable, wantCalls: 1, wantError: true},
+		{name: "terminal_exec_no_replay", method: protocol.MethodTerminalExec, wantCalls: 1, wantError: true},
 		{name: "development_start_no_replay", method: protocol.MethodDevTerminalStart, wantCalls: 1, wantError: true},
 		{name: "git_commit_no_replay", method: protocol.MethodRunGitCommit, wantCalls: 1, wantError: true},
 		{name: "pr_create_no_replay", method: protocol.MethodRunPRCreate, wantCalls: 1, wantError: true},

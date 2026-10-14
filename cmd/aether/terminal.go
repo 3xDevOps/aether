@@ -18,12 +18,15 @@ var terminalTabName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 func init() {
 	register(command{
 		name:  "terminal",
-		short: "open or manage your Environment terminal",
+		short: "open or manage your Environment terminal, or run one command in it",
 		run:   runTerminal,
 	})
 }
 
 func runTerminal(args []string) error {
+	if len(args) > 0 && args[0] == "exec" {
+		return terminalExec(args[1:])
+	}
 	if len(args) > 0 && (args[0] == "status" || args[0] == "stop") {
 		if len(args) != 1 {
 			return terminalUsage()
@@ -67,7 +70,7 @@ func runTerminal(args []string) error {
 }
 
 func terminalUsage() error {
-	return errors.New("usage: aether terminal [--tab <name>] [status|stop]")
+	return errors.New("usage: aether terminal [--tab <name>] [status|stop|exec <command>...]")
 }
 
 func terminalStatus() error {
@@ -84,6 +87,31 @@ func terminalStop() error {
 	return withControl(func(c *protocol.Client) error {
 		return c.Call(protocol.MethodTerminalStop, struct{}{}, nil)
 	})
+}
+
+// terminalExec exits with the command's own status, as aether ssh does.
+func terminalExec(args []string) error {
+	command := strings.Join(args, " ")
+	if strings.TrimSpace(command) == "" {
+		return terminalUsage()
+	}
+	var result protocol.TerminalExecResult
+	err := withControl(func(c *protocol.Client) error {
+		return c.Call(protocol.MethodTerminalExec, protocol.TerminalExecParams{Command: command}, &result)
+	})
+	if err != nil {
+		return err
+	}
+	if _, err = io.WriteString(os.Stdout, result.Stdout); err != nil {
+		return err
+	}
+	if _, err = io.WriteString(os.Stderr, result.Stderr); err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		os.Exit(result.ExitCode)
+	}
+	return nil
 }
 
 func printTerminalStatus(w io.Writer, status protocol.TerminalStatusResult) error {
