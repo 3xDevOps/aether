@@ -105,6 +105,8 @@ function useNames() {
 export function SignInsSection({ client, self, focus }: { client: Api; self: Member; focus?: boolean }) {
   const caps = useCapability()
   const merges = useStore((s) => Object.keys(s.mergedInto).length)
+  // Re-read whenever member.device or a wake re-reads the devices: an approval binds an account.
+  const devices = useStore((s) => s.devices)
   const [identities, setIdentities] = useState<MemberIdentities | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [linking, setLinking] = useState(false)
@@ -120,7 +122,7 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
   useEffect(() => {
     void reload()
     void loadMergeProposals(useStore, client).catch((err: unknown) => setError(message(err)))
-  }, [client, reload, merges])
+  }, [client, reload, merges, devices])
 
   useEffect(() => {
     if (focus) ref.current?.scrollIntoView({ block: 'start' })
@@ -386,7 +388,14 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
     }
   }
 
-  if (proposal && plan) return <Proposed proposal={proposal} minted={plan.plan.minted} />
+  if (proposal && plan) {
+    return (
+      <div className="flex min-w-0 flex-col gap-3">
+        <Proposed proposal={proposal} minted={plan.plan.minted} />
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-3">

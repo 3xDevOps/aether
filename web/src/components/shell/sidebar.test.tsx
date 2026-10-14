@@ -569,3 +569,28 @@ describe('phone shell', () => {
     expect(banner.getByRole('button', { name: 'New run' }).textContent).toBe('')
   })
 })
+
+describe('merge proposals', () => {
+  const proposal = {
+    id: 'prop_1', minted_id: alice.id, proposer_id: bob.id, keep_settings_of: bob.id, plan_digest: 'd',
+    expires_at: '2026-10-14T00:10:00Z', refusal: 'member mem_bob is pending; approve first: aether member approve mem_bob',
+  }
+
+  it('opens Profile at Sign-ins from the board card with the sidebar collapsed', async () => {
+    useStore.setState({ sidebarCollapsed: true, mergeProposals: [proposal], profileOpen: false })
+    render(<AppShell />)
+
+    const card = (await screen.findByText('Bob proposes merging their sign-ins into your member')).closest('[data-merge-proposal-id]') as HTMLElement
+    fireEvent.click(within(card).getByRole('button', { name: 'Review' }))
+    const profile = await screen.findByRole('dialog', { name: 'Profile' })
+    expect(within(profile).getByRole('region', { name: 'Sign-ins' })).toBeDefined()
+  })
+
+  it('counts a proposal to accept in the sidebar Needs you and opens Profile from its row', async () => {
+    useStore.setState({ runs: {}, mergeProposals: [proposal], profileOpen: false })
+    render(<AppShell />)
+
+    fireEvent.click(runList().getByRole('button', { name: /A merge proposal waiting for you/ }))
+    expect(await screen.findByRole('dialog', { name: 'Profile' })).toBeDefined()
+  })
+})

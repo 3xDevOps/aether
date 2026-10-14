@@ -312,6 +312,34 @@ describe('accept a merge', () => {
     expect(client.memberMergeCancel).toHaveBeenCalledWith('prop_2')
   })
 
+  it('re-reads the sign-ins when the devices are re-read', async () => {
+    seed()
+    const client = fakeApi()
+    render(<SignInsSection client={client} self={alice} />)
+    await waitFor(() => expect(client.memberIdentityList).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setDevices([], null))
+    await waitFor(() => expect(client.memberIdentityList).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows a failed proposals read beside the proposal it followed', async () => {
+    seed()
+    const client = fakeApi({
+      memberMergePreview: vi.fn(async () => plan),
+      memberMergePropose: vi.fn(async () => ({ id: 'prop_1', minted_id: minted.id, proposer_id: alice.id, keep_settings_of: alice.id, plan_digest: 'digest-1', expires_at: '2026-10-14T00:10:00Z' })),
+      memberMergePending: vi.fn().mockResolvedValueOnce([]).mockRejectedValue(new Error('member.merge.pending: connection closed')),
+    })
+    render(<SignInsSection client={client} self={alice} />)
+    const dialog = enterCode()
+    fireEvent.change(dialog.getByLabelText('Merge code'), { target: { value: 'ABCD-EFGH' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Preview' }))
+    fireEvent.click(await dialog.findByRole('radio', { name: 'Alice (this sign-in)' }))
+    fireEvent.click(dialog.getByRole('checkbox', { name: 'Discard the listed settings' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Propose merge' }))
+
+    expect(await dialog.findByRole('status')).toBeDefined()
+    expect((await dialog.findByRole('alert')).textContent).toBe('member.merge.pending: connection closed')
+  })
+
   it('re-reads the sign-ins when a merge maps another member', async () => {
     seed()
     const client = fakeApi()

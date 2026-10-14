@@ -4166,7 +4166,8 @@ dashboard, and updates the viewer's own name when it is theirs.
 **Sign-ins** in Profile (`src/routes/members/sign-ins.tsx`) lists, from
 `member.identity.list` (readable by the member or an admin), the member's
 tailnet login, SSH key fingerprint, GitHub accounts and devices with their
-status. **Link a GitHub account**
+status, re-read whenever the devices are (a `member.device` event or a
+wake), since approving a device binds an account. **Link a GitHub account**
 sends `member.identity.link` for the viewer and shows the join link with
 the next step: open it on a device signed in as that account, or `aether
 link '<link>'`, then approve that device. **Merge with another member**
@@ -4193,7 +4194,9 @@ opens a dialog with two tabs:
 A proposal for the viewer to accept (`member.merge.pending` where the
 viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
 card and as a row in the sidebar's Needs you; **Review** and the row open
-Profile at Sign-ins. It lists the proposer's sign-ins, the settings kept,
+Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
+`store/ui.ts`), not the sidebar, so **Review** works with the sidebar
+collapsed or the phone drawer closed. It lists the proposer's sign-ins, the settings kept,
 what is discarded and the resulting role; **Accept and merge** (danger
 style) needs the same tick and sends `member.merge.accept` with the
 proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused

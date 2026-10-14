@@ -7,11 +7,15 @@ import { Sidebar } from '@/components/shell/sidebar'
 import { TopBar } from '@/components/shell/top-bar'
 import { ShortcutsDialog } from '@/components/shortcuts'
 import { UpdateCenter } from '@/components/update-banner'
+import { ProfileDialog } from '@/routes/members/personal'
 import { useTeamRefresh } from '@/routes/team'
+import { useStore } from '@/store'
 
 export function AppShell() {
   useNavShortcuts()
   useTeamRefresh()
+  const profileOpen = useStore((s) => s.profileOpen)
+  const setProfileOpen = useStore((s) => s.setProfileOpen)
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ui text-text">
       <a
@@ -38,6 +42,7 @@ export function AppShell() {
       <CommandPalette />
       <PaletteDialogs />
       <ShortcutsDialog />
+      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
       <UpdateCenter />
       <ConnectionAnnouncer />
     </div>
