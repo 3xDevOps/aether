@@ -134,13 +134,15 @@ ANDROID_JNILIBS  := android/app/src/main/jniLibs
 # The dashboard and that CLI are built in containers pinned by digest too, so
 # `make android` needs Docker and nothing else, as before. The Go image is the
 # toolchain go.mod pins and the Bun image the version web/.bun-version pins;
-# android-cli refuses to run when either has moved without the other. The Bun
-# image has no Node, so Next runs on Bun (`bun --bun`). Their module and build
-# caches live outside the tree, like Gradle's.
+# android-cli refuses to run when either has moved without the other. Bun
+# crashes running Next's TypeScript step, so Next runs on Node like the CI
+# dashboard job: the Bun binary is copied out of its image into the Node one.
+# Their module and build caches live outside the tree, like Gradle's.
 ANDROID_GO_VERSION  := 1.26.9
 ANDROID_GO_IMAGE    := golang:$(ANDROID_GO_VERSION)@sha256:d7722066f0b60ceccb6c0643cbed1f5f9e15506ac237146c95333504d7805d89
 ANDROID_BUN_VERSION := 1.3.14
 ANDROID_BUN_IMAGE   := oven/bun:$(ANDROID_BUN_VERSION)@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+ANDROID_NODE_IMAGE  := node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8
 ANDROID_CLI_CACHE   ?= $(HOME)/.cache/aether/android-cli
 ANDROID_CLI_RUN = docker run --rm \
 	-u $$(id -u):$$(id -g) \
@@ -313,8 +315,11 @@ android-cli:
 	@[ '$(ANDROID_BUN_VERSION)' = "$$(cat web/.bun-version)" ] || { \
 		echo "make android-cli: ANDROID_BUN_IMAGE is Bun $(ANDROID_BUN_VERSION) but web/.bun-version pins $$(cat web/.bun-version); move both together" >&2; exit 1; }
 	@mkdir -p '$(ANDROID_CLI_CACHE)'
-	$(ANDROID_CLI_RUN) -w /src/web $(ANDROID_BUN_IMAGE) \
-		sh -c 'bun install --frozen-lockfile && bun --bun run build'
+	@mkdir -p '$(ANDROID_CLI_CACHE)/bin'
+	docker run --rm --entrypoint cat $(ANDROID_BUN_IMAGE) /usr/local/bin/bun > '$(ANDROID_CLI_CACHE)/bin/bun'
+	@chmod +x '$(ANDROID_CLI_CACHE)/bin/bun'
+	$(ANDROID_CLI_RUN) -w /src/web -e PATH=/cache/bin:/usr/local/bin:/usr/bin:/bin $(ANDROID_NODE_IMAGE) \
+		sh -c 'bun install --frozen-lockfile && bun run build'
 	$(ANDROID_CLI_RUN) -w /src -e CGO_ENABLED=0 -e GOTOOLCHAIN=local $(ANDROID_GO_IMAGE) sh -c ' \
 		for pair in $(ANDROID_CLI_ABIS); do \
 			abi=$${pair%%:*}; platform=$${pair#*:}; \

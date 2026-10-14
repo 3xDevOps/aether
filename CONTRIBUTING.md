@@ -209,9 +209,10 @@ build and a released one run the same toolchain:
 make android
 ```
 
-`make android` first runs `make android-cli`, which builds the dashboard in
-`oven/bun` and then the CLI in `golang`, both pinned by digest in the
-`Makefile` (`ANDROID_BUN_IMAGE`, `ANDROID_GO_IMAGE`) and refused when they
+`make android` first runs `make android-cli`, which builds the dashboard on
+Node 22 with the Bun binary from `oven/bun`, then the CLI in `golang`, all
+pinned by digest in the `Makefile` (`ANDROID_NODE_IMAGE`, `ANDROID_BUN_IMAGE`,
+`ANDROID_GO_IMAGE`) and refused when they
 drift from `web/.bun-version` or `go.mod`'s toolchain. The CLI is built with
 `CGO_ENABLED=0` and the release `-ldflags` into
 `android/app/src/main/jniLibs/<abi>/libaether.so` (gitignored): `GOOS=android`
