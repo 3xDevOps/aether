@@ -22,6 +22,8 @@ const buttonVariants = cva(
         md: 'h-7 px-2.5 text-ui coarse:h-11 coarse:px-3',
         icon: "size-7 coarse:size-11 [&_svg:not([class*='size-'])]:size-4",
         'icon-sm': 'size-6 coarse:size-11',
+        round: "size-7 rounded-full coarse:size-11 [&_svg:not([class*='size-'])]:size-4",
+        pill: 'h-7 rounded-full px-3 text-ui coarse:h-11 coarse:px-4',
       },
     },
     compoundVariants: [{ variant: ['link', 'quiet'], className: 'h-auto px-0 coarse:h-auto coarse:px-0' }],
@@ -34,7 +36,7 @@ type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'link' | 'quiet'
 export type ButtonProps = React.ComponentProps<'button'> & {
   variant?: Variant
   hint?: React.ReactNode
-} & ({ size?: 'sm' | 'md'; label?: undefined } | { size: 'icon' | 'icon-sm'; label: string })
+} & ({ size?: 'sm' | 'md' | 'pill'; label?: undefined } | { size: 'icon' | 'icon-sm' | 'round'; label: string })
 
 export function Button({ className, variant, size, label, hint, ...props }: ButtonProps) {
   const button = (

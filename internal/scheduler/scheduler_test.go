@@ -282,8 +282,8 @@ func TestSaveTerminalImageUsesRunHome(t *testing.T) {
 	if got := readSavedTerminalImage(t, e, e.member.ID, path); string(got) != string(image) {
 		t.Fatalf("saved image = %q, want %q", got, image)
 	}
-	if err = e.sched.ValidateTerminalImage(t.Context(), run.ID, path); err != nil {
-		t.Fatalf("ValidateTerminalImage: %v", err)
+	if err = e.sched.ValidateAttachment(t.Context(), run.ID, path); err != nil {
+		t.Fatalf("ValidateAttachment: %v", err)
 	}
 
 	accountHome, err := e.cfg.Homes.Path(account.ID)

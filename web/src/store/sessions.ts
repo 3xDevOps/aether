@@ -12,6 +12,7 @@ import { toolTenses, type AgentPayload } from '@/store/activity'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
+  isAttachedFile,
   itemCount,
   prependItems,
   replaceItem,
@@ -143,6 +144,9 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
         break
       case 'auth_status':
         if (state) state = { ...state, auth: item.auth }
+        break
+      case 'usage':
+        if (state && item.usage) state = { ...state, usage: item.usage }
         break
     }
   }
@@ -322,7 +326,13 @@ export function deliveryOf(m: RoomMessage): Pick<Extract<SessionRow, { kind: 'us
 }
 
 export function roomImages(m: Pick<RoomMessage, 'id' | 'attachments'>): Extract<SessionRow, { kind: 'user' }>['images'] {
-  return m.attachments?.length ? m.attachments.map((_, index) => ({ messageID: m.id, index })) : undefined
+  const images = (m.attachments ?? []).flatMap((path, index) => isAttachedFile(path) ? [] : [{ messageID: m.id, index }])
+  return images.length ? images : undefined
+}
+
+export function roomFiles(m: Pick<RoomMessage, 'attachments'>): string[] | undefined {
+  const files = m.attachments?.filter(isAttachedFile)
+  return files?.length ? files : undefined
 }
 
 export interface SessionSources {
@@ -450,7 +460,7 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
     const order = events.length + index
     if (m.kind === 'steer_request') {
       items.push({ at: m.created_at, order, row: {
-        ...base, kind: 'user', authorID: m.actor_id, body: m.body, images: roomImages(m), ...deliveryOf(m),
+        ...base, kind: 'user', authorID: m.actor_id, body: m.body, images: roomImages(m), files: roomFiles(m), ...deliveryOf(m),
       } })
     } else if (m.kind === 'comment') {
       items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body } })

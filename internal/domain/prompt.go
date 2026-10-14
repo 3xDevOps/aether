@@ -21,7 +21,8 @@ type AgentPrompt struct {
 }
 
 // TextWithAttachments renders references for terminal delivery. ACP delivery
-// uses native image blocks instead of this text-only representation.
+// uses native image and resource link blocks instead of this text-only
+// representation.
 func (p AgentPrompt) TextWithAttachments() string {
 	if len(p.Attachments) == 0 {
 		return p.Text

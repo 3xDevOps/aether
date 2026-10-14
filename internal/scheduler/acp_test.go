@@ -1059,13 +1059,18 @@ func TestEnhancedRunEmbeddedImageWire(t *testing.T) {
 	}
 }
 
-func TestEnhancedRunRejectsUnsupportedImagesBeforeDelivery(t *testing.T) {
+func TestEnhancedRunRefusesOnlyImagesWithoutImageSupport(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t)
 	rt.fixture.Initialize = bytes.Replace(rt.fixture.Initialize, []byte(`"image": true`), []byte(`"image": false`), 1)
 	run := e.launchACP(t, acpmock.PromptWait)
 	e.waitAgentWorking(t, run.ID)
-	prompt := domain.AgentPrompt{Text: "caption", Attachments: []string{"/not-even-an-image"}, MessageID: "unsupported"}
+	data := []byte("%PDF-1.7\nnot really a document")
+	file, saveErr := e.sched.SaveTerminalFile(t.Context(), e.member.ID, run.ID, "Q3 report.pdf", data)
+	if saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	prompt := domain.AgentPrompt{Text: "caption", Attachments: []string{file, "/not-even-an-image"}, MessageID: "unsupported"}
 	for _, steer := range []bool{false, true} {
 		_, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, prompt, steer, nil)
 		if !errors.Is(err, acphost.ErrUnsupportedImage) || collab.ClassifyReceipt(err) != collab.ReceiptNotSent {
@@ -1078,6 +1083,28 @@ func TestEnhancedRunRejectsUnsupportedImagesBeforeDelivery(t *testing.T) {
 	if err := e.sched.ACPCancel(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
+	waitItems(t, e.sched, run.ID, "cancelled turn", turnEnded("cancelled", 1))
+
+	outcome, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "read this", Attachments: []string{file}, MessageID: "file"}, false, nil)
+	if err != nil || outcome != acphost.OutcomeSent {
+		t.Fatalf("file prompt = %q, %v", outcome, err)
+	}
+	prompts := rt.all()[0].wire.prompts(t)
+	blocks := prompts[len(prompts)-1]
+	wantURI := "file://" + strings.ReplaceAll(file, " ", "%20")
+	if len(blocks) != 2 || blocks[1].ResourceLink == nil {
+		t.Fatalf("file prompt blocks = %+v", blocks)
+	}
+	link := blocks[1].ResourceLink
+	if link.Uri != wantURI || link.Name != "Q3 report.pdf" || link.MimeType == nil || *link.MimeType != "application/pdf" || link.Size == nil || *link.Size != len(data) {
+		t.Fatalf("resource link = %+v", link)
+	}
+	waitItems(t, e.sched, run.ID, "file link in history", func(items []acphost.Item) bool {
+		return slices.ContainsFunc(items, func(item acphost.Item) bool {
+			return item.Message != nil && item.Message.Role == "user" && len(item.Message.Attachments) == 1 &&
+				item.Message.Attachments[0].Type == "resource_link" && item.Message.Attachments[0].URI == wantURI
+		})
+	})
 }
 
 func TestReadImageUsesStoredHomeWithoutLiveRun(t *testing.T) {
@@ -1101,7 +1128,7 @@ func TestReadImageUsesStoredHomeWithoutLiveRun(t *testing.T) {
 	if err != nil || mimeType != "image/png" || !bytes.Equal(got, data) {
 		t.Fatalf("read retained image = %q, %v", mimeType, err)
 	}
-	if validationErr := retained.ValidateTerminalImage(t.Context(), run.ID, reference); validationErr == nil {
+	if validationErr := retained.ValidateAttachment(t.Context(), run.ID, reference); validationErr == nil {
 		t.Fatal("new image admission succeeded without captured live HOME")
 	}
 	foreign, err := e.cfg.Homes.SaveImage(domain.MemberID("another-member"), ".png", data)

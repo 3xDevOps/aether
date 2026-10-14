@@ -804,6 +804,13 @@ func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, r
 	return "/root/.aether/terminal-images/image-test" + extension, nil
 }
 
+func (f *fakeRuns) SaveTerminalFile(_ context.Context, actor domain.MemberID, run domain.RunID, name string, data []byte) (string, error) {
+	if err := f.record(fmt.Sprintf("terminal-file:%s:%s:%s:%d", actor, run, name, len(data))); err != nil {
+		return "", err
+	}
+	return "/root/.aether/terminal-files/" + strings.Repeat("0", 32) + "/" + name, nil
+}
+
 func (f *fakeRuns) ConnectGitHub(_ context.Context, member domain.MemberID) (domain.GitHubConnection, error) {
 	if err := f.record(fmt.Sprintf("github-connect:%s", member)); err != nil {
 		return domain.GitHubConnection{}, err

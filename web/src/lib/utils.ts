@@ -6,7 +6,7 @@ import { extendTailwindMerge } from 'tailwind-merge'
 // `rounded-control rounded-control`.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ['control', 'panel'], shadow: ['overlay', 'field-focus'] },
+    theme: { radius: ['control', 'panel', 'composer'], shadow: ['overlay', 'field-focus'] },
     classGroups: { 'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar'] }] },
   },
 })

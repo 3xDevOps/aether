@@ -1795,7 +1795,13 @@ automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
 `SessionView` reuses `TerminalControlBorder` around the Enhanced timeline and
-composer, excluding the frame toolbar and Details. Its appearance follows
+composer, excluding the frame toolbar and Details. The component is one SVG:
+the four side-midpoint-to-centre paths drawn three times, as a blurred wide
+glow and a tight halo under the `pool` mask, a rim under the `rim` mask, and a
+near-white core under the `hot` mask. Each mask holds the same five radial
+spots, so every layer brightens at the same pools; all layers inherit the
+SVG's animated `stroke-dashoffset` and colour, which is what the acquisition,
+release, hold and takeover animations drive. Its appearance follows
 the acknowledged ACP lease, not the unused agent terminal's history or
 connection state. Voluntary release retracts it; takeover feedback requires
 an explicit revocation matching the held session and generation.
@@ -1932,27 +1938,45 @@ The Enhanced composer (`routes/run/composer.tsx`, state in
 `composer-state.ts`) sends with `run.inject` and the lease; its pill reads
 **Send**, **Steer** (a turn is running and the agent advertised steering),
 **Queue** (`Mod+Shift` held, or no steering), **Interrupt** (`run.acp.cancel`,
-an empty composer during a turn) or **Resume** (a paused run). `Mod+Enter` does
-what the pill says and nothing without text or images, `Mod+Shift+Enter`
-queues; on touch only the pill sends. The shared upload state in
-`composer-images.tsx` accepts file selection and native image paste, enforces
-the eight-image limit, and uses `terminal.image`. File-backed object URLs show
-thumbnails inside the input; removal, successful send and unmount revoke them.
-Enhanced sends pass text and ordered attachment references separately through
-`run.inject`; the server resolves them into ACP image blocks. Image-only
-messages are allowed, incomplete uploads block sending, and failures preserve
-the draft and previews. `prompt_images` from the ACP snapshot gates image input.
-Footer controls wrap on narrow screens.
+an empty composer during a turn) or **Resume** (a paused run). `Enter` does
+what the pill says and nothing without text or images, `Shift+Enter` adds a
+line and `Mod+Shift+Enter` queues; on touch only the pill sends. `Enter` is a
+plain key, which the shortcut table stands down for inside a field, so the
+textarea answers it itself through `isPress`; a key still composing in an
+input method never sends. The shared upload state in
+`composer-images.tsx` accepts file selection and native file paste, enforces
+the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
+`terminal.image` and every other file through `terminal.file`. File-backed
+object URLs show image thumbnails inside the input, other files a chip with
+name and size; removal, successful send and unmount revoke them. Enhanced
+sends pass text and ordered attachment references separately through
+`run.inject`; the server resolves images into ACP image blocks and other files
+into `resource_link` blocks. Attachment-only messages are allowed, incomplete
+uploads block sending, and failures preserve the draft and previews.
+`prompt_images` from the ACP snapshot gates sending a message with an image
+(`hasImages`), not other files.
+
+The timeline rows and both composers share `sessionColumn`
+(`session-rows.tsx`): the 736px column with 16px gutters, so message text and
+the message box line up at every width. The box (`rounded-composer`, 14px)
+holds the textarea above one footer row: attach, the agent's mode, model and
+effort pickers, the context meter, and the send pill at the end. The pill is a
+round arrow while it reads **Send** and widens to its word otherwise. Hints
+and the 45-second delivery notice sit under the box. Footer controls wrap on
+narrow screens. The context meter shows the agent's last ACP `usage_update`
+(`state.usage` in the snapshot, replaced by each `usage` item) as a share of
+its context window, with token counts in its tooltip; it turns
+`state-needs-you` at 90%. An agent that reports no usage shows no meter.
 
 An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
-attached images with their uploaded paths, and the idempotency key of the last
+attached files with their uploaded paths, and the idempotency key of the last
 attempt to send them, so sending the same prompt again delivers it once. The
 Standard and Enhanced composers read the same draft, so it survives opening
 another run or page, an event-log restart that remounts the run, and a switch
 between Standard and Enhanced. A sent prompt empties the draft; deleting the
 run, or authenticating as another member or server, drops it.
 
-A send or an image upload outlives the composer that started it, so the
+A send or an upload outlives the composer that started it, so the
 request in flight and its error are part of the draft too. A composer that
 mounts meanwhile reads **Sending…** or **Uploading…** and stays locked until
 the request settles: nothing can be added to a prompt that is being sent, and
@@ -1971,12 +1995,17 @@ store, not a root-store slice: every root-store write rewrites `aether.ui`,
 and one made while events drain notifies on the next frame, which drops
 keystrokes in a controlled textarea.
 
-User rows keep room-message IDs and attachment indices, not image bytes.
-Image-bearing ACP rows match room messages by those IDs rather than caption
-text, so separate image-only messages remain separate. `message-images.tsx`
+User rows keep room-message IDs and attachment indices, not image bytes, and
+the container paths of other files. A path under
+`.aether/terminal-files/<random>/` is a file (`isAttachedFile`); any other
+attachment is an image. Image-bearing ACP rows match room messages by those IDs
+rather than caption text, so separate image-only messages remain separate; an
+ACP row whose `resource_link` URIs name attached files matches the room
+message with the same text and the same attachment paths. `message-images.tsx`
 fetches authorized image blobs through `api.roomImage` and revokes its object
-URLs when identity, run or row changes. Images sit outside the text-collapse
-area and remain available through history and reconnect.
+URLs when identity, run or row changes, and shows each other file as a chip
+named by its basename with the path as its title. Attachments sit outside the
+text-collapse area and remain available through history and reconnect.
 Mode and effort menus use content-sized described rows; model selectors use
 `Command` inside `Popover`, preserving every advertised option and provider
 group with search by name, ID and description. Selections use
@@ -4944,7 +4973,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘[` / `Alt+←` | browser | Go back |
 | `⌘]` / `Alt+→` | browser | Go forward |
 | `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
-| `⌘Enter` / `Ctrl+Enter` | composer | Send the message, or steer the running turn |
+| `Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
 | `1` to `4` | request | Pick that option of the focused Session request |
 

@@ -16,12 +16,12 @@ describe('enhanced sessions in the store', () => {
     store.getState().acpAck('run_1', { ok: true, seq: 0, replay: 0, epoch: 0, live: true, has_control: false, state: state() })
     const opened = [item('turn_start', 1), item('request', 1, { request })]
     store.getState().acpFrames('run_1', frames(...opened))
-    store.getState().acpFrames('run_1', frames(opened[1]!, item('config_options', 1, { config_options: [{ id: 'mode', name: 'Mode', type: 'select', currentValue: 'plan' }] })))
+    store.getState().acpFrames('run_1', frames(opened[1]!, item('config_options', 1, { config_options: [{ id: 'mode', name: 'Mode', type: 'select', currentValue: 'plan' }] }), item('usage', 1, { usage: { used: 53000, size: 200000 } })))
     let session = store.getState().acpSessions.run_1!
-    expect(session.seq).toBe(3)
-    expect(session.turns[0]!.items.map((it) => it.seq)).toEqual([1, 2, 3])
+    expect(session.seq).toBe(4)
+    expect(session.turns[0]!.items.map((it) => it.seq)).toEqual([1, 2, 3, 4])
     expect(session.pending).toEqual([request])
-    expect(session.state).toMatchObject({ turn_in_flight: true, config_options: [{ currentValue: 'plan' }] })
+    expect(session.state).toMatchObject({ turn_in_flight: true, config_options: [{ currentValue: 'plan' }], usage: { used: 53000, size: 200000 } })
 
     store.getState().acpFrames('run_1', frames(item('request', 1, { request: { ...request, status: 'answered', answer: 'ok' } })))
     expect(store.getState().acpSessions.run_1!.pending).toEqual([])
@@ -29,7 +29,7 @@ describe('enhanced sessions in the store', () => {
     store.getState().acpFrames('run_1', [{ reset: true, epoch: 1 }, ...frames(item('turn_start', 1))])
     session = store.getState().acpSessions.run_1!
     expect(session.epoch).toBe(1)
-    expect(session.turns.flatMap((t) => t.items.map((it) => it.seq))).toEqual([5])
+    expect(session.turns.flatMap((t) => t.items.map((it) => it.seq))).toEqual([6])
   })
 
   it('starts over when the replay window moved past the held cursor', () => {

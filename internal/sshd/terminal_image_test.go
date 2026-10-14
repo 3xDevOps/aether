@@ -73,17 +73,30 @@ func TestDecodeTerminalImagePreservesValidationErrors(t *testing.T) {
 	}
 }
 
-func TestTerminalImageTargetAuthorization(t *testing.T) {
+func TestTerminalUploadTargetAuthorization(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	viewerKey, _ := addMember(t, e, "Viewer", "viewer", false)
 	viewer := controlAs(t, e, viewerKey)
-	err := viewer.Call("terminal.image", map[string]string{
-		"run_id":  string(e.run.ID),
-		"content": base64.StdEncoding.EncodeToString(onePixelPNG),
-	}, nil)
+	for method, content := range map[string][]byte{"terminal.image": onePixelPNG, "terminal.file": []byte("notes")} {
+		err := viewer.Call(method, map[string]string{
+			"run_id":  string(e.run.ID),
+			"name":    "notes.txt",
+			"content": base64.StdEncoding.EncodeToString(content),
+		}, nil)
+		var pe *protocol.Error
+		if err == nil || !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
+			t.Fatalf("viewer targeted %s = %v, want CodeDenied", method, err)
+		}
+	}
+	owner := controlClient(t, e)
+	var result protocol.TerminalUploadResult
+	if err := owner.Call("terminal.file", map[string]string{"run_id": string(e.run.ID), "name": "notes.txt", "content": "bm90ZXM="}, &result); err != nil || !strings.HasSuffix(result.Path, "/notes.txt") {
+		t.Fatalf("owner terminal.file = %+v, %v", result, err)
+	}
+	err := owner.Call("terminal.file", map[string]string{"run_id": string(e.run.ID), "name": "notes.txt", "content": "/x=="}, nil)
 	var pe *protocol.Error
-	if err == nil || !errors.As(err, &pe) || pe.Code != protocol.CodeDenied {
-		t.Fatalf("viewer targeted terminal.image = %v, want CodeDenied", err)
+	if err == nil || !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, "file content is not valid base64") {
+		t.Fatalf("non-canonical terminal.file content = %v, want invalid params", err)
 	}
 }

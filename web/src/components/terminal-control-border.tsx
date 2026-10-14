@@ -1,7 +1,16 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { useMediaQuery } from '@/lib/hooks'
 
 export type TerminalControlAppearance = 'active' | 'release' | 'takeover' | 'hidden'
+
+/** Where the light pools along the edge, as fractions of the box. */
+const smudges = [
+  { x: 0.22, y: 0 },
+  { x: 0.7, y: 0 },
+  { x: 1, y: 0.38 },
+  { x: 0.58, y: 1 },
+  { x: 0, y: 0.68 },
+]
 
 /** Decoration only: lease/input fencing never waits for this animation. */
 export function TerminalControlBorder({
@@ -15,6 +24,7 @@ export function TerminalControlBorder({
   const previousTakeoverProgress = useRef<number | undefined>(undefined)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const id = useId()
 
   useLayoutEffect(() => {
     const svg = ref.current
@@ -31,7 +41,7 @@ export function TerminalControlBorder({
     if (!svg) return
     const style = getComputedStyle(svg)
     const from = Number.parseFloat(style.strokeDashoffset) || 0
-    const primary = style.getPropertyValue('--accent-fill').trim()
+    const primary = style.getPropertyValue('--control-light').trim()
     const danger = style.getPropertyValue('--state-failed').trim()
     const color = appearance === 'takeover' && previousTakeoverProgress.current === 1
       ? danger : from === 1 ? primary : style.color
@@ -69,12 +79,13 @@ export function TerminalControlBorder({
     previousTakeoverProgress.current = takeoverProgress
   }, [takeoverProgress])
 
+  const { width, height } = size
   const left = 0.5
-  const right = Math.max(left, size.width - 0.5)
+  const right = Math.max(left, width - 0.5)
   const top = 0.5
-  const bottom = Math.max(top, size.height - 0.5)
-  const x = size.width / 2
-  const y = size.height / 2
+  const bottom = Math.max(top, height - 0.5)
+  const x = width / 2
+  const y = height / 2
   const paths = (
     <>
       <path pathLength="1" d={`M ${left} ${y} V ${top} H ${x}`} />
@@ -83,10 +94,65 @@ export function TerminalControlBorder({
       <path pathLength="1" d={`M ${right} ${y} V ${bottom} H ${x}`} />
     </>
   )
+  const region = { x: 0, y: 0, width, height }
+  const spots = (scale: number) => smudges.map((spot, index) => {
+    const along = Math.min(280, Math.max(90, (spot.y % 1 === 0 ? width : height) * 0.24)) * scale
+    const across = 96 * scale
+    return (
+      <ellipse
+        key={index}
+        cx={spot.x * width}
+        cy={spot.y * height}
+        rx={spot.y % 1 === 0 ? along : across}
+        ry={spot.y % 1 === 0 ? across : along}
+        fill={`url(#${id}-spot)`}
+      />
+    )
+  })
+  const light = (
+    <>
+      <g mask={`url(#${id}-pool)`}>
+        <g className="control-glow" filter={`url(#${id}-glow)`}>{paths}</g>
+        <g className="control-halo" filter={`url(#${id}-halo)`}>{paths}</g>
+      </g>
+      <g mask={`url(#${id}-rim)`}>
+        <g className="control-rim">{paths}</g>
+      </g>
+      <g mask={`url(#${id}-hot)`}>
+        <g className="control-core" filter={`url(#${id}-bloom)`}>{paths}</g>
+      </g>
+    </>
+  )
   const progress = Math.min(1, Math.max(0, takeoverProgress ?? 0))
   return (
     <svg ref={ref} aria-hidden="true" className="terminal-control-border" data-control-appearance={appearance}>
-      <g>{paths}</g>
+      <defs>
+        <filter id={`${id}-glow`} filterUnits="userSpaceOnUse" {...region}>
+          <feGaussianBlur stdDeviation="18" />
+        </filter>
+        <filter id={`${id}-halo`} filterUnits="userSpaceOnUse" {...region}>
+          <feGaussianBlur stdDeviation="3" />
+        </filter>
+        <filter id={`${id}-bloom`} filterUnits="userSpaceOnUse" {...region}>
+          <feGaussianBlur stdDeviation="1.5" />
+        </filter>
+        <radialGradient id={`${id}-spot`}>
+          <stop offset="0" stopColor="white" />
+          <stop offset="1" stopColor="white" stopOpacity="0" />
+        </radialGradient>
+        <mask id={`${id}-pool`} maskUnits="userSpaceOnUse" {...region}>
+          <rect {...region} fill="white" fillOpacity="0.1" />
+          {spots(1)}
+        </mask>
+        <mask id={`${id}-rim`} maskUnits="userSpaceOnUse" {...region}>
+          <rect {...region} fill="white" fillOpacity="0.45" />
+          {spots(1)}
+        </mask>
+        <mask id={`${id}-hot`} maskUnits="userSpaceOnUse" {...region}>
+          {spots(0.5)}
+        </mask>
+      </defs>
+      <g>{light}</g>
       {appearance === 'active' && takeoverProgress !== undefined && (
         <g
           data-takeover-border
@@ -95,7 +161,7 @@ export function TerminalControlBorder({
             strokeDashoffset: reducedMotion ? 0 : 1 - progress,
           }}
         >
-          {paths}
+          {light}
         </g>
       )}
     </svg>

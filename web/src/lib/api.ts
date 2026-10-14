@@ -201,11 +201,12 @@ import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-ty
 
 export const API_BASE = '/api/v1'
 export const MAX_TERMINAL_IMAGE_BYTES = 8 * 1024 * 1024
+export const MAX_TERMINAL_FILE_BYTES = 64 * 1024 * 1024
 export const TERMINAL_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
 
 type TerminalImageType = (typeof TERMINAL_IMAGE_TYPES)[number]
 
-function isTerminalImageType(type: string): type is TerminalImageType {
+export function isTerminalImageType(type: string): type is TerminalImageType {
   return (TERMINAL_IMAGE_TYPES as readonly string[]).includes(type)
 }
 
@@ -245,6 +246,22 @@ async function uploadTerminalImage(file: File, runID?: string): Promise<{ path: 
   })
   if (!result.path.startsWith('/')) {
     throw new Error('The server returned an unusable image path.')
+  }
+  return result
+}
+
+async function uploadTerminalFile(file: File, runID?: string): Promise<{ path: string }> {
+  if (file.size > MAX_TERMINAL_FILE_BYTES) {
+    throw new Error('File must be 64 MiB or smaller.')
+  }
+  const content = await readFileBase64(file)
+  const result = await call<{ path: string }>('terminal.file', {
+    ...(runID ? { run_id: runID } : {}),
+    name: file.name,
+    content,
+  })
+  if (!result.path.startsWith('/')) {
+    throw new Error('The server returned an unusable file path.')
   }
   return result
 }
@@ -989,6 +1006,8 @@ export const api = {
   terminalHistory: (params: TerminalHistoryParams, signal?: AbortSignal) =>
     call<TerminalHistoryResult>('terminal.history', params, signal),
   uploadTerminalImage: (file: File, runID?: string) => uploadTerminalImage(file, runID),
+  /** Stores any file under its sanitised name in a fresh generated directory. */
+  uploadTerminalFile: (file: File, runID?: string) => uploadTerminalFile(file, runID),
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
   /** Finishes the GitHub connection the member started with `gh auth login`

@@ -140,11 +140,13 @@ restyling it.
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
-Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square) and
-`icon-sm` (24px square); each grows to 44px on a coarse pointer. `link` and
-`quiet` have no height or padding of their own and widen their touch target
-to 44px. An `icon` or `icon-sm` button requires `label`, which becomes its
-accessible name and tooltip; `hint` puts a tooltip on any button.
+Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square),
+`icon-sm` (24px square), and the composer's send control: `round` (28px
+circle) and `pill` (28px, fully rounded); each grows to 44px on a coarse
+pointer. `link` and `quiet` have no height or padding of their own and widen
+their touch target to 44px. An `icon`, `icon-sm` or `round` button requires
+`label`, which becomes its accessible name and tooltip; `hint` puts a tooltip
+on any button.
 
 ## Enforcement
 
@@ -199,7 +201,9 @@ Use compact workbench geometry rather than landing-page ornament:
 - Two radii: `--radius-control` 4px (`rounded-sm`, `rounded-control`) for
   buttons, fields, chips, rows, code and keys; `--radius-panel` 6px
   (`rounded-md`, `rounded-lg`, `rounded-panel`) for cards, dialogs, menus,
-  popovers and callouts. `rounded-full` is for dots, radios and avatars only.
+  popovers and callouts. The run composer alone uses `--radius-composer`
+  14px (`rounded-composer`). `rounded-full` is for dots, radios, avatars,
+  meters and the composer's send control only.
 - Only floating surfaces cast `shadow-overlay`; content panels have none.
   Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
@@ -348,19 +352,24 @@ entirely, and its CSS stops animation if the preference changes while it is
 visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.
 
-Live local control draws a 1px `--accent-fill` outline around the terminal
-viewport or the Enhanced Session conversation and composer, excluding
-toolbars and Details. The outline is pointer-transparent and does not change
-layout. It appears only with live, acknowledged writable control. Terminal
+Live local control lights the edges of the terminal viewport or the Enhanced
+Session conversation and composer, excluding toolbars and Details: a 1.5px
+`--control-light` rim that brightens where light pools at five fixed points
+along the edges, a soft glow spilling inward from each pool, and a near-white
+core at its centre. `--control-light` is the accent teal in light theme and a
+brighter teal in dark; `--control-glow` dims the glow to 0.3 in light theme.
+The light is pointer-transparent and does not change layout. It appears only
+with live, acknowledged writable control. Terminal
 replay and history reading hide it; reading earlier Enhanced items does not
-disable the composer or hide its control border. Acquisition and voluntary
-release propagate along it over 720ms,
-decelerating toward the endpoint. A control-lost takeover turns it red over
+disable the composer or hide its light. Acquisition and voluntary release
+carry the light from the side midpoints to the top and bottom centres, or
+back, over 720ms, decelerating toward the endpoint; the pools stay put and
+light up as it passes. A control-lost takeover turns the light red over
 540ms and retracts it over 1440ms. An occupied five-second hold fills **Take
-control** and the holder's **Release** diagonally in red and traces the
-holder's border red; text on either side of the fill edge keeps its own
-contrast. A seven-second holder decision follows. Under
+control** and the holder's **Release** diagonally in red and traces red light
+over the holder's teal along the same path; text on either side of the fill
+edge keeps its own contrast. A seven-second holder decision follows. Under
 `prefers-reduced-motion: reduce`, ownership changes are instant and takeover
-fills and borders become static red indicators with countdowns; labels keep
+fills and light become static red indicators with countdowns; labels keep
 the state meaning. Loading spinners and delayed skeletons remain functional
 feedback.

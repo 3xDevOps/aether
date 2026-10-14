@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { Paperclip, X } from '@/components/icons'
+import { File as FileIcon, Plus, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { api, TERMINAL_IMAGE_TYPES } from '@/lib/api'
-import { message } from '@/lib/format'
-import { imageFiles } from '@/lib/term-clipboard'
+import { api, isTerminalImageType } from '@/lib/api'
+import { formatBytes, message } from '@/lib/format'
+import { clipboardFiles } from '@/lib/term-clipboard'
 import { beginDraftRequest, composerDraft, saveComposerDraft, useComposerDraft, type ComposerImage } from '@/routes/run/composer-state'
 
 export const maxAttachments = 8
-export const imageTypes = TERMINAL_IMAGE_TYPES.join(',')
+
+/** Images go to the agent as images; every other file goes as a file path. */
+export function isImage(attachment: ComposerImage): boolean {
+  return isTerminalImageType(attachment.file.type)
+}
+
+export function hasImages(previews: ComposerImage[]): boolean {
+  return previews.some(isImage)
+}
 
 let nextID = 0
 
@@ -48,21 +56,21 @@ export function useComposerImages(runID: string, enabled: boolean): ComposerImag
       for (;;) {
         const image = request.current() ? composerDraft(runID).images.find((item) => !item.path) : undefined
         if (!image) break
-        const { path } = await api.uploadTerminalImage(image.file, runID)
+        const { path } = await (isImage(image) ? api.uploadTerminalImage : api.uploadTerminalFile)(image.file, runID)
         if (request.current()) {
           saveComposerDraft(runID, { images: composerDraft(runID).images.map((item) => item.id === image.id ? { ...item, path } : item) })
         }
       }
       request.settle()
     } catch (cause) {
-      request.settle({ uploadError: `Image upload failed: ${message(cause)}` })
+      request.settle({ uploadError: `Upload failed: ${message(cause)}` })
     }
   }
   const upload = async (files: File[]) => {
     const draft = composerDraft(runID)
     if (!files.length || !enabled || draft.busy || draft.uploading) return
     if (draft.images.length + files.length > maxAttachments) {
-      saveComposerDraft(runID, { uploadError: `Attach at most ${maxAttachments} images.` })
+      saveComposerDraft(runID, { uploadError: `Attach at most ${maxAttachments} files.` })
       return
     }
     saveComposerDraft(runID, { images: [...draft.images, ...files.map((file) => ({ id: nextID++, file }))] })
@@ -71,7 +79,7 @@ export function useComposerImages(runID: string, enabled: boolean): ComposerImag
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (!enabled) return
-    const files = imageFiles(event.clipboardData)
+    const files = clipboardFiles(event.clipboardData)
     if (!files.length) return
     if (!event.clipboardData.getData('text/plain')) event.preventDefault()
     void upload(files)
@@ -99,11 +107,10 @@ export function ComposerImagePicker({ images, disabled, unsupported }: {
       <input
         ref={picker}
         type="file"
-        accept={imageTypes}
         multiple
         className="sr-only"
         tabIndex={-1}
-        aria-label="Choose images to attach"
+        aria-label="Choose files to attach"
         disabled={disabled || images.uploading || images.previews.length >= maxAttachments}
         onChange={(event) => {
           const files = Array.from(event.currentTarget.files ?? [])
@@ -114,16 +121,16 @@ export function ComposerImagePicker({ images, disabled, unsupported }: {
       <Button
         variant="ghost"
         size="icon-sm"
-        label={unsupported ?? (images.previews.length >= maxAttachments ? `At most ${maxAttachments} images` : 'Attach an image')}
+        label={images.previews.length >= maxAttachments ? `At most ${maxAttachments} files` : 'Attach files'}
         disabled={disabled || images.uploading || images.previews.length >= maxAttachments}
         onClick={() => picker.current?.click()}
       >
-        <Paperclip />
+        <Plus />
       </Button>
       {unsupported && <span className="text-ui-sm text-muted">{unsupported}</span>}
       {!images.ready && !images.uploading && (
         <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void images.retry()}>
-          Retry image upload
+          Retry upload
         </Button>
       )}
     </>
@@ -136,29 +143,45 @@ function ComposerImagePreview({ image, index, disabled, onRemove }: {
   disabled: boolean
   onRemove: () => void
 }) {
+  const picture = isImage(image)
   const [preview, setPreview] = useState<string>()
   useEffect(() => {
-    if (typeof URL.createObjectURL !== 'function') return
+    if (!picture || typeof URL.createObjectURL !== 'function') return
     const url = URL.createObjectURL(image.file)
     setPreview(url)
     return () => URL.revokeObjectURL(url)
-  }, [image.file])
-  const name = image.file.name || 'Clipboard image'
+  }, [image.file, picture])
+  const name = image.file.name || (picture ? 'Clipboard image' : 'Clipboard file')
+  const remove = (
+    <Button
+      className={picture ? 'absolute right-0 top-0 bg-canvas' : undefined}
+      variant="ghost"
+      size="icon-sm"
+      label={`Remove attached ${picture ? 'image' : 'file'} ${index + 1}: ${name}`}
+      disabled={disabled}
+      onClick={onRemove}
+    >
+      <X />
+    </Button>
+  )
+  if (!picture) {
+    return (
+      <div className="flex max-w-64 shrink-0 items-center gap-2 self-start rounded-control border border-seam bg-canvas py-1 pl-2">
+        <FileIcon className="shrink-0 text-muted" />
+        <div className="min-w-0">
+          <p className="truncate text-ui-sm" title={name}>{name}</p>
+          <p className="text-ui-sm text-muted">{formatBytes(image.file.size)}{!image.path && ' · Not uploaded'}</p>
+        </div>
+        {remove}
+      </div>
+    )
+  }
   return (
     <div className="relative w-28 shrink-0 rounded-control border border-seam bg-canvas p-1">
       {preview && <img src={preview} alt={name} className="h-20 w-full rounded-[2px] object-contain" />}
       <p className="truncate px-1 pt-1 text-ui-sm text-muted" title={name}>{name}</p>
       {!image.path && <p className="px-1 text-ui-sm text-muted">Not uploaded</p>}
-      <Button
-        className="absolute right-0 top-0 bg-canvas"
-        variant="ghost"
-        size="icon-sm"
-        label={`Remove attached image ${index + 1}: ${name}`}
-        disabled={disabled}
-        onClick={onRemove}
-      >
-        <X />
-      </Button>
+      {remove}
     </div>
   )
 }
@@ -169,7 +192,7 @@ export function ComposerImages({ images, disabled }: {
 }) {
   if (!images.previews.length) return null
   return (
-    <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto p-2" aria-label="Attached images">
+    <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto px-3 pt-3" aria-label="Attached files">
       {images.previews.map((image, index) => (
         <ComposerImagePreview
           key={image.id}

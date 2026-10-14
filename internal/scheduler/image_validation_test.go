@@ -19,7 +19,7 @@ var onePixelPNG = []byte{
 	0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 }
 
-func TestValidateTerminalImageRequiresGeneratedRunAccountPath(t *testing.T) {
+func TestValidateAttachmentRequiresGeneratedRunAccountPath(t *testing.T) {
 	e := newTestEnv(t, nil)
 	t.Setenv(fakeAgentEnv, "fake-agent {task}")
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "validate image", "fake", domain.LaunchTUI)
@@ -30,17 +30,31 @@ func TestValidateTerminalImageRequiresGeneratedRunAccountPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveTerminalImage: %v", err)
 	}
-	if err := e.sched.ValidateTerminalImage(t.Context(), run.ID, imagePath); err != nil {
-		t.Fatalf("ValidateTerminalImage(valid): %v", err)
+	if err := e.sched.ValidateAttachment(t.Context(), run.ID, imagePath); err != nil {
+		t.Fatalf("ValidateAttachment(valid): %v", err)
+	}
+	filePath, saveErr := e.sched.SaveTerminalFile(t.Context(), e.member.ID, run.ID, "../notes.txt", []byte("notes"))
+	if saveErr != nil {
+		t.Fatalf("SaveTerminalFile: %v", saveErr)
+	}
+	if filepath.Base(filePath) != "_notes.txt" {
+		t.Fatalf("saved file name = %q", filepath.Base(filePath))
+	}
+	if err := e.sched.ValidateAttachment(t.Context(), run.ID, filePath); err != nil {
+		t.Fatalf("ValidateAttachment(file): %v", err)
 	}
 	for _, reference := range []string{
 		filepath.Join(filepath.Dir(imagePath), "..", "secret.png"),
 		filepath.Join(filepath.Dir(imagePath), "arbitrary.png"),
 		"/tmp/terminal-image.png",
 		imagePath + "\n",
+		filepath.Join(filepath.Dir(filePath), "missing.txt"),
+		filepath.Join(filepath.Dir(filePath), ".bashrc"),
+		filepath.Join(filepath.Dir(filePath), "..", "..", "..", ".bashrc"),
+		filepath.Join(filepath.Dir(filepath.Dir(filePath)), "notes.txt"),
 	} {
-		if err := e.sched.ValidateTerminalImage(t.Context(), run.ID, reference); err == nil {
-			t.Errorf("ValidateTerminalImage(%q) accepted an untrusted reference", reference)
+		if err := e.sched.ValidateAttachment(t.Context(), run.ID, reference); err == nil {
+			t.Errorf("ValidateAttachment(%q) accepted an untrusted reference", reference)
 		}
 	}
 }

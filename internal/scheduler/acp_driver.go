@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -211,10 +213,24 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	if prompt.Text != "" || len(prompt.Attachments) == 0 {
 		blocks = append(blocks, acp.TextBlock(prompt.Text))
 	}
-	if len(prompt.Attachments) > 0 && !sess.Info().PromptImages {
+	if !sess.Info().PromptImages && slices.ContainsFunc(prompt.Attachments, func(reference string) bool {
+		_, file := attachedFileName(reference)
+		return !file
+	}) {
 		return "", acphost.ErrUnsupportedImage
 	}
 	for index, reference := range prompt.Attachments {
+		if _, file := attachedFileName(reference); file {
+			size, mimeType, statErr := d.s.StatAttachedFile(ctx, run.ID, reference)
+			if statErr != nil {
+				return "", fmt.Errorf("%w: scheduler: stat prompt file: %w", domain.ErrPromptNotSent, statErr)
+			}
+			block := acp.ResourceLinkBlock(path.Base(reference), (&url.URL{Scheme: "file", Path: reference}).String())
+			n := int(size)
+			block.ResourceLink.MimeType, block.ResourceLink.Size = &mimeType, &n
+			blocks = append(blocks, block)
+			continue
+		}
 		data, mimeType, readErr := d.s.ReadImage(ctx, run.ID, reference)
 		if readErr != nil {
 			return "", fmt.Errorf("%w: scheduler: read prompt image: %w", domain.ErrPromptNotSent, readErr)

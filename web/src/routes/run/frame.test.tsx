@@ -792,16 +792,16 @@ describe('run details', () => {
 })
 
 describe('the session composer', () => {
-  it('sends on Ctrl+Enter and carries the lease the viewer holds', async () => {
+  it('sends on Enter and carries the lease the viewer holds', async () => {
     open({}, 'session')
     attached(true)
     const box = screen.getByRole('textbox', { name: 'Message the agent' })
     expect(screen.getByText('Sends to the agent’s terminal.')).toBeDefined()
     const tooMany = Array.from({ length: 9 }, (_, index) => new File(['png'], `extra-${index}.png`, { type: 'image/png' }))
-    await userEvent.upload(screen.getByLabelText('Choose images to attach'), tooMany)
-    expect(screen.getByRole('alert').textContent).toContain('Attach at most 8 images.')
+    await userEvent.upload(screen.getByLabelText('Choose files to attach'), tooMany)
+    expect(screen.getByRole('alert').textContent).toContain('Attach at most 8 files.')
     await userEvent.type(box, 'run the tests')
-    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(api.runRoomPost).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'steer_request', body: 'run the tests', control_generation: 3,
     })))
@@ -839,7 +839,7 @@ describe('the session composer', () => {
     open({}, 'session')
     const box = screen.getByRole('textbox', { name: 'Message the agent' })
     await userEvent.type(box, 'run the tests')
-    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(box, { key: 'Enter' })
     expect((await screen.findByRole('alert')).textContent).toContain('403 forbidden: steering is not allowed')
     expect((box as HTMLTextAreaElement).value).toBe('run the tests')
   })
@@ -857,7 +857,7 @@ describe('the session composer', () => {
     const waiting = screen.getByRole('textbox', { name: 'Message the agent' })
     expect(waiting).toMatchObject({ value: 'run the tests', readOnly: true })
     expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
-    fireEvent.keyDown(waiting, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(waiting, { key: 'Enter' })
     act(() => settle.reject(new Error('403 forbidden: steering is not allowed')))
     await waitFor(() => expect(waiting).toMatchObject({ value: 'run the tests', readOnly: false }))
 
@@ -877,13 +877,13 @@ describe('the session composer', () => {
     await userEvent.type(box, 'run the tests')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      fireEvent.keyDown(box, { key: 'Enter' })
       expect(screen.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
       expect(box).toMatchObject({ value: 'run the tests', readOnly: false })
-      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true })
+      fireEvent.keyDown(box, { key: 'Enter' })
       const [first, second] = vi.mocked(api.runRoomPost).mock.calls
       expect(second![0].idempotency_key).toBe(first![0].idempotency_key)
     } finally {

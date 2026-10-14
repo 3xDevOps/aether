@@ -71,6 +71,17 @@ describe('session rows from the item log', () => {
     ])
   })
 
+  it('keeps a prompt\'s room images and attached files apart and ignores any other link', () => {
+    const file = `/home/alice/.aether/terminal-files/${'a'.repeat(32)}/Q3 report.pdf`
+    const [row] = turnRows(turnOf([item('message', 1, { message: { role: 'user', message_id: 'u', text: 'read these', complete: true, attachments: [
+      { type: 'image', mime_type: 'image/png', uri: 'aether://room/m1/0' },
+      { type: 'resource_link', uri: 'file:///home/alice/.aether/terminal-files/' + 'a'.repeat(32) + '/Q3%20report.pdf' },
+      { type: 'resource_link', uri: 'file:///home/alice/secrets.txt' },
+      { type: 'resource_link', uri: 'https://example.com/a.pdf' },
+    ] } })]))
+    expect(row).toEqual(expect.objectContaining({ kind: 'user', images: [{ messageID: 'm1', index: 0 }], files: [file] }))
+  })
+
   it('names the running tool, a streaming thought, or plain work as the live row', () => {
     const open = (items: SessionItem[]) => liveActivity(turnOf([item('turn_start', 1), ...items], false))?.label
     expect(open([tool(1, 'r', 'read', 'Read a.go', 'in_progress', { locations: [{ path: 'a.go' }] })])).toBe('Reading a.go')

@@ -108,7 +108,7 @@ func callBound(method string) time.Duration {
 	switch method {
 	case protocol.MethodAgentInstall:
 		return protocol.AgentInstallTimeout + callTimeout
-	case protocol.MethodHomeUpload, protocol.MethodHomeDownload:
+	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile:
 		return transferTimeout
 	case protocol.MethodTerminalExec:
 		return protocol.TerminalExecTimeout + callTimeout
