@@ -39,6 +39,12 @@ import type {
   LinkRepoResult,
   LinkStatus,
   Member,
+  MemberIdentities,
+  MemberList,
+  MemberMerge,
+  MergeCode,
+  MergePlan,
+  MergeProposal,
   Mission,
   MissionCancelResult,
   MissionCreateResult,
@@ -439,8 +445,7 @@ export const api = {
   serverInfo: () => call<ServerInfo>('server.info'),
   serverEdge: () => call<ServerEdge>('server.edge'),
   serverEdgeClaimCode: () => call<ServerEdgeClaimCode>('server.edge.claimcode'),
-  memberList: () =>
-    call<{ members: Member[] }>('member.list').then((r) => r.members),
+  memberList: () => call<MemberList>('member.list'),
   accountList: () => call<AccountAccess>('account.list'),
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
     call<UsageResult>('account.usage', params),
@@ -772,6 +777,23 @@ export const api = {
     call<{ device: Device }>('member.device.revoke', { device_id: deviceID }).then(
       (r) => r.device,
     ),
+  memberIdentityList: (memberID: string) => call<MemberIdentities>('member.identity.list', { member_id: memberID }),
+  /** Names an account the caller links to their own member; the link is shown only here. */
+  memberIdentityLink: (params: { login?: string; email?: string }) =>
+    call<InvitationResult>('member.identity.link', params),
+  memberMergeStart: () => call<MergeCode>('member.merge.start'),
+  memberMergePreview: (code: string) => call<MergePlan>('member.merge.preview', { code }),
+  memberMergePropose: (params: { code: string; keep_settings_of: string; plan_digest: string; discard_ack: true; keep_admin?: boolean }) =>
+    call<MergeProposal>('member.merge.propose', params),
+  memberMergePending: () =>
+    call<{ proposals: MergeProposal[] }>('member.merge.pending').then((r) => r.proposals),
+  memberMergeAccept: (params: { proposal_id: string; plan_digest: string; keep_admin?: boolean }) =>
+    call<{ merge: MemberMerge; member: Member }>('member.merge.accept', params),
+  /** Without a proposal, drops every open code and proposal of the caller. */
+  memberMergeCancel: (proposalID?: string) =>
+    call<{ cancelled: number }>('member.merge.cancel', { proposal_id: proposalID }),
+  memberMergeList: () =>
+    call<{ merges: MemberMerge[] }>('member.merge.list').then((r) => r.merges),
   memberInvitationList: () =>
     call<{ invitations: Invitation[] }>('member.invitation.list').then((r) => r.invitations),
   memberInvitationCreate: (params: {

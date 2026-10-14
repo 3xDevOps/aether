@@ -19,6 +19,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
 import { agentLabel } from '@/components/launch/modes'
+import { memberName } from '@/lib/member-name'
 import type { AgentInfo, Mission, MissionExecutionChoice } from '@/lib/types'
 import { useStore } from '@/store'
 
@@ -41,6 +42,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
   onReplaced: () => void
 }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const choices = mission.execution_choices.filter(
     (choice, index, all) =>
       all.findIndex((other) => other.account_member_id === choice.account_member_id && agentKey(other) === agentKey(choice)) === index,
@@ -100,7 +102,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
               <SelectValue placeholder="Choose an account" />
             </SelectTrigger>
             <SelectContent>
-              {accountIDs.map((id) => <SelectItem key={id} value={id}>{members[id]?.display_name ?? id}</SelectItem>)}
+              {accountIDs.map((id) => <SelectItem key={id} value={id}>{memberName({ members, mergedInto }, id)}</SelectItem>)}
             </SelectContent>
           </Select>
         </FormField>

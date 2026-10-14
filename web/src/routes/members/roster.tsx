@@ -38,7 +38,7 @@ function accountWords(id: string, access: AccountAccess | null): string {
 
 export function Roster({ client }: { client: Api }) {
   const members = useStore((s) => s.members)
-  const setMembers = useStore((s) => s.setMembers)
+  const setMemberList = useStore((s) => s.setMemberList)
   const presence = useStore((s) => s.presence)
   const self = useStore((s) => s.info?.member)
   const caps = useCapability()
@@ -53,14 +53,14 @@ export function Roster({ client }: { client: Api }) {
 
   useEffect(() => {
     let live = true
-    readMembers().then((list) => live && setMembers(list), () => {})
+    readMembers().then((list) => live && setMemberList(list), () => {})
     if (canListAccounts) client.accountList().then((a) => live && setAccess(a), () => {})
     return () => {
       live = false
     }
-  }, [canListAccounts, client, readMembers, setMembers])
+  }, [canListAccounts, client, readMembers, setMemberList])
 
-  const refetch = async () => setMembers(await readMembers())
+  const refetch = async () => setMemberList(await readMembers())
 
   const update = (member: Member, next: Partial<Member>, send: () => Promise<Member>, done: string) => {
     const { patchMember, revertMember, confirmMember } = useStore.getState()

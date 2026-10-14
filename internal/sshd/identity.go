@@ -458,14 +458,18 @@ func (s *Server) memberIdentityList(ctx context.Context, member domain.MemberID,
 	if perr := s.actingOn(ctx, member, target, protocol.MethodMemberIdentityList); perr != nil {
 		return nil, perr
 	}
-	if _, err := s.cfg.Store.GetMember(ctx, target); err != nil {
+	m, err := s.cfg.Store.GetMember(ctx, target)
+	if err != nil {
 		return nil, rpcError(err)
 	}
 	all, err := ids.ListIdentities(ctx)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := protocol.MemberIdentityListResult{Identities: []protocol.Identity{}, Devices: []protocol.Device{}}
+	out := protocol.MemberIdentityListResult{TailnetLogin: m.TailnetLogin, Identities: []protocol.Identity{}, Devices: []protocol.Device{}}
+	if m.PublicKey != "" {
+		out.PublicKeyFingerprint = fingerprintOf(m.PublicKey)
+	}
 	for _, id := range all {
 		if id.Member == target {
 			out.Identities = append(out.Identities, protocol.Identity{Provider: id.Provider, Subject: id.Subject,

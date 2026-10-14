@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Participants } from '@/components/messages/message-row'
 import type { EventType } from '@/lib/events'
 import { budgetStateLabel, money } from '@/lib/format'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { plainReason } from '@/lib/status'
 import type { BudgetState, Event, RoomMessageKind, RoomMessageState, RunStatus } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -25,7 +26,7 @@ function bounded(value: unknown, max: number): string {
 export function Who({ id, fallback = 'Someone', object = false }: { id: unknown; fallback?: string; object?: boolean }) {
   const memberID = text(id)
   const self = useStore((s) => s.info?.member.id)
-  const name = useStore((s) => s.members[memberID]?.display_name)
+  const name = useStore((s) => (resolveMember(s, memberID).member ? memberName(s, memberID) : undefined))
   if (memberID && memberID === self) return object ? 'you' : 'You'
   return name ?? fallback
 }
@@ -38,7 +39,7 @@ function MemberRenamed({ member, actor, name }: { member: unknown; actor: unknow
 
 function AccountOf({ id }: { id: unknown }) {
   const self = useStore((s) => s.info?.member.id)
-  const name = useStore((s) => s.members[text(id)]?.display_name)
+  const name = useStore((s) => (resolveMember(s, text(id)).member ? memberName(s, text(id)) : undefined))
   return text(id) === self ? 'your account' : `${name ?? 'another member'}'s account`
 }
 
@@ -295,6 +296,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'coord.message.acked': () => 'An agent read its message',
   'mission.changed': (p) => (p.deleted ? 'A swarm was deleted' : <>Swarm <MissionName id={p.mission_id} /> updated</>),
   'member.changed': (p, e) => <MemberRenamed member={p.member_id} actor={e.actor_id} name={p.display_name} />,
+  'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',
   'profile.change': (p, e) => <><Who id={p.member ?? e.actor_id} /> {profileWords[text(p.action)] ?? 'changed'} the {text(p.harness) || 'agent'} profile</>,
 }

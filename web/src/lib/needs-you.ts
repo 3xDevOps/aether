@@ -1,3 +1,4 @@
+import { memberName as storeMemberName } from '@/lib/member-name'
 import type {
   Approval,
   Device,
@@ -17,6 +18,7 @@ export interface StateContext {
   viewerID: string | null
   viewerRole: Member['role'] | null
   members: Record<string, Member>
+  mergedInto: Record<string, string>
   runs: Record<string, RunRecord>
   workspaces: Record<string, Workspace>
   approvalsByRun: Record<string, Approval[]>
@@ -161,8 +163,8 @@ function controller(run: RunRecord, ctx: StateContext): string | undefined {
   return ctx.roomStatus[run.id]?.controller?.member_id
 }
 
-export function memberName(memberID: string, ctx: Pick<StateContext, 'members'>): string {
-  return ctx.members[memberID]?.display_name ?? memberID
+export function memberName(memberID: string, ctx: Pick<StateContext, 'members' | 'mergedInto'>): string {
+  return storeMemberName(ctx, memberID)
 }
 
 function waited(iso: string, now: number): string {
@@ -455,7 +457,8 @@ export function deviceNeeds(
   const waiting = (device: Device) =>
     admin
       ? device.status === 'pending' || (device.status === 'registered' && accessPolicy === 'approved-devices')
-      : device.status === 'pending' && device.member_id === viewer.viewerID
+      // The server lists a non-admin's link devices (an invitation naming a member) only to that member.
+      : device.status === 'pending' && (device.member_id === viewer.viewerID || (!device.member_id && Boolean(device.invitation_id && device.display_name)))
   return devices
     .filter(waiting)
     .map((device) => {
@@ -463,7 +466,7 @@ export function deviceNeeds(
       return {
         device,
         reason: !admin
-          ? `New device ${device.label} signed in as you`
+          ? device.member_id ? `New device ${device.label} signed in as you` : `${who} is waiting on your account link`
           : device.status === 'registered'
           ? `${who} signed in as ${device.display_name} and is not approved`
           : device.display_name

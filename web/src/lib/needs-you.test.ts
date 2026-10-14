@@ -272,6 +272,12 @@ describe('viewer scoping', () => {
     expect(presentRun(stopped, ctx)).toEqual({ state: 'working', reason: 'Waiting for Alice' })
   })
 
+  it('names a waiting run by the member its owner was merged into', () => {
+    const stopped = record({ status: 'needs-attention', reason: 'agent idle', member_id: 'mem_old' })
+    const ctx = stateContext({ ...bobViewing, mergedInto: { mem_old: alice.id } })
+    expect(presentRun(stopped, ctx).reason).toBe('Waiting for Alice (merged)')
+  })
+
   it("leaves another member's unreviewed finish Done", () => {
     const finished = record({ status: 'completed', outcome_unseen: true })
     expect(presentRun(finished, stateContext(bobViewing))).toEqual({ state: 'done', reason: 'Finished' })
@@ -438,6 +444,16 @@ describe('device cards', () => {
       reason: 'New device laptop signed in as you',
       admits: 'admits as: Bob (collaborator)',
       waitingSince: own.created_at,
+    }])
+  })
+
+  it('asks a member to approve a device waiting on their own account link', () => {
+    const linking = pendingDevice({ account: 'bob-gh', display_name: 'Bob' })
+    expect(deviceNeeds([linking], collaborator, 'account')).toEqual([{
+      device: linking,
+      reason: 'laptop (github bob-gh) is waiting on your account link',
+      admits: 'admits as: Bob (collaborator)',
+      waitingSince: linking.created_at,
     }])
   })
 

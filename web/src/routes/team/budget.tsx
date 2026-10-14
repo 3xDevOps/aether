@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { budgetStateLabel, money } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import { useStore } from '@/store'
 import { costTotals } from '@/store/cost'
 import { onlineMembers } from '@/store/presence'
@@ -8,6 +9,7 @@ import { onlineMembers } from '@/store/presence'
 export function TeamSummary({ heading }: { heading?: ReactNode }) {
   const presence = useStore((s) => s.presence)
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const budgets = useStore((s) => s.budgets)
   const inboxError = useStore((s) => s.inboxError)
   const online = onlineMembers(presence)
@@ -21,7 +23,7 @@ export function TeamSummary({ heading }: { heading?: ReactNode }) {
     parts.push(totals.state === 'ok' ? spend : `${spend}, ${budgetStateLabel[totals.state]}`)
   }
   if (parts.length === 0 && !inboxError) return null
-  const names = online.map((id) => members[id]?.display_name ?? id)
+  const names = online.map((id) => memberName({ members, mergedInto }, id))
   return (
     <div className="pb-1 text-ui-sm text-muted">
       {heading}

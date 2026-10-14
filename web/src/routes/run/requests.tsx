@@ -6,6 +6,7 @@ import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
+import { memberName, resolveMember } from '@/lib/member-name'
 import { inputHint, inputTitle } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
 import type { Approval, RoomMessage } from '@/lib/types'
@@ -108,8 +109,9 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
   docked: boolean
 }) {
   const members = useStore((s) => s.members)
+  const mergedInto = useStore((s) => s.mergedInto)
   const { inputs, sessionRequests, approvals, steers, questions } = useRunRequests(run)
-  const name = (id: string, snapshot?: string) => members[id]?.display_name ?? snapshot ?? id
+  const name = (id: string, snapshot?: string) => (resolveMember({ members, mergedInto }, id).member ? memberName({ members, mergedInto }, id) : snapshot ?? id)
   const openTerminal = () => {
     nav.go('terminal')
     if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()

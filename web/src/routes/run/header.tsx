@@ -11,6 +11,7 @@ import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
+import { memberName, resolveMember } from '@/lib/member-name'
 import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
@@ -108,9 +109,10 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const { state, reason } = run.switching
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
-  const owner = useStore((s) => s.members[run.member_id])
+  const owner = useStore((s) => resolveMember(s, run.member_id).member)
+  const ownerName = useStore((s) => memberName(s, run.member_id))
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
-  const accountOwner = useStore((s) => s.members[accountID])
+  const accountOwner = useStore((s) => memberName(s, accountID))
   return (
     <div className="@container/state w-full min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
@@ -132,7 +134,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
         {accountID && (
           <>
             <span aria-hidden>·</span>
-            <span className="min-w-0 truncate">On {accountOwner?.display_name ?? accountID}&apos;s account (fallback)</span>
+            <span className="min-w-0 truncate">On {accountOwner}&apos;s account (fallback)</span>
           </>
         )}
         <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
@@ -149,7 +151,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           </Button>
         </span>
         <span className="hidden shrink-0 @lg/state:flex">
-          <Avatar name={owner?.display_name ?? run.member_id} color={owner?.color} />
+          <Avatar name={ownerName} color={owner?.color} />
         </span>
       </div>
     </div>

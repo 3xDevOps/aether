@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { ArrowUpCircle, Keyboard, User } from '@/components/icons'
 import { ConnectionDot, connectionLabel } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
@@ -18,7 +17,6 @@ import {
 } from '@/components/ui/menu'
 import { useUpdateNotice } from '@/components/update-banner'
 import { useIsMobile } from '@/lib/breakpoints'
-import { ProfileDialog } from '@/routes/members/personal'
 import { TeamSummary } from '@/routes/team/budget'
 import { useStore } from '@/store'
 import type { Theme } from '@/store/ui'
@@ -57,7 +55,7 @@ export function SidebarFooter() {
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const update = useUpdateNotice(true)
   const mobile = useIsMobile()
-  const [profile, setProfile] = useState(false)
+  const openProfile = useStore((s) => s.setProfileOpen)
   const name = self?.display_name ?? 'Not signed in'
   const word = connectionLabel[connection]
 
@@ -87,7 +85,7 @@ export function SidebarFooter() {
         </MenuTrigger>
         <MenuContent side="top" align="start" className="w-60">
           {self && (
-            <MenuItem onSelect={() => setProfile(true)}>
+            <MenuItem onSelect={() => openProfile(true)}>
               <User />
               Profile
             </MenuItem>
@@ -121,7 +119,6 @@ export function SidebarFooter() {
           <TeamSummary heading={<><MenuSeparator /><MenuLabel>Team</MenuLabel></>} />
         </MenuContent>
       </Menu>
-      <ProfileDialog open={profile} onOpenChange={setProfile} />
     </div>
   )
 }

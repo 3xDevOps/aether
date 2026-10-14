@@ -12,6 +12,7 @@ import { message } from '@/lib/format'
 import { coarsePointer, useDelayed, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { keyboardBusy, onTabListKeyDown } from '@/lib/keys'
+import { memberName, resolveMember } from '@/lib/member-name'
 import type { DevBrowserCloseParams, DevBrowserPage, DevBrowserResetParams, DevBrowserStatusResult, DevController, DevControlFence, DevSurface } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -93,6 +94,7 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
   const cap = useCapability()
   const coarse = useMediaQuery(coarsePointer)
   const members = useStore((state) => state.members)
+  const mergedInto = useStore((state) => state.mergedInto)
   const self = useStore((state) => state.info?.member.id)
   const preset = useStore((state) => state.browserPresets[runID])
   const setPreset = useStore((state) => state.setBrowserPreset)
@@ -146,10 +148,12 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
   const fence = lease?.fence ?? null
   const chosen = preset ? viewportPresets[preset] : undefined
   const target = chosen ?? paneViewport(pane)
+  const driverMember = resolveMember({ members, mergedInto }, other?.member_id ?? '').member
+  const driverName = driverMember ? memberName({ members, mergedInto }, other?.member_id ?? '') : 'Another member'
   const driver = !other ? ''
     : other.kind === 'run_agent' ? 'The agent is driving'
       : other.member_id === self ? 'You are driving in another tab'
-        : `${members[other.member_id ?? '']?.display_name ?? 'Another member'} is driving`
+        : `${driverName} is driving`
   const latest = useRef({ surface, other, driver, page, status, target })
   latest.current = { surface, other, driver, page, status, target }
   const logs = useBrowserLogs(runID, page)
@@ -645,7 +649,7 @@ function BrowserRoute({ runID, split, agent, agentName, onCaptures }: BrowserVie
         <div role="status" className="flex min-w-0 basis-full items-center gap-2 px-1 @2xl:basis-auto">
           {other.kind === 'run_agent'
             ? <Bot aria-hidden className="size-3.5 shrink-0 text-muted" />
-            : <Avatar name={members[other.member_id ?? '']?.display_name ?? 'Another member'} color={members[other.member_id ?? '']?.color} />}
+            : <Avatar name={driverName} color={driverMember?.color} />}
           <span className="min-w-0 flex-1 truncate text-ui-sm text-muted">{driver}</span>
           <Button variant="secondary" size="sm" aria-disabled={pending !== null || undefined} onClick={takeOver}>Take over</Button>
         </div>

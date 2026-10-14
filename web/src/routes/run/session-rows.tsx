@@ -11,6 +11,7 @@ import { AssistantRow, duration, EventRow, LiveActivityRow, MessageRow, WorkDeta
 import { api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
+import { memberName } from '@/lib/member-name'
 import { inputHint } from '@/lib/run-requests'
 import { PathText } from '@/routes/files/path-link'
 import type { RunNavigation } from '@/routes/run/header'
@@ -135,7 +136,8 @@ function EntryDetail({ runID, entry }: { runID: string; entry: WorkItem }) {
 
 function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
   const members = useStore((s) => s.members)
-  const name = (id: string) => members[id]?.display_name ?? id
+  const mergedInto = useStore((s) => s.mergedInto)
+  const name = (id: string) => memberName({ members, mergedInto }, id)
   switch (row.kind) {
     case 'user': {
       const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body

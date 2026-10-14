@@ -2,7 +2,9 @@ import { useState, type ReactNode } from 'react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { DeviceNeed } from '@/lib/needs-you'
+import type { MergeProposal } from '@/lib/types'
 import { DeviceCard } from '@/routes/board/device-card'
+import { MergeProposalCard } from '@/routes/board/merge-card'
 import { RunCard } from '@/routes/board/run-card'
 import type { BoardColumn } from '@/routes/board/selectors'
 
@@ -17,6 +19,7 @@ export function Column({
   actions,
   footer,
   devices = [],
+  merges = [],
 }: {
   column: BoardColumn
   label?: string
@@ -26,9 +29,10 @@ export function Column({
   actions?: ReactNode
   footer?: ReactNode
   devices?: DeviceNeed[]
+  merges?: MergeProposal[]
 }) {
   const [open, setOpen] = useState(!collapsed)
-  const count = devices.length + column.cards.length
+  const count = devices.length + merges.length + column.cards.length
   const heading = (
     <>
       <span>{label}</span>{' '}
@@ -38,6 +42,9 @@ export function Column({
   const body = (
     <>
       <div className="flex flex-col gap-2">
+        {merges.map((proposal) => (
+          <MergeProposalCard key={proposal.id} proposal={proposal} />
+        ))}
         {devices.map((need) => (
           <DeviceCard key={need.device.id} need={need} />
         ))}

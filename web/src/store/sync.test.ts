@@ -8,6 +8,8 @@ import { createRootStore } from '@/store'
 import { loadDevices } from '@/store/devices'
 import { homeKey } from '@/store/files'
 import { capability } from '@/store/hooks'
+import { memberName } from '@/lib/member-name'
+import { addMergeProposal, dropMergeProposal, loadMergeProposals } from '@/store/members'
 import { stateContextOf } from '@/store/selectors'
 import { applyEvent, connect, hydrate } from '@/store/sync'
 import {
@@ -21,6 +23,7 @@ import {
   roomMessage,
   run,
   serverInfo as serverInfoFixture,
+  vera,
   workspace,
 } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -1570,7 +1573,7 @@ describe('applyEvent', () => {
 
   it('re-fetches the member list when an event names an actor it does not know', async () => {
     const store = createRootStore()
-    await hydrate(store, fakeApi({ memberList: vi.fn(async () => [alice]) }))
+    await hydrate(store, fakeApi({ memberList: vi.fn(async () => ({ members: [alice] })) }))
     expect(store.getState().members[bob.id]).toBeUndefined()
 
     await applyEvent(store, statusEvent({ actor_id: bob.id }), fakeApi())
@@ -1810,13 +1813,108 @@ describe('applyEvent', () => {
     await hydrate(store, fakeApi())
     const self = store.getState().info!.member
     const renamed = { ...self, display_name: 'Renamed' }
-    const client = fakeApi({ memberList: vi.fn(async () => [renamed, bob]) })
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [renamed, bob] })) })
     await applyEvent(store, statusEvent({
       run_id: '', type: 'member.changed', actor_id: self.id, payload: { member_id: self.id, display_name: 'Renamed' },
     }), client)
 
     expect(store.getState().members[self.id].display_name).toBe('Renamed')
     expect(store.getState().info?.member.display_name).toBe('Renamed')
+  })
+
+  it('maps a merged-away member to the survivor on a member.merged event', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice, vera], merged_into: { [bob.id]: vera.id } })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: vera.id,
+      payload: { merge_id: 'merge_1', survivor_id: vera.id, absorbed_id: bob.id },
+    }), client)
+
+    expect(memberName(store.getState(), bob.id)).toBe('Vera (merged)')
+    expect(client.runList).toHaveBeenCalled()
+  })
+
+  it('drops the member.merged snapshot of a connection that was replaced', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const lifecycle = new AbortController()
+    lifecycle.abort()
+    const client = fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: bob.id,
+      payload: { merge_id: 'merge_1', survivor_id: bob.id, absorbed_id: alice.id },
+    }), client, lifecycle.signal)
+
+    expect(store.getState().info?.member.id).toBe(alice.id)
+  })
+
+  it('keeps a merge when an older member list lands after it', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().setMemberList({ members: [alice], merged_into: { [bob.id]: alice.id } })
+    store.getState().setMemberList({ members: [alice, bob] })
+
+    expect(store.getState().members[bob.id]).toBeUndefined()
+    expect(memberName(store.getState(), bob.id)).toBe('Alice (merged)')
+  })
+
+  it('takes a fresh snapshot when the viewer was merged away', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) }))
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice], merged_into: { [bob.id]: alice.id } })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: alice.id,
+      payload: { merge_id: 'merge_1', survivor_id: alice.id, absorbed_id: bob.id },
+    }), client)
+
+    expect(store.getState().info?.member.id).toBe(alice.id)
+  })
+
+  describe('merge proposals', () => {
+    const proposal = (id: string) => ({ id, minted_id: alice.id, proposer_id: bob.id, keep_settings_of: bob.id, plan_digest: 'd', expires_at: '2026-10-14T00:10:00Z' })
+    const held = () => {
+      let answer!: (proposals: ReturnType<typeof proposal>[]) => void
+      return { promise: new Promise<ReturnType<typeof proposal>[]>((resolve) => { answer = resolve }), answer: (p: ReturnType<typeof proposal>[]) => answer(p) }
+    }
+
+    it('lands only the latest read', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      const older = held()
+      const first = loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(() => older.promise) }))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_new')]) }))
+      older.answer([])
+      await first
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_new'])
+    })
+
+    it('keeps a cancelled proposal out of a read sent before the cancel', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_1')]) }))
+      const before = held()
+      const read = loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(() => before.promise) }))
+      dropMergeProposal(store, 'prop_1')
+      before.answer([proposal('prop_1')])
+      await read
+      expect(store.getState().mergeProposals).toEqual([])
+    })
+
+    it('keeps a proposal just made when the read after it fails', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi())
+      addMergeProposal(store, proposal('prop_mine'))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => Promise.reject(new Error('member.merge.pending: server unreachable'))) }))
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_mine'])
+    })
+
+    it('keeps the proposals shown and records a failed read', async () => {
+      const store = createRootStore()
+      await hydrate(store, fakeApi({ memberMergePending: vi.fn(async () => [proposal('prop_1')]) }))
+      await loadMergeProposals(store, fakeApi({ memberMergePending: vi.fn(async () => Promise.reject(new Error('member.merge.pending: server unreachable'))) }))
+      expect(store.getState().mergeProposals.map((p) => p.id)).toEqual(['prop_1'])
+      expect(store.getState().mergeProposalsError).toBe('member.merge.pending: server unreachable')
+    })
   })
 
   it('re-reads the devices on a device event', async () => {
@@ -1851,7 +1949,7 @@ describe('applyEvent', () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
     store.getState().patchMember(bob.id, { color: '#911eb4' })
-    const client = fakeApi({ memberList: vi.fn(async () => [alice, { ...bob, display_name: 'Robert' }]) })
+    const client = fakeApi({ memberList: vi.fn(async () => ({ members: [alice, { ...bob, display_name: 'Robert' }] })) })
     await applyEvent(store, statusEvent({
       run_id: '', type: 'member.changed', actor_id: bob.id, payload: { member_id: bob.id, display_name: 'Robert' },
     }), client)

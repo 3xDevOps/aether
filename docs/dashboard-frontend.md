@@ -1185,10 +1185,12 @@ comes back online, which catches a failed read and an approval made with
 | Pending, a member's | an admin | laptop (github bob) signed in as Bob | the same |
 | Registered under `account`, on a server now under `approved-devices` (from `server.edge`) | an admin | laptop (github bob) signed in as Bob and is not approved | the same |
 | Pending, the viewer's own | the member, not an admin | New device laptop signed in as you | the same |
+| Pending, waiting on the viewer's account link | the member, not an admin | laptop (github bob-gh) is waiting on your account link | the same |
 
 The card shows the account, the key fingerprint and whom approving admits
 it as, and waits since the device was recorded. No card carries an
-approval code. Device cards list before
+approval code. Merge proposal cards ([Members, devices and
+Profile](#members-devices-and-profile)), then device cards, list before
 runs in the board's Needs you and above the Map. The sidebar's Needs you
 counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
@@ -4202,6 +4204,64 @@ teammate shared or revoked since it was sent.
 A `member.changed` event re-reads `member.list` in every other open
 dashboard, and updates the viewer's own name when it is theirs.
 
+**Sign-ins** in Profile (`src/routes/members/sign-ins.tsx`) lists, from
+`member.identity.list` (readable by the member or an admin), the member's
+tailnet login, SSH key fingerprint, GitHub accounts and devices with their
+status, re-read whenever the devices are (a `member.device` event or a
+wake), since approving a device binds an account. **Link a GitHub account**
+sends `member.identity.link` for the viewer and shows the join link with
+the next step: open it on a device signed in as that account, or `aether
+link '<link>'`, then approve that device. **Merge with another member**
+opens a dialog with two tabs:
+
+- **Get a merge code** sends `member.merge.start` and shows the code, a
+  per-second expiry countdown and `aether member merge <code>`. Proposing
+  and cancelling publish no event, so `connect` re-reads
+  `member.merge.pending` every 5 seconds while that code is valid or a
+  proposal is open, dialog closed or not, and when the tab wakes. Only the
+  latest read lands, and a cancel or accept outdates reads already sent;
+  a failed read keeps the proposals shown and its error shows on the
+  board and in Sign-ins.
+- **I have a merge code** sends `member.merge.preview` and shows both
+  members side by side (role, sign-ins, devices, runs, schedules,
+  settings), stacked at phone width. **Keep settings from** has no
+  default; choosing a side lists what the other loses. When the roles
+  differ the resulting role is stated, and the admin side gets **Keep the
+  merged member an admin** only when the plan carries
+  `role_with_keep_admin`. **Propose merge** (danger style) stays disabled
+  until a side is chosen and **Discard the listed settings** is ticked,
+  then sends `member.merge.propose` with the plan's `plan_digest`; the
+  answer says the other sign-in must accept. A refused propose shows the
+  error and drops the preview, as does editing the code, so only a new
+  **Preview** can propose.
+
+A proposal for the viewer to accept (`member.merge.pending` where the
+viewer minted the code) shows in Sign-ins, in the code tab, as a Needs you
+card and as a row in the sidebar's Needs you; **Review** and the row open
+Profile at Sign-ins. Profile is mounted by the app shell (`profileOpen` in
+`store/ui.ts`), not the sidebar, so **Review** works with the sidebar
+collapsed or the phone drawer closed. It lists the proposer's sign-ins, the settings kept,
+what is discarded and the resulting role; **Accept and merge** (danger
+style) needs the same tick and sends `member.merge.accept` with the
+proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
+accept clears the tick and re-reads the proposals, so a `refusal` the
+server now reports disables **Accept and merge**. A proposal the server
+could not plan shows only its `refusal` and **Cancel**, and the viewer's
+own open proposals show with **Cancel**. Every RPC error shows verbatim,
+as a toast when it arrives after its dialog or Profile closed, unless the
+signed-in member changed. After a merge
+the record shows in Sign-ins; **Merge history** lists `member.merge.list`
+with the discarded settings, custom agent definitions included, and the
+archive path.
+
+`member.list`'s `merged_into` is kept as `mergedInto`. `memberName` and
+`resolveMember` in `lib/member-name.ts` follow it, so an id history names
+(events, runs, costs, comments, swarms, devices) shows the survivor's name
+with `(merged)`. A `member.merged` event (workspace id `server`) takes a
+fresh snapshot: a merge moves runs and roles without their own events, and
+a session absorbed by the merge then shows the survivor, with its role,
+without a reload.
+
 ## Manage workspaces
 
 `src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
@@ -5286,7 +5346,11 @@ and answers a swarm; and `files-browser.mobile.spec.ts` opens a second file
 from the tree sheet. `sidebar-drawer.spec.ts` stays on the desktop project
 because its keyboard contract - `Mod+B` closing the drawer and the palette
 coming back once it is gone - needs a narrow window with a keyboard rather
-than a phone. `board-card`, `run-switch`, `run-attach-retry`,
+than a phone. `sign-ins-merge.spec.ts` gets a merge code
+as one member and previews it as another at phone width; both harness
+members have an SSH key, so it checks the server's refusal verbatim, and
+`src/routes/members/sign-ins.test.tsx` covers choosing, proposing and
+accepting. `board-card`, `run-switch`, `run-attach-retry`,
 `run-provisioning`, `terminal-tools` and the onboarding scenarios cover the
 corresponding real UI transitions, gateway responses and terminal behavior.
 Run the full browser workflow with `make test-e2e`; its scenario inventory and
