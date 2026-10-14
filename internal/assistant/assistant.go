@@ -33,6 +33,8 @@ import (
 )
 
 const (
+	// EpochStride separates conversation generations in the epoch viewers see.
+	EpochStride  = 1 << 20
 	workDir      = ".aether/assistant"
 	socketName   = "assistant.sock"
 	startTimeout = 2 * time.Minute
@@ -66,7 +68,6 @@ type Config struct {
 	Caller func(domain.MemberID) tools.Caller
 }
 
-// Service manages one session per member.
 type Service struct {
 	cfg    Config
 	ctx    context.Context
@@ -87,6 +88,9 @@ type member struct {
 	confirms *confirmations
 	// op serializes starting, stopping and resetting the session.
 	op sync.Mutex
+	// reset is held while a reset runs, so a viewer that sees the session
+	// end reads the new generation.
+	reset sync.RWMutex
 
 	mu       sync.Mutex
 	sess     *session
@@ -105,11 +109,15 @@ type member struct {
 }
 
 type session struct {
-	agent  string
-	acp    *acphost.Session
-	exec   runtime.ManagedExec
-	cancel context.CancelFunc
-	ended  chan struct{}
+	agent     string
+	harnessID string
+	acp       *acphost.Session
+	exec      runtime.ManagedExec
+	cancel    context.CancelFunc
+	ended     chan struct{}
+
+	stopOnce sync.Once
+	stopErr  error
 }
 
 func (s *Service) member(id domain.MemberID) *member {
@@ -149,7 +157,6 @@ func (m *member) signalLocked() {
 	m.notify()
 }
 
-// notify tells watchers that the member's status may have changed.
 func (m *member) notify() {
 	m.wmu.Lock()
 	defer m.wmu.Unlock()
@@ -161,7 +168,6 @@ func (m *member) notify() {
 	}
 }
 
-// updates receives a value after each status change; unread ones coalesce.
 func (m *member) updates() (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	m.wmu.Lock()
@@ -178,7 +184,6 @@ func (s *Service) logPath(id domain.MemberID) string {
 	return filepath.Join(s.cfg.Dir, string(id), "items.jsonl")
 }
 
-// Close stops every session and waits for the tool sockets to close.
 func (s *Service) Close() error {
 	s.cancel()
 	s.mu.Lock()
@@ -192,14 +197,13 @@ func (s *Service) Close() error {
 	var errs []error
 	for _, m := range members {
 		m.op.Lock()
-		errs = append(errs, m.stop(ctx))
+		errs = append(errs, s.stop(ctx, m))
 		m.op.Unlock()
 	}
 	s.wg.Wait()
 	return errors.Join(errs...)
 }
 
-// agents reports the assistant's agents as the member's agent.list sees them.
 func (s *Service) agents(ctx context.Context, id domain.MemberID) ([]protocol.AssistantAgent, error) {
 	raw, perr := s.cfg.Caller(id).Call(ctx, protocol.MethodAgentList, json.RawMessage("{}"))
 	if perr != nil {
@@ -223,7 +227,6 @@ func (s *Service) stored(ctx context.Context, id domain.MemberID) (*store.Assist
 	return row, nil
 }
 
-// Status reports the member's assistant.
 func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.AssistantStatus, error) {
 	agents, err := s.agents(ctx, id)
 	if err != nil {
@@ -280,13 +283,11 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	return status, nil
 }
 
-// Start starts the member's session if none is live and returns the status,
-// which says when no agent is ready or the environment needs a restart.
 func (s *Service) Start(ctx context.Context, id domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error) {
 	m := s.member(id)
 	if p.RestartEnvironment {
 		m.op.Lock()
-		err := m.stop(ctx)
+		err := s.stop(ctx, m)
 		m.op.Unlock()
 		if err != nil {
 			return protocol.AssistantStatus{}, err
@@ -360,8 +361,6 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	return live, nil
 }
 
-// open starts the agent's adapter in the member's terminal and opens the
-// session over it, resuming row's when it belongs to agent.
 func (s *Service) open(ctx context.Context, m *member, agent string, row *store.AssistantSession) (*session, error) {
 	argv, askMode, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
 	if err != nil {
@@ -391,11 +390,18 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		return nil, err
 	}
 	live.cancel = cancel
-	s.wg.Go(func() { m.watch(live) })
+	s.wg.Go(func() { s.watch(m, live) })
 	return live, nil
 }
 
 func (s *Service) openSession(ctx context.Context, m *member, agent, askMode string, argv []string, row *store.AssistantSession) (*session, error) {
+	if err := s.stopStale(ctx, m, row); err != nil {
+		return nil, err
+	}
+	resume := ""
+	if row.Agent == agent {
+		resume = row.HarnessSessionID
+	}
 	exec, cwd, err := s.cfg.Runs.StartAssistantExec(ctx, m.id, runtime.ExecSpec{
 		Argv: argv, WorkingDir: workDir, CreationKey: "assistant-" + rand.Text(),
 		Env: []string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"},
@@ -403,13 +409,17 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 	if err != nil {
 		return nil, fmt.Errorf("assistant: start %s: %w", argv[0], err)
 	}
+	identity, err := json.Marshal(exec.Identity())
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("assistant: encode the adapter's identity: %w", err), stopExec(exec))
+	}
+	record := &store.AssistantSession{MemberID: m.id, Agent: agent, HarnessSessionID: resume, ExecIdentity: string(identity)}
+	if err = s.cfg.Store.PutAssistantSession(ctx, record); err != nil {
+		return nil, errors.Join(fmt.Errorf("assistant: record the adapter: %w", err), stopExec(exec))
+	}
 	att := exec.Attachment()
 	stderr := &tail{max: stderrTail}
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
-	resume := ""
-	if row.Agent == agent {
-		resume = row.HarnessSessionID
-	}
 	acpSess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath: s.logPath(m.id),
 		Cwd:     cwd,
@@ -429,11 +439,44 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 			return nil, errors.Join(fmt.Errorf("assistant: set the %q mode, without which the assistant does not run: %w", askMode, err), stopExec(exec))
 		}
 	}
-	if err = s.cfg.Store.PutAssistantSession(ctx, &store.AssistantSession{MemberID: m.id, Agent: agent, HarnessSessionID: acpSess.SessionID()}); err != nil {
+	record.HarnessSessionID = acpSess.SessionID()
+	if err = s.cfg.Store.PutAssistantSession(ctx, record); err != nil {
 		_ = acpSess.Close()
 		return nil, errors.Join(fmt.Errorf("assistant: record the session: %w", err), stopExec(exec))
 	}
-	return &session{agent: agent, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
+	return &session{agent: agent, harnessID: record.HarnessSessionID, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
+}
+
+// stopStale stops the adapter row records, which an earlier session or server
+// process started and may not have stopped.
+func (s *Service) stopStale(ctx context.Context, m *member, row *store.AssistantSession) error {
+	if row.ExecIdentity == "" {
+		return nil
+	}
+	var identity runtime.ExecIdentity
+	if err := json.Unmarshal([]byte(row.ExecIdentity), &identity); err != nil {
+		return fmt.Errorf("assistant: decode the recorded adapter: %w", err)
+	}
+	if err := s.cfg.Runs.StopAssistantExec(ctx, identity); err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
+	return s.cfg.Store.PutAssistantSession(ctx, &store.AssistantSession{MemberID: m.id, Agent: row.Agent, HarnessSessionID: row.HarnessSessionID})
+}
+
+// endExec stops the session's adapter once and forgets its recorded
+// identity. A failure keeps the identity, so the next start stops it.
+func (s *Service) endExec(live *session, member domain.MemberID) error {
+	live.stopOnce.Do(func() {
+		if live.stopErr = stopExec(live.exec); live.stopErr != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), stopGrace+10*time.Second)
+		defer cancel()
+		if err := s.cfg.Store.PutAssistantSession(ctx, &store.AssistantSession{MemberID: member, Agent: live.agent, HarnessSessionID: live.harnessID}); err != nil {
+			live.stopErr = fmt.Errorf("assistant: forget the stopped adapter: %w", err)
+		}
+	})
+	return live.stopErr
 }
 
 func stopExec(exec runtime.ManagedExec) error {
@@ -449,7 +492,6 @@ func stopExec(exec runtime.ManagedExec) error {
 	return nil
 }
 
-// listen opens the member's tool socket, replacing a stale one.
 func (s *Service) listen(id domain.MemberID) (*net.UnixListener, error) {
 	dir := scheduler.AssistantSocketDir(s.cfg.Dir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -473,12 +515,15 @@ func (s *Service) listen(id domain.MemberID) (*net.UnixListener, error) {
 	return ln, nil
 }
 
-// watch cleans up after the adapter exits, whether stopped or not.
-func (m *member) watch(live *session) {
+// watch ends the session's adapter and its bookkeeping once the ACP
+// connection is gone: a dropped attachment does not mean the adapter exited.
+func (s *Service) watch(m *member, live *session) {
 	<-live.acp.Done()
 	live.cancel()
 	m.confirms.cancelAll()
-	_ = live.exec.Detach()
+	if err := s.endExec(live, m.id); err != nil {
+		slog.Warn("assistant: the adapter may still run; the next start stops it", "member", m.id, "error", err)
+	}
 	m.mu.Lock()
 	if m.sess == live {
 		m.sess = nil
@@ -488,14 +533,13 @@ func (m *member) watch(live *session) {
 	close(live.ended)
 }
 
-// stop ends the live session, if any. The caller holds m.op.
-func (m *member) stop(ctx context.Context) error {
+func (s *Service) stop(ctx context.Context, m *member) error {
 	live := m.live()
 	if live == nil {
 		return nil
 	}
 	_ = live.acp.Close()
-	if err := stopExec(live.exec); err != nil {
+	if err := s.endExec(live, m.id); err != nil {
 		return err
 	}
 	select {
@@ -530,12 +574,15 @@ func resolve(agents []protocol.AssistantAgent, requested, stored string) (string
 	return choose(agents, requested, stored)
 }
 
-// resetLocked discards the conversation. The caller holds m.op.
+// resetLocked discards the conversation and starts the next generation. The
+// caller holds m.op.
 func (s *Service) resetLocked(ctx context.Context, m *member) error {
-	if err := m.stop(ctx); err != nil {
+	m.reset.Lock()
+	defer m.reset.Unlock()
+	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
-	if err := s.cfg.Store.DeleteAssistantSession(ctx, m.id); err != nil {
+	if _, err := s.cfg.Store.ResetAssistantSession(ctx, m.id); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
 	if err := os.Remove(s.logPath(m.id)); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -543,18 +590,17 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	}
 	m.mu.Lock()
 	m.err = ""
+	m.attempts, m.done = make(map[string]*attempt), nil
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
 }
 
-// Remove stops the member's session and deletes everything the assistant
-// keeps for them. Call it when the member is removed.
 func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
-	if err := m.stop(ctx); err != nil {
+	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -566,7 +612,6 @@ func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
 	return nil
 }
 
-// Reset stops the session and discards the conversation.
 func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.AssistantStatus, error) {
 	m := s.member(id)
 	m.op.Lock()
@@ -578,17 +623,27 @@ func (s *Service) Reset(ctx context.Context, id domain.MemberID) (protocol.Assis
 	return s.Status(ctx, id)
 }
 
-// attempt is one prompt under an idempotency key; err is final once done is
-// closed.
 type attempt struct {
 	done chan struct{}
 	err  error
 }
 
 // Prompt sends text to the assistant, starting it first when needed, unless a
-// turn is running. A key that is in flight or was accepted is not sent again:
-// a duplicate waits for the first attempt and returns its result.
+// turn is running. A key that is in flight or was accepted, even before a
+// restart, is not sent again: a duplicate waits for the first attempt and
+// returns its result.
 func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string) error {
+	row, err := s.stored(ctx, id)
+	if err != nil {
+		return err
+	}
+	seen, err := s.cfg.Store.HasAssistantPromptKey(ctx, id, row.Generation, key)
+	if err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
+	if seen {
+		return nil
+	}
 	m := s.member(id)
 	a, first := m.begin(key)
 	if !first {
@@ -599,9 +654,15 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
-	err := s.send(ctx, id, text)
+	err = s.send(ctx, id, text)
 	m.finish(key, a, err)
-	return err
+	if err != nil {
+		return err
+	}
+	if err = s.cfg.Store.AddAssistantPromptKey(ctx, id, row.Generation, key); err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) send(ctx context.Context, id domain.MemberID, text string) error {
@@ -628,12 +689,15 @@ func (m *member) begin(key string) (*attempt, bool) {
 }
 
 // finish records a's result. A failed key is forgotten, so the caller can
-// retry it.
+// retry it. A reset in between has already dropped a.
 func (m *member) finish(key string, a *attempt, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	a.err = err
 	close(a.done)
+	if m.attempts[key] != a {
+		return
+	}
 	if err != nil {
 		delete(m.attempts, key)
 		return
@@ -652,7 +716,6 @@ func (s *Service) liveSession(id domain.MemberID) (*acphost.Session, error) {
 	return live.acp, nil
 }
 
-// Cancel stops the turn in flight.
 func (s *Service) Cancel(ctx context.Context, id domain.MemberID) error {
 	sess, err := s.liveSession(id)
 	if err != nil {
@@ -661,7 +724,6 @@ func (s *Service) Cancel(ctx context.Context, id domain.MemberID) error {
 	return sess.Cancel(ctx)
 }
 
-// Answer answers one of the harness's pending requests.
 func (s *Service) Answer(id domain.MemberID, requestID, optionID string, values map[string]any) error {
 	sess, err := s.liveSession(id)
 	if err != nil {
@@ -670,7 +732,6 @@ func (s *Service) Answer(id domain.MemberID, requestID, optionID string, values 
 	return sess.Answer(requestID, optionID, values)
 }
 
-// Confirm answers one of the member's pending confirmations.
 func (s *Service) Confirm(id domain.MemberID, confirmationID string, approve bool) error {
 	return s.member(id).confirms.decide(confirmationID, approve)
 }
@@ -691,7 +752,6 @@ func (t *tail) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// suffix is the adapter's stderr, for an error message.
 func (t *tail) suffix() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -81,3 +81,24 @@ func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.Member
 	exec, err := managed.StartExecPipe(ctx, sup.containerID, spec)
 	return exec, spec.WorkingDir, err
 }
+
+// StopAssistantExec stops an adapter an earlier session or server process
+// started. An exec the runtime no longer knows is gone, not an error.
+func (s *Scheduler) StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error {
+	managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
+	if !ok {
+		return fmt.Errorf("%w: the runtime cannot recover a managed exec", runtime.ErrExecUnavailable)
+	}
+	exec, err := managed.RecoverExec(ctx, identity)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = exec.Detach() }()
+	if _, err = exec.Stop(ctx, acpStopGrace); err != nil {
+		if state, statusErr := exec.Status(ctx); statusErr == nil && !state.Running {
+			return nil
+		}
+		return fmt.Errorf("stop the assistant's adapter (exec %s): %w", identity.ExecID, err)
+	}
+	return nil
+}

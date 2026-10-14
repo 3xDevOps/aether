@@ -14,7 +14,6 @@ export function onPhone(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(mobileScreen).matches
 }
 
-/** Approvals and harness prompts the member has yet to answer. */
 export function assistantWaiting(s: Pick<RootState, 'assistantConfirmations' | 'acpSessions'>): number {
   return s.assistantConfirmations.length + (s.acpSessions[assistantSessionID]?.pending.length ?? 0)
 }
@@ -28,7 +27,6 @@ export interface AssistantSlice {
   assistantWidth: number
   assistantStatus: AssistantStatus | null
   assistantStatusError: string | null
-  /** The pending set of the last status; replaced whole, never patched. */
   assistantConfirmations: AssistantConfirmation[]
   assistantDraft: string
   /** Bumped by a new conversation so the stream reconnects from sequence 0. */

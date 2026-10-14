@@ -12,7 +12,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// confirmTTL is how long a confirmation waits for the member.
 const confirmTTL = 10 * time.Minute
 
 var (
@@ -45,8 +44,6 @@ func newConfirmations(changed func()) *confirmations {
 	return &confirmations{now: time.Now, ttl: confirmTTL, changed: changed}
 }
 
-// confirm publishes c and blocks until the member decides, the confirmation
-// expires, ctx ends or cancelAll discards it. A nil return is approval.
 func (r *confirmations) confirm(ctx context.Context, c protocol.AssistantConfirmation) error {
 	c.ID = rand.Text()
 	c.CreatedAt = r.now().UTC()
@@ -82,7 +79,6 @@ func (r *confirmations) remove(p *pendingConfirmation) {
 	}
 }
 
-// decide answers the pending confirmation id.
 func (r *confirmations) decide(id string, approve bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,7 +99,6 @@ func (r *confirmations) decide(id string, approve bool) error {
 	return fmt.Errorf("%w: %s", ErrNoConfirmation, id)
 }
 
-// cancelAll fails every pending confirmation with errSessionEnded.
 func (r *confirmations) cancelAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

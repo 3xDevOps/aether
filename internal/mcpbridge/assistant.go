@@ -114,8 +114,6 @@ func registerAssistantTools(srv *mcp.Server, socket string) {
 		protocol.MethodEnvSave, func(struct{}) any { return nil })
 }
 
-// add registers one tool that forwards its input, mapped by params, to
-// method and returns the JSON object the method answers with.
 func add[In any](srv *mcp.Server, socket, name, description, method string, params func(In) any) {
 	// A read tool says so, which lets an agent skip its approval prompt.
 	annotations := &mcp.ToolAnnotations{ReadOnlyHint: strings.HasPrefix(description, "Read tier")}

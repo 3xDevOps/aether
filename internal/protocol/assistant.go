@@ -96,6 +96,9 @@ type AssistantDocsResult struct {
 // AssistantStreamRequest is the /ws/assistant header.
 type AssistantStreamRequest struct {
 	AfterSeq int64 `json:"after_seq"`
+	// Epoch is the epoch of the last ack the viewer holds. A different
+	// conversation than the viewer's replays from the start.
+	Epoch int64 `json:"epoch,omitempty"`
 }
 
 // AssistantFrame is one stream frame after the ACPStreamResponse ack: an

@@ -19,7 +19,6 @@ export async function refreshAssistant(store: RootStore, client: Api): Promise<v
   }
 }
 
-/** Streams the assistant's items into `acpSessions` and its status frames into the assistant slice. */
 export function connectAssistant(store: RootStore, client: Api): () => void {
   const id = assistantSessionID
   const stream = connectSessionStream(id, {
@@ -43,7 +42,7 @@ export function connectAssistant(store: RootStore, client: Api): () => void {
     onState: (state, error) => store.getState().acpStream(id, state, error),
   }, {
     url: () => client.assistantSocket(),
-    header: (afterSeq) => ({ after_seq: afterSeq }),
+    header: (afterSeq) => ({ after_seq: afterSeq, epoch: store.getState().acpSessions[id]?.epoch ?? 0 }),
   })
   return () => {
     stream.close()
@@ -55,14 +54,18 @@ export async function loadOlderAssistant(store: RootStore, client: Api): Promise
   const id = assistantSessionID
   const session = store.getState().acpSessions[id]
   if (!session?.more || session.olderLoading) return
+  const generation = store.getState().assistantGeneration
+  // historyGeneration restarts at zero when a new conversation recreates the entry, so it cannot tell conversations apart.
+  const current = () => store.getState().assistantGeneration === generation &&
+    store.getState().acpSessions[id]?.historyGeneration === session.historyGeneration
   store.getState().acpOlderState(id, true)
   try {
     const page = await client.assistantHistory(session.oldestSeq, historyPage)
-    if (store.getState().acpSessions[id]?.historyGeneration !== session.historyGeneration) return
+    if (!current()) return
     const oldest = page.frames.find((frame) => frame.item)?.item?.seq ?? 0
     store.getState().acpOlder(id, page.frames, oldest > (page.oldest_seq ?? 1), page.truncated_before)
   } catch (err) {
-    if (store.getState().acpSessions[id]?.historyGeneration === session.historyGeneration) {
+    if (current()) {
       store.getState().acpOlderState(id, false, message(err))
     }
   }

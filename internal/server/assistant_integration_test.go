@@ -21,10 +21,12 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/assistant"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // assistantRuntime serves every managed exec with the acpmock agent in
@@ -62,8 +64,18 @@ func (r *assistantRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec 
 	return e, nil
 }
 
-func (r *assistantRuntime) RecoverExec(context.Context, runtime.ExecIdentity) (runtime.ManagedExec, error) {
+func (r *assistantRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
+	for _, e := range r.started() {
+		if e.identity == identity {
+			return e, nil
+		}
+	}
 	return nil, runtime.ErrExecUnavailable
+}
+
+// adapters are the execs the assistant started.
+func (r *assistantRuntime) adapters() []*assistantExec {
+	return slices.DeleteFunc(r.started(), func(e *assistantExec) bool { return !strings.HasPrefix(e.spec.CreationKey, "assistant-") })
 }
 
 func (r *assistantRuntime) started() []*assistantExec {
@@ -110,6 +122,15 @@ func (e *assistantExec) Wait(ctx context.Context) (runtime.ExitStatus, error) {
 		return runtime.ExitStatus{}, nil
 	case <-ctx.Done():
 		return runtime.ExitStatus{}, ctx.Err()
+	}
+}
+
+func (e *assistantExec) stopped() bool {
+	select {
+	case <-e.done:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -181,21 +202,7 @@ func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv
 	}
 	env.srv = srv
 	if prior == nil {
-		_, signer := writeClientKey(t)
-		env.member = &domain.Member{DisplayName: "Ada", PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Color: "#4363d8", Role: domain.RoleAdmin}
-		if err := srv.Store().CreateMember(ctx, env.member); err != nil {
-			t.Fatalf("seed member: %v", err)
-		}
-		home := filepath.Join(env.data, "homes", string(env.member.ID))
-		for _, name := range []string{".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json"} {
-			path := filepath.Join(home, name)
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-		}
+		env.member = seedAssistantMember(t, ctx, srv, env.data, domain.RoleAdmin)
 	}
 	var runCtx context.Context
 	runCtx, env.cancel = context.WithCancel(ctx)
@@ -288,7 +295,7 @@ func TestIntegrationAssistant(t *testing.T) {
 	if started.State != protocol.AssistantStateIdle || started.Agent != "claude" || started.Error != "" {
 		t.Fatalf("assistant.start = %+v, want an idle claude session", started)
 	}
-	execs := env.rt.started()
+	execs := env.rt.adapters()
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
@@ -397,10 +404,26 @@ func TestIntegrationAssistant(t *testing.T) {
 	env.stop()
 	env = startAssistantServer(t, ctx, env)
 	defer env.stop()
+	stale, err := env.rt.StartExecPipe(ctx, execs[0].identity.ContainerID, runtime.ExecSpec{Argv: []string{"stale"}, CreationKey: "stale"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, _ := json.Marshal(stale.Identity())
+	row, err := env.srv.Store().GetAssistantSession(ctx, env.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.ExecIdentity = string(identity)
+	if err := env.srv.Store().PutAssistantSession(ctx, row); err != nil {
+		t.Fatal(err)
+	}
 	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "and now?", IdempotencyKey: "k2"}, nil); perr != nil {
 		t.Fatalf("assistant.prompt after a restart: %v", perr)
 	}
-	execs = env.rt.started()
+	if !stale.(*assistantExec).stopped() {
+		t.Fatal("the recorded stale adapter was not stopped before the new one started")
+	}
+	execs = env.rt.adapters()
 	if len(execs) != 2 {
 		t.Fatalf("%d adapters started over both servers, want 2", len(execs))
 	}
@@ -412,14 +435,77 @@ func TestIntegrationAssistant(t *testing.T) {
 		t.Fatalf("restarted adapter received %v, want the asking mode set", methods)
 	}
 
+	viewer := env.watch(ctx, 0)
+	viewer.until(t, "the first status", func(f protocol.AssistantFrame) bool { return f.Status != nil })
 	var reset protocol.AssistantStatus
 	if perr := env.call(protocol.MethodAssistantReset, struct{}{}, &reset); perr != nil || reset.State != protocol.AssistantStateIdle {
 		t.Fatalf("assistant.reset = %+v, %v", reset, perr)
+	}
+	frame := viewer.until(t, "a reset frame", func(f protocol.AssistantFrame) bool { return f.Reset })
+	if frame.Epoch/assistant.EpochStride != 2 {
+		t.Fatalf("reset frame epoch %d, want the second generation's", frame.Epoch)
 	}
 	if _, err := os.Stat(filepath.Join(env.data, "assistant", string(env.member.ID), "items.jsonl")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("item log after reset: %v, want it removed", err)
 	}
 	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr == nil || perr.Code != protocol.CodeUnavailable {
 		t.Fatalf("assistant.cancel after reset = %v, want unavailable", perr)
+	}
+}
+
+// seedAssistantMember adds a member whose claude agent is ready.
+func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data string, role domain.Role) *domain.Member {
+	t.Helper()
+	_, signer := writeClientKey(t)
+	member := &domain.Member{DisplayName: "Ada", PublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Color: "#4363d8", Role: role}
+	if err := srv.Store().CreateMember(ctx, member); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	home := filepath.Join(data, "homes", string(member.ID))
+	for _, name := range []string{".local/bin/claude", ".local/bin/claude-agent-acp", ".claude/.credentials.json"} {
+		path := filepath.Join(home, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return member
+}
+
+// TestIntegrationAssistantRemoveDuringStart removes a member while their
+// assistant starts: each holds a lock the other waits on unless the
+// assistant is stopped first.
+func TestIntegrationAssistantRemoveDuringStart(t *testing.T) {
+	requireBinary(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	env := startAssistantServer(t, ctx, nil)
+	defer env.stop()
+	for range 5 {
+		victim := seedAssistantMember(t, ctx, env.srv, env.data, domain.RoleCollaborator)
+		done := make(chan string, 2)
+		go func() {
+			_, _ = env.srv.ssh.Local(victim.ID).Call(ctx, protocol.MethodAssistantStart, json.RawMessage("{}"))
+			done <- "start"
+		}()
+		go func() {
+			params, _ := json.Marshal(protocol.MemberRemoveParams{MemberID: string(victim.ID)})
+			if _, perr := env.srv.ssh.Local(env.member.ID).Call(ctx, protocol.MethodMemberRemove, params); perr != nil {
+				t.Errorf("member.remove: %v", perr)
+			}
+			done <- "remove"
+		}()
+		for range 2 {
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatal("assistant start and member.remove did not both finish: deadlock")
+			}
+		}
+		if _, err := env.srv.Store().GetMember(ctx, victim.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("member after member.remove: %v, want it gone", err)
+		}
 	}
 }

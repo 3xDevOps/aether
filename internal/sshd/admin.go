@@ -171,6 +171,12 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			return nil, rpcError(listErr)
 		}
 	}
+	// The assistant stops before the terminal lock is taken: starting it waits
+	// on that lock while holding its own, so stopping it under the lock
+	// would deadlock. A failure leaves the member as it was.
+	if err := s.removeAssistant(ctx, id); err != nil {
+		return nil, rpcError(fmt.Errorf("member.remove: %w", err))
+	}
 	// Hold the terminal lifecycle lock through removal: EnsureTerminal must not
 	// recreate an owner between stopping the terminal and deleting its home.
 	// Lock order is terminal lifecycle -> cache; never call StopTerminal while
@@ -192,7 +198,6 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			if err := s.cfg.Store.DeleteMember(ctx, id); err != nil {
 				return err
 			}
-			s.removeAssistant(ctx, id)
 			if s.cfg.Homes != nil {
 				if err := s.cfg.Homes.Remove(ctx, id); err != nil {
 					slog.Warn("sshd: member home cleanup failed", "member", id, "error", err)

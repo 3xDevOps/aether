@@ -1,14 +1,82 @@
 package assistant
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
+
+type memStore struct {
+	mu   sync.Mutex
+	rows map[domain.MemberID]*store.AssistantSession
+	keys map[string]bool
+}
+
+func newMemStore() *memStore {
+	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}}
+}
+
+func (m *memStore) GetAssistantSession(_ context.Context, id domain.MemberID) (*store.AssistantSession, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if row := m.rows[id]; row != nil {
+		c := *row
+		return &c, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *memStore) PutAssistantSession(_ context.Context, s *store.AssistantSession) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row := m.rows[s.MemberID]
+	if row == nil {
+		row = &store.AssistantSession{MemberID: s.MemberID}
+		m.rows[s.MemberID] = row
+	}
+	row.Agent, row.HarnessSessionID, row.ExecIdentity = s.Agent, s.HarnessSessionID, s.ExecIdentity
+	return nil
+}
+
+func (m *memStore) ResetAssistantSession(_ context.Context, id domain.MemberID) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row := m.rows[id]
+	if row == nil {
+		row = &store.AssistantSession{MemberID: id}
+		m.rows[id] = row
+	}
+	row.Agent, row.HarnessSessionID = "", ""
+	row.Generation++
+	m.keys = map[string]bool{}
+	return row.Generation, nil
+}
+
+func keyOf(id domain.MemberID, generation int64, key string) string {
+	return string(id) + "/" + string(rune('0'+generation)) + "/" + key
+}
+
+func (m *memStore) HasAssistantPromptKey(_ context.Context, id domain.MemberID, generation int64, key string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.keys[keyOf(id, generation, key)], nil
+}
+
+func (m *memStore) AddAssistantPromptKey(_ context.Context, id domain.MemberID, generation int64, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.keys[keyOf(id, generation, key)] = true
+	return nil
+}
 
 func TestResolveNeverSwitchesUnasked(t *testing.T) {
 	agents := []protocol.AssistantAgent{
@@ -29,7 +97,7 @@ func TestResolveNeverSwitchesUnasked(t *testing.T) {
 }
 
 func TestPromptKeyIsSharedByDuplicates(t *testing.T) {
-	s := New(Config{})
+	s := New(Config{Store: newMemStore()})
 	s.cancel()
 	m := s.member("m1")
 	m.op.Lock()
@@ -52,18 +120,78 @@ func TestPromptKeyIsSharedByDuplicates(t *testing.T) {
 	if len(m.attempts) != 0 {
 		t.Fatalf("failed key kept: %v", m.attempts)
 	}
-	a, first := m.begin("ok")
-	m.finish("ok", a, nil)
-	if _, again := m.begin("ok"); again || !first {
-		t.Fatal("an accepted key must not run twice")
+}
+
+func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
+	db := newMemStore()
+	if err := db.AddAssistantPromptKey(t.Context(), "m1", 0, "k"); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Config{Store: db})
+	s.cancel()
+	if err := s.Prompt(t.Context(), "m1", "hi", "k"); err != nil {
+		t.Fatalf("a key accepted before the restart ran again: %v", err)
+	}
+	if err := s.Prompt(t.Context(), "m1", "hi", "other"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("a new key = %v, want it to run", err)
+	}
+}
+
+func TestResetStartsANewGeneration(t *testing.T) {
+	dir := t.TempDir()
+	db := newMemStore()
+	s := New(Config{Dir: dir, Store: db})
+	m := s.member("m1")
+	log := func(items int) {
+		l, err := acphost.OpenLog(s.logPath("m1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = l.Close() }()
+		for range items {
+			if err := l.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Title: "n"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	log(3)
+	viewer := Epoch(0, 0)
+	m.op.Lock()
+	err := s.resetLocked(t.Context(), m)
+	m.op.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(s.logPath("m1")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("log after reset: %v", statErr)
+	}
+	if generation, _ := s.Generation(t.Context(), "m1"); generation != 1 {
+		t.Fatalf("generation = %d, want 1", generation)
+	}
+	log(5)
+
+	stale, err := s.Subscribe(t.Context(), "m1", 3, viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stale.Cancel()
+	if len(stale.Replay) != 5 || stale.Epoch/EpochStride != 2 || stale.Epoch == viewer {
+		t.Fatalf("viewer of the old conversation got %d items at epoch %d, want everything at a new epoch", len(stale.Replay), stale.Epoch)
+	}
+	current, err := s.Subscribe(t.Context(), "m1", 3, stale.Epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer current.Cancel()
+	if len(current.Replay) != 2 {
+		t.Fatalf("current viewer got %d items, want the 2 after its cursor", len(current.Replay))
 	}
 }
 
 func TestRemoveDeletesMemberFiles(t *testing.T) {
 	dir := t.TempDir()
 	s := New(Config{Dir: dir})
-	sock := filepath.Join(dir, "m1", "sock")
-	if err := os.MkdirAll(sock, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "m1", "sock"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	s.member("m1")

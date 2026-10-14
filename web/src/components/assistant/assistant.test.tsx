@@ -252,7 +252,7 @@ describe('the conversation', () => {
     const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
     expect(await within(log).findByText('What is running?')).toBeDefined()
     expect(within(log).getByText('working').tagName).toBe('STRONG')
-    expect(assistantSocket().header()).toEqual({ after_seq: 0 })
+    expect(assistantSocket().header()).toEqual({ after_seq: 0, epoch: 0 })
   })
 
   it('sends a prompt with Enter and keeps a newline on Shift+Enter', async () => {
@@ -415,6 +415,50 @@ describe('while closed', () => {
     render(<AppShell />)
     await waitFor(() => expect(api.assistantStatus).toHaveBeenCalledTimes(1))
     expect(StubSocket.opened).toHaveLength(0)
+  })
+})
+
+describe('a new conversation', () => {
+  it('clears the transcript when a reconnect meets a new epoch', async () => {
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    expect(await within(aside).findByText('old question')).toBeDefined()
+    const held = useStore.getState().acpSessions.assistant!.epoch
+    const before = StubSocket.opened.length
+    assistantSocket().close(1006)
+    await waitFor(() => expect(StubSocket.opened.length).toBeGreaterThan(before))
+    resetItems()
+    const reconnected = assistantSocket().open({ epoch: 1, seq: 2, replay: 2 }, [item('turn_start', 1), say(1, 'user', 'new question')])
+    expect(reconnected.header()).toEqual({ after_seq: 3, epoch: held })
+    expect(await within(aside).findByText('new question')).toBeDefined()
+    expect(within(aside).queryByText('old question')).toBeNull()
+  })
+
+  it('drops a full-item read that finishes after the reset', async () => {
+    const whole = item('tool_call', 1, { tool_call: { id: 't', title: 'late', status: 'completed' } })
+    let finish: (value: typeof whole) => void = () => {}
+    vi.mocked(api.assistantItem).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const read = loadWholeItem(useStore, api, 'assistant', whole.seq)
+    act(() => useStore.getState().restartAssistantConversation())
+    const replace = vi.spyOn(useStore.getState(), 'acpReplaceItem')
+    finish(whole)
+    await read
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it('sends the next prompt under a fresh idempotency key', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new Error('lost')).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'same words')
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    await within(aside).findByRole('alert')
+    act(() => useStore.getState().restartAssistantConversation())
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
+    const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
+    expect(second![1]).not.toBe(first![1])
   })
 })
 

@@ -53,15 +53,12 @@ var tiers = map[string]string{
 	protocol.MethodEnvSave:        tierConfirmed,
 }
 
-// Caller runs a control method with the member's authority.
 type Caller interface {
 	Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error)
 }
 
-// Confirmer blocks until the member decides on c. A nil return is approval.
 type Confirmer func(ctx context.Context, c protocol.AssistantConfirmation) error
 
-// Server answers tool calls on a listener.
 type Server struct {
 	Caller  Caller
 	Confirm Confirmer
@@ -70,7 +67,6 @@ type Server struct {
 	Member string
 }
 
-// Serve accepts connections until ctx is done or the listener fails.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup

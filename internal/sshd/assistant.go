@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +19,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/scheduler"
 )
 
-// AssistantService hosts each member's assistant. Every method acts on the
-// calling member's own.
 type AssistantService interface {
 	Status(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	Start(ctx context.Context, member domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error)
@@ -31,9 +29,9 @@ type AssistantService interface {
 	Reset(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	History(member domain.MemberID, beforeSeq int64, limit int) (acphost.HistoryPage, error)
 	Item(member domain.MemberID, seq int64) (acphost.Item, error)
-	// Remove deletes what the assistant keeps for a removed member.
 	Remove(ctx context.Context, member domain.MemberID) error
-	Subscribe(member domain.MemberID, afterSeq int64) (assistant.Stream, error)
+	Subscribe(ctx context.Context, member domain.MemberID, afterSeq, viewerEpoch int64) (assistant.Stream, error)
+	Generation(ctx context.Context, member domain.MemberID) (int64, error)
 }
 
 func init() {
@@ -202,13 +200,15 @@ func (s *Server) assistantItem(_ context.Context, member domain.MemberID, raw js
 	return protocol.RunACPItemResult{Item: b}, nil
 }
 
-// removeAssistant drops a removed member's assistant files and session.
-func (s *Server) removeAssistant(ctx context.Context, member domain.MemberID) {
-	if svc := s.cfg.Services.Assistant; svc != nil {
-		if err := svc.Remove(ctx, member); err != nil {
-			slog.Warn("sshd: member assistant cleanup failed", "member", member, "error", err)
-		}
+func (s *Server) removeAssistant(ctx context.Context, member domain.MemberID) error {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil
 	}
+	if err := svc.Remove(ctx, member); err != nil {
+		return fmt.Errorf("remove the member's assistant: %w", err)
+	}
+	return nil
 }
 
 func assistantError(err error) *protocol.Error {
@@ -263,7 +263,7 @@ func (s *Server) serveAssistant(ctx context.Context, member domain.MemberID, ch 
 		refuse(errAssistantUnavailable.Code, errAssistantUnavailable.Message)
 		return
 	}
-	stream, err := svc.Subscribe(member, req.AfterSeq)
+	stream, err := svc.Subscribe(ctx, member, req.AfterSeq, req.Epoch)
 	if err != nil {
 		e := assistantError(err)
 		refuse(e.Code, e.Message)
@@ -340,6 +340,10 @@ func (s *Server) serveAssistant(ctx context.Context, member domain.MemberID, ch 
 	if errors.Is(context.Cause(ctx), errAttachMembershipRevoked) {
 		ch.exit(protocol.AttachExitMembershipRevoked)
 		return
+	}
+	// A reset ends the stream like any session end; tell the viewer which.
+	if generation, err := svc.Generation(context.WithoutCancel(ctx), member); err == nil && generation != stream.Generation {
+		_ = write(protocol.ACPFrame{Reset: true, Epoch: assistant.Epoch(generation, 0)})
 	}
 	ch.exit(0)
 }

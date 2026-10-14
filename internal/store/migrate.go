@@ -1689,14 +1689,24 @@ CREATE TABLE member_merges (
 );
 CREATE INDEX idx_member_merges_survivor ON member_merges(survivor_id);
 `,
-	// v64: the assistant. One row per member names the agent and the harness
-	// session the member's assistant resumes.
+	// v64: the assistant. One row per member names the agent and harness
+	// session their assistant resumes, the adapter exec to stop before the
+	// next one starts, and the conversation generation a reset bumps. The
+	// last prompt keys per generation let a retry after a restart be ignored.
 	`
 CREATE TABLE assistant_sessions (
 	member_id          TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
 	agent              TEXT NOT NULL,
 	harness_session_id TEXT NOT NULL,
+	exec_identity      TEXT NOT NULL DEFAULT '',
+	generation         INTEGER NOT NULL DEFAULT 0,
 	updated_at         INTEGER NOT NULL
+);
+CREATE TABLE assistant_prompt_keys (
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	generation INTEGER NOT NULL,
+	key        TEXT NOT NULL,
+	PRIMARY KEY (member_id, generation, key)
 );
 `,
 }

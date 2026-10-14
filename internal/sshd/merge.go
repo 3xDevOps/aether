@@ -382,7 +382,9 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 	if caller != merge.AbsorbedID || !deferUntilResponded(ctx, closeAbsorbed) {
 		closeAbsorbed()
 	}
-	s.removeAssistant(ctx, merge.AbsorbedID)
+	if err := s.removeAssistant(ctx, merge.AbsorbedID); err != nil {
+		slog.Warn("sshd: absorbed member's assistant cleanup failed", "merge", merge.ID, "error", err)
+	}
 	s.notifyDirectory()
 	ev := events.Event{WorkspaceID: events.ServerScope, ActorID: merge.SurvivorID,
 		Payload: events.MemberMergedPayload{MergeID: merge.ID, SurvivorID: merge.SurvivorID, AbsorbedID: merge.AbsorbedID}}

@@ -30,7 +30,6 @@ function useAction() {
   return { busy, error, run }
 }
 
-/** A harness permission prompt or question; assistant.answer answers it. */
 export function AssistantRequestCard({ request }: { request: SessionRequest }) {
   const { busy, error, run } = useAction()
   const call = useToolCall(assistantSessionID, request.tool_call_id)
@@ -93,7 +92,6 @@ export function AssistantRequestCard({ request }: { request: SessionRequest }) {
   )
 }
 
-/** The params of a confirmed call as labelled rows: `workspace_id` reads "Workspace", text stays whole, nested values are JSON. */
 export function paramRows(params: unknown): [string, string][] {
   if (params === null || typeof params !== 'object' || Array.isArray(params)) {
     return params === undefined || params === null ? [] : [['Params', JSON.stringify(params)]]
@@ -104,7 +102,6 @@ export function paramRows(params: unknown): [string, string][] {
   })
 }
 
-/** An Aether operation the assistant may not run until the member approves its exact parameters. */
 export function ConfirmationCard({ confirmation }: { confirmation: AssistantConfirmation }) {
   const { busy, error, run } = useAction()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))

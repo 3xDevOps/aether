@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { ArrowUp, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,10 @@ export function AssistantComposer({ textarea, running, dock }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const attempt = useRef<{ text: string; key: string }>(null)
+  const generation = useStore((s) => s.assistantGeneration)
+  useEffect(() => {
+    attempt.current = null
+  }, [generation])
 
   const send = async () => {
     const text = draft.trim()
