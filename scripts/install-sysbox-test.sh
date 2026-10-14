@@ -121,6 +121,10 @@ run FAKE_ROUTE=172.20.5.0/24
 expect 1 "cannot add \"bip\": 172.20.0.1/16 overlaps"
 untouched
 
+run 'FAKE_ROUTE=blackhole 172.20.0.0/16'
+expect 1 "cannot add \"bip\": 172.20.0.1/16 overlaps"
+untouched
+
 run FAKE_ADDR=172.25.9.1/24
 expect 1 "cannot add \"default-address-pools\": 172.25.0.0/16 overlaps"
 untouched

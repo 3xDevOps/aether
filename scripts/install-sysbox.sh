@@ -100,7 +100,7 @@ ip -4 -o address show dev docker0 2>/dev/null | grep -qF " $BIP " && docker0_has
 # Every IPv4 network on the host's routes and interfaces, except docker0's own
 # bip network. A route without a prefix length is a host route.
 local_networks() {
-	ip -4 -o route | awk -v skip="$docker0_has_bip" '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ && !(skip != "" && $0 ~ / dev docker0( |$)/) {print $1}'
+	ip -4 -o route | awk -v skip="$docker0_has_bip" '{net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ && !(skip != "" && $0 ~ / dev docker0( |$)/) {print net}'
 	ip -4 -o address | awk -v skip="$docker0_has_bip" '!(skip != "" && $2 == "docker0") {print $4}'
 }
 
