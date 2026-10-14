@@ -90,38 +90,57 @@ command -v jq >/dev/null 2>&1 || apt_install jq
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 tmp_json="$tmp/daemon.json"
-daemon_json_changed=
 BIP="172.20.0.1/16"
 POOL_BASE="172.25.0.0/16"
 
-# Mirrors the package's own check: an address overlaps a local subnet unless
-# the kernel routes it through the default gateway.
+# docker0 already carrying the bip is not a conflict with it.
+docker0_has_bip=
+ip -4 -o address show dev docker0 2>/dev/null | grep -qF " $BIP " && docker0_has_bip=yes
+
+# Every IPv4 network on the host's routes and interfaces, except docker0's own
+# bip network.
+local_networks() {
+	ip -4 -o route | awk -v skip="$docker0_has_bip" '$1 != "default" && !(skip != "" && $0 ~ / dev docker0( |$)/) {print $1}'
+	ip -4 -o address | awk -v skip="$docker0_has_bip" '!(skip != "" && $2 == "docker0") {print $4}'
+}
+
+# overlaps_local_subnet ADDRESS PREFIX: a route inside the proposed /16, or the
+# package's own check, under which an address overlaps unless the kernel routes
+# it through the default gateway (this catches a covering supernet).
 overlaps_local_subnet() {
+	local_networks | grep -q "^$2" && return 0
+	[ -z "$docker0_has_bip" ] || [ "$2" != '172\.20\.' ] || return 1
 	! ip route get "$1" | grep -q "via $(ip route | awk '/default/ {print $3}')"
 }
 
-mkdir -p "$(dirname "$DAEMON_JSON")"
-[ -s "$DAEMON_JSON" ] || echo '{}' >"$DAEMON_JSON"
-
-if ! jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null; then
-	if overlaps_local_subnet "${BIP%/*}" && ! ip -4 address show dev docker0 2>/dev/null | grep -q "$BIP"; then
+add_bip=false
+add_pool=false
+if ! jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null 2>&1; then
+	overlaps_local_subnet "${BIP%/*}" '172\.20\.' &&
 		die "cannot add \"bip\": ${BIP} overlaps a subnet on this host. Set \"bip\" in ${DAEMON_JSON} to a free range, then re-run this script."
-	fi
-	jq --arg bip "$BIP" --indent 4 '. + {"bip": $bip}' "$DAEMON_JSON" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
-	cat "$tmp_json" >"$DAEMON_JSON"
-	say "added \"bip\": \"${BIP}\" to ${DAEMON_JSON}"
-	daemon_json_changed=yes
+	add_bip=true
 fi
-if ! jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null; then
-	if overlaps_local_subnet "${POOL_BASE%/*}"; then
+if ! jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null 2>&1; then
+	overlaps_local_subnet "${POOL_BASE%/*}" '172\.25\.' &&
 		die "cannot add \"default-address-pools\": ${POOL_BASE} overlaps a subnet on this host. Set \"default-address-pools\" in ${DAEMON_JSON} to a free range, then re-run this script."
-	fi
-	jq --arg base "$POOL_BASE" --indent 4 '. + {"default-address-pools": [{"base": $base, "size": 24}]}' "$DAEMON_JSON" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
-	cat "$tmp_json" >"$DAEMON_JSON"
-	say "added \"default-address-pools\": [{\"base\": \"${POOL_BASE}\", \"size\": 24}] to ${DAEMON_JSON}"
-	daemon_json_changed=yes
+	add_pool=true
 fi
-[ -z "$daemon_json_changed" ] || say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
+
+if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
+	source_json="$DAEMON_JSON"
+	if [ ! -s "$DAEMON_JSON" ]; then
+		echo '{}' >"$tmp/empty.json"
+		source_json="$tmp/empty.json"
+	fi
+	jq --indent 4 --arg bip "$BIP" --arg base "$POOL_BASE" --argjson add_bip "$add_bip" --argjson add_pool "$add_pool" \
+		'(if $add_bip then .bip = $bip else . end) | (if $add_pool then ."default-address-pools" = [{"base": $base, "size": 24}] else . end)' \
+		"$source_json" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
+	mkdir -p "$(dirname "$DAEMON_JSON")"
+	cat "$tmp_json" >"$DAEMON_JSON"
+	[ "$add_bip" = false ] || say "added \"bip\": \"${BIP}\" to ${DAEMON_JSON}"
+	[ "$add_pool" = false ] || say "added \"default-address-pools\": [{\"base\": \"${POOL_BASE}\", \"size\": 24}] to ${DAEMON_JSON}"
+	say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
+fi
 
 say "downloading ${deb}"
 curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
@@ -143,8 +162,14 @@ say "Docker lists sysbox-runc"
 probe="$tmp/probe"
 mkdir "$probe"
 chown 1000:1000 "$probe"
-probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 touch /m/probe 2>&1)" ||
-	die "bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}"
+pull_out="$(docker pull busybox:1.36 2>&1)" || die "cannot pull the probe image busybox:1.36: ${pull_out}"
+probe_rc=0
+probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 sh -c 'touch /m/probe || exit 42' 2>&1)" || probe_rc=$?
+case "$probe_rc" in
+0) ;;
+42) die "bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
+*) die "cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
+esac
 say "bind-mount probe passed"
 echo
 echo "next:"
