@@ -39,8 +39,17 @@ let stepped: string | null = null
 
 type Entry = 'prompt' | 'empty' | 'report' | FlatRow
 
-function PromptNote({ error, cut }: { error: string | undefined; cut: boolean }) {
-  if (error) return <p role="alert" className="text-ui-sm text-state-failed">The prompt could not be read: {error}</p>
+function ReadError({ what, error, onRetry }: { what: string; error: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p role="alert" className="text-ui-sm text-state-failed">The {what} could not be read: {error}</p>
+      <Button size="sm" variant="secondary" onClick={onRetry}>Retry</Button>
+    </div>
+  )
+}
+
+function PromptNote({ error, cut, onRetry }: { error: string | undefined; cut: boolean; onRetry: () => void }) {
+  if (error) return <ReadError what="prompt" error={error} onRetry={onRetry} />
   return cut
     ? <p className="text-ui-sm text-muted">The launch input is longer than the session log keeps, so its prompt is not available.</p>
     : <p className="text-ui-sm text-muted">Loading the prompt…</p>
@@ -80,10 +89,12 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
 
   const missing = truncated && (!prompt || (finished && !report))
   const [wholeError, setWholeError] = useState<string>()
+  const [attempt, setAttempt] = useState(0)
+  const retryWhole = () => setAttempt((n) => n + 1)
   useEffect(() => {
     setWholeError(undefined)
     if (missing) loadWholeItem(useStore, api, run.id, callSeq!).catch((err) => setWholeError(message(err)))
-  }, [missing, run.id, callSeq])
+  }, [missing, run.id, callSeq, attempt])
 
   const paged = useRef(0)
   const known = sub !== undefined
@@ -100,9 +111,9 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
     return [
       ...(prompt || truncated || cut ? ['prompt' as const] : []),
       ...(flat.length === 0 ? ['empty' as const] : flat),
-      ...(finished && (report || (truncated && !wholeError)) ? ['report' as const] : []),
+      ...(finished && (report || truncated) ? ['report' as const] : []),
     ]
-  }, [sub, prompt, truncated, cut, flat, finished, report, wholeError])
+  }, [sub, prompt, truncated, cut, flat, finished, report])
 
   const list = useRef<VListHandle>(null)
   const pinned = useRef(state === 'running')
@@ -191,7 +202,7 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
                 <div key="prompt" className="px-4 pt-1">
                   {prompt
                     ? <MessageRow author="Prompt">{prompt}</MessageRow>
-                    : <PromptNote error={wholeError} cut={cut && !truncated} />}
+                    : <PromptNote error={wholeError} cut={cut && !truncated} onRetry={retryWhole} />}
                 </div>
               )
             }
@@ -202,7 +213,11 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
               return (
                 <div key="report" className="px-4 pt-3 pb-4">
                   <h3 className={cn('mb-1 text-ui-sm font-medium', state === 'failed' ? 'text-state-failed' : 'text-muted')}>Report</h3>
-                  {report ? <Markdown text={report} /> : <p className="text-ui-sm text-muted">Loading the report…</p>}
+                  {report
+                    ? <Markdown text={report} />
+                    : wholeError
+                      ? <ReadError what="report" error={wholeError} onRetry={retryWhole} />
+                      : <p className="text-ui-sm text-muted">Loading the report…</p>}
                 </div>
               )
             }

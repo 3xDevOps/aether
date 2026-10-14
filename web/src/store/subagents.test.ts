@@ -255,6 +255,19 @@ describe('indexing subagents', () => {
     expect(replaced.callTruncated).toBe(false)
   })
 
+  it('moves an orphan card up when an older page brings an earlier item', () => {
+    const later = [item('turn_start', 1), say(1, 'user', 'go')]
+    const early = read(1, 'ghost', 'r1')
+    const late = read(1, 'ghost', 'r2')
+    const { index: idx, main } = index([...later, late])
+    const turn = { turn: 1, items: main, closed: true }
+    const before = withAgentRows(rowsOfTurn(turn), 1, turnExtras(idx, late.seq))
+    expect(before.map((row) => row.kind)).toEqual(['user', 'subagents'])
+    const older = { ...early, seq: 0, time: later[0]!.time }
+    const after = withAgentRows(rowsOfTurn(turn), 1, turnExtras(index([older], true, idx).index, 0))
+    expect(after.map((row) => row.kind)).toEqual(['subagents', 'user'])
+  })
+
   it('orders activity against a settle or turn end by seq when their times tie', () => {
     const raw_input = { run_in_background: true }
     const ack = launch(1, 'a1', 'completed', { raw_input })

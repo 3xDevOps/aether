@@ -165,7 +165,23 @@ describe('subagents in the session view', () => {
     open('a1')
     acpSocket().open({}, [start, launched])
     const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
-    expect((await within(inspector).findByRole('alert')).textContent).toContain('acphost: requested session history has expired')
+    expect((await within(inspector).findAllByRole('alert')).map((alert) => alert.textContent)).toEqual([
+      'The prompt could not be read: acphost: requested session history has expired',
+      'The report could not be read: acphost: requested session history has expired',
+    ])
+  })
+
+  it('shows a report read error beside a held prompt, and retries it', async () => {
+    const start = item('turn_start', 1)
+    const launched = { ...launch(1, 'a1', 'Find usages', 'completed', { raw_input: { prompt: 'Search' } }), truncated: true }
+    vi.mocked(api.runACPItem).mockClear().mockRejectedValue(new Error('acphost: requested session history has expired'))
+    open('a1')
+    acpSocket().open({}, [start, launched])
+    const inspector = await screen.findByRole('dialog', { name: 'Subagent' })
+    expect(within(inspector).getByText('Search')).toBeDefined()
+    expect((await within(inspector).findByRole('alert')).textContent).toBe('The report could not be read: acphost: requested session history has expired')
+    await userEvent.click(within(inspector).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(api.runACPItem).toHaveBeenCalledTimes(2))
   })
 
   it('pages earlier history until the launch is loaded, and says when an agent is unknown', async () => {
@@ -247,6 +263,14 @@ describe('subagents in the session view', () => {
     const log = await screen.findByRole('log', { name: 'Session' })
     const card = await within(log).findByRole('button', { name: 'Subagent, Not loaded' })
     expect(within(card).getByText('Its launch is not in the session history · Read billing.js')).toBeDefined()
+  })
+
+  it('lists the edits of a subagent whose turn holds no main item', async () => {
+    open()
+    acpSocket().open({}, [tool(1, 'e1', 'edit', 'Edit billing.js', 'completed', { parent_id: 'ghost', diffs: [{ path: 'billing.js', patch: '+a\n' }] })])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    expect(await within(log).findByText('Changed 1 file')).toBeDefined()
+    expect(within(log).getByText('billing.js')).toBeDefined()
   })
 
   it('previews a report without Latin letters', async () => {

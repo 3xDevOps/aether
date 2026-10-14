@@ -103,7 +103,9 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
 function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
   if (!turns) return []
   const held = new Set(turns.map((turn) => turn.turn))
-  const lost = [...extras].flatMap(([turn, { orphans }]): SessionRow[] => (orphans && !held.has(turn) ? [{ kind: 'subagents', id: `orphans:${turn}`, ...orphans }] : []))
+  const lost = [...extras].flatMap(([turn, { orphans, files }]): SessionRow[] => (orphans && !held.has(turn)
+    ? [{ kind: 'subagents', id: `orphans:${turn}`, ...orphans }, ...(files ? [{ kind: 'changed-files' as const, id: `files:${turn}`, at: orphans.at, files }] : [])]
+    : []))
   const rows = byTime(turns.flatMap((turn) => withAgentRows(rowsOfTurn(turn), turn.turn, extras)), lost)
   const open = turns.at(-1)
   const live = streaming ? liveActivity(open) : null

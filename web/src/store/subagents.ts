@@ -459,7 +459,7 @@ export function turnExtras(index: AgentIndex, oldestSeq: number): Map<number, Tu
   for (const turn of new Set([...files.keys(), ...orphans.keys()])) {
     const changed = files.get(turn) && [...files.get(turn)!.values()]
     const lost = orphans.get(turn)
-    const sig = [...(changed ?? []).map((f) => `${f.path}+${f.additions}-${f.deletions}`), ...(lost?.ids ?? [])].join('|')
+    const sig = [...(changed ?? []).map((f) => `${f.path}+${f.additions}-${f.deletions}`), ...(lost ? [lost.at, ...lost.ids] : [])].join('|')
     extras.set(turn, { files: changed, orphans: lost, sig })
   }
   extrasCache.set(index, { oldestSeq, extras })
