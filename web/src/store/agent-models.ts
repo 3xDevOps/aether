@@ -9,7 +9,6 @@ export interface AgentModelsState {
 }
 
 export interface AgentModelsSlice {
-  /** agent.models answers by account and agent, kept for the page session. */
   agentModels: Record<string, AgentModelsState>
   setAgentModels: (key: string, state: AgentModelsState) => void
 }
