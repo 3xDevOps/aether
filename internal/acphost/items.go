@@ -46,6 +46,9 @@ const (
 	// and single-digit indices fit comfortably in this bounded reference.
 	maxRoomImages   = 8
 	maxRoomImageURI = 128
+	// Subagent links and labels stay in the brief wire form, so each is
+	// bounded.
+	maxLinkBytes = 128
 )
 
 // Item is one entry of a run's session item log. Seq is per run and strictly
@@ -69,6 +72,7 @@ type Item struct {
 	Message       *Message        `json:"message,omitempty"`
 	ToolCall      *ToolCall       `json:"tool_call,omitempty"`
 	Plan          []PlanEntry     `json:"plan,omitempty"`
+	PlanParentID  string          `json:"plan_parent_id,omitempty"`
 	Request       *Request        `json:"request,omitempty"`
 	Mode          string          `json:"mode,omitempty"`
 	ConfigOptions json.RawMessage `json:"config_options,omitempty"`
@@ -82,9 +86,12 @@ type Item struct {
 }
 
 // Message is one segment of a user message, assistant message, or thought.
+// ParentID is the ID of the tool call that launched the subagent that wrote
+// it, empty for the main agent.
 type Message struct {
 	Role        string    `json:"role"`
 	MessageID   string    `json:"message_id"`
+	ParentID    string    `json:"parent_id,omitempty"`
 	Text        string    `json:"text"`
 	Attachments []Content `json:"attachments,omitempty"`
 	Complete    bool      `json:"complete,omitempty"`
@@ -100,10 +107,17 @@ type Content struct {
 	TerminalID string `json:"terminal_id,omitempty"`
 }
 
+// ToolCall is one tool call. ParentID is the ID of the tool call that
+// launched the subagent that made it, empty for the main agent. ToolName is
+// the agent's own name for the tool. Subagent is set on a call that launches
+// a subagent.
 type ToolCall struct {
 	ID          string          `json:"id"`
+	ParentID    string          `json:"parent_id,omitempty"`
 	Title       string          `json:"title"`
 	ToolKind    string          `json:"tool_kind,omitempty"`
+	ToolName    string          `json:"tool_name,omitempty"`
+	Subagent    *Subagent       `json:"subagent,omitempty"`
 	Status      string          `json:"status,omitempty"`
 	Locations   []Location      `json:"locations,omitempty"`
 	Content     []Content       `json:"content,omitempty"`
@@ -113,6 +127,13 @@ type ToolCall struct {
 	Output      string          `json:"output,omitempty"`
 	OutputBytes int64           `json:"output_bytes,omitempty"`
 	ExitCode    *int            `json:"exit_code,omitempty"`
+}
+
+// Subagent labels a subagent from the input of the tool call that launched
+// it. The prompt stays in RawInput.
+type Subagent struct {
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"`
 }
 
 type Location struct {
@@ -340,12 +361,13 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 		return b, true, err
 	}
 	brief := Item{Seq: it.Seq, Epoch: it.Epoch, Time: it.Time, Turn: it.Turn, Kind: it.Kind, Truncated: true,
-		Mode: cut.Mode, StopReason: cut.StopReason}
+		Mode: cut.Mode, StopReason: cut.StopReason, PlanParentID: cut.PlanParentID}
 	if m := cut.Message; m != nil {
-		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, Complete: m.Complete, Attachments: m.Attachments}
+		brief.Message = &Message{Role: m.Role, MessageID: m.MessageID, ParentID: m.ParentID, Complete: m.Complete, Attachments: m.Attachments}
 	}
 	if tc := cut.ToolCall; tc != nil {
-		brief.ToolCall = &ToolCall{ID: tc.ID, ToolKind: tc.ToolKind, Status: tc.Status, ExitCode: tc.ExitCode}
+		brief.ToolCall = &ToolCall{ID: tc.ID, ParentID: tc.ParentID, ToolKind: tc.ToolKind, ToolName: tc.ToolName,
+			Subagent: tc.Subagent, Status: tc.Status, ExitCode: tc.ExitCode}
 	}
 	if r := cut.Request; r != nil {
 		brief.Request = &Request{ID: r.ID, Kind: r.Kind, ToolCallID: r.ToolCallID, Status: r.Status, Answer: r.Answer}

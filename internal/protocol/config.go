@@ -4,6 +4,7 @@ const (
 	MethodConfigRoots  = "config.roots"
 	MethodConfigTree   = "config.tree"
 	MethodConfigRead   = "config.read"
+	MethodConfigStat   = "config.stat"
 	MethodConfigWrite  = "config.write"
 	MethodConfigImport = "config.import"
 )
@@ -53,6 +54,26 @@ type ConfigFileReadResult struct {
 	Writable  bool   `json:"writable"`
 }
 
+type ConfigStatParams struct {
+	Harness string   `json:"harness"`
+	Paths   []string `json:"paths"`
+}
+
+// ConfigStatEntry is one requested path that exists. Revision is the SHA-256
+// of a file's bytes, as in ConfigFileReadResult, and empty for a file over
+// 64 MiB. Blocked marks a path config.import would refuse: a directory, a
+// symlink, a hard link, or a path through one.
+type ConfigStatEntry struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	Revision string `json:"revision"`
+	Blocked  bool   `json:"blocked,omitempty"`
+}
+
+type ConfigStatResult struct {
+	Entries []ConfigStatEntry `json:"entries"`
+}
+
 type ConfigWriteParams struct {
 	Harness  string `json:"harness"`
 	Path     string `json:"path"`
@@ -66,9 +87,12 @@ type ConfigImportFile struct {
 	Mode          uint32 `json:"mode"`
 }
 
+// ConfigImportParams.Overwrite lets a file replace a destination that holds
+// different bytes; without it that file is excluded with reason "differs".
 type ConfigImportParams struct {
-	Harness string             `json:"harness"`
-	Files   []ConfigImportFile `json:"files"`
+	Harness   string             `json:"harness"`
+	Files     []ConfigImportFile `json:"files"`
+	Overwrite bool               `json:"overwrite,omitempty"`
 }
 
 type ConfigExcluded struct {
@@ -77,11 +101,14 @@ type ConfigExcluded struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// ConfigImportResult counts the files written. Replaced names those that
+// took the place of different bytes; the rest were created.
 type ConfigImportResult struct {
 	Harness       string           `json:"harness"`
 	Files         int              `json:"files"`
 	Bytes         int64            `json:"bytes"`
 	Excluded      []ConfigExcluded `json:"excluded"`
+	Replaced      []string         `json:"replaced,omitempty"`
 	Error         string           `json:"error,omitempty"`
 	ImportedPaths []string         `json:"imported_paths,omitempty"`
 }

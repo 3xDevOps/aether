@@ -190,7 +190,7 @@ the tailnet.
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
 `-32004` (unavailable). `config.import`, `workspace.import`, `agent.install`,
-`github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
+`terminal.exec`, `github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
 `home.mkdir`, `home.rename`, `home.remove`, `home.upload`,
 `dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
 so uncertainty surfaces immediately. A subsequent explicit request can
@@ -841,11 +841,12 @@ unavailable owned source remains the server's protocol error.
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
-| `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/"]}]}` |
+| `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/","transcripts/",...],"credential_names":[".credentials.json",...]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
 | `config.read` | `{"harness":"claude","path":"settings.json"}` | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
+| `config.stat` | `{"harness":"claude","paths":["settings.json","CLAUDE.md"]}` (at most 2,000 paths) | `{"entries":[{"path":"settings.json","size":1234,"revision":"<sha256>"}]}`: one entry per path that exists, with the path as it was sent; an absent path, and one the credential and runtime policy hides, has none. `revision` is empty for a file over 64 MiB, which is not read. `"blocked":true` replaces `size` and `revision` for a path `config.import` would refuse: a directory, a symlink, a hard link, or a path through one |
 | `config.write` | `{"harness":"claude","path":"settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape as `config.read`, for the saved bytes |
-| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}]}` | complete: `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}]}`; an incomplete write after at least one file is committed adds `"error":"...failed relative path...: ..."` and `"imported_paths":["settings.json"]` |
+| `config.import` | `{"harness":"claude","files":[{"path":"settings.json","content_base64":"...","mode":420}],"overwrite":false}` (`overwrite` optional) | complete: `{"harness":"claude","files":1,"bytes":12,"excluded":[{"path":"notes.md","reason":"secret","detail":"..."}],"replaced":["settings.json"]}`, `replaced` absent when nothing was replaced; an incomplete write after at least one file is committed adds `"error":"...failed relative path...: ..."` and `"imported_paths":["settings.json"]` |
 | `home.tree` | `{"path":".claude"}` (`path` may be omitted, empty, or `"."` for the home itself) | `{"entries":[{"name":".credentials.json","kind":"file","size":412,"locked":true},{"name":"skills","kind":"dir","size":4096,"locked":false}]}` |
 | `home.read` | `{"path":".claude/settings.json"}` | the same `FileRead` shape as `config.read` |
 | `home.write` | `{"path":".claude/settings.json","content":"...","revision":"<sha256>"}` (`revision` is empty only for a new file) | the same `FileRead` shape, for the saved bytes |
@@ -856,6 +857,7 @@ unavailable owned source remains the server's protocol error.
 | `home.download` | `{"path":"notes/logo.png"}` | `{"content_base64":"...","size":1234}` |
 | `terminal.status` | none | `TerminalStatusResult` - whether the member environment is running, its `image`, optional `saved_image`, start time, and active tabs |
 | `terminal.stop` | none | empty result; stops the member environment and its tabs |
+| `terminal.exec` | `{"command":"claude --version"}` | `{"exit_code":0,"stdout":"...","stderr":"..."}` - runs the command through a login shell in the caller's member environment, starting it if needed; a non-zero exit code is a result, not an error. Any approved member may call it. Answers within 10 minutes: a command still running then is killed and the call answers `-32603`, as it does for output past 1 MiB. See [terminal.md](terminal.md#run-one-command) |
 | `terminal.image` | `TerminalImageParams` (`{"run_id":"<run-id>","content":"<base64-original-image-bytes>"}`; `run_id` optional) | `TerminalImageResult` (`{"path":"/home/<account>/.aether/terminal-images/image-<random>.png"}`) - absolute path in the target container |
 | `env.save` | none | `EnvSaveResult` (`{"image":"aether/member-<id>:<unix-seconds>"}`) - commits the running environment terminal as the member's image |
 | `env.reset` | none | empty result; stops the environment, forgets and removes the saved image |
@@ -981,8 +983,9 @@ revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
 arbitrary live-agent filesystem writers.
 
-`config.roots`, `config.tree`, `config.read`, `config.write`, and
-`config.import` always address the authenticated member's own persistent home.
+`config.roots`, `config.tree`, `config.read`, `config.stat`, `config.write`,
+and `config.import` always address the authenticated member's own persistent
+home.
 They require **Launch**; an administrator cannot select another member with an
 extra request field. `config.write` has the same explicit-save and revision
 rules as `files.write`. `config.import` writes a batch of files into one
@@ -1028,7 +1031,8 @@ and `home.write` refuse it with `-32001` and a message such as
 `.claude/.credentials.json is a credential file; read it in the Environment terminal`.
 A path is a credential file when any of its components is one of the
 `credential_names` of a shipped agent, matched case-insensitively, or ends in
-`.pem`; when it is under `.ssh/` and does not end in `.pub`; or when it is
+`.pem` or is `.env` or `.env.*`; when it is under `.ssh/` and does not end
+in `.pub`; or when it is
 `.config/gh/hosts.yml`, `.git-credentials`, or `.netrc`. `home.rename`
 refuses a credential file, and a folder holding one of those fixed paths,
 with the same code, since a renamed copy would be readable. `home.remove`
@@ -1064,29 +1068,41 @@ that of `config.import`, both below; `home.upload` does not use import
 admission.
 
 `config.roots` returns each agent's `runtime_ignores` and
-`credential_names`. `runtime_ignores` contains exact, case-sensitive
-root-relative paths and component prefixes; trailing slashes are ignored for
-matching. These lists are per agent, so a runtime file ignored for Claude is
-not implicitly ignored for OMP or a member-defined custom agent. Known
-credential names wherever they occur in a path, and every basename ending in
-`.pem`, remain filtered by the destination-independent credential policy.
+`credential_names`. `runtime_ignores` contains case-sensitive patterns
+anchored at the agent's directory; one matches a path and everything below
+it, `*` matches any run of characters within one name, and trailing slashes
+are ignored for matching. These lists are per agent, so a runtime file
+ignored for Claude is not implicitly ignored for OMP or a member-defined
+custom agent. Known credential names wherever they occur in a path, and every
+basename that is `.env` or starts with `.env.` or ends in `.pem`, remain
+filtered by the destination-independent credential policy.
 `aether config push` applies both lists before reading a file and runs the
 secret scanner locally, so flagged bytes are not sent; the server applies
 the same policy and scanner again.
+
+`config.stat` gives `aether config push` the size and revision of the
+server's copy of each file it is about to send, without reading the content
+back. The CLI sends only files that are absent there, or, with
+`--overwrite`, that differ. `config.import` enforces the same rule on its
+own: a file whose destination already holds the same bytes is excluded with
+reason `identical`, and one whose destination holds different bytes is
+excluded with reason `differs` unless the request sets `overwrite`. A client
+that predates `overwrite` therefore cannot replace a file.
 
 Each `config.import` request permits at most 2,000 files and 64 MiB decoded,
 with a 64 MiB per-file ceiling matching configuration editing. These bounds
 limit a request, not a directory: `aether config push` sends batches of at
 most 2,000 files and a target of 20 MiB decoded, and a larger file alone.
 Paths are slash-separated and relative to the agent's directory. `mode`
-carries permission bits for a new file, and `0` means `0644`; an overwrite
-keeps the existing remote mode. Empty and binary regular files are
+carries permission bits for a new file, and `0` means `0644`; a replaced
+file keeps its existing remote mode. Empty and binary regular files are
 preserved. The server rejects unsafe paths, symlink components, hardlinks,
 and non-regular destinations.
 
 The result's `files` and `bytes` count
-accepted files only; `excluded` reports server-side credential, ignore,
-secret, or safety exclusions. Explicit CLI profile `push`, `status`, and
+written files only, and `replaced` names the ones that took the place of
+different bytes; `excluded` reports server-side credential, ignore, secret,
+identical, and differs exclusions. Explicit CLI profile `push`, `status`, and
 `rollback` remain separate manual operations; neither `config.import` nor
 **Files** edits create CLI snapshot history. The persistent HOME does not
 depend on snapshots. Snapshot pins record optional launch provenance, not
@@ -1100,8 +1116,8 @@ If an import fails after writing one or more files, the response is still a
 are the exact committed counts, `imported_paths` lists the exact canonical
 paths that remain in the member's shared HOME, and `error` names the failed
 relative path and the underlying error. This is an incomplete import, not a
-successful one: `aether config push` prints those paths as `uploaded`, sends
-no further batch, and exits with the error. The optional `error` and `imported_paths`
+successful one: `aether config push` prints those paths as `created` or
+`replaced`, sends no further batch, and exits with the error. The optional `error` and `imported_paths`
 fields are absent from complete results and from failures before any file is
 committed.
 
@@ -2330,4 +2346,6 @@ Closing the socket detaches without stopping the shell. A normal shell exit
 closes with **1000**. Membership loss closes with **1008**. `terminal.status`
 reports the running container's `image`, its `saved_image` when set, start
 time, and active tabs; `terminal.stop` stops the container and deletes its tab
-sessions while preserving the member home.
+sessions while preserving the member home. `terminal.exec` runs one command
+in the same container without a tab
+([terminal.md](terminal.md#run-one-command)).

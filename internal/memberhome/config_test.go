@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestConfigImportExcludesSecretsRuntimeAndCredentials(t *testing.T) {
 		{Path: "history.jsonl", Content: []byte("transcript"), Mode: 0o644},
 		{Path: ".credentials.json", Content: []byte("token"), Mode: 0o600},
 		{Path: "README.md", Content: []byte("token=QmFzZTY0c2VjcmV0LWFldGhlci10ZXN0LTQy"), Mode: 0o644},
-	}, []string{".credentials.json"})
+	}, false, []string{".credentials.json"})
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestConfigImportPreservesExistingModes(t *testing.T) {
 		{Path: "new.json", Content: []byte("{}"), Mode: 0o644},
 		{Path: "default.json", Content: []byte("{}")},
 	}
-	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", files, nil); err != nil {
+	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", files, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	wantModes := map[string]os.FileMode{"check.sh": 0o755, "private.json": 0o600, "new.json": 0o644, "default.json": 0o644}
@@ -135,6 +136,95 @@ func TestConfigImportPreservesExistingModes(t *testing.T) {
 		if err != nil || string(content) != string(file.Content) {
 			t.Errorf("%s content = %q, err=%v, want %q", file.Path, content, err, file.Content)
 		}
+	}
+}
+
+func TestConfigImportKeepsADifferingFileUnlessOverwrite(t *testing.T) {
+	manager, err := New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	stat := func(paths ...string) []ConfigStat {
+		t.Helper()
+		got, statErr := manager.ConfigStat(ctx, "member-a", "claude", ".claude", paths, []string{".credentials.json"})
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		return got
+	}
+	if got := stat("settings.json"); len(got) != 0 {
+		t.Fatalf("stat before the directory exists = %+v", got)
+	}
+	first := []ConfigFile{
+		{Path: "settings.json", Content: []byte("server"), Mode: 0o644},
+		{Path: "CLAUDE.md", Content: []byte("same"), Mode: 0o644},
+		{Path: ".credentials.json", Content: []byte("token"), Mode: 0o600},
+	}
+	if _, err = manager.ConfigImport(ctx, "member-a", "claude", ".claude", first, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []ConfigStat{
+		{Path: ".claude/settings.json", Size: 6, Revision: revision([]byte("server"))},
+		{Path: "CLAUDE.md", Size: 4, Revision: revision([]byte("same"))},
+	}
+	if got := stat(".claude/settings.json", "CLAUDE.md", "missing.md", ".credentials.json", "projects/a.jsonl"); !slices.Equal(got, want) {
+		t.Fatalf("stat = %+v, want %+v", got, want)
+	}
+
+	asset := filepath.Join(manager.root, "member-a", ".claude", "model.bin")
+	if err = os.WriteFile(asset, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Truncate(asset, ConfigMaxFileBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if got := stat("model.bin"); !slices.Equal(got, []ConfigStat{{Path: "model.bin", Size: ConfigMaxFileBytes + 1}}) {
+		t.Fatalf("stat of a file over the upload limit = %+v, want its size and no revision", got)
+	}
+	claudeDir := filepath.Dir(asset)
+	if err = os.Mkdir(filepath.Join(claudeDir, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("settings.json", filepath.Join(claudeDir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+	blocked := []ConfigStat{{Path: "skills", Blocked: true}, {Path: "link.json", Blocked: true}, {Path: "settings.json/below", Blocked: true}}
+	if got := stat("skills", "link.json", "settings.json/below", "skills/absent.md"); !slices.Equal(got, blocked) {
+		t.Fatalf("stat of paths import refuses = %+v, want %+v", got, blocked)
+	}
+
+	second := []ConfigFile{
+		{Path: "settings.json", Content: []byte("local copy"), Mode: 0o644},
+		{Path: "CLAUDE.md", Content: []byte("same"), Mode: 0o644},
+		{Path: "new.md", Content: []byte("new"), Mode: 0o644},
+	}
+	result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", second, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantExcluded := []ConfigExcluded{
+		{Path: "CLAUDE.md", Reason: "identical", Detail: "identical on the server"},
+		{Path: "settings.json", Reason: "differs", Detail: "the server has a different file (6 bytes)"},
+	}
+	if result.Files != 1 || len(result.Replaced) != 0 || !slices.Equal(result.Excluded, wantExcluded) {
+		t.Fatalf("import without overwrite = %+v", result)
+	}
+	read, err := manager.ConfigRead(ctx, "member-a", "claude", ".claude", "settings.json", nil)
+	if err != nil || string(read.Content) != "server" {
+		t.Fatalf("settings.json after a refused replace = %q, %v", read.Content, err)
+	}
+
+	result, err = manager.ConfigImport(ctx, "member-a", "claude", ".claude", second, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Files != 1 || !slices.Equal(result.Replaced, []string{"settings.json"}) || len(result.Excluded) != 2 {
+		t.Fatalf("import with overwrite = %+v", result)
+	}
+	read, err = manager.ConfigRead(ctx, "member-a", "claude", ".claude", "settings.json", nil)
+	if err != nil || string(read.Content) != "local copy" {
+		t.Fatalf("settings.json after overwrite = %q, %v", read.Content, err)
 	}
 }
 
@@ -299,7 +389,7 @@ func TestConfigImportExcludesPiAndOMPTransientFilesKeepsConfiguration(t *testing
 			for _, ignored := range tc.ignored {
 				files = append(files, ConfigFile{Path: ignored, Content: []byte("runtime"), Mode: 0o644})
 			}
-			result, err := manager.ConfigImport(context.Background(), tc.member, tc.name, tc.root, files, nil)
+			result, err := manager.ConfigImport(context.Background(), tc.member, tc.name, tc.root, files, false, nil)
 			if err != nil {
 				t.Fatalf("import: %v", err)
 			}
@@ -360,7 +450,7 @@ func TestConfigImportPreflightsSymlinkBeforeMutation(t *testing.T) {
 	_, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
 		{Path: "good.json", Content: []byte("good"), Mode: 0o644},
 		{Path: "unsafe/evil.json", Content: []byte("evil"), Mode: 0o644},
-	}, nil)
+	}, false, nil)
 	if !errors.Is(err, ErrConfigDenied) {
 		t.Fatalf("symlink import = %v, want denied", err)
 	}
@@ -406,7 +496,7 @@ func TestConfigImportPreservesBinaryAsReadOnly(t *testing.T) {
 	binary := []byte{0, 1, 2, 0xff}
 	result, err := manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{{
 		Path: "plugin.bin", Content: binary, Mode: 0o600,
-	}}, nil)
+	}}, false, nil)
 	if err != nil {
 		t.Fatalf("binary import: %v", err)
 	}
@@ -434,7 +524,7 @@ func TestConfigImportPreflightsCandidateCollisions(t *testing.T) {
 		{Path: "new.txt", Content: []byte("new"), Mode: 0o644},
 		{Path: "a", Content: []byte("file"), Mode: 0o644},
 		{Path: "a/nested.txt", Content: []byte("nested"), Mode: 0o644},
-	}, nil)
+	}, false, nil)
 	if !errors.Is(err, ErrConfigDenied) {
 		t.Fatalf("candidate collision = %v, want denied", err)
 	}
@@ -455,7 +545,7 @@ func TestConfigImportAcceptsFileAboveOneMiB(t *testing.T) {
 	content := bytes.Repeat([]byte("# ordinary configuration\n"), (1<<20)/25+1)
 	result, err := manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
 		{Path: "instructions.md", Content: content, Mode: 0o644},
-	}, nil)
+	}, false, nil)
 	if err != nil {
 		t.Fatalf("import above 1 MiB: %v", err)
 	}
@@ -478,7 +568,7 @@ func TestConfigImportRequestBounds(t *testing.T) {
 	// request bounds but avoid scanning/copying a giant fixture to disk.
 	content := make([]byte, ConfigMaxFileBytes+1)
 	atLimit := []ConfigFile{{Path: "auth.json", Content: content[:ConfigMaxFileBytes]}}
-	result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", atLimit, nil)
+	result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", atLimit, false, nil)
 	if err != nil || result.Files != 0 || len(result.Excluded) != 1 || result.Excluded[0].Reason != "credential" {
 		t.Fatalf("exact file/request byte limit: result=%+v, err=%v", result, err)
 	}
@@ -486,7 +576,7 @@ func TestConfigImportRequestBounds(t *testing.T) {
 	for i := range countLimit {
 		countLimit[i].Path = fmt.Sprintf("dir-%d/auth.json", i)
 	}
-	result, err = manager.ConfigImport(ctx, "member-a", "claude", ".claude", countLimit, nil)
+	result, err = manager.ConfigImport(ctx, "member-a", "claude", ".claude", countLimit, false, nil)
 	if err != nil || result.Files != 0 || len(result.Excluded) != ConfigImportMaxFiles {
 		t.Fatalf("exact request count limit: excluded=%d, err=%v", len(result.Excluded), err)
 	}
@@ -499,7 +589,7 @@ func TestConfigImportRequestBounds(t *testing.T) {
 		{"count", append(countLimit, ConfigFile{Path: "new.txt"})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", tc.files, nil)
+			result, err := manager.ConfigImport(ctx, "member-a", "claude", ".claude", tc.files, false, nil)
 			if !errors.Is(err, ErrConfigTooLarge) || result.Files != 0 || result.Bytes != 0 {
 				t.Fatalf("over-limit import: result=%+v, err=%v", result, err)
 			}
@@ -518,7 +608,7 @@ func TestConfigTreeAllowsOmittedRootPath(t *testing.T) {
 	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
 		{Path: "settings.json", Content: []byte("{}"), Mode: 0o644},
 		{Path: "commands/review.md", Content: []byte("# review"), Mode: 0o644},
-	}, nil); err != nil {
+	}, false, nil); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	entries, err := manager.ConfigTree(context.Background(), "member-a", "claude", ".claude", "", nil)

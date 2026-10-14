@@ -22,6 +22,7 @@ func init() {
 	registerGuarded(protocol.MethodTerminalHistory, permissions.View, terminalHistoryTarget, (*Server).terminalHistory)
 	registerMethod(protocol.MethodTerminalStatus, (*Server).terminalStatus)
 	registerMethod(protocol.MethodTerminalStop, (*Server).terminalStop)
+	registerMethod(protocol.MethodTerminalExec, (*Server).terminalExec)
 	registerMethod(protocol.MethodEnvSave, (*Server).environmentSave)
 	registerMethod(protocol.MethodEnvReset, (*Server).environmentReset)
 }
@@ -294,6 +295,21 @@ func (s *Server) terminalStop(ctx context.Context, member domain.MemberID, _ jso
 		return nil, rpcError(err)
 	}
 	return struct{}{}, nil
+}
+
+func (s *Server) terminalExec(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.TerminalExecParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if strings.TrimSpace(p.Command) == "" {
+		return nil, invalidParams("command is required")
+	}
+	code, stdout, stderr, err := s.cfg.Runs.ExecTerminal(ctx, member, p.Command)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.TerminalExecResult{ExitCode: code, Stdout: stdout, Stderr: stderr}, nil
 }
 
 func (s *Server) environmentSave(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

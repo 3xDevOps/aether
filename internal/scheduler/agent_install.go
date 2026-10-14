@@ -17,9 +17,9 @@ var ErrAgentInstallRunning = errors.New("agent install: another install is runni
 
 const maxInstallLog = 8 << 10
 
-// installExecGrace is how long past AgentInstallTimeout the exec may take
-// to answer once the container has killed the installer.
-const installExecGrace = 30 * time.Second
+// execKillGrace is how long past its time limit an exec may take to answer
+// once the container has killed the command.
+const execKillGrace = 30 * time.Second
 
 // InstallAgent runs an agent's install command in the member's environment
 // terminal, starting it if needed. The terminal lock is not held across the
@@ -53,7 +53,7 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 	// The container kills the install at AgentInstallTimeout, so the guard is
 	// never released while an installer still writes into the home. Exec
 	// refuses output past 1 MiB, so only the log's tail comes back.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), protocol.AgentInstallTimeout+installExecGrace)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), protocol.AgentInstallTimeout+execKillGrace)
 	defer cancel()
 	script := fmt.Sprintf("log=$(mktemp) || exit 1\ntimeout -s KILL %d sh -c \"$1\" >\"$log\" 2>&1\ncode=$?\ntail -c %d \"$log\"\nrm -f \"$log\"\nexit $code",
 		int(protocol.AgentInstallTimeout.Seconds()), maxInstallLog)

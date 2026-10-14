@@ -1345,6 +1345,12 @@ verb rather than offering the one the server would refuse.
 The global `overview` route (`src/routes/overview.tsx`) is **All workspaces**:
 every run in every workspace in one `RunList`, in the board's group order
 (Needs you, Working, Finished) with a `StatusDot` and the state word per row.
+A swarm worker whose integrator run is also listed is indented under it,
+by the board map's rule (`swarmParents` in `src/routes/board/map-layout.ts`);
+other workers stay in place. The tree sits where its earliest member falls, so
+a worker that needs you lifts its integrator into Needs you. The integrator's
+chevron, **Hide <n> workers**, folds the workers that do not need you and
+is absent when all of them do.
 It is reached from the workspace switcher, `g` then `l` and the palette's
 **Open all workspaces**.
 
@@ -3214,10 +3220,25 @@ The body is one column, in this order:
    answer.`
    Answering needs `mission.question.answer`, launch permission and the
    accountable human or an admin.
-3. **Tasks**, a compact table: title, status dot and word (Proposed, Ready,
-   Working, Review, Done, Abandoned, Blocked), the latest attempt's mode word
-   and a worker link that opens the run. On a phone each task is two rows.
-   Expanding a task shows its objective, scope, blockers other than
+3. **Tasks**, a tree rooted at the current integrator run. Each run row
+   shows its status dot (`presentRun`, pulsing while working), the name
+   (`Integrator`, or `Worker <n>` and `attempt <m>` from `workerName` via `missionTree`),
+   agent and mode, the run's reason (its latest tool activity while working,
+   with the `live-shimmer` sweep) and the elapsed time from the run's or
+   attempt's start to its finish or now. Under the integrator, each task
+   shows its status word (Proposed, Ready, Working, Review, Done, Abandoned,
+   Blocked) and `Depends on` with each prerequisite's status dot and title.
+   Under each task, every attempt is listed newest first with the attempt
+   state ahead of the run's reason, and `from a replaced integrator` when an
+   earlier integrator generation dispatched it. A run the store does not
+   hold shows a neutral dot and the attempt state, or `Run not loaded` for
+   the integrator. The integrator and each task fold with their chevron and
+   start open. Folding either keeps every control hold and every worker that
+   needs you visible; a task with neither disappears while the integrator is
+   folded. Swarm rows join with the sidebar's tree connectors. Selecting a
+   run row opens that run. The derivation is
+   `missionTree` in `src/routes/missions/tree.ts`. **Task details**, closed
+   by default, shows the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
    and attempt errors. A worker under a human control hold shows `<name>
    holds control of this worker` with **Release control**, which sends
@@ -3229,10 +3250,15 @@ The body is one column, in this order:
    with the swarm ID, integrator run ID, generation, accepted set version,
    execution choices, task IDs and revisions, attempts, and each accepted
    submission's run, retained revision, evidence reference, evidence
-   exceptions and scope disposition.
+   exceptions and scope disposition. Every run ID there opens its run.
 
 A task is Done only when the server accepted a submission for its current
-revision; the table shows the server's status, never a worker's exit.
+revision; the tree shows the server's status, never a worker's exit.
+
+Each `mission.changed` for the open swarm re-reads `mission.show`, and one
+for any other swarm re-reads `mission.list`, without holding up the events
+behind it. A burst coalesces to one read in flight and one queued per swarm
+(or workspace list), so the page settles on the last state.
 
 When `current_integrator_run_id` names a run the hydrated store does not
 hold, the page asks `run.get` once; a create's response can reach the

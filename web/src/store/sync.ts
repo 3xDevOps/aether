@@ -311,6 +311,8 @@ async function reconcileEvidenceHistory(
   }
 }
 
+const missionDeletions = new WeakMap<object, number>()
+
 /**
  * Await in sequence order: the cursor must never move past an event still
  * waiting on a fetch. False means only a fresh snapshot repairs the store.
@@ -353,6 +355,7 @@ export async function applyEvent(
   if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
     const missionID = (ev.payload as { mission_id: string }).mission_id
     const state = store.getState()
+    missionDeletions.set(store, (missionDeletions.get(store) ?? 0) + 1)
     state.removeMission(missionID)
     if (state.route.name === 'missions' && state.route.params.missionId === missionID) state.navigate('missions')
     return true
@@ -377,36 +380,46 @@ export async function applyEvent(
         changedMissionID === missionID &&
         (!currentMission || currentMission.workspace_id === ev.workspace_id)
       ) {
-        await client
-          .missionShow(missionID)
-          .then((result) => {
-            if (result.mission.workspace_id !== ev.workspace_id) return
-            store.getState().setMissionDetail({
-              mission: result.mission,
-              tasks: result.tasks,
-              attempts: result.attempts ?? [],
-              submissions: result.submissions ?? [],
-              diagnostics: result.diagnostics ?? [],
-              questions: result.questions ?? [],
+        coalesce(store, `mission:${missionID}`, () => {
+          const generation = missionDeletions.get(store)
+          return client
+            .missionShow(missionID)
+            .then((result) => {
+              if (missionDeletions.get(store) !== generation) return false
+              if (result.mission.workspace_id !== ev.workspace_id) return
+              store.getState().setMissionDetail({
+                mission: result.mission,
+                tasks: result.tasks,
+                attempts: result.attempts ?? [],
+                submissions: result.submissions ?? [],
+                diagnostics: result.diagnostics ?? [],
+                questions: result.questions ?? [],
+              })
             })
-          })
-          .catch(ignore)
+            .catch(ignore)
+        })
       } else {
-        await client
-          .missionList({ workspace_id: ev.workspace_id, limit: 50 })
-          .then((result) => {
-            const state = store.getState()
-            // Merged, not replaced, so loaded older pages stay and the stored
-            // cursor still marks the next older page for this workspace.
-            const loaded = state.missionListWorkspace === ev.workspace_id
-            state.setMissions(
-              ev.workspace_id,
-              result.missions,
-              loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
-              true,
-            )
-          })
-          .catch(ignore)
+        coalesce(store, `missions:${ev.workspace_id}`, () => {
+          const generation = missionDeletions.get(store)
+          if (store.getState().activeWorkspace !== ev.workspace_id) return Promise.resolve()
+          return client
+            .missionList({ workspace_id: ev.workspace_id, limit: 50 })
+            .then((result) => {
+              if (missionDeletions.get(store) !== generation) return false
+              const state = store.getState()
+              if (state.activeWorkspace !== ev.workspace_id) return
+              // Merged, not replaced, so loaded older pages stay and the stored
+              // cursor still marks the next older page for this workspace.
+              const loaded = state.missionListWorkspace === ev.workspace_id
+              state.setMissions(
+                ev.workspace_id,
+                result.missions,
+                loaded ? state.missionNextCursor ?? undefined : result.next_cursor,
+                true,
+              )
+            })
+            .catch(ignore)
+        })
       }
     }
   }

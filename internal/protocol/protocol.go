@@ -68,6 +68,9 @@ const (
 	MethodRunPull         = "run.pull"
 	MethodTerminalStatus  = "terminal.status"
 	MethodTerminalStop    = "terminal.stop"
+	// MethodTerminalExec runs one command in the caller's environment
+	// terminal and answers when it ends or TerminalExecTimeout passes.
+	MethodTerminalExec = "terminal.exec"
 	// MethodTerminalImage stores an image in the target member home and
 	// returns the absolute path visible inside its container. An empty run
 	// ID targets the caller's environment terminal.
@@ -100,6 +103,8 @@ const (
 
 // AgentInstallTimeout bounds one agent.install.
 const AgentInstallTimeout = 10 * time.Minute
+
+const TerminalExecTimeout = 10 * time.Minute
 
 // Permission-model methods.
 const (

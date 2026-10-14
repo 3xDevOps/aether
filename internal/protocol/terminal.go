@@ -92,6 +92,16 @@ type TerminalStatusResult struct {
 	Tabs       []string `json:"tabs,omitempty"`
 }
 
+type TerminalExecParams struct {
+	Command string `json:"command"`
+}
+
+type TerminalExecResult struct {
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+}
+
 // EnvSaveResult is the result of saving a member's environment terminal.
 type EnvSaveResult struct {
 	Image string `json:"image"`

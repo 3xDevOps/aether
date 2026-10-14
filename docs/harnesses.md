@@ -1484,8 +1484,8 @@ To turn updates off for the whole server, start it with
 ## Agent configuration: import and Files
 
 [Upload agent configuration](quickstart.md#upload-agent-configuration) covers
-the prompt under **Agents > Agent config files** and the `aether config ls`
-and `aether config push` commands a local agent runs with it. This section
+the prompt under **Agents > Agent config files** and the `aether config`
+commands a local agent runs with it. This section
 covers what an upload and a **Files** edit change on the server.
 
 `aether config push` reads each agent's `credential_names` and
@@ -1495,15 +1495,24 @@ reading them. The server enforces the same names, the runtime paths,
 `config.import` request. Rules inside `.aether-profile-ignore` apply only to
 `aether profile push`.
 
-For oh-my-pi, the shared runtime policy excludes:
+`aether config ls` prints each agent's runtime paths. Beyond transcripts,
+history, and caches, they cover what the agent's own account sync, plugin
+install, or package manager recreates on the server: Claude Code's
+`plugins/cache/`, `plugins/marketplaces/`, `plugins/synced/`, and
+`skills/synced/`; Codex's `plugins/cache/`, `skills/.system/`, and
+root-level `*.sqlite` state databases; OpenCode's `node_modules/` and
+`.git/`. Reinstall those plugins and packages on the server instead.
+`aether profile push` still carries them.
+
+For oh-my-pi, the runtime policy excludes:
 
 | Root-relative paths in `~/.omp` | Contents |
 | --- | --- |
 | `stats.db`, `stats.db-wal`, `stats.db-shm` | Usage statistics derived from session logs |
 | `agent/history.db`, `agent/history.db-wal`, `agent/history.db-shm` | Prompt history |
 | `agent/models.db`, `agent/models.db-wal`, `agent/models.db-shm` | Model/provider cache |
-| `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/` | Session history and cache |
-| `natives/`, `cache/`, `logs/`, `run/`, `collab/`, `puppeteer/`, `webcache/` | Downloaded runtime components, caches, logs, and process state |
+| `agent/sessions/`, `agent/terminal-sessions/`, `agent/cache/`, `agent/blobs/` | Session history, cache, and blobs |
+| `natives/`, `cache/`, `logs/`, `run/`, `collab/`, `puppeteer/`, `webcache/`, `wt/`, `remote-host/`, `ssh-control/` | Downloaded runtime components, caches, logs, worktrees, and process state |
 
 These names follow OMP's
 [statistics storage](https://raw.githubusercontent.com/can1357/oh-my-pi/9348320cc4a30a7195d36a1f05a6c11bcb701a17/packages/stats/README.md)

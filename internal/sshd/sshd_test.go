@@ -773,6 +773,13 @@ func (f *fakeRuns) TerminalStatus(_ context.Context, member domain.MemberID) (do
 	return domain.TerminalStatus{}, nil
 }
 
+func (f *fakeRuns) ExecTerminal(_ context.Context, member domain.MemberID, command string) (int, string, string, error) {
+	if err := f.record(fmt.Sprintf("terminal-exec:%s:%s", member, command)); err != nil {
+		return 0, "", "", err
+	}
+	return 3, "out\n", "err\n", nil
+}
+
 func (f *fakeRuns) SaveEnvironment(_ context.Context, member domain.MemberID) (string, error) {
 	if err := f.record(fmt.Sprintf("env-save:%s", member)); err != nil {
 		return "", err

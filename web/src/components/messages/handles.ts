@@ -19,8 +19,11 @@ export function swarmHandle(detail: MissionDetail | undefined, runID: string): H
   if (index < 0) return undefined
   const task = detail.tasks[index]
   const first = Math.min(...detail.attempts.filter((item) => item.task_id === task.id).map((item) => item.number))
-  const name = `Worker ${index + 1}${attempt.number > first ? `, attempt ${attempt.number}` : ''}`
-  return { name, task: task.revision?.title || task.pending_revision?.title }
+  return { name: workerName(index, attempt.number, first), task: task.revision?.title || task.pending_revision?.title }
+}
+
+export function workerName(taskIndex: number, attempt: number, firstAttempt: number): string {
+  return `Worker ${taskIndex + 1}${attempt > firstAttempt ? `, attempt ${attempt}` : ''}`
 }
 
 const requested = new Map<string, Set<string>>()

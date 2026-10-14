@@ -61,7 +61,7 @@ func TestConfigWritePreservesModeWithRestrictiveUmask(t *testing.T) {
 	if _, err = manager.ConfigImport(context.Background(), "member-a", "claude", ".claude", []ConfigFile{
 		{Path: "check.sh", Content: []byte(content), Mode: 0o644},
 		{Path: "new.json", Content: []byte("{}"), Mode: 0o644},
-	}, nil); err != nil {
+	}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, file := range []struct {

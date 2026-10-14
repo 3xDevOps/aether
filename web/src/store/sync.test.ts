@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { Toaster, toast } from 'sonner'
 import { ApiError } from '@/lib/api'
-import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, Run } from '@/lib/types'
+import type { Event, GatewayCapabilities, LinkStatus, MissionListResult, MissionShowResult, Run } from '@/lib/types'
 import { board } from '@/routes/board/selectors'
 import { createRootStore } from '@/store'
 import { loadDevices } from '@/store/devices'
@@ -1646,6 +1646,61 @@ describe('applyEvent', () => {
     expect(s.missionNextCursor).toBe('page-3')
   })
 
+  it('drops a mission list read that finishes after the workspace changed', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) }))
+    const read = Promise.withResolvers<MissionListResult>()
+    const client = fakeApi({ missionList: vi.fn(() => read.promise) })
+    const applied = applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_a' },
+    }), client)
+    await vi.waitFor(() => expect(client.missionList).toHaveBeenCalled())
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    read.resolve({ missions: [mission({ id: 'mission_a' })], next_cursor: '' })
+    await applied
+
+    expect(store.getState().missions.mission_a).toBeUndefined()
+  })
+
+  it('does not read missions for a workspace that is no longer active', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) }))
+    const client = fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) })
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_a' },
+    }), client)
+
+    expect(client.missionList).not.toHaveBeenCalled()
+  })
+
+  it('coalesces a burst of mission changes into at most two reads', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const release: Array<() => void> = []
+    const missionShow = vi.fn((_id: string) => new Promise<MissionShowResult>((resolve) => {
+      const objective = `read-${missionShow.mock.calls.length}`
+      release.push(() => resolve({ mission: mission({ objective }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
+    }))
+    const client = fakeApi({ missionShow })
+
+    for (let i = 0; i < 5; i++) {
+      await applyEvent(store, statusEvent({ seq: 10 + i, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } }), client)
+    }
+    expect(missionShow).toHaveBeenCalledTimes(1)
+
+    release[0]()
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(2))
+    release[1]()
+    await vi.waitFor(() => expect(store.getState().missions.mission_1.objective).toBe('read-2'))
+    expect(missionShow).toHaveBeenCalledTimes(2)
+  })
+
   it('takes the fetched mission cursor over one read for another workspace', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())
@@ -1661,6 +1716,47 @@ describe('applyEvent', () => {
 
     expect(store.getState().missionNextCursor).toBe('page-2')
     expect(store.getState().missionListWorkspace).toBe(workspace.id)
+  })
+
+  it('does not restore a mission deleted while its list read was in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const pending = Promise.withResolvers<MissionListResult>()
+    const missionList = vi.fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ missions: [mission({ id: 'mission_1' })] })
+    const client = fakeApi({ missionList })
+    const payload = (deleted?: boolean) => ({ mission_id: 'mission_2', ...(deleted && { deleted }) })
+
+    await applyEvent(store, statusEvent({ seq: 10, run_id: '', type: 'mission.changed', payload: payload() }), client)
+    await vi.waitFor(() => expect(missionList).toHaveBeenCalledTimes(1))
+    await applyEvent(store, statusEvent({ seq: 11, run_id: '', type: 'mission.changed', payload: payload(true) }), client)
+    pending.resolve({ missions: [mission({ id: 'mission_1' }), mission({ id: 'mission_2' })] })
+
+    await vi.waitFor(() => expect(missionList).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(store.getState().missions.mission_1).toBeDefined())
+    expect(store.getState().missions.mission_2).toBeUndefined()
+  })
+
+  it('does not restore a mission detail deleted while its show read was in flight', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    store.getState().navigate('missions', { missionId: 'mission_1' })
+    const pending = Promise.withResolvers<MissionShowResult>()
+    const missionShow = vi.fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockRejectedValue(new ApiError(404, 'mission not found'))
+    const client = fakeApi({ missionShow })
+
+    await applyEvent(store, statusEvent({ seq: 10, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1' } }), client)
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(1))
+    await applyEvent(store, statusEvent({ seq: 11, run_id: '', type: 'mission.changed', payload: { mission_id: 'mission_1', deleted: true } }), client)
+    pending.resolve({ mission: mission(), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+
+    await vi.waitFor(() => expect(missionShow).toHaveBeenCalledTimes(2))
+    expect(store.getState().missions.mission_1).toBeUndefined()
+    expect(store.getState().missionDetails.mission_1).toBeUndefined()
   })
 
   it('drops a deleted mission and leaves its page without re-reading it', async () => {

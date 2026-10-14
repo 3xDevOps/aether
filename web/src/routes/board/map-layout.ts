@@ -1,5 +1,6 @@
 import type { Member } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
+import type { RunRecord } from '@/store/runs'
 
 export const mapCardWidth = 320
 export const mapCardHeight = 160
@@ -60,7 +61,22 @@ export interface RunMapLayout {
 }
 
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
-const runKey = (card: BoardCard) => JSON.stringify([card.run.workspace_id, card.run.id])
+export const runKey = ({ run }: { run: RunRecord }) => JSON.stringify([run.workspace_id, run.id])
+
+/** Only explicit workspace, mission and integrator IDs establish a relationship. */
+export function swarmParents<T extends { run: RunRecord }>(items: T[]): Map<string, string> {
+  const byKey = new Map(items.map((item) => [runKey(item), item.run]))
+  const parents = new Map<string, string>()
+  for (const { run } of items) {
+    if (run.mission_role !== 'worker' || !run.mission_id || !run.integrator_run_id) continue
+    const parentKey = JSON.stringify([run.workspace_id, run.integrator_run_id])
+    const parent = byKey.get(parentKey)
+    if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) {
+      parents.set(runKey({ run }), parentKey)
+    }
+  }
+  return parents
+}
 
 /** Tall units go first, then identity; live state never changes shelf order. */
 function pack<T extends MapRect & { key: string }>(rects: T[], gap: number, aspect: number) {
@@ -149,7 +165,6 @@ function makeUnit(key: string, cards: BoardCard[], parents: Map<string, string>)
   }
 }
 
-/** Only explicit workspace, mission and integrator IDs establish a relationship. */
 export function layoutRunMap(cards: BoardCard[], previous?: RunMapLayout): RunMapLayout {
   const byKey = new Map(cards.map((card) => [runKey(card), card]))
   if (previous && previous.nodes.length === byKey.size && previous.nodes.every((node) => {
@@ -176,16 +191,7 @@ export function layoutRunMap(cards: BoardCard[], previous?: RunMapLayout): RunMa
     return { ...previous, groups, nodes }
   }
   const ordered = [...byKey.values()].sort((a, b) => compare(runKey(a), runKey(b)))
-  const parents = new Map<string, string>()
-  for (const card of ordered) {
-    const run = card.run
-    if (run.mission_role !== 'worker' || !run.mission_id || !run.integrator_run_id) continue
-    const parentKey = JSON.stringify([run.workspace_id, run.integrator_run_id])
-    const parent = byKey.get(parentKey)?.run
-    if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) {
-      parents.set(runKey(card), parentKey)
-    }
-  }
+  const parents = swarmParents(ordered)
 
   const owners = new Map<string, BoardCard[]>()
   for (const card of ordered) {
