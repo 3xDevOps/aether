@@ -151,6 +151,16 @@ describe('ModelPicker', () => {
     expect(api.agentModels).toHaveBeenLastCalledWith('claude', 'mem_alice', true)
   })
 
+  it('refreshes instead of selecting when Enter is pressed on the refresh button', async () => {
+    const { trigger, onChange } = setup()
+    await openPicker(trigger)
+    await screen.findByRole('option', { name: /^Opus 4.1/ })
+    screen.getByRole('button', { name: 'Refresh models' }).focus()
+    await userEvent.keyboard('{Enter}')
+    expect(api.agentModels).toHaveBeenLastCalledWith('claude', undefined, true)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it('fetches once per account and agent', async () => {
     setup()
     await waitFor(() => expect(useStore.getState().agentModels['/claude']?.result).toBeDefined())
@@ -191,10 +201,12 @@ describe('ModelPicker', () => {
     vi.mocked(api.agentModels).mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
     setup()
     await waitFor(() => expect(api.agentModels).toHaveBeenCalledTimes(3))
+    vi.mocked(api.agentModels).mockReturnValueOnce(new Promise(() => {}))
     useStore.setState({ agentModels: {}, identityKey: 'member:bob' })
     answer(discovered)
+    await waitFor(() => expect(api.agentModels).toHaveBeenCalledTimes(4))
     await Promise.resolve()
-    expect(useStore.getState().agentModels['/claude']).toBeUndefined()
+    expect(useStore.getState().agentModels['/claude']?.result).toBeUndefined()
   })
 
   it('neither fetches nor shows the status row when the server lacks agent.models', async () => {

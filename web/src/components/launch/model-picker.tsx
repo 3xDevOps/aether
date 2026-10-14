@@ -17,6 +17,7 @@ export function useAgentModels(harness: string, accountMemberID?: string) {
   const key = `${accountMemberID ?? ''}/${harness}`
   const supported = useCapability().hasMethod('agent.models')
   const entry = useStore((s) => s.agentModels[key])
+  const identity = useStore((s) => s.identityKey)
   const load = useCallback((refresh: boolean) => {
     const same = sameIdentity()
     const { agentModels, setAgentModels } = useStore.getState()
@@ -29,7 +30,7 @@ export function useAgentModels(harness: string, accountMemberID?: string) {
   useEffect(() => {
     const current = useStore.getState().agentModels[key]
     if (supported && harness && (!current || (current.error && !current.loading))) load(false)
-  }, [key, harness, supported, load])
+  }, [key, harness, supported, load, identity])
   return { ...entry, supported, refresh: () => load(true) }
 }
 
@@ -104,7 +105,7 @@ export function ModelPicker({ harness, accountMemberID, value, onChange, disable
                 {failure && <span className="text-state-failed">{failure}</span>}
               </span>
             )}
-            <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" label="Refresh models" disabled={loading} onClick={refresh}>
+            <Button type="button" variant="ghost" size="icon-sm" className="ml-auto" label="Refresh models" disabled={loading} onClick={refresh} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation() }}>
               <RefreshCw aria-hidden />
             </Button>
           </div>}
