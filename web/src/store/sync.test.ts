@@ -1801,6 +1801,20 @@ describe('applyEvent', () => {
     expect(client.runList).toHaveBeenCalled()
   })
 
+  it('drops the member.merged snapshot of a connection that was replaced', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi())
+    const lifecycle = new AbortController()
+    lifecycle.abort()
+    const client = fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) })
+    await applyEvent(store, statusEvent({
+      run_id: '', workspace_id: 'server', type: 'member.merged', actor_id: bob.id,
+      payload: { merge_id: 'merge_1', survivor_id: bob.id, absorbed_id: alice.id },
+    }), client, lifecycle.signal)
+
+    expect(store.getState().info?.member.id).toBe(alice.id)
+  })
+
   it('takes a fresh snapshot when the viewer was merged away', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member: bob })) }))

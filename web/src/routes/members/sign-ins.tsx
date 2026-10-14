@@ -15,12 +15,13 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
+import { toastFailure } from '@/components/failure'
 import { message, providerName } from '@/lib/format'
 import type { InvitationResult, Member, MemberIdentities, MemberMerge, MergeCode, MergeMember, MergePlan, MergeProposal } from '@/lib/types'
 import { deviceStatus } from '@/routes/devices'
 import { acceptOutcome, proposeOutcome, settingsLines, type MergeOutcome, type ProposeForm } from '@/routes/members/merge-plan'
 import { roleLabel } from '@/routes/members/roster'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { memberName } from '@/lib/member-name'
 import { dropMergeProposal, loadMergeProposals } from '@/store/members'
@@ -92,6 +93,25 @@ function CancelProposal({ client, proposal, onFailed }: { client: Api; proposal:
   return <Button size="sm" variant="secondary" disabled={pending} onClick={() => void cancel()}>{pending ? 'Cancelling…' : 'Cancel'}</Button>
 }
 
+/** An action's error, shown in place while its view is mounted and as a
+ * toast once it has closed, unless the signed-in member changed. */
+function useActionError() {
+  const [error, setError] = useState<string | null>(null)
+  const mounted = useRef(true)
+  const [same] = useState(sameIdentity)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const report = useCallback((next: string | null) => {
+    if (mounted.current) setError(next)
+    else if (next && same()) toastFailure(next, { same })
+  }, [same])
+  return [error, report] as const
+}
+
 function useNames() {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -108,16 +128,21 @@ export function SignInsSection({ client, self, focus }: { client: Api; self: Mem
   // Re-read whenever member.device or a wake re-reads the devices: an approval binds an account.
   const devices = useStore((s) => s.devices)
   const [identities, setIdentities] = useState<MemberIdentities | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useActionError()
   const [linking, setLinking] = useState(false)
   const [merging, setMerging] = useState(false)
   const [merged, setMerged] = useState<MemberMerge | null>(null)
   const ref = useRef<HTMLElement>(null)
 
+  const reads = useRef(0)
   const reload = useCallback(() => {
+    const read = ++reads.current
     setError(null)
-    return client.memberIdentityList(self.id).then(setIdentities, (err: unknown) => setError(message(err)))
-  }, [client, self.id])
+    return client.memberIdentityList(self.id).then(
+      (list) => read === reads.current && setIdentities(list),
+      (err: unknown) => read === reads.current && setError(message(err)),
+    )
+  }, [client, self.id, setError])
 
   useEffect(() => {
     void reload()
@@ -215,7 +240,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
 function LinkDialog({ client, self, onClose }: { client: Api; self: Member; onClose: () => void }) {
   const [login, setLogin] = useState('')
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useActionError()
   const [created, setCreated] = useState<InvitationResult | null>(null)
 
   const link = async () => {
@@ -323,7 +348,7 @@ function MergeDialog({ client, self, onMerged, onClose }: { client: Api; self: M
 function GetCode({ client, self, onMerged }: { client: Api; self: Member; onMerged: (merge: MemberMerge) => void }) {
   const [code, setCode] = useState<MergeCode | null>(null)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useActionError()
   const countdown = useCountdown(code?.expires_at)
 
   const start = async () => {
@@ -373,7 +398,7 @@ function EnterCode({ client, self }: { client: Api; self: Member }) {
   const [code, setCode] = useState('')
   const [plan, setPlan] = useState<{ code: string; plan: MergePlan } | null>(null)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useActionError()
   const [proposal, setProposal] = useState<MergeProposal | null>(null)
 
   const preview = async () => {

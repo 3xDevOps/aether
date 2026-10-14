@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { toast, Toaster } from 'sonner'
 import { ApiError } from '@/lib/api'
 import type { MemberMerge, MergeMember, MergePlan, MergeProposal, MergeSettings } from '@/lib/types'
 import { ProposeForm, SignInsSection } from '@/routes/members/sign-ins'
@@ -310,6 +311,37 @@ describe('accept a merge', () => {
     fireEvent.click(refused.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Merge proposal from Bob' })).toBeNull())
     expect(client.memberMergeCancel).toHaveBeenCalledWith('prop_2')
+  })
+
+  it('ignores a sign-ins answer older than the latest read', async () => {
+    seed()
+    let older!: (value: { identities: never[]; devices: never[]; public_key_fingerprint: string }) => void
+    const client = fakeApi({
+      memberIdentityList: vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { older = resolve }))
+        .mockResolvedValue({ identities: [], devices: [], public_key_fingerprint: 'SHA256:new' }),
+    })
+    render(<SignInsSection client={client} self={alice} />)
+    act(() => useStore.getState().setDevices([], null))
+    expect(await screen.findByText('SHA256:new')).toBeDefined()
+    await act(async () => older({ identities: [], devices: [], public_key_fingerprint: 'SHA256:old' }))
+    expect(screen.queryByText('SHA256:old')).toBeNull()
+  })
+
+  it('shows a link refused after its dialog closed as a toast', async () => {
+    seed()
+    let refuse!: (err: Error) => void
+    const client = fakeApi({ memberIdentityLink: vi.fn(() => new Promise<never>((_, reject) => { refuse = reject })) })
+    render(<><Toaster /><SignInsSection client={client} self={alice} /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'Link a GitHub account' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Link a GitHub account' }))
+    fireEvent.change(dialog.getByLabelText('GitHub login'), { target: { value: 'alice-gh' } })
+    fireEvent.click(dialog.getByRole('button', { name: 'Create link' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await act(async () => refuse(new Error('member.identity.link: the edge reports this server unclaimed')))
+
+    expect(await screen.findByText('member.identity.link: the edge reports this server unclaimed')).toBeDefined()
+    toast.dismiss()
   })
 
   it('re-reads the sign-ins when the devices are re-read', async () => {

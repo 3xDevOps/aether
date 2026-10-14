@@ -324,6 +324,7 @@ export async function applyEvent(
   store: RootStore,
   ev: Event,
   client: Api = api,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (ev.seq > 0 && ev.seq <= store.getState().lastSeq) {
     // Replay resumes strictly after the cursor, so equal is a duplicate. Below
@@ -453,7 +454,7 @@ export async function applyEvent(
       break
     case 'member.merged':
       // A merge moves runs and roles without publishing their events, and may change the viewer.
-      if (!(await hydrate(store, client))) return false
+      if (!(await hydrate(store, client, signal))) return false
       break
     case 'run.status': {
       const p = ev.payload as RunStatusPayload
@@ -895,7 +896,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
   const drain = () => batchNotifications(store, async () => {
     while (!signal.aborted && !hydrating && queue.length > 0) {
       const ev = queue.shift() as Event
-      if (await applyEvent(store, ev, client)) {
+      if (await applyEvent(store, ev, client, signal)) {
         if (ev.type === 'mission.changed' && ev.workspace_id) {
           missionRefreshes.add(ev.workspace_id)
           refreshMissionRuns()

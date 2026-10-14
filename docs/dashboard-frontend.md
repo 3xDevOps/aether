@@ -4207,7 +4207,9 @@ proposal's digest, and **Cancel** sends `member.merge.cancel`. A refused
 accept clears the tick and re-reads the proposals, so a `refusal` the
 server now reports disables **Accept and merge**. A proposal the server
 could not plan shows only its `refusal` and **Cancel**, and the viewer's
-own open proposals show with **Cancel**. Every RPC error shows verbatim. After a merge
+own open proposals show with **Cancel**. Every RPC error shows verbatim,
+as a toast when it arrives after its dialog or Profile closed, unless the
+signed-in member changed. After a merge
 the record shows in Sign-ins; **Merge history** lists `member.merge.list`
 with the discarded settings, custom agent definitions included, and the
 archive path.
