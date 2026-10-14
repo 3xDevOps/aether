@@ -48,6 +48,12 @@ const (
 	// PromptDevServer starts shell DevServerTaskID in the background, which
 	// never ends, and ends the turn.
 	PromptDevServer = "start a dev server"
+	// PromptHold starts workflow HeldTaskID in the background and ends the
+	// turn; the workflow runs until PromptRelease.
+	PromptHold = "hold in background"
+	// PromptRelease ends the turn, and BackgroundDelay later ends HeldTaskID
+	// and runs its follow-up turn.
+	PromptRelease = "release background"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
@@ -66,6 +72,8 @@ const (
 	BackgroundTaskID = "mock-background-task"
 	// DevServerTaskID is the id of the shell PromptDevServer starts.
 	DevServerTaskID = "mock-dev-server"
+	// HeldTaskID is the id of the workflow PromptHold starts.
+	HeldTaskID = "mock-held-task"
 )
 
 type Fixture struct {
@@ -362,6 +370,14 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptDevServer:
 		a.launch(ctx, DevServerTaskID, "local_bash")
 		a.text(ctx, "started")
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptHold:
+		a.launch(ctx, HeldTaskID, "local_workflow")
+		a.text(ctx, "started")
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptRelease:
+		time.AfterFunc(BackgroundDelay, func() { a.finish(HeldTaskID) })
+		a.text(ctx, "releasing")
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {

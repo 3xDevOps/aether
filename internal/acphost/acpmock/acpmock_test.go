@@ -122,6 +122,70 @@ func TestPromptDevServerNeverEnds(t *testing.T) {
 	}
 }
 
+func TestPromptHoldKeepsTheWorkflowLiveUntilRelease(t *testing.T) {
+	delay := BackgroundDelay
+	BackgroundDelay = 50 * time.Millisecond
+	t.Cleanup(func() { BackgroundDelay = delay })
+	fix, err := Load("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go New(fix).Serve(agentIn, agentOut)
+	t.Cleanup(func() { _ = hostOut.Close(); _ = hostIn.Close() })
+	lines := make(chan string, 64)
+	go func() {
+		scan := bufio.NewScanner(hostIn)
+		for scan.Scan() {
+			lines <- scan.Text()
+		}
+		close(lines)
+	}()
+	send := func(line string) { go func() { _, _ = io.WriteString(hostOut, line+"\n") }() }
+	send(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/","mcpServers":[]%s}}`, askForFrames))
+	nextLine(t, lines)
+	prompt := func(id int, text string) []string {
+		send(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"session/prompt","params":{"sessionId":%q,"prompt":[{"type":"text","text":%q}]}}`, id, fix.SessionID(), text))
+		var got []string
+		for {
+			line := nextLine(t, lines)
+			got = append(got, line)
+			if strings.Contains(line, `"stopReason"`) {
+				return got
+			}
+		}
+	}
+	held := `"task_id":"` + HeldTaskID + `"`
+
+	if turn := strings.Join(prompt(2, PromptHold), "\n"); !strings.Contains(turn, held) || !strings.Contains(turn, `"tasks":[{`) {
+		t.Fatalf("hold turn does not list %s as live:\n%s", HeldTaskID, turn)
+	}
+	select {
+	case line := <-lines:
+		t.Fatalf("held task changed without a release: %s", line)
+	case <-time.After(4 * BackgroundDelay):
+	}
+
+	release := strings.Join(prompt(3, PromptRelease), "\n")
+	if strings.Contains(release, `"subtype":"task_notification"`) {
+		t.Fatalf("task ended inside the release turn:\n%s", release)
+	}
+	var after []string
+	timeout := time.After(time.Second)
+	for !strings.Contains(strings.Join(after, "\n"), "background done") {
+		select {
+		case line := <-lines:
+			after = append(after, line)
+		case <-timeout:
+			t.Fatalf("no follow-up after release:\n%s", strings.Join(after, "\n"))
+		}
+	}
+	if end := strings.Join(after, "\n"); !strings.Contains(end, `"subtype":"task_notification"`) || !strings.Contains(end, held) {
+		t.Fatalf("release did not end %s:\n%s", HeldTaskID, end)
+	}
+}
+
 func nextLine(t *testing.T, lines <-chan string) string {
 	t.Helper()
 	select {
