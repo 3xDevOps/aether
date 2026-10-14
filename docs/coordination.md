@@ -664,9 +664,10 @@ Browser observers receive the latest complete frame when joining an active
 stream, even when the page is static; slow viewers do not queue an image
 history. Resizing to the current width and height preserves the viewport
 identity and cached frame. A changed viewport fences out old-geometry frames
-before Chromium renders its replacement. On controller release, revocation or
-disconnect, the server clears
-held browser keys, buttons and touches before admitting another controller.
+before Chromium renders its replacement, then restarts an active screencast so
+a static page still streams a frame at the new size. On controller release,
+revocation or disconnect, the server clears held browser keys, buttons and
+touches before admitting another controller.
 If cleanup cannot be confirmed, new control remains fenced.
 
 Page inventories and physical-input acknowledgements use cached, best-effort
