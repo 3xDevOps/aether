@@ -522,10 +522,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
-	// A session that started anew, here or after a failed restore, has not
-	// had them yet.
-	if task == "" && systemPrompt == "" && (fresh ||
-		acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq <= acphost.LastItem(sess.Log(), acphost.KindReset).Seq) {
+	// A session that started anew, here or after a failed restore, or
+	// refused its prompts so far has not had them yet.
+	if task == "" && systemPrompt == "" && (fresh || !acphost.Answered(sess.Log())) {
 		r.instructions = d.s.runInstructions(entry.missionAssigned, oneShot)
 	}
 	d.setRun(runID, r)

@@ -1343,6 +1343,47 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartBeforeAnyTurn(t *test
 	}
 }
 
+func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartAfterOnlyRefusedPrompts(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, binDir := withCoordination(t, e)
+	rt.fixture.RefusePrompts = true
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "first"}, false, nil); err == nil {
+		t.Fatal("Inject of a refused prompt succeeded")
+	}
+	waitItems(t, e.sched, run.ID, "the refused turn", turnEnded("error", 1))
+	if err := e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rt.fixture.RefusePrompts = false
+
+	cfg := e.cfg
+	cfg.PTY = newFakePTY()
+	cfg.PTY.(*fakePTY).logDir = e.pty.logDir
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	s2.UseCoordination(coord, binDir)
+	startScheduler(t, s2)
+	waitFor(t, "restored session", func() bool { return s2.acp.session(run.ID) != nil })
+	if _, err := s2.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "second"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, s2, run.ID, "the first answered turn", turnEnded("end_turn", 1))
+	execs := rt.all()
+	prompts := execs[len(execs)-1].wire.prompts(t)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts %+v, want one", prompts)
+	}
+	if want := []string{"second", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+		t.Fatalf("first answered prompt %q, want the message and the instructions", textOf(prompts[0]))
+	}
+}
+
 // A prompt queued behind a running turn that the session drops never reached
 // the agent, so the next prompt still owes the instructions.
 func TestEnhancedTasklessRunKeepsInstructionsWhenTheFirstMessageIsDropped(t *testing.T) {

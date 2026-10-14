@@ -442,6 +442,26 @@ func LastItem(log *Log, kind Kind) Item {
 	}
 }
 
+// Answered reports whether the agent answered a prompt since the log's last
+// reset other than by failing it, as it does when it refuses one.
+func Answered(log *Log) bool {
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			return false
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			switch it := items[i]; {
+			case it.Kind == KindReset:
+				return false
+			case it.Kind == KindTurnEnd && !it.Autonomous && it.StopReason != "error":
+				return true
+			}
+		}
+		before = items[0].Seq
+	}
+}
+
 // Interrupted reports whether the agent session the log records lost work when
 // its connection ended: its last turn ended interrupted, as a host that closed
 // the connection logs it, or tasks the run waited for were live, and no turn

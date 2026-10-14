@@ -231,3 +231,33 @@ func TestWireCutsLargeItems(t *testing.T) {
 		t.Fatal("Wire changed the item")
 	}
 }
+
+func TestAnswered(t *testing.T) {
+	for name, tc := range map[string]struct {
+		items []Item
+		want  bool
+	}{
+		"empty":               {nil, false},
+		"only refused turns":  {[]Item{{Kind: KindTurnEnd, StopReason: "error"}, {Kind: KindTurnEnd, StopReason: "error"}}, false},
+		"an answered turn":    {[]Item{{Kind: KindTurnEnd, StopReason: "error"}, {Kind: KindTurnEnd, StopReason: "end_turn"}}, true},
+		"autonomous end only": {[]Item{{Kind: KindTurnEnd, StopReason: "end_turn", Autonomous: true}}, false},
+		"answer before reset": {[]Item{{Kind: KindTurnEnd, StopReason: "end_turn"}, {Kind: KindReset}}, false},
+		"answer after reset":  {[]Item{{Kind: KindReset}, {Kind: KindTurnEnd, StopReason: "end_turn"}}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l, err := OpenLog(filepath.Join(t.TempDir(), "run.items.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = l.Close() })
+			for _, it := range tc.items {
+				if err := l.Append(&it); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := Answered(l); got != tc.want {
+				t.Fatalf("Answered = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
