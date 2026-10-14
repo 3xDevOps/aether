@@ -47,19 +47,16 @@ func (s *Scheduler) runInstructions(assigned, background bool) string {
 	}
 	rules := coordinationInstruction
 	if c.enabled {
-		rules += "\n\n" + reportInstruction(assigned, background)
+		report := harness.InteractiveReportInstruction
+		switch {
+		case assigned:
+			report = harness.AssignedReportInstruction
+		case background:
+			report = harness.BackgroundReportInstruction
+		}
+		rules += "\n\n" + report
 	}
 	return rules + "\n\n" + coAuthorInstruction
-}
-
-func reportInstruction(assigned, background bool) string {
-	switch {
-	case assigned:
-		return harness.AssignedReportInstruction
-	case background:
-		return harness.BackgroundReportInstruction
-	}
-	return harness.InteractiveReportInstruction
 }
 
 // withCoAuthorInstruction appends the run instructions to a task prompt. A
