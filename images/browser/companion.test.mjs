@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { BrowserSession, boundedRead, limits } from './session.mjs';
+import { BrowserSession, limits } from './session.mjs';
 import { encodeFrame } from './stream.mjs';
 import { renderTerminal } from './terminal.mjs';
 import { startServer } from './server.mjs';
@@ -238,25 +238,8 @@ test('late static viewers receive original current pixels and invalidated frames
   assert.equal(replay.metadata.viewport_id, page.viewport_id);
   assert.equal(await native.evaluate(() => window.boot), boot, 'attaching must not reload the app');
   second.close();
-  const cdp = await session.cdp(session.pages.get(page.page_id));
-  const resize = native.setViewportSize.bind(native);
-  native.setViewportSize = async (size) => {
-    let observed;
-    const painted = new Promise((resolve) => {
-      observed = (event) => {
-        if (event.metadata.deviceWidth === size.width && event.metadata.deviceHeight === size.height) resolve();
-      };
-      cdp.on('Page.screencastFrame', observed);
-    });
-    try {
-      await resize(size);
-      await boundedRead(painted);
-    } finally { cdp.off('Page.screencastFrame', observed); }
-  };
-  try {
-    ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
-  } finally { native.setViewportSize = resize; }
-  const resized = watch(page, 'resize frame delivered before completion');
+  ({ page } = await call('/command', { ...page, operation: 'viewport', width: 640, height: 480 }));
+  const resized = watch(page, 'resized static page');
   const resizedFrame = await resized.first;
   assert.equal(resizedFrame.metadata.viewport_id, page.viewport_id);
   assert.deepEqual([resizedFrame.metadata.width, resizedFrame.metadata.height], [640, 480]);

@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import { inspectPoint } from './inspect.mjs';
 
 export const limits = Object.freeze({ request: 2 * 1024 * 1024, image: 8 * 1024 * 1024, frame: 2 * 1024 * 1024, pages: 16, nodes: 128, snapshotChars: 8192, chars: 32000, logs: 100, timeout: 10000, operationTimeout: 30000 });
+export const screencast = Object.freeze({ format: 'jpeg', quality: 75, maxWidth: 2560, maxHeight: 1600, everyNthFrame: 1 });
 export class BrowserError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -411,6 +412,12 @@ export class BrowserSession {
         state.viewportChanged = Date.now() / 1000;
         this.invalidateFrames(state);
         await page.setViewportSize({ width, height });
+        // Chromium can drop the only screencast frame of a resized static page.
+        if (state.streams.size) {
+          const cdp = await this.cdp(state);
+          await cdp.send('Page.stopScreencast');
+          if (state.streams.size) await cdp.send('Page.startScreencast', screencast);
+        }
         break;
       }
       case 'wait': {
