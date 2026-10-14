@@ -224,7 +224,6 @@ func (h *coordHarness) member(role domain.Role) *domain.Member {
 	return m
 }
 
-// ownBy hands run i to owner and sets its protection.
 func (h *coordHarness) ownBy(i int, owner domain.MemberID, protected bool) {
 	h.t.Helper()
 	r := h.runs[i]

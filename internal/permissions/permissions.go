@@ -14,14 +14,13 @@
 //	| admin        | everything | everything          | members, settings, ... |
 //
 // modified by two restrictions: a workspace with steer_others=admins_only
-// limits steering and killing others' runs to owner and admins, and a
-// protected run limits steer AND kill to its owner and admins regardless
-// of the workspace setting.
+// limits messaging, steering and killing others' runs to owner and admins,
+// and a protected run limits each of them to its owner and admins
+// regardless of the workspace setting.
 //
 // Message lets one run's owner open a coordination conversation with
-// another run in the same workspace. It is advisory inbox mail, not
-// control: the steer-others setting does not restrict it, a protected run
-// limits it to owner and admins, and a viewer has none.
+// another run in the same workspace. Coordination mail can start a turn in
+// an idle run, so it follows the same two restrictions; a viewer has none.
 //
 // Git push over SSH is the Push capability: writing to a workspace's
 // repository is a collaborator action, so a viewer is read-only on the
@@ -148,10 +147,16 @@ func Check(cap Capability, actor Actor, target Target) error {
 		if actor.Role != domain.RoleCollaborator {
 			return deny("messaging another run requires the collaborator role")
 		}
-		if owner || !target.Protected {
+		if owner {
 			return nil
 		}
-		return deny("run is protected: only its owner or an admin may message it")
+		if target.Protected {
+			return deny("run is protected: only its owner or an admin may message it")
+		}
+		if target.SteerOthers == domain.SteerOthersAdminsOnly {
+			return deny("workspace restricts messaging others' runs to their owner and admins")
+		}
+		return nil
 	}
 	return deny(fmt.Sprintf("unknown capability %q", cap))
 }

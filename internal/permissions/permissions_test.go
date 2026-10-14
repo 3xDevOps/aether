@@ -23,7 +23,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 		return role == domain.RoleCollaborator
 	case Handoff, Protect:
 		return owner
-	case Steer, Kill:
+	case Steer, Kill, Message:
 		if role != domain.RoleCollaborator {
 			return false
 		}
@@ -31,8 +31,6 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 			return true
 		}
 		return !protected && steerOthers != domain.SteerOthersAdminsOnly
-	case Message:
-		return role == domain.RoleCollaborator && (owner || !protected)
 	}
 	return false
 }
@@ -122,9 +120,12 @@ func TestCheckSpotRules(t *testing.T) {
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor}, true},
 		{"viewer cannot message even from its own run", Message,
 			Actor{actor, domain.RoleViewer}, Target{Owner: actor}, false},
-		{"admins_only does not restrict messaging another's run", Message,
+		{"admins_only blocks messaging another's run", Message,
 			Actor{actor, domain.RoleCollaborator},
-			Target{Owner: other, SteerOthers: domain.SteerOthersAdminsOnly}, true},
+			Target{Owner: other, SteerOthers: domain.SteerOthersAdminsOnly}, false},
+		{"admins_only leaves messaging one's own run", Message,
+			Actor{actor, domain.RoleCollaborator},
+			Target{Owner: actor, SteerOthers: domain.SteerOthersAdminsOnly}, true},
 		{"protected run refuses messages from another member", Message,
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: other, Protected: true}, false},
 		{"protected run accepts messages from its owner's runs", Message,

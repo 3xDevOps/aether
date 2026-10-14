@@ -499,9 +499,10 @@ A separate **message** capability covers agent-to-agent coordination mail
 between runs in one workspace: the runs of a collaborator or admin can message
 any live run there, except a protected run of another member, which only its
 owner's runs, admins' runs, and runs it overlaps or shares a swarm with can
-reach. A viewer's runs cannot message any run, swarm and overlap peers
-included, and a demotion applies to the next message. The
-message-others policy below does not restrict it; see
+reach. The message-others policy below restricts it the same way: under
+`admins-only`, a collaborator's runs reach other members' runs only over a
+shared swarm or a file overlap. A viewer's runs cannot message any run, swarm
+and overlap peers included, and a demotion applies to the next message; see
 [Conflict radar](#conflict-radar).
 
 **Everyone is a collaborator by default, on purpose.** Teammates can message and
@@ -1080,8 +1081,8 @@ their agents, before or after the radar sees an overlap (on by default;
 a run lists the runs it can reach: swarm peers, overlapping runs, then other
 live runs in the workspace its owner may message. `aether protect <run>` limits
 messages to a run to its owner's runs, admins' runs, and overlapping or swarm
-peers. Every
-message shows in Activity as an **Agent message** row naming sender,
+peers; `aether workspace settings --message-others admins-only` does the same
+for every member's runs. Every message shows in Activity as an **Agent message** row naming sender,
 recipient, and kind, and every member can read the bodies through
 `coord.messages.list`. See [coordination.md](coordination.md#seeing-agent-messages)
 and [mcp-bridge.md](mcp-bridge.md).

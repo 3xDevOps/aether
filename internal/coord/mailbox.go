@@ -1053,6 +1053,7 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 // question ownership check in Reply.
 type peerMessageStore interface {
 	AppendRunMessageWithPeer(context.Context, *store.RunMessage, int, int, bool) (bool, error)
+	CoordConversationsAtCap(context.Context, domain.RunID, int) (bool, map[domain.RunID]bool, error)
 }
 
 func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.RunMessage, openPeer bool) (bool, error) {

@@ -16,7 +16,8 @@ import (
 // route names the first route that lets sender open a conversation with
 // target: its swarm assignment, the radar's active/grace set, or the
 // workspace. Every route requires a sender owner who may message; only the
-// workspace route honors protection. Callers have checked that both runs
+// workspace route honors protection and the workspace's steer-others
+// setting. Callers have checked that both runs
 // share a workspace and that target is live.
 func (s *Service) route(ctx context.Context, method string, sender, target *domain.Run) (string, *protocol.Error) {
 	owner, reason, err := s.messagingOwner(ctx, sender)
@@ -40,7 +41,11 @@ func (s *Service) route(ctx context.Context, method string, sender, target *doma
 	if peer.state != "" {
 		return peer.state, nil
 	}
-	if err := checkMessage(owner, target.WorkspaceID, target.MemberID, target.Protected); err != nil {
+	ws, err := s.cfg.Store.GetWorkspace(ctx, target.WorkspaceID)
+	if err != nil {
+		return "", internalError(method, err)
+	}
+	if err := checkMessage(owner, ws, target.MemberID, target.Protected); err != nil {
 		return "", deniedPeer(method, sender.ID, target.ID, ownerDenial(owner, err))
 	}
 	return protocol.CoordPeerWorkspace, nil
@@ -57,7 +62,7 @@ func (s *Service) messagingOwner(ctx context.Context, run *domain.Run) (*domain.
 	if err != nil {
 		return nil, "", err
 	}
-	if err := checkMessage(owner, run.WorkspaceID, "", false); err != nil {
+	if err := checkMessage(owner, &domain.Workspace{ID: run.WorkspaceID}, "", false); err != nil {
 		return nil, ownerDenial(owner, err), nil
 	}
 	return owner, "", nil
@@ -87,7 +92,8 @@ func (s *Service) missionMember(ctx context.Context, run, peer domain.RunID) (bo
 // bounded to CoordMaxStatusPeers, with the unbounded total: live swarm
 // peers first, then the radar's active/grace peers, then the other live
 // runs in the workspace that self's owner may message, most recently active
-// first. A run whose owner may not message lists none.
+// first. A run whose owner may not message lists none; a run at its peer
+// cap lists only swarm peers and runs it already has a conversation with.
 func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeers []protocol.CoordPeer) ([]protocol.CoordPeer, int, error) {
 	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
 	owner, _, err := s.messagingOwner(ctx, self)
@@ -103,6 +109,16 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	for _, r := range live {
 		byID[r.ID] = r
 	}
+	ws, err := s.cfg.Store.GetWorkspace(ctx, self.WorkspaceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	atCap, conversed := false, map[domain.RunID]bool(nil)
+	if ps, ok := s.cfg.Mail.(peerMessageStore); ok {
+		if atCap, conversed, err = ps.CoordConversationsAtCap(ctx, self.ID, maxPeers); err != nil {
+			return nil, 0, err
+		}
+	}
 	radarPeers, err := s.radar.authorizedSet(ctx, self.ID)
 	if err != nil {
 		return nil, 0, err
@@ -114,6 +130,9 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	seen := make(map[domain.RunID]bool)
 	add := func(r *store.RunSummary, state string, overlap authorizedPeer) {
 		if r == nil || r.ID == self.ID || seen[r.ID] {
+			return
+		}
+		if atCap && state != protocol.CoordPeerMission && !conversed[r.ID] {
 			return
 		}
 		seen[r.ID] = true
@@ -141,17 +160,17 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 		add(byID[p.run], p.state, p)
 	}
 	for _, r := range live {
-		if checkMessage(owner, self.WorkspaceID, r.MemberID, r.Protected) == nil {
+		if checkMessage(owner, ws, r.MemberID, r.Protected) == nil {
 			add(r, protocol.CoordPeerWorkspace, authorizedPeer{})
 		}
 	}
 	return peers, len(seen), nil
 }
 
-func checkMessage(owner *domain.Member, workspace domain.WorkspaceID, targetOwner domain.MemberID, protected bool) error {
+func checkMessage(owner *domain.Member, ws *domain.Workspace, targetOwner domain.MemberID, protected bool) error {
 	return permissions.Check(permissions.Message,
 		permissions.Actor{ID: owner.ID, Role: owner.Role},
-		permissions.Target{Workspace: workspace, Owner: targetOwner, Protected: protected})
+		permissions.Target{Workspace: ws.ID, Owner: targetOwner, Protected: protected, SteerOthers: ws.SteerOthers})
 }
 
 func ownerDenial(owner *domain.Member, err error) string {

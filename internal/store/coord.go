@@ -237,6 +237,41 @@ func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int
 	return err
 }
 
+// CoordConversationsAtCap reports whether from has opened maxPeers
+// coordination peers and, if so, the runs it already has a conversation
+// with: an opened peer or a send or question it delivered. Those are the
+// only runs outside its swarm that AppendRunMessageWithPeer still accepts.
+func (d *DB) CoordConversationsAtCap(ctx context.Context, from domain.RunID, maxPeers int) (bool, map[domain.RunID]bool, error) {
+	var opened int
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM coord_peers WHERE from_run = ?`, from).Scan(&opened); err != nil {
+		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
+	}
+	if opened < maxPeers {
+		return false, nil, nil
+	}
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT to_run FROM coord_peers WHERE from_run = ?
+		 UNION SELECT to_run FROM run_messages WHERE from_run = ? AND kind <> ?`,
+		from, from, RunMessageKindReply)
+	if err != nil {
+		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	conversed := make(map[domain.RunID]bool, opened)
+	for rows.Next() {
+		var id domain.RunID
+		if err := rows.Scan(&id); err != nil {
+			return false, nil, fmt.Errorf("store: coord conversations: %w", err)
+		}
+		conversed[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, nil, fmt.Errorf("store: coord conversations: %w", err)
+	}
+	return true, conversed, nil
+}
+
 // AppendRunMessageWithPeer atomically persists a message and, for a new
 // send/question, its sender-to-recipient peer relationship. The relationship
 // insert is rolled back with an inbox-cap failure, so failed enqueues never

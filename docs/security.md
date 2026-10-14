@@ -1545,10 +1545,12 @@ operator-facing stances are these.
   Admins may message any run; a viewer's runs may message no run on any
   route; collaborators may message any run unless it is protected, and a
   protected run (`aether protect`) accepts workspace-route messages only from
-  its owner's runs and admins' runs. The swarm and radar routes do not check
-  protection. `steer_others=admins_only` does not restrict messaging. The
-  owner's role is re-read on every send and status, so a demotion applies to
-  the next message. `coord.status` omits runs the sender may not message.
+  its owner's runs and admins' runs. `steer_others=admins_only` (the
+  message-others policy) limits workspace-route messages to another member's
+  run to admins' runs the same way. The swarm and radar routes check neither
+  protection nor that policy. The owner's role and the workspace policy are
+  re-read on every send and status, so a demotion applies to the next
+  message. `coord.status` omits runs the sender may not message.
 - **A message grants nothing else.** It is an attributed inbox item
   (`from_run_id`), never an instruction. It confers no steer, kill, input
   injection, terminal, transcript, Git, secret, or task and worker authority

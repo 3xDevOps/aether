@@ -118,7 +118,9 @@ reach no peer on any route. Three routes are then checked in order:
 3. **Workspace**: any other live run in the same workspace, when the sender
    run's owner holds the `message` permission on it. Admins hold it on every
    run; collaborators hold it unless the target is a protected run of another
-   member. Only this route checks protection.
+   member or belongs to another member in a workspace whose message-others
+   policy is `admins-only`. Only this route checks protection and that
+   policy.
 
 The owner's role is re-read on every send.
 
@@ -129,8 +131,9 @@ reports one; radar peers with `state: "active"` or `"grace"`; then workspace
 peers with `state: "workspace"`, their task summary and `run_status`, most
 recently active first. Each run appears once, under its first route, and
 status never lists a run the sender cannot message: finished runs, runs in
-another workspace, and every peer of a viewer's run are left out, and
-`peer_total` counts what remains. A question reply is the
+another workspace, every peer of a viewer's run, and, once the sender has
+reached the peer cap, every radar or workspace run it has no conversation
+with are left out, and `peer_total` counts what remains. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a
@@ -138,8 +141,9 @@ workspace boundary.
 
 The `recipient_status` in a send or ask receipt is the recipient's lifecycle
 status when the receipt is returned: `queued`, `provisioning`, `running`, or
-`needs-attention`. An idempotent retry reports the current status. The message waits in the inbox whatever the status. A
-refused send names its reason:
+`needs-attention`. An idempotent retry reports the current status, which is a
+terminal status if the recipient has since finished. The message waits in the
+inbox whatever the status. A refused send names its reason:
 
 | Error | Reason |
 | --- | --- |
@@ -147,6 +151,7 @@ refused send names its reason:
 | `-32001` `run <to> is not an authorized peer of run <from>: member <id> (viewer) may not message it: <rule>; ...` | The sender run's owner is a viewer; no route applies. |
 | `-32001` `run <to> is not an authorized peer of run <from>: its owner <id> is no longer a member; ...` | The sender run's owner was removed; no route applies. |
 | `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: run is protected: ...; ...` | No swarm or radar route, and the target is a protected run of another member. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: workspace restricts messaging others' runs ...; ...` | No swarm or radar route, and the workspace's message-others policy is `admins-only`. |
 | `-32004` `run <to> has finished` | The target is no longer live. |
 | `-32003` `run <from> has reached its limit of 8 coordination peers; ...` | The peer cap below. |
 

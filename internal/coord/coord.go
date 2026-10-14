@@ -78,6 +78,7 @@ type EvidencePacketLookup interface {
 type Runs interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
+	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
 	ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*store.RunSummary, error)
 }

@@ -180,8 +180,9 @@ func TestSendReceiptCarriesRecipientStatus(t *testing.T) {
 
 // TestStatusBoundsAndDedupsAllThreeRoutes lists mission, radar, and
 // workspace peers that overlap one another past the status bound: each run
-// appears once, in route order, the newest workspace run first, and the
-// total counts each distinct peer once.
+// appears once, in route order, the most recently active workspace run
+// first even though it was created earliest, and the total counts each
+// distinct peer once.
 func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	stub := &missionTransportStub{}
 	n := protocol.CoordMaxStatusPeers + 8
@@ -190,11 +191,12 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	self := h.run(0)
 	stub.mission = []domain.RunID{self, h.run(1), h.run(2), h.run(3)}
 	h.peers.hub(self, []domain.RunID{h.run(3), h.run(4), h.run(5)}, "src/auth.go")
-	h.runs[n].Task = strings.Repeat("é", protocol.CoordMaxStatusTaskBytes)
-	if err := h.db.UpdateRun(ctx, h.runs[n]); err != nil {
+	recent := 6
+	h.runs[recent].Task = strings.Repeat("é", protocol.CoordMaxStatusTaskBytes)
+	if err := h.db.UpdateRun(ctx, h.runs[recent]); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	if err := h.db.UpdateRunStatus(ctx, h.run(n), domain.RunNeedsAttention, "", nil, nil); err != nil {
+	if err := h.db.UpdateRunStatus(ctx, h.run(recent), domain.RunNeedsAttention, "", nil, nil); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 
@@ -223,9 +225,90 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 			t.Fatalf("peer %d = %+v, want state %q", i, p, want)
 		}
 	}
-	if p := st.Peers[5]; p.RunID != string(h.run(n)) || p.RunStatus != string(domain.RunNeedsAttention) ||
+	if p := st.Peers[5]; p.RunID != string(h.run(recent)) || p.RunStatus != string(domain.RunNeedsAttention) ||
 		p.TaskBytes != 2*protocol.CoordMaxStatusTaskBytes || !p.TaskTruncated ||
 		len(p.Task) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Task) {
-		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task bounded", p, h.run(n))
+		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task bounded", p, h.run(recent))
+	}
+}
+
+// TestAdminsOnlyLimitsTheWorkspaceRoute covers message-others=admins_only:
+// a collaborator's run reaches only its owner's runs over the workspace
+// route, an admin-owned run reaches every run, and the swarm and overlap
+// routes stay open.
+func TestAdminsOnlyLimitsTheWorkspaceRoute(t *testing.T) {
+	stub := &missionTransportStub{}
+	h := newHarness(t, 6, func(c *Config) { c.Mission = stub })
+	ctx := context.Background()
+	mine, sibling, other, swarm, overlap, adminRun := h.run(0), h.run(1), h.run(2), h.run(3), h.run(4), h.run(5)
+	for _, i := range []int{2, 3, 4} {
+		h.ownBy(i, h.member(domain.RoleCollaborator).ID, false)
+	}
+	h.ownBy(5, h.member(domain.RoleAdmin).ID, false)
+	if err := h.db.SetWorkspaceSteerOthers(ctx, h.workspace, domain.SteerOthersAdminsOnly); err != nil {
+		t.Fatalf("set steer_others: %v", err)
+	}
+	stub.mission = []domain.RunID{mine, swarm}
+	h.peers.pair(mine, overlap, "src/auth.go")
+
+	_, err := h.svc.Send(ctx, mine, sendParams(other, "other member"))
+	wantDenied(t, err, "workspace restricts messaging others' runs to their owner and admins")
+	for _, target := range []domain.RunID{sibling, swarm, overlap} {
+		h.advance(sendRefill)
+		if _, err = h.svc.Send(ctx, mine, sendParams(target, "allowed")); err != nil {
+			t.Fatalf("send to %s under admins_only: %v", target, err)
+		}
+	}
+	if _, err = h.svc.Send(ctx, adminRun, sendParams(other, "admin")); err != nil {
+		t.Fatalf("send from an admin-owned run under admins_only: %v", err)
+	}
+	st, serr := h.svc.Status(ctx, mine)
+	if serr != nil {
+		t.Fatalf("Status: %v", serr)
+	}
+	listed := make(map[string]bool, len(st.Peers))
+	for _, p := range st.Peers {
+		listed[p.RunID] = true
+	}
+	if len(listed) != 3 || st.PeerTotal != 3 || !listed[string(sibling)] || !listed[string(swarm)] || !listed[string(overlap)] {
+		t.Fatalf("status peers = %+v (total %d), want the sibling, swarm and overlap runs", st.Peers, st.PeerTotal)
+	}
+}
+
+// TestStatusAtThePeerCapListsOnlyReachableRuns fills the sender's peer
+// slots and expects status to list only its swarm peer and the runs it
+// already wrote to, exactly the runs send still accepts.
+func TestStatusAtThePeerCapListsOnlyReachableRuns(t *testing.T) {
+	stub := &missionTransportStub{}
+	n := maxPeers + 4
+	h := newHarness(t, n, func(c *Config) { c.Mission = stub })
+	ctx := context.Background()
+	self := h.run(0)
+	stub.mission = []domain.RunID{self, h.run(1)}
+	h.peers.pair(self, h.run(n-2), "src/auth.go")
+	for i := 2; i < 2+maxPeers; i++ {
+		h.advance(sendRefill)
+		if _, err := h.svc.Send(ctx, self, sendParams(h.run(i), "heads up")); err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+	}
+
+	st, err := h.svc.Status(ctx, self)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if len(st.Peers) != maxPeers+1 || st.PeerTotal != maxPeers+1 || st.PeersTruncated {
+		t.Fatalf("status = %d peers, total %d; want the swarm peer and %d conversations", len(st.Peers), st.PeerTotal, maxPeers)
+	}
+	listed := make(map[string]bool, len(st.Peers))
+	for _, p := range st.Peers {
+		listed[p.RunID] = true
+	}
+	for i := 1; i < n; i++ {
+		h.advance(sendRefill)
+		_, serr := h.svc.Send(ctx, self, sendParams(h.run(i), "again"))
+		if listed[string(h.run(i))] != (serr == nil) {
+			t.Fatalf("run %d listed=%v but send error=%v", i, listed[string(h.run(i))], serr)
+		}
 	}
 }

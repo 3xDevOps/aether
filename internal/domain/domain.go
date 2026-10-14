@@ -178,7 +178,7 @@ type Workspace struct {
 	Name        string
 	Environment WorkspaceEnvironment
 	BaseBranch  string
-	// SteerOthers "" lets any collaborator steer or kill any run;
+	// SteerOthers "" lets any collaborator message, steer or kill any run;
 	// SteerOthersAdminsOnly restricts that to the run's owner and admins.
 	SteerOthers string
 	// Origin is the upstream git URL run checkouts push to; "" when the
@@ -622,8 +622,8 @@ type Run struct {
 	LastCommitAt time.Time
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
-	// Protected restricts steering and killing this run to its owner and
-	// admins, regardless of the workspace's SteerOthers setting.
+	// Protected restricts messaging, steering and killing this run to its
+	// owner and admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
 	// ArchivedAt is when this run was hidden from the board; nil means it
 	// is not archived. Only a Final run can be archived. Archiving does

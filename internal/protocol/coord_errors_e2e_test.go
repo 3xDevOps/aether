@@ -183,6 +183,10 @@ func (f *wireRuns) GetMember(_ context.Context, id domain.MemberID) (*domain.Mem
 	return &domain.Member{ID: id, Role: domain.RoleCollaborator}, nil
 }
 
+func (f *wireRuns) GetWorkspace(_ context.Context, id domain.WorkspaceID) (*domain.Workspace, error) {
+	return &domain.Workspace{ID: id}, nil
+}
+
 func (f *wireRuns) ListActiveRuns(context.Context) ([]*domain.Run, error) { return nil, nil }
 
 func (f *wireRuns) ListLiveRunSummaries(context.Context, domain.WorkspaceID, int) ([]*store.RunSummary, error) {
