@@ -239,6 +239,21 @@ func TestAutonomousTurnWithoutAMarker(t *testing.T) {
 		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
 	})
 
+	t.Run("a call left running by an ended turn does not hold it", func(t *testing.T) {
+		m := newMockAgent(t, loadFixture(t, "claude"))
+		m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "stale", "title": "Bash", "kind": "execute", "status": "in_progress"})
+			return map[string]any{"stopReason": "end_turn"}, nil
+		}
+		s, rec := startMock(t, m, Config{})
+		if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+			t.Fatal(err)
+		}
+		rec.waitStates(t, "working:prompt", "idle:end_turn")
+		m.chunk("hello")
+		rec.waitStates(t, "working:prompt", "idle:end_turn", "working:background", "idle:end_turn")
+	})
+
 	t.Run("stragglers do not open a turn", func(t *testing.T) {
 		m, s, rec := plain(t)
 		m.update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "old", "status": "completed"})
