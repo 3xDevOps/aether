@@ -67,7 +67,7 @@ describe('ChangesBar', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes', file: 'internal/old.go' } })
 
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes' } })
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes', diff: 'current' } })
   })
 
   it('renders nothing without files or once the run is merged', () => {
@@ -106,7 +106,7 @@ describe('ChangesBar', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('reads again when the connection returns after a failed read, and never twice at once', async () => {
+  it('reads again whenever the connection returns before a live snapshot, never twice at once', async () => {
     const timeline = vi.mocked(api.workspaceTimeline)
     const record = seed()
     timeline.mockRejectedValueOnce(new Error('timeline unavailable'))
@@ -122,6 +122,14 @@ describe('ChangesBar', () => {
     act(() => useStore.setState({ connection: 'live' }))
     expect(await screen.findAllByText('2 files changed')).toHaveLength(2)
     expect(timeline).toHaveBeenCalledTimes(2)
+
+    timeline.mockResolvedValueOnce({
+      events: [{ time: '2026-08-14T10:07:00Z', payload: { files: files.slice(1) } }],
+    } as Awaited<ReturnType<typeof api.workspaceTimeline>>)
+    act(() => useStore.setState({ connection: 'reconnecting' }))
+    act(() => useStore.setState({ connection: 'live' }))
+    expect(await screen.findAllByText('1 file changed')).toHaveLength(2)
+    expect(timeline).toHaveBeenCalledTimes(3)
   })
 
   it('shows a file count but no totals for a truncated snapshot', () => {

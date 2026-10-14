@@ -1933,16 +1933,17 @@ The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the run's whole
 worktree against its fork point, the Changes view's **Current diff**, so
 edits made by shell commands count too. Its source is the newest `run.diff`
-stat set; a page load that has seen none reads one with `workspace.timeline`
-(`types: ["run.diff"]`, `newest: true`, `limit: 1`), and a resumed event
-stream replays any it missed. It starts collapsed and stays expanded per run
+stat set. Until the page has received one live, it reads the newest with
+`workspace.timeline` (`types: ["run.diff"]`, `newest: true`, `limit: 1`)
+on load and again whenever the connection returns, since the page may hold
+no replay cursor yet; after that, a resumed event stream replays any it
+missed. It starts collapsed and stays expanded per run
 once opened. Expanded, it lists each file with its status letter and
 `+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
-the Changes view at that file; **Review** opens the Changes view. A
+the Changes view at that file; **Review** opens its **Current diff**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the checkout is gone; a
-failed read shows the server's error with **Retry** and is read again when
-the connection returns. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
+failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#the-session-item-log) instead.
@@ -2647,8 +2648,9 @@ both what it renders and the overlap set the conflict chips read.
   and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
   `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
-  file and scrolls to it once the diff has it. Each file in the Session view's
-  changes bar navigates this way. `file` is not written to the
+  file and scrolls to it once the diff has it; `diff: 'current'` selects
+  **Current diff** alone. The Session view's changes bar navigates these
+  ways. `file` is not written to the
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
   of lines of the diff, held in this browser until it is sent to the agent.

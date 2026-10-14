@@ -1,4 +1,4 @@
-import { useEffect, useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { WorkGroup } from '@/components/ui/timeline'
 import { api } from '@/lib/api'
@@ -19,13 +19,14 @@ export function ChangesBar({ run }: { run: RunRecord }) {
   const expanded = useStore((s) => s.changesOpen[run.id] === true)
   const listID = useId()
   const checkout = isLiveRun(run)
+  const wasConnected = useRef(connected)
   useEffect(() => {
-    if (checkout && connected && !latest && persisted === undefined) void readPersistedDiff(useStore, api, run)
-  }, [checkout, connected, latest, persisted, run])
-  // A read that failed is asked again once the connection is back.
-  useEffect(() => {
-    if (!connected && error) useStore.getState().setDiff(run.id, { persisted: undefined })
-  }, [connected, error, run.id])
+    // Before its first live snapshot the page may hold no replay cursor, so
+    // a reconnect reads the newest one again.
+    const back = connected && !wasConnected.current
+    wasConnected.current = connected
+    if (checkout && connected && !latest && (back || (persisted === undefined && !error))) void readPersistedDiff(useStore, api, run)
+  }, [checkout, connected, latest, persisted, error, run])
 
   if (!checkout) return null
   const snapshot = latest ?? persisted
@@ -58,7 +59,7 @@ export function ChangesBar({ run }: { run: RunRecord }) {
             onToggle={() => useStore.getState().toggleChanges(run.id)}
           />
         </div>
-        <Button variant="link" size="sm" onClick={() => open({})}>Review</Button>
+        <Button variant="link" size="sm" onClick={() => open({ diff: 'current' })}>Review</Button>
       </div>
       <ul id={listID} hidden={!expanded} className="max-h-48 overflow-y-auto max-md:max-h-[30dvh]">
         {expanded && files.map((file) => (

@@ -415,19 +415,6 @@ const demoAnswer = "The totals now round to cents before they are returned.\n\n"
 
 const demoNewBilling = "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n"
 
-func (a *Agent) writeDemoEdit() error {
-	a.mu.Lock()
-	cwd := a.cwd
-	a.mu.Unlock()
-	if cwd == "" {
-		return errors.New("the session has no cwd")
-	}
-	if err := os.MkdirAll(filepath.Join(cwd, "src"), 0o755); err != nil {
-		return fmt.Errorf("create src: %w", err)
-	}
-	return os.WriteFile(filepath.Join(cwd, "src", "billing.js"), []byte(demoNewBilling), 0o644)
-}
-
 func demoPlan(done int) json.RawMessage {
 	steps := []string{"Read the billing module", "Run the tests", "Round totals to cents"}
 	entries := make([]map[string]any, len(steps))
@@ -496,7 +483,17 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}, write bool)
 			a.update(ctx, u)
 		}
 		if write && i == editStep {
-			if err := a.writeDemoEdit(); err != nil {
+			a.mu.Lock()
+			cwd := a.cwd
+			a.mu.Unlock()
+			err := errors.New("the session has no cwd")
+			if cwd != "" {
+				err = os.MkdirAll(filepath.Join(cwd, "src"), 0o755)
+			}
+			if err == nil {
+				err = os.WriteFile(filepath.Join(cwd, "src", "billing.js"), []byte(demoNewBilling), 0o644)
+			}
+			if err != nil {
 				a.text(ctx, "write failed: "+err.Error())
 			}
 		}

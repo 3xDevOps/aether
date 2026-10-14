@@ -270,7 +270,7 @@ test('a diff snapshot refetches the patch and joins the interval menu', async ()
   expect(screen.getByRole('menuitemradio', { name: /Current diff/ }).textContent).toContain('Against abcdef12')
 })
 
-test('selecting an interval fetches that change alone; Current diff goes back without refetching', async () => {
+test('selecting an interval fetches that change alone; Current diff, picked or linked, goes back without refetching', async () => {
   seed({ ...ready, snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')] })
   vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
   renderDiff()
@@ -286,6 +286,11 @@ test('selecting an interval fetches that change alone; Current diff goes back wi
   chooseInterval(/Current diff/)
   expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
   expect(api.runPatch).toHaveBeenCalledTimes(1)
+
+  chooseInterval(/What changed/)
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  act(() => useStore.getState().navigate('run', { runId: active.id, view: 'changes', diff: 'current' }))
+  expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
 })
 
 test('a second snapshot of the same file shows only the second change', async () => {
