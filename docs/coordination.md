@@ -769,13 +769,16 @@ created to make discovery appear to work.
 `--to` takes a peer `run_id` from `aether-internal status`; the user never
 has to supply one. `status` lists exactly the runs this run may message, each
 with its state - `mission` (same swarm), `active` or `grace` (overlapping
-edits, with the shared files) or `workspace` (same workspace) - and its task
-summary.
+edits, with the shared files) or `workspace` (same workspace) - its task
+summary and, for workspace peers, `run_status`, the peer's lifecycle status. A
+run owned by a viewer, or by someone no longer a member, has no peers and
+cannot send or ask.
 
 The result contains `message_id` and `recipient_status`. The receipt means the
-message is durably queued, not read; `recipient_status` shows whether the peer
-is paused or awaiting input. A finished peer returns `-32004`. A denial states
-its reason; check `status` instead of retrying. `--body-file path` reads a body
+message is durably queued, not read; `recipient_status` is the peer's
+lifecycle status when the receipt is returned (a retry reports the current
+status), so it shows a peer that needs attention. A finished peer returns
+`-32004`. A denial states its reason; check `status` instead of retrying. `--body-file path` reads a body
 from a file, and `--body-file -` reads it from standard input. A body can also
 be provided as the positional text after the peer run ID.
 

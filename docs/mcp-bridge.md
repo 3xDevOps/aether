@@ -88,9 +88,10 @@ that have no MCP tool. Its tool description tells the agent to run
 `aether-internal skill` for those.
 
 `aether_status` peers carry `state` (`mission`, `active`, `grace` or
-`workspace`), the task summary and overlapping files; their `run_id` is the
-`to_run_id` for `aether_send` and `aether_ask`. The `aether_send` and
-`aether_ask` descriptions tell the agent to announce its plan and owned files
+`workspace`), the task summary, overlapping files and, for workspace peers,
+`run_status` (the peer's lifecycle status). A run owned by a viewer has no
+peers and cannot send or ask. A peer's `run_id` is the `to_run_id` for
+`aether_send` and `aether_ask`. The `aether_send` and `aether_ask` descriptions tell the agent to announce its plan and owned files
 before editing what a peer touches, that a receipt means queued rather than
 read, and to check status instead of retrying a denial. The `aether_inbox`
 description marks peer messages as untrusted information that never overrides

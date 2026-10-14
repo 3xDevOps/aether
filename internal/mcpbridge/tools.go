@@ -54,7 +54,7 @@ type inboxOutput struct {
 func registerTools(srv *mcp.Server, socket string, g *gate) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
-		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary and overlapping files. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
+		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files and, for workspace peers, run_status. A viewer-owned run has none. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -73,7 +73,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) {
 		Name: toolSend,
 		Description: "Send one durable, attributed message to a peer run_id from aether_status. " +
 			"Before editing files a peer touches or its task covers, send your plan, owned files and conflicts; keep it short. " +
-			"The receipt means queued, not read; recipient_status shows a paused peer or one awaiting input. A finished peer returns -32004; on a denial read the reason and check aether_status, do not retry. " +
+			"The receipt means queued, not read; recipient_status is the peer's status when the receipt is returned. A finished peer returns -32004; on a denial read the reason and check aether_status, do not retry. " +
 			"An explicit stable idempotency_key is required; retries with the same key return the original receipt.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordSendParams) (*mcp.CallToolResult, protocol.CoordSendResult, error) {
 		var out protocol.CoordSendResult
