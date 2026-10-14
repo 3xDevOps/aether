@@ -71,7 +71,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   const queued = log.locator('[data-slot="message-row"]', { hasText: 'after the wait' })
   await expect(queued).toContainText('Queued')
   await interrupt.click()
-  await expect(log.getByText(/^Interrupted/)).toBeVisible()
+  await expect(log.getByText(/^Cancelled/)).toBeVisible()
   await expect(queued).not.toContainText('Queued')
   await expect.poll(async () => {
     const { messages } = await alice.api.rpc<{ messages: { body: string; state: string; agent_delivery?: string }[] }>(
@@ -80,6 +80,43 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
     const sent = messages.find((m) => m.body === 'after the wait')
     return sent && `${sent.state}/${sent.agent_delivery}`
   }, { message: 'the queued message is recorded as delivered' }).toBe('sent/delivered')
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+})
+
+test('an Enhanced run shows its background wait and the autonomous turn that follows', async ({ page, aether }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  await aether.installACPMock(alice, await memberID(alice))
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id,
+    harness: 'mock',
+    mode: 'acp',
+    task: 'demo',
+  })
+
+  await page.goto(`${alice.url}&run=${run.id}`)
+  const log = page.getByRole('log', { name: 'Session' })
+  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  const finished = log.getByText(/^Finished( in \d+s)?$/)
+  const before = await finished.count()
+  // The mock's follow-up starts 300 ms after the prompt turn ends, too soon to poll for the wait.
+  await page.evaluate(() => {
+    const seen = window as unknown as { sawBackgroundWait: boolean }
+    seen.sawBackgroundWait = false
+    new MutationObserver(() => {
+      if (document.body.textContent?.includes('Working in background: 1 task')) seen.sawBackgroundWait = true
+    }).observe(document.body, { subtree: true, childList: true, characterData: true })
+  })
+
+  const box = page.getByRole('combobox', { name: 'Message the agent' })
+  await box.fill('work in background')
+  await box.press('ControlOrMeta+Enter')
+  await expect(log.getByText('background done')).toBeVisible({ timeout: 30_000 })
+  await expect(finished).toHaveCount(before + 2)
+  expect(await page.evaluate(() => (window as unknown as { sawBackgroundWait: boolean }).sawBackgroundWait)).toBe(true)
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 })
 

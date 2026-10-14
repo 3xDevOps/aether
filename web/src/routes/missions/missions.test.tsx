@@ -230,7 +230,7 @@ describe('swarm detail', () => {
   it('keeps a broken integrator in view while a question is open', async () => {
     seed({ runs: { run_integrator: toRecord(integrator({ status: 'needs-attention', reason: 'enhanced session failed: start claude-agent-acp: not found' })) } })
     await mount(showing({ phase: 'planning', open_questions: 1 }, { questions: [missionQuestion()] }))
-    const problem = 'Enhanced unavailable: start claude-agent-acp: not found'
+    const problem = 'Enhanced could not start: start claude-agent-acp: not found'
     expect(screen.getAllByText(`${problem} · 1 question for you · Claude Code · Standard · created`, { exact: false }).length).toBeGreaterThan(0)
     const callout = screen.getByText('The integrator needs you').parentElement!
     expect(callout.textContent).toContain(problem)

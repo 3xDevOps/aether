@@ -8,7 +8,7 @@ import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
 import { memberName } from '@/lib/member-name'
-import { runLabel } from '@/lib/status'
+import { backgroundReason, runLabel } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -25,7 +25,7 @@ import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
 import { liveActivity, rowsOfTurn, type SessionRow } from '@/store/session-rows'
-import { deliveryOf, readSessionLog, roomFiles, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
+import { backgroundWait, deliveryOf, readSessionLog, roomFiles, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
 
 const emptyRoom: RoomMessage[] = []
@@ -85,12 +85,14 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
   return byTime(matched, waiting)
 }
 
-function enhancedRows(session: AcpSession | undefined): SessionRow[] {
+function enhancedRows(run: RunRecord, session: AcpSession | undefined): SessionRow[] {
   if (!session) return []
   const rows = session.turns.flatMap(rowsOfTurn)
   const open = session.turns.at(-1)
   const live = session.live ? liveActivity(open) : null
+  const tasks = live ? null : backgroundWait(run, session)
   if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
+  else if (tasks) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? session.state!.last_activity, label: backgroundReason(tasks), waiting: false })
   return rows
 }
 
@@ -106,7 +108,7 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const rows = useMemo(() => {
     const floor = historyFloor(session)
     const base = enhanced
-      ? withSteers(enhancedRows(session), room, floor)
+      ? withSteers(enhancedRows(run, session), room, floor)
       : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => memberName({ members, mergedInto }, id) })
     if (!showMessages) return base
     const reported = messages.some((m) => m.kind === 'report')

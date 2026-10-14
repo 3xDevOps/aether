@@ -72,7 +72,7 @@ export interface Aether {
    * Builds the acpmock agent (internal/acphost/acpmock/agent) and registers
    * it as the member agent `mock`, whose Enhanced mode runs it in the run
    * container. Prompts it understands: `demo`, `ask permission`, `ask
-   * form`, `wait`, `refuse`.
+   * form`, `wait`, `refuse`, `work in background`.
    */
   installACPMock: (member: Member, memberID: string) => Promise<void>
 }

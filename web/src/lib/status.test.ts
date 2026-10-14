@@ -1,7 +1,7 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { clipLabel, groupOf, plainReason, presentRun, runLabel } from '@/lib/status'
 import { isTerminal, toRecord } from '@/store/runs'
-import { run, stateContext } from '@/test/fixtures'
+import { bob, run, stateContext } from '@/test/fixtures'
 
 describe('runLabel', () => {
   it('prefers a terminal title over the task', () => {
@@ -64,6 +64,18 @@ describe('run presentation', () => {
     expect(shown({ status: 'failed', reason: 'agent exited 1' })).toEqual({ state: 'failed', reason: 'Failed: Agent exited with code 1' })
     expect(shown({ status: 'interrupted' })).toEqual({ state: 'failed', reason: 'Interrupted' })
     expect(shown({ status: 'needs-attention' }).state).toBe('needs-you')
+  })
+
+  it.each([
+    ['needs input: Which database?', 'Agent asks: Which database?'],
+    ['turn cancelled', 'Turn cancelled'],
+    ['turn interrupted', 'Turn interrupted'],
+    ['turn ended: refusal', 'Stopped: the agent refused'],
+  ])('parks an Enhanced run at %s for its owner and shows others the wait', (reason, shownReason) => {
+    const parked = { mode: 'acp', acp: true, status: 'needs-attention', reason } as const
+    expect(shown(parked)).toMatchObject({ state: 'needs-you', reason: shownReason })
+    const other = stateContext({ viewerID: bob.id, viewerRole: bob.role })
+    expect(presentRun(toRecord(run(parked)), other)).toEqual({ state: 'working', reason: 'Waiting for Alice' })
   })
 
   it('reads what the agent is doing from its activity', () => {
@@ -158,6 +170,11 @@ describe('plainReason', () => {
     ['server restarted: container exited 143', 'Its container had stopped with exit code 143 when the server restarted'],
     ['stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
     ["the agent's turn ended: max_tokens", 'The agent hit its output limit'],
+    ['needs input: Which database?', 'Agent asks: Which database?'],
+    ['turn cancelled', 'Turn cancelled'],
+    ['turn interrupted', 'Turn interrupted'],
+    ['turn ended: refusal', 'The agent refused to continue'],
+    ['turn ended: something_new', "The agent's turn ended (something_new)"],
     ['review retained evidence', "Review the worker's saved results"],
     ['killed', 'Stopped'],
     ['disk quota exceeded', 'disk quota exceeded'],

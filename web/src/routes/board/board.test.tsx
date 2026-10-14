@@ -203,6 +203,19 @@ describe('board columns', () => {
     expect(column('Working').queryByText(otherWorkspace.name)).toBeNull()
   })
 
+  it('puts a running Enhanced run in Working and one asking a question in Needs you', () => {
+    const enhanced = { mode: 'acp', acp: true } as const
+    seed([
+      run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running' }),
+      run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', reason: 'needs input: Which database?' }),
+    ])
+    renderBoard()
+
+    expect(column('Working').getByText('busy agent')).toBeDefined()
+    expect(column('Needs you').getByText('asking agent')).toBeDefined()
+    expect(column('Needs you').getByText('Agent asks: Which database?')).toBeDefined()
+  })
+
   it("keeps another member's stopped run in Working, waiting for its owner", () => {
     seed([run({ ...stopped, member_id: bob.id })])
     renderBoard()

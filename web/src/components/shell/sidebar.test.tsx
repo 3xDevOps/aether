@@ -96,6 +96,20 @@ describe('run rows', () => {
     expect(runList().getAllByRole('button', { name: /^Needs you · question/ })).toHaveLength(7)
   })
 
+  it('sorts an Enhanced run by what it waits on', () => {
+    const enhanced = { mode: 'acp', acp: true } as const
+    useStore.setState({
+      runs: Object.fromEntries([
+        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running' }),
+        run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', reason: 'needs input: Which database?' }),
+      ].map((r) => [r.id, toRecord(r)])),
+    })
+    render(<AppShell />)
+
+    expect(runList().getByRole('button', { name: /^Working · busy agent/ })).toBeDefined()
+    expect(runList().getByRole('button', { name: /^Needs you · asking agent · Agent asks: Which database\?/ })).toBeDefined()
+  })
+
   it('names the state first, marks the open run, and opens its terminal', () => {
     render(<AppShell />)
 

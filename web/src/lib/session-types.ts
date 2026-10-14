@@ -103,6 +103,9 @@ export interface SessionItem {
   title?: string
   notice?: { severity: string; title: string; description?: string }
   stop_reason?: string
+  autonomous?: boolean
+  origin?: string
+  background_tasks?: string[]
   raw?: unknown
 }
 
@@ -125,6 +128,7 @@ export interface SessionHistory {
 /** Snapshot of a live session sent in the /ws/acp ack. */
 export interface SessionState {
   turn_in_flight: boolean
+  background?: boolean
   queued: number
   pending: SessionRequest[]
   last_activity: string

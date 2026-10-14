@@ -168,7 +168,8 @@ function patchCounts(patch: string): { additions: number; deletions: number } {
 
 const stopText: Record<string, [string, Tone]> = {
   end_turn: ['Finished', 'done'],
-  cancelled: ['Interrupted', 'paused'],
+  cancelled: ['Cancelled', 'paused'],
+  interrupted: ['Interrupted', 'failed'],
   max_tokens: ['Stopped: the reply reached its token limit', 'failed'],
   max_turn_requests: ['Stopped: too many model requests in one turn', 'failed'],
   refusal: ['Stopped: the agent refused', 'failed'],
@@ -380,6 +381,16 @@ export function rowsOfTurn(turn: Turn): SessionRow[] {
     frozen.set(turn, rows)
   }
   return rows
+}
+
+export function backgroundTasks(turns: Turn[]): string[] {
+  for (let t = turns.length - 1; t >= 0; t--) {
+    const items = turns[t]!.items
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i]!.kind === 'turn_start' || items[i]!.kind === 'turn_end') return items[i]!.background_tasks ?? []
+    }
+  }
+  return []
 }
 
 export interface LiveActivity {

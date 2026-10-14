@@ -42,6 +42,7 @@ export type NeedsYouID =
   | 'control-hold'
   | 'enhanced-failure'
   | 'blocked'
+  | 'needs-input'
   | 'usage-limit'
   | 'turn-ended'
   | 'stopped'
@@ -227,12 +228,15 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
+// Mirrors needsInputReasonPrefix in internal/scheduler/reported.go.
+const needsInputPrefix = 'needs input: '
 // Mirrors the acp*Reason constants in internal/scheduler/acp_driver.go.
-export const enhancedReasonPrefixes = [
-  'enhanced session failed: ',
-  'enhanced session ended: ',
-  'enhanced turn failed: ',
-] as const
+const enhancedFailureLabels = {
+  'enhanced session failed: ': 'Enhanced could not start',
+  'enhanced session ended: ': 'Agent disconnected',
+  'enhanced turn failed: ': 'Turn failed',
+} as const
+export const enhancedReasonPrefixes = Object.keys(enhancedFailureLabels) as (keyof typeof enhancedFailureLabels)[]
 const stalledPrefix = 'stalled:'
 // Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
 const usageLimitPrefix = 'Usage limit reached on '
@@ -241,7 +245,25 @@ const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix
 
 function enhancedFailure(run: RunRecord): string | undefined {
   const prefix = enhancedReasonPrefixes.find((p) => run.reason?.startsWith(p))
-  return prefix === undefined ? undefined : run.reason!.slice(prefix.length)
+  return prefix === undefined ? undefined : `${enhancedFailureLabels[prefix]}: ${run.reason!.slice(prefix.length)}`
+}
+
+const turnEndedPrefix = 'turn ended: '
+const stopReasons: Record<string, string> = {
+  max_tokens: 'the reply reached its token limit',
+  max_turn_requests: 'too many model requests in one turn',
+  refusal: 'the agent refused',
+}
+
+// Mirrors acpIdleReason in internal/scheduler/acp_driver.go.
+function turnEndedReason(reason: string | undefined): string {
+  if (reason === 'turn cancelled') return 'Turn cancelled'
+  if (reason === 'turn interrupted') return 'Turn interrupted'
+  if (reason?.startsWith(turnEndedPrefix)) {
+    const stop = reason.slice(turnEndedPrefix.length)
+    return `Stopped: ${stopReasons[stop] ?? stop}`
+  }
+  return 'Waiting for your reply'
 }
 
 // Order matters: the reason-prefix rows must precede `stopped`, which matches any parked run.
@@ -352,7 +374,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     background: true,
     holds: (run) => enhancedFailure(run) !== undefined,
     resolvers: (run) => [run.member_id],
-    reason: (run) => `Enhanced unavailable: ${enhancedFailure(run)}`,
+    reason: (run) => enhancedFailure(run)!,
     action: () => terminalAction,
   }),
   condition({
@@ -365,6 +387,14 @@ export const needsYouConditions: NeedsYouCondition[] = [
     reason: (run) =>
       `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
     action: () => terminalAction,
+  }),
+  condition({
+    id: 'needs-input',
+    target: 'run',
+    holds: (run) => run.status === 'needs-attention' && run.reason?.startsWith(needsInputPrefix) === true,
+    resolvers: (run) => [run.member_id],
+    reason: (run) => `Agent asks: ${run.reason?.slice(needsInputPrefix.length)}`,
+    action: () => ({ kind: 'reply', label: 'Reply' }),
   }),
   condition({
     id: 'usage-limit',
@@ -386,11 +416,12 @@ export const needsYouConditions: NeedsYouCondition[] = [
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(stalledPrefix) &&
       !run.reason?.startsWith(blockedPrefix) &&
+      !run.reason?.startsWith(needsInputPrefix) &&
       !usageLimited(run) &&
       enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'reply', label: 'Reply' }),
-    reason: () => 'Waiting for your reply',
+    reason: (run) => turnEndedReason(run.reason),
   }),
   condition({
     id: 'stopped',
@@ -400,6 +431,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
       reportedOutcome(run) === undefined &&
       !isPaused(run, ctx) &&
       !run.reason?.startsWith(blockedPrefix) &&
+      !run.reason?.startsWith(needsInputPrefix) &&
       !usageLimited(run) &&
       enhancedFailure(run) === undefined,
     resolvers: (run) => [run.member_id],

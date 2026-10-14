@@ -12,6 +12,7 @@ import { toolTenses, type AgentPayload } from '@/store/activity'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
+  backgroundTasks,
   isAttachedFile,
   itemCount,
   prependItems,
@@ -130,7 +131,13 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
       }
       case 'turn_start':
       case 'turn_end':
-        if (state) state = { ...state, turn_in_flight: item.kind === 'turn_start' }
+        if (state) {
+          state = {
+            ...state,
+            turn_in_flight: item.kind === 'turn_start',
+            background: item.kind === 'turn_start' ? item.autonomous === true : (item.background_tasks?.length ?? 0) > 0,
+          }
+        }
         if (item.kind === 'turn_end') pending = []
         break
       case 'mode_change':
@@ -155,6 +162,15 @@ function advance(session: AcpSession, items: SessionItem[]): Pick<AcpSession, 's
 
 function patchSession(s: SessionsSlice, runID: string, patch: Partial<AcpSession>): Pick<SessionsSlice, 'acpSessions'> {
   return { acpSessions: { ...s.acpSessions, [runID]: { ...(s.acpSessions[runID] ?? emptySession), ...patch } } }
+}
+
+/**
+ * The background tasks an Enhanced run waits on with no turn running, or null when it waits on none.
+ * A cancelled or lost wait logs no item, so only a running run on a live stream has one.
+ */
+export function backgroundWait(run: Pick<RunRecord, 'status'>, session: AcpSession | undefined): string[] | null {
+  if (run.status !== 'running' || session?.stream !== 'live' || !session.state?.background || session.state.turn_in_flight) return null
+  return backgroundTasks(session.turns)
 }
 
 export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({

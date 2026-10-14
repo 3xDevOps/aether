@@ -1,5 +1,5 @@
 import type { SessionItem } from '@/lib/session-types'
-import { appendItems, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { appendItems, backgroundTasks, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
 beforeEach(resetItems)
@@ -67,7 +67,7 @@ describe('session rows from the item log', () => {
       { kind: 'event', text: 'Woken by new agent messages' },
       { kind: 'event', text: 'Turn interrupted', detail: 'The agent connection ended.', tone: 'failed' },
       { kind: 'event', text: 'New agent session' },
-      { kind: 'finished', text: 'Interrupted', tone: 'paused' },
+      { kind: 'finished', text: 'Cancelled', tone: 'paused' },
     ])
   })
 
@@ -99,6 +99,34 @@ describe('session rows from the item log', () => {
     expect(answered).toEqual({ label: 'Running rm -rf build', waiting: false })
     const question = { id: 'q1', kind: 'question' as const, title: 'Which database?', status: 'pending' as const }
     expect(liveActivity(turnOf([item('turn_start', 1), item('request', 1, { request: question })], false))).toEqual({ label: 'Waiting for your answer', waiting: true })
+  })
+})
+
+describe('autonomous turns and background tasks', () => {
+  const prompt = [item('turn_start', 1), item('turn_end', 1, { stop_reason: 'end_turn', background_tasks: ['bg1'] })]
+
+  it('opens a turn for an autonomous turn_start, names its work and closes it on turn_end', () => {
+    const turns = appendItems([], [...prompt, item('turn_start', 2, { autonomous: true })])
+    expect(turns.map((t) => [t.turn, t.closed])).toEqual([[1, true], [2, false]])
+    expect(liveActivity(turns.at(-1))).toEqual({ label: 'Working', waiting: false })
+    const working = appendItems(turns, [tool(2, 'x', 'execute', 'make', 'in_progress')])
+    expect(liveActivity(working.at(-1))?.label).toBe('Running make')
+    const ended = appendItems(working, [item('turn_end', 2, { autonomous: true, origin: 'task-notification', stop_reason: 'end_turn' })])
+    expect(liveActivity(ended.at(-1))).toBeNull()
+    expect(rowsOfTurn(ended.at(-1)!).at(-1)).toMatchObject({ kind: 'finished', text: 'Finished in 2s', tone: 'done' })
+  })
+
+  it('reads the tasks off the newest turn boundary', () => {
+    expect(backgroundTasks(appendItems([], prompt))).toEqual(['bg1'])
+    expect(backgroundTasks(appendItems([], [...prompt, item('turn_start', 2, { autonomous: true })]))).toEqual([])
+    expect(backgroundTasks(appendItems([], [item('usage', 1)]))).toEqual([])
+    expect(backgroundTasks([])).toEqual([])
+  })
+
+  it('words a cancelled turn as Cancelled and one cut off by a restart as Interrupted', () => {
+    const finish = (stop_reason: string) => turnRows(turnOf([item('turn_start', 1), item('turn_end', 1, { stop_reason })])).at(-1)
+    expect(finish('cancelled')).toMatchObject({ kind: 'finished', text: 'Cancelled in 1s', tone: 'paused' })
+    expect(finish('interrupted')).toMatchObject({ kind: 'finished', text: 'Interrupted', tone: 'failed' })
   })
 })
 

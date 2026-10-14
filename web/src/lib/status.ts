@@ -23,12 +23,17 @@ export interface RunPresentation {
   unread?: number
 }
 
-function workingReason(run: RunRecord, ctx: StateContext): string {
+export function backgroundReason(tasks: string[]): string {
+  return tasks.length === 0 ? 'Working in background' : `Working in background: ${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`
+}
+
+function workingReason(run: RunRecord, ctx: StateContext, background?: string[] | null): string {
   if (run.status === 'queued') return 'Queued'
   if (run.status === 'provisioning') return 'Starting'
   const waiter = waitingOn(run, ctx)
   if (waiter !== undefined) return `Waiting for ${memberName(waiter, ctx)}`
   if (supervised(run, ctx) && run.status === 'needs-attention') return 'Waiting for the integrator'
+  if (background) return backgroundReason(background)
   if (run.activity) return `${run.activity.verb} ${run.activity.target}`.trimEnd()
   return run.status === 'needs-attention' ? 'Agent idle' : 'Agent working'
 }
@@ -76,6 +81,10 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
   [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
+  [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
+  [/^turn cancelled$/, () => 'Turn cancelled'],
+  [/^turn interrupted$/, () => 'Turn interrupted'],
+  [/^turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
   [/^the agent's turn ended: (\w+)$/, (stop) => turnEnds[stop] ?? `The agent's turn ended (${stop})`],
   [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
   [/^review retained evidence$/, () => `Review ${savedResults}`],
@@ -91,7 +100,7 @@ export function plainReason(reason: string): string {
   return reason
 }
 
-export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
+export function presentRun(run: RunRecord, ctx: StateContext, background?: string[] | null): RunPresentation {
   const condition = needsYou(run, ctx)
   if (condition) return { state: 'needs-you', reason: condition.reason(run, ctx), needsYou: condition }
   if (isTerminal(run.status)) {
@@ -112,7 +121,7 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
       reason: `Agent reported ${outcome}. Run remains open for follow-up.`,
     }
   }
-  return { state: 'working', reason: workingReason(run, ctx) }
+  return { state: 'working', reason: workingReason(run, ctx, background) }
 }
 
 export function groupOf(state: PresentationState): RunGroup {
