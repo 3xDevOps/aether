@@ -142,7 +142,7 @@ func TestItemCap(t *testing.T) {
 	s := &Session{subs: map[chan Item]struct{}{}, logger: discard, log: log}
 	s.proj = newProjector(s.emitLocked, func() {}, func(string, string) {})
 	// One 300 KiB chunk is split into segments, not cut.
-	s.proj.chunk(KindMessage, "assistant", "m1", textPrompt(strings.Repeat("y", 300<<10))[0])
+	s.proj.chunk(KindMessage, "assistant", "m1", "", textPrompt(strings.Repeat("y", 300<<10))[0])
 	s.proj.closeText()
 	its, _ := s.log.ReadAfter(0, 0)
 	if text := messageText(its, "assistant"); len(text) != 300<<10 {
