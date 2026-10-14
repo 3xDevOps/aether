@@ -425,33 +425,58 @@ func (m *Manager) ConfigStat(ctx context.Context, member domain.MemberID, harnes
 		if profilesvc.DeniedBasename(rel, deny) || isDefaultIgnored(harnessName, rel) {
 			continue
 		}
-		f, info, err := openConfigFile(profileRoot, rel)
+		info, blocked, err := statConfigPath(profileRoot, rel)
 		switch {
-		case errors.Is(err, ErrConfigNotFound):
-			continue
-		case errors.Is(err, ErrConfigDenied):
-			out = append(out, ConfigStat{Path: raw, Blocked: true})
+		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
 			return nil, err
+		case blocked:
+			out = append(out, ConfigStat{Path: raw, Blocked: true})
+			continue
 		}
 		stat := ConfigStat{Path: raw, Size: info.Size()}
 		// No upload can equal a file past the upload limit, so it is not
 		// read; one that grows past it while it is read gets no revision.
 		if stat.Size <= ConfigMaxFileBytes {
+			f, err := rootfs.Open(profileRoot, rel)
+			if err != nil {
+				return nil, err
+			}
 			sum := sha256.New()
-			var n int64
-			if n, err = io.Copy(sum, io.LimitReader(f, ConfigMaxFileBytes+1)); err == nil && n <= ConfigMaxFileBytes {
+			n, err := io.Copy(sum, io.LimitReader(f, ConfigMaxFileBytes+1))
+			_ = f.Close()
+			if err != nil {
+				return nil, err
+			}
+			if n <= ConfigMaxFileBytes {
 				stat.Revision = hex.EncodeToString(sum.Sum(nil))
 			}
-		}
-		_ = f.Close()
-		if err != nil {
-			return nil, err
 		}
 		out = append(out, stat)
 	}
 	return out, nil
+}
+
+// statConfigPath looks at rel one component at a time without following a
+// link. blocked reports a path config.import refuses: a symlink, a directory,
+// a hard link, a special file, or a path through a symlink or a file. Any
+// other failure, a missing path included, is returned as it is.
+func statConfigPath(root *os.Root, rel string) (info fs.FileInfo, blocked bool, err error) {
+	parts := strings.Split(rel, "/")
+	for i := range parts {
+		if info, err = root.Lstat(path.Join(parts[:i+1]...)); err != nil {
+			return nil, false, err
+		}
+		last := i == len(parts)-1
+		switch {
+		case info.Mode()&os.ModeSymlink != 0, !last && !info.IsDir():
+			return nil, true, nil
+		case last && (!info.Mode().IsRegular() || hasMultipleLinks(info)):
+			return nil, true, nil
+		}
+	}
+	return info, false, nil
 }
 
 // ConfigWrite replaces one editor file after checking its exact-byte revision.
