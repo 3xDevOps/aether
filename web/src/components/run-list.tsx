@@ -97,8 +97,8 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                   )}
                 >
                   {shown(row.run.id, workers).map((worker) => (
-                    <li key={worker.run.id} className={connectors}>
-                      <Row row={worker} />
+                    <li key={worker.run.id} className={cn(connectors, 'pl-0')}>
+                      <Row row={worker} nested />
                     </li>
                   ))}
                 </ul>
@@ -130,8 +130,10 @@ const workersID = (runID: string) => `workers-${runID}`
 function Row({
   row: { run, state, reason, owner },
   toggle,
+  nested,
 }: {
   row: RunRow
+  nested?: boolean
   toggle?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
@@ -151,6 +153,7 @@ function Row({
       className={cn(
         focusRing,
         'grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 border-l-2 border-l-transparent px-3 py-2 text-left transition-colors hover:bg-hover-chrome md:grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] md:items-center',
+        nested && 'pl-[calc(var(--trunk)+--spacing(3.25)+--spacing(3))]',
       )}
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-start gap-2 md:col-auto md:row-auto">
