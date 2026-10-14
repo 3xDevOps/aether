@@ -443,3 +443,42 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 }
+
+func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, reason string
+		stalls       bool
+	}{
+		{"one task", "working in background: 1 task", false},
+		{"several tasks", "working in background: 3 tasks", false},
+		{"autonomous turn without tasks", "working in background", true},
+		{"plain working", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := newReportingEnv(t, func(cfg *Config) {
+				cfg.StallThreshold = 300 * time.Millisecond
+				cfg.PollInterval = 20 * time.Millisecond
+			})
+			e.startStalls(t)
+			run, _ := e.launchReporting(t)
+			if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, Reason: tc.reason}); err != nil {
+				t.Fatalf("report working: %v", err)
+			}
+			stalled := func() bool {
+				r, err := e.db.GetRun(t.Context(), run.ID)
+				return err == nil && r.Status == domain.RunNeedsAttention && strings.HasPrefix(r.Reason, "stalled: ")
+			}
+			if tc.stalls {
+				waitFor(t, "the run to stall", stalled)
+				return
+			}
+			time.Sleep(4 * time.Second / 3)
+			r, err := e.db.GetRun(t.Context(), run.ID)
+			if err != nil || r.Status != domain.RunRunning || stalled() {
+				t.Fatalf("run = %+v, %v; want running past the stall threshold", r, err)
+			}
+		})
+	}
+}

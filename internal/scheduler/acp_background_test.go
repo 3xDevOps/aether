@@ -529,3 +529,89 @@ func assistantSaidNow(e *testEnv, run domain.RunID, text string) bool {
 	page, err := e.sched.ACPHistory(run, 0, 0)
 	return err == nil && assistantSaid(text)(page.Items)
 }
+
+func TestEnhancedClaudeRunKeepsAQuestionAskedBeforeItsTurnEndedWithTasksLive(t *testing.T) {
+	delay := acpmock.BackgroundDelay
+	acpmock.BackgroundDelay = 4 * time.Second
+	t.Cleanup(func() { acpmock.BackgroundDelay = delay })
+	e, _ := newACPEnv(t)
+	withCoordination(t, e)
+	sub := e.subscribe(t)
+	run := e.launchClaudeACP(t, "")
+	waitFor(t, "idle session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	inject := func(text string) {
+		t.Helper()
+		if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: text}, false, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inject(acpmock.PromptBackground)
+	waitFor(t, "the run to report its task", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == "working in background: 1 task"
+	})
+	inject(acpmock.PromptAskPermission)
+	var pending []domain.RunInputRequest
+	waitFor(t, "the permission request", func() bool {
+		pending = e.sched.PendingInputs(run.ID)
+		return len(pending) == 1
+	})
+	if err := e.sched.ReportNeedsInput(t.Context(), run.ID, "needs-input-1", "which region?", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunRunning {
+		t.Fatalf("run = %+v, %v; want running until the turn ends", r, err)
+	}
+	if err := e.sched.ACPAnswer(run.ID, pending[0].ID, "allow", nil); err != nil {
+		t.Fatal(err)
+	}
+	const question = "needs input: which region?"
+	trail := e.statusTrail(t, sub, run.ID, func(trail []events.RunStatusPayload) bool {
+		return statusIndex(trail, domain.RunNeedsAttention, question) >= 0
+	})
+	if !sess.State().Background {
+		t.Fatalf("the question showed after the task drained, not at the turn end: %+v", sess.State())
+	}
+
+	waitItems(t, e.sched, run.ID, "the autonomous follow-up", func(items []acphost.Item) bool {
+		return assistantSaid("background done")(items) && slices.ContainsFunc(items, func(it acphost.Item) bool { return it.Usage != nil })
+	})
+	waitFor(t, "the follow-up to settle", func() bool { return !sess.State().Background && !sess.State().TurnInFlight })
+	trail = append(trail, e.runStatusEvents(sub, run.ID)...)
+	asked := statusIndex(trail, domain.RunNeedsAttention, question)
+	for _, p := range trail[asked+1:] {
+		if p.To != domain.RunNeedsAttention || p.Reason != question {
+			t.Fatalf("status events %+v, want nothing to move the run off its question", trail[asked:])
+		}
+	}
+	if r, err := e.db.GetRun(t.Context(), run.ID); err != nil || r.Status != domain.RunNeedsAttention || r.Reason != question {
+		t.Fatalf("run = %+v, %v; want the question kept after the tasks ended", r, err)
+	}
+
+	inject("thanks")
+	e.statusTrail(t, sub, run.ID, func(trail []events.RunStatusPayload) bool {
+		return slices.ContainsFunc(trail, func(p events.RunStatusPayload) bool { return p.To == domain.RunRunning })
+	})
+}
+
+func TestEnhancedClaudeRunParksAQuestionAskedBetweenTurnsWithTasksLive(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	withCoordination(t, e)
+	run := e.launchClaudeACP(t, acpmock.PromptHold)
+	waitFor(t, "the run to report its task", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Reason == "working in background: 1 task"
+	})
+	if err := e.sched.ReportNeedsInput(t.Context(), run.ID, "needs-input-1", "which region?", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the question", func() bool {
+		r, err := e.db.GetRun(t.Context(), run.ID)
+		return err == nil && r.Status == domain.RunNeedsAttention && r.Reason == "needs input: which region?"
+	})
+	if !e.sched.acp.session(run.ID).State().Background {
+		t.Fatal("the held task is not live")
+	}
+}

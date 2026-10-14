@@ -79,13 +79,17 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	finishes := entry.reported != "" && turnEnd(execution) && len(pending) == 0
 	reason := report.Reason
 	showsIdle, clearsIdle := false, false
+	held := entry.questionHeld(execution)
+	settled := turnEnd(execution) || (entry.betweenTurns && entry.asks() && backgroundWork(execution))
 	switch {
-	case turnEnd(execution) && len(pending) == 0 && !finishes && entry.idleReason != "":
+	case settled && len(pending) == 0 && !finishes && entry.idleReason != "":
 		reason = entry.idleReason
 		showsIdle = !entry.idleShown
-	case report.State == agentstatus.Working && entry.idleShown:
+	case report.State == agentstatus.Working && entry.idleShown && !held:
 		clearsIdle = true
 	}
+	// The question already shows; the agent's own idle repeats it.
+	repeat := entry.idleShown && reason == entry.idleReason && entry.status == domain.RunNeedsAttention
 	var oldSidecar sidecar
 	persist := inputsChanged || reportChanged || showsIdle || clearsIdle
 	if persist {
@@ -113,7 +117,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	var transitionErr error
 	switch {
 	case report.State == agentstatus.Idle || showsIdle:
-		if !finishes && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
+		if !finishes && !repeat && (entry.status != domain.RunNeedsAttention || reportChanged || showsIdle) {
 			cause := causeUnattended
 			if showsIdle {
 				cause = idleCause(reason)
@@ -121,7 +125,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
 				domain.RunNeedsAttention, reason, "", cause)
 		}
-	case report.State == agentstatus.Working:
+	case report.State == agentstatus.Working && !held:
 		// A run working in the background says so in its reason, so the
 		// sidebar can show it without the session open.
 		resumed := agentstatus.ReasonResumed
@@ -155,7 +159,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		// A repeated working report remains a no-write heartbeat for the stall
 		// detector. Native hooks produce no terminal or file activity.
 		entry.lastWorking = time.Now().UTC()
-		entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+		if !held {
+			entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+		}
 	case agentstatus.Idle:
 		if !finishes {
 			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}

@@ -504,11 +504,11 @@ Background runs finish at turn end: Aether commits the work, publishes the run
 branch, and records completed or failed. They have one success/failure report
 per launch and take no new work afterwards.
 Blocked shows your summary as the Needs you reason at turn end, not while input
-is open. It may repeat; it is not a way to wait. Do not report while idle or
-waiting on a peer or human.
+is open. It may repeat; it is not a way to wait for a peer or mail.
 Needs-input is nonterminal; its summary is your question for the user, shown as
-the Needs you reason at turn end. Ask one specific question, then end your turn;
-the user's reply arrives as your next prompt. Background runs cannot ask.
+the Needs you reason at turn end, even while background tasks still run. Ask
+one specific question, then end your turn; the user's reply arrives as your
+next prompt. Background runs cannot ask.
 When you need the user's decision or information, you MUST report needs-input,
 then end your turn. When a task you were given is done or cannot be done, or an
 external blocker stops it, you MUST report success, failure or blocked before

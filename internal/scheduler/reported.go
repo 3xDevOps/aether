@@ -299,7 +299,7 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 		}
 		return fmt.Errorf("scheduler: record idle report for %s: %w", entry.runID, err)
 	}
-	if entry.turnEnded() && !entry.atPrompt() {
+	if entry.outcomeDue() && !entry.atPrompt() {
 		return s.parkIdleReportLocked(ctx, entry)
 	}
 	return nil
@@ -458,7 +458,7 @@ func (s *Scheduler) finishOverdueReports() {
 			s.startReportedFinishLocked(entry)
 		}
 		if entry.idleReason != "" && !entry.idleShown &&
-			(entry.turnEnded() || (reportedIdleReason(entry.idleReason) && ready &&
+			(entry.outcomeDue() || (reportedIdleReason(entry.idleReason) && ready &&
 				now.Sub(entry.idleReportAt) >= reportFinishDeadline)) {
 			if err := s.parkIdleReportLocked(s.superCtx, entry); err != nil {
 				slog.Warn("scheduler: park reported outcome", "run", entry.runID, "error", err)
@@ -471,6 +471,26 @@ func (s *Scheduler) finishOverdueReports() {
 // The caller must hold s.mu.
 func (e *supervised) atPrompt() bool {
 	return len(e.pendingInputs) != 0
+}
+
+// asks reports whether the run's outcome is a question for its user. The
+// caller must hold s.mu.
+func (e *supervised) asks() bool {
+	return strings.HasPrefix(e.idleReason, needsInputReasonPrefix)
+}
+
+// outcomeDue reports whether the turn the outcome belongs to ended. A
+// question shows once its turn ended even while background tasks run, since
+// they may run long after it. The caller must hold s.mu.
+func (e *supervised) outcomeDue() bool {
+	return e.turnEnded() || (e.betweenTurns && e.asks())
+}
+
+// questionHeld reports whether a shown question outranks the agent's
+// background work, which goes on until the user answers. The caller must
+// hold s.mu.
+func (e *supervised) questionHeld(report agentstatus.Report) bool {
+	return e.idleShown && e.asks() && backgroundWork(report)
 }
 
 // turnEnded must be called with s.mu held.

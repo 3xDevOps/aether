@@ -627,8 +627,8 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			// A run whose harness reports both ends of a turn and has said
 			// it is waiting is released by the agent's own next report, not
 			// by anything on the terminal.
-			heldForTheMember := e.agentReport.State == agentstatus.Idle &&
-				e.reporter == harness.ReporterFull
+			heldForTheMember := (e.agentReport.State == agentstatus.Idle &&
+				e.reporter == harness.ReporterFull) || e.questionHeld(e.agentReport)
 			released := e.status == domain.RunNeedsAttention && observed &&
 				idle <= s.cfg.StallThreshold && !heldForTheMember
 			if released && (e.agentReport.State == agentstatus.Idle || e.idleShown) {
@@ -636,7 +636,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			}
 			var err error
 			switch {
-			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold:
+			case e.status == domain.RunRunning && idle > s.cfg.StallThreshold && !heldByTasks(e.agentReport):
 				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the

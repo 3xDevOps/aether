@@ -223,10 +223,14 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 	if instructions != "" {
 		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
 	}
-	started, err := sess.PromptIdle(ctx, blocks)
+	started, err := sess.PromptIdle(ctx, blocks, settle)
 	if err == nil && !started {
 		err = errACPBusy
 	}
-	settle(err)
+	if !started && ctx.Err() == nil {
+		// No turn took the prompt; one awaiting acceptance settles through
+		// the callback.
+		settle(err)
+	}
 	return err
 }

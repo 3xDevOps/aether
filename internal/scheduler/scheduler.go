@@ -358,6 +358,9 @@ type supervised struct {
 	idleShown    bool
 	idleReportID string
 	idleReportAt time.Time
+	// betweenTurns says an Enhanced agent works only on background tasks
+	// with no turn running, which settles a needs-input outcome's turn.
+	betweenTurns bool
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
