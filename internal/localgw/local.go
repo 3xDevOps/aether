@@ -328,10 +328,10 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 }
 
 func sameServer(a, b cli.Config) bool {
-	if a.ServerID != "" && a.ServerID == b.ServerID {
-		return true
+	if a.ServerID != "" && b.ServerID != "" {
+		return a.ServerID == b.ServerID
 	}
-	return a.Addr != "" && a.Addr == b.Addr
+	return a.ServerID == "" && b.ServerID == "" && a.Addr != "" && a.Addr == b.Addr
 }
 
 // addLink saves a server linked from a named profile as a link of its own
@@ -346,7 +346,7 @@ func (g *Gateway) addLink(result cli.LinkResult, requested string) *protocol.Err
 	}
 	name := cmp.Or(requested, result.Config.ServerID, result.Config.Addr)
 	if i := slices.IndexFunc(saved.Links, func(l cli.NamedLink) bool {
-		return (l.ServerID != "" && l.ServerID == result.Config.ServerID) || (l.ServerID == "" && l.Addr == result.Config.Addr)
+		return requested == "" && sameServer(cli.Config{Addr: l.Addr, ServerID: l.ServerID}, result.Config)
 	}); i >= 0 {
 		name = saved.Links[i].Name
 	} else {

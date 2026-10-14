@@ -264,7 +264,7 @@ func TestEdgeVerbsRefuseBeforeReachingTheEdge(t *testing.T) {
 	}
 }
 
-func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
+func TestEdgeLinkOfAnAddressOnlyNamedProfileIsAddedBesideIt(t *testing.T) {
 	useTempConfigDir(t)
 	initial := cli.Config{
 		Addr: "default:2222",
@@ -300,9 +300,11 @@ func TestEdgeChangeOfANamedProfileIsSavedIntoIt(t *testing.T) {
 	if reloaded.Addr != initial.Addr || reloaded.EdgeURL != "" || reloaded.ServerID != "" {
 		t.Fatalf("default link changed: %+v", reloaded)
 	}
-	work, ok := reloaded.Named("work")
-	if !ok || work.Addr != "work:2222" || work.EdgeURL != connected.EdgeURL || work.ServerID != connected.ServerID {
-		t.Fatalf("reloaded named link = %+v, present %v", work, ok)
+	if work, ok := reloaded.Named("work"); !ok || work.Addr != "work:2222" || work.EdgeURL != "" || work.ServerID != "" {
+		t.Fatalf("named link work = %+v, present %v; want it unchanged", work, ok)
+	}
+	if edge, ok := reloaded.ByServerID(connected.ServerID); !ok || edge.EdgeURL != connected.EdgeURL || edge.Addr != "work:2222" {
+		t.Fatalf("edge link = %+v, present %v", edge, ok)
 	}
 	repo := t.TempDir()
 	localGit(t, repo, "init")
@@ -327,7 +329,7 @@ func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
 	g := newVerbGateway(t, workspaceListBackend(""), selected)
 	connected := selected
 	connected.EdgeURL, connected.ServerID = "https://edge.example", "aaaa"
-	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
+	requested := cli.NamedLink{Name: "laptop", Addr: "work:2222", User: "bob", AutoKey: true, EdgeURL: connected.EdgeURL, ServerID: connected.ServerID}
 	if perr := g.adoptLink(cli.LinkResult{Config: cli.UpsertLink(connected, requested)}, "laptop"); perr != nil {
 		t.Fatalf("adoptLink: %v", perr)
 	}
@@ -339,10 +341,7 @@ func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
 	if reloaded.Addr != initial.Addr || reloaded.ServerID != "" {
 		t.Fatalf("default link changed: %+v", reloaded)
 	}
-	want := []cli.NamedLink{
-		{Name: "work", Addr: "work:2222", User: "bob", EdgeURL: connected.EdgeURL, ServerID: connected.ServerID},
-		requested,
-	}
+	want := []cli.NamedLink{initial.Links[0], requested}
 	if !slices.Equal(reloaded.Links, want) {
 		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
 	}
@@ -386,5 +385,27 @@ func TestLinkingAnotherServerFromANamedProfileAddsALink(t *testing.T) {
 	}
 	if len(backend.relinked) != 1 || backend.relinked[0].Active != "ab-2" {
 		t.Fatalf("relinked = %+v, want the new link", backend.relinked)
+	}
+}
+
+func TestLinkingANewServerIDAtTheSameAddressAddsALink(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr:  "default:2222",
+		Links: []cli.NamedLink{{Name: "work", Addr: "work:2222", EdgeURL: "https://edge.example", ServerID: "old"}},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, _ := initial.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	linked := cli.Config{Addr: "work:2222", EdgeURL: "https://edge.example", ServerID: "new"}
+	if perr := g.adoptLink(cli.LinkResult{Config: linked}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != "default:2222" || reloaded.ServerID != "" || len(reloaded.Links) != 2 || reloaded.Links[0] != initial.Links[0] || reloaded.Links[1].ServerID != "new" {
+		t.Fatalf("saved config = %+v, want the default and work kept and new added", reloaded)
 	}
 }
