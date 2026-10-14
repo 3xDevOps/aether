@@ -771,6 +771,40 @@ describe('hydrate', () => {
     expect(c.hasLocal('worktree.open')).toBe(false)
   })
 
+  it('keeps the known capabilities when their fetch gets no answer', async () => {
+    const store = createRootStore()
+    const caps: GatewayCapabilities = { gateway: 'local', methods: ['*'], ws: ['events'] }
+    store.getState().setCapabilities(caps)
+    const ok = await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => {
+          // What Chromium's fetch throws for net::ERR_NETWORK_CHANGED.
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
+    expect(ok).toBe(true)
+    expect(store.getState().hydrationError).toBeNull()
+    expect(store.getState().capabilities).toBe(caps)
+  })
+
+  it('retries hydration when capabilities get no answer and none are known', async () => {
+    const store = createRootStore()
+    const ok = await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => {
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
+    expect(ok).toBe(false)
+    expect(store.getState().hydrated).toBe(false)
+  })
+
   it('classifies a fetch that never got an answer as a dead gateway', async () => {
     const store = createRootStore()
     store.getState().setCapabilities({ gateway: 'local', methods: ['*'], ws: ['events'] })
