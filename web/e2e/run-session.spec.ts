@@ -4,6 +4,7 @@
 
 import { expect, test } from './fixtures'
 import { dockerReachable } from './harness/server'
+import { runCoordCLI } from './harness/coord'
 import { memberID, seedWorkspace } from './harness/setup'
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
@@ -83,33 +84,59 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 })
 
-test('an Enhanced run shows the autonomous turn that follows its background work', async ({ page, aether }) => {
+test('an Enhanced run holding background work stays working, asks while it waits and stops on Stop waiting', async ({ page, aether }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
   await aether.installACPMock(alice, await memberID(alice))
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
-  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
-    workspace_id: workspaces[0].id,
-    harness: 'mock',
-    mode: 'acp',
-    task: 'demo',
-  })
+  const workspace = workspaces[0].id
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspace, harness: 'mock', mode: 'acp', task: 'demo' })
+  const status = async () => (await alice.api.rpc<{ run: { status: string; reason?: string } }>('run.get', { run_id: run.id })).run
+  const statuses = async () => (await alice.api.rpc<{ events: { seq: number; payload: { to: string; reason?: string } }[] }>(
+    'workspace.timeline', { workspace_id: workspace, run_id: run.id, types: ['run.status'], newest: true, limit: 1000 })).events
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Session' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
-  const finished = log.getByText(/^Finished( in \d+s)?$/)
-  await expect(finished.first()).toBeVisible()
-  const before = await finished.count()
+  const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
+  const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
-  await box.fill('work in background')
-  await box.press('ControlOrMeta+Enter')
-  await expect(log.getByText('background done')).toBeVisible({ timeout: 30_000 })
-  await expect(finished).toHaveCount(before + 2)
+  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+
+  await box.fill('hold in background')
+  await box.press('Enter')
   await expect(log.getByText('started', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+  await expect(runs.getByText('Working in background: 1 task')).toBeVisible()
+  await expect(header.getByText('Working in background: 1 task')).toBeVisible()
+  // Past acpmock's 2 s BackgroundDelay, the held task still keeps the run working.
+  await page.waitForTimeout(3_000)
+  expect(await status()).toMatchObject({ status: 'running', reason: 'working in background: 1 task' })
+  await expect(runs.getByText('Needs you', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Stop waiting for background work' })).toBeVisible()
+
+  runCoordCLI(run.id, ['report', '--outcome', 'needs-input', '--summary', 'Which port should the server use?', '--idempotency-key', 'held-question'])
+  await expect(header.getByText('Agent asks: Which port should the server use?')).toBeVisible({ timeout: 30_000 })
+  await expect(runs.getByText('Agent asks: Which port should the server use?')).toBeVisible()
+
+  const released = Math.max(0, ...(await statuses()).map((event) => event.seq))
+  await box.fill('release background')
+  await box.press('Enter')
+  await expect(log.getByText('background done: mock-held-task')).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => status(), { timeout: 30_000 }).toMatchObject({ status: 'needs-attention', reason: 'agent idle' })
+  // The release turn, the task's end and its follow-up turn settle once.
+  await page.waitForTimeout(3_000)
+  const parked = (await statuses()).filter((event) => event.seq > released && event.payload.to === 'needs-attention')
+  expect(parked.map((event) => event.payload.reason)).toEqual(['agent idle'])
+  await expect(header.getByText('Waiting for your reply')).toBeVisible()
+
+  await box.fill('hold in background')
+  await box.press('Enter')
+  await expect(header.getByText('Working in background: 1 task')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Stop waiting for background work' }).click()
+  await expect(header.getByText('Turn cancelled')).toBeVisible()
+  await expect.poll(() => status()).toMatchObject({ status: 'needs-attention', reason: 'turn cancelled' })
+  await expect(page.getByRole('button', { name: 'Stop waiting for background work' })).toHaveCount(0)
 })
 
 test('Enhanced multiplayer keeps moderated messages, deliberate release and timed takeover', async ({ page, browser, aether }, testInfo) => {
