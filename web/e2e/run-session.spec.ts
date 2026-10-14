@@ -139,6 +139,91 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await expect(page.getByRole('button', { name: 'Stop waiting for background work' })).toHaveCount(0)
 })
 
+test('an Enhanced run keeps subagents out of the conversation and opens each in the inspector', async ({ page, aether }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+  await aether.installACPMock(alice, await memberID(alice))
+  const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', {
+    workspace_id: workspaces[0].id,
+    harness: 'mock',
+    mode: 'acp',
+    task: 'demo',
+  })
+
+  await page.goto(`${alice.url}&run=${run.id}`)
+  const log = page.getByRole('log', { name: 'Session' })
+  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  const box = page.getByRole('combobox', { name: 'Message the agent' })
+
+  const changed = log.locator('[data-slot="changed-files"]')
+  const changedBefore = await changed.count()
+  await box.fill('subagents')
+  await box.press('Enter')
+  await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
+  await expect(log.getByText('Splitting the work across subagents.')).toBeVisible()
+  await expect(log.getByRole('button', { name: '3 subagents' })).toHaveAttribute('aria-expanded', 'true')
+  const billing = log.getByRole('button', { name: 'Map the billing module, Explore, Done' })
+  await expect(billing).toBeVisible()
+  await expect(log.getByRole('button', { name: 'Run the tests, general-purpose, Done' })).toBeVisible()
+  await expect(log.getByRole('button', { name: 'Round totals to cents, Done' })).toBeVisible()
+  await expect(log.getByText('Reading the billing module.')).toHaveCount(0)
+  await expect(log.getByText('Read src/billing.js')).toHaveCount(0)
+  await expect(changed).toHaveCount(changedBefore + 1)
+  await expect(changed.last()).toContainText('src/billing.js')
+
+  await billing.click()
+  await expect(page).toHaveURL(/&agent=/)
+  const inspector = page.getByRole('complementary', { name: 'Subagent' })
+  const transcript = inspector.getByRole('log', { name: 'Subagent transcript' })
+  const path = inspector.getByRole('navigation', { name: 'Subagent path' })
+  await expect(path).toContainText('Session')
+  await expect(path).toContainText('Map the billing module')
+  await expect(transcript.getByText('Reading the billing module.')).toBeVisible()
+  await expect(transcript.getByRole('button', { name: /Read 1 file/ })).toBeVisible()
+  await expect(inspector.getByText('1 of 3')).toBeVisible()
+  await expect(inspector.getByRole('button', { name: 'Previous subagent' })).toBeVisible()
+  await expect(inspector.getByRole('button', { name: 'Close subagent' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('enhanced-subagents.png') })
+
+  await transcript.getByRole('button', { name: 'Find the callers, general-purpose, Done' }).click()
+  await expect(path).toContainText('Map the billing module')
+  await expect(path).toContainText('Find the callers')
+  await expect(transcript.getByText('Two callers found.')).toBeVisible()
+  await path.getByRole('button', { name: 'Map the billing module' }).click()
+  await expect(transcript.getByText('Reading the billing module.')).toBeVisible()
+
+  await inspector.getByRole('button', { name: 'Next subagent' }).click()
+  await expect(transcript.getByText('Running the tests.')).toBeVisible()
+  await expect(inspector.getByText('2 of 3')).toBeVisible()
+
+  await page.reload()
+  await expect(page).toHaveURL(/&agent=/)
+  await expect(inspector.getByText('2 of 3')).toBeVisible({ timeout: 30_000 })
+  await expect(transcript.getByText('Running the tests.')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(inspector).toBeHidden()
+  await expect(page).not.toHaveURL(/&agent=/)
+  await page.goBack()
+  await expect(transcript.getByText('Two callers found.')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(inspector).toBeHidden()
+
+  await box.fill('workflow')
+  await box.press('Enter')
+  await expect(log.getByText('The workflow is running.')).toBeVisible({ timeout: 30_000 })
+  const workflow = log.getByRole('button', { name: 'audit-billing, Workflow, Running' })
+  await expect(workflow).toBeVisible()
+  await expect(workflow).toContainText('Running in the background')
+  const background = log.getByRole('button', { name: 'Watch the build, general-purpose, Running' })
+  await expect(background).toContainText('Reading build.log')
+  await expect(log.getByText('Async agent launched successfully.')).toHaveCount(0)
+})
+
+
 test('Enhanced multiplayer keeps moderated messages, deliberate release and timed takeover', async ({ page, browser, aether }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const alice = await aether.member('Alice')

@@ -18,15 +18,16 @@ import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
 import { RequestDock, requestTitle } from '@/routes/run/session-requests'
-import { flattenRows, rowGap, sessionColumn, TimelineRow, type FlatRow, type RowContext } from '@/routes/run/session-rows'
+import { flattenRows, rowGap, sessionColumn, TimelineRow, useRowContext, type FlatRow } from '@/routes/run/session-rows'
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
-import { liveActivity, rowsOfTurn, type SessionRow } from '@/store/session-rows'
+import { liveActivity, rowsOfTurn, type SessionRow, type Turn } from '@/store/session-rows'
 import { backgroundWait, deliveryOf, readSessionLog, roomFiles, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
+import { extrasSig, noAgents, turnExtras, withAgentRows, type AgentIndex } from '@/store/subagents'
 
 const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
@@ -47,11 +48,25 @@ function byTime(rows: SessionRow[], extra: SessionRow[]): SessionRow[] {
   return [...out, ...sorted.slice(next)]
 }
 
-/** The time before which a session's items are not loaded yet. */
-function historyFloor(session: AcpSession | undefined): number {
-  if (!session?.more) return -Infinity
-  const oldest = session.turns[0]?.items[0]
-  return oldest ? Date.parse(oldest.time) : Infinity
+/** The time before which a session's items are not loaded yet. A turn can
+ * open with a late snapshot after a trim, so every held start counts. */
+function historyFloor(turns: Turn[] | undefined, agentsFloor: number, more: boolean): number {
+  if (!more) return -Infinity
+  let floor = agentsFloor
+  for (const turn of turns ?? []) {
+    const first = turn.items[0]
+    if (first) floor = Math.min(floor, Date.parse(first.time))
+  }
+  return floor
+}
+
+function agentsFloor(agents: AgentIndex): number {
+  let floor = Infinity
+  for (const agent of Object.values(agents.agents)) {
+    const first = agent.items[0]
+    if (first) floor = Math.min(floor, Date.parse(first.time))
+  }
+  return floor
 }
 
 function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): SessionRow[] {
@@ -85,19 +100,30 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
   return byTime(matched, waiting)
 }
 
-function enhancedRows(run: RunRecord, session: AcpSession | undefined): SessionRow[] {
-  if (!session) return []
-  const rows = session.turns.flatMap(rowsOfTurn)
-  const open = session.turns.at(-1)
-  const live = session.live ? liveActivity(open) : null
-  const tasks = live || run.status !== 'running' ? null : backgroundWait(run, session)
+function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
+  if (!turns) return []
+  const held = new Set(turns.map((turn) => turn.turn))
+  const lost = [...extras].flatMap(([turn, { orphans }]): SessionRow[] => (orphans && !held.has(turn) ? [{ kind: 'subagents', id: `orphans:${turn}`, ...orphans }] : []))
+  const rows = byTime(turns.flatMap((turn) => withAgentRows(rowsOfTurn(turn), turn.turn, extras)), lost)
+  const open = turns.at(-1)
+  const live = streaming ? liveActivity(open) : null
   if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
-  else if (tasks) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? session.state!.last_activity, label: backgroundReason(tasks), waiting: false })
+  else if (wait) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? wait.at, label: wait.label, waiting: false })
   return rows
 }
 
 function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { rows: SessionRow[]; session?: AcpSession; missingRoomImages: boolean } {
   const session = useStore((s) => (enhanced ? s.acpSessions[run.id] : undefined))
+  const turns = session?.turns
+  const more = session?.more ?? false
+  const streaming = session?.live ?? false
+  const tasks = run.status === 'running' ? backgroundWait(run, session) : null
+  const waitLabel = tasks ? backgroundReason(tasks) : undefined
+  const lastActivity = session?.state?.last_activity ?? ''
+  const agentFloor = useStore((s) => agentsFloor(s.acpSessions[run.id]?.agents ?? noAgents))
+  const oldestSeq = session?.oldestSeq ?? 0
+  const agentsSig = useStore((s) => extrasSig(s.acpSessions[run.id]?.agents ?? noAgents, oldestSeq))
+  const extras = useMemo(() => turnExtras(useStore.getState().acpSessions[run.id]?.agents ?? noAgents, oldestSeq), [agentsSig, oldestSeq, run.id])
   const events = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]?.events))
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyRoom)
   const members = useStore((s) => s.members)
@@ -106,15 +132,16 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
   const rows = useMemo(() => {
-    const floor = historyFloor(session)
+    const wait = waitLabel === undefined ? null : { label: waitLabel, at: lastActivity }
+    const floor = historyFloor(turns, agentFloor, more)
     const base = enhanced
-      ? withSteers(enhancedRows(run, session), room, floor)
+      ? withSteers(enhancedRows(turns, streaming, extras, wait), room, floor)
       : rowsForRun({ run, events: events ?? [], room, paused, memberName: (id) => memberName({ members, mergedInto }, id) })
     if (!showMessages) return base
     const reported = messages.some((m) => m.kind === 'report')
     const mail = messages.filter((m) => Date.parse(m.created_at) >= floor)
     return byTime(reported ? base.filter((row) => row.kind !== 'event' || !row.report) : base, mail.map((m) => ({ kind: 'agent-message', id: `mail:${m.id}`, at: m.created_at, messageID: m.id })))
-  }, [enhanced, session, room, run, events, members, mergedInto, messages, showMessages, paused])
+  }, [enhanced, turns, more, streaming, waitLabel, lastActivity, agentFloor, extras, room, run, events, members, mergedInto, messages, showMessages, paused])
   const roomIDs = new Set(room.map((m) => m.id))
   const missingRoomImages = enhanced && rows.some((row) => row.kind === 'user' && row.images?.some((image) => !roomIDs.has(image.messageID)))
   return { rows, session, missingRoomImages }
@@ -222,21 +249,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)
 
-  const latest = useRef({ agent, nav })
-  latest.current = { agent, nav }
-  const ctx: RowContext = useMemo(() => ({
-    runID: run.id,
-    task: run.task,
-    ownerID: run.member_id,
-    hasAgentTerminal: agent.hasAgentTerminal,
-    openTerminal: () => {
-      const { agent: current, nav: to } = latest.current
-      to.go('terminal')
-      if (!current.localControl && !current.controlUnavailable) current.session.takeControl()
-    },
-    openChange: (path) => useStore.getState().navigate('run', { runId: run.id, view: 'changes', file: path }),
-    reveal: (id) => latest.current.nav.reveal(id),
-  }), [run.id, run.task, run.member_id, agent.hasAgentTerminal])
+  const ctx = useRowContext(run, agent, nav)
 
   const count = flat.length + (older ? 1 : 0)
   const markInput = () => {

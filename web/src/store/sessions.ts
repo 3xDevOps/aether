@@ -14,8 +14,8 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
   isAttachedFile,
-  itemCount,
   prependItems,
+  rehome,
   replaceItem,
   trimTurns,
   workSummary,
@@ -25,6 +25,7 @@ import {
   type WorkItem,
 } from '@/store/session-rows'
 import type { SliceCreator } from '@/store/slice'
+import { indexItems, localItem, noAgents, replaceAgentItem, trimAgents, type AgentIndex } from '@/store/subagents'
 
 export type { Delivery, SessionRow }
 
@@ -48,6 +49,7 @@ export interface AcpSession {
   truncatedBefore: boolean
   historyGeneration: number
   turns: Turn[]
+  agents: AgentIndex
   state: SessionState | null
   /** The ack's seq: its state already covers items up to it, so a replay of them must not roll it back. */
   stateSeq: number
@@ -107,6 +109,7 @@ const emptySession: AcpSession = {
   truncatedBefore: false,
   historyGeneration: 0,
   turns: [],
+  agents: noAgents,
   state: null,
   stateSeq: 0,
   pending: [],
@@ -217,7 +220,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const held = s.acpSessions[runID] ?? emptySession
       const restart = ack.epoch !== held.epoch || ack.oldest_seq !== undefined
       const base = restart
-        ? { turns: [], seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
+        ? { turns: [], agents: noAgents, seq: 0, oldestSeq: 0, more: (ack.oldest_seq ?? 0) > 1, historyGeneration: held.historyGeneration + 1, olderLoading: false, olderError: undefined }
         : {}
       return patchSession(s, runID, { ...base, truncatedBefore: ack.truncated_before ?? (ack.epoch === held.epoch && held.truncatedBefore), epoch: ack.epoch, live: ack.live, state: ack.state ?? null, stateSeq: ack.seq, pending: ack.state?.pending ?? [] })
     }),
@@ -227,10 +230,12 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       let batch: SessionItem[] = []
       const flush = () => {
         if (batch.length === 0) return
+        const { index, main, home } = indexItems(session.agents, batch)
         session = {
           ...session,
           ...advance(session, batch),
-          turns: appendItems(session.turns, batch),
+          turns: appendItems(session.turns, main, (item) => home.get(item)),
+          agents: index,
           seq: batch.at(-1)!.seq,
           oldestSeq: session.oldestSeq || batch[0]!.seq,
         }
@@ -241,7 +246,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
           flush()
           const sameEpoch = frame.epoch === session.epoch
           session = {
-            ...session, turns: [], seq: 0, oldestSeq: 0,
+            ...session, turns: [], agents: noAgents, seq: 0, oldestSeq: 0,
             more: sameEpoch && session.more,
             truncatedBefore: sameEpoch && session.truncatedBefore,
             historyGeneration: session.historyGeneration + 1,
@@ -263,8 +268,10 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       const session = s.acpSessions[runID]
       if (!session) return {}
       const older = itemsOf(frames).filter((item) => !session.oldestSeq || item.seq < session.oldestSeq)
+      const { index, main, rehomed, home } = indexItems(session.agents, older, true)
       return patchSession(s, runID, {
-        turns: prependItems(session.turns, older),
+        turns: rehome(prependItems(session.turns, main, (item) => home.get(item)), rehomed),
+        agents: index,
         oldestSeq: older[0]?.seq ?? session.oldestSeq,
         more: more && older.length > 0,
         truncatedBefore: session.truncatedBefore || truncatedBefore,
@@ -276,7 +283,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
   acpReplaceItem: (runID, item) =>
     set((s) => {
       const session = s.acpSessions[runID]
-      return session ? patchSession(s, runID, { turns: replaceItem(session.turns, item) }) : {}
+      return session ? patchSession(s, runID, { turns: replaceItem(session.turns, localItem(session.agents, item)), agents: replaceAgentItem(session.agents, item) }) : {}
     }),
   acpStream: (runID, stream, error) => set((s) => patchSession(s, runID, { stream, streamError: error })),
   acpControl: (runID, control, error) => set((s) => patchSession(s, runID, { control, controlError: error })),
@@ -289,9 +296,11 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
         .sort(([, a], [, b]) => b.touched - a.touched)
       const room = Math.max(0, residentSessions - 1 - Object.keys(sessions).filter((id) => id !== runID && open(id)).length)
       for (const [id, session] of idle.slice(room)) {
-        if (itemCount(session.turns) <= keptItems) continue
-        const turns = trimTurns(session.turns, keptItems)
-        sessions[id] = { ...session, turns, oldestSeq: turns[0]?.items[0]?.seq ?? session.oldestSeq, more: true }
+        const seqs = [...session.turns, ...Object.values(session.agents.agents)].flatMap((held) => held.items.map((item) => item.seq))
+        if (seqs.length <= keptItems) continue
+        seqs.sort((a, b) => a - b)
+        const { turns, floor } = trimTurns(session.turns, seqs[seqs.length - keptItems]!)
+        sessions[id] = { ...session, turns, agents: trimAgents(session.agents, floor), oldestSeq: floor, more: true }
       }
       return { acpSessions: sessions }
     }),

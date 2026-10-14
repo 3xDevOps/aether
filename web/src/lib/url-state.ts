@@ -8,16 +8,17 @@ const pageIDs: Record<string, string> = {
   workspace: 'workspaceId',
 }
 
-const keys = ['run', 'view', 'page', 'id']
+const keys = ['run', 'view', 'agent', 'page', 'id']
 
 const boardRoute: Route = { name: 'board', params: {} }
 
 export function routeQuery(route: Route): URLSearchParams {
   const query = new URLSearchParams()
-  const { runId, view } = route.params
+  const { runId, view, agent } = route.params
   if (route.name === 'run' && runId) {
     query.set('run', runId)
     if (view) query.set('view', view)
+    if (agent) query.set('agent', agent)
     return query
   }
   if (route.name === 'board') return query
@@ -32,7 +33,9 @@ export function routeFromQuery(query: URLSearchParams): Route {
   if (run) {
     const asked = query.get('view') ?? ''
     const view = renamedViews[asked] ?? asked
-    return runRoute(run, isRunView(view) ? view : undefined)
+    const route = runRoute(run, isRunView(view) ? view : undefined)
+    const agent = query.get('agent')
+    return agent ? { ...route, params: { ...route.params, agent } } : route
   }
   const page = query.get('page')
   if (!page) return boardRoute

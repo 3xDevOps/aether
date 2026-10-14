@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import {
   ArrowRightLeft,
@@ -159,11 +159,13 @@ export function WorkGroup({
   summary,
   trailing,
   expanded,
+  controls,
   onToggle,
 }: {
   summary: React.ReactNode
   trailing?: React.ReactNode
   expanded: boolean
+  controls?: string
   onToggle: () => void
 }) {
   return (
@@ -171,6 +173,7 @@ export function WorkGroup({
       type="button"
       data-slot="work-group"
       aria-expanded={expanded}
+      aria-controls={controls}
       onClick={onToggle}
       className={cn(
         focusRingInset,
@@ -180,6 +183,62 @@ export function WorkGroup({
       <ChevronRight className={cn('size-3.5 shrink-0 transition-transform duration-100 motion-reduce:transition-none', expanded && 'rotate-90')} />
       <span className="min-w-0 flex-1 truncate">{summary}</span>
       {trailing !== undefined && <span className="shrink-0 tabular-nums">{trailing}</span>}
+    </button>
+  )
+}
+
+export function AgentCard({
+  dot,
+  label,
+  type,
+  meta,
+  progress,
+  current,
+  accessibleName,
+  onOpen,
+}: {
+  dot: React.ReactNode
+  label: string
+  type?: string
+  meta?: React.ReactNode
+  progress: React.ReactNode
+  current: boolean
+  accessibleName: string
+  onOpen: () => void
+}) {
+  const progressID = useId()
+  return (
+    <button
+      type="button"
+      data-slot="agent-card"
+      aria-label={accessibleName}
+      aria-describedby={progressID}
+      aria-current={current || undefined}
+      onClick={onOpen}
+      className={cn(focusRingInset, 'flex w-full min-w-0 flex-col gap-0.5 rounded-control px-2 py-1 text-left text-ui-sm hover:bg-hover coarse:min-h-11', current && 'bg-selection')}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        {dot}
+        <span className="min-w-0 truncate text-text">{label}</span>
+        {type && <span className="hidden shrink-0 text-muted sm:inline">{type}</span>}
+        {meta && <span className="ml-auto flex shrink-0 items-center gap-2 text-muted tabular-nums">{meta}</span>}
+      </span>
+      <span id={progressID} className="min-w-0 truncate pl-[1.125rem] text-muted">{progress}</span>
+    </button>
+  )
+}
+
+export function AgentEntry({ dot, label, state, onOpen }: { dot: React.ReactNode; label: string; state: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      data-slot="agent-entry"
+      onClick={onOpen}
+      className={cn(focusRingInset, 'flex h-6 w-full min-w-0 items-center gap-2 rounded-control pl-6 text-left text-ui-sm text-muted hover:bg-hover hover:text-text coarse:h-11')}
+    >
+      {dot}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="shrink-0">{state}</span>
     </button>
   )
 }

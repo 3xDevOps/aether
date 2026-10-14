@@ -1,5 +1,6 @@
 import type { SessionItem } from '@/lib/session-types'
-import { appendItems, liveActivity, prependItems, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { appendItems, liveActivity, prependItems, rehome, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { indexItems, noAgents } from '@/store/subagents'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
 beforeEach(resetItems)
@@ -90,6 +91,13 @@ describe('session rows from the item log', () => {
     expect(liveActivity(turnOf([item('turn_start', 1), item('turn_end', 1)]))).toBeNull()
   })
 
+  it('says a turn with only running subagent launches waits on them', () => {
+    const agent = (id: string) => tool(1, id, 'other', `Agent ${id}`, 'in_progress', { tool_name: 'Agent' })
+    const open = (items: SessionItem[]) => liveActivity(turnOf([item('turn_start', 1), ...items], false))?.label
+    expect(open([agent('a1'), agent('a2')])).toBe('Waiting on 2 subagents')
+    expect(open([agent('a1'), agent('a2'), tool(1, 'r', 'read', 'Read a.go', 'in_progress', { locations: [{ path: 'a.go' }] })])).toBe('Reading a.go')
+  })
+
   it('says a tool call waits for approval while its permission is pending', () => {
     const asked = { id: 'p1', kind: 'permission' as const, title: 'rm -rf build', status: 'pending' as const, tool_call_id: 'x1' }
     const call = tool(1, 'x1', 'execute', 'rm -rf build', 'pending')
@@ -146,7 +154,7 @@ describe('turns', () => {
 
   it('trims to the newest items', () => {
     const turns = appendItems([], Array.from({ length: 10 }, (_, i) => item('usage', 1 + Math.floor(i / 4))))
-    expect(trimTurns(turns, 5).flatMap((turn) => turn.items.map((it) => it.seq))).toEqual([6, 7, 8, 9, 10])
+    expect(trimTurns(turns, 6).turns.flatMap((turn) => turn.items.map((it) => it.seq))).toEqual([6, 7, 8, 9, 10])
   })
 
   it('keeps row and entry ids unique when turns reuse a tool call or message id', () => {
@@ -168,5 +176,120 @@ describe('turns', () => {
     const done = { ...tool(1, 'r1', 'read', 'Read a.js', 'completed'), time: started.time }
     const [work] = turnRows(turnOf([started, done]))
     expect(work).toMatchObject({ entries: [{ status: 'done', durationMs: undefined }] })
+  })
+})
+
+describe('subagent rows', () => {
+  const launch = (id: string, status = 'in_progress') =>
+    tool(1, id, 'other', `Agent ${id}`, status, { tool_name: 'Agent', subagent: { description: id } })
+
+  it('groups consecutive launches into one row that prose or a tool call breaks', () => {
+    const rows = turnRows(turnOf([
+      item('turn_start', 1),
+      launch('a'), launch('b'), launch('a', 'completed'),
+      say(1, 'assistant', 'waiting'),
+      launch('c'),
+      tool(1, 'r', 'read', 'Read x', 'completed'),
+      launch('d'),
+    ], false))
+    expect(rows.map((row) => row.kind)).toEqual(['subagents', 'assistant', 'subagents', 'work', 'subagents'])
+    expect(rows[0]).toMatchObject({ id: 'agents:1:a', ids: ['a', 'b'] })
+    expect(rows[2]).toMatchObject({ id: 'agents:1:c', ids: ['c'] })
+    expect(rows[4]).toMatchObject({ ids: ['d'] })
+  })
+
+  it('renders items without parent metadata exactly as before', () => {
+    const rows = turnRows(turnOf([item('turn_start', 1), tool(1, 'r', 'read', 'Read x', 'completed'), tool(1, 'e', 'other', 'Delegate', 'completed', { tool_name: 'Edit' })]))
+    expect(rows.map((row) => row.kind)).toEqual(['work'])
+    expect(indexItems(noAgents, [tool(1, 'r', 'read', 'Read x', 'completed')]).index.roots).toEqual([])
+  })
+
+  it('appends a snapshot logged in a later turn to the turn of the call, once', () => {
+    const diff = { path: 'a.go', patch: '--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-a\n+b\n' }
+    const first = tool(1, 'e', 'edit', 'Edit a.go', 'in_progress', { diffs: [diff] })
+    const items = [item('turn_start', 1), first, item('turn_end', 1), item('turn_start', 2), tool(2, 'e', 'edit', 'Edit a.go', 'completed', { diffs: [diff] })]
+    const { main, home } = indexItems(noAgents, items)
+    const turns = appendItems([], main, (it) => home.get(it))
+    expect(turns.map((turn) => turn.items.length)).toEqual([4, 1])
+    const rows = turns.flatMap(rowsOfTurn)
+    expect(rows.filter((row) => row.kind === 'work')).toHaveLength(1)
+    expect(rows.filter((row) => row.kind === 'changed-files')).toMatchObject([{ files: [{ additions: 1, deletions: 1 }] }])
+  })
+
+  it('keeps a carried call running while its snapshots arrive after its turn ended', () => {
+    const items = [item('turn_start', 1), tool(1, 'x', 'execute', 'make', 'in_progress'), item('turn_end', 1), item('turn_start', 2), tool(2, 'x', 'execute', 'make', 'in_progress', { output: 'ok' })]
+    const { main, home } = indexItems(noAgents, items)
+    const [first] = appendItems([], main, (it) => home.get(it))
+    expect(rowsOfTurn(first!).find((row) => row.kind === 'work')).toMatchObject({ entries: [{ status: 'running' }] })
+    expect(rowsOfTurn({ ...first!, items: first!.items.slice(0, 3) }).find((row) => row.kind === 'work')).toMatchObject({ entries: [{ status: 'done' }] })
+  })
+
+  it('joins an older page with a held turn of the same number after a trim', () => {
+    const early = [item('turn_start', 1), say(1, 'user', 'go'), item('turn_end', 1), item('turn_start', 2), say(2, 'user', 'again')]
+    const late = tool(1, 'x', 'execute', 'make', 'completed')
+    const held: Turn[] = [{ turn: 1, items: [late], closed: true }, { turn: 2, items: [say(2, 'assistant', 'ok')], closed: false }]
+    const turns = prependItems(held, early)
+    expect(turns.map((turn) => turn.turn)).toEqual([1, 2])
+    expect(turns.map((turn) => turn.items.length)).toEqual([4, 3])
+    expect(turns[0]!.items.at(-1)).toBe(late)
+  })
+
+  it('homes an older page snapshot into a held earlier turn the page does not reach', () => {
+    const first = tool(1, 'x', 'execute', 'make', 'in_progress')
+    const items = [item('turn_start', 1), first, item('turn_end', 1), item('turn_start', 2), tool(2, 'x', 'execute', 'make', 'in_progress', { output: 'a' }),
+      say(2, 'user', 'more'), tool(2, 'x', 'execute', 'make', 'completed')]
+    const all = indexItems(noAgents, items)
+    const held = trimTurns(appendItems([], all.main, (it) => all.home.get(it)), 6).turns
+    expect(held.map((turn) => turn.turn)).toEqual([1, 2])
+    const page = indexItems(all.index, items.slice(3, 5), true)
+    const turns = prependItems(held, page.main, (it) => page.home.get(it))
+    expect(turns.map((turn) => turn.turn)).toEqual([1, 2])
+    expect(turns[0]!.items.map((it) => it.seq)).toEqual([5, 7])
+    expect(turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')).toHaveLength(1)
+  })
+
+  it('keeps a settled call whose id comes back in a later turn as a new call', () => {
+    const items = [item('turn_start', 1), tool(1, 't', 'read', 'Read a.js', 'completed'), item('turn_end', 1), item('turn_start', 2), tool(2, 't', 'read', 'Read b.js', 'completed')]
+    const { main, home } = indexItems(noAgents, items)
+    const turns = appendItems([], main, (it) => home.get(it))
+    expect(turns.map((turn) => turn.items.length)).toEqual([3, 2])
+    expect(turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')).toHaveLength(2)
+    const older = indexItems(indexItems(noAgents, items.slice(3)).index, items.slice(0, 3), true)
+    expect(older.rehomed).toEqual([])
+  })
+
+  it('moves a snapshot to the turn an older page reveals as its home', () => {
+    const early = tool(1, 'x', 'execute', 'make', 'in_progress')
+    const end = item('turn_end', 1)
+    const late = tool(2, 'x', 'execute', 'make', 'completed')
+    const live = indexItems(noAgents, [late])
+    let turns = appendItems([], live.main)
+    const older = indexItems(live.index, [early, end], true)
+    turns = rehome(prependItems(turns, older.main), older.rehomed)
+    expect(turns.map((turn) => turn.items.map((it) => it.seq))).toEqual([[1, 2, 3], []])
+    expect(rehome(turns, [])).toBe(turns)
+    expect(rehome(turns, [{ id: 'x', from: 2, to: 9 }])).toBe(turns)
+  })
+
+  it('gives a tool call split across turns of one older page a single finished work row', () => {
+    const page = [item('turn_start', 1), tool(1, 'x', 'execute', 'make', 'in_progress'), item('turn_end', 1), item('turn_start', 2), tool(2, 'x', 'execute', 'make', 'completed')]
+    const { main, home } = indexItems(noAgents, page, true)
+    const turns = prependItems([], main, (it) => home.get(it))
+    const work = turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')
+    expect(work).toHaveLength(1)
+    expect(work[0]).toMatchObject({ entries: [{ status: 'done' }] })
+  })
+
+  it('trims by seq across turns and keeps every segment of a retained user message', () => {
+    const items = [item('turn_start', 1), tool(1, 'x', 'execute', 'make', 'in_progress'), item('turn_end', 1), item('turn_start', 2), say(2, 'user', 'a', 'm'), say(2, 'user', 'b', 'm'), tool(2, 'x', 'execute', 'make', 'completed')]
+    const { main, home } = indexItems(noAgents, items)
+    const turns = appendItems([], main, (it) => home.get(it))
+    expect(turns.map((turn) => turn.items.map((it) => it.seq))).toEqual([[1, 2, 3, 7], [4, 5, 6]])
+    const late = trimTurns(turns, 7)
+    expect(late.floor).toBe(7)
+    expect(late.turns.map((turn) => turn.items.map((it) => it.seq))).toEqual([[7]])
+    const message = trimTurns(turns, 6)
+    expect(message.floor).toBe(5)
+    expect(message.turns.map((turn) => turn.items.map((it) => it.seq))).toEqual([[7], [5, 6]])
   })
 })
