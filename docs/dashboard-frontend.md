@@ -4630,6 +4630,20 @@ before any), **Saved servers** (the default link, then named ones) with
   Run headers, action confirmations and the Finished release dialog show the
   exact runtime deadline and cleanup failures. Cleanup-only refreshes preserve
   the completion time; reopening clears the old retention disclosure.
+- **Docker inside runs**, a row in **Server**, for admins when the server
+  answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States: **On**,
+  **Off** with **Install**, `Unavailable on this host` plus the server's
+  reason, `Installing… this takes a minute or two`, and **Install failed**
+  with the reason, **Show output** (the install log in a `CodeBlock`) and
+  **Try again**. **Install** calls `server.sysbox.install`, which returns at
+  once; the row then polls `server.sysbox.status` every 2 seconds while the
+  state is `installing`. Reaching **On** from an install announces `New runs
+  get it now. Reopen your Environment to use it there.` in a polite status
+  region, because an existing Environment keeps its old container. On the
+  board, an admin whose server reports `off` sees a neutral callout, `Let
+  agents use Docker in their runs`, with **Install** and **Dismiss**
+  (`src/components/sysbox-nudge.tsx`); dismissal is persisted as
+  `sysboxNudgeDismissed`. Non-admins and older servers see neither.
 - **Remote access**, when the server answers `server.edge` (the `edge`
   store slice, read at hydration): the **Edge** URL or `off`, the copyable
   **Server id**, the **Access policy**, the **Owner** (`<login> (github)`

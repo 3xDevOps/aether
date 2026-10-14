@@ -992,8 +992,10 @@ Building the APK from a checkout is in
   Engine 26.0 or newer (API 1.45);
   `docker version --format '{{.Server.Version}}'` prints yours.
 - Optionally **Sysbox**, which lets agents run Docker inside their run
-  containers: `sudo sh scripts/install-sysbox.sh`, then restart
-  `aether-server`. See [environments.md](environments.md#docker-inside-runs).
+  containers. `aether-server setup` installs it on Ubuntu and Debian when you
+  accept the question; on an existing server run
+  `sudo aether-server sysbox install`. See
+  [environments.md](environments.md#docker-inside-runs).
 - **git** on the host. Bare repos, run checkouts, and diffs are real git.
 - **`ssh-keygen`** on the host, from the OpenSSH client package
   (`openssh-client` on Debian and Ubuntu). Git uses it to sign the commits
@@ -1182,6 +1184,12 @@ the edge on: `edge-url` is empty unless the config file or a flag names an
 edge, so an upgrade never enrolls an existing server. With the edge on,
 setup ends by printing the server id and a claim link for the Aether
 app, with the claim code inside it for `aether link --claim <code>`.
+Last, unless Docker already has Sysbox, setup asks `Let agents use Docker
+inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)`,
+defaulting to yes, and installs it after writing the files. On a host that
+cannot run Sysbox it prints `Docker inside runs is unavailable on this host:
+<reason>`; if the install fails it prints the error and
+`sudo aether-server sysbox install`. Either way setup completes.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 
@@ -1198,6 +1206,20 @@ stays off unless you pass `--edge-url`, which is refused without
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
 ```
+
+`install` also installs Sysbox, as setup does without the question, unless
+you pass `--sysbox=false`. The flag is not a serve option and is not written
+to the config file.
+
+To install or check Sysbox on its own, on the server host:
+
+```sh
+sudo aether-server sysbox install
+aether-server sysbox status
+```
+
+`aether update` prints the install command after replacing `aether-server`
+on a Debian or Ubuntu host whose Docker lacks Sysbox. It never runs it.
 
 Neither command starts anything; both print the activation line so an install
 never restarts a live server behind your back:

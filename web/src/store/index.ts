@@ -100,6 +100,7 @@ const persistedUi = (s: RootState) => ({
   boardMapViewports: s.boardMapViewports,
   launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
+  sysboxNudgeDismissed: s.sysboxNudgeDismissed,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
   onboardingFurthest: s.onboardingFurthest,

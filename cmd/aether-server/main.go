@@ -57,6 +57,8 @@ func main() {
 		exitOn(install(args))
 	case "setup":
 		exitOn(setup(args))
+	case "sysbox":
+		exitOn(sysboxCmd(args))
 	case "config":
 		exitOn(configCmd(args))
 	case "edge":
@@ -85,6 +87,7 @@ commands:
   serve    run the server
   install  write the systemd unit and the config file (same options as serve)
   setup    walk through the install interactively
+  sysbox   status | install: let runs start their own Docker daemon
   config   show | path | set <key> <value> | edit
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
@@ -227,6 +230,7 @@ func serve(args []string) error {
 		RunPidsLimit:     int64(*o.runPids),
 
 		ContainerRuntime: *o.containerRuntime,
+		SysboxInstaller:  true,
 	})
 	if err != nil {
 		return err

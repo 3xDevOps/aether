@@ -1551,6 +1551,20 @@ operator-facing stances are these.
   the container was not already given, and the isolation is still the
   container, exactly as in "The agent container" above.
 
+## Sysbox install
+
+When an admin presses **Install** under **Settings > Server**
+(`server.sysbox.install`), the server runs its embedded
+`install-sysbox.sh` as root, the user its systemd unit runs as. That is the
+same installer `sudo aether-server sysbox install` runs, and it is part of the
+signed release binary: the client sends no script, URL or version. It
+downloads the pinned Sysbox package, verifies its SHA-256 and installs it with
+`apt-get`; it may also add `bip` and `default-address-pools` to
+`/etc/docker/daemon.json`. A server that does not run as root answers off and
+names `sudo aether-server sysbox install`. Only admins can call either Sysbox
+method. An admin can already run arbitrary code on the Docker daemon, so
+this adds root only for this one script.
+
 ## Server self-update
 
 `aether server update` (see [install.md](install.md#upgrading)) lets an admin

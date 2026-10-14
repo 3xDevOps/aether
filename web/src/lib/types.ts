@@ -1688,6 +1688,15 @@ export interface ServerUpdateStatus {
   manual_commands?: string[]
 }
 
+/** server.sysbox.status and server.sysbox.install: whether runs can use
+ * Docker inside their own containers. `reason` explains `unsupported` and
+ * `failed`; `log` is the install output. */
+export interface SysboxStatus {
+  state: 'on' | 'off' | 'unsupported' | 'installing' | 'failed'
+  reason?: string
+  log?: string
+}
+
 /** When an update applies: immediately, at the next idle moment, or never
  * (which clears the pending one). */
 export type ServerUpdateWhen = 'now' | 'idle' | 'cancel'

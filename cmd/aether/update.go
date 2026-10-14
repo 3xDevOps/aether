@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
@@ -88,6 +90,9 @@ func runUpdate(args []string) error {
 	}
 	if len(replaced) > 1 {
 		fmt.Println("restart it: sudo systemctl restart aether-server")
+		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
+			fmt.Println("Let agents use Docker inside runs: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
+		}
 	}
 	warnShadowed(os.Stderr, replaced[0])
 	if *noApp {
@@ -96,6 +101,34 @@ func runUpdate(args []string) error {
 	// replaced[0] is this CLI's own path with its symlinks resolved, which
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
+}
+
+func dockerRuntimes(ctx context.Context) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{json .Runtimes}}").Output()
+	return string(out), err
+}
+
+// offerSysbox is true on a Debian or Ubuntu host whose Docker answers and
+// lacks the sysbox-runc runtime.
+func offerSysbox(ctx context.Context, osRelease string, runtimes func(context.Context) (string, error)) bool {
+	data, err := os.ReadFile(osRelease)
+	if err != nil {
+		return false
+	}
+	var debian bool
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, _ := strings.Cut(line, "=")
+		if key == "ID" || key == "ID_LIKE" {
+			debian = debian || slices.ContainsFunc(strings.Fields(strings.Trim(value, `"`)), func(id string) bool {
+				return id == "debian" || id == "ubuntu"
+			})
+		}
+	}
+	if !debian {
+		return false
+	}
+	out, err := runtimes(ctx)
+	return err == nil && !strings.Contains(out, "sysbox-runc")
 }
 
 // reportBinary names the binary a no-op update looked at. Without it,

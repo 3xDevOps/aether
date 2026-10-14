@@ -197,7 +197,7 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 		method == protocol.MethodTerminalExec ||
 		method == protocol.MethodAssistantPrompt || method == protocol.MethodAssistantAnswer ||
 		method == protocol.MethodAssistantConfirm || method == protocol.MethodAssistantStart ||
-		method == protocol.MethodAssistantReset ||
+		method == protocol.MethodAssistantReset || method == protocol.MethodServerSysboxInstall ||
 		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
 		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
 		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||

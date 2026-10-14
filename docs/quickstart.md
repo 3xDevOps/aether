@@ -88,8 +88,10 @@ sudo aether-server setup
 It asks for the listen address, data directory, and tailnet policy - plus, on
 a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
 and whether to use the edge (Enter accepts each default) - and, with the edge
-on, who may reach the server through it, a question with no default. Then it
-prints:
+on, who may reach the server through it, a question with no default. It also
+offers to install Sysbox on Ubuntu and Debian, which lets agents run Docker
+inside their runs ([environments.md](environments.md#docker-inside-runs)).
+Then it prints:
 
 ```sh
 systemctl daemon-reload && systemctl enable --now aether-server

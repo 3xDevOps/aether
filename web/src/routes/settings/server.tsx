@@ -1,8 +1,12 @@
 import { packagedLine, useUpdateNotice } from '@/components/update-banner'
 import { Button } from '@/components/ui/button'
+import { CodeBlock } from '@/components/ui/code'
+import { Spinner } from '@/components/ui/spinner'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
+import { api, type Api } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
+import { useSysbox } from '@/lib/use-sysbox'
 import { memberName, resolveMember } from '@/lib/member-name'
 import type { DiskUsage } from '@/lib/types'
 import { workspaceRuns } from '@/routes/board/selectors'
@@ -27,7 +31,7 @@ function knownBytes(bytes: number | undefined): string {
   return bytes === undefined ? 'unknown' : formatBytes(bytes)
 }
 
-export function ServerSection() {
+export function ServerSection({ client = api }: { client?: Api } = {}) {
   const info = useStore((s) => s.info)
   const admin = useIsAdmin()
   const update = useUpdateNotice(true)
@@ -57,6 +61,7 @@ export function ServerSection() {
           </Button>
         )}
       />
+      <DockerInRunsRow client={client} />
       {!disk && (
         <SettingRow label="Disk" help="Storage accounting unavailable.">
           {info.diskError && <p className="whitespace-pre-wrap break-words text-ui-sm text-muted">{info.diskError}</p>}
@@ -127,6 +132,49 @@ export function ServerSection() {
       {disk?.entries && <StorageOwners disk={disk} />}
       {admin && <RetainedContainersRow />}
     </SettingsSection>
+  )
+}
+
+function DockerInRunsRow({ client }: { client: Api }) {
+  const { status, error, justInstalled, install } = useSysbox(client)
+  if (!status) return null
+  const { state, reason, log } = status
+  const installing = state === 'installing'
+  const states = {
+    on: ['On', 'Agents can run docker, compose and buildx in their runs.'],
+    off: ['Off', 'Lets agents build and run containers inside their own runs, isolated from this server. Installs the Sysbox runtime.'],
+    unsupported: ['Unavailable on this host', reason],
+    installing: ['Installing', undefined],
+    failed: ['Install failed', reason],
+  } as const
+  const [title, detail] = states[state]
+  return (
+    <SettingRow
+      label="Docker inside runs"
+      help={(
+        <>
+          <p className="text-text">{title}</p>
+          {detail && <p className="whitespace-pre-wrap break-words">{detail}</p>}
+        </>
+      )}
+      control={(state === 'off' || state === 'failed') && (
+        <Button size="sm" variant="secondary" onClick={install}>
+          {state === 'failed' ? 'Try again' : 'Install'}
+        </Button>
+      )}
+    >
+      <p role="status" className="flex items-center gap-2 text-ui-sm text-muted empty:hidden">
+        {installing && <><Spinner />Installing… this takes a minute or two</>}
+        {justInstalled && state === 'on' && 'New runs get it now. Reopen your Environment to use it there.'}
+      </p>
+      {error && <p role="alert" className="whitespace-pre-wrap break-words text-ui-sm text-state-failed">{error}</p>}
+      {state === 'failed' && log && (
+        <details className="min-w-0 text-ui-sm text-muted">
+          <summary className="cursor-pointer py-1">Show output</summary>
+          <CodeBlock className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{log}</CodeBlock>
+        </details>
+      )}
+    </SettingRow>
   )
 }
 

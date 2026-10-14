@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/moby/moby/api/types/system"
 	"github.com/moby/moby/client"
@@ -64,6 +65,35 @@ func TestResolveRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveRuntimeRechecksMissingSysbox(t *testing.T) {
+	plain := system.Info{Runtimes: map[string]system.RuntimeWithStatus{"runc": {}}}
+	sysbox := system.Info{Runtimes: map[string]system.RuntimeWithStatus{"runc": {}, runtimeSysbox: {}}}
+	d, calls := runtimeInfoDocker(t, RuntimeAuto, func(call int32) (int, system.Info) {
+		if call < 3 {
+			return http.StatusOK, plain
+		}
+		return http.StatusOK, sysbox
+	})
+	clock := time.Now()
+	d.now = func() time.Time { return clock }
+	resolve := func(want string, wantCalls int32) {
+		t.Helper()
+		got, err := d.resolveRuntime(t.Context())
+		if err != nil || got != want || calls.Load() != wantCalls {
+			t.Fatalf("resolveRuntime() = %q, %v after %d info calls; want %q after %d", got, err, calls.Load(), want, wantCalls)
+		}
+	}
+	resolve("", 1)
+	clock = clock.Add(sysboxRecheck - time.Second)
+	resolve("", 1)
+	clock = clock.Add(2 * time.Second)
+	resolve("", 2)
+	d.ForgetRuntime()
+	resolve(runtimeSysbox, 3)
+	clock = clock.Add(time.Hour)
+	resolve(runtimeSysbox, 3)
 }
 
 func TestResolveRuntimeDoesNotCacheInfoError(t *testing.T) {

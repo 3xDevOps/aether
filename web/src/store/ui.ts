@@ -154,6 +154,7 @@ export interface UiSlice {
   browserRequests: Record<string, string>
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
+  sysboxNudgeDismissed: boolean
   updatesOpen: boolean
   shortcutsOpen: boolean
   profileOpen: boolean
@@ -184,6 +185,7 @@ export interface UiSlice {
   navigate: (name: string, params?: Record<string, string>) => void
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
+  dismissSysboxNudge: () => void
   setUpdatesOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
@@ -234,6 +236,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   browserPresets: {},
   browserRequests: {},
   dismissedUpdates: { cli: '', server: '', shell: '' },
+  sysboxNudgeDismissed: false,
   updatesOpen: false,
   shortcutsOpen: false,
   profileOpen: false,
@@ -314,6 +317,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     set((s) => ({ dismissedUpdates: { ...s.dismissedUpdates, [kind]: version } })),
   clearDismissedUpdates: () =>
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
+  dismissSysboxNudge: () => set({ sysboxNudgeDismissed: true }),
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setProfileOpen: (profileOpen) => set({ profileOpen }),
