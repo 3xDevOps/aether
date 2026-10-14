@@ -131,7 +131,7 @@ export function AssistantFailed({ error }: { error?: string }) {
 export function EmptyConversation({ onPick }: { onPick: (text: string) => void }) {
   return (
     <section aria-label="Suggestions" className="flex min-h-0 flex-1 flex-col justify-center gap-3 overflow-y-auto p-4">
-      <p className="text-ui text-muted">Ask in plain language. The assistant acts with your permissions and asks before it stops a run or saves your environment.</p>
+      <p className="text-ui text-muted">Ask in plain language. The assistant acts with your permissions and asks before it launches, messages or stops a run, or saves your environment.</p>
       <div className="flex flex-col items-start gap-2">
         {examplePrompts.map(({ label, text }) => (
           <Button key={label} size="sm" variant="secondary" className="h-auto min-h-6 max-w-full py-1 text-left whitespace-normal" onClick={() => onPick(text)}>

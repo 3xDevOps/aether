@@ -3,7 +3,8 @@
 The assistant is a chat panel in the dashboard where you ask Aether for
 things in plain language: "what's the status of my runs?", "launch a run to
 fix the flaky login test", "install Rust in my environment". It acts with
-your permissions and asks before it stops a run or saves your environment.
+your permissions and asks before it launches, messages or stops a run, or
+saves your environment.
 
 It is not a run. It is an [Enhanced](enhanced-runs.md) session of your own
 Claude Code or Codex, started in your [environment](terminal.md) container
