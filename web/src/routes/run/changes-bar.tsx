@@ -11,19 +11,21 @@ import { useStore } from '@/store'
 import { diffTotals, readPersistedDiff } from '@/store/diff'
 import type { RunRecord } from '@/store/runs'
 
-const expandKey = 'changes-bar'
-
 export function ChangesBar({ run }: { run: RunRecord }) {
   const latest = useStore((s) => s.diffs[run.id]?.snapshots[0])
   const persisted = useStore((s) => s.diffs[run.id]?.persisted)
   const error = useStore((s) => s.diffs[run.id]?.persistedError)
   const connected = useStore((s) => s.connection === 'live')
-  const expanded = useStore((s) => s.expandedRows[run.id]?.[expandKey] === true)
+  const expanded = useStore((s) => s.changesOpen[run.id] === true)
   const listID = useId()
   const checkout = isLiveRun(run)
   useEffect(() => {
     if (checkout && connected && !latest && persisted === undefined) void readPersistedDiff(useStore, api, run)
   }, [checkout, connected, latest, persisted, run])
+  // A read that failed is asked again once the connection is back.
+  useEffect(() => {
+    if (!connected && error) useStore.getState().setDiff(run.id, { persisted: undefined })
+  }, [connected, error, run.id])
 
   if (!checkout) return null
   const snapshot = latest ?? persisted
@@ -31,7 +33,7 @@ export function ChangesBar({ run }: { run: RunRecord }) {
     return (
       <div role="alert" className={cn(sessionColumn, 'flex shrink-0 items-center gap-2 pb-1 text-ui-sm text-state-failed')}>
         <span className="min-w-0 flex-1 break-words">Changes could not be read: {error}</span>
-        <Button variant="quiet" onClick={() => useStore.getState().setDiff(run.id, { persisted: undefined })}>Retry</Button>
+        <Button variant="quiet" onClick={() => void readPersistedDiff(useStore, api, run)}>Retry</Button>
       </div>
     )
   }
@@ -53,20 +55,18 @@ export function ChangesBar({ run }: { run: RunRecord }) {
             trailing={truncated ? undefined : <Counts {...totals} />}
             expanded={expanded}
             controls={listID}
-            onToggle={() => useStore.getState().toggleSessionRow(run.id, expandKey)}
+            onToggle={() => useStore.getState().toggleChanges(run.id)}
           />
         </div>
         <Button variant="link" size="sm" onClick={() => open({})}>Review</Button>
       </div>
-      {expanded && (
-        <ul id={listID} className="max-h-48 overflow-y-auto max-md:max-h-[30dvh]">
-          {files.map((file) => (
-            <li key={file.path}>
-              <ChangedFileRow file={file} counts={!truncated} onOpen={(path) => open({ file: path })} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul id={listID} hidden={!expanded} className="max-h-48 overflow-y-auto max-md:max-h-[30dvh]">
+        {expanded && files.map((file) => (
+          <li key={file.path}>
+            <ChangedFileRow file={file} counts={!truncated} onOpen={(path) => open({ file: path })} />
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

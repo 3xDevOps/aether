@@ -1941,8 +1941,8 @@ once opened. Expanded, it lists each file with its status letter and
 the Changes view at that file; **Review** opens the Changes view. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the checkout is gone; a
-failed read shows the server's error with **Retry**. Conversation rows carry
-no file lists: each edit's diff stays in its `work` entry.
+failed read shows the server's error with **Retry** and is read again when
+the connection returns. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#the-session-item-log) instead.
@@ -2626,8 +2626,8 @@ both what it renders and the overlap set the conflict chips read.
   one is kept and never asked for again. The selection keys on the snapshot's
   timestamp, so a new snapshot never retargets it. A snapshot with no tree -
   from a server that predates them - is a disabled row whose description says
-  why. The list is capped at 40 per run and starts empty on every page load,
-  because there is no history to replay.
+  why. The list is capped at 40 per run and starts empty on every page load:
+  it holds only the snapshots this page received.
   `history_gap` marks a missing interval or a successful interval spanning
   missed snapshots; `snapshot_error` gives its safe cause. Neither is shown
   as a normal complete interval. Expired snapshot ranges show the server's

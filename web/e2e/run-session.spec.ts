@@ -53,7 +53,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(log.getByText('permission: allow', { exact: true })).toHaveCount(2)
   await page.screenshot({ path: testInfo.outputPath('enhanced-first-click-approval.png') })
 
-  await box.fill('demo')
+  await box.fill('demo edit')
   await box.press('Enter')
   await expect(log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ })).toBeVisible({ timeout: 30_000 })
   await log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ }).click()

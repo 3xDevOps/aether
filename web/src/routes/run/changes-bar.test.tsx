@@ -22,7 +22,7 @@ function seed(opts: { files?: FileDiffStat[]; truncated?: boolean; status?: 'run
   useStore.setState({
     runs: { [record.id]: record },
     connection: 'live',
-    expandedRows: {},
+    changesOpen: {},
     route: { name: 'run', params: { runId: record.id } },
     diffs: opts.files
       ? { [record.id]: { ...initialDiff, snapshots: [diffSnapshot('2026-08-14T10:05:00Z', { files: opts.files, truncated: opts.truncated })] } }
@@ -104,6 +104,24 @@ describe('ChangesBar', () => {
     expect(await screen.findByText('2 files changed')).not.toBeNull()
     await waitFor(() => expect(timeline).toHaveBeenCalledTimes(2))
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('reads again when the connection returns after a failed read, and never twice at once', async () => {
+    const timeline = vi.mocked(api.workspaceTimeline)
+    const record = seed()
+    timeline.mockRejectedValueOnce(new Error('timeline unavailable'))
+    render(<><ChangesBar run={record} /><ChangesBar run={record} /></>)
+    await screen.findAllByRole('alert')
+    expect(timeline).toHaveBeenCalledTimes(1)
+
+    timeline.mockResolvedValueOnce({
+      events: [{ time: '2026-08-14T10:05:00Z', payload: { files } }],
+    } as Awaited<ReturnType<typeof api.workspaceTimeline>>)
+    act(() => useStore.setState({ connection: 'reconnecting' }))
+    expect(timeline).toHaveBeenCalledTimes(1)
+    act(() => useStore.setState({ connection: 'live' }))
+    expect(await screen.findAllByText('2 files changed')).toHaveLength(2)
+    expect(timeline).toHaveBeenCalledTimes(2)
   })
 
   it('shows a file count but no totals for a truncated snapshot', () => {

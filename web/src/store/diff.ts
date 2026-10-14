@@ -117,6 +117,9 @@ const maxSnapshots = 40
 
 export interface DiffSlice {
   diffs: Record<string, RunDiffState>
+  /** Runs whose Session changes bar is expanded. */
+  changesOpen: Record<string, true>
+  toggleChanges: (runID: string) => void
   overlaps: Record<string, OverlapPeer[]>
   setDiff: (runID: string, patch: Partial<RunDiffState>) => void
   applyPatch: (patch: RunPatch, revision: number) => void
@@ -129,6 +132,14 @@ export interface DiffSlice {
 
 export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
   diffs: {},
+  changesOpen: {},
+  toggleChanges: (runID) =>
+    set((s) => {
+      const changesOpen = { ...s.changesOpen }
+      if (changesOpen[runID]) delete changesOpen[runID]
+      else changesOpen[runID] = true
+      return { changesOpen }
+    }),
   overlaps: {},
   setDiff: (runID, patch) =>
     set((s) => ({
@@ -218,6 +229,9 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
 
 /** Reads the newest persisted `run.diff`, which a page load has not seen. */
 export async function readPersistedDiff(store: RootStore, client: Api, run: Pick<Run, 'id' | 'workspace_id'>): Promise<void> {
+  const current = store.getState().diffs[run.id]
+  // null without an error is a read in flight or one that found nothing.
+  if (current?.persisted === null && !current.persistedError) return
   store.getState().setDiff(run.id, { persisted: null, persistedError: undefined })
   try {
     const page = await client.workspaceTimeline({ workspace_id: run.workspace_id, run_id: run.id, types: ['run.diff'], newest: true, limit: 1 })

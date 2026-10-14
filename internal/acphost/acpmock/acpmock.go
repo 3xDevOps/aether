@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,9 +58,11 @@ const (
 	// and runs its follow-up turn.
 	PromptRelease = "release background"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
-	// command with output, an edit with a diff and a markdown answer. The
-	// edit is written to src/billing.js under the session's cwd.
+	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
+	// PromptDemoEdit plays PromptDemo and also writes its edit to
+	// src/billing.js under the session's cwd.
+	PromptDemoEdit = "demo edit"
 	// PromptSubagents plays a turn in which the main agent launches
 	// subagents the way Claude's adapter reports them: nested, concurrent,
 	// and with later updates that omit the parent link.
@@ -238,7 +241,7 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		return a.fix.SessionNew, nil
 	case acp.AgentMethodSessionResume, acp.AgentMethodSessionLoad:
 		a.mu.Lock()
-		a.session, a.frames = p.SessionID, frames
+		a.session, a.cwd, a.frames = p.SessionID, p.Cwd, frames
 		a.mu.Unlock()
 		if method == acp.AgentMethodSessionLoad {
 			for _, u := range a.fix.Load.Updates {
@@ -362,8 +365,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		content, _ := json.Marshal(res.Content)
 		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
-	case PromptDemo:
-		return a.demo(ctx, cancelled), nil
+	case PromptDemo, PromptDemoEdit:
+		return a.demo(ctx, cancelled, text == PromptDemoEdit), nil
 	case PromptSubagents:
 		a.subagents(ctx)
 		return map[string]any{"stopReason": "end_turn"}, nil
@@ -417,10 +420,10 @@ func (a *Agent) writeDemoEdit() error {
 	cwd := a.cwd
 	a.mu.Unlock()
 	if cwd == "" {
-		return nil
+		return errors.New("the session has no cwd")
 	}
 	if err := os.MkdirAll(filepath.Join(cwd, "src"), 0o755); err != nil {
-		return err
+		return fmt.Errorf("create src: %w", err)
 	}
 	return os.WriteFile(filepath.Join(cwd, "src", "billing.js"), []byte(demoNewBilling), 0o644)
 }
@@ -453,7 +456,7 @@ func demoTool(id, kind, title, status string, extra map[string]any) json.RawMess
 	return b
 }
 
-func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
+func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}, write bool) any {
 	thought, _ := json.Marshal(map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
 		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
@@ -492,7 +495,7 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		for _, u := range step {
 			a.update(ctx, u)
 		}
-		if i == editStep {
+		if write && i == editStep {
 			if err := a.writeDemoEdit(); err != nil {
 				a.text(ctx, "write failed: "+err.Error())
 			}
