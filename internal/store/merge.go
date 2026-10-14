@@ -434,7 +434,8 @@ func refuseLiveWork(ctx context.Context, tx *sql.Tx, a, b domain.MemberID) error
 		return err
 	}
 	deliveries, err := queryStrings(ctx, tx, `SELECT id FROM integration_candidates
-		WHERE json_extract(payload, '$.delivery_request.state') IN ('approved', 'delivering')
+		WHERE state NOT IN ('deleting', 'expired')
+		AND json_extract(payload, '$.delivery_request.state') IN ('approved', 'delivering')
 		AND json_extract(payload, '$.delivery_request.decided_by') IN (?1, ?2) ORDER BY id`, a, b)
 	if err != nil {
 		return err

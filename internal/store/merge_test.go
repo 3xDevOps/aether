@@ -421,6 +421,10 @@ func TestPlanMergeRefusals(t *testing.T) {
 	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, "approved deliveries of candidates cand-1") {
 		t.Fatalf("approved delivery = %v", err)
 	}
+	mustExec(t, db, `UPDATE integration_candidates SET state = 'expired'`)
+	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); err != nil {
+		t.Fatalf("approved delivery of a deleted candidate = %v, want no refusal", err)
+	}
 	mustExec(t, db, `DELETE FROM integration_candidates`)
 	plan, err := db.PlanMerge(ctx, "code", b.ID, "", now)
 	if err != nil {
