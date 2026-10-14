@@ -210,14 +210,23 @@ func restoreInvite(dir, code string, rec inviteRecord) error {
 	return os.WriteFile(invitePath(dir, code), append(body, '\n'), 0o600)
 }
 
-// revokeInvitesBy deletes the open invite codes any of issuers minted.
-func revokeInvitesBy(dir string, issuers ...domain.MemberID) error {
+// revokeInvitesBy deletes the open invite codes any of issuers minted and
+// returns how to put them back.
+func revokeInvitesBy(dir string, issuers ...domain.MemberID) (func(), error) {
+	revoked := map[string]inviteRecord{}
+	undo := func() {
+		for code, rec := range revoked {
+			if err := restoreInvite(dir, code, rec); err != nil {
+				slog.Error("sshd: put back an invite code a failed merge revoked", "error", err)
+			}
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return undo, nil
 	}
 	if err != nil {
-		return fmt.Errorf("sshd: list invites: %w", err)
+		return undo, fmt.Errorf("sshd: list invites: %w", err)
 	}
 	for _, e := range entries {
 		rec, lerr := loadInvite(dir, e.Name())
@@ -225,8 +234,9 @@ func revokeInvitesBy(dir string, issuers ...domain.MemberID) error {
 			continue
 		}
 		if berr := burnInvite(dir, e.Name()); berr != nil && !errors.Is(berr, os.ErrNotExist) {
-			return fmt.Errorf("sshd: revoke invite: %w", berr)
+			return undo, fmt.Errorf("sshd: revoke invite: %w", berr)
 		}
+		revoked[e.Name()] = rec
 	}
-	return nil
+	return undo, nil
 }

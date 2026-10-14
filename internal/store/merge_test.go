@@ -280,13 +280,17 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 }
 
-// A merge that fails after the absorbed member's home was moved puts the
-// home back and changes no row.
+// A merge that fails after the absorbed member's home was moved and the
+// demoted admin's codes revoked puts both back and changes no row.
 func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	a := mustCreateMember(t, db)
+	a.Role = domain.RoleAdmin
+	if err := db.UpdateMember(ctx, a); err != nil {
+		t.Fatal(err)
+	}
 	b := &domain.Member{DisplayName: "B", TailnetLogin: "b@", Color: "#3cb44b", Role: domain.RoleCollaborator}
 	admin := &domain.Member{DisplayName: "Root", TailnetLogin: "root@", Color: "#ffe119", Role: domain.RoleAdmin}
 	for _, m := range []*domain.Member{b, admin} {
@@ -306,14 +310,19 @@ func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, db, `CREATE TRIGGER fail_merge BEFORE INSERT ON member_merges BEGIN SELECT RAISE(ABORT, 'injected'); END`)
-	moved, restored := false, false
+	var moved, restored, revoked, reinstated bool
 	_, err = db.AcceptMerge(ctx, MergeAccept{ProposalID: pm.ProposalID, Caller: a.ID, Digest: plan.Digest, Now: now,
 		Archive: func(string, domain.MemberID) (string, func(), error) {
 			moved = true
 			return "/merged/x", func() { restored = true }, nil
+		},
+		Demoted: func(domain.MemberID, domain.MemberID) (func(), error) {
+			revoked = true
+			return func() { reinstated = true }, nil
 		}})
-	if err == nil || !moved || !restored {
-		t.Fatalf("AcceptMerge = %v, home moved %v, restored %v; want a failure that puts the home back", err, moved, restored)
+	if err == nil || !moved || !restored || !revoked || !reinstated {
+		t.Fatalf("AcceptMerge = %v; home moved %v, restored %v; codes revoked %v, reinstated %v; want a failure that undoes both",
+			err, moved, restored, revoked, reinstated)
 	}
 	if m, err := db.GetMember(ctx, b.ID); err != nil || m.ID != b.ID || m.TailnetLogin != "b@" {
 		t.Fatalf("absorbed member after the failed merge = %+v, %v", m, err)
