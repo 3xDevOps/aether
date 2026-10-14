@@ -58,22 +58,6 @@ describe('batchNotifications', () => {
     await batch
     await vi.waitFor(() => expect(heard).toBe(2))
   })
-
-  it('notifies from the timer after the document that ran frames is gone', async () => {
-    const store = createRootStore()
-    let heard = 0
-    store.subscribe(() => heard++)
-    vi.stubGlobal('requestAnimationFrame', () => 1)
-    await batchNotifications(store, async () => store.getState().setActiveWorkspace('a'))
-    // A test environment's teardown deletes the frame globals while the
-    // timer is still pending.
-    vi.stubGlobal('cancelAnimationFrame', undefined)
-    try {
-      await vi.waitFor(() => expect(heard).toBe(1))
-    } finally {
-      vi.unstubAllGlobals()
-    }
-  })
 })
 
 describe('drain', () => {

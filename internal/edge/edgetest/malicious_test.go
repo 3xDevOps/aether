@@ -89,15 +89,16 @@ func sameKeys(a, b map[string]string) bool {
 // after its control channel closed. The proxy records the edge's Ready
 // before passing it on, and a server reading anything else in its place
 // drops the channel, so enrolled means the server's first message after
-// Ready.
+// Ready. Hello is the only message the server sends before Ready.
 func (h *harness) reenrolled(t *testing.T, s *serverNode, from int) {
 	t.Helper()
-	var ready *controlLink
-	h.proxy.await(t, "server "+s.id+" enrolled again", from, func(e logEntry) bool {
-		if r, ok := e.msg.(edgeproto.Ready); ok && r.ServerID == s.id {
-			ready = e.link
-		}
-		return !e.fromEdge && ready != nil && e.link == ready
+	ready := h.proxy.await(t, "server "+s.id+" enrolled again", from, func(e logEntry) bool {
+		r, ok := e.msg.(edgeproto.Ready)
+		return ok && r.ServerID == s.id
+	})
+	h.proxy.await(t, "server "+s.id+" past ready", from, func(e logEntry) bool {
+		_, hello := e.msg.(edgeproto.Hello)
+		return !e.fromEdge && !hello && e.link == ready.link
 	})
 }
 

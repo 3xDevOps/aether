@@ -743,7 +743,7 @@ func TestIntegrationMissionCompositionInDocker(t *testing.T) {
 	attB.waitOutput(t, "fixture-acked:")
 	// The server closes a worker's run once its report is accepted, so the
 	// durable submissions, not later output, show that both reported.
-	shown := waitMissionSubmissions(ctx, t, adaCtrl, missionID, 2)
+	shown := waitMissionSubmissions(ctx, t, adaCtrl, missionID, 2, attA, attB)
 	if len(shown.Submissions) != 2 {
 		t.Fatalf("mission submissions = %d, want two retained submissions", len(shown.Submissions))
 	}
@@ -999,7 +999,7 @@ func waitMissionVerification(ctx context.Context, t *testing.T, runID string, ca
 	return candidate
 }
 
-func waitMissionSubmissions(ctx context.Context, t *testing.T, ctrl *protocol.Client, missionID string, want int) protocol.MissionShowResult {
+func waitMissionSubmissions(ctx context.Context, t *testing.T, ctrl *protocol.Client, missionID string, want int, workers ...*attachConn) protocol.MissionShowResult {
 	t.Helper()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -1008,9 +1008,16 @@ func waitMissionSubmissions(ctx context.Context, t *testing.T, ctrl *protocol.Cl
 		if err := ctrl.Call(protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: missionID}, &shown); err == nil && len(shown.Submissions) >= want {
 			return shown
 		}
+		outputs := make([]string, len(workers))
+		for i, w := range workers {
+			outputs[i] = w.output()
+			if strings.Contains(outputs[i], "fixture-report-failed:") {
+				t.Fatalf("worker report failed; output %q", outputs[i])
+			}
+		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for %d durable mission submissions", want)
+			t.Fatalf("timed out waiting for %d durable mission submissions; worker output %q", want, outputs)
 		case <-ticker.C:
 		}
 	}

@@ -50,7 +50,7 @@ export function batched<
       const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(flush) : null
       cancelFrame = () => {
         clearTimeout(timer)
-        if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
+        if (frame !== null) cancelAnimationFrame(frame)
       }
     }
 
