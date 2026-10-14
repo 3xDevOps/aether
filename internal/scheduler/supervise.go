@@ -634,9 +634,13 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			if released && (e.agentReport.State == agentstatus.Idle || e.idleShown) {
 				released = e.unparks(activity, s.cfg.turnTail)
 			}
+			limit := s.cfg.StallThreshold
+			if heldByTasks(e.agentReport) {
+				limit *= heldStallFactor
+			}
 			var err error
 			switch {
-			case e.status == domain.RunRunning && idle > stallLimit(e.agentReport, s.cfg.StallThreshold):
+			case e.status == domain.RunRunning && idle > limit:
 				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the
@@ -653,7 +657,14 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				// a restart must not resurrect the report this clears.
 				old := e.sidecar()
 				oldParked, oldActivity := e.parkedAt, e.postParkActivity
-				e.agentReport = agentstatus.Report{}
+				reason := "activity resumed"
+				if heldByTasks(e.agentReport) {
+					// The tasks still run, and the session sends no new
+					// state for them.
+					reason = e.agentReport.Reason
+				} else {
+					e.agentReport = agentstatus.Report{}
+				}
 				e.parkedAt, e.postParkActivity = time.Time{}, time.Time{}
 				if e.idleShown {
 					e.idleReason, e.idleShown = "", false
@@ -661,7 +672,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				err = s.writeSidecar(e.sidecar())
 				if err == nil {
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunRunning,
-						"activity resumed", "")
+						reason, "")
 				}
 				if err != nil {
 					e.agentReport = old.agentReport()

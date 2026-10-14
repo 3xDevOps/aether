@@ -910,7 +910,9 @@ agent's reporter past `--stall-threshold` parks a live run at
 `needs-attention` with a reason that leads with `stalled:`. This is the hang
 detector: it catches an agent that said it was working and then wedged, and
 it is the only signal at all for an agent that cannot report. An Enhanced
-run waiting for Claude background tasks is exempt until they end. Genuine
+run waiting for Claude background tasks parks only after three times
+`--stall-threshold`, and returns to `running` with its background reason
+when the agent sends something again. Genuine
 agent output or a file change returns such a run to `running`;
 server-written message echoes do not.
 

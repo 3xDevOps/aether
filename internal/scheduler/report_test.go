@@ -463,7 +463,7 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				cfg.PollInterval = 20 * time.Millisecond
 			})
 			e.startStalls(t)
-			run, _ := e.launchReporting(t)
+			run, c := e.launchReporting(t)
 			if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, Reason: tc.reason}); err != nil {
 				t.Fatalf("report working: %v", err)
 			}
@@ -481,6 +481,17 @@ func TestBackgroundTasksHoldARunAgainstTheStallDetector(t *testing.T) {
 				t.Fatalf("run = %+v, %v; want running past the stall threshold", r, err)
 			}
 			waitFor(t, "the run to stall after the stretched limit", stalled)
+
+			stop := pump(t, c)
+			waitFor(t, "activity to resume the run with its tasks", func() bool {
+				r, err := e.db.GetRun(t.Context(), run.ID)
+				return err == nil && r.Status == domain.RunRunning && r.Reason == tc.reason
+			})
+			stop()
+			time.Sleep(2 * threshold)
+			if stalled() {
+				t.Fatal("the resumed run stalled at the plain threshold while its tasks still run")
+			}
 		})
 	}
 }

@@ -51,13 +51,9 @@ func backgroundWork(report agentstatus.Report) bool {
 // them.
 const heldStallFactor = 3
 
-// stallLimit is how long a run whose agent last reported report may go with
-// no activity before it parks stalled.
-func stallLimit(report agentstatus.Report, threshold time.Duration) time.Duration {
-	if backgroundWork(report) && report.Reason != acpBackgroundReason {
-		return heldStallFactor * threshold
-	}
-	return threshold
+// heldByTasks reports whether background tasks the run waits for are live.
+func heldByTasks(report agentstatus.Report) bool {
+	return backgroundWork(report) && report.Reason != acpBackgroundReason
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
