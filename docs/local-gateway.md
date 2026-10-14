@@ -1464,8 +1464,11 @@ does, with the same files in the config directory:
   and asks for a confirmation; a server id typed from the admin links
   without one.
 - `edge.link` and `edge.claim` save the link and swap the gateway connection
-  in place, as `link.apply` does; under `aether gui --server <name>` the
-  change is saved into that named profile. They move the clone's `aether`
+  in place, as `link.apply` does; under `aether gui --server <name>` a link
+  to the same server (same address or server id) is saved into that named
+  profile, and a link to another server is added as a new named link, called
+  `name`, else the server id or address (suffixed `-2`, `-3` when taken), and
+  becomes `gui_server`. No existing link changes. They move the clone's `aether`
   remote from the previous git host to the new one, and report a remote
   that could not be moved as `remote_error` without failing the call. `server_id` must be a server id, and the
   server's SSH host key is checked against it before anything is sent.

@@ -347,3 +347,44 @@ func TestEdgeLinkUnderAnotherNameOnANamedProfileSavesBoth(t *testing.T) {
 		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
 	}
 }
+
+func TestLinkingAnotherServerFromANamedProfileAddsALink(t *testing.T) {
+	useTempConfigDir(t)
+	initial := cli.Config{
+		Addr: "default:2222",
+		User: "alice",
+		Links: []cli.NamedLink{
+			{Name: "work", Addr: "work:2222", User: "bob"},
+			{Name: "ab", Addr: "old:2222", ServerID: "other"},
+		},
+	}
+	saveConfigAt(t, initial, time.Unix(1_700_000_000, 0))
+	selected, ok := initial.Named("work")
+	if !ok {
+		t.Fatal("initial named link missing")
+	}
+	backend := &switchBackend{}
+	g := newVerbGateway(t, backend, selected)
+	linked := cli.Config{Addr: "new:2222", User: "carol", EdgeURL: "https://edge.example", ServerID: "ab"}
+	if perr := g.adoptLink(cli.LinkResult{Config: linked}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+
+	reloaded, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Addr != initial.Addr || reloaded.User != initial.User || reloaded.GUIServer != "ab-2" {
+		t.Fatalf("default link = %+v, want it unchanged and gui_server ab-2", reloaded)
+	}
+	want := append(slices.Clone(initial.Links), cli.NamedLink{Name: "ab-2", Addr: "new:2222", User: "carol", AutoKey: true, EdgeURL: linked.EdgeURL, ServerID: "ab"})
+	if !slices.Equal(reloaded.Links, want) {
+		t.Fatalf("saved links = %+v, want %+v", reloaded.Links, want)
+	}
+	if got := g.local.snapshot(); got.Active != "ab-2" || got.Addr != "new:2222" {
+		t.Fatalf("cached link = %+v, want ab-2 active", got)
+	}
+	if len(backend.relinked) != 1 || backend.relinked[0].Active != "ab-2" {
+		t.Fatalf("relinked = %+v, want the new link", backend.relinked)
+	}
+}

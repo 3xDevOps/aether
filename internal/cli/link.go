@@ -115,6 +115,9 @@ func linkConfig(cfg, prev Config, name string) Config {
 	return UpsertLink(cfg, namedLink(name, cfg))
 }
 
+// NamedLinkFor is the saved link a named profile keeps for cfg.
+func NamedLinkFor(name string, cfg Config) NamedLink { return namedLink(name, cfg) }
+
 func namedLink(name string, cfg Config) NamedLink {
 	return NamedLink{
 		Name:       name,

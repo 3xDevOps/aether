@@ -291,6 +291,9 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 // profile: its top-level fields are the profile's overlay, not the
 // default link. A requested profile of another name is saved beside it.
 func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.Error {
+	if prev := g.local.snapshot(); prev.Active != "" && !sameServer(prev, result.Config) {
+		return g.addLink(result, requested)
+	}
 	saved := result.Config
 	if name := saved.Active; name != "" {
 		var err error
@@ -321,6 +324,48 @@ func (g *Gateway) adoptLink(result cli.LinkResult, requested string) *protocol.E
 	g.local.cacheConfig(result.Config)
 	g.local.mu.Unlock()
 	g.cfg.Backend.Relink(result.Config, result.Conn)
+	return nil
+}
+
+func sameServer(a, b cli.Config) bool {
+	if a.ServerID != "" && a.ServerID == b.ServerID {
+		return true
+	}
+	return a.Addr != "" && a.Addr == b.Addr
+}
+
+// addLink saves a server linked from a named profile as a link of its own
+// and moves the gateway onto it, so no existing link changes. A server
+// that is already saved keeps its name; otherwise the link is named
+// requested, else its server id or address, made unique.
+func (g *Gateway) addLink(result cli.LinkResult, requested string) *protocol.Error {
+	saved, err := cli.Load()
+	if err != nil {
+		_ = result.Conn.Close()
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "load link config: " + err.Error()}
+	}
+	name := cmp.Or(requested, result.Config.ServerID, result.Config.Addr)
+	if i := slices.IndexFunc(saved.Links, func(l cli.NamedLink) bool {
+		return (l.ServerID != "" && l.ServerID == result.Config.ServerID) || (l.ServerID == "" && l.Addr == result.Config.Addr)
+	}); i >= 0 {
+		name = saved.Links[i].Name
+	} else {
+		base := name
+		for n := 2; slices.ContainsFunc(saved.Links, func(l cli.NamedLink) bool { return l.Name == name }); n++ {
+			name = fmt.Sprintf("%s-%d", base, n)
+		}
+	}
+	saved = cli.UpsertLink(saved, cli.NamedLinkFor(name, result.Config))
+	saved.GUIServer = name
+	if err := cli.Save(saved); err != nil {
+		_ = result.Conn.Close()
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "save link config: " + err.Error()}
+	}
+	target, _ := saved.Named(name)
+	g.local.mu.Lock()
+	g.local.cacheConfig(target)
+	g.cfg.Backend.Relink(target, result.Conn)
+	g.local.mu.Unlock()
 	return nil
 }
 

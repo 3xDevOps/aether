@@ -939,8 +939,8 @@ place and the dashboard reloads. **Link another server** opens onboarding's
 Connect step with the edge server picker, and works while the default server
 is offline. From the default, a newly linked edge server becomes the default
 and the previous edge default stays as a saved server named by its server id.
-From a named server, the link is saved into that server and the default is
-untouched. The app starts on the server you last switched to
+From a named server, the new server is added as another saved server, named
+by its server id, and no existing server changes. The app starts on the server you last switched to
 (`gui_server` in `config.json`). Port forwarding is not offered on the phone:
 a forward listens on `127.0.0.1`, which every app on the phone can reach.
 
