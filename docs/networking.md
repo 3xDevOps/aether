@@ -329,8 +329,10 @@ A notification goes to a run's owner when the run starts needing them:
 | asks for a permission | `Permission: <action>`, or `Permission requested` |
 | asks a question | `Question from the agent` |
 | ends its turn and waits | `Waiting for your reply`, `Agent idle`, or `No activity` after a stall |
+| ends an Enhanced turn another way | `Turn cancelled`, `Turn interrupted`, or `Stopped: <stop reason>` |
 | reports that it is blocked | `Blocked: <summary>` |
-| loses its Enhanced session | `Enhanced unavailable: <error>` |
+| asks you with `report --outcome needs-input` | the question |
+| loses its Enhanced session | `Enhanced could not start: <error>`, `Agent disconnected: <cause>`, or `Turn failed: <error>` |
 | reports a result | `Agent reported success, review the result`, `Finished, review the result` or `Failed, review the result` |
 
 These are the owner's **Needs you** reasons that depend on the run alone
