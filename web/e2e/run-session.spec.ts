@@ -107,17 +107,17 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await box.fill('hold in background')
   await box.press('Enter')
   await expect(log.getByText('started', { exact: true })).toBeVisible()
-  await expect(runs.getByText('Working in background: 1 task')).toBeVisible()
+  await expect(runs.getByRole('button', { name: /^Working · .* · Working in background: 1 task/ })).toBeVisible()
   await expect(header.getByText('Working in background: 1 task')).toBeVisible()
   // Past acpmock's 2 s BackgroundDelay, the held task still keeps the run working.
   await page.waitForTimeout(3_000)
   expect(await status()).toMatchObject({ status: 'running', reason: 'working in background: 1 task' })
-  await expect(runs.getByText('Needs you', { exact: true })).toHaveCount(0)
+  await expect(runs.getByRole('button', { name: /^Needs you/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Stop waiting for background work' })).toBeVisible()
 
   runCoordCLI(run.id, ['report', '--outcome', 'needs-input', '--summary', 'Which port should the server use?', '--idempotency-key', 'held-question'])
   await expect(header.getByText('Agent asks: Which port should the server use?')).toBeVisible({ timeout: 30_000 })
-  await expect(runs.getByText('Agent asks: Which port should the server use?')).toBeVisible()
+  await expect(runs.getByRole('button', { name: /^Needs you · .* · Agent asks: Which port should the server use\?/ })).toBeVisible()
 
   const released = Math.max(0, ...(await statuses()).map((event) => event.seq))
   await box.fill('release background')
