@@ -16,7 +16,8 @@ ghcr.io/3xdevops/aether-standard:<tag>
 
 The standard image is based on Ubuntu 24.04; its packages and toolchains are
 defined in [`images/standard/Dockerfile`](../images/standard/Dockerfile).
-It includes bash, build-essential, certificates, curl, findutils, Ubuntu's
+It includes bash, build-essential, certificates, curl, Docker (`docker.io`,
+`docker-compose-v2` and `docker-buildx` from Ubuntu), findutils, Ubuntu's
 distribution Git, the GitHub CLI, GnuPG, grep, jq, the OpenSSH client, pkg-config,
 Python 3 with venv, ripgrep, sudo, unzip, Go, Node and npm via fnm, uv, and Rust
 via rustup. Git uses the normal Ubuntu package, not a custom source build,
@@ -267,6 +268,95 @@ available to runs or a replacement terminal.
 
 The workspace's setup script and variables still apply to runs; see
 [Workspace environment](#workspace-environment).
+
+## Docker inside runs
+
+The standard image ships the `docker` CLI, `dockerd`, `docker compose` and
+`docker buildx`. On a server host that has the [Sysbox](https://github.com/nestybox/sysbox)
+container runtime, each run and each Environment terminal starts its own
+`dockerd` before the agent, login shell or setup script. The daemon runs
+inside the container, so it needs no `--privileged` and no host Docker
+socket. `docker run`, `docker build` and `docker compose up` work in a run
+as they do on a laptop.
+
+Install Sysbox once on the server host (Ubuntu or Debian, amd64 or arm64,
+Linux 5.19 or newer or a kernel with the `shiftfs` module, Docker already
+running):
+
+```sh
+sudo sh scripts/install-sysbox.sh
+# or, without a checkout:
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install-sysbox.sh | sudo sh
+sudo systemctl restart aether-server
+```
+
+The script downloads Sysbox CE 0.7.1, verifies its pinned SHA-256, installs
+the package and checks that `docker info` lists `sysbox-runc`. It exits 0
+without changes when that version is already installed.
+
+Sysbox's installer refuses to run while any container exists, stopped ones
+included, if it must restart Docker, and it must when `/etc/docker/daemon.json`
+lacks `bip` or `default-address-pools`. The script therefore adds a missing
+or empty key itself, keeping the other keys: `"bip": "172.20.0.1/16"` and
+`"default-address-pools": [{"base": "172.25.0.0/16", "size": 24}]`. It creates
+the file as `{}` if it is missing. If either range overlaps a route or
+address on the host, the script stops without changing the file; set that key to a free range
+yourself and run it again. The script does not restart Docker and running
+containers keep running; Docker applies the new keys at its next restart.
+
+The script ends by pulling `busybox:1.36` and running it with
+`--runtime sysbox-runc -u 1000:1000` against a host directory owned by
+1000:1000. It fails with "bind mounts are not ID-mapped on this host" only if
+the container user cannot write the directory; a pull or start failure reports
+Docker's own error.
+
+The server picks its container runtime once, at first use, from
+`--container-runtime` (config key `container-runtime`):
+
+| Value | Meaning |
+| --- | --- |
+| `auto` (default) | `sysbox-runc` when Docker reports it registered, otherwise the daemon default. |
+| `runc` | Never use Sysbox; Docker stays unavailable inside runs. |
+| any other name | That runtime exactly, as registered in Docker. |
+
+```sh
+sudo aether-server config set container-runtime runc   # opt out
+sudo systemctl restart aether-server
+```
+
+Run containers, Environment terminals and candidate verification containers
+use the runtime. The browser companion and the server's short-lived utility
+containers stay on the daemon default.
+
+Things to know:
+
+- If `dockerd` cannot start, the launch fails with the daemon's log tail:
+  `runtime: dockerd did not become ready (exit 1): <last lines of the log>`.
+  The full log is `/var/log/aether-dockerd.log` in the container. An image
+  without `dockerd` skips the step silently.
+- Sysbox keeps the container's `/var/lib/docker` in a host directory under
+  `/var/lib/sysbox` and removes it with the container. Inner images,
+  containers and volumes are discarded with it, and `aether env save` does
+  not keep them. Pull or build again in each run, or bake what you need into
+  the image. Admission's free-space floor covers that directory when
+  `/var/lib/sysbox` shares a filesystem with Docker's data root.
+- A port published by an inner container is on the run's own network
+  namespace, not the host's. Reach it from the run at `127.0.0.1`; the
+  run's browser companion opens it at `127.0.0.1` as well.
+- Existing containers keep the runtime they were created with. After
+  installing Sysbox and restarting `aether-server`, new runs and new
+  Environment terminals get Docker; close and reopen an Environment
+  terminal that is already open.
+- A saved member image that predates Docker in the standard image has no
+  Docker CLI. In the Environment terminal run
+  `sudo apt-get install -y docker.io docker-compose-v2 docker-buildx` then
+  `aether env save`, or `aether env reset` to return to the standard image.
+- Without Sysbox the CLI is present but has no daemon:
+  `Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?`
+
+How the boundary differs is in [security.md](security.md#the-agent-container).
+Running Aether's own test suites from inside a run is in
+[testing.md](testing.md#running-the-docker-suites-inside-a-run).
 
 ## Save the environment
 

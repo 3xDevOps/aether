@@ -188,6 +188,7 @@ test-e2e: build
 # loopback when one is installed, and skips otherwise.
 test-scripts:
 	sh scripts/install-test.sh
+	sh scripts/install-sysbox-test.sh
 	sh scripts/deploy-test.sh
 	sh scripts/publish-release-test.sh
 	sh scripts/release-ci-check-test.sh

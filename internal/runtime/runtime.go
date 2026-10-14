@@ -116,6 +116,10 @@ type Spec struct {
 	// metadata - like Env it is visible to anyone who can inspect the
 	// container, so it must not embed secrets.
 	SetupScript string
+	// NestedDocker runs the container under the configured OCI runtime and,
+	// when that is sysbox-runc, starts dockerd inside it before the main
+	// process, so the image's docker CLI works without the host socket.
+	NestedDocker bool
 	// SecretEnv names the Env entries whose values are masked wherever the
 	// setup script's output is logged or returned.
 	SecretEnv []string

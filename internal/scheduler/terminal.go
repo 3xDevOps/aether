@@ -205,6 +205,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		CPULimit:         s.cfg.RunCPULimit,
 		MemoryLimitBytes: s.cfg.RunMemoryBytes,
 		PidsLimit:        s.cfg.RunPidsLimit,
+		NestedDocker:     true,
 	}
 	cid, err = s.createAndStartTerminal(ctx, spec)
 	if err != nil {

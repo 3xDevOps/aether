@@ -41,11 +41,14 @@ func TestNewDockerDefaults(t *testing.T) {
 
 func TestNewDockerOptions(t *testing.T) {
 	labels := map[string]string{"aether.session": "s1"}
-	d, err := NewDocker(WithNamePrefix("custom-"), WithLabels(labels), WithNetworkMode("none"))
+	d, err := NewDocker(WithNamePrefix("custom-"), WithLabels(labels), WithNetworkMode("none"), WithContainerRuntime("runc"))
 	if err != nil {
 		t.Fatalf("NewDocker() error: %v", err)
 	}
 	defer func() { _ = d.Close() }()
+	if d.containerRuntime != "runc" {
+		t.Errorf("containerRuntime = %q, want %q", d.containerRuntime, "runc")
+	}
 	if d.namePrefix != "custom-" {
 		t.Errorf("namePrefix = %q, want %q", d.namePrefix, "custom-")
 	}
@@ -181,7 +184,7 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	}
 	spec := validSpec()
 	spec.SetupScript = ""
-	cfg, hostCfg := d.containerConfig(spec)
+	cfg, hostCfg := d.containerConfig(spec, "")
 
 	if cfg.Image != spec.Image {
 		t.Errorf("Image = %q, want %q", cfg.Image, spec.Image)
@@ -208,8 +211,8 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	if cfg.Labels[labelManaged] != "true" || cfg.Labels["aether.session"] != "s1" {
 		t.Errorf("Labels = %v, want managed + runtime labels", cfg.Labels)
 	}
-	if _, ok := cfg.Labels[labelSetupScript]; ok {
-		t.Errorf("Labels = %v, setup label present without setup script", cfg.Labels)
+	if cfg.Labels[labelSetupScript] != "" {
+		t.Errorf("Labels = %v, setup label set without setup script", cfg.Labels)
 	}
 
 	if hostCfg.NetworkMode != "none" {
@@ -242,7 +245,7 @@ func TestContainerConfigPlumbing(t *testing.T) {
 func TestContainerConfigSetupGate(t *testing.T) {
 	d := &Docker{namePrefix: defaultNamePrefix}
 	spec := validSpec()
-	cfg, _ := d.containerConfig(spec)
+	cfg, _ := d.containerConfig(spec, "")
 
 	sentinel := cfg.Labels[labelSetupSentinel]
 	if !strings.HasPrefix(sentinel, setupSentinelPrefix) || len(sentinel) <= len(setupSentinelPrefix) {
@@ -258,7 +261,7 @@ func TestContainerConfigSetupGate(t *testing.T) {
 		t.Errorf("setup label = %q, want %q", cfg.Labels[labelSetupScript], spec.SetupScript)
 	}
 
-	cfg2, _ := d.containerConfig(spec)
+	cfg2, _ := d.containerConfig(spec, "")
 	if cfg2.Labels[labelSetupSentinel] == sentinel {
 		t.Error("sentinel path repeated across creates, want unguessable per-container path")
 	}
@@ -269,7 +272,7 @@ func TestSetupOutputMasksSecretEnv(t *testing.T) {
 	spec := validSpec()
 	spec.Env = map[string]string{"TOKEN": "abc", "LONG_TOKEN": "abc-and-more", "MODE": "plain", "EMPTY": ""}
 	spec.SecretEnv = []string{"TOKEN", "LONG_TOKEN", "EMPTY"}
-	cfg, _ := d.containerConfig(spec)
+	cfg, _ := d.containerConfig(spec, "")
 
 	secrets := secretEnvValues(cfg.Labels[labelSecretEnv], cfg.Env)
 	got := setupOutput("+ curl -H abc-and-more\nmode plain, token abc\n", false, secrets)
@@ -278,7 +281,7 @@ func TestSetupOutputMasksSecretEnv(t *testing.T) {
 	}
 
 	spec.SetupScript = ""
-	if cfg, _ := d.containerConfig(spec); cfg.Labels[labelSecretEnv] != "" {
+	if cfg, _ := d.containerConfig(spec, ""); cfg.Labels[labelSecretEnv] != "" {
 		t.Errorf("secret label = %q without a setup script, want none", cfg.Labels[labelSecretEnv])
 	}
 }
@@ -326,7 +329,7 @@ func TestContainerConfigTTY(t *testing.T) {
 	d := &Docker{namePrefix: defaultNamePrefix}
 	spec := validSpec()
 	spec.TTY = true
-	cfg, _ := d.containerConfig(spec)
+	cfg, _ := d.containerConfig(spec, "")
 	if !cfg.Tty {
 		t.Error("Tty = false, want true with Spec.TTY")
 	}
@@ -341,7 +344,7 @@ func TestResizeWithoutTTYFails(t *testing.T) {
 
 func TestContainerConfigNoMountNoLimits(t *testing.T) {
 	d := &Docker{namePrefix: defaultNamePrefix}
-	cfg, hostCfg := d.containerConfig(Spec{Image: "busybox", Command: []string{"true"}})
+	cfg, hostCfg := d.containerConfig(Spec{Image: "busybox", Command: []string{"true"}}, "")
 	if len(hostCfg.Mounts) != 0 {
 		t.Errorf("Mounts = %v, want none", hostCfg.Mounts)
 	}
@@ -529,7 +532,7 @@ func TestContainerConfigUserAndCreationKey(t *testing.T) {
 	spec := validSpec()
 	spec.User = "1000:1000"
 	spec.CreationKey = "run_42"
-	cfg, _ := d.containerConfig(spec)
+	cfg, _ := d.containerConfig(spec, "")
 	if cfg.User != "1000:1000" {
 		t.Errorf("User = %q, want 1000:1000", cfg.User)
 	}
@@ -537,7 +540,7 @@ func TestContainerConfigUserAndCreationKey(t *testing.T) {
 		t.Errorf("creation-key label = %q, want run_42", cfg.Labels[labelCreationKey])
 	}
 
-	cfg, _ = d.containerConfig(validSpec())
+	cfg, _ = d.containerConfig(validSpec(), "")
 	if cfg.User != "" {
 		t.Errorf("User = %q, want empty (image default)", cfg.User)
 	}
@@ -553,7 +556,7 @@ func TestContainerConfigAdditionalMounts(t *testing.T) {
 		{HostPath: "/srv/aether/homes/m1/claude/root/.claude", ContainerPath: "/root/.claude"},
 		{HostPath: "/srv/aether/profiles/m1", ContainerPath: "/opt/profile", ReadOnly: true},
 	}
-	_, hostCfg := d.containerConfig(spec)
+	_, hostCfg := d.containerConfig(spec, "")
 	if len(hostCfg.Mounts) != 3 {
 		t.Fatalf("Mounts = %v, want worktree + 2 additional", hostCfg.Mounts)
 	}
@@ -584,7 +587,7 @@ func TestContainerConfigSubpathMount(t *testing.T) {
 		{HostPath: "/srv/aether/homes/m1", ContainerPath: "/root"},
 		{HostPath: "/srv/aether/homes/m2", Subpath: ".claude/.credentials.json", ContainerPath: "/root/.claude/.credentials.json"},
 	}
-	_, hostCfg := d.containerConfig(spec)
+	_, hostCfg := d.containerConfig(spec, "")
 	if len(hostCfg.Mounts) != 3 {
 		t.Fatalf("Mounts = %v, want worktree + 2 additional", hostCfg.Mounts)
 	}

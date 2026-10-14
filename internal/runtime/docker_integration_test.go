@@ -65,7 +65,7 @@ func createContainerWithoutInit(t *testing.T, d *Docker, spec Spec) ID {
 			t.Fatalf("pull image %s: %v", spec.Image, err)
 		}
 	}
-	cfg, hostCfg := d.containerConfig(spec)
+	cfg, hostCfg := d.containerConfig(spec, "")
 	initDisabled := false
 	hostCfg.Init = &initDisabled
 	resp, err := d.cli.ContainerCreate(t.Context(), client.ContainerCreateOptions{Config: cfg, HostConfig: hostCfg, Name: d.namePrefix + spec.Name})

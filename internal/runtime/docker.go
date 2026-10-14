@@ -33,11 +33,18 @@ const (
 	labelManaged       = "aether.managed"
 	labelSetupScript   = "aether.setup-script"
 	labelSetupSentinel = "aether.setup-sentinel"
+	labelNestedDocker  = "aether.nested-docker"
 	// labelSecretEnv holds Spec.SecretEnv, the names only, as a JSON array.
 	labelSecretEnv = "aether.secret-env"
 	// labelCreationKey persists Spec.CreationKey so FindByCreationKey can
 	// recover a container created before its ID was persisted.
 	labelCreationKey = "aether.creation-key"
+
+	// RuntimeAuto picks sysbox-runc when the daemon has it registered.
+	RuntimeAuto   = "auto"
+	runtimeSysbox = "sysbox-runc"
+
+	dockerdStartTimeout = 60 * time.Second
 
 	// The suffix is random per Create so neither image contents nor
 	// container processes can pre-release the setup gate.
@@ -66,6 +73,10 @@ type Docker struct {
 	namePrefix  string
 	labels      map[string]string
 	networkMode string
+
+	containerRuntime string
+	runtimeMu        sync.Mutex
+	autoRuntime      *string
 }
 
 var _ Runtime = (*Docker)(nil)
@@ -84,6 +95,14 @@ func WithLabels(labels map[string]string) DockerOption {
 // WithNetworkMode: empty means the daemon default.
 func WithNetworkMode(mode string) DockerOption {
 	return func(d *Docker) { d.networkMode = mode }
+}
+
+// WithContainerRuntime selects the OCI runtime of containers whose Spec sets
+// NestedDocker: RuntimeAuto uses sysbox-runc when the daemon has it
+// registered, any other name is used as given, and empty means the daemon
+// default.
+func WithContainerRuntime(name string) DockerOption {
+	return func(d *Docker) { d.containerRuntime = name }
 }
 
 // NewDocker connects lazily: daemon reachability surfaces on first use.
@@ -117,7 +136,14 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 			return "", err
 		}
 	}
-	cfg, hostCfg := d.containerConfig(spec)
+	var containerRuntime string
+	if spec.NestedDocker {
+		var err error
+		if containerRuntime, err = d.resolveRuntime(ctx); err != nil {
+			return "", err
+		}
+	}
+	cfg, hostCfg := d.containerConfig(spec, containerRuntime)
 	var name string
 	if spec.Name != "" {
 		name = d.namePrefix + spec.Name
@@ -156,9 +182,31 @@ func (d *Docker) pull(ctx context.Context, ref string) error {
 	return nil
 }
 
+// resolveRuntime caches only a successful lookup of the daemon's runtimes.
+func (d *Docker) resolveRuntime(ctx context.Context) (string, error) {
+	if d.containerRuntime != RuntimeAuto {
+		return d.containerRuntime, nil
+	}
+	d.runtimeMu.Lock()
+	defer d.runtimeMu.Unlock()
+	if d.autoRuntime == nil {
+		info, err := d.cli.Info(ctx, client.InfoOptions{})
+		if err != nil {
+			return "", fmt.Errorf("runtime: read docker runtimes: %w", err)
+		}
+		var name string
+		if _, ok := info.Info.Runtimes[runtimeSysbox]; ok {
+			name = runtimeSysbox
+		}
+		d.autoRuntime = &name
+	}
+	return *d.autoRuntime, nil
+}
+
 // containerConfig always overrides the entrypoint so Spec.Command is exactly
-// the main process; a setup script holds it behind gateEntrypoint.
-func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostConfig) {
+// the main process; a setup script or dockerd holds it behind gateEntrypoint.
+// containerRuntime is the resolved runtime of a NestedDocker spec.
+func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container.Config, *container.HostConfig) {
 	labels := map[string]string{labelManaged: "true"}
 	maps.Copy(labels, d.labels)
 
@@ -178,12 +226,24 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 	if spec.CreationKey != "" {
 		cfg.Labels[labelCreationKey] = spec.CreationKey
 	}
-	if spec.SetupScript != "" {
+	// A saved image carries these labels from the container it was committed
+	// from, and Docker merges image labels into new containers; empty values
+	// keep them from reaching a container that has no gate or dockerd.
+	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSecretEnv} {
+		cfg.Labels[key] = ""
+	}
+	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
+	if spec.SetupScript != "" || nestedDockerd {
 		sentinel := newSetupSentinel()
 		cfg.Entrypoint = gateEntrypoint(sentinel)
 		cfg.Cmd = spec.Command
-		cfg.Labels[labelSetupScript] = spec.SetupScript
 		cfg.Labels[labelSetupSentinel] = sentinel
+	}
+	if nestedDockerd {
+		cfg.Labels[labelNestedDocker] = "1"
+	}
+	if spec.SetupScript != "" {
+		cfg.Labels[labelSetupScript] = spec.SetupScript
 		if len(spec.SecretEnv) > 0 {
 			names, _ := json.Marshal(spec.SecretEnv)
 			cfg.Labels[labelSecretEnv] = string(names)
@@ -202,6 +262,9 @@ func (d *Docker) containerConfig(spec Spec) (*container.Config, *container.HostC
 			MemorySwap: spec.MemoryLimitBytes,
 		},
 		LogConfig: container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
+	}
+	if spec.NestedDocker {
+		hostCfg.Runtime = containerRuntime
 	}
 	if spec.PidsLimit > 0 {
 		pids := spec.PidsLimit
@@ -326,9 +389,9 @@ func nanoCPUs(cores float64) int64 {
 	return int64(math.Round(cores * 1e9))
 }
 
-// Start returns only after any setup script succeeded; a nonzero setup exit
-// kills the container. The sentinel on the container filesystem makes a
-// later Start skip the script.
+// Start returns only after dockerd (when the container nests Docker) and any
+// setup script succeeded; a failure kills the container. The sentinel on the
+// container filesystem makes a later Start skip the script.
 func (d *Docker) Start(ctx context.Context, id ID) error {
 	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
 	if err != nil {
@@ -347,13 +410,13 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 		}
 		return fmt.Errorf("runtime: start container: %w", err)
 	}
-	script := info.Container.Config.Labels[labelSetupScript]
-	if script == "" {
+	labels := info.Container.Config.Labels
+	sentinel := labels[labelSetupSentinel]
+	if sentinel == "" {
 		return nil
 	}
-	sentinel := info.Container.Config.Labels[labelSetupSentinel]
-	secrets := secretEnvValues(info.Container.Config.Labels[labelSecretEnv], info.Container.Config.Env)
-	if err := d.runSetup(ctx, id, script, sentinel, info.Container.Config.WorkingDir, secrets); err != nil {
+	secrets := secretEnvValues(labels[labelSecretEnv], info.Container.Config.Env)
+	if err := d.prepare(ctx, id, labels, sentinel, info.Container.Config.WorkingDir, info.Container.Config.User, secrets); err != nil {
 		// Never kill a run that was already live before this Start call: a
 		// redundant Start must not take down a healthy container.
 		if !wasRunning {
@@ -368,8 +431,77 @@ func (d *Docker) Start(ctx context.Context, id ID) error {
 	return nil
 }
 
+func (d *Docker) prepare(ctx context.Context, id ID, labels map[string]string, sentinel, workDir, user string, secrets []string) error {
+	if labels[labelNestedDocker] != "" {
+		if err := d.startDockerd(ctx, id, user); err != nil {
+			return err
+		}
+	}
+	if script := labels[labelSetupScript]; script != "" {
+		return d.runSetup(ctx, id, script, sentinel, workDir, secrets)
+	}
+	return d.releaseGate(ctx, id, sentinel)
+}
+
+// dockerdScript is idempotent: a redundant Start finds the daemon answering.
+// An image without dockerd has nothing to start. $1 is the container's user;
+// dockerd's socket group is that user's primary group, so the user can reach
+// it. The probes pin the socket because workspace variables may set
+// DOCKER_HOST. Pid and socket files left in a committed image are removed
+// only when no dockerd process is alive.
+const dockerdScript = `command -v dockerd >/dev/null 2>&1 && command -v docker >/dev/null 2>&1 || exit 0
+sock=unix:///var/run/docker.sock
+docker -H "$sock" version >/dev/null 2>&1 && exit 0
+user=${1%%:*}
+case "$1" in
+*:*) group=${1#*:} ;;
+*) group= ;;
+esac
+case "$user" in
+""|0|root) [ -n "$group" ] || group=0 ;;
+*) [ -n "$group" ] || group=$(id -g "$user" 2>/dev/null) || group=0 ;;
+esac
+alive=
+for comm in /proc/[0-9]*/comm; do
+	[ "$(cat "$comm" 2>/dev/null)" = dockerd ] && alive=1
+done
+[ -n "$alive" ] || rm -f /var/run/docker.pid /var/run/docker.sock /var/run/docker/containerd/containerd.pid /var/run/docker/containerd/containerd.sock
+set -- dockerd -H "$sock"
+set -- "$@" --group "$group"
+if command -v setsid >/dev/null 2>&1; then
+	setsid "$@" >>/var/log/aether-dockerd.log 2>&1 </dev/null &
+else
+	nohup "$@" >>/var/log/aether-dockerd.log 2>&1 </dev/null &
+fi
+pid=$!
+i=0
+while [ "$i" -lt 300 ]; do
+	docker -H "$sock" version >/dev/null 2>&1 && exit 0
+	kill -0 "$pid" 2>/dev/null || break
+	sleep 0.1 2>/dev/null || sleep 1
+	i=$((i+1))
+done
+tail -n 40 /var/log/aether-dockerd.log
+exit 1`
+
+func (d *Docker) startDockerd(ctx context.Context, id ID, user string) error {
+	ctx, cancel := context.WithTimeout(ctx, dockerdStartTimeout)
+	defer cancel()
+	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", dockerdScript, "aether-dockerd", user}, "", "0:0")
+	output = setupOutput(output, cut, nil)
+	if err != nil {
+		slog.Error("runtime: dockerd start failed", "container", id, "output", output, "error", err)
+		return fmt.Errorf("runtime: start dockerd: %w", err)
+	}
+	if code != 0 {
+		slog.Error("runtime: dockerd did not become ready", "container", id, "output", output, "exit_code", code)
+		return fmt.Errorf("runtime: dockerd did not become ready (exit %d): %s", code, strings.TrimSpace(output))
+	}
+	return nil
+}
+
 func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir string, secrets []string) error {
-	code, output, _, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "")
+	code, output, _, err := d.execCombined(ctx, id, []string{"/bin/sh", "-c", "test -e " + sentinel}, "", "")
 	if err != nil {
 		slog.Error("runtime: setup gate probe failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: probe setup gate: %w", err)
@@ -380,7 +512,7 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 	// Docker delivers stdout and stderr without keeping their order, so the
 	// script's stderr joins its stdout inside the container: the end of the
 	// transcript is then where the script failed.
-	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", "exec 2>&1; " + script}, workDir)
+	code, output, cut, err := d.execCombined(ctx, id, []string{"/bin/sh", "-ec", "exec 2>&1; " + script}, workDir, "")
 	output = setupOutput(output, cut, secrets)
 	if err != nil {
 		slog.Error("runtime: setup script execution failed", "container", id, "working_dir", workDir, "script", script, "output", output, "error", err)
@@ -390,8 +522,12 @@ func (d *Docker) runSetup(ctx context.Context, id ID, script, sentinel, workDir 
 		slog.Error("runtime: setup script exited nonzero", "container", id, "working_dir", workDir, "script", script, "output", output, "exit_code", code)
 		return &SetupError{ExitCode: code, Output: output}
 	}
+	return d.releaseGate(ctx, id, sentinel)
+}
+
+func (d *Docker) releaseGate(ctx context.Context, id ID, sentinel string) error {
 	release := []string{"/bin/sh", "-c", "mkdir -p /tmp && : > " + sentinel}
-	code, output, _, err = d.execCombined(ctx, id, release, "")
+	code, output, _, err := d.execCombined(ctx, id, release, "", "")
 	if err != nil {
 		slog.Error("runtime: release setup gate failed", "container", id, "output", output, "error", err)
 		return fmt.Errorf("runtime: release setup gate: %w", err)
@@ -473,9 +609,9 @@ func (w *tailWriter) tail() (kept string, cut bool) {
 
 // execCombined is Exec for the setup script, which may print without limit:
 // one transcript, of which the last execOutputLimit bytes are kept.
-func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir string) (code int, output string, cut bool, err error) {
+func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir, user string) (code int, output string, cut bool, err error) {
 	kept := &tailWriter{limit: execOutputLimit}
-	code, err = d.exec(ctx, id, cmd, workDir, func(r io.Reader) error {
+	code, err = d.exec(ctx, id, cmd, workDir, user, func(r io.Reader) error {
 		_, copyErr := stdcopy.StdCopy(kept, kept, r)
 		return copyErr
 	})
@@ -485,16 +621,17 @@ func (d *Docker) execCombined(ctx context.Context, id ID, cmd []string, workDir 
 
 func (d *Docker) Exec(ctx context.Context, id ID, cmd []string, workDir string) (int, string, string, error) {
 	var stdout, stderr string
-	code, err := d.exec(ctx, id, cmd, workDir, func(r io.Reader) (copyErr error) {
+	code, err := d.exec(ctx, id, cmd, workDir, "", func(r io.Reader) (copyErr error) {
 		stdout, stderr, copyErr = readExecOutput(r)
 		return copyErr
 	})
 	return code, stdout, stderr, err
 }
 
-func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir string, read func(io.Reader) error) (int, error) {
+func (d *Docker) exec(ctx context.Context, id ID, cmd []string, workDir, user string, read func(io.Reader) error) (int, error) {
 	created, err := d.cli.ExecCreate(ctx, string(id), client.ExecCreateOptions{
 		Cmd:          cmd,
+		User:         user,
 		WorkingDir:   workDir,
 		AttachStdout: true,
 		AttachStderr: true,

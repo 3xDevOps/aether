@@ -118,6 +118,7 @@ type serveOptions struct {
 	runCPUs              *runCPUValue
 	runMemory            *runCountValue
 	runPids              *runCountValue
+	containerRuntime     *string
 }
 
 // serveFlags declares the server options on fs. It is the single definition
@@ -167,6 +168,9 @@ func serveFlags(fs *flag.FlagSet) *serveOptions {
 	fs.Var(o.runMemory, "run-memory", "memory ceiling in bytes per run/member environment (0 = automatic 8GiB)")
 	o.runPids = new(runCountValue)
 	fs.Var(o.runPids, "run-pids", "process ceiling per run/member environment (0 = automatic 4096)")
+	o.containerRuntime = fs.String("container-runtime", server.DefaultContainerRuntime,
+		"OCI runtime for run and member environment containers: auto uses sysbox-runc when Docker has it registered "+
+			"(Docker inside runs without --privileged), otherwise the daemon default; any other value is used as given, e.g. runc to opt out")
 	return o
 }
 
@@ -221,6 +225,8 @@ func serve(args []string) error {
 		RunCPULimit:      float64(*o.runCPUs),
 		RunMemoryBytes:   int64(*o.runMemory),
 		RunPidsLimit:     int64(*o.runPids),
+
+		ContainerRuntime: *o.containerRuntime,
 	})
 	if err != nil {
 		return err

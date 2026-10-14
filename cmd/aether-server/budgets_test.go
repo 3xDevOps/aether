@@ -78,3 +78,21 @@ func TestBudgetConfigPrecedenceAndAutomaticReset(t *testing.T) {
 		}
 	}
 }
+
+func TestContainerRuntimeFlagDefaultsToAutoAndTakesConfig(t *testing.T) {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	o := serveFlags(fs)
+	if *o.containerRuntime != "auto" {
+		t.Fatalf("default container-runtime = %q, want auto", *o.containerRuntime)
+	}
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := configSet(&bytes.Buffer{}, path, "container-runtime", "runc"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyConfigFile(fs, path, false); err != nil {
+		t.Fatal(err)
+	}
+	if *o.containerRuntime != "runc" {
+		t.Fatalf("container-runtime from config = %q, want runc", *o.containerRuntime)
+	}
+}
