@@ -266,6 +266,11 @@ describe('needs you conditions', () => {
     expect(presentRun(asking, ctx)).toEqual({ state: 'working', reason: 'Waiting for Alice' })
   })
 
+  it("shows a paused run as Paused, not the agent's question", () => {
+    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', reason: 'needs input: Which database?' })
+    expect(presentRun(asking, stateContext({ pausedRuns: { [asking.id]: true } }))).toEqual({ state: 'paused', reason: 'Paused' })
+  })
+
   it.each([
     ['permission', 'Permission requested'],
     ['question', 'Question from the agent'],

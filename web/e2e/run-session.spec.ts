@@ -101,6 +101,7 @@ test('an Enhanced run shows its background wait and the autonomous turn that fol
   const log = page.getByRole('log', { name: 'Session' })
   await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
   const finished = log.getByText(/^Finished( in \d+s)?$/)
+  await expect(finished.first()).toBeVisible()
   const before = await finished.count()
   // The mock's follow-up starts 300 ms after the prompt turn ends, too soon to poll for the wait.
   await page.evaluate(() => {

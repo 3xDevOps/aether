@@ -391,7 +391,8 @@ export const needsYouConditions: NeedsYouCondition[] = [
   condition({
     id: 'needs-input',
     target: 'run',
-    holds: (run) => run.status === 'needs-attention' && run.reason?.startsWith(needsInputPrefix) === true,
+    holds: (run, ctx) =>
+      run.status === 'needs-attention' && !isPaused(run, ctx) && run.reason?.startsWith(needsInputPrefix) === true,
     resolvers: (run) => [run.member_id],
     reason: (run) => `Agent asks: ${run.reason?.slice(needsInputPrefix.length)}`,
     action: () => ({ kind: 'reply', label: 'Reply' }),
