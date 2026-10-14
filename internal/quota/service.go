@@ -192,11 +192,11 @@ func (s *Service) lead(key string, account domain.MemberID, refresh bool, flight
 	}
 	flight.providers = cloneProviders(providers)
 	flight.err = readErr
-	close(flight.done)
 
 	s.mu.Lock()
 	delete(s.flight, key)
 	s.mu.Unlock()
+	close(flight.done)
 }
 
 func (s *Service) readLeader(ctx context.Context, account domain.MemberID, creds credentials, refresh bool) ([]Provider, error) {
