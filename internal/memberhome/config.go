@@ -443,8 +443,19 @@ func (m *Manager) ConfigStat(ctx context.Context, member domain.MemberID, harnes
 			if err != nil {
 				return nil, err
 			}
+			// The path may have become a hard link to another file since
+			// statConfigPath looked, and that file's hash is not this path's.
+			opened, err := f.Stat()
+			if err == nil && hasMultipleLinks(opened) {
+				_ = f.Close()
+				out = append(out, ConfigStat{Path: raw, Blocked: true})
+				continue
+			}
 			sum := sha256.New()
-			n, err := io.Copy(sum, io.LimitReader(f, ConfigMaxFileBytes+1))
+			var n int64
+			if err == nil {
+				n, err = io.Copy(sum, io.LimitReader(f, ConfigMaxFileBytes+1))
+			}
 			_ = f.Close()
 			if err != nil {
 				return nil, err
