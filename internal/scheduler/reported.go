@@ -495,33 +495,32 @@ func (e *supervised) questionHeld(report agentstatus.Report) bool {
 }
 
 // answerReached clears a shown question once a member's message reached the
-// agent, and returns a working run to running.
-func (s *Scheduler) answerReached(run domain.RunID) {
+// agent, and returns a working run to running. The question stays cleared
+// when persisting that fails: the agent has the answer, and the next sidecar
+// write or agent report repairs the rest.
+func (s *Scheduler) answerReached(run domain.RunID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry := s.runs[run]
 	if entry == nil || !entry.idleShown || !entry.asks() {
-		return
+		return nil
 	}
-	old := entry.sidecar()
 	entry.idleReason, entry.idleShown = "", false
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
-		slog.Warn("scheduler: clear the answered question", "run", run, "error", err)
-		return
+		return fmt.Errorf("scheduler: persist the answered question of %s: %w", run, err)
 	}
 	if entry.status != domain.RunNeedsAttention || entry.agentReport.State != agentstatus.Working {
-		return
+		return nil
 	}
 	reason := agentstatus.ReasonResumed
 	if backgroundWork(entry.agentReport) {
 		reason = entry.agentReport.Reason
 	}
 	if err := s.transitionLocked(s.superCtx, run, entry.workspaceID, entry.status, domain.RunRunning, reason, ""); err != nil {
-		slog.Warn("scheduler: resume the answered run", "run", run, "error", err)
-		return
+		return fmt.Errorf("scheduler: resume the answered run %s: %w", run, err)
 	}
 	entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
+	return nil
 }
 
 // turnEnded must be called with s.mu held.

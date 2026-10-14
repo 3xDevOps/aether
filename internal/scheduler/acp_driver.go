@@ -229,7 +229,9 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
 		settle(taken)
 		if taken == nil {
-			d.s.answerReached(run.ID)
+			if answerErr := d.s.answerReached(run.ID); answerErr != nil {
+				slog.Warn("scheduler: a member's message reached the agent", "run", run.ID, "error", answerErr)
+			}
 		}
 		if untitled && taken == nil {
 			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
