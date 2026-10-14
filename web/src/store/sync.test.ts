@@ -785,9 +785,24 @@ describe('hydrate', () => {
       }),
     )
 
+    expect(ok).toBe(true)
+    expect(store.getState().hydrationError).toBeNull()
+    expect(store.getState().capabilities).toBe(caps)
+  })
+
+  it('retries hydration when capabilities get no answer and none are known', async () => {
+    const store = createRootStore()
+    const ok = await hydrate(
+      store,
+      fakeApi({
+        capabilities: vi.fn(async () => {
+          throw new TypeError('Failed to fetch')
+        }),
+      }),
+    )
+
     expect(ok).toBe(false)
     expect(store.getState().hydrated).toBe(false)
-    expect(store.getState().capabilities).toBe(caps)
   })
 
   it('classifies a fetch that never got an answer as a dead gateway', async () => {

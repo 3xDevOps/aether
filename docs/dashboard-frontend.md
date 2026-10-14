@@ -715,11 +715,12 @@ an unset selection or a workspace that has been deleted falls back to the
 first by ID, or clears the selection when none remain. An open deleted
 workspace route moves to the replacement workspace or **Manage workspaces**;
 an open run in a deleted workspace returns to the board. A gateway that
-answers the capabilities fetch with anything but the descriptor is a legacy
-gateway: hydration succeeds and the store holds `null`. A fetch that gets no
-answer at all, such as Chromium's `net::ERR_NETWORK_CHANGED` after the host
-gains a network interface, fails hydration and retries, keeping the
-capabilities already known.
+answers the capabilities fetch with an error status or a body that is not
+JSON is a legacy gateway: hydration succeeds and the store holds `null`. A
+fetch that gets no answer at all, such as Chromium's
+`net::ERR_NETWORK_CHANGED` after the host gains a network interface, keeps
+the capabilities the connect probe loaded; with none loaded, hydration fails
+and retries.
 The snapshot also seeds the board's paused map from each run's wire `paused`
 field, skipping runs that do not carry it.
 

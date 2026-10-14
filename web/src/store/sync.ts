@@ -130,11 +130,13 @@ export async function hydrate(
         client.runOverlaps().catch(() => []),
         // A legacy remote monitor does not serve the endpoint; null keeps the
         // client on its built-in assumptions. A fetch that got no answer
-        // (fetch's TypeError) says nothing about the gateway, so it fails
-        // hydration and is retried instead of hiding every newer feature.
+        // (fetch's TypeError) says nothing about the gateway, so the
+        // connect probe's answer stands, or hydration fails and retries.
         client.capabilities().catch((err: unknown) => {
-          if (err instanceof TypeError) throw err
-          return null
+          if (!(err instanceof TypeError)) return null
+          const known = store.getState().capabilities
+          if (known) return known
+          throw err
         }),
       ])
     if (signal?.aborted) return false
