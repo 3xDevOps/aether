@@ -89,10 +89,10 @@ test('an Enhanced run holding background work stays working, asks while it waits
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
-  await aether.installACPMock(alice, await memberID(alice))
+  aether.installClaudeACPMock(await memberID(alice))
   const { workspaces } = await alice.api.rpc<{ workspaces: { id: string }[] }>('workspace.list')
   const workspace = workspaces[0].id
-  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspace, harness: 'mock', mode: 'acp', task: 'demo' })
+  const { run } = await alice.api.rpc<{ run: { id: string } }>('run.launch', { workspace_id: workspace, harness: 'claude', mode: 'acp', task: 'demo' })
   const status = async () => (await alice.api.rpc<{ run: { status: string; reason?: string } }>('run.get', { run_id: run.id })).run
   const statuses = async () => (await alice.api.rpc<{ events: { seq: number; payload: { to: string; reason?: string } }[] }>(
     'workspace.timeline', { workspace_id: workspace, run_id: run.id, types: ['run.status'], newest: true, limit: 1000 })).events
