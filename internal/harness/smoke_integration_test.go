@@ -60,15 +60,11 @@ func runSmoke(t *testing.T, image string, argv []string, env map[string]string) 
 	return smokeRun(t, image, argv, env, nil)
 }
 
-// runSmokeUntil reads argv's output until done reports it holds what the
-// caller needs, or the process exits, and the container is destroyed
-// either way. Stopping at quiescence instead would end the read whenever
-// an agent paused mid-answer for longer than the quiet window.
-func runSmokeUntil(t *testing.T, image string, argv []string, env map[string]string, done func(string) bool) string {
-	t.Helper()
-	return smokeRun(t, image, argv, env, done)
-}
-
+// smokeRun launches argv in image on a TTY. With done set it reads the
+// output until done reports it holds what the caller needs or the process
+// exits, and the container is destroyed either way. Stopping at quiescence
+// instead would end the read whenever an agent paused mid-answer for
+// longer than the quiet window.
 func smokeRun(t *testing.T, image string, argv []string, env map[string]string, done func(string) bool) string {
 	t.Helper()
 	d, err := runtime.NewDocker(runtime.WithLabels(map[string]string{"aether.test": t.Name()}))
@@ -201,7 +197,9 @@ func TestCollectOutputStopsAtProofOnOpenStream(t *testing.T) {
 	chunks := make(chan string, 2)
 	chunks <- "\x1b[0m\r\n"
 	chunks <- "> build · big-pickle\r\n"
-	out, err := collectOutput(t.Context(), chunks, func(s string) bool { return strings.Contains(s, "> build") }, time.Second, time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	out, err := collectOutput(ctx, chunks, func(s string) bool { return strings.Contains(s, "> build") }, time.Second, time.Second)
 	if err != nil || !strings.Contains(out, "> build") {
 		t.Fatalf("collector = %q, %v; want the proof without waiting for the stream to close", out, err)
 	}
@@ -348,7 +346,7 @@ func TestSmokeHeadlessNoLogin(t *testing.T) {
 				lower := strings.ToLower(out)
 				return slices.ContainsFunc(noLoginProofs[name], func(m string) bool { return strings.Contains(lower, m) })
 			}
-			out := runSmokeUntil(t, image, Argv(p.HeadlessArgs, smokeTask, nil), launchEnv(p), proven)
+			out := smokeRun(t, image, Argv(p.HeadlessArgs, smokeTask, nil), launchEnv(p), proven)
 			assertArgvAccepted(t, name, "headless-no-login", out)
 			if !proven(out) {
 				t.Fatalf("%s headless with no login never got past its own argument parsing:\n%s", name, out)
