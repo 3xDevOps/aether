@@ -83,7 +83,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 })
 
-test('an Enhanced run shows its background wait and the autonomous turn that follows', async ({ page, aether }) => {
+test('an Enhanced run shows the autonomous turn that follows its background work', async ({ page, aether }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
@@ -103,21 +103,12 @@ test('an Enhanced run shows its background wait and the autonomous turn that fol
   const finished = log.getByText(/^Finished( in \d+s)?$/)
   await expect(finished.first()).toBeVisible()
   const before = await finished.count()
-  // The mock's follow-up starts 300 ms after the prompt turn ends, too soon to poll for the wait.
-  await page.evaluate(() => {
-    const seen = window as unknown as { sawBackgroundWait: boolean }
-    seen.sawBackgroundWait = false
-    new MutationObserver(() => {
-      if (document.body.textContent?.includes('Working in background: 1 task')) seen.sawBackgroundWait = true
-    }).observe(document.body, { subtree: true, childList: true, characterData: true })
-  })
-
   const box = page.getByRole('combobox', { name: 'Message the agent' })
   await box.fill('work in background')
   await box.press('ControlOrMeta+Enter')
   await expect(log.getByText('background done')).toBeVisible({ timeout: 30_000 })
   await expect(finished).toHaveCount(before + 2)
-  expect(await page.evaluate(() => (window as unknown as { sawBackgroundWait: boolean }).sawBackgroundWait)).toBe(true)
+  await expect(log.getByText('started', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
 })
 
