@@ -432,3 +432,22 @@ func TestAdoptLinkWaitsForARunningSwitch(t *testing.T) {
 		t.Fatalf("adoptLink: %v", perr)
 	}
 }
+
+func TestLinkingAnotherServerStopsForwardsToTheOldOne(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "default:2222", Links: []cli.NamedLink{{Name: "work", Addr: "work:2222"}}}
+	saveConfigAt(t, saved, time.Unix(1_700_000_000, 0))
+	selected, _ := saved.Named("work")
+	g := newVerbGateway(t, &switchBackend{}, selected)
+	port := freeLocalForwardPort(t)
+	if rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+strconv.Itoa(port)+`}`, true); rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+	if perr := g.adoptLink(cli.LinkResult{Config: cli.Config{Addr: "new:2222", ServerID: "ab"}}, ""); perr != nil {
+		t.Fatalf("adoptLink: %v", perr)
+	}
+	rec := do(g, http.MethodPost, "/local/v1/forward.status", `{}`, true)
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"forwards\":[]}\n" {
+		t.Fatalf("forward.status after linking another server = %d: %s", rec.Code, rec.Body)
+	}
+}
