@@ -326,3 +326,23 @@ func TestCodexModelsScriptAnswersWithoutStdinEOF(t *testing.T) {
 		t.Fatalf("models = %+v", list.models)
 	}
 }
+
+func TestAgentModelsOverrideWithoutStandardArgv(t *testing.T) {
+	t.Parallel()
+	e, _ := newModelsEnv(t)
+	e.sched.harnesses["claude"] = HarnessSpec{ACPArgs: []string{"alt-claude-acp"}}
+	e.sched.harnesses["codex"] = HarnessSpec{HeadlessArgs: []string{"alt-codex", "exec", "{task}"}}
+	e.rt.execHandler = func(runtime.ID, []string) (int, string, error) {
+		return 0, modelsFixture(t, "codex-app-server.jsonl"), nil
+	}
+	got, err := e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "claude", false)
+	if err != nil || got.Source != protocol.ModelSourceNone || len(e.rt.execRuns()) != 0 {
+		t.Fatalf("claude: got %+v, %v, %d execs", got, err, len(e.rt.execRuns()))
+	}
+	if got, err = e.sched.AgentModels(t.Context(), e.member.ID, e.member.ID, "codex", false); err != nil || got.Source != protocol.ModelSourceAgent {
+		t.Fatalf("codex: got %+v, %v", got, err)
+	}
+	if runs := e.rt.execRuns(); len(runs) != 1 || !slices.Contains(runs[0].argv, "alt-codex") {
+		t.Fatalf("exec runs = %+v, want one probing alt-codex", runs)
+	}
+}

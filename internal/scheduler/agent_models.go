@@ -79,12 +79,20 @@ var errNoModelsAnswer = errors.New("no answer")
 // which is cached for a minute. Another member's account is probed only while
 // its owner's terminal is running.
 func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.MemberID, name string, refresh bool) (protocol.AgentModelsResult, error) {
+	none := protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}
 	if name != "claude" && name != "codex" {
-		return protocol.AgentModelsResult{Source: protocol.ModelSourceNone, Models: []protocol.AgentModel{}}, nil
+		return none, nil
 	}
 	profile, argvs, err := s.launchProfile(ctx, member, account, name)
 	if err != nil {
 		return protocol.AgentModelsResult{}, err
+	}
+	cli := argvs[domain.LaunchTUI]
+	if len(cli) == 0 {
+		cli = argvs[domain.LaunchHeadless]
+	}
+	if len(cli) == 0 {
+		return none, nil
 	}
 	if account != member && s.cfg.Homes != nil {
 		if _, err = s.accountLogins(ctx, account, profile); err != nil {
@@ -102,7 +110,7 @@ func (s *Scheduler) AgentModels(ctx context.Context, member, account domain.Memb
 	}
 	start := account == member
 	result, _, _ := s.modelProbes.Do(fmt.Sprintf("%s\x00%s\x00%t", account, name, start), func() (any, error) {
-		return s.probeAgentModels(context.WithoutCancel(ctx), key, argvs[domain.LaunchTUI][0], profile.EnvPassthrough, start), nil
+		return s.probeAgentModels(context.WithoutCancel(ctx), key, cli[0], profile.EnvPassthrough, start), nil
 	})
 	return result.(protocol.AgentModelsResult), nil
 }
