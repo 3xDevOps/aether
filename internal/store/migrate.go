@@ -1689,6 +1689,16 @@ CREATE TABLE member_merges (
 );
 CREATE INDEX idx_member_merges_survivor ON member_merges(survivor_id);
 `,
+	// v64: the assistant. One row per member names the agent and the harness
+	// session the member's assistant resumes.
+	`
+CREATE TABLE assistant_sessions (
+	member_id          TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	agent              TEXT NOT NULL,
+	harness_session_id TEXT NOT NULL,
+	updated_at         INTEGER NOT NULL
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

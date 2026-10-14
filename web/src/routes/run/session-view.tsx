@@ -84,7 +84,7 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
   return byTime(matched, waiting)
 }
 
-function enhancedRows(session: AcpSession | undefined): SessionRow[] {
+export function enhancedRows(session: AcpSession | undefined): SessionRow[] {
   if (!session) return []
   const rows = session.turns.flatMap(rowsOfTurn)
   const open = session.turns.at(-1)

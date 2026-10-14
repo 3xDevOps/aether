@@ -14,6 +14,7 @@ const (
 	MethodAssistantConfirm = "assistant.confirm"
 	MethodAssistantReset   = "assistant.reset"
 	MethodAssistantHistory = "assistant.history"
+	MethodAssistantItem    = "assistant.item"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
 )
@@ -79,6 +80,10 @@ type AssistantHistoryParams struct {
 	Limit     int   `json:"limit,omitempty"`
 }
 
+type AssistantItemParams struct {
+	Seq int64 `json:"seq"`
+}
+
 type AssistantDocsParams struct {
 	Topic string `json:"topic,omitempty"`
 }
@@ -94,9 +99,12 @@ type AssistantStreamRequest struct {
 }
 
 // AssistantFrame is one stream frame after the ACPStreamResponse ack: an
-// ACPFrame, or the full pending confirmation set whenever it changes. A
-// non-nil empty Confirmations clears the set.
+// ACPFrame, or the whole status, sent right after the ack and whenever the
+// state or the pending confirmations change.
 type AssistantFrame struct {
 	ACPFrame
-	Confirmations *[]AssistantConfirmation `json:"confirmations,omitempty"`
+	Status *AssistantStatus `json:"status,omitempty"`
 }
+
+// SubsystemAssistant streams the caller's own assistant session.
+const SubsystemAssistant = "aether-assistant"

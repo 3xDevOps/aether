@@ -30,6 +30,7 @@ var memberRefs = map[string]bool{
 	"runs.home_member_id":                                  true,
 	"runs.requested_account_member_id":                     true,
 	"schedules.member_id":                                  true,
+	"assistant_sessions.member_id":                         false,
 	"approvals.decided_by":                                 false,
 	"events.actor_id":                                      false,
 	"evidence_packets.origin_id":                           false,

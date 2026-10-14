@@ -106,6 +106,8 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				handler = func() { s.serveAttach(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemACP:
 				handler = func() { s.serveACP(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
+			case protocol.SubsystemAssistant:
+				handler = func() { s.serveAssistant(ctx, member, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemTerminal:
 				handler = func() { s.serveTerminal(ctx, member, st, sshConn{Channel: ch, abort: abortConn}) }
 			case protocol.SubsystemDevBrowser:

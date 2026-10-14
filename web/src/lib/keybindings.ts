@@ -36,6 +36,13 @@ export const keybindings = [
     // A terminal keeps it: Ctrl+B is a common tmux prefix.
     when: (event) => !keyboardBusy(event) && !inModal(event.target),
   },
+  {
+    id: 'assistant',
+    keys: '$mod+/',
+    scope: 'global',
+    label: 'Open or close the assistant',
+    when: (event) => !inModal(event.target),
+  },
   { id: 'shortcuts', keys: '[Shift]+?', scope: 'global', label: 'Open this reference' },
   { id: 'launch', keys: 'n', scope: 'global', label: 'New run' },
   { id: 'next-needs-you', keys: 'u', scope: 'global', label: 'Open the next run that needs you' },

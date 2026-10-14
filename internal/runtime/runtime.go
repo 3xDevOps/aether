@@ -75,6 +75,8 @@ type ContainerInfo struct {
 	User string
 	// Env is the configured environment, including values such as HOME.
 	Env []string
+	// MountTargets are the container paths of the container's mounts.
+	MountTargets []string
 }
 
 // Spec describes one run container, engine-neutrally: the image,

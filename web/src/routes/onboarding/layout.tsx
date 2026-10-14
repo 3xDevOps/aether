@@ -1,4 +1,7 @@
 import type { ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
+import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 
 /** Sticky because a step can be taller than the window, and Back must stay in reach. */
 export const actionRow =
@@ -20,6 +23,7 @@ export function Step({
   actions?: ReactNode
   children?: ReactNode
 }) {
+  const assistant = useCapability().hasMethod('assistant.status')
   return (
     <section aria-label={label} className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-col gap-1">
@@ -27,6 +31,11 @@ export function Step({
         {lead && <p className="text-ui text-muted">{lead}</p>}
       </div>
       {children}
+      {assistant && (
+        <p className="text-ui-sm text-muted">
+          <Button variant="link" size="sm" onClick={() => useStore.getState().setAssistantOpen(true)}>Stuck? Ask Aether</Button>
+        </p>
+      )}
       {actions && <div className={actionRow}>{actions}</div>}
     </section>
   )

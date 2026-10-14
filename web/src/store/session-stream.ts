@@ -4,6 +4,7 @@ import { message } from '@/lib/format'
 import type { SessionLease } from '@/lib/session-types'
 import type { ControlMetadata, TakeoverAction } from '@/routes/terminal/attach'
 import type { RootStore } from '@/store'
+import { assistantSessionID } from '@/store/assistant'
 import { batchNotifications } from '@/store/batch'
 
 interface Owned {
@@ -217,5 +218,6 @@ export async function loadOlderItems(store: RootStore, client: Api, runID: strin
 }
 
 export async function loadWholeItem(store: RootStore, client: Api, runID: string, seq: number): Promise<void> {
-  store.getState().acpReplaceItem(runID, await client.runACPItem(runID, seq))
+  const item = runID === assistantSessionID ? await client.assistantItem(seq) : await client.runACPItem(runID, seq)
+  store.getState().acpReplaceItem(runID, item)
 }

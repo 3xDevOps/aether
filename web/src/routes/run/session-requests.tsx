@@ -59,7 +59,7 @@ export function orderedOptions(options: SessionOption[]): SessionOption[] {
   return [...options].sort((a, b) => optionRank(a) - optionRank(b))
 }
 
-function optionVariant(option: SessionOption, options: SessionOption[]): 'primary' | 'secondary' {
+export function optionVariant(option: SessionOption, options: SessionOption[]): 'primary' | 'secondary' {
   const primary = options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.id === 'accept') ?? options[0]
   return option === primary ? 'primary' : 'secondary'
 }
@@ -83,7 +83,7 @@ function useAnswer(runID: string, request: SessionRequest) {
   return { busy, error, answer }
 }
 
-function useToolCall(runID: string, id: string | undefined): SessionToolCall | undefined {
+export function useToolCall(runID: string, id: string | undefined): SessionToolCall | undefined {
   return useStore((s) => {
     const turns = s.acpSessions[runID]?.turns ?? []
     for (let t = turns.length - 1; id && t >= 0; t--) {

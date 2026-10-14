@@ -101,6 +101,7 @@ list when `topic` is empty.
 | `assistant.confirm` | `{confirmation_id, approve}` | `{}` |
 | `assistant.reset` | `{}` | `AssistantStatus` |
 | `assistant.history` | `{before_seq?, limit?}` | like `run.acp.history` |
+| `assistant.item` | `{seq}` | like `run.acp.item` |
 
 `AssistantStatus`: `state` (`setup`, `needs_restart`, `idle`, `starting`,
 `running`, `failed`), `agent`, `agents` (each `{name, display_name, ready,
@@ -114,7 +115,9 @@ expires_at}`. `summary` is one plain sentence, for example
 
 `/ws/assistant` (and the `aether-assistant` SSH subsystem): header
 `{after_seq}`, then an `ACPStreamResponse` ack, then frames. A frame is an
-`ACPFrame`, or `{confirmations: [...]}` whenever the pending set changes.
+`ACPFrame`, or `{status: AssistantStatus}` right after the ack and whenever
+the state or the pending confirmations change. A prompt while a turn runs is
+refused with an invalid-state error; the member stops the turn first.
 
 ## 3. Dashboard
 

@@ -28,6 +28,7 @@ const browseRunLimit = 50
 const destinationCommandIDs: Record<string, true> = {
   board: true,
   overview: true,
+  assistant: true,
   launch: true,
   swarm: true,
   template: true,

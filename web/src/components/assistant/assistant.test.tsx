@@ -1,0 +1,384 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Step } from '@/routes/onboarding/layout'
+import { AppShell } from '@/components/shell/app-shell'
+import type * as apiModule from '@/lib/api'
+import { api } from '@/lib/api'
+import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
+import { useStore, createRootStore } from '@/store'
+import { loadWholeItem } from '@/store/session-stream'
+import { item, resetItems, ScriptedSession, say } from '@/test/acp-stream'
+import { alice, serverInfo, workspace } from '@/test/fixtures'
+import { StubSocket } from '@/test/stub-socket'
+import { atViewport } from '@/test/viewport'
+
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
+  const { fakeApi } = await import('@/test/fixtures')
+  return { ...actual, api: fakeApi() }
+})
+
+Element.prototype.scrollIntoView = vi.fn()
+
+class SizedObserver {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    const height = (target as HTMLElement).style.overflowY ? 4000 : 24
+    const box = [{ blockSize: height, inlineSize: 400 }]
+    this.callback([{ target, contentRect: { height, width: 400 }, borderBoxSize: box, contentBoxSize: box } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
+const offsetParent = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')!
+beforeAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get() { return this.parentElement } })
+})
+afterAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetParent', offsetParent)
+})
+
+const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
+
+function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], ...over }
+}
+
+const stop: AssistantConfirmation = {
+  id: 'c1',
+  method: 'run.kill',
+  summary: 'Stop run run-8x2 ("Fix flaky login test")',
+  params: { run_id: 'run-8x2' },
+  created_at: '2026-10-14T10:00:00Z',
+  expires_at: '2099-10-14T10:10:00Z',
+}
+
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', SizedObserver)
+  StubSocket.install()
+  resetItems()
+  localStorage.clear()
+  useStore.setState({
+    ...useStore.getInitialState(),
+    info: serverInfo,
+    members: { [alice.id]: alice },
+    workspaces: { [workspace.id]: workspace },
+    hydrated: true,
+    route: { name: 'board', params: {} },
+    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
+    onboarded: true,
+  }, true)
+  vi.mocked(api.assistantStatus).mockResolvedValue(status())
+})
+
+afterEach(async () => {
+  cleanup()
+  await Promise.resolve()
+  vi.clearAllMocks()
+  vi.unstubAllGlobals()
+})
+
+const panel = () => screen.findByRole('complementary', { name: 'Assistant' })
+
+function assistantSocket(): ScriptedSession {
+  const socket = StubSocket.opened.filter((s) => s.url.includes('/ws/assistant')).at(-1)
+  if (!socket) throw new Error('no /ws/assistant socket opened')
+  return new ScriptedSession(socket)
+}
+
+async function openPanel() {
+  render(<AppShell />)
+  await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+  return panel()
+}
+
+describe('opening the assistant', () => {
+  it('opens from the top bar and closes from its header, returning focus to the button', async () => {
+    render(<AppShell />)
+    const button = screen.getByRole('button', { name: 'Assistant' })
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+
+    await userEvent.click(button)
+    const aside = await panel()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(aside.nextElementSibling).toBeNull()
+    expect(aside.previousElementSibling?.id).toBe('main')
+
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close assistant' }))
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(button))
+  })
+
+  it('opens from the palette command Ask Aether', async () => {
+    render(<AppShell />)
+    act(() => useStore.getState().togglePalette(true))
+    await userEvent.click(await screen.findByRole('option', { name: /Ask Aether/ }))
+    expect(await panel()).toBeDefined()
+    expect(useStore.getState().assistantOpen).toBe(true)
+  })
+
+  it('opens from the keyboard shortcut', async () => {
+    render(<AppShell />)
+    await userEvent.keyboard('{Control>}/{/Control}')
+    expect(await panel()).toBeDefined()
+  })
+
+  it('is absent from a server that does not serve assistant.status', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['run.list'], ws: ['events', 'attach'] } })
+    render(<AppShell />)
+    expect(screen.queryByRole('button', { name: 'Assistant' })).toBeNull()
+  })
+
+  it('keeps the conversation out of the run lists', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    expect(within(aside).queryByRole('log')).toBeDefined()
+    expect(Object.keys(useStore.getState().runs)).toEqual([])
+  })
+})
+
+function acpOpen(items = [] as ReturnType<typeof say>[]) {
+  return assistantSocket().open({}, items)
+}
+
+describe('entry points', () => {
+  it('offers Ask Aether on an empty board', async () => {
+    render(<AppShell />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask Aether' }))
+    expect(await panel()).toBeDefined()
+  })
+
+  it('offers Stuck? Ask Aether on an onboarding step', async () => {
+    render(<><Step label="Agent" title="Set up an agent" /><AppShell /></>)
+    await userEvent.click(screen.getByRole('button', { name: 'Stuck? Ask Aether' }))
+    expect(await panel()).toBeDefined()
+  })
+})
+
+describe('states', () => {
+  it('explains setup and lists each agent with its reason', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({
+      state: 'setup',
+      agent: undefined,
+      agents: [
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'No login was found' },
+        { name: 'codex', display_name: 'Codex', ready: false, reason: 'The Enhanced adapter is not installed' },
+      ],
+    }))
+    const aside = await openPanel()
+    expect(await within(aside).findByText(/runs on your own agent/)).toBeDefined()
+    const agents = within(within(aside).getByRole('list', { name: 'Agents' }))
+    expect(agents.getByText('No login was found')).toBeDefined()
+    expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
+    expect(StubSocket.opened).toHaveLength(0)
+  })
+
+  it('asks before restarting the environment', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
+    vi.mocked(api.assistantStart).mockResolvedValue(status({ state: 'starting' }))
+    const aside = await openPanel()
+    expect(await within(aside).findByText(/closes any shells open in it/)).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Restart environment' }))
+    expect(api.assistantStart).toHaveBeenCalledWith({ restart_environment: true })
+    await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('starting'))
+  })
+
+  it('shows the real error of a failed assistant and retries', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'failed', error: 'adapter exited: exit status 1' }))
+    vi.mocked(api.assistantStart).mockResolvedValue(status())
+    const aside = await openPanel()
+    expect(await within(aside).findByText('adapter exited: exit status 1')).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Retry' }))
+    expect(api.assistantStart).toHaveBeenCalledWith({})
+  })
+
+  it('offers example prompts that fill the composer', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Launch a run to …' }))
+    expect((within(aside).getByRole('textbox', { name: 'Message the assistant' }) as HTMLTextAreaElement).value).toBe('Launch a run to ')
+  })
+})
+
+describe('the conversation', () => {
+  it('renders streamed items', async () => {
+    const aside = await openPanel()
+    acpOpen([
+      item('turn_start', 1),
+      say(1, 'user', 'What is running?'),
+      say(1, 'assistant', 'Two runs are **working**.'),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
+    expect(await within(log).findByText('What is running?')).toBeDefined()
+    expect(within(log).getByText('working').tagName).toBe('STRONG')
+    expect(assistantSocket().header()).toEqual({ after_seq: 0 })
+  })
+
+  it('sends a prompt with Enter and keeps a newline on Shift+Enter', async () => {
+    vi.mocked(api.assistantPrompt).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'line one{Shift>}{Enter}{/Shift}line two')
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.assistantPrompt).mock.calls[0]![0]).toBe('line one\nline two')
+    expect(vi.mocked(api.assistantPrompt).mock.calls[0]![1]).toMatch(/\S/)
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
+  })
+
+  it('sends with the Send button and shows a refusal without losing the draft', async () => {
+    vi.mocked(api.assistantPrompt).mockRejectedValue(new Error('assistant is not running'))
+    const aside = await openPanel()
+    acpOpen()
+    const box = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.type(box, 'hello')
+    await userEvent.click(within(aside).getByRole('button', { name: /^Send/ }))
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant is not running')
+    expect((box as HTMLTextAreaElement).value).toBe('hello')
+  })
+
+  it('shows Stop while a turn runs and cancels it', async () => {
+    vi.mocked(api.assistantCancel).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'Install Rust')])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Stop' }))
+    expect(api.assistantCancel).toHaveBeenCalled()
+  })
+
+  it('answers a harness permission prompt with assistant.answer', async () => {
+    vi.mocked(api.assistantAnswer).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().items(item('request', 1, {
+      request: {
+        id: 'req_1',
+        kind: 'permission',
+        title: 'rm -rf build',
+        status: 'pending',
+        options: [
+          { id: 'allow', name: 'Allow', kind: 'allow_once' },
+          { id: 'reject', name: 'Reject', kind: 'reject_once' },
+        ],
+      },
+    }))
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Allow' }))
+    expect(api.assistantAnswer).toHaveBeenCalledWith('req_1', 'allow', undefined)
+  })
+})
+
+describe('confirmations', () => {
+  it('approves and declines through assistant.confirm and clears on a status frame', async () => {
+    vi.mocked(api.assistantConfirm).mockResolvedValue({})
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [stop, { ...stop, id: 'c2', summary: 'Save your environment' }] }) })
+    const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
+    expect(within(card).getByText('run.kill')).toBeDefined()
+    expect(within(card).getByText(/"run_id": "run-8x2"/)).toBeDefined()
+    expect(within(card).getByText(/expires/)).toBeDefined()
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
+    expect(api.assistantConfirm).toHaveBeenCalledWith('c1', true)
+    expect(within(aside).getByText(stop.summary)).toBeDefined()
+
+    const second = within(aside).getByRole('group', { name: 'Approve this action? Save your environment' })
+    await userEvent.click(within(second).getByRole('button', { name: 'Decline' }))
+    expect(api.assistantConfirm).toHaveBeenCalledWith('c2', false)
+
+    assistantSocket().send({ status: status() })
+    await waitFor(() => expect(within(aside).queryByText(stop.summary)).toBeNull())
+  })
+
+  it('discards the conversation only after the member confirms', async () => {
+    vi.mocked(api.assistantReset).mockResolvedValue(status())
+    const aside = await openPanel()
+    acpOpen([item('turn_start', 1), say(1, 'user', 'old question'), item('turn_end', 1)])
+    expect(await within(aside).findByText('old question')).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    expect(api.assistantReset).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
+    await waitFor(() => expect(api.assistantReset).toHaveBeenCalled())
+    await waitFor(() => expect(within(aside).queryByText('old question')).toBeNull())
+  })
+})
+
+describe('on a phone', () => {
+  it('renders a side sheet instead of an aside', async () => {
+    atViewport(500)
+    render(<AppShell />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Assistant' })
+    expect(sheet.getAttribute('data-variant')).toBe('side')
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    expect(within(sheet).getByRole('button', { name: 'New conversation' })).toBeDefined()
+  })
+})
+
+describe('while closed', () => {
+  it('badges the button and keeps the stream up while an approval is pending', async () => {
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ confirmations: [stop] }))
+    render(<AppShell />)
+    expect(await screen.findByRole('button', { name: 'Assistant, 1 action waiting for approval' })).toBeDefined()
+    await waitFor(() => expect(StubSocket.opened.some((s) => s.url.includes('/ws/assistant'))).toBe(true))
+    assistantSocket().open().send({ status: status() })
+    expect(await screen.findByRole('button', { name: 'Assistant' })).toBeDefined()
+  })
+
+  it('stays disconnected while idle with nothing pending', async () => {
+    render(<AppShell />)
+    await waitFor(() => expect(api.assistantStatus).toHaveBeenCalledTimes(1))
+    expect(StubSocket.opened).toHaveLength(0)
+  })
+})
+
+describe('truncated items', () => {
+  it('are read whole with assistant.item, not run.acp.item', async () => {
+    const whole = item('tool_call', 1, { tool_call: { id: 't', title: 'ls', status: 'completed' } })
+    vi.mocked(api.assistantItem).mockResolvedValue(whole)
+    await loadWholeItem(useStore, api, 'assistant', whole.seq)
+    expect(api.assistantItem).toHaveBeenCalledWith(whole.seq)
+    expect(api.runACPItem).not.toHaveBeenCalled()
+  })
+})
+
+describe('width', () => {
+  it('resizes from the keyboard and persists open and width', async () => {
+    const aside = await openPanel()
+    const handle = within(aside).getByRole('separator', { name: 'Resize assistant' })
+    expect(handle.getAttribute('aria-valuenow')).toBe('400')
+    handle.focus()
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' })
+    expect(useStore.getState().assistantWidth).toBe(416)
+    expect(aside.style.width).toBe('416px')
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(useStore.getState().assistantWidth).toBe(640)
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(useStore.getState().assistantWidth).toBe(320)
+
+    const stored = JSON.parse(localStorage.getItem('aether.ui')!).state
+    expect(stored.assistantOpen).toBe(true)
+    expect(stored.assistantWidth).toBe(320)
+  })
+
+  it('never persists or restores an open sheet on a phone', async () => {
+    atViewport(500)
+    render(<AppShell />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    await screen.findByRole('dialog', { name: 'Assistant' })
+    expect(JSON.parse(localStorage.getItem('aether.ui')!).state.assistantOpen).toBe(false)
+    localStorage.setItem('aether.ui', JSON.stringify({ state: { assistantOpen: true }, version: 8 }))
+    expect(createRootStore().getState().assistantOpen).toBe(false)
+  })
+
+  it('restores a stored width within its bounds', () => {
+    localStorage.setItem('aether.ui', JSON.stringify({ state: { assistantOpen: true, assistantWidth: 9000 }, version: 8 }))
+    const restored = createRootStore().getState()
+    expect(restored.assistantOpen).toBe(true)
+    expect(restored.assistantWidth).toBe(640)
+  })
+})

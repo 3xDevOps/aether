@@ -52,6 +52,8 @@ type Services struct {
 	GitHub GitHubService
 	// GitHubOAuth manages browser authorization for the caller's native gh account.
 	GitHubOAuth GitHubOAuthController
+	// Assistant hosts each member's built-in assistant.
+	Assistant AssistantService
 	// Push notifies a run's owner on their subscribed devices.
 	Push PushService
 }

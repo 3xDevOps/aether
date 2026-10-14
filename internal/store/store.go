@@ -206,6 +206,7 @@ type Store interface {
 	CollaborationStore
 	RunMessageHistoryStore
 	PushStore
+	AssistantStore
 
 	Close() error
 }

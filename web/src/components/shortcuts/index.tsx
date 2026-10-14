@@ -51,7 +51,7 @@ const localGroups: { name: string; entries: [string, string][] }[] = [
       ],
       [
         'Arrow keys',
-        'Resize the sidebar or a terminal 16px a press; Home and End are its limits, Enter collapses it',
+        'Resize the sidebar, the assistant or a terminal 16px a press; Home and End are its limits, Enter collapses the sidebar',
       ],
     ],
   },

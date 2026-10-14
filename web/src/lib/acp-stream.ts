@@ -47,7 +47,13 @@ const codeConflict = -32003
 const resubscribe = 1012
 const policy = 1008
 
-export function connectSessionStream(runID: string, h: SessionStreamHandlers): SessionStream {
+/** Where a stream connects and what its header says; a run's by default. */
+export interface SessionEndpoint {
+  url: () => string
+  header: (afterSeq: number) => Record<string, unknown>
+}
+
+export function connectSessionStream(runID: string, h: SessionStreamHandlers, endpoint?: SessionEndpoint): SessionStream {
   let socket: WebSocket | null = null
   let acked = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -64,7 +70,7 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers): S
     h.onState(attempt === 0 ? 'connecting' : 'reconnecting')
     let ws: WebSocket
     try {
-      ws = new WebSocket(api.acpSocket(runID))
+      ws = new WebSocket(endpoint ? endpoint.url() : api.acpSocket(runID))
     } catch {
       retry()
       return
@@ -72,6 +78,10 @@ export function connectSessionStream(runID: string, h: SessionStreamHandlers): S
     socket = ws
     acked = false
     ws.onopen = () => {
+      if (endpoint) {
+        ws.send(JSON.stringify(endpoint.header(h.afterSeq())))
+        return
+      }
       const lease = h.lease()
       const header: SessionStreamRequest = dropLease
         ? { after_seq: h.afterSeq(), control_session_id: lease.control_session_id }

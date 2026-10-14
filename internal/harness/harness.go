@@ -208,7 +208,7 @@ func isPathWithin(candidate, root string) bool {
 
 // Profile converts a generic definition to a launch profile. The registry
 // entry of the same name still supplies what is not part of the argv:
-// EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs and ModelEnv.
+// EnvPassthrough, Env, PermissionEnv, ACPMode, ACPAskMode, ModelArgs and ModelEnv.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -224,6 +224,7 @@ func (d Definition) Profile() Profile {
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
 		p.ACPMode = registered.ACPMode
+		p.ACPAskMode = registered.ACPAskMode
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}
@@ -247,6 +248,9 @@ type Profile struct {
 	// ACPMode is the session mode a new enhanced session starts in: the
 	// agent's mode that acts without asking. Empty keeps the agent's default.
 	ACPMode string
+	// ACPAskMode is the session mode that asks before acting, the one the
+	// assistant runs in. Empty when the agent has none.
+	ACPAskMode string
 	// ACPTitleLookup marks an agent that titles a session at its first
 	// prompt, sends session_info_update only when that turn ends, and reports
 	// the title in session/list meanwhile.
@@ -379,6 +383,7 @@ var profiles = map[string]Profile{
 		ACPArgs:        []string{claudeACP.Binary},
 		ACPInstall:     claudeACP,
 		ACPMode:        "bypassPermissions",
+		ACPAskMode:     "default",
 		ACPTitleLookup: true,
 		ModelArgs:      []string{"--model", ModelPlaceholder},
 		ResumeArgs:     []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
@@ -420,6 +425,7 @@ var profiles = map[string]Profile{
 		ACPArgs:         []string{codexACP.Binary},
 		ACPInstall:      codexACP,
 		ACPMode:         "agent-full-access",
+		ACPAskMode:      "agent",
 		ACPDefault:      true,
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},

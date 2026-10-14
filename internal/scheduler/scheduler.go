@@ -111,6 +111,10 @@ type Config struct {
 	// ServerBinary is staged into run and terminal containers for the
 	// coordination CLI; empty means DefaultServerBinary.
 	ServerBinary string
+	// AssistantDir holds each member's assistant directory. A new terminal
+	// mounts its sock subdirectory and the server binary for the assistant;
+	// empty creates terminals without them.
+	AssistantDir string
 	// HarnessUpdateDisabled stops pre-launch updates of shipped harnesses
 	// installed in the member home.
 	HarnessUpdateDisabled bool
