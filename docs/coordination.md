@@ -376,7 +376,7 @@ and is never delivered, but still lists, without `acked_at`.
 A task-bearing run receives this capability-neutral launch instruction automatically:
 
 ```
-Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Use only available capabilities and report only what you verified.
+Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified.
 ```
 
 No skill package, manual identity argument, or credential setup is required.
