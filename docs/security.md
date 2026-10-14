@@ -1535,17 +1535,20 @@ operator-facing stances are these.
 - **Three routes authorize a new conversation, none across workspaces.**
   `coord.send` and `coord.ask` are accepted when the target is a current swarm
   assignment peer, a radar active/grace overlap peer, or a live run in the
-  sender's workspace that the sender run's owner may message. The sender and
-  target must share a workspace on every route, and a finished target is
-  refused. `coord.reply` is authorized by the question it answers.
+  sender's workspace that the sender run's owner may message. Every route
+  first requires the sender run's owner to be a current member who is not a
+  viewer. The sender and target must share a workspace on every route, and a
+  finished target is refused. `coord.reply` is authorized by the question it
+  answers.
 - **Messaging is its own permission.** The workspace route checks the
   `message` capability for the sender run's owner against the target run.
-  Admins may message any run; viewers may not message from their runs;
-  collaborators may message any run unless it is protected, and a protected
-  run (`aether protect`) accepts workspace-route messages only from its
-  owner's runs and admins' runs. `steer_others=admins_only` does not restrict
-  messaging. The owner's role is re-read on every send, so a demotion applies
-  to the next message. `coord.status` omits runs the sender may not message.
+  Admins may message any run; a viewer's runs may message no run on any
+  route; collaborators may message any run unless it is protected, and a
+  protected run (`aether protect`) accepts workspace-route messages only from
+  its owner's runs and admins' runs. The swarm and radar routes do not check
+  protection. `steer_others=admins_only` does not restrict messaging. The
+  owner's role is re-read on every send and status, so a demotion applies to
+  the next message. `coord.status` omits runs the sender may not message.
 - **A message grants nothing else.** It is an attributed inbox item
   (`from_run_id`), never an instruction. It confers no steer, kill, input
   injection, terminal, transcript, Git, secret, or task and worker authority
@@ -1556,7 +1559,8 @@ operator-facing stances are these.
   its owner may message. The server limits each run to 8 distinct
   correspondents opened over the radar and workspace routes instead of trying
   to infer intent. Swarm assignment peers are server-derived and do not count,
-  so an integrator reaches every worker it dispatched. Read this as defence in
+  so an integrator reaches every worker it dispatched. A run already sent to
+  stays reachable at the cap. Read this as defence in
   depth, not a boundary: runs in one workspace already share a repository, so
   influencing each other through file contents needs no authorization at all.
   Turn the feature off if that is not acceptable.

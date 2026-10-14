@@ -185,6 +185,10 @@ func (f *wireRuns) GetMember(_ context.Context, id domain.MemberID) (*domain.Mem
 
 func (f *wireRuns) ListActiveRuns(context.Context) ([]*domain.Run, error) { return nil, nil }
 
+func (f *wireRuns) ListLiveRunSummaries(context.Context, domain.WorkspaceID, int) ([]*store.RunSummary, error) {
+	return nil, nil
+}
+
 func (f *wireRuns) set(r domain.Run) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

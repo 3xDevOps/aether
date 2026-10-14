@@ -3,8 +3,10 @@ package coord
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -20,10 +22,11 @@ func wantDenied(t *testing.T, err *protocol.Error, reason string) {
 
 // TestWorkspaceRouteFollowsTheMessagePermission covers the permission
 // behind the workspace route: protection admits only the owner's runs and
-// admins, a viewer-owned run reaches nobody, and the sender owner's role is
-// re-read on every send.
+// admins, a viewer-owned run reaches nobody on any route, and the sender
+// owner's role is re-read on every send.
 func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
-	h := newHarness(t, 4)
+	stub := &missionTransportStub{}
+	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
 	ctx := context.Background()
 	mine, sibling, theirs, adminRun := h.run(0), h.run(1), h.run(2), h.run(3)
 	h.ownBy(1, h.runs[0].MemberID, true)
@@ -59,9 +62,15 @@ func TestWorkspaceRouteFollowsTheMessagePermission(t *testing.T) {
 	if uerr := h.db.UpdateMember(ctx, owner); uerr != nil {
 		t.Fatalf("demote owner: %v", uerr)
 	}
-	h.advance(sendRefill)
-	_, err = h.svc.Send(ctx, mine, sendParams(sibling, "after demotion"))
-	wantDenied(t, err, fmt.Sprintf("member %s (viewer) may not message it: messaging another run requires the collaborator role", owner.ID))
+	// A viewer-owned run reaches nobody, not even over a swarm or an overlap.
+	stub.mission = []domain.RunID{mine, sibling}
+	h.peers.pair(mine, theirs, "src/auth.go")
+	viewer := fmt.Sprintf("member %s (viewer) may not message it: messaging another run requires the collaborator role", owner.ID)
+	for _, target := range []domain.RunID{sibling, theirs, adminRun} {
+		h.advance(sendRefill)
+		_, err = h.svc.Send(ctx, mine, sendParams(target, "after demotion"))
+		wantDenied(t, err, viewer)
+	}
 	if st, err = h.svc.Status(ctx, mine); err != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
 		t.Fatalf("viewer status = %+v (err %v), want no peers", st.Peers, err)
 	}
@@ -93,26 +102,19 @@ func TestRoutesNeverCrossWorkspaces(t *testing.T) {
 		_, err = h.svc.Ask(ctx, dir[0], protocol.CoordAskParams{ToRunID: string(dir[1]), Body: "across?", IdempotencyKey: "ask-" + string(dir[0])})
 		wantDenied(t, err, "it is in a different workspace")
 	}
-	// The real index never pairs runs across workspaces, so only the fake
-	// edge can list the foreign run; the swarm and workspace routes do not.
 	st, err := h.svc.Status(ctx, local)
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	for _, p := range st.Peers {
-		if p.RunID == string(foreign.ID) && p.State != protocol.CoordPeerActive {
-			t.Fatalf("status lists the foreign run through state %q", p.State)
-		}
+	if err != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
+		t.Fatalf("status = %+v (err %v), want the foreign run unlisted", st, err)
 	}
 }
 
 // TestSwarmAndIndependentRunsMessageEachOther covers the routes between a
 // swarm and a run launched on its own, and that an integrator reaches more
-// workers than the peer cap allows conversations.
+// workers than the peer cap allows conversations without spending a slot.
 func TestSwarmAndIndependentRunsMessageEachOther(t *testing.T) {
 	stub := &missionTransportStub{}
 	workers := maxPeers + 2
-	h := newHarness(t, workers+2, func(c *Config) { c.Mission = stub })
+	h := newHarness(t, workers+maxPeers+2, func(c *Config) { c.Mission = stub })
 	ctx := context.Background()
 	integrator, independent := h.run(0), h.run(workers+1)
 	stub.integrator = integrator
@@ -134,9 +136,23 @@ func TestSwarmAndIndependentRunsMessageEachOther(t *testing.T) {
 			t.Fatalf("integrator -> worker %d of %d: %v", i, workers, err)
 		}
 	}
+	for i := 0; i < maxPeers; i++ {
+		h.advance(sendRefill)
+		if _, err := h.svc.Send(ctx, integrator, sendParams(h.run(workers+1+i), "heads up")); err != nil {
+			t.Fatalf("integrator -> independent run %d after messaging every worker: %v", i, err)
+		}
+	}
 	h.advance(sendRefill)
-	if _, err := h.svc.Send(ctx, integrator, sendParams(independent, "heads up")); err != nil {
-		t.Fatalf("integrator -> independent run after messaging every worker: %v", err)
+	_, err := h.svc.Send(ctx, integrator, sendParams(h.run(workers+1+maxPeers), "one too many"))
+	if err == nil || err.Code != protocol.CodeConflict || !strings.Contains(err.Message, "limit of 8 coordination peers") {
+		t.Fatalf("send past the peer cap = %v, want the peer limit", err)
+	}
+	// A worker that leaves the swarm but stays live is still an existing
+	// conversation for the integrator at its cap.
+	stub.mission = slices.DeleteFunc(stub.mission, func(id domain.RunID) bool { return id == worker })
+	h.advance(sendRefill)
+	if _, err := h.svc.Send(ctx, integrator, sendParams(worker, "still there?")); err != nil {
+		t.Fatalf("integrator -> former worker at the peer cap: %v", err)
 	}
 }
 
@@ -174,6 +190,10 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	self := h.run(0)
 	stub.mission = []domain.RunID{self, h.run(1), h.run(2), h.run(3)}
 	h.peers.hub(self, []domain.RunID{h.run(3), h.run(4), h.run(5)}, "src/auth.go")
+	h.runs[n].Task = strings.Repeat("é", protocol.CoordMaxStatusTaskBytes)
+	if err := h.db.UpdateRun(ctx, h.runs[n]); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
 	if err := h.db.UpdateRunStatus(ctx, h.run(n), domain.RunNeedsAttention, "", nil, nil); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
@@ -203,7 +223,9 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 			t.Fatalf("peer %d = %+v, want state %q", i, p, want)
 		}
 	}
-	if p := st.Peers[5]; p.RunID != string(h.run(n)) || p.RunStatus != string(domain.RunNeedsAttention) {
-		t.Fatalf("first workspace peer = %+v, want the most recently active run %s", p, h.run(n))
+	if p := st.Peers[5]; p.RunID != string(h.run(n)) || p.RunStatus != string(domain.RunNeedsAttention) ||
+		p.TaskBytes != 2*protocol.CoordMaxStatusTaskBytes || !p.TaskTruncated ||
+		len(p.Task) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Task) {
+		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task bounded", p, h.run(n))
 	}
 }

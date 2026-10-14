@@ -141,7 +141,7 @@ const (
 // CoordPeer is one run the caller is authorized to message. Files are the
 // paths both runs touch, empty once the overlap has cleared; ExpiresAt is
 // set only in the grace state and is RFC3339. RunStatus is the peer run's
-// lifecycle status, set in the workspace state.
+// lifecycle status.
 type CoordPeer struct {
 	RunID          string   `json:"run_id"`
 	MemberID       string   `json:"member_id"`

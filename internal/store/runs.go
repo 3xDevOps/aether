@@ -252,6 +252,43 @@ func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	return collect(rows, scanRun)
 }
 
+// RunSummary is the slim view of a live run that coordination lists. Task
+// holds at most the requested prefix of the task in bytes; TaskBytes is the
+// full task's length.
+type RunSummary struct {
+	ID        domain.RunID
+	MemberID  domain.MemberID
+	Status    domain.RunStatus
+	Protected bool
+	Task      string
+	TaskBytes int
+}
+
+// ListLiveRunSummaries returns the non-terminal runs in workspace, most
+// recently created or status-changed first. It reads only the runs table.
+func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*RunSummary, error) {
+	placeholders := []string{}
+	args := []any{taskBytes, workspace}
+	for _, s := range domain.AllRunStatuses {
+		if !s.Terminal() {
+			placeholders = append(placeholders, "?")
+			args = append(args, s)
+		}
+	}
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT id, member_id, status, protected,
+		     COALESCE(CAST(substr(CAST(task AS BLOB), 1, ?) AS TEXT), ''), length(CAST(task AS BLOB))
+		 FROM runs WHERE workspace_id = ? AND status IN (`+strings.Join(placeholders, ", ")+`)
+		 ORDER BY max(COALESCE(status_changed_at, created_at), created_at) DESC, rowid DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list live run summaries: %w", err)
+	}
+	return collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
+		var r RunSummary
+		return &r, row.Scan(&r.ID, &r.MemberID, &r.Status, &r.Protected, &r.Task, &r.TaskBytes)
+	})
+}
+
 // UpdateRun writes a run snapshot back. It never writes home_member_id: the
 // home a run's container mounts is fixed when the row is created, and a
 // stale or hand-built snapshot must not be able to change or clear it. It

@@ -79,6 +79,7 @@ type Runs interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	ListActiveRuns(ctx context.Context) ([]*domain.Run, error)
+	ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*store.RunSummary, error)
 }
 
 // MissionService is the optional mission authority behind the coordination

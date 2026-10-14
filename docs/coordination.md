@@ -108,15 +108,19 @@ coordination capabilities when conflict coordination is enabled. Assignment
 capabilities extend that baseline; they do not replace it. Development
 capabilities come from the live development service, not the assignment.
 The sender is never a parameter. A run can open a conversation with
-`coord.send` or `coord.ask` over three routes, checked in order:
+`coord.send` or `coord.ask` only while its owner holds the `message`
+permission: a viewer's runs, and runs whose owner is no longer a member,
+reach no peer on any route. Three routes are then checked in order:
 
 1. **Swarm**: a current assignment peer of a swarm run.
 2. **Radar**: a run the radar currently marks as overlapping, or one in its
    ten-minute overlap grace period.
 3. **Workspace**: any other live run in the same workspace, when the sender
    run's owner holds the `message` permission on it. Admins hold it on every
-   run and viewers on none; collaborators hold it unless the target is a
-   protected run of another member. The owner's role is re-read on every send.
+   run; collaborators hold it unless the target is a protected run of another
+   member. Only this route checks protection.
+
+The owner's role is re-read on every send.
 
 No route crosses a workspace boundary, and a finished run cannot be messaged.
 Status lists the reachable peers in route order: assignment peers with
@@ -124,21 +128,25 @@ Status lists the reachable peers in route order: assignment peers with
 reports one; radar peers with `state: "active"` or `"grace"`; then workspace
 peers with `state: "workspace"`, their task summary and `run_status`, most
 recently active first. Each run appears once, under its first route, and
-status never lists a run the sender cannot message. A question reply is the
+status never lists a run the sender cannot message: finished runs, runs in
+another workspace, and every peer of a viewer's run are left out, and
+`peer_total` counts what remains. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a
 workspace boundary.
 
 The `recipient_status` in a send or ask receipt is the recipient's lifecycle
-status when the message was stored: `queued`, `provisioning`, `running`, or
-`needs-attention`. The message waits in the inbox whatever the status. A
+status when the receipt is returned: `queued`, `provisioning`, `running`, or
+`needs-attention`. An idempotent retry reports the current status. The message waits in the inbox whatever the status. A
 refused send names its reason:
 
 | Error | Reason |
 | --- | --- |
 | `-32001` `run <to> is not an authorized peer of run <from>: it is in a different workspace; ...` | The target belongs to another workspace. |
-| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: <rule>; ...` | No swarm or radar route, and the owner lacks `message`: the role is viewer, or the target is protected. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (viewer) may not message it: <rule>; ...` | The sender run's owner is a viewer; no route applies. |
+| `-32001` `run <to> is not an authorized peer of run <from>: its owner <id> is no longer a member; ...` | The sender run's owner was removed; no route applies. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: run is protected: ...; ...` | No swarm or radar route, and the target is a protected run of another member. |
 | `-32004` `run <to> has finished` | The target is no longer live. |
 | `-32003` `run <from> has reached its limit of 8 coordination peers; ...` | The peer cap below. |
 
@@ -148,7 +156,8 @@ message``.
 A run may open conversations with at most eight distinct peers over the radar
 and workspace routes. Swarm assignment peers do not count, so an integrator
 can message every worker it dispatched. Existing conversations remain usable
-when this limit has been reached. The server
+when this limit has been reached: a run the sender already sent to or asked,
+including a former swarm peer that is still live, stays reachable. The server
 also enforces these bounds:
 
 - message, question, and reply bodies are at most 4 KiB;

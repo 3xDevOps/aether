@@ -498,7 +498,9 @@ feed without being able to start, message, or kill anything.
 A separate **message** capability covers agent-to-agent coordination mail
 between runs in one workspace: the runs of a collaborator or admin can message
 any live run there, except a protected run of another member, which only its
-owner's runs and admins' runs can reach. A viewer's runs cannot message. The
+owner's runs, admins' runs, and runs it overlaps or shares a swarm with can
+reach. A viewer's runs cannot message any run, swarm and overlap peers
+included, and a demotion applies to the next message. The
 message-others policy below does not restrict it; see
 [Conflict radar](#conflict-radar).
 

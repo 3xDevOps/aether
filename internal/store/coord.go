@@ -240,7 +240,9 @@ func (d *DB) AppendRunMessage(ctx context.Context, m *RunMessage, maxUnacked int
 // AppendRunMessageWithPeer atomically persists a message and, for a new
 // send/question, its sender-to-recipient peer relationship. The relationship
 // insert is rolled back with an inbox-cap failure, so failed enqueues never
-// spend a peer slot.
+// spend a peer slot. A send or question the sender already delivered without
+// opening a peer, such as one to a swarm peer, is an existing conversation
+// and spends no slot.
 func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUnacked, maxPeers int, openPeer bool) (bool, error) {
 	if m == nil || m.WorkspaceID == "" || m.FromRun == "" || m.ToRun == "" {
 		return false, errors.New("store: append run message: workspace_id, from_run, and to_run are required")
@@ -310,8 +312,9 @@ func (d *DB) AppendRunMessageWithPeer(ctx context.Context, m *RunMessage, maxUna
 	if openPeer {
 		var exists int
 		if peerErr := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM coord_peers WHERE from_run = ? AND to_run = ?)`,
-			m.FromRun, m.ToRun).Scan(&exists); peerErr != nil {
+			`SELECT EXISTS (SELECT 1 FROM coord_peers WHERE from_run = ? AND to_run = ?)
+			     OR EXISTS (SELECT 1 FROM run_messages WHERE from_run = ? AND to_run = ? AND kind <> ?)`,
+			m.FromRun, m.ToRun, m.FromRun, m.ToRun, RunMessageKindReply).Scan(&exists); peerErr != nil {
 			return false, fmt.Errorf("store: append run message: peer lookup: %w", peerErr)
 		}
 		if exists == 0 {

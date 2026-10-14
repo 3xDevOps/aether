@@ -57,9 +57,7 @@ var coordinationCapabilities = []string{
 }
 
 // Status answers coord.status for run: who it is, exactly the peers it
-// may message, and how many messages are waiting. A mission run lists its
-// server-authorized assignment peers first; every run then lists the
-// radar's active/grace peers and the workspace runs its owner may message.
+// may message, and how many messages are waiting.
 func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
 	const method = protocol.MethodCoordStatus
 	if !s.enterRun(run) {
@@ -114,81 +112,10 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 			}
 		}
 	}
-	radarPeers, radarTotal, _, radarErr := s.radar.authorizedSetBounded(ctx, run, protocol.CoordMaxStatusPeers)
-	if radarErr != nil {
-		return protocol.CoordStatusResult{}, internalError(method, radarErr)
-	}
-	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
-	seen := make(map[domain.RunID]int, len(missionPeers)+len(radarPeers))
-	appendPeer := func(peer protocol.CoordPeer) {
-		id := domain.RunID(peer.RunID)
-		if id == "" || id == run {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			// MissionService and the radar each return a bounded unique set;
-			// a duplicate keeps the first current-authority entry.
-			return
-		}
-		if len(peers) >= protocol.CoordMaxStatusPeers {
-			return
-		}
-		seen[id] = len(peers)
-		peers = append(peers, peer)
-	}
-	missionTotal, shared := 0, 0
-	missionIDs := make(map[domain.RunID]bool, len(missionPeers))
-	for _, peer := range missionPeers {
-		if target, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err != nil ||
-			target == nil || target.Status.Terminal() || target.WorkspaceID != self.WorkspaceID {
-			continue
-		}
-		missionIDs[domain.RunID(peer.RunID)] = true
-		missionTotal++
-		peer.State = protocol.CoordPeerMission
-		// The bounded radar view may omit this peer; the full set says
-		// whether the two overlap.
-		p, radarErr := s.radar.authorized(ctx, run, domain.RunID(peer.RunID))
-		if radarErr != nil {
-			return protocol.CoordStatusResult{}, internalError(method, radarErr)
-		}
-		if p.state != "" {
-			shared++
-			peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(p.files)
-		}
-		appendPeer(s.decoratePeer(ctx, peer))
-	}
-	for _, p := range radarPeers {
-		task, taskBytes, taskTruncated := "", 0, false
-		memberID := ""
-		if r, gerr := s.cfg.Store.GetRun(ctx, p.run); gerr == nil && r != nil {
-			memberID = string(r.MemberID)
-			task, taskBytes, taskTruncated = boundStatusText(r.Task)
-		}
-		peer := protocol.CoordPeer{
-			RunID: string(p.run), MemberID: memberID, Task: task, TaskBytes: taskBytes,
-			TaskTruncated: taskTruncated, State: p.state,
-		}
-		peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(p.files)
-		if !p.expiry.IsZero() {
-			peer.ExpiresAt = p.expiry.UTC().Format(time.RFC3339)
-		}
-		appendPeer(peer)
-	}
-	workspacePeers, err := s.workspacePeers(ctx, self, func(id domain.RunID) bool {
-		return missionIDs[id] || s.radar.listed(run, id)
-	})
+	peers, total, err := s.statusPeers(ctx, self, missionPeers)
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
-	for _, r := range workspacePeers {
-		task, taskBytes, taskTruncated := boundStatusText(r.Task)
-		appendPeer(protocol.CoordPeer{
-			RunID: string(r.ID), MemberID: string(r.MemberID), Task: task, TaskBytes: taskBytes,
-			TaskTruncated: taskTruncated, State: protocol.CoordPeerWorkspace, RunStatus: string(r.Status),
-		})
-	}
-	total := missionTotal + radarTotal - shared + len(workspacePeers)
 	unread, err := s.cfg.Mail.CountUnackedRunMessages(ctx, run)
 	if err != nil {
 		return protocol.CoordStatusResult{}, internalError(method, err)
@@ -242,23 +169,6 @@ func boundStatusFiles(all []string) ([]string, int, bool) {
 		files = append(files, path)
 	}
 	return files, len(all), len(all) > len(files)
-}
-
-func (s *Service) decoratePeer(ctx context.Context, peer protocol.CoordPeer) protocol.CoordPeer {
-	if peer.TaskBytes == 0 && peer.Task != "" {
-		peer.Task, peer.TaskBytes, peer.TaskTruncated =
-			boundStatusText(peer.Task)
-	}
-	if peer.MemberID == "" {
-		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err == nil && r != nil {
-			peer.MemberID = string(r.MemberID)
-			if peer.Task == "" {
-				peer.Task, peer.TaskBytes, peer.TaskTruncated =
-					boundStatusText(r.Task)
-			}
-		}
-	}
-	return peer
 }
 
 func missionRPCError(method string, err error) *protocol.Error {

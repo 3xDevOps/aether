@@ -269,6 +269,7 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "src/auth.go")
 
 	if _, err := h.svc.Send(ctx, a, sendParams(a, "hi")); err == nil || err.Code != protocol.CodeInvalidParams {
 		t.Fatalf("self-send = %v, want CodeInvalidParams", err)
@@ -281,8 +282,8 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 		err.Message != fmt.Sprintf("coord.send: run %s has finished", b) {
 		t.Fatalf("send to a finished run = %v, want CodeUnavailable", err)
 	}
-	if st, serr := h.svc.Status(ctx, a); serr != nil || len(st.Peers) != 0 {
-		t.Fatalf("status peers = %+v (err %v), want the finished run omitted", st.Peers, serr)
+	if st, serr := h.svc.Status(ctx, a); serr != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
+		t.Fatalf("status peers = %+v (err %v), want the finished overlapping run omitted", st, serr)
 	}
 }
 
