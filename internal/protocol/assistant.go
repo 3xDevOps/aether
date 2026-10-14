@@ -1,0 +1,102 @@
+package protocol
+
+import (
+	"encoding/json"
+	"time"
+)
+
+const (
+	MethodAssistantStatus  = "assistant.status"
+	MethodAssistantStart   = "assistant.start"
+	MethodAssistantPrompt  = "assistant.prompt"
+	MethodAssistantCancel  = "assistant.cancel"
+	MethodAssistantAnswer  = "assistant.answer"
+	MethodAssistantConfirm = "assistant.confirm"
+	MethodAssistantReset   = "assistant.reset"
+	MethodAssistantHistory = "assistant.history"
+	// MethodAssistantDocs is served only on the assistant tool socket.
+	MethodAssistantDocs = "assistant.docs"
+)
+
+const (
+	AssistantStateSetup        = "setup"
+	AssistantStateNeedsRestart = "needs_restart"
+	AssistantStateIdle         = "idle"
+	AssistantStateStarting     = "starting"
+	AssistantStateRunning      = "running"
+	AssistantStateFailed       = "failed"
+)
+
+type AssistantAgent struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Ready       bool   `json:"ready"`
+	// Reason says why the agent is not ready, for example that its Enhanced
+	// adapter is not installed or no login was found.
+	Reason string `json:"reason,omitempty"`
+}
+
+type AssistantConfirmation struct {
+	ID        string          `json:"id"`
+	Method    string          `json:"method"`
+	Summary   string          `json:"summary"`
+	Params    json.RawMessage `json:"params"`
+	CreatedAt time.Time       `json:"created_at"`
+	ExpiresAt time.Time       `json:"expires_at"`
+}
+
+type AssistantStatus struct {
+	State         string                  `json:"state"`
+	Agent         string                  `json:"agent,omitempty"`
+	Agents        []AssistantAgent        `json:"agents"`
+	Error         string                  `json:"error,omitempty"`
+	Confirmations []AssistantConfirmation `json:"confirmations"`
+}
+
+type AssistantStartParams struct {
+	Agent              string `json:"agent,omitempty"`
+	RestartEnvironment bool   `json:"restart_environment,omitempty"`
+}
+
+type AssistantPromptParams struct {
+	Text           string `json:"text"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type AssistantAnswerParams struct {
+	RequestID string         `json:"request_id"`
+	OptionID  string         `json:"option_id"`
+	Values    map[string]any `json:"values,omitempty"`
+}
+
+type AssistantConfirmParams struct {
+	ConfirmationID string `json:"confirmation_id"`
+	Approve        bool   `json:"approve"`
+}
+
+type AssistantHistoryParams struct {
+	BeforeSeq int64 `json:"before_seq,omitempty"`
+	Limit     int   `json:"limit,omitempty"`
+}
+
+type AssistantDocsParams struct {
+	Topic string `json:"topic,omitempty"`
+}
+
+type AssistantDocsResult struct {
+	Topics []string `json:"topics,omitempty"`
+	Text   string   `json:"text,omitempty"`
+}
+
+// AssistantStreamRequest is the /ws/assistant header.
+type AssistantStreamRequest struct {
+	AfterSeq int64 `json:"after_seq"`
+}
+
+// AssistantFrame is one stream frame after the ACPStreamResponse ack: an
+// ACPFrame, or the full pending confirmation set whenever it changes. A
+// non-nil empty Confirmations clears the set.
+type AssistantFrame struct {
+	ACPFrame
+	Confirmations *[]AssistantConfirmation `json:"confirmations,omitempty"`
+}
