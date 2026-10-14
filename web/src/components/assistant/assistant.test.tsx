@@ -513,6 +513,19 @@ describe('a new conversation', () => {
     expect(replace).not.toHaveBeenCalled()
   })
 
+  it('drops a full-item read that finishes after another tab reset the conversation', async () => {
+    const whole = item('tool_call', 1, { tool_call: { id: 't', title: 'late', status: 'completed' } })
+    let finish: (value: typeof whole) => void = () => {}
+    vi.mocked(api.assistantItem).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    act(() => useStore.getState().acpAck('assistant', { ok: true, seq: 0, replay: 0, epoch: 0, live: true, has_control: false }))
+    const read = loadWholeItem(useStore, api, 'assistant', whole.seq)
+    act(() => useStore.getState().acpAck('assistant', { ok: true, seq: 0, replay: 0, epoch: 1, live: true, has_control: false }))
+    const replace = vi.spyOn(useStore.getState(), 'acpReplaceItem')
+    finish(whole)
+    await read
+    expect(replace).not.toHaveBeenCalled()
+  })
+
   it('sends the next prompt under a fresh idempotency key', async () => {
     vi.mocked(api.assistantPrompt).mockRejectedValueOnce(new Error('lost')).mockResolvedValue({})
     const aside = await openPanel()

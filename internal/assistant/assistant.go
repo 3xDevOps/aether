@@ -319,6 +319,12 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
+	return s.ensureLocked(ctx, m, requested)
+}
+
+// ensureLocked is ensure with m.op held.
+func (s *Service) ensureLocked(ctx context.Context, m *member, requested string) (*session, error) {
+	id := m.id
 	if s.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
@@ -454,7 +460,12 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 		}}},
 		SessionID: resume,
 		Logger:    slog.Default().With("assistant", m.id),
-		OnState:   func(acphost.TurnState) { m.notify() },
+		OnState: func(st acphost.TurnState) {
+			if !st.Working && st.Tasks == 0 {
+				m.confirms.cancelAll()
+			}
+			m.notify()
+		},
 	})
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("assistant: open the %s session%s: %w", agent, stderr.suffix(), err), stopExec(exec))
@@ -683,17 +694,6 @@ type attempt struct {
 // restart, is not sent again: a duplicate waits for the first attempt and
 // returns its result.
 func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string) error {
-	row, err := s.stored(ctx, id)
-	if err != nil {
-		return err
-	}
-	seen, err := s.cfg.Store.HasAssistantPromptKey(ctx, id, row.Generation, key)
-	if err != nil {
-		return fmt.Errorf("assistant: %w", err)
-	}
-	if seen {
-		return nil
-	}
 	m := s.member(id)
 	a, first := m.begin(key)
 	if !first {
@@ -704,27 +704,50 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
-	err = s.send(ctx, id, text)
-	m.finish(key, a, err)
-	if err != nil {
+	dispatched, err := s.send(ctx, m, text, key)
+	if err != nil && !dispatched {
+		m.finish(key, a, err)
 		return err
 	}
-	if err = s.cfg.Store.AddAssistantPromptKey(ctx, id, row.Generation, key); err != nil {
-		return fmt.Errorf("assistant: %w", err)
-	}
-	return nil
+	m.finish(key, a, nil)
+	return err
 }
 
-func (s *Service) send(ctx context.Context, id domain.MemberID, text string) error {
-	live, err := s.ensure(ctx, id, "")
+// send dispatches text under m.op, so a reset cannot fall between the key
+// check, the dispatch and saving the key under the generation it ran in.
+// dispatched is true once the agent may have the prompt; its key then stays
+// reserved even if the caller left or saving it failed.
+func (s *Service) send(ctx context.Context, m *member, text, key string) (dispatched bool, err error) {
+	m.op.Lock()
+	defer m.op.Unlock()
+	row, err := s.stored(ctx, m.id)
 	if err != nil {
-		return err
+		return false, err
+	}
+	seen, err := s.cfg.Store.HasAssistantPromptKey(ctx, m.id, row.Generation, key)
+	if err != nil {
+		return false, fmt.Errorf("assistant: %w", err)
+	}
+	if seen {
+		return true, nil
+	}
+	live, err := s.ensureLocked(ctx, m, "")
+	if err != nil {
+		return false, err
 	}
 	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
-	if err == nil && !started {
-		err = ErrTurnRunning
+	switch {
+	case err == nil && !started:
+		return false, ErrTurnRunning
+	case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
+		return false, err
 	}
-	return err
+	// A caller that left while waiting for the agent's acceptance may have
+	// started the turn, so its key is saved all the same.
+	if saveErr := s.cfg.Store.AddAssistantPromptKey(context.WithoutCancel(ctx), m.id, row.Generation, key); saveErr != nil {
+		return true, errors.Join(err, fmt.Errorf("assistant: %w", saveErr))
+	}
+	return true, err
 }
 
 func (m *member) begin(key string) (*attempt, bool) {
@@ -771,7 +794,9 @@ func (s *Service) Cancel(ctx context.Context, id domain.MemberID) error {
 	if err != nil {
 		return err
 	}
-	return sess.Cancel(ctx)
+	err = sess.Cancel(ctx)
+	s.member(id).confirms.cancelAll()
+	return err
 }
 
 func (s *Service) Answer(id domain.MemberID, requestID, optionID string, values map[string]any) error {

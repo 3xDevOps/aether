@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -70,7 +71,7 @@ func (r *assistantRuntime) RecoverExec(_ context.Context, identity runtime.ExecI
 			return e, nil
 		}
 	}
-	return nil, runtime.ErrExecUnavailable
+	return nil, fmt.Errorf("%w: %w", runtime.ErrExecUnavailable, runtime.ErrNotFound)
 }
 
 // adapters are the execs the assistant started.
@@ -559,5 +560,84 @@ func TestIntegrationAssistantCrash(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if row, err = env.srv.Store().GetAssistantSession(ctx, env.member.ID); err != nil || row.HarnessSessionID != "" || row.Agent != "" || row.Generation != 1 {
 		t.Fatalf("row after a crash and a reset = %+v, %v, want a cleared conversation", row, err)
+	}
+}
+
+// TestIntegrationAssistantCancelCards cancels a turn while a
+// tool call waits for approval: the card goes and the call fails unapproved.
+func TestIntegrationAssistantCancelCards(t *testing.T) {
+	requireBinary(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	env := startAssistantServer(t, ctx, nil)
+	defer env.stop()
+	if perr := env.call(protocol.MethodAssistantStart, protocol.AssistantStartParams{}, nil); perr != nil {
+		t.Fatal(perr)
+	}
+	frames := env.watch(ctx, 0)
+	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: acpmock.PromptWait, IdempotencyKey: "w"}, nil); perr != nil {
+		t.Fatal(perr)
+	}
+	conn, err := net.Dial("unix", filepath.Join(env.data, "assistant", string(env.member.ID), "sock", "assistant.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	result := make(chan *protocol.Error, 1)
+	go func() {
+		perr, _ := env.toolCall(conn, bufio.NewReader(conn), protocol.MethodEnvSave)
+		result <- perr
+	}()
+	frames.until(t, "a pending confirmation", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && len(f.Status.Confirmations) == 1
+	})
+	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
+		t.Fatal(perr)
+	}
+	frames.until(t, "the card to go", func(f protocol.AssistantFrame) bool {
+		return f.Status != nil && len(f.Status.Confirmations) == 0
+	})
+	select {
+	case perr := <-result:
+		if perr == nil || !strings.Contains(perr.Message, "was not approved") {
+			t.Fatalf("env.save after a cancel = %v, want it refused", perr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the tool call stayed blocked after the cancel")
+	}
+}
+
+// TestIntegrationAssistantKeyKept drops the caller
+// while the agent has the prompt: the retry must not run it twice.
+func TestIntegrationAssistantKeyKept(t *testing.T) {
+	requireBinary(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	env := startAssistantServer(t, ctx, nil)
+	defer env.stop()
+	callerCtx, leave := context.WithCancel(ctx)
+	time.AfterFunc(300*time.Millisecond, leave)
+	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("prompt of a caller that left = %v, want the cancellation", err)
+	}
+	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone"); err != nil {
+		t.Fatalf("retry of a dispatched prompt = %v, want it ignored", err)
+	}
+	var history protocol.RunACPHistoryResult
+	if perr := env.call(protocol.MethodAssistantHistory, protocol.AssistantHistoryParams{}, &history); perr != nil {
+		t.Fatal(perr)
+	}
+	turns := 0
+	for _, f := range history.Frames {
+		if strings.Contains(string(f.Item), `"turn_start"`) {
+			turns++
+		}
+	}
+	if turns != 1 {
+		t.Fatalf("%d turns after the retry, want 1", turns)
+	}
+	if perr := env.call(protocol.MethodAssistantCancel, struct{}{}, nil); perr != nil {
+		t.Fatal(perr)
 	}
 }

@@ -83,15 +83,18 @@ func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.Member
 }
 
 // StopAssistantExec stops an adapter an earlier session or server process
-// started. An exec the runtime no longer knows is gone, not an error.
+// started. Only an exec the runtime proves gone counts as stopped.
 func (s *Scheduler) StopAssistantExec(ctx context.Context, identity runtime.ExecIdentity) error {
 	managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
 		return fmt.Errorf("%w: the runtime cannot recover a managed exec", runtime.ErrExecUnavailable)
 	}
 	exec, err := managed.RecoverExec(ctx, identity)
-	if err != nil {
+	if errors.Is(err, runtime.ErrNotFound) {
 		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("recover the assistant's adapter (exec %s): %w", identity.ExecID, err)
 	}
 	defer func() { _ = exec.Detach() }()
 	if _, err = exec.Stop(ctx, acpStopGrace); err != nil {

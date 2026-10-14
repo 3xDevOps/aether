@@ -21,7 +21,7 @@ var (
 
 	errDeclined     = errors.New("the member declined this action")
 	errExpired      = fmt.Errorf("the member did not answer within %s", confirmTTL)
-	errSessionEnded = errors.New("the assistant session ended before the member answered")
+	errSessionEnded = errors.New("the turn or session ended before the member answered")
 )
 
 type pendingConfirmation struct {

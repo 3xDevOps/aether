@@ -43,14 +43,17 @@ func (s *Service) Generation(ctx context.Context, id domain.MemberID) (int64, er
 // conversation is reset, and the viewer resubscribes. A viewer that reports
 // the epoch of an earlier conversation gets the whole log.
 func (s *Service) Subscribe(ctx context.Context, id domain.MemberID, afterSeq, viewerEpoch int64) (Stream, error) {
-	generation, genErr := s.Generation(ctx, id)
-	if genErr != nil {
-		return Stream{}, genErr
+	m := s.member(id)
+	m.reset.RLock()
+	defer m.reset.RUnlock()
+	row, err := s.stored(ctx, id)
+	if err != nil {
+		return Stream{}, err
 	}
+	generation := row.Generation
 	if viewerEpoch != 0 && viewerEpoch/EpochStride-1 != generation {
 		afterSeq = 0
 	}
-	m := s.member(id)
 	m.mu.Lock()
 	live, changed := m.liveLocked(), m.changed
 	m.mu.Unlock()
@@ -59,8 +62,8 @@ func (s *Service) Subscribe(ctx context.Context, id domain.MemberID, afterSeq, v
 	out.Epoch = Epoch(generation, 0)
 	out.Started, out.Cancel = changed, stopWatching
 	if live != nil {
-		replay, items, cancel, err := live.acp.Subscribe(afterSeq)
-		if err == nil {
+		replay, items, cancel, subErr := live.acp.Subscribe(afterSeq)
+		if subErr == nil {
 			state := live.acp.State()
 			out.ACPStream = scheduler.ACPStream{
 				Replay: replay.Items, Reset: replay.Reset, TruncatedBefore: replay.TruncatedBefore, Epoch: Epoch(generation, replay.Epoch),
@@ -69,9 +72,9 @@ func (s *Service) Subscribe(ctx context.Context, id domain.MemberID, afterSeq, v
 			}
 			return out, nil
 		}
-		if !errors.Is(err, acphost.ErrClosed) {
+		if !errors.Is(subErr, acphost.ErrClosed) {
 			stopWatching()
-			return Stream{}, err
+			return Stream{}, subErr
 		}
 		out.Started = live.ended
 	}

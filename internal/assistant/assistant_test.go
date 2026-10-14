@@ -263,3 +263,33 @@ func TestLateEndExecLeavesNewerRowAlone(t *testing.T) {
 		t.Fatalf("exec identity = %q, want the stopped adapter forgotten", row.ExecIdentity)
 	}
 }
+
+// A reset holds the lock a subscription takes, so the generation, the replay
+// and the epoch always describe the same conversation.
+func TestSubscribeWaitsForReset(t *testing.T) {
+	s := New(Config{Dir: t.TempDir(), Store: newMemStore()})
+	m := s.member("m1")
+	m.reset.Lock()
+	done := make(chan error, 1)
+	go func() {
+		stream, err := s.Subscribe(t.Context(), "m1", 0, 0)
+		if err == nil {
+			stream.Cancel()
+		}
+		done <- err
+	}()
+	select {
+	case <-done:
+		t.Fatal("a subscription ran while a reset was in progress")
+	case <-time.After(100 * time.Millisecond):
+	}
+	m.reset.Unlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the subscription never finished")
+	}
+}
