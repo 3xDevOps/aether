@@ -135,7 +135,7 @@ export function SidebarRuns() {
 }
 
 // --spacing(3.25) is the centre of ListRow's status dot: px-2 plus half of size-2.5.
-const connectors = cn(
+export const connectors = cn(
   'relative pl-6.5',
   'before:absolute before:top-0 before:left-[calc(--spacing(3.25)-0.5px)] before:h-[calc(50%+0.5px)] before:w-[calc(--spacing(3.25)+0.5px)] before:border-b before:border-l before:border-icon-faint',
   'after:absolute after:top-[calc(50%+0.5px)] after:bottom-0 after:left-[calc(--spacing(3.25)-0.5px)] after:border-l after:border-icon-faint last:after:hidden',

@@ -331,6 +331,36 @@ describe('swarm detail', () => {
     expect(tasks.queryByText('add empty cart tests')).toBeNull()
   })
 
+  it('keeps control holds and workers that need you visible when the integrator is folded', async () => {
+    seed({
+      runs: Object.fromEntries([
+        integrator(),
+        worker('run_ask', { status: 'needs-attention', reason: 'blocked: no database access' }),
+        worker('run_busy'),
+      ].map((r) => [r.id, toRecord(r)])),
+    })
+    await mount(showing({}, {
+      tasks: [
+        missionTask(),
+        missionTask({ id: 'task_2', revision: missionTaskRevision({ task_id: 'task_2', title: 'second task' }) }),
+        missionTask({ id: 'task_3', revision: missionTaskRevision({ task_id: 'task_3', title: 'quiet task' }) }),
+      ],
+      attempts: [
+        attempt({ id: 'attempt_1', run_id: 'run_busy', takeover_active: true, takeover_member_id: alice.id, takeover_generation: 4 }),
+        attempt({ id: 'attempt_2', task_id: 'task_2', run_id: 'run_ask' }),
+        attempt({ id: 'attempt_3', task_id: 'task_3', run_id: 'run_gone' }),
+      ],
+    }))
+    const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
+    await userEvent.click(tasks.getByRole('button', { name: "Integrator's tasks" }))
+
+    expect(tasks.getByText('Alice holds control of this worker')).toBeDefined()
+    expect(tasks.getByText('second task')).toBeDefined()
+    expect(tasks.getByText(/^Worker 2 · Claude Code/)).toBeDefined()
+    expect(tasks.queryByText('quiet task')).toBeNull()
+    expect(tasks.queryByText('Task details')).toBeNull()
+  })
+
   it('groups agent messages by thread and folds a run of plain messages', async () => {
     seed({ runs: { run_integrator: toRecord(integrator()), run_worker: toRecord(worker('run_worker')) } })
     await mount(showing({}, {

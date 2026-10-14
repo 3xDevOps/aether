@@ -37,7 +37,7 @@ export function missionTree(detail: MissionDetail): TaskNode[] {
       dependsOn: detail.tasks.filter((other) => needed.has(other.id)),
       attempts: attempts.map((attempt) => ({
         attempt,
-        name: attempt.run_id ? workerName(index, attempt.number, first) : `Attempt ${attempt.number}`,
+        name: workerName(index, attempt.number, first),
         earlierIntegrator: attempt.integrator_generation !== detail.mission.integrator_generation,
       })),
     }

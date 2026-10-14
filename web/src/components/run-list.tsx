@@ -13,6 +13,7 @@ import { useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { RunRow } from '@/store/selectors'
 import { runKey, swarmParents } from '@/routes/board/map-layout'
+import { connectors } from '@/components/shell/sidebar-runs'
 
 export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const hydrated = useStore((s) => s.hydrated)
@@ -75,9 +76,9 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
               <Row
                 row={row}
                 toggle={
-                  workers.length > 0
+                  foldable(workers) > 0
                     ? {
-                        count: workers.length,
+                        count: foldable(workers),
                         expanded: expanded[row.run.id] ?? true,
                         onToggle: () =>
                           setExpanded((prev) => ({ ...prev, [row.run.id]: !(prev[row.run.id] ?? true) })),
@@ -90,10 +91,9 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                   id={workersID(row.run.id)}
                   hidden={shown(row.run.id, workers).length === 0}
                   aria-label={`Workers of ${runLabel(row.run)}`}
-                  className="ml-5 border-l border-seam"
                 >
                   {shown(row.run.id, workers).map((worker) => (
-                    <li key={worker.run.id} className="border-t border-seam first:border-t-0">
+                    <li key={worker.run.id} className={connectors}>
                       <Row row={worker} />
                     </li>
                   ))}
@@ -118,6 +118,8 @@ function nestWorkers(runs: RunRow[]): { row: RunRow; workers: RunRow[] }[] {
   }
   return [...top]
 }
+
+const foldable = (workers: RunRow[]) => workers.filter((worker) => worker.state !== 'needs-you').length
 
 const workersID = (runID: string) => `workers-${runID}`
 

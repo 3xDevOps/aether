@@ -95,11 +95,20 @@ describe('run list swarm ordering', () => {
 
   it('keeps a worker that needs you visible when its integrator is folded', () => {
     renderAsking()
-    fireEvent.click(screen.getByRole('button', { name: 'Hide 2 workers' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Hide 1 worker' }))
 
     expect(screen.getByText('asking worker')).toBeDefined()
     expect(screen.queryByText('busy worker')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Show 2 workers' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Show 1 worker' }).getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('offers no fold when every worker needs you', () => {
+    useStore.setState({ hydrated: true, hydrationError: null, streamDead: false, route: { name: 'overview', params: {} } })
+    const asking = runs.filter((item) => item.id !== 'run_busy')
+    render(<RunList runs={listedRuns('', stateContext({ runs: runRecords(...asking) }))} empty="No runs yet" />)
+
+    expect(screen.getByText('asking worker')).toBeDefined()
+    expect(screen.queryByRole('button', { name: /^(Hide|Show) / })).toBeNull()
   })
 })
 

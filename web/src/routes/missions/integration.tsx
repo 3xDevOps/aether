@@ -49,7 +49,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
           ))}
           {attempts.map((attempt) => (
             <Fact key={attempt.id} term={`${taskTitle(attempt.task_id)} · attempt ${attempt.number}`}>
-              {attempt.run_id && runLink(attempt.run_id)} · {attempt.state} · rev {attempt.task_revision}
+              {runLink(attempt.run_id)} · {attempt.state} · rev {attempt.task_revision}
               {attempt.takeover_generation != null ? ` · takeover ${attempt.takeover_generation}` : ''}
             </Fact>
           ))}

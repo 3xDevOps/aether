@@ -401,11 +401,13 @@ export async function applyEvent(
       } else {
         coalesce(store, `missions:${ev.workspace_id}`, () => {
           const generation = missionDeletions.get(store)
+          if (store.getState().activeWorkspace !== ev.workspace_id) return Promise.resolve()
           return client
             .missionList({ workspace_id: ev.workspace_id, limit: 50 })
             .then((result) => {
               if (missionDeletions.get(store) !== generation) return false
               const state = store.getState()
+              if (state.activeWorkspace !== ev.workspace_id) return
               // Merged, not replaced, so loaded older pages stay and the stored
               // cursor still marks the next older page for this workspace.
               const loaded = state.missionListWorkspace === ev.workspace_id

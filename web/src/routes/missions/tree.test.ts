@@ -19,9 +19,9 @@ describe('missionTree', () => {
   it('orders attempts newest first and names workers', () => {
     const [node] = missionTree(detail({
       tasks: [missionTask()],
-      attempts: [attempt({}), attempt({ id: 'attempt_2', number: 2, run_id: 'run_w2' }), attempt({ id: 'attempt_3', number: 3, run_id: '' })],
+      attempts: [attempt({}), attempt({ id: 'attempt_2', number: 2, run_id: 'run_w2' })],
     }))
-    expect(node.attempts.map((item) => item.name)).toEqual(['Attempt 3', 'Worker 1, attempt 2', 'Worker 1'])
+    expect(node.attempts.map((item) => item.name)).toEqual(['Worker 1, attempt 2', 'Worker 1'])
   })
 
   it('resolves dependencies once, in task order, ignoring unknown tasks', () => {

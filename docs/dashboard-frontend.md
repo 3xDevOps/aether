@@ -1349,7 +1349,8 @@ A swarm worker whose integrator run is also listed is indented under it,
 by the board map's rule (`swarmParents` in `src/routes/board/map-layout.ts`);
 other workers stay in place. The tree sits where its earliest member falls, so
 a worker that needs you lifts its integrator into Needs you. The integrator's
-chevron, **Hide <n> workers**, folds the workers that do not need you.
+chevron, **Hide <n> workers**, folds the workers that do not need you and
+is absent when all of them do.
 It is reached from the workspace switcher, `g` then `l` and the palette's
 **Open all workspaces**.
 
@@ -3216,7 +3217,7 @@ The body is one column, in this order:
    accountable human or an admin.
 3. **Tasks**, a tree rooted at the current integrator run. Each run row
    shows its status dot (`presentRun`, pulsing while working), the name
-   (`Integrator`, or `Worker <n>` and `attempt <m>` from `swarmHandle`),
+   (`Integrator`, or `Worker <n>` and `attempt <m>` from `workerName` via `missionTree`),
    agent and mode, the run's reason (its latest tool activity while working,
    with the `live-shimmer` sweep) and the elapsed time from the run's or
    attempt's start to its finish or now. Under the integrator, each task
@@ -3227,7 +3228,9 @@ The body is one column, in this order:
    earlier integrator generation dispatched it. A run the store does not
    hold shows a neutral dot and the attempt state, or `Run not loaded` for
    the integrator. The integrator and each task fold with their chevron and
-   start open; a control hold stays visible when its task folds. Selecting a
+   start open. Folding either keeps every control hold and every worker that
+   needs you visible; a task with neither disappears while the integrator is
+   folded. Swarm rows join with the sidebar's tree connectors. Selecting a
    run row opens that run. The derivation is
    `missionTree` in `src/routes/missions/tree.ts`. **Task details**, closed
    by default, shows the task's objective, scope, blockers other than

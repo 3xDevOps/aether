@@ -1646,6 +1646,38 @@ describe('applyEvent', () => {
     expect(s.missionNextCursor).toBe('page-3')
   })
 
+  it('drops a mission list read that finishes after the workspace changed', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) }))
+    const read = Promise.withResolvers<MissionListResult>()
+    const client = fakeApi({ missionList: vi.fn(() => read.promise) })
+    const applied = applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_a' },
+    }), client)
+    await vi.waitFor(() => expect(client.missionList).toHaveBeenCalled())
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    read.resolve({ missions: [mission({ id: 'mission_a' })], next_cursor: '' })
+    await applied
+
+    expect(store.getState().missions.mission_a).toBeUndefined()
+  })
+
+  it('does not read missions for a workspace that is no longer active', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) }))
+    const client = fakeApi({ missionList: vi.fn(async () => ({ missions: [], next_cursor: '' })) })
+    store.getState().setActiveWorkspace(otherWorkspace.id)
+    await applyEvent(store, statusEvent({
+      run_id: '',
+      type: 'mission.changed',
+      payload: { mission_id: 'mission_a' },
+    }), client)
+
+    expect(client.missionList).not.toHaveBeenCalled()
+  })
+
   it('coalesces a burst of mission changes into at most two reads', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi())

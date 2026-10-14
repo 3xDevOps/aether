@@ -12,9 +12,10 @@ import { message } from '@/lib/format'
 import { plainReason } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionAttemptState, MissionTask, MissionTaskScope } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { connectors } from '@/components/shell/sidebar-runs'
 import { elapsed, missionTree, taskTitle, type AttemptNode, type TaskNode } from '@/routes/missions/tree'
 import { useStore } from '@/store'
-import { useRun, useRunPresentation } from '@/store/hooks'
+import { useNeedsYouRuns, useRun, useRunPresentation } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
 import type { RunRecord } from '@/store/runs'
 
@@ -148,7 +149,7 @@ function LoadedRunLine({ run, label, lead, note, from, to }: RunLineProps & { ru
       shimmer={working}
       detail={[lead, shown.reason, note].filter(Boolean).join(' · ')}
       from={from}
-      to={to}
+      to={run.finished_at ?? to}
     />
   )
 }
@@ -230,28 +231,38 @@ function AttemptRow({ node, agents }: { node: AttemptNode; agents: AgentInfo[] |
   )
 }
 
-function TaskRow({ node, detail, agents, showProposalBlocker, canRelease, client, onChanged }: {
+function TaskRow({ node, detail, agents, needy, folded, showProposalBlocker, canRelease, client, onChanged }: {
   node: TaskNode
   detail: MissionDetail
   agents: AgentInfo[] | null
+  needy: ReadonlySet<string>
+  folded: boolean
   showProposalBlocker: boolean
   canRelease: boolean
   client: Api
   onChanged: () => void
 }) {
   const { task, title, dependsOn, attempts } = node
+  const [open, setOpen] = useState(true)
   const latest = attempts[0]?.attempt
   const held = latest && (latest.takeover_active || latest.orchestration_hold)
+  const expanded = open && !folded
+  const needing = attempts.filter((item) => needy.has(item.attempt.run_id))
+  if (folded && !held && needing.length === 0) return null
   return (
-    <li className="border-b border-seam last:border-b-0">
-      <Collapsible defaultOpen>
+    <li className={connectors}>
+      <Collapsible open={expanded} onOpenChange={setOpen}>
         <div className="flex min-h-7 items-center gap-3 coarse:min-h-11">
-          <CollapsibleTrigger className="w-auto min-w-0 flex-1">
-            <span className="min-w-0 truncate">{title}</span>
-          </CollapsibleTrigger>
+          {folded ? (
+            <span className="min-w-0 flex-1 truncate pl-5 text-ui">{title}</span>
+          ) : (
+            <CollapsibleTrigger className="w-auto min-w-0 flex-1">
+              <span className="min-w-0 truncate">{title}</span>
+            </CollapsibleTrigger>
+          )}
           <StateLine tone={statusTone[task.status]} className="shrink-0">{statusWord[task.status]}</StateLine>
         </div>
-        {dependsOn.length > 0 && (
+        {!folded && dependsOn.length > 0 && (
           <p className="flex flex-wrap items-center gap-x-1 pb-1 pl-5 text-ui-sm text-muted">
             Depends on
             {dependsOn.map((other, index) => (
@@ -267,6 +278,13 @@ function TaskRow({ node, detail, agents, showProposalBlocker, canRelease, client
           <div className="pb-2 pl-5">
             <ControlHold attempt={latest} canRelease={canRelease} client={client} onReleased={onChanged} />
           </div>
+        )}
+        {!expanded && needing.length > 0 && (
+          <ul className="flex flex-col pl-5">
+            {needing.map((attempt) => (
+              <AttemptRow key={attempt.attempt.id} node={attempt} agents={agents} />
+            ))}
+          </ul>
         )}
         <CollapsibleContent>
           <div className="pl-5">
@@ -314,40 +332,43 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
 }) {
   const { mission } = detail
   const tree = useMemo(() => missionTree(detail), [detail])
+  const [open, setOpen] = useState(true)
+  const runIDs = useMemo(() => detail.attempts.map((attempt) => attempt.run_id), [detail.attempts])
+  const needy = useNeedsYouRuns(runIDs)
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
-      <Collapsible defaultOpen>
+      <Collapsible open={open} onOpenChange={setOpen}>
         <div className="flex items-center gap-1">
           <CollapsibleTrigger className="w-auto shrink-0" aria-label="Integrator's tasks" />
           <div className="min-w-0 flex-1">
             <IntegratorLine detail={detail} agents={agents} />
           </div>
         </div>
-        <CollapsibleContent>
-          <div className="ml-2 border-l border-seam pl-3">
-            {tree.length === 0 ? (
-              <p className="text-ui text-muted">
-                {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
-              </p>
-            ) : (
-              <ul className="flex flex-col">
-                {tree.map((node) => (
-                  <TaskRow
-                    key={node.task.id}
-                    node={node}
-                    detail={detail}
-                    agents={agents}
-                    showProposalBlocker={mission.phase === 'active'}
-                    canRelease={canRelease}
-                    client={client}
-                    onChanged={onChanged}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        </CollapsibleContent>
+        {tree.length === 0 ? (
+          open && (
+            <p className="ml-2 pl-3 text-ui text-muted">
+              {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
+            </p>
+          )
+        ) : (
+          <ul className="ml-2 flex flex-col">
+            {tree.map((node) => (
+              <TaskRow
+                key={node.task.id}
+                node={node}
+                detail={detail}
+                agents={agents}
+                needy={needy}
+                folded={!open}
+                showProposalBlocker={mission.phase === 'active'}
+                canRelease={canRelease}
+                client={client}
+                onChanged={onChanged}
+              />
+            ))}
+          </ul>
+        )}
       </Collapsible>
     </section>
   )
