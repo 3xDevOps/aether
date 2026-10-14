@@ -224,8 +224,9 @@ func workerCapabilities() []string {
 
 // Peers returns the full current mission membership, not historical
 // attempts and not human takeover rows. It is unbounded because coord
-// authorizes swarm messages against it; coord.status bounds what it lists.  Every member is resolved from its durable run so
-// peer authorization is workspace-bound and symmetric.
+// authorizes swarm messages against it; coord.status bounds what it lists.
+// Every member is resolved from its durable run so peer authorization is
+// workspace-bound and symmetric.
 func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
 	m, _, err := s.resolveAssignment(ctx, run)
 	if err != nil {

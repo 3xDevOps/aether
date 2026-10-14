@@ -397,3 +397,60 @@ func TestCommandHooksAnnounceNewMailAtTheSameUnreadCount(t *testing.T) {
 		t.Fatalf("announced mail was repeated: %q", again)
 	}
 }
+
+func TestHookWarnsOfOverlapsTheRunMayNotMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block func(t *testing.T, db *store.DB, run domain.RunID)
+	}{
+		{"viewer owner", func(t *testing.T, db *store.DB, run domain.RunID) {
+			r, err := db.GetRun(t.Context(), run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := db.GetMember(t.Context(), r.MemberID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner.Role = domain.RoleViewer
+			if err = db.UpdateMember(t.Context(), owner); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"peer limit", func(t *testing.T, db *store.DB, run domain.RunID) {
+			r, err := db.GetRun(t.Context(), run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 8 {
+				other := domain.Run{WorkspaceID: r.WorkspaceID, MemberID: r.MemberID, Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+				if err = db.CreateRun(t.Context(), &other); err != nil {
+					t.Fatal(err)
+				}
+				msg := &store.RunMessage{WorkspaceID: r.WorkspaceID, FromRun: run, ToRun: other.ID, Body: "hello"}
+				if _, err = db.AppendRunMessageWithPeer(t.Context(), msg, 10, 8, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, socket, run := hookRun(t, nil, []string{"shared.go"}, false)
+			tc.block(t, db, run)
+			var status protocol.CoordStatusResult
+			if err := coordtransport.Call(t.Context(), socket, protocol.MethodCoordHookStatus, nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			for _, peer := range status.Peers {
+				if len(peer.Files) != 0 {
+					t.Fatalf("status lists the overlapping run as a peer: %+v", status.Peers)
+				}
+			}
+			var out bytes.Buffer
+			code, err := Run(t.Context(), []string{"hook", "claude", "PostToolBatch"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out})
+			if err != nil || code != ExitOK || !strings.Contains(out.String(), "overlapping edits") {
+				t.Fatalf("hook = %d, %v, %q; want the overlap notice", code, err, out.String())
+			}
+		})
+	}
+}

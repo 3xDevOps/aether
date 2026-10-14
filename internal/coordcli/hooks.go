@@ -144,7 +144,7 @@ func currentHookNotices(status protocol.CoordStatusResult) hookNotices {
 		n.Mission = a.IntegratorNotice()
 	}
 	var overlap []string
-	for _, peer := range status.Peers {
+	for _, peer := range status.Overlaps {
 		for _, file := range peer.Files {
 			overlap = append(overlap, peer.RunID+":"+file)
 		}

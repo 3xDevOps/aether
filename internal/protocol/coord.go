@@ -175,6 +175,15 @@ type CoordStatusResult struct {
 	WaitSupported    bool                    `json:"wait_supported,omitempty"`
 	UnreadMessageIDs []string                `json:"unread_message_ids,omitempty"`
 	WakeAdmitted     bool                    `json:"wake_admitted,omitempty"`
+	Overlaps         []CoordOverlap          `json:"overlaps,omitempty"`
+}
+
+// CoordOverlap is one run whose edits overlap the caller's. Only
+// coord.hook.status sets it: an overlap warning does not depend on whether
+// the caller may message that run.
+type CoordOverlap struct {
+	RunID string   `json:"run_id"`
+	Files []string `json:"files"`
 }
 
 // CoordHookStatusParams opts a native hook into one bounded, non-consuming

@@ -502,7 +502,8 @@ owner's runs, admins' runs, and runs it overlaps or shares a swarm with can
 reach. The message-others policy below restricts it the same way: under
 `admins-only`, a collaborator's runs reach other members' runs only over a
 shared swarm or a file overlap. A viewer's runs cannot message any run, swarm
-and overlap peers included, and a demotion applies to the next message; see
+and overlap peers included, except to answer a question it was asked, and a
+demotion applies to the next message; see
 [Conflict radar](#conflict-radar).
 
 **Everyone is a collaborator by default, on purpose.** Teammates can message and

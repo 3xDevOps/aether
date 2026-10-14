@@ -84,7 +84,10 @@ the ordinary read-only result and authorization of `coord.status`. A params
 object opts into bounded observation: `wait_seconds` is 0–30 (zero when
 omitted on the wire), and `seen_message_ids` is at most 100 opaque message
 IDs. The result adds optional `wait_supported`, `unread_message_ids`, and
-`wake_admitted` fields; false/empty values may be omitted on the wire.
+`wake_admitted` fields; false/empty values may be omitted on the wire. Every
+`coord.hook.status` result also adds `overlaps`: up to 32 runs whose edits
+currently overlap the caller's, each with `run_id` and up to 16 `files`,
+whether or not the caller may message them.
 Observer mode never returns bodies or acknowledgement tokens and never
 consumes the inbox. An admitted wake response is an input action; ordinary
 status is not. The CLI helper supplies its own 30-second default and always
@@ -250,7 +253,8 @@ All integrations add only a trusted instruction to read the inbox. They
 never acknowledge a batch or promote a peer's body into system/developer
 instructions. The agent reads the original, attributed payload through `inbox`.
 
-Hooks also direct agents with overlapping edits to `status`. Integrators are
+Hooks also warn agents about overlapping edits from `overlaps`, so a run
+that may not message the other run, or is at its peer limit, is still warned. Integrators are
 told to refresh `mission plan show` and `worker list` when the swarm phase,
 open-question count, or integrator generation changes. An Enhanced
 integrator is told instead whenever the swarm's change counter moves past
