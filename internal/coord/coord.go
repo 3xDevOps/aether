@@ -53,6 +53,9 @@ var (
 	// ErrCannotAsk is returned by OutcomeSink.ReportNeedsInput for a run
 	// that cannot take its user's answer.
 	ErrCannotAsk = errors.New("a Background run cannot ask its user; report blocked or failure instead")
+	// ErrRunFinished is returned by OutcomeSink.ReportNeedsInput for a run
+	// that already finished.
+	ErrRunFinished = errors.New("the run already finished; its reported outcome stands, so it cannot ask its user")
 )
 
 // EvidenceCapture is the narrow evidence seam needed by coord.report.

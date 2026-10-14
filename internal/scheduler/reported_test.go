@@ -1509,6 +1509,41 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	}
 }
 
+// TestNeedsInputSupersedesAnEarlierSuccessReport: the newest report in a turn
+// speaks for an interactive run, so a question after a success is shown.
+func TestNeedsInputSupersedesAnEarlierSuccessReport(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	at := time.Now()
+	if err := e.sched.FinishReported(ctx, run.ID, "success-1", domain.RunCompleted, at); err != nil {
+		t.Fatalf("FinishReported: %v", err)
+	}
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", at.Add(time.Second)); err != nil {
+		t.Fatalf("ReportNeedsInput: %v", err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+		t.Fatalf("report %s: %v", waitingForInput.State, err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || row.Reason != "needs input: which region?" {
+		t.Fatalf("parked run = %+v, %v, want the question as the reason", row, err)
+	}
+}
+
+// TestNeedsInputIsRefusedForAFinishedRun: a run the server no longer
+// supervises has no user left to answer.
+func TestNeedsInputIsRefusedForAFinishedRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	if err := e.sched.ReportNeedsInput(t.Context(), "run-gone", "needs-input-1", "which region?", time.Now()); !errors.Is(err, coord.ErrRunFinished) {
+		t.Fatalf("ReportNeedsInput = %v, want %v", err, coord.ErrRunFinished)
+	}
+}
+
 // TestNeedsInputIsRefusedForABackgroundRun: nobody can answer a headless run
 // before its turn ends, so the question is refused and the run is left alone.
 func TestNeedsInputIsRefusedForABackgroundRun(t *testing.T) {

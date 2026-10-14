@@ -382,11 +382,12 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 // Same-turn Working callbacks do not erase it; the first resume after it is
 // shown does. The shared watermark fences replays, older reports and relaunches.
 func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
-	return s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report")
+	return s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report", nil)
 }
 
 // ReportNeedsInput records an agent's question for its user like
-// ReportBlocked. A Background run ends at its turn end, before anyone answers.
+// ReportBlocked. A Background run ends at its turn end, before anyone answers,
+// and a finished run has no user left to answer, so both are refused.
 func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -395,10 +396,10 @@ func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, 
 	if headless {
 		return coord.ErrCannotAsk
 	}
-	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report")
+	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report", coord.ErrRunFinished)
 }
 
-func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string) error {
+func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string, finished error) error {
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
 		reason = string(runes[:maxPublicRunStatusReason])
 	}
@@ -406,26 +407,26 @@ func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason
 	if entry := s.runs[run]; entry != nil {
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
-			return nil
+			return finished
 		}
 		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}
 	s.mu.Unlock()
-	return s.requireFinished(ctx, run, what)
+	return s.requireFinished(ctx, run, what, finished)
 }
 
-// requireFinished is the answer for a run with no supervised owner: done
+// requireFinished is the answer for a run with no supervised owner: finished
 // when the row is terminal or deleted, retryable otherwise.
-func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what string) error {
+func (s *Scheduler) requireFinished(ctx context.Context, run domain.RunID, what string, finished error) error {
 	r, err := s.cfg.Store.GetRun(ctx, run)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil
+		return finished
 	}
 	if err != nil {
 		return fmt.Errorf("scheduler: %s %s: %w", what, run, err)
 	}
 	if r.Status.Terminal() {
-		return nil
+		return finished
 	}
 	return fmt.Errorf("scheduler: %s %s: the run is %s and has no live container yet", what, run, r.Status)
 }

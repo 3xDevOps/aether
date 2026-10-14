@@ -1217,8 +1217,8 @@ verification evidence and exact delivery.
 ```
 
 `--outcome` is exactly one of `success`, `failure`, `blocked`, or
-`needs-input`. A non-empty summary is required. `--evidence-ref` may be repeated, and `--summary-file`
-accepts a file or `-` for standard input. The result contains a durable
+`needs-input`. A non-empty summary is required. `--evidence-ref` may be
+repeated, and `--summary-file` accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 Terminal worker reports wait for concurrent swarm operations to leave admission
 before returning the receipt; ordinary lock contention is not a report conflict.
@@ -1271,12 +1271,16 @@ What a report does depends on the run:
   reason, separate from `blocked: <summary>`. The user's reply arrives as the
   next prompt, and resuming work clears the reason. It is nonterminal and not
   a durable report: it has no `report_id` or evidence, takes no
-  `--evidence-ref`, and does not use the terminal slot. Retrying the same
-  key while its question is the latest is a no-op; retrying an older key
-  after a newer question asks the older one again. A Background run's or a
-  swarm worker's report is refused with `CodeInvalidParams`: a Background run
-  ends at its turn end, and workers ask their integrator with
-  `aether-internal ask`.
+  `--evidence-ref`, and does not use the terminal slot. The latest report
+  decides the turn's reason: a question after a success or failure in the
+  same turn replaces `agent reported success` or `agent reported failure`,
+  and that report stays durable. Retrying the same key while its question is
+  the latest is a no-op; retrying an older key after a newer question asks
+  the older one again. The report is refused with `CodeInvalidParams` for a
+  Background run (`a Background run cannot ask its user; report blocked or
+  failure instead`), a swarm worker, which asks its integrator with
+  `aether-internal ask`, and a run that already finished (`the run already
+  finished; its reported outcome stands, so it cannot ask its user`).
 
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason
