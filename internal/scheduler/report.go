@@ -122,9 +122,16 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 				domain.RunNeedsAttention, reason, "", cause)
 		}
 	case report.State == agentstatus.Working:
-		if entry.status == domain.RunNeedsAttention {
+		// A run working in the background says so in its reason, so the
+		// sidebar can show it without the session open.
+		resumed := agentstatus.ReasonResumed
+		if backgroundWork(execution) {
+			resumed = execution.Reason
+		}
+		if entry.status == domain.RunNeedsAttention ||
+			(reportChanged && (backgroundWork(execution) || backgroundWork(entry.agentReport))) {
 			transitionErr = s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunRunning, agentstatus.ReasonResumed, "")
+				domain.RunRunning, resumed, "")
 		}
 	}
 	if transitionErr != nil {

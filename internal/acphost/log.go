@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -443,8 +444,14 @@ func LastItem(log *Log, kind Kind) Item {
 
 // Interrupted reports whether the agent session the log records lost work when
 // its connection ended: its last turn ended interrupted, as a host that closed
-// the connection logs it, or with background tasks awaiting their follow-up.
+// the connection logs it, or tasks the run waited for were live, and no turn
+// started since.
 func Interrupted(log *Log) bool {
-	end := LastItem(log, KindTurnEnd)
-	return (end.StopReason == "interrupted" || len(end.BackgroundTasks) > 0) && LastItem(log, KindReset).Seq < end.Seq
+	reset := LastItem(log, KindReset).Seq
+	if end := LastItem(log, KindTurnEnd); end.StopReason == "interrupted" && end.Seq > reset {
+		return true
+	}
+	bg := LastItem(log, KindBackground)
+	return bg.Seq > reset && bg.Seq > LastItem(log, KindTurnStart).Seq &&
+		slices.ContainsFunc(bg.Tasks, func(t Task) bool { return t.Holds })
 }

@@ -185,6 +185,7 @@ func (m *mockAgent) handle(ctx context.Context, method string, params json.RawMe
 type recorder struct {
 	mu       sync.Mutex
 	states   []string
+	turns    []TurnState
 	inputs   [][]domain.RunInputRequest
 	activity [][2]string
 	failed   error
@@ -193,21 +194,22 @@ type recorder struct {
 }
 
 func newRecorder() *recorder {
-	return &recorder{idle: make(chan string, 16), inputsCh: make(chan []domain.RunInputRequest, 16)}
+	return &recorder{idle: make(chan string, 256), inputsCh: make(chan []domain.RunInputRequest, 16)}
 }
 
 func (r *recorder) config(c Config) Config {
-	c.OnState = func(working bool, reason string, failed error) {
+	c.OnState = func(st TurnState) {
 		r.mu.Lock()
-		r.failed = failed
-		if working {
-			r.states = append(r.states, "working:"+reason)
+		r.failed = st.Failed
+		r.turns = append(r.turns, st)
+		if st.Working {
+			r.states = append(r.states, "working:"+st.Reason)
 		} else {
-			r.states = append(r.states, "idle:"+reason)
+			r.states = append(r.states, "idle:"+st.Reason)
 		}
 		r.mu.Unlock()
-		if !working {
-			r.idle <- reason
+		if !st.Working {
+			r.idle <- st.Reason
 		}
 	}
 	c.OnInputs = func(p []domain.RunInputRequest) {

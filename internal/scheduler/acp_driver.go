@@ -62,6 +62,25 @@ const (
 	acpStoppedReason     = "turn ended: "
 )
 
+// acpBackgroundReason is a working run's reason while its agent works with no
+// prompt open, with ": 1 task" or ": N tasks" appended while it waits for
+// background tasks (web/src/lib/status.ts).
+const acpBackgroundReason = "working in background"
+
+func backgroundReason(tasks int) string {
+	switch tasks {
+	case 0:
+		return acpBackgroundReason
+	case 1:
+		return acpBackgroundReason + ": 1 task"
+	}
+	return fmt.Sprintf("%s: %d tasks", acpBackgroundReason, tasks)
+}
+
+func backgroundWork(report agentstatus.Report) bool {
+	return report.State == agentstatus.Working && strings.HasPrefix(report.Reason, acpBackgroundReason)
+}
+
 // acpDriver hosts an enhanced run: the container's primary PTY is a login
 // shell, and the agent's ACP server runs beside it as a managed exec whose
 // stdio the acphost session owns. The adapter never outlives that pipe, so
@@ -236,11 +255,12 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 		blocks = append(blocks, block)
 	}
 	untitled := run.Task == "" && run.Title == ""
-	instructions := d.instructions(run.ID)
+	instructions, settle := d.claimInstructions(run.ID, sess)
 	if instructions != "" {
 		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
 	}
 	receipt, err := sess.Prompt(ctx, blocks, steer, func(queued bool, taken error) {
+		settle(taken)
 		if untitled && taken == nil {
 			d.s.setProvisionalRunTitle(run.ID, prompt.Text)
 		}
@@ -248,30 +268,41 @@ func (d *acpDriver) Deliver(ctx context.Context, run *domain.Run, _ *domain.Memb
 			delivered(taken)
 		}
 	})
+	if err != nil && ctx.Err() == nil {
+		// No turn took the prompt; one awaiting acceptance settles through
+		// the callback.
+		settle(err)
+	}
 	if errors.Is(err, acphost.ErrClosed) {
 		err = fmt.Errorf("%w: %w", ptyhost.ErrSessionEnded, err)
-	}
-	if err == nil && instructions != "" {
-		d.instructionsTaken(run.ID, sess)
 	}
 	return receipt.Outcome, err
 }
 
-func (d *acpDriver) instructionsTaken(run domain.RunID, sess *acphost.Session) {
+// claimInstructions takes the run instructions sess still owes for one
+// prompt. settle gives them back when that prompt never reached the agent;
+// only its first call counts.
+func (d *acpDriver) claimInstructions(run domain.RunID, sess *acphost.Session) (instructions string, settle func(error)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if r := d.runs[run]; r != nil && r.session == sess {
-		r.instructions = ""
+	r := d.runs[run]
+	if r == nil || r.session != sess || r.instructions == "" {
+		return "", func(error) {}
 	}
-}
-
-func (d *acpDriver) instructions(run domain.RunID) string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if r := d.runs[run]; r != nil {
-		return r.instructions
+	instructions, r.instructions = r.instructions, ""
+	var once sync.Once
+	return instructions, func(err error) {
+		once.Do(func() {
+			if err == nil {
+				return
+			}
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if d.runs[run] == r && r.instructions == "" {
+				r.instructions = instructions
+			}
+		})
 	}
-	return ""
 }
 
 func (d *acpDriver) session(run domain.RunID) *acphost.Session {
@@ -433,9 +464,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if profile.ACPTitleLookup {
 		titleLookup = acpTitleLookupDelay
 	}
-	prompt, systemPrompt := d.s.withCoAuthorInstruction(task), ""
+	prompt, systemPrompt := d.s.withCoAuthorInstruction(task, entry.missionAssigned, oneShot), ""
 	if profile.ACPSystemPrompt {
-		prompt, systemPrompt = task, d.s.runInstructions()
+		prompt, systemPrompt = task, d.s.runInstructions(entry.missionAssigned, oneShot)
 	}
 	runID := entry.runID
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
@@ -447,18 +478,19 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,
+		ClaudeCode:     profile.ACPClaudeCode,
 		TitleLookup:    titleLookup,
-		OnState: func(working bool, reason string, failed error) {
-			if message, ok := acphost.UsageLimit(failed); ok {
+		OnState: func(st acphost.TurnState) {
+			if message, ok := acphost.UsageLimit(st.Failed); ok {
 				d.s.mu.Lock()
 				d.s.setUsageLimitLocked(entry, message)
 				d.s.mu.Unlock()
 				// The move stops this session, which waits for this
 				// callback to return.
-				d.s.goMove(func() { d.usageLimit(entry, oneShot, reason, failed, message) })
+				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
-			d.turnState(entry, oneShot, working, reason, failed)
+			d.turnState(entry, oneShot, st)
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
 			d.report(runID, agentstatus.Report{InputUpdates: []domain.RunInputUpdate{{Operation: "replace", Requests: pending}}})
@@ -490,8 +522,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
-	if task == "" && systemPrompt == "" && (fresh || acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq == 0) {
-		r.instructions = d.s.runInstructions()
+	// A session that started anew, here or after a failed restore, has not
+	// had them yet.
+	if task == "" && systemPrompt == "" && (fresh ||
+		acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq <= acphost.LastItem(sess.Log(), acphost.KindReset).Seq) {
+		r.instructions = d.s.runInstructions(entry.missionAssigned, oneShot)
 	}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
@@ -520,34 +555,36 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	return nil
 }
 
-func (d *acpDriver) turnState(entry *supervised, oneShot, working bool, reason string, failed error) {
-	if oneShot && !working {
+func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
+	if oneShot && !st.Working {
 		// An interrupted session is ended by its connection's end or
 		// resumed by startOneShot.
-		if reason != "" && reason != "interrupted" {
-			d.endOneShot(entry, reason == "end_turn", false, turnEndReport(reason))
+		if st.Reason != "" && st.Reason != "interrupted" {
+			d.endOneShot(entry, st.Reason == "end_turn", false, turnEndReport(st.Reason))
 		}
 		return
 	}
 	report := agentstatus.Report{State: agentstatus.Working}
 	switch {
-	case working:
-	case failed != nil:
+	case st.Working && st.Reason == "background":
+		report.Reason = backgroundReason(st.Tasks)
+	case st.Working:
+	case st.Failed != nil:
 		// Not a turn end: a waiting outcome report must not finish the run
 		// on a turn that failed.
-		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + failed.Error()}
+		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpTurnFailedReason + st.Failed.Error()}
 	default:
-		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpIdleReason(reason)}
+		report = agentstatus.Report{State: agentstatus.Idle, Reason: acpIdleReason(st.Reason)}
 	}
 	d.report(entry.runID, report)
-	if !working {
+	if !st.Working {
 		d.wakeIdle(entry.runID)
 	}
 }
 
 // usageLimit handles a turn that failed on the account's usage limit: the
 // run continues on another account, or stops with the reason why not.
-func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, failed error, message string) {
+func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, st acphost.TurnState, message string) {
 	outcome, stopped := d.s.continueLiveRun(entry, false, message)
 	switch outcome {
 	case usageContinued, usageShutdown, usageSkipped:
@@ -556,7 +593,7 @@ func (d *acpDriver) usageLimit(entry *supervised, oneShot bool, reason string, f
 	d.s.clearUsageLimit(entry)
 	switch outcome {
 	case usageRefused:
-		d.turnState(entry, oneShot, false, reason, failed)
+		d.turnState(entry, oneShot, st)
 	case usageNoFallback:
 		report := agentstatus.Report{State: agentstatus.Idle, Reason: stopped}
 		if !oneShot {

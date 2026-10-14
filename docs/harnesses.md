@@ -965,11 +965,12 @@ The server stages that `/usr/local/bin/aether-internal` CLI and the run's
 flag, repository instruction, or persistent member-home write is needed.
 The agent should run `aether-internal skill` before acting, then use the CLI
 for coordination. Report a terminal outcome only after the assigned work is
-finished. A task prompt also carries the report rule while coordination
-reporting is enabled: the agent MUST run `aether-internal report` before it
-ends a turn, with `--outcome needs-input` and its question as the summary
-when it needs you. Enhanced runs deliver these rules differently
-([enhanced-runs.md](enhanced-runs.md#run-instructions)). The co-author rule still asks the agent to read
+finished. While coordination reporting is enabled, a task prompt also
+carries a report rule for the run's role
+([enhanced-runs.md](enhanced-runs.md#run-instructions)): an ordinary
+interactive run MUST report `needs-input` with its question when it needs
+you, and success, failure or blocked when a task is done, impossible or
+blocked. The co-author rule still asks the agent to read
 `/run/aether/co-authors` before each commit. Only the prompt
 the agent receives changes: the stored task, branch slug, and every CLI and
 dashboard surface keep what the member typed. See [coordination.md](coordination.md).

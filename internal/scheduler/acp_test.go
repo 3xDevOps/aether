@@ -1233,7 +1233,7 @@ func TestEnhancedRunSendsInstructionsAsSystemPromptWhenTheAgentTakesOne(t *testi
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	wire := &rt.all()[0].wire
 	system, _ := wire.sessionNewMeta(t)["systemPrompt"].(map[string]any)
-	if got := system["append"]; got != e.sched.runInstructions() || got == "" {
+	if got := system["append"]; got != e.sched.runInstructions(false, false) || got == "" {
 		t.Fatalf("session/new systemPrompt.append %q, want the run instructions", got)
 	}
 	prompts := wire.prompts(t)
@@ -1253,7 +1253,7 @@ func TestEnhancedRunAppendsInstructionsToTheTaskWithoutASystemPromptRoute(t *tes
 		t.Fatalf("session/new _meta %+v, want no system prompt", meta)
 	}
 	prompts := wire.prompts(t)
-	if want := e.sched.withCoAuthorInstruction("say pong"); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
+	if want := e.sched.withCoAuthorInstruction("say pong", false, false); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
 		t.Fatalf("prompts %+v, want the task with the instructions", prompts)
 	}
 }
@@ -1274,7 +1274,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMessageOnly(t *testi
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"first", "\n\n" + e.sched.runInstructions()}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1300,7 +1300,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMailPrompt(t *testin
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions()}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("mail prompt %q, want the hint and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1338,7 +1338,86 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartBeforeAnyTurn(t *test
 	if len(prompts) != 1 {
 		t.Fatalf("prompts %+v, want one", prompts)
 	}
-	if want := []string{"first", "\n\n" + s2.runInstructions()}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
+	}
+}
+
+// A prompt queued behind a running turn that the session drops never reached
+// the agent, so the next prompt still owes the instructions.
+func TestEnhancedTasklessRunKeepsInstructionsWhenTheFirstMessageIsDropped(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	if _, err := sess.Prompt(t.Context(), []acp.ContentBlock{acp.TextBlock(acpmock.PromptWait)}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := e.sched.acp.Deliver(t.Context(), &domain.Run{ID: run.ID}, nil, domain.AgentPrompt{Text: "first"}, false, nil)
+	if err != nil || receipt != acphost.OutcomeQueued {
+		t.Fatalf("Deliver = %q, %v; want %q", receipt, err, acphost.OutcomeQueued)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the instructions given back", func() bool {
+		e.sched.acp.mu.Lock()
+		defer e.sched.acp.mu.Unlock()
+		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(false, false)
+	})
+}
+
+func TestEnhancedTasklessRunAppendsInstructionsOnceToConcurrentPrompts(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "idle session", func() bool { return e.sched.acp.session(run.ID) != nil && e.sched.IdleEnhanced(run.ID) })
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "message"}, false, nil); err != nil {
+			t.Errorf("Inject: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil && !errors.Is(err, errACPBusy) {
+			t.Errorf("WakeEnhanced: %v", err)
+		}
+	}()
+	wg.Wait()
+	waitFor(t, "the turns to finish", func() bool { return e.sched.IdleEnhanced(run.ID) && assistantSaidNow(e, run.ID, "pong") })
+	count := 0
+	for _, prompt := range rt.all()[0].wire.prompts(t) {
+		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(false, false)) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%d prompts carry the instructions, want one", count)
+	}
+}
+
+func TestEnhancedTasklessRunGetsInstructionsBackFromABusyWake(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run := e.launchACP(t, "")
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	sess := e.sched.acp.session(run.ID)
+	instructions, settle := e.sched.acp.claimInstructions(run.ID, sess)
+	if instructions != e.sched.runInstructions(false, false) {
+		t.Fatalf("claimed %q, want the run instructions", instructions)
+	}
+	if again, _ := e.sched.acp.claimInstructions(run.ID, sess); again != "" {
+		t.Fatalf("a second claim got %q, want none while the first is out", again)
+	}
+	settle(errACPBusy)
+	if got, _ := e.sched.acp.claimInstructions(run.ID, sess); got != instructions {
+		t.Fatalf("claim after a busy wake = %q, want the instructions back", got)
 	}
 }

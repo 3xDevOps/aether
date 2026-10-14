@@ -581,9 +581,10 @@ the container and shell are still healthy, not that an OOM spared them.
 | Failure | What happens |
 | --- | --- |
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
-| The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, pending background tasks get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
+| The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`; background tasks the old server was running are gone. |
-| A turn is cancelled | The run parks with `turn cancelled`, not `agent idle`. |
+| A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
+| A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
 
@@ -592,11 +593,8 @@ differs: an ACP server that fails to start or exits, a cancelled turn, or any
 stop reason other than `end_turn` ends the container with exit code 1, so the
 run records `failed` with `agent exited 1: <cause>`, for example
 `agent exited 1: the agent's turn ended: cancelled`. The item log's notice
-carries the full error. A turn that ends `end_turn` with background work
-pending finishes the run only once that work is done
-([enhanced-runs.md](enhanced-runs.md#background-work)). A server restart
-mid-turn resumes the session and asks the agent to continue; a turn that had
-already ended finishes the run.
+carries the full error. A server restart mid-turn resumes the session and asks the
+agent to continue; a turn that had already ended finishes the run.
 
 ### Usage limit mid-run
 
@@ -880,8 +878,8 @@ do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
 turn parks at its end with `blocked: <summary>` instead of `agent idle`,
 until it resumes. `--outcome needs-input` does the same with
-`needs input: <question>` when the agent needs a user decision. The execution report is recovered through a server
-restart.
+`needs input: <question>` when the agent needs a user decision. The
+execution report is recovered through a server restart.
 
 How such a run comes back depends on how much its agent can say. Where the
 agent reports both ends of a turn (`claude`, `pi`, `omp`), the run returns

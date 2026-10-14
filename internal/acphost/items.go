@@ -27,6 +27,7 @@ const (
 	KindNotice        Kind = "notice"
 	KindTurnStart     Kind = "turn_start"
 	KindTurnEnd       Kind = "turn_end"
+	KindBackground    Kind = "background"
 	KindReset         Kind = "reset"
 	KindUnknown       Kind = "unknown"
 )
@@ -90,9 +91,9 @@ type Item struct {
 	// Origin is what the agent reported started an autonomous turn, such as
 	// Claude Code's "task-notification".
 	Origin string `json:"origin,omitempty"`
-	// BackgroundTasks are the ids of background tasks the agent started that
-	// still await their follow-up when a turn ends.
-	BackgroundTasks []string `json:"background_tasks,omitempty"`
+	// Tasks is a background item's full set of live background tasks; an
+	// empty set is written when the last one ends.
+	Tasks []Task `json:"tasks,omitempty"`
 }
 
 // Message is one segment of a user message, assistant message, or thought.
@@ -128,6 +129,7 @@ type ToolCall struct {
 	ToolKind    string          `json:"tool_kind,omitempty"`
 	ToolName    string          `json:"tool_name,omitempty"`
 	Subagent    *Subagent       `json:"subagent,omitempty"`
+	Task        *ToolTask       `json:"task,omitempty"`
 	Status      string          `json:"status,omitempty"`
 	Locations   []Location      `json:"locations,omitempty"`
 	Content     []Content       `json:"content,omitempty"`
@@ -144,6 +146,16 @@ type ToolCall struct {
 type Subagent struct {
 	Description string `json:"description,omitempty"`
 	Type        string `json:"type,omitempty"`
+}
+
+// ToolTask is the Claude Code background task a tool call started.
+type ToolTask struct {
+	ID string `json:"id"`
+	// Type is Claude Code's task type, such as local_agent, local_workflow
+	// or local_bash, once the adapter reported it.
+	Type string `json:"type,omitempty"`
+	// Status is running, completed, failed or stopped.
+	Status string `json:"status"`
 }
 
 type Location struct {
@@ -377,7 +389,7 @@ func (it Item) Wire(limit int) (b []byte, truncated bool, err error) {
 	}
 	if tc := cut.ToolCall; tc != nil {
 		brief.ToolCall = &ToolCall{ID: tc.ID, ParentID: tc.ParentID, ToolKind: tc.ToolKind, ToolName: tc.ToolName,
-			Subagent: tc.Subagent, Status: tc.Status, ExitCode: tc.ExitCode}
+			Subagent: tc.Subagent, Task: tc.Task, Status: tc.Status, ExitCode: tc.ExitCode}
 	}
 	if r := cut.Request; r != nil {
 		brief.Request = &Request{ID: r.ID, Kind: r.Kind, ToolCallID: r.ToolCallID, Status: r.Status, Answer: r.Answer}

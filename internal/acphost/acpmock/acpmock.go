@@ -36,11 +36,18 @@ const (
 	// does when the account's usage limit is reached
 	// (acphost/testdata/claude_usage_limit.jsonl).
 	PromptUsageLimit = "hit the usage limit"
-	// PromptBackground starts a background command as Claude's adapter
-	// reports one, ends the turn, and BackgroundDelay later runs the
-	// follow-up turn Claude Code runs when the command finishes, with no
-	// prompt open.
+	// PromptBackground starts workflow BackgroundTaskID in the background as
+	// Claude's adapter reports one and ends the turn. BackgroundDelay later
+	// the workflow ends and the agent runs the follow-up turn Claude Code
+	// runs for it, with no prompt open. Task frames go only to a session
+	// whose meta asked for them in claudeCode.emitRawSDKMessages.
 	PromptBackground = "work in background"
+	// PromptBackgroundPair is PromptBackground with a second workflow,
+	// BackgroundTaskID+"-2", that ends and is followed up twice as late.
+	PromptBackgroundPair = "work in background twice"
+	// PromptDevServer starts shell DevServerTaskID in the background, which
+	// never ends, and ends the turn.
+	PromptDevServer = "start a dev server"
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
@@ -52,10 +59,14 @@ const (
 
 // BackgroundDelay is how long after PromptBackground's turn ends its
 // follow-up turn starts.
-var BackgroundDelay = 300 * time.Millisecond
+var BackgroundDelay = 2 * time.Second
 
-// BackgroundTaskID is the id of the task PromptBackground starts.
-const BackgroundTaskID = "mock-background-task"
+const (
+	// BackgroundTaskID is the id of the workflow PromptBackground starts.
+	BackgroundTaskID = "mock-background-task"
+	// DevServerTaskID is the id of the shell PromptDevServer starts.
+	DevServerTaskID = "mock-dev-server"
+)
 
 type Fixture struct {
 	Initialize json.RawMessage `json:"initialize"`
@@ -101,6 +112,10 @@ type Agent struct {
 
 	mu      sync.Mutex
 	session string
+	// frames says the session asked for Claude Code's task frames; live
+	// maps each live background task to its type.
+	frames  bool
+	live    map[string]string
 	methods []string
 	listed  int
 	options []map[string]any
@@ -188,19 +203,25 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		Prompt    []struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
+		Meta struct {
+			ClaudeCode struct {
+				EmitRawSDKMessages json.RawMessage `json:"emitRawSDKMessages"`
+			} `json:"claudeCode"`
+		} `json:"_meta"`
 	}
 	_ = json.Unmarshal(params, &p)
+	frames := len(p.Meta.ClaudeCode.EmitRawSDKMessages) > 0 && string(p.Meta.ClaudeCode.EmitRawSDKMessages) != "false"
 	switch method {
 	case acp.AgentMethodInitialize:
 		return a.fix.Initialize, nil
 	case acp.AgentMethodSessionNew:
 		a.mu.Lock()
-		a.session = a.fix.SessionID()
+		a.session, a.frames = a.fix.SessionID(), frames
 		a.mu.Unlock()
 		return a.fix.SessionNew, nil
 	case acp.AgentMethodSessionResume, acp.AgentMethodSessionLoad:
 		a.mu.Lock()
-		a.session = p.SessionID
+		a.session, a.frames = p.SessionID, frames
 		a.mu.Unlock()
 		if method == acp.AgentMethodSessionLoad {
 			for _, u := range a.fix.Load.Updates {
@@ -329,8 +350,18 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 	case PromptSubagents:
 		a.subagents(ctx)
 		return map[string]any{"stopReason": "end_turn"}, nil
-	case PromptBackground:
-		a.background(ctx)
+	case PromptBackground, PromptBackgroundPair:
+		a.launch(ctx, BackgroundTaskID, "local_workflow")
+		time.AfterFunc(BackgroundDelay, func() { a.finish(BackgroundTaskID) })
+		if text == PromptBackgroundPair {
+			a.launch(ctx, BackgroundTaskID+"-2", "local_workflow")
+			time.AfterFunc(2*BackgroundDelay, func() { a.finish(BackgroundTaskID + "-2") })
+		}
+		a.text(ctx, "started")
+		return map[string]any{"stopReason": "end_turn"}, nil
+	case PromptDevServer:
+		a.launch(ctx, DevServerTaskID, "local_bash")
+		a.text(ctx, "started")
 		return map[string]any{"stopReason": "end_turn"}, nil
 	case PromptWait:
 		select {
@@ -497,22 +528,61 @@ func (a *Agent) subagents(ctx context.Context) {
 	}
 }
 
-func (a *Agent) background(ctx context.Context) {
-	a.update(ctx, demoTool("mock-bash", "execute", "sleep 1", "in_progress", nil))
-	a.update(ctx, demoTool("mock-bash", "execute", "sleep 1", "completed", map[string]any{"_meta": map[string]any{
-		"claudeCode": map[string]any{"toolName": "Bash", "toolResponse": map[string]any{
-			"stdout": "", "stderr": "", "interrupted": false, "backgroundTaskId": BackgroundTaskID,
-		}},
+// launch starts background task id of type typ the way Claude's adapter
+// reports it: the tool call, the live set, and the tool result.
+func (a *Agent) launch(ctx context.Context, id, typ string) {
+	call, tool, response := id+"-call", "Workflow", map[string]any{"status": "async_launched", "taskId": id}
+	if typ == "local_bash" {
+		tool, response = "Bash", map[string]any{"stdout": "", "stderr": "", "interrupted": false, "backgroundTaskId": id}
+	}
+	a.update(ctx, demoTool(call, "execute", tool+" "+id, "in_progress", nil))
+	a.mu.Lock()
+	if a.live == nil {
+		a.live = map[string]string{}
+	}
+	a.live[id] = typ
+	a.mu.Unlock()
+	a.liveSet(ctx)
+	a.update(ctx, demoTool(call, "execute", tool+" "+id, "completed", map[string]any{"_meta": map[string]any{
+		"claudeCode": map[string]any{"toolName": tool, "toolResponse": response},
 	}}))
-	a.text(ctx, "started")
-	time.AfterFunc(BackgroundDelay, func() {
-		ctx := context.Background()
-		a.text(ctx, "background done")
-		usage, _ := json.Marshal(map[string]any{
-			"sessionUpdate": "usage_update", "used": 1000, "size": 200000,
-			"cost":  map[string]any{"amount": 0.01, "currency": "USD"},
-			"_meta": map[string]any{"_claude/origin": map[string]any{"kind": "task-notification"}},
-		})
-		a.update(ctx, usage)
+}
+
+// finish ends background task id and runs the follow-up turn for it.
+func (a *Agent) finish(id string) {
+	ctx := context.Background()
+	a.mu.Lock()
+	delete(a.live, id)
+	a.mu.Unlock()
+	a.liveSet(ctx)
+	a.sdk(ctx, map[string]any{"type": "system", "subtype": "task_updated", "task_id": id, "patch": map[string]any{"status": "completed"}})
+	a.sdk(ctx, map[string]any{"type": "system", "subtype": "task_notification", "task_id": id, "status": "completed", "summary": "done"})
+	a.text(ctx, "background done: "+id)
+	usage, _ := json.Marshal(map[string]any{
+		"sessionUpdate": "usage_update", "used": 1000, "size": 200000,
+		"cost":  map[string]any{"amount": 0.01, "currency": "USD"},
+		"_meta": map[string]any{"_claude/origin": map[string]any{"kind": "task-notification"}},
 	})
+	a.update(ctx, usage)
+}
+
+func (a *Agent) liveSet(ctx context.Context) {
+	a.mu.Lock()
+	tasks := []map[string]any{}
+	for id, typ := range a.live {
+		tasks = append(tasks, map[string]any{"task_id": id, "task_type": typ, "description": id})
+	}
+	a.mu.Unlock()
+	a.sdk(ctx, map[string]any{"type": "system", "subtype": "background_tasks_changed", "tasks": tasks})
+}
+
+// sdk forwards a raw Claude Code SDK message as Claude's adapter does, to a
+// session that asked for them.
+func (a *Agent) sdk(ctx context.Context, message map[string]any) {
+	a.mu.Lock()
+	session, frames := a.session, a.frames
+	a.mu.Unlock()
+	if frames {
+		_ = a.conn.SendNotification(ctx, "_claude/sdkMessage", map[string]any{"sessionId": session, "message": message})
+	}
 }

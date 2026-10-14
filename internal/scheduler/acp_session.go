@@ -219,19 +219,14 @@ func (s *Scheduler) WakeEnhanced(ctx context.Context, run domain.RunID, prompt s
 		return err
 	}
 	blocks := []acp.ContentBlock{acp.TextBlock(prompt)}
-	instructions := s.acp.instructions(run)
+	instructions, settle := s.acp.claimInstructions(run, sess)
 	if instructions != "" {
 		blocks = append(blocks, acp.TextBlock("\n\n"+instructions))
 	}
 	started, err := sess.PromptIdle(ctx, blocks)
-	if err != nil {
-		return err
+	if err == nil && !started {
+		err = errACPBusy
 	}
-	if !started {
-		return errACPBusy
-	}
-	if instructions != "" {
-		s.acp.instructionsTaken(run, sess)
-	}
-	return nil
+	settle(err)
+	return err
 }

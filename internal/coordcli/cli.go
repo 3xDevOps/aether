@@ -266,10 +266,12 @@ the Needs you reason at turn end. Ask one specific question, then end your
 turn; the user's reply arrives as your next prompt. It takes no --evidence-ref
 and is refused for Background runs and for mission workers, who ask their
 integrator with ask.
-You MUST report before ending a turn: success or failure when the task is done
-or cannot be done, blocked when an external blocker stops you, needs-input with
-your question as the summary when you need the user's decision or information.
-Never end a turn silently.
+When you need the user's decision or information, you MUST report needs-input
+with your question as the summary, then end your turn. When a task you were
+given is done or cannot be done, or an external blocker stops it, you MUST
+report success, failure or blocked before ending that turn. A turn that only
+answers or discusses, or that ends waiting on workers, peers or mail, ends
+without a report.
 Mission worker: success submits the attempt and stops the worker; failure ends
 it without a task result.
 Mission integrator: success completes an active mission and stops leftover
@@ -469,7 +471,6 @@ only after finishing with required evidence, failure only if irrecoverable.
 Verify the changed behavior and collect required screenshots/evidence BEFORE
 reporting: a terminal worker report can clean up its development resources.
 Blocked is a nonterminal durable observation, not a submission or a way to wait.
-Workers cannot report needs-input: ask your integrator with ask.
 Do not report while idle or waiting on a peer or human. After a terminal
 report, take no new work.
 `
@@ -486,10 +487,9 @@ Blocked is a nonterminal durable observation, not a way to wait. Do not report
 while idle or waiting on workers. Use a new idempotency key for a later outcome.
 Needs-input is nonterminal; its summary is your question for the user, shown as
 the Needs you reason at turn end. Ask one specific question, then end your turn.
-You MUST report before ending a turn: success or failure when done or unable,
-blocked when an external blocker stops you, needs-input with your question as
-the summary when you need the user's decision or information. Never end a turn
-silently.
+An interactive integrator that needs the user's decision reports needs-input
+with the question as the summary, then ends its turn; it still does not report
+while idle or waiting on workers.
 `
 
 const ordinaryOutcomes = `Report success only after finishing with required evidence, failure only if
@@ -509,10 +509,11 @@ waiting on a peer or human.
 Needs-input is nonterminal; its summary is your question for the user, shown as
 the Needs you reason at turn end. Ask one specific question, then end your turn;
 the user's reply arrives as your next prompt. Background runs cannot ask.
-You MUST report before ending a turn: success or failure when the task is done
-or cannot be done, blocked when an external blocker stops you, needs-input with
-your question as the summary when you need the user's decision or information.
-Never end a turn silently.
+When you need the user's decision or information, you MUST report needs-input,
+then end your turn. When a task you were given is done or cannot be done, or an
+external blocker stops it, you MUST report success, failure or blocked before
+ending that turn. A turn that only answers or discusses, or that ends waiting
+on workers, peers or mail, ends without a report.
 `
 
 const skillRetry = `For an uncertain mutation, retry identical inputs with the same idempotency

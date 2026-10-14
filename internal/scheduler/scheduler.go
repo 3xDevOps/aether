@@ -729,11 +729,11 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 // command resolves argv and profile for one launch by member on account's
 // shared account, with the profile from launchProfile. An acp launch has no
 // argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
+func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
 	if err = domain.ValidModel(model); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
-	task = s.withCoAuthorInstruction(task)
+	task = s.withCoAuthorInstruction(task, assigned, mode == domain.LaunchHeadless)
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
 		return nil, harness.Profile{}, false, err
@@ -834,6 +834,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.DiscoveryEnv = nil
 		profile.DiscoveryFiles = nil
 		profile.ACPSystemPrompt = false
+		profile.ACPClaudeCode = false
 		profile.NativeCoordination = false
 		profile.UpdateScript = ""
 		profile.SwitchVerified = false

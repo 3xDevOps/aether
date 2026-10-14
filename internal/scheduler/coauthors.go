@@ -37,26 +37,37 @@ const coordinationInstruction = harness.DiscoveryInstruction
 
 // runInstructions are the rules a run's agent follows: the coordination
 // discovery hint, the report rule while lifecycle reporting is enabled, and
-// the co-author rule. A run without a run transport has no mounted directory
-// to read the files from and gets none.
-func (s *Scheduler) runInstructions() string {
+// the co-author rule. assigned marks a mission worker or integrator and
+// background a headless run; they pick the report rule. A run without a run
+// transport has no mounted directory to read the files from and gets none.
+func (s *Scheduler) runInstructions(assigned, background bool) string {
 	c := s.coordinationSeam()
 	if c == nil || c.svc == nil {
 		return ""
 	}
 	rules := coordinationInstruction
 	if c.enabled {
-		rules += "\n\n" + harness.ReportInstruction
+		rules += "\n\n" + reportInstruction(assigned, background)
 	}
 	return rules + "\n\n" + coAuthorInstruction
+}
+
+func reportInstruction(assigned, background bool) string {
+	switch {
+	case assigned:
+		return harness.AssignedReportInstruction
+	case background:
+		return harness.BackgroundReportInstruction
+	}
+	return harness.InteractiveReportInstruction
 }
 
 // withCoAuthorInstruction appends the run instructions to a task prompt. A
 // taskless launch remains taskless: its profile receives the discovery hint
 // through the coordination directory's ephemeral launch mechanism instead of
 // gaining a seeded user prompt.
-func (s *Scheduler) withCoAuthorInstruction(task string) string {
-	if rules := s.runInstructions(); task != "" && rules != "" {
+func (s *Scheduler) withCoAuthorInstruction(task string, assigned, background bool) string {
+	if rules := s.runInstructions(assigned, background); task != "" && rules != "" {
 		return task + "\n\n" + rules
 	}
 	return task

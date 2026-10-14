@@ -39,10 +39,11 @@ func TestCancelRightAfterPromptEndsTheWaitTurn(t *testing.T) {
 	}
 }
 
-func TestPromptBackgroundRunsAFollowUpAfterTheTurn(t *testing.T) {
-	delay := BackgroundDelay
-	BackgroundDelay = 50 * time.Millisecond
-	t.Cleanup(func() { BackgroundDelay = delay })
+// runPrompt opens a session with meta, sends prompt, and returns the agent's
+// lines through the end of the turn plus every line that followed within
+// wait.
+func runPrompt(t *testing.T, meta, prompt string, wait time.Duration) (inTurn, after []string) {
+	t.Helper()
 	fix, err := Load("claude")
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestPromptBackgroundRunsAFollowUpAfterTheTurn(t *testing.T) {
 	hostIn, agentOut := io.Pipe()
 	go New(fix).Serve(agentIn, agentOut)
 	t.Cleanup(func() { _ = hostOut.Close(); _ = hostIn.Close() })
-	lines := make(chan string)
+	lines := make(chan string, 64)
 	go func() {
 		scan := bufio.NewScanner(hostIn)
 		for scan.Scan() {
@@ -59,10 +60,10 @@ func TestPromptBackgroundRunsAFollowUpAfterTheTurn(t *testing.T) {
 		}
 		close(lines)
 	}()
-	turn := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":%q}]}}`+"\n", PromptBackground)
-	go func() { _, _ = io.WriteString(hostOut, turn) }()
-
-	var inTurn []string
+	send := func(line string) { go func() { _, _ = io.WriteString(hostOut, line+"\n") }() }
+	send(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/","mcpServers":[]%s}}`, meta))
+	nextLine(t, lines)
+	send(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":%q,"prompt":[{"type":"text","text":%q}]}}`, fix.SessionID(), prompt))
 	for {
 		line := nextLine(t, lines)
 		inTurn = append(inTurn, line)
@@ -70,15 +71,54 @@ func TestPromptBackgroundRunsAFollowUpAfterTheTurn(t *testing.T) {
 			break
 		}
 	}
-	joined := strings.Join(inTurn, "\n")
-	if !strings.Contains(joined, `"backgroundTaskId":"`+BackgroundTaskID+`"`) || !strings.Contains(inTurn[len(inTurn)-1], `"stopReason":"end_turn"`) {
-		t.Fatalf("turn output:\n%s", joined)
+	timeout := time.After(wait)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return inTurn, after
+			}
+			after = append(after, line)
+		case <-timeout:
+			return inTurn, after
+		}
 	}
-	chunk := nextLine(t, lines)
-	usage := nextLine(t, lines)
-	if !strings.Contains(chunk, "agent_message_chunk") || !strings.Contains(chunk, "background done") ||
-		!strings.Contains(usage, "usage_update") || !strings.Contains(usage, `"_claude/origin":{"kind":"task-notification"}`) {
-		t.Fatalf("follow-up:\n%s\n%s", chunk, usage)
+}
+
+const askForFrames = `,"_meta":{"claudeCode":{"emitRawSDKMessages":[{"type":"system","subtype":"background_tasks_changed"}]}}`
+
+func TestPromptBackgroundRunsAFollowUpAfterTheTurn(t *testing.T) {
+	delay := BackgroundDelay
+	BackgroundDelay = 50 * time.Millisecond
+	t.Cleanup(func() { BackgroundDelay = delay })
+	inTurn, after := runPrompt(t, askForFrames, PromptBackground, 400*time.Millisecond)
+	turn, followUp := strings.Join(inTurn, "\n"), strings.Join(after, "\n")
+	if !strings.Contains(turn, `"_claude/sdkMessage"`) || !strings.Contains(turn, `"task_id":"`+BackgroundTaskID+`"`) || !strings.Contains(inTurn[len(inTurn)-1], `"stopReason":"end_turn"`) {
+		t.Fatalf("turn output:\n%s", turn)
+	}
+	for _, want := range []string{`"subtype":"task_notification"`, `"subtype":"task_updated"`, "background done", `"_claude/origin":{"kind":"task-notification"}`} {
+		if !strings.Contains(followUp, want) {
+			t.Fatalf("follow-up lacks %s:\n%s", want, followUp)
+		}
+	}
+}
+
+func TestPromptBackgroundSendsNoFramesUnlessAsked(t *testing.T) {
+	delay := BackgroundDelay
+	BackgroundDelay = 50 * time.Millisecond
+	t.Cleanup(func() { BackgroundDelay = delay })
+	inTurn, after := runPrompt(t, "", PromptBackground, 400*time.Millisecond)
+	all := strings.Join(append(inTurn, after...), "\n")
+	if strings.Contains(all, "_claude/sdkMessage") || !strings.Contains(all, "background done") {
+		t.Fatalf("output:\n%s", all)
+	}
+}
+
+func TestPromptDevServerNeverEnds(t *testing.T) {
+	inTurn, after := runPrompt(t, askForFrames, PromptDevServer, 300*time.Millisecond)
+	turn := strings.Join(inTurn, "\n")
+	if !strings.Contains(turn, `"task_type":"local_bash"`) || len(after) != 0 {
+		t.Fatalf("turn output:\n%s\nafter it: %v", turn, after)
 	}
 }
 

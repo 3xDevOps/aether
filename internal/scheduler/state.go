@@ -37,8 +37,9 @@ func legalTransition(from, to domain.RunStatus) bool {
 	case domain.RunProvisioning:
 		return from == domain.RunQueued
 	case domain.RunRunning:
-		// Provisioned, or a stalled-but-alive run whose activity resumed.
-		return from == domain.RunProvisioning || from == domain.RunNeedsAttention
+		// Provisioned, a stalled-but-alive run whose activity resumed, or a
+		// running run whose reason changes.
+		return from == domain.RunProvisioning || from == domain.RunNeedsAttention || from == domain.RunRunning
 	case domain.RunNeedsAttention:
 		// A live run stalls while the agent still has a container.
 		return from == domain.RunRunning || from == domain.RunNeedsAttention

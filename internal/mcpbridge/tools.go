@@ -138,7 +138,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) {
 		Name: toolReport,
 		Description: "Submit one success, failure, blocked, or needs-input outcome; all but needs-input are durable and take bounded evidence references. " +
 			"needs-input is nonterminal, takes no evidence_refs, is refused for Background runs and swarm workers, and its summary is your question for the user, shown as the Needs you reason at turn end; ask one specific question, then end your turn. " +
-			"You MUST report before ending a turn, with an outcome your role allows: success or failure when done or unable, blocked when an external blocker stops you, needs-input when you need the user's decision or information. Never end a turn silently. " +
+			"When you need the user's decision or information you MUST report needs-input and end your turn. When a task you were given is done or cannot be done, or an external blocker stops it, you MUST report success, failure or blocked before ending that turn, with an outcome your role allows. A turn that only answers or discusses, or that ends waiting on workers or peers, ends without a report. " +
 			"Interactive non-worker Standard/TUI and Enhanced/ACP sessions stay open: report, end your turn, and await follow-up; use a new key for a later task. " +
 			"Background runs finish on success/failure with one terminal report per launch; swarm workers keep one per attempt. " +
 			"Integrator success still completes the active mission; blocked shows the summary as the Needs you reason at turn end. " +

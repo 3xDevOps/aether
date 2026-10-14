@@ -188,7 +188,7 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 // Outcome guidance is selected by the live assignment, not merely by whether
 // the coordination socket belongs to a mission.
 func TestCLIReportHelpListsNeedsInput(t *testing.T) {
-	for _, want := range []string{"success|failure|blocked|needs-input", "Needs you reason", "MUST report before ending a turn"} {
+	for _, want := range []string{"success|failure|blocked|needs-input", "Needs you reason", "you MUST report needs-input"} {
 		if !strings.Contains(commandUsages["report"], want) {
 			t.Fatalf("report help lacks %q: %s", want, commandUsages["report"])
 		}
@@ -209,7 +209,7 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 			t.Fatalf("%s skill lacks its outcome guidance: %s", role, raw)
 		}
 		raw := out.String()
-		if !strings.Contains(raw, "eeds-input") || strings.Contains(raw, "MUST report before ending a turn") == (role == "worker") {
+		if strings.Contains(raw, "needs-input") == (role == "worker") || strings.Contains(raw, "end a turn silently") {
 			t.Fatalf("%s skill has wrong needs-input guidance: %s", role, raw)
 		}
 	}

@@ -2,23 +2,76 @@ package acphost
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"time"
 )
 
-// autonomousQuiet ends an autonomous turn whose agent reports no end for it,
-// once nothing arrived for this long and no tool call or request is open. It
-// matches the two minutes the scheduler waits for a harness that cannot report
-// a turn end.
+// autonomousQuiet ends an autonomous turn whose agent reports no result for
+// it, once nothing arrived for this long and no tool call or request is open.
+// It matches the two minutes the scheduler waits for a harness that cannot
+// report a turn end.
 var autonomousQuiet = 2 * time.Minute
+
+// autonomousStale ends an autonomous turn that sent nothing for this long
+// while a tool call stayed open: Claude Code's Bash tool runs at most ten
+// minutes, so such a call lost its end update.
+var autonomousStale = 15 * time.Minute
+
+// claudeTaskFrames are the raw Claude Code SDK messages Claude's adapter
+// forwards as _claude/sdkMessage when session meta lists them in
+// claudeCode.emitRawSDKMessages.
+var claudeTaskFrames = []map[string]string{
+	{"type": "system", "subtype": "task_notification"},
+	{"type": "system", "subtype": "task_updated"},
+	{"type": "system", "subtype": "background_tasks_changed"},
+}
+
+// Task is one live Claude Code background task.
+type Task struct {
+	ID string `json:"id"`
+	// Type is Claude Code's task type, such as local_bash, local_agent or
+	// local_workflow.
+	Type        string `json:"type,omitempty"`
+	Description string `json:"description,omitempty"`
+	// Holds says the run stays working until the task ends.
+	Holds bool `json:"holds,omitempty"`
+}
+
+type liveTask struct {
+	typ, description string
+	ambient          bool
+	// dismissed marks a task the user cancelled the wait for.
+	dismissed bool
+}
+
+// holds reports whether the run waits for the task: a subagent, workflow or
+// any other task but a shell. A shell, such as a dev server, may never end,
+// and Claude Code is idle while one runs.
+func (t *liveTask) holds() bool {
+	return !t.ambient && !t.dismissed && t.typ != "local_bash"
+}
+
+type sdkMessage struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	TaskID  string `json:"task_id"`
+	Status  string `json:"status"`
+	Patch   struct {
+		Status string `json:"status"`
+	} `json:"patch"`
+	Tasks []struct {
+		TaskID      string `json:"task_id"`
+		TaskType    string `json:"task_type"`
+		Description string `json:"description"`
+		Ambient     bool   `json:"ambient"`
+	} `json:"tasks"`
+}
 
 type updateHead struct {
 	Kind string `json:"sessionUpdate"`
 	Meta struct {
-		ClaudeCode struct {
-			ToolResponse json.RawMessage `json:"toolResponse"`
-		} `json:"claudeCode"`
 		Origin *struct {
 			Kind string `json:"kind"`
 		} `json:"_claude/origin"`
@@ -35,121 +88,225 @@ func opensTurn(kind string) bool {
 	return false
 }
 
-// launchedTask is the id of the background task a Claude Code tool result
-// reports starting: a backgrounded command's backgroundTaskId, or the taskId
-// of a workflow launched in the background. Claude's adapter holds the prompt
-// open for a background subagent itself.
-func launchedTask(toolResponse json.RawMessage) string {
-	var r struct {
-		BackgroundTaskID string `json:"backgroundTaskId"`
-		Status           string `json:"status"`
-		TaskID           string `json:"taskId"`
+func (s *Session) sdkMessage(raw json.RawMessage) {
+	var m sdkMessage
+	if json.Unmarshal(raw, &m) != nil || m.Type != "system" {
+		return
 	}
-	if json.Unmarshal(toolResponse, &r) != nil {
-		return ""
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.heldLocked()
+	switch m.Subtype {
+	case "task_notification":
+		s.taskEndedLocked(m.TaskID, m.Status)
+		delete(s.tasks, m.TaskID)
+	case "task_updated":
+		switch m.Patch.Status {
+		case "completed", "failed":
+			s.taskEndedLocked(m.TaskID, m.Patch.Status)
+			delete(s.tasks, m.TaskID)
+		case "killed":
+			s.taskEndedLocked(m.TaskID, "stopped")
+			delete(s.tasks, m.TaskID)
+		}
+	case "background_tasks_changed":
+		// The full live set, which replaces the one held.
+		live := make(map[string]bool, len(m.Tasks))
+		for _, lt := range m.Tasks {
+			live[lt.TaskID] = true
+			t := s.tasks[lt.TaskID]
+			if t == nil {
+				t = &liveTask{typ: lt.TaskType, description: lt.Description}
+				s.tasks[lt.TaskID] = t
+			}
+			t.ambient = lt.Ambient
+		}
+		maps.DeleteFunc(s.tasks, func(id string, _ *liveTask) bool { return !live[id] })
+	default:
+		return
 	}
-	if r.BackgroundTaskID != "" {
-		return r.BackgroundTaskID
+	if s.heldLocked() < held && !s.turnActive && !s.autonomous {
+		// Claude Code reports back on the task in a turn of its own that
+		// starts right after.
+		s.owed = time.Now()
+		time.AfterFunc(autonomousQuiet, s.quietCheck)
 	}
-	if r.Status == "async_launched" {
-		return r.TaskID
-	}
-	return ""
+	s.logTasksLocked()
+	s.settleLocked()
 }
 
-// backgroundLocked reports whether the agent works without an open prompt: an
-// autonomous turn runs, or background tasks await their follow-up.
-func (s *Session) backgroundLocked() bool { return s.autonomous || len(s.launched) > 0 }
+// trackTaskCallLocked fills in the type of the task a tool call started and
+// keeps the call's snapshot while the task runs.
+func (s *Session) trackTaskCallLocked(it *Item) {
+	task := it.ToolCall.Task
+	if task == nil || task.Status != "running" {
+		return
+	}
+	if t := s.tasks[task.ID]; t != nil && task.Type == "" {
+		typed := *task
+		typed.Type = t.typ
+		it.ToolCall.Task = &typed
+		s.proj.setTask(it.ToolCall.ID, &typed)
+	}
+	s.taskCalls[task.ID] = *it.ToolCall
+}
 
-func (s *Session) backgroundTasksLocked() []string {
-	return slices.Sorted(maps.Keys(s.launched))
+// taskEndedLocked writes the snapshot of the tool call that started task id
+// with the task's final status.
+func (s *Session) taskEndedLocked(id, status string) {
+	call, ok := s.taskCalls[id]
+	if !ok {
+		return
+	}
+	delete(s.taskCalls, id)
+	task := *call.Task
+	task.Status = status
+	if t := s.tasks[id]; t != nil && task.Type == "" {
+		task.Type = t.typ
+	}
+	call.Task = &task
+	s.proj.setTask(call.ID, &task)
+	s.emitLocked(Item{Kind: KindToolCall, ToolCall: &call})
+}
+
+func (s *Session) tasksLocked() []Task {
+	tasks := make([]Task, 0, len(s.tasks))
+	for _, id := range slices.Sorted(maps.Keys(s.tasks)) {
+		t := s.tasks[id]
+		if !t.ambient {
+			tasks = append(tasks, Task{ID: id, Type: t.typ, Description: t.description, Holds: t.holds()})
+		}
+	}
+	return tasks
+}
+
+func (s *Session) heldLocked() int { return len(s.heldTasksLocked()) }
+
+func (s *Session) heldTasksLocked() []string {
+	var ids []string
+	for _, id := range slices.Sorted(maps.Keys(s.tasks)) {
+		if s.tasks[id].holds() {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// logTasksLocked records the live task set when it differs from the one the
+// log holds last.
+func (s *Session) logTasksLocked() {
+	tasks := s.tasksLocked()
+	if slices.Equal(tasks, s.loggedTasks) {
+		return
+	}
+	s.loggedTasks = tasks
+	s.emitLocked(Item{Kind: KindBackground, Tasks: tasks})
+}
+
+// relogTasksLocked records the live task set again after a turn start, which
+// fences the set logged before it out of Interrupted.
+func (s *Session) relogTasksLocked() {
+	s.loggedTasks = nil
+	if tasks := s.tasksLocked(); len(tasks) > 0 {
+		s.logTasksLocked()
+	}
+}
+
+// backgroundLocked reports whether the agent works with no prompt open: an
+// autonomous turn runs, tasks it reports back on are live, or one ended and
+// the turn reporting back on it has not started within autonomousQuiet.
+func (s *Session) backgroundLocked() bool {
+	return s.autonomous || s.heldLocked() > 0 || (!s.owed.IsZero() && time.Since(s.owed) < autonomousQuiet)
 }
 
 func (s *Session) trackLocked(head updateHead) {
 	s.lastUpdate = time.Now()
-	if id := launchedTask(head.Meta.ClaudeCode.ToolResponse); id != "" {
-		if _, ok := s.launched[id]; !ok {
-			s.launched[id] = s.turn
-		}
-	}
 	// Claude's adapter tags the usage_update it sends for every result of an
 	// autonomous cycle with the cycle's origin.
-	if head.Kind != "usage_update" || head.Meta.Origin == nil {
-		return
-	}
-	if s.autonomous {
+	if s.autonomous && head.Kind == "usage_update" && head.Meta.Origin != nil {
 		s.resulted, s.origin = true, head.Meta.Origin.Kind
-	}
-	if head.Meta.Origin.Kind != "task-notification" {
-		return
-	}
-	// The follow-up does not say which task finished, so it settles every
-	// task started before it; one started by this follow-up stays.
-	for id, turn := range s.launched {
-		if !s.autonomous || turn < s.turn {
-			delete(s.launched, id)
-		}
 	}
 }
 
 // openAutonomousLocked starts an autonomous turn for agent work that arrived
-// with no prompt open.
+// with no prompt open, from an agent whose adapter runs turns of its own.
 func (s *Session) openAutonomousLocked() {
-	if s.turnActive || s.autonomous || s.closed {
+	if !s.cfg.ClaudeCode || s.turnActive || s.autonomous || s.closed {
 		return
 	}
-	wasBackground := s.backgroundLocked()
 	s.proj.closeText()
 	s.turn++
-	s.autonomous, s.resulted, s.origin = true, false, ""
+	s.autonomous, s.resulted, s.origin, s.holdIdle = true, false, "", false
+	s.lastUpdate, s.owed = time.Now(), time.Time{}
 	s.emitLocked(Item{Kind: KindTurnStart, Autonomous: true})
-	if !wasBackground {
-		s.waiting = true
-		s.stateLocked(true, "background", nil)
-	}
+	s.relogTasksLocked()
 }
 
 // settleLocked ends the autonomous turn once the agent reported its result,
-// or went quiet for autonomousQuiet, with no tool call or request open, and
-// reports idle once no background work is left.
+// or went quiet, and reports the state the background work leaves.
 func (s *Session) settleLocked() {
 	if s.turnActive || s.closed {
 		return
 	}
-	if s.autonomous {
-		if s.proj.toolsOpen() || len(s.conn.pendingRequests()) > 0 {
-			return
-		}
-		if !s.resulted {
-			if wait := autonomousQuiet - time.Since(s.lastUpdate); wait > 0 {
-				if !s.quietArmed {
-					s.quietArmed = true
-					time.AfterFunc(wait, s.quietCheck)
-				}
-				return
-			}
-		}
+	if s.autonomous && s.autonomousOverLocked() {
 		s.endAutonomousLocked("end_turn")
 		if s.turnActive {
 			return
 		}
 	}
-	if len(s.launched) == 0 && s.waiting {
-		s.waiting = false
-		s.stateLocked(false, s.idleStop, nil)
+	if s.backgroundLocked() && (s.autonomous || !s.holdIdle) {
+		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked()}
+		if s.reported != st {
+			s.stateLocked(st)
+		}
+		return
 	}
+	if s.reported.Working {
+		s.stateLocked(TurnState{Reason: s.idleStop})
+	}
+}
+
+// autonomousOverLocked reports whether the autonomous turn ended, and arms a
+// check for when its quiet wait runs out.
+func (s *Session) autonomousOverLocked() bool {
+	if s.resulted {
+		return true
+	}
+	if len(s.conn.pendingRequests()) > 0 {
+		return false
+	}
+	limit := autonomousQuiet
+	if s.proj.toolsOpen() {
+		limit = autonomousStale
+	}
+	quiet := time.Since(s.lastUpdate)
+	if wait := limit - quiet; wait > 0 {
+		// A tool call that ended shortens the wait already armed.
+		if at := time.Now().Add(wait); s.quietAt.IsZero() || at.Before(s.quietAt) {
+			s.quietAt = at
+			time.AfterFunc(wait, s.quietCheck)
+		}
+		return false
+	}
+	if limit == autonomousStale {
+		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: "warning", Title: "Background turn ended",
+			Description: fmt.Sprintf("The agent sent nothing for %s while a tool call stayed open, so Aether stopped waiting for the turn's end.", limit)}})
+	}
+	return true
 }
 
 func (s *Session) quietCheck() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.quietArmed = false
+	if !s.quietAt.After(time.Now()) {
+		s.quietAt = time.Time{}
+	}
 	s.settleLocked()
 }
 
 func (s *Session) endAutonomousLocked(stop string) {
 	s.proj.endTurn()
-	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin, BackgroundTasks: s.backgroundTasksLocked()})
+	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: stop, Autonomous: true, Origin: s.origin})
 	s.autonomous, s.resulted, s.origin = false, false, ""
 	s.idleStop = stop
 	if len(s.queue) > 0 && !s.closingLocked() {
@@ -159,23 +316,33 @@ func (s *Session) endAutonomousLocked(stop string) {
 	}
 }
 
-func (s *Session) stateLocked(working bool, reason string, failed error) {
+func (s *Session) stateLocked(st TurnState) {
+	s.reported = st
+	s.reported.Failed = nil
 	if s.cfg.OnState != nil {
-		s.callback(func() { s.cfg.OnState(working, reason, failed) })
+		s.callback(func() { s.cfg.OnState(st) })
 	}
 }
 
+// dismissLocked stops waiting for the live tasks; they still end and report
+// back on their own.
+func (s *Session) dismissLocked() {
+	for _, t := range s.tasks {
+		t.dismissed = true
+	}
+	s.logTasksLocked()
+}
+
+// cancelBackgroundLocked ends the autonomous turn and the wait for tasks when
+// no prompt is open.
 func (s *Session) cancelBackgroundLocked() {
 	if s.turnActive || s.closed || !s.backgroundLocked() {
 		return
 	}
-	clear(s.launched)
+	s.dismissLocked()
+	s.owed, s.idleStop = time.Time{}, "cancelled"
 	if s.autonomous {
 		s.endAutonomousLocked("cancelled")
-		if s.turnActive {
-			return
-		}
 	}
-	s.idleStop = "cancelled"
 	s.settleLocked()
 }

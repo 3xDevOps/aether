@@ -217,6 +217,32 @@ func claudeMeta(meta map[string]any) (parent, toolName string) {
 	return parent, toolName
 }
 
+// launchedTask is the id of the background task a Claude Code tool result
+// reports starting: a backgrounded command's backgroundTaskId, or the taskId
+// or agentId of a workflow or subagent launched in the background.
+func launchedTask(meta map[string]any) string {
+	cc, _ := meta["claudeCode"].(map[string]any)
+	r, _ := cc["toolResponse"].(map[string]any)
+	id, _ := r["backgroundTaskId"].(string)
+	if status, _ := r["status"].(string); id == "" && status == "async_launched" {
+		if id, _ = r["taskId"].(string); id == "" {
+			id, _ = r["agentId"].(string)
+		}
+	}
+	if len(id) > maxLinkBytes {
+		return ""
+	}
+	return id
+}
+
+// setTask records task on a tool call the projector still knows, so a later
+// update does not bring back its earlier state.
+func (p *projector) setTask(id string, task *ToolTask) {
+	if st, ok := p.tools[id]; ok {
+		st.call.Task = task
+	}
+}
+
 // chunk appends streamed text to the open message, starting a new one when
 // the kind, role, message id or subagent changes.
 func (p *projector) chunk(kind Kind, role, id, parent string, block acp.ContentBlock) {
@@ -318,6 +344,9 @@ func (p *projector) tool(id string, patch toolPatch) {
 	}
 	if toolName != "" && c.ToolName == "" {
 		c.ToolName = toolName
+	}
+	if task := launchedTask(patch.meta); task != "" && c.Task == nil {
+		c.Task = &ToolTask{ID: task, Status: "running"}
 	}
 	if patch.title != nil {
 		var cut bool
