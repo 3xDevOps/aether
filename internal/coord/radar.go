@@ -283,3 +283,12 @@ func (r *radar) forget(run domain.RunID) {
 	delete(r.state, run)
 	delete(r.cleared, run)
 }
+
+// listed reports whether run's active/grace set held peer at the last
+// refresh.
+func (r *radar) listed(run, peer domain.RunID) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.state[run][peer]
+	return ok
+}

@@ -1487,8 +1487,9 @@ identities, device labels, client addresses, timing and byte counts
 
 ## Conflict coordination
 
-When two runs edit the same file, each container may receive a run-scoped unix
-socket for coordination. Detail is in `docs/coordination.md` (host side and
+Each container may receive a run-scoped unix socket that runs in one
+workspace use to coordinate, for example when the radar finds two of them
+editing the same file. Detail is in `docs/coordination.md` (host side and
 wire) and `docs/mcp-bridge.md` (the optional in-container bridge); the
 operator-facing stances are these.
 
@@ -1531,18 +1532,34 @@ operator-facing stances are these.
   timeline. The optional bridge is manual and still exposes only its six
   existing tools; it is not automatic registration or a Release B
   mission/worker interface.
-- **A run can widen its own peer set, and the cap is what bounds it.** For
-  ordinary runs, the overlap that authorizes a message is computed from the two
-  runs' own diff snapshots, so a run that touches every tracked file is
-  reported as overlapping with every other run in the workspace. Swarm
-  assignments instead provide a server-derived peer set that may authorize
-  active integrator and worker runs before file overlap; neither set is
-  caller-selected, and both remain bounded. The server limits each run to 8
-  distinct correspondents instead of trying to infer intent from a wide
-  refactor. Read this as defence in depth, not a boundary: runs in one
-  workspace already share a repository, so influencing each other through file
-  contents needs no authorization at all. Turn the feature off if that is not
-  acceptable.
+- **Three routes authorize a new conversation, none across workspaces.**
+  `coord.send` and `coord.ask` are accepted when the target is a current swarm
+  assignment peer, a radar active/grace overlap peer, or a live run in the
+  sender's workspace that the sender run's owner may message. The sender and
+  target must share a workspace on every route, and a finished target is
+  refused. `coord.reply` is authorized by the question it answers.
+- **Messaging is its own permission.** The workspace route checks the
+  `message` capability for the sender run's owner against the target run.
+  Admins may message any run; viewers may not message from their runs;
+  collaborators may message any run unless it is protected, and a protected
+  run (`aether protect`) accepts workspace-route messages only from its
+  owner's runs and admins' runs. `steer_others=admins_only` does not restrict
+  messaging. The owner's role is re-read on every send, so a demotion applies
+  to the next message. `coord.status` omits runs the sender may not message.
+- **A message grants nothing else.** It is an attributed inbox item
+  (`from_run_id`), never an instruction. It confers no steer, kill, input
+  injection, terminal, transcript, Git, secret, or task and worker authority
+  over the recipient, and the socket's method set stays closed.
+- **A run can widen its own peer set, and the cap is what bounds it.** A run
+  that touches every tracked file is reported as overlapping with every other
+  run in the workspace, and the workspace route already reaches every live run
+  its owner may message. The server limits each run to 8 distinct
+  correspondents opened over the radar and workspace routes instead of trying
+  to infer intent. Swarm assignment peers are server-derived and do not count,
+  so an integrator reaches every worker it dispatched. Read this as defence in
+  depth, not a boundary: runs in one workspace already share a repository, so
+  influencing each other through file contents needs no authorization at all.
+  Turn the feature off if that is not acceptable.
 - **The staged bridge binary is the server's own binary.** It is mounted
   read-only at `/opt/aether/aether-server` so a container can run the optional
   MCP bridge without shipping an extra artifact. A container therefore holds a

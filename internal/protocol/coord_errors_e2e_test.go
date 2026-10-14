@@ -38,7 +38,7 @@ func TestCoordWireV3ErrorsGolden(t *testing.T) {
 	runs := &wireRuns{runs: make(map[domain.RunID]*domain.Run)}
 	runs.set(domain.Run{ID: "run_01", WorkspaceID: "ws_01", MemberID: "mem_01", Status: domain.RunRunning})
 	runs.set(domain.Run{ID: "run_02", WorkspaceID: "ws_01", MemberID: "mem_02", Status: domain.RunRunning})
-	runs.set(domain.Run{ID: "run_09", WorkspaceID: "ws_01", MemberID: "mem_03", Status: domain.RunRunning})
+	runs.set(domain.Run{ID: "run_09", WorkspaceID: "ws_01", MemberID: "mem_03", Status: domain.RunRunning, Protected: true})
 
 	cfg := coord.Config{
 		Dir:   filepath.Join(t.TempDir(), "coord"),
@@ -93,7 +93,8 @@ func TestCoordWireV3ErrorsGolden(t *testing.T) {
 	}
 
 	got := make([][]byte, 0, 8)
-	// 1: the target is alive but shares no overlap edge with the sender.
+	// 1: the target is alive and shares no overlap edge with the sender,
+	// and its protection closes the workspace route to another member.
 	got = append(got, call(1, protocol.MethodCoordSend, send("run_09", "ping", "unauthorized-1")))
 	// 2: the same target, no longer a run the store knows.
 	runs.del("run_09")
@@ -178,8 +179,8 @@ func (f *wireRuns) GetRun(_ context.Context, id domain.RunID) (*domain.Run, erro
 	return &cp, nil
 }
 
-func (f *wireRuns) GetMember(context.Context, domain.MemberID) (*domain.Member, error) {
-	return nil, store.ErrNotFound
+func (f *wireRuns) GetMember(_ context.Context, id domain.MemberID) (*domain.Member, error) {
+	return &domain.Member{ID: id, Role: domain.RoleCollaborator}, nil
 }
 
 func (f *wireRuns) ListActiveRuns(context.Context) ([]*domain.Run, error) { return nil, nil }

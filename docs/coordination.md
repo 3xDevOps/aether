@@ -2,7 +2,8 @@
 
 Aether's conflict radar identifies active runs that edit the same files. When
 coordination is enabled, each run also gets a small, durable channel for
-communicating with radar-authorized runs. A swarm is one objective handled by
+communicating with other live runs in its workspace, whether or not the radar
+has found an overlap yet. A swarm is one objective handled by
 a group of runs: an integrator run splits it into tasks and dispatches worker
 runs to do them. A current swarm assignment may add server-authorized peers
 before any file overlap exists. The channel is advisory:
@@ -70,9 +71,9 @@ line. The base coordination method set is:
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `coord.status` | none | v3 wire version, this run's identity and assignment, authorized peers, unread count, and capabilities |
-| `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id` |
+| `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id`, `recipient_status` |
 | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
-| `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id` |
+| `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
 
@@ -99,29 +100,55 @@ methods use the same run-authenticated socket but are not part of the base
 Every allow-list is derived from the current assignment, not from
 caller-supplied roles or identities. A swarm authorizes its integrator
 and active worker runs as peers before any file overlap exists, on top of
-the radar active/grace authorization described below.
+the radar and workspace routes described below.
 
 `coord.status` reports `wire_version: "v3"`, the run, workspace, and member
 IDs, the recorded task, each currently authorized peer, and the six base
 coordination capabilities when conflict coordination is enabled. Assignment
 capabilities extend that baseline; they do not replace it. Development
 capabilities come from the live development service, not the assignment.
-The sender is never a parameter. An ordinary run can message
-only a peer in the same workspace that the radar currently marks as
-overlapping, or a peer in its ten-minute overlap grace period. A swarm run
-can message those same radar peers plus its current assignment peers, so a
-worker that overlaps a run outside its swarm can still answer the overlap
-notice. Status lists the assignment peers first with `state: "mission"` even
-when no file overlap exists, carrying the overlapping files when the radar
-also reports one; radar peers outside the swarm follow with `state:
-"active"` or `"grace"`. Any other run is refused. A question reply is the
+The sender is never a parameter. A run can open a conversation with
+`coord.send` or `coord.ask` over three routes, checked in order:
+
+1. **Swarm**: a current assignment peer of a swarm run.
+2. **Radar**: a run the radar currently marks as overlapping, or one in its
+   ten-minute overlap grace period.
+3. **Workspace**: any other live run in the same workspace, when the sender
+   run's owner holds the `message` permission on it. Admins hold it on every
+   run and viewers on none; collaborators hold it unless the target is a
+   protected run of another member. The owner's role is re-read on every send.
+
+No route crosses a workspace boundary, and a finished run cannot be messaged.
+Status lists the reachable peers in route order: assignment peers with
+`state: "mission"`, carrying the overlapping files when the radar also
+reports one; radar peers with `state: "active"` or `"grace"`; then workspace
+peers with `state: "workspace"`, their task summary and `run_status`, most
+recently active first. Each run appears once, under its first route, and
+status never lists a run the sender cannot message. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
 question and remains allowed for that question even after ordinary overlap
 grace expires. It cannot be used to send an unrelated message or cross a
 workspace boundary.
 
-A run may open conversations with at most eight distinct peers. Existing
-conversations remain usable when this limit has been reached. The server
+The `recipient_status` in a send or ask receipt is the recipient's lifecycle
+status when the message was stored: `queued`, `provisioning`, `running`, or
+`needs-attention`. The message waits in the inbox whatever the status. A
+refused send names its reason:
+
+| Error | Reason |
+| --- | --- |
+| `-32001` `run <to> is not an authorized peer of run <from>: it is in a different workspace; ...` | The target belongs to another workspace. |
+| `-32001` `run <to> is not an authorized peer of run <from>: member <id> (<role>) may not message it: <rule>; ...` | No swarm or radar route, and the owner lacks `message`: the role is viewer, or the target is protected. |
+| `-32004` `run <to> has finished` | The target is no longer live. |
+| `-32003` `run <from> has reached its limit of 8 coordination peers; ...` | The peer cap below. |
+
+Denials end with ``run `aether-internal status` to list the runs it can
+message``.
+
+A run may open conversations with at most eight distinct peers over the radar
+and workspace routes. Swarm assignment peers do not count, so an integrator
+can message every worker it dispatched. Existing conversations remain usable
+when this limit has been reached. The server
 also enforces these bounds:
 
 - message, question, and reply bodies are at most 4 KiB;
@@ -766,7 +793,7 @@ created to make discovery appear to work.
   --idempotency-key send-example-1
 ```
 
-The result contains `message_id`. `--body-file path` reads a body from a
+The result contains `message_id` and `recipient_status`. `--body-file path` reads a body from a
 file, and `--body-file -` reads it from standard input. A body can also be
 provided as the positional text after the peer run ID.
 

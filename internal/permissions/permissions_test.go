@@ -31,6 +31,8 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 			return true
 		}
 		return !protected && steerOthers != domain.SteerOthersAdminsOnly
+	case Message:
+		return role == domain.RoleCollaborator && (owner || !protected)
 	}
 	return false
 }
@@ -39,7 +41,7 @@ func want(cap Capability, role domain.Role, owner, protected bool, steerOthers s
 // protected x steer-others.
 func TestCheckFullMatrix(t *testing.T) {
 	roles := []domain.Role{domain.RoleViewer, domain.RoleCollaborator, domain.RoleAdmin}
-	caps := []Capability{View, Steer, Kill, Launch, Push, Handoff, Protect, WorkspaceAdmin}
+	caps := []Capability{View, Steer, Kill, Message, Launch, Push, Handoff, Protect, WorkspaceAdmin}
 	settings := []string{"", domain.SteerOthersAdminsOnly}
 	actor := domain.MemberID("m_actor")
 	other := domain.MemberID("m_other")
@@ -118,6 +120,17 @@ func TestCheckSpotRules(t *testing.T) {
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor}, true},
 		{"protect by owner allowed", Protect,
 			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor}, true},
+		{"viewer cannot message even from its own run", Message,
+			Actor{actor, domain.RoleViewer}, Target{Owner: actor}, false},
+		{"admins_only does not restrict messaging another's run", Message,
+			Actor{actor, domain.RoleCollaborator},
+			Target{Owner: other, SteerOthers: domain.SteerOthersAdminsOnly}, true},
+		{"protected run refuses messages from another member", Message,
+			Actor{actor, domain.RoleCollaborator}, Target{Owner: other, Protected: true}, false},
+		{"protected run accepts messages from its owner's runs", Message,
+			Actor{actor, domain.RoleCollaborator}, Target{Owner: actor, Protected: true}, true},
+		{"admin messages a protected run", Message,
+			Actor{actor, domain.RoleAdmin}, Target{Owner: other, Protected: true}, true},
 		{"workspace admin requires admin", WorkspaceAdmin,
 			Actor{actor, domain.RoleCollaborator}, Target{}, false},
 	}

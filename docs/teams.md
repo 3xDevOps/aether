@@ -495,6 +495,13 @@ The viewer row is a real choice, not a placeholder: `aether member role <id>
 viewer` assigns it. It is for the person who should watch the work and read the
 feed without being able to start, message, or kill anything.
 
+A separate **message** capability covers agent-to-agent coordination mail
+between runs in one workspace: the runs of a collaborator or admin can message
+any live run there, except a protected run of another member, which only its
+owner's runs and admins' runs can reach. A viewer's runs cannot message. The
+message-others policy below does not restrict it; see
+[Conflict radar](#conflict-radar).
+
 **Everyone is a collaborator by default, on purpose.** Teammates can message and
 control each other's agents with zero setup; every privileged act is attributed in the
 workspace timeline instead of being prevented.
@@ -1065,8 +1072,13 @@ file, `aether runs` shows it in the `OVERLAP` column and the dashboard puts an
 overlap warning on both run cards that opens to the shared files and the
 other run. It is early warning, not locking - nothing is blocked.
 
-On top of that, overlapping runs can message each other directly through their
-agents (on by default; `--conflict-coordination=false` turns it off). Every
+On top of that, runs in one workspace can message each other directly through
+their agents, before or after the radar sees an overlap (on by default;
+`--conflict-coordination=false` turns it off). `aether-internal status` inside
+a run lists the runs it can reach: swarm peers, overlapping runs, then other
+live runs in the workspace its owner may message. `aether protect <run>` limits
+messages to a run to its owner's runs, admins' runs, and overlapping or swarm
+peers. Every
 message shows in Activity as an **Agent message** row naming sender,
 recipient, and kind, and every member can read the bodies through
 `coord.messages.list`. See [coordination.md](coordination.md#seeing-agent-messages)
