@@ -47,6 +47,9 @@ type MergeStore interface {
 	// MergedInto returns the member a merge absorbed member into, empty
 	// when it was not merged; ErrNotFound when it never existed.
 	MergedInto(ctx context.Context, member domain.MemberID) (domain.MemberID, error)
+	// FinishedRunsOf returns the finished runs that belong to, run on the
+	// account of, or use the home of a or b.
+	FinishedRunsOf(ctx context.Context, a, b domain.MemberID) ([]*domain.Run, error)
 }
 
 var _ MergeStore = (*DB)(nil)
@@ -852,4 +855,20 @@ func (d *DB) MergedInto(ctx context.Context, member domain.MemberID) (domain.Mem
 		return "", fmt.Errorf("store: merged into: %w", err)
 	}
 	return into, nil
+}
+
+func (d *DB) FinishedRunsOf(ctx context.Context, a, b domain.MemberID) ([]*domain.Run, error) {
+	var finished []string
+	for _, s := range domain.AllRunStatuses {
+		if s.Terminal() {
+			finished = append(finished, "'"+string(s)+"'")
+		}
+	}
+	rows, err := d.db.QueryContext(ctx, runSnapshotQuery(`runs.status IN (`+strings.Join(finished, ", ")+`)
+		AND (runs.member_id IN (?, ?) OR runs.account_member_id IN (?, ?) OR runs.home_member_id IN (?, ?))`)+
+		` ORDER BY runs.created_at, runs.rowid`, a, b, a, b, a, b)
+	if err != nil {
+		return nil, fmt.Errorf("store: finished runs of %s and %s: %w", a, b, err)
+	}
+	return collect(rows, scanRun)
 }

@@ -17,6 +17,7 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -268,6 +269,15 @@ func TestMergeRefusals(t *testing.T) {
 	if err := e.store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	until := time.Now().Add(time.Hour)
+	e.runs.mu.Lock()
+	e.runs.retentions = map[domain.RunID]scheduler.RetentionInfo{run.ID: {RetainedUntil: &until}}
+	e.runs.mu.Unlock()
+	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: code}, nil),
+		"finished runs "+string(run.ID)+" still keep their containers")
+	e.runs.mu.Lock()
+	e.runs.retentions = nil
+	e.runs.mu.Unlock()
 
 	plan := mergePreview(t, tc, code)
 	if plan.Role != string(domain.RoleViewer) || plan.RoleWithKeepAdmin != "" {
@@ -452,14 +462,24 @@ func TestRecoverMergeArchivesPutsBackAnUncommittedHome(t *testing.T) {
 	if err != nil || dir == "" {
 		t.Fatalf("archive = %q, %v", dir, err)
 	}
-	if err := e.srv.RecoverMergeArchives(context.Background()); err != nil {
+	if err = e.srv.RecoverMergeArchives(context.Background()); err != nil {
 		t.Fatalf("RecoverMergeArchives: %v", err)
 	}
-	if data, err := os.ReadFile(filepath.Join(home, "notes.txt")); err != nil || string(data) != "kept" {
-		t.Fatalf("home after recovery: %q, %v", data, err)
+	if data, rerr := os.ReadFile(filepath.Join(home, "notes.txt")); rerr != nil || string(data) != "kept" {
+		t.Fatalf("home after recovery: %q, %v", data, rerr)
 	}
-	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("archive left behind: %v", err)
+	if _, serr := os.Stat(dir); !errors.Is(serr, os.ErrNotExist) {
+		t.Fatalf("archive left behind: %v", serr)
+	}
+	empty := filepath.Join(merged, "mrg-stopped-in-setup")
+	if err = os.MkdirAll(empty, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.srv.RecoverMergeArchives(context.Background()); err != nil {
+		t.Fatalf("RecoverMergeArchives with an archive stopped before its marker: %v", err)
+	}
+	if _, err := os.Stat(empty); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty archive left behind: %v", err)
 	}
 }
 

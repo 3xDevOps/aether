@@ -254,7 +254,9 @@ A merge is refused, with what to do, when the code is unknown, expired or
 used; both members have a tailnet login, or both an SSH key; either is
 pending (`aether member approve <id>` first); either has a run that has
 not finished, an Environment terminal, a role in an open swarm (stop
-those first) or a handoff still publishing (retry in a minute); or the members changed since the preview or proposal
+those first), a handoff still publishing (retry in a minute) or a finished
+run whose container the server still keeps, since it mounts the agent
+logins (merge once it is released, or `aether delete <run-id>`); or the members changed since the preview or proposal
 (`the members changed since the preview; preview again`). Entering your
 own code answers `already the same member`; accepting again from the
 merged member returns the recorded merge.

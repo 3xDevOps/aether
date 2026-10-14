@@ -132,7 +132,36 @@ func (s *Server) memberMergePreview(ctx context.Context, member domain.MemberID,
 	if err != nil {
 		return nil, mergeError(err)
 	}
+	if perr := s.refuseRetainedRuns(ctx, ms, plan.Minted.Member.ID, member); perr != nil {
+		return nil, perr
+	}
 	return s.planToWire(plan)
+}
+
+// refuseRetainedRuns refuses a merge while a finished run of either member
+// keeps its container: a relaunch would resume it with the agent logins it
+// mounted, the absorbed member's included, after a merge.
+func (s *Server) refuseRetainedRuns(ctx context.Context, ms store.MergeStore, a, b domain.MemberID) *protocol.Error {
+	runs, err := ms.FinishedRunsOf(ctx, a, b)
+	if err != nil {
+		return rpcError(err)
+	}
+	var kept []string
+	for _, r := range runs {
+		info, err := s.cfg.Runs.Retention(r)
+		if err != nil {
+			return rpcError(err)
+		}
+		if info.CleanupPending || (info.RetainedUntil != nil && time.Now().Before(*info.RetainedUntil)) {
+			kept = append(kept, string(r.ID))
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+		"stop these first, then merge: finished runs %s still keep their containers, which mount the members' agent logins; merge once the server releases them, or delete the runs (aether delete <run-id>)",
+		strings.Join(kept, ", "))}
 }
 
 func (s *Server) memberMergePropose(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -225,6 +254,9 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 	}
 	pm, perr := acceptable(pending, p, member)
 	if perr != nil {
+		return nil, perr
+	}
+	if perr = s.refuseRetainedRuns(ctx, ms, pm.Minted, pm.Proposer); perr != nil {
 		return nil, perr
 	}
 	absorbed, other := pm.Minted, pm.Proposer
@@ -429,18 +461,30 @@ func (s *Server) RecoverMergeArchives(ctx context.Context) error {
 			continue
 		}
 		dir := filepath.Join(s.cfg.MergedDir, e.Name())
+		home := filepath.Join(dir, "home")
 		member, err := os.ReadFile(filepath.Join(dir, mergeMemberFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			// Setup or cleanup stopped around the marker. The home is
+			// moved only after the marker is written and the marker removed
+			// only after it is put back, so there is no home to recover.
+			if _, serr := os.Lstat(home); serr == nil {
+				return fmt.Errorf("sshd: recover merge archive %s: it holds a home but names no member; move it back by hand", dir)
+			}
+			if err = os.Remove(dir); err != nil {
+				return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+			}
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
 		}
-		home := filepath.Join(dir, "home")
 		if _, err := os.Lstat(home); err == nil {
 			if err := s.cfg.Homes.Unarchive(domain.MemberID(member), home); err != nil {
 				return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
 			}
 			slog.Warn("sshd: put back the home of a merge that never committed", "member", string(member), "archive", dir)
 		}
-		if err := os.Remove(filepath.Join(dir, mergeMemberFile)); err != nil {
+		if err := os.Remove(filepath.Join(dir, mergeMemberFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
 		}
 		if err := os.Remove(dir); err != nil {
