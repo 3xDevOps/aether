@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -44,6 +45,15 @@ func (m *memStore) PutAssistantSession(_ context.Context, s *store.AssistantSess
 		m.rows[s.MemberID] = row
 	}
 	row.Agent, row.HarnessSessionID, row.ExecIdentity = s.Agent, s.HarnessSessionID, s.ExecIdentity
+	return nil
+}
+
+func (m *memStore) ClearAssistantExec(_ context.Context, id domain.MemberID, generation int64, identity string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if row := m.rows[id]; row != nil && row.Generation == generation && row.ExecIdentity == identity {
+		row.ExecIdentity = ""
+	}
 	return nil
 }
 
@@ -203,5 +213,53 @@ func TestRemoveDeletesMemberFiles(t *testing.T) {
 	}
 	if _, kept := s.members["m1"]; kept {
 		t.Fatal("member kept in memory")
+	}
+}
+
+type fakeExec struct{}
+
+func (fakeExec) Identity() runtime.ExecIdentity { return runtime.ExecIdentity{} }
+func (fakeExec) Attachment() runtime.Attachment { return nil }
+func (fakeExec) Status(context.Context) (runtime.ExecState, error) {
+	return runtime.ExecState{}, nil
+}
+func (fakeExec) Wait(context.Context) (runtime.ExitStatus, error) { return runtime.ExitStatus{}, nil }
+func (fakeExec) Stop(context.Context, time.Duration) (runtime.ExitStatus, error) {
+	return runtime.ExitStatus{}, nil
+}
+func (fakeExec) Resize(context.Context, uint, uint) error { return nil }
+func (fakeExec) Detach() error                            { return nil }
+
+// A session that ended earlier cleans up late; that must not undo a reset or
+// blank the exec identity of the session that replaced it.
+func TestLateEndExecLeavesNewerRowAlone(t *testing.T) {
+	db := newMemStore()
+	s := New(Config{Store: db})
+	old := func() *session {
+		return &session{agent: "claude", harnessID: "old", generation: 0, identity: "OLD", exec: fakeExec{}}
+	}
+
+	db.rows["m1"] = &store.AssistantSession{MemberID: "m1", Generation: 1}
+	if err := s.endExec(old(), "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if row := db.rows["m1"]; row.HarnessSessionID != "" || row.Agent != "" || row.Generation != 1 {
+		t.Fatalf("row after a reset and a late cleanup = %+v, want the old session not resurrected", row)
+	}
+
+	db.rows["m1"] = &store.AssistantSession{MemberID: "m1", Agent: "claude", HarnessSessionID: "new", ExecIdentity: "NEW"}
+	if err := s.endExec(old(), "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if row := db.rows["m1"]; row.ExecIdentity != "NEW" {
+		t.Fatalf("exec identity = %q after the old session's cleanup, want NEW kept", row.ExecIdentity)
+	}
+
+	db.rows["m1"] = &store.AssistantSession{MemberID: "m1", ExecIdentity: "OLD"}
+	if err := s.endExec(old(), "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if row := db.rows["m1"]; row.ExecIdentity != "" {
+		t.Fatalf("exec identity = %q, want the stopped adapter forgotten", row.ExecIdentity)
 	}
 }

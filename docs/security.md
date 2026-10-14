@@ -470,7 +470,9 @@ container, driven from the dashboard. The boundaries:
   over a Unix socket at `<data>/assistant/<member>/sock/assistant.sock`. The
   server binds each socket to one member and runs every call as that member,
   with the same permission checks as their own CLI. No tool takes a member id,
-  and the socket rejects any parameter containing `member_id`. Only a fixed
+  and the socket rejects any parameter containing `member_id`, including
+  `account_member_id`. The one exception is `run.list`, which accepts
+  `member_id` as a read filter: every member can see every run anyway. Only a fixed
   allowlist of methods is served; anything else returns `method not found`.
 - **Socket placement.** The socket directory is mounted read-only at
   `/run/aether-assistant` in that member's environment terminal only. No run

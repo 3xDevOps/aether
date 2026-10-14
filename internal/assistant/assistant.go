@@ -56,6 +56,8 @@ var (
 	ErrTurnRunning = errors.New("assistant: a turn is running; stop it first")
 	// ErrClosed means the service is shutting down.
 	ErrClosed = errors.New("assistant: the server is shutting down")
+	// ErrRemoving means the member is being removed.
+	ErrRemoving = errors.New("assistant: the member is being removed")
 )
 
 type Config struct {
@@ -91,6 +93,8 @@ type member struct {
 	// reset is held while a reset runs, so a viewer that sees the session
 	// end reads the new generation.
 	reset sync.RWMutex
+	// removing refuses new sessions while the member is being removed.
+	removing bool
 
 	mu       sync.Mutex
 	sess     *session
@@ -109,12 +113,14 @@ type member struct {
 }
 
 type session struct {
-	agent     string
-	harnessID string
-	acp       *acphost.Session
-	exec      runtime.ManagedExec
-	cancel    context.CancelFunc
-	ended     chan struct{}
+	agent      string
+	harnessID  string
+	generation int64
+	identity   string
+	acp        *acphost.Session
+	exec       runtime.ManagedExec
+	cancel     context.CancelFunc
+	ended      chan struct{}
 
 	stopOnce sync.Once
 	stopErr  error
@@ -316,8 +322,25 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	if s.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
-	if live := m.live(); live != nil && (requested == "" || requested == live.agent) {
-		return live, nil
+	if m.removing {
+		return nil, ErrRemoving
+	}
+	m.mu.Lock()
+	cur := m.sess
+	m.mu.Unlock()
+	if cur != nil {
+		select {
+		case <-cur.acp.Done():
+			select {
+			case <-cur.ended:
+			case <-ctx.Done():
+				return nil, fmt.Errorf("assistant: wait for the earlier session to end: %w", ctx.Err())
+			}
+		default:
+			if requested == "" || requested == cur.agent {
+				return cur, nil
+			}
+		}
 	}
 	agents, err := s.agents(ctx, id)
 	if err != nil {
@@ -336,6 +359,9 @@ func (s *Service) ensure(ctx context.Context, id domain.MemberID, requested stri
 	}
 	if requested != "" && row.Agent != "" && row.Agent != agent {
 		if err = s.resetLocked(ctx, m); err != nil {
+			return nil, err
+		}
+		if row, err = s.stored(ctx, id); err != nil {
 			return nil, err
 		}
 	}
@@ -444,7 +470,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 		_ = acpSess.Close()
 		return nil, errors.Join(fmt.Errorf("assistant: record the session: %w", err), stopExec(exec))
 	}
-	return &session{agent: agent, harnessID: record.HarnessSessionID, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
+	return &session{agent: agent, harnessID: record.HarnessSessionID, generation: row.Generation, identity: record.ExecIdentity, acp: acpSess, exec: exec, ended: make(chan struct{})}, nil
 }
 
 // stopStale stops the adapter row records, which an earlier session or server
@@ -460,7 +486,7 @@ func (s *Service) stopStale(ctx context.Context, m *member, row *store.Assistant
 	if err := s.cfg.Runs.StopAssistantExec(ctx, identity); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
-	return s.cfg.Store.PutAssistantSession(ctx, &store.AssistantSession{MemberID: m.id, Agent: row.Agent, HarnessSessionID: row.HarnessSessionID})
+	return s.cfg.Store.ClearAssistantExec(ctx, m.id, row.Generation, row.ExecIdentity)
 }
 
 // endExec stops the session's adapter once and forgets its recorded
@@ -472,7 +498,7 @@ func (s *Service) endExec(live *session, member domain.MemberID) error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), stopGrace+10*time.Second)
 		defer cancel()
-		if err := s.cfg.Store.PutAssistantSession(ctx, &store.AssistantSession{MemberID: member, Agent: live.agent, HarnessSessionID: live.harnessID}); err != nil {
+		if err := s.cfg.Store.ClearAssistantExec(ctx, member, live.generation, live.identity); err != nil {
 			live.stopErr = fmt.Errorf("assistant: forget the stopped adapter: %w", err)
 		}
 	})
@@ -534,7 +560,9 @@ func (s *Service) watch(m *member, live *session) {
 }
 
 func (s *Service) stop(ctx context.Context, m *member) error {
-	live := m.live()
+	m.mu.Lock()
+	live := m.sess
+	m.mu.Unlock()
 	if live == nil {
 		return nil
 	}
@@ -594,6 +622,28 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
+}
+
+// Fence stops the member's session and refuses new ones until Unfence or
+// Remove, so a member being removed cannot recreate it.
+func (s *Service) Fence(ctx context.Context, id domain.MemberID) error {
+	m := s.member(id)
+	m.op.Lock()
+	defer m.op.Unlock()
+	m.removing = true
+	if err := s.stop(ctx, m); err != nil {
+		m.removing = false
+		return err
+	}
+	return nil
+}
+
+// Unfence lets a member whose removal failed use the assistant again.
+func (s *Service) Unfence(id domain.MemberID) {
+	m := s.member(id)
+	m.op.Lock()
+	defer m.op.Unlock()
+	m.removing = false
 }
 
 func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {

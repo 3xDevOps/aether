@@ -34,6 +34,9 @@ type AssistantStore interface {
 	GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error)
 	// PutAssistantSession stores everything but the generation.
 	PutAssistantSession(ctx context.Context, session *AssistantSession) error
+	// ClearAssistantExec forgets the recorded adapter identity if the row is
+	// still in generation and still records identity.
+	ClearAssistantExec(ctx context.Context, member domain.MemberID, generation int64, identity string) error
 	// ResetAssistantSession starts the member's next conversation: it clears
 	// the agent, harness session and prompt keys, and returns the new generation.
 	ResetAssistantSession(ctx context.Context, member domain.MemberID) (int64, error)
@@ -72,6 +75,16 @@ func (d *DB) PutAssistantSession(ctx context.Context, session *AssistantSession)
 		session.MemberID, session.Agent, session.HarnessSessionID, session.ExecIdentity)
 	if err != nil {
 		return fmt.Errorf("store: put assistant session: %w", mapConstraint(err, ErrNotFound))
+	}
+	return nil
+}
+
+func (d *DB) ClearAssistantExec(ctx context.Context, member domain.MemberID, generation int64, identity string) error {
+	_, err := d.db.ExecContext(ctx,
+		`UPDATE assistant_sessions SET exec_identity = '', updated_at = unixepoch()
+		 WHERE member_id = ? AND generation = ? AND exec_identity = ?`, member, generation, identity)
+	if err != nil {
+		return fmt.Errorf("store: clear assistant exec: %w", err)
 	}
 	return nil
 }

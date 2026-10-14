@@ -32,6 +32,8 @@ type AssistantService interface {
 	Remove(ctx context.Context, member domain.MemberID) error
 	Subscribe(ctx context.Context, member domain.MemberID, afterSeq, viewerEpoch int64) (assistant.Stream, error)
 	Generation(ctx context.Context, member domain.MemberID) (int64, error)
+	Fence(ctx context.Context, member domain.MemberID) error
+	Unfence(member domain.MemberID)
 }
 
 func init() {
@@ -200,6 +202,18 @@ func (s *Server) assistantItem(_ context.Context, member domain.MemberID, raw js
 	return protocol.RunACPItemResult{Item: b}, nil
 }
 
+func (s *Server) fenceAssistant(ctx context.Context, member domain.MemberID) error {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil
+	}
+	if err := svc.Fence(ctx, member); err != nil {
+		return fmt.Errorf("stop the member's assistant: %w", err)
+	}
+	return nil
+}
+
+// removeAssistant stops a removed member's assistant and deletes its files.
 func (s *Server) removeAssistant(ctx context.Context, member domain.MemberID) error {
 	svc := s.cfg.Services.Assistant
 	if svc == nil {
@@ -220,7 +234,7 @@ func assistantError(err error) *protocol.Error {
 		return &protocol.Error{Code: protocol.CodeNotFound, Message: err.Error()}
 	case errors.Is(err, assistant.ErrTurnRunning):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
-	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed),
+	case errors.Is(err, assistant.ErrNotRunning), errors.Is(err, assistant.ErrNoAgent), errors.Is(err, assistant.ErrClosed), errors.Is(err, assistant.ErrRemoving),
 		errors.Is(err, scheduler.ErrAssistantNeedsRestart):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
 	}

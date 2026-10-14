@@ -485,10 +485,17 @@ func TestIntegrationAssistantRemoveDuringStart(t *testing.T) {
 	defer env.stop()
 	for range 5 {
 		victim := seedAssistantMember(t, ctx, env.srv, env.data, domain.RoleCollaborator)
-		done := make(chan string, 2)
+		done := make(chan string, 3)
 		go func() {
 			_, _ = env.srv.ssh.Local(victim.ID).Call(ctx, protocol.MethodAssistantStart, json.RawMessage("{}"))
 			done <- "start"
+		}()
+		go func() {
+			params, _ := json.Marshal(protocol.AssistantPromptParams{Text: "hi", IdempotencyKey: "p-" + string(victim.ID)})
+			for range 20 {
+				_, _ = env.srv.ssh.Local(victim.ID).Call(ctx, protocol.MethodAssistantPrompt, params)
+			}
+			done <- "prompt"
 		}()
 		go func() {
 			params, _ := json.Marshal(protocol.MemberRemoveParams{MemberID: string(victim.ID)})
@@ -497,7 +504,7 @@ func TestIntegrationAssistantRemoveDuringStart(t *testing.T) {
 			}
 			done <- "remove"
 		}()
-		for range 2 {
+		for range 3 {
 			select {
 			case <-done:
 			case <-time.After(30 * time.Second):
@@ -507,5 +514,50 @@ func TestIntegrationAssistantRemoveDuringStart(t *testing.T) {
 		if _, err := env.srv.Store().GetMember(ctx, victim.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("member after member.remove: %v, want it gone", err)
 		}
+		if _, err := os.Stat(filepath.Join(env.data, "assistant", string(victim.ID))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("assistant files after member.remove and prompts: %v, want none", err)
+		}
+	}
+}
+
+// TestIntegrationAssistantCrash ends the adapter behind the assistant's back:
+// the next prompt starts a new one whose recorded identity survives the old
+// session's late cleanup, and a reset after another crash is not undone.
+func TestIntegrationAssistantCrash(t *testing.T) {
+	requireBinary(t, "git")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	env := startAssistantServer(t, ctx, nil)
+	defer env.stop()
+	if perr := env.call(protocol.MethodAssistantStart, protocol.AssistantStartParams{}, nil); perr != nil {
+		t.Fatalf("assistant.start: %v", perr)
+	}
+	first := env.rt.adapters()[0]
+	if _, err := first.Stop(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "after the crash", IdempotencyKey: "c1"}, nil); perr != nil {
+		t.Fatalf("assistant.prompt after a crash: %v", perr)
+	}
+	adapters := env.rt.adapters()
+	if len(adapters) != 2 {
+		t.Fatalf("%d adapters, want a new one after the crash", len(adapters))
+	}
+	identity, _ := json.Marshal(adapters[1].identity)
+	time.Sleep(200 * time.Millisecond)
+	row, err := env.srv.Store().GetAssistantSession(ctx, env.member.ID)
+	if err != nil || row.ExecIdentity != string(identity) {
+		t.Fatalf("row after the old session's cleanup = %+v, %v, want the new adapter's identity %s", row, err, identity)
+	}
+
+	if _, err := adapters[1].Stop(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if perr := env.call(protocol.MethodAssistantReset, struct{}{}, nil); perr != nil {
+		t.Fatalf("assistant.reset after a crash: %v", perr)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if row, err = env.srv.Store().GetAssistantSession(ctx, env.member.ID); err != nil || row.HarnessSessionID != "" || row.Agent != "" || row.Generation != 1 {
+		t.Fatalf("row after a crash and a reset = %+v, %v, want a cleared conversation", row, err)
 	}
 }
