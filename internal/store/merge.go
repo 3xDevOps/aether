@@ -719,7 +719,7 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (*MemberMerge, erro
 	if err != nil {
 		return nil, fmt.Errorf("store: merge: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE member_merge_codes SET consumed_at = ?, merge_id = ? WHERE code_hash = ?`,
+	if _, err = tx.ExecContext(ctx, `UPDATE member_merge_codes SET consumed_at = ?, merge_id = ? WHERE code_hash = ?`,
 		consumed, merge.ID, code.hash); err != nil {
 		return nil, fmt.Errorf("store: merge: consume code: %w", err)
 	}

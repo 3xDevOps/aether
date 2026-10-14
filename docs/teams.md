@@ -231,7 +231,9 @@ are revoked, and its home (agent logins, git signing key, files) moves to
 `<data-dir>/merged/<merge id>/home` on the server. That directory, owner
 only and outside every member's home and Files view, still holds live
 agent logins; once nothing in it is needed, the machine's administrator
-removes it with `sudo rm -r <data-dir>/merged/<merge id>`. The absorbed
+removes it with `sudo rm -r <data-dir>/merged/<merge id>`. A merge
+interrupted after the move and before it was recorded, by the server
+stopping, has the home put back when `aether-server` next starts. The absorbed
 member's saved environment image is removed by cache cleanup, like a
 removed member's. A workspace mirror that fetched with its GitHub
 connection needs GitHub reconnected on the merged member. Its connections
@@ -241,7 +243,8 @@ The merged member never gains a permission: it takes the lower of the two
 roles. When one of them is an admin, that side keeps it admin with
 `--keep-admin`: the admin who minted the code when accepting, or the admin
 who proposes. When the merged member is no longer an admin, the open
-invitations, links and invite codes either member created are revoked. A
+invitations and links either member created are revoked, and so are their
+invite codes. A
 merge that would leave the server without an admin, or leave its owner's
 GitHub account at the edge on a member who is not an admin, is refused
 (`aether member transfer` first).
@@ -449,6 +452,7 @@ linked to my-server:2222 as Dana (collaborator)
 
 Invited members are collaborators immediately - no approval step, because the
 code was the approval. Nobody needs shell access to the server box to join.
+A code stops working once the admin who minted it is no longer an admin.
 
 ## Roles
 

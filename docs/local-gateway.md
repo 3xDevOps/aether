@@ -1538,6 +1538,8 @@ the dashboard calls them through `POST /api/v1/<method>` like any other:
   absorbed member's connections, the caller's included once it has the
   answer; a new connection is the survivor. `member.merge.cancel`
   (`{"proposal_id":"..."}`, or `{}` for all) answers `{"cancelled":n}`.
+  `member.list` also carries `merged_into`, which maps each absorbed
+  member's id, still named in history, to the member it is now.
   `member.merge.list` answers `{"merges":[...]}`, each with `archive_path`:
   the caller's as survivor, every one for an admin. A refused step answers
   `-32002` with the reason, such as `the members changed since the

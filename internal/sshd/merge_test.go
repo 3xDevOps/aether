@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/memberhome"
@@ -374,5 +376,64 @@ func TestSelfLinkByNonAdmin(t *testing.T) {
 	invs, err := identities(t, e).ListInvitations(context.Background())
 	if err != nil || len(invs) != 1 || invs[0].Login != "someone-else" || invs[0].Member != carol.ID {
 		t.Fatalf("open invitations = %+v, %v; want only Carol's newest link", invs, err)
+	}
+}
+
+// An invite code grants what its issuer could, so it stops working once
+// the issuer is no longer an admin, by member.role or a merge.
+func TestInviteCodeDiesWithItsIssuersAdminRole(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "invites")
+	e := newTestEnv(t, func(c *Config) { c.InvitesDir = dir })
+	_, zed := addMember(t, e, "Zed", domain.RoleAdmin, false)
+	code, _, err := mintInvite(dir, time.Hour, zed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = controlClient(t, e).Call(protocol.MethodMemberRole,
+		protocol.MemberRoleParams{MemberID: string(zed.ID), Role: string(domain.RoleViewer)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := e.store.ListMembers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, derr := e.dialAs("invite:"+code, nil, ssh.PublicKeys(newSigner(t))); derr == nil {
+		_ = c.Wait()
+	}
+	if after, err := e.store.ListMembers(context.Background()); err != nil || len(after) != len(before) {
+		t.Fatalf("members after joining with a demoted admin's code = %d, %v; want %d", len(after), err, len(before))
+	}
+}
+
+// A merge that moved a home aside and never committed, because the server
+// stopped, gets the home back at the next start.
+func TestRecoverMergeArchivesPutsBackAnUncommittedHome(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "caches"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := filepath.Join(t.TempDir(), "merged")
+	e := newTestEnv(t, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
+	home, err := homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(home, "notes.txt"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir, _, err := e.srv.archiveHome("mrg-unfinished", e.member.ID)
+	if err != nil || dir == "" {
+		t.Fatalf("archive = %q, %v", dir, err)
+	}
+	if err := e.srv.RecoverMergeArchives(context.Background()); err != nil {
+		t.Fatalf("RecoverMergeArchives: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(home, "notes.txt")); err != nil || string(data) != "kept" {
+		t.Fatalf("home after recovery: %q, %v", data, err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive left behind: %v", err)
 	}
 }

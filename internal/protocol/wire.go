@@ -233,6 +233,9 @@ type WorkspaceGetResult struct {
 
 type MemberListResult struct {
 	Members []Member `json:"members"`
+	// MergedInto maps the id of each member a merge absorbed, which
+	// history still names, to the member it is now.
+	MergedInto map[string]string `json:"merged_into,omitempty"`
 }
 
 // MemberApproveParams: member.approve is admin only.

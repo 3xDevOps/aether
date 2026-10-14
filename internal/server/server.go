@@ -467,6 +467,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if s.ssh, err = sshd.New(sshCfg); err != nil {
 		return nil, err
 	}
+	if err = s.ssh.RecoverMergeArchives(ctx); err != nil {
+		return nil, err
+	}
 	if cfg.EdgeURL != "" {
 		if s.edge, err = newEdgeAgent(cfg, s.ssh); err != nil {
 			return nil, err

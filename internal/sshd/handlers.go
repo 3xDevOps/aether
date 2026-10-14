@@ -68,11 +68,23 @@ func (s *Server) memberList(ctx context.Context, _ domain.MemberID, _ json.RawMe
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	out := make([]protocol.Member, 0, len(list))
+	out := protocol.MemberListResult{Members: make([]protocol.Member, 0, len(list))}
 	for _, m := range list {
-		out = append(out, protocol.MemberFromDomain(m))
+		out.Members = append(out.Members, protocol.MemberFromDomain(m))
 	}
-	return protocol.MemberListResult{Members: out}, nil
+	if ms, ok := s.cfg.Store.(store.MergeStore); ok {
+		merges, err := ms.ListMerges(ctx, "")
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		for _, m := range merges {
+			if out.MergedInto == nil {
+				out.MergedInto = map[string]string{}
+			}
+			out.MergedInto[string(m.AbsorbedID)] = string(m.SurvivorID)
+		}
+	}
+	return out, nil
 }
 
 func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

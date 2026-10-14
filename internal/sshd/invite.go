@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -138,6 +137,14 @@ func (s *Server) joinInviteMember(ctx context.Context, code, keyLine, display st
 	if err = burnInvite(s.cfg.InvitesDir, code); err != nil {
 		return nil, fmt.Errorf("sshd: burn invite: %w", err)
 	}
+	// A code grants what its issuer could, so it dies with the issuer's
+	// admin role, through member.role or a merge.
+	if rec.IssuedBy != "" {
+		issuer, ierr := s.cfg.Store.GetMember(ctx, rec.IssuedBy)
+		if ierr != nil || issuer.ID != rec.IssuedBy || issuer.Role != domain.RoleAdmin {
+			return nil, fmt.Errorf("sshd: invite was issued by %s, who is no longer an admin", rec.IssuedBy)
+		}
+	}
 	members, err := s.cfg.Store.ListMembers(ctx)
 	if err != nil {
 		_ = restoreInvite(s.cfg.InvitesDir, code, rec)
@@ -167,25 +174,4 @@ func restoreInvite(dir, code string, rec inviteRecord) error {
 		return err
 	}
 	return os.WriteFile(invitePath(dir, code), append(body, '\n'), 0o600)
-}
-
-// revokeInvitesBy deletes the open invite codes any of issuers minted.
-func revokeInvitesBy(dir string, issuers ...domain.MemberID) error {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("sshd: list invites: %w", err)
-	}
-	for _, e := range entries {
-		rec, err := loadInvite(dir, e.Name())
-		if err != nil || rec.IssuedBy == "" || !slices.Contains(issuers, rec.IssuedBy) {
-			continue
-		}
-		if err := burnInvite(dir, e.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("sshd: revoke invite: %w", err)
-		}
-	}
-	return nil
 }

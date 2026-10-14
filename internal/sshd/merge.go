@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -296,21 +298,15 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 }
 
 // afterMerge closes the absorbed member's connections, the caller's once
-// it has the result, revokes the invite codes a demoted admin minted, and
-// publishes the merge and the devices that moved.
+// it has the result, and publishes the merge and the devices that moved.
+// A demoted admin's invite codes need nothing here: joining checks the
+// issuer's role.
 func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *store.MemberMerge, devs []*domain.Device) {
 	closeAbsorbed := func() { s.closeMemberConns(merge.AbsorbedID) }
 	if caller != merge.AbsorbedID || !deferUntilResponded(ctx, closeAbsorbed) {
 		closeAbsorbed()
 	}
 	s.notifyDirectory()
-	demoted := merge.RoleAfter != domain.RoleAdmin &&
-		(merge.SurvivorRoleBefore == domain.RoleAdmin || merge.AbsorbedRoleBefore == domain.RoleAdmin)
-	if demoted && s.cfg.InvitesDir != "" {
-		if err := revokeInvitesBy(s.cfg.InvitesDir, merge.SurvivorID, merge.AbsorbedID); err != nil {
-			slog.Warn("sshd: revoke a demoted admin's invite codes after a merge", "merge", merge.ID, "error", err)
-		}
-	}
 	ev := events.Event{WorkspaceID: events.ServerScope, ActorID: merge.SurvivorID,
 		Payload: events.MemberMergedPayload{MergeID: merge.ID, SurvivorID: merge.SurvivorID, AbsorbedID: merge.AbsorbedID}}
 	if _, err := s.cfg.Bus.Publish(ctx, ev); err != nil {
@@ -339,22 +335,90 @@ func (s *Server) memberMergeCancel(ctx context.Context, member domain.MemberID, 
 	return protocol.MemberMergeCancelResult{Cancelled: n}, nil
 }
 
-// archiveHome moves the absorbed member's home to <MergedDir>/<merge id>/home.
+// archiveHome moves the absorbed member's home to <MergedDir>/<merge
+// id>/home, beside a file naming the member so RecoverMergeArchives can
+// put it back if the server stops before the merge commits.
 func (s *Server) archiveHome(mergeID string, absorbed domain.MemberID) (string, func(), error) {
 	if s.cfg.Homes == nil || s.cfg.MergedDir == "" {
 		return "", nil, nil
 	}
 	dir := filepath.Join(s.cfg.MergedDir, mergeID)
-	home := filepath.Join(dir, "home")
+	marker, home := filepath.Join(dir, mergeMemberFile), filepath.Join(dir, "home")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", nil, fmt.Errorf("sshd: merge archive: %w", err)
+	}
+	clear := func() { _ = os.Remove(marker); _ = os.Remove(dir) }
+	if err := os.WriteFile(marker, []byte(absorbed), 0o600); err != nil {
+		clear()
+		return "", nil, fmt.Errorf("sshd: merge archive: %w", err)
+	}
 	moved, err := s.cfg.Homes.Archive(absorbed, home)
 	if err != nil || !moved {
+		clear()
 		return "", nil, err
 	}
 	return dir, func() {
 		if err := s.cfg.Homes.Unarchive(absorbed, home); err != nil {
-			slog.Error("sshd: merge failed and its archived home could not be put back", "member", absorbed, "path", home, "error", err)
+			slog.Error("sshd: merge failed and its archived home could not be put back; aether-server restores it at its next start",
+				"member", absorbed, "path", home, "error", err)
+			return
 		}
+		clear()
 	}, nil
+}
+
+// mergeMemberFile names the absorbed member in a merge's archive.
+const mergeMemberFile = "member"
+
+// RecoverMergeArchives puts back the home of each merge that moved it and
+// never committed: the server stopped in between. Call it before Serve.
+func (s *Server) RecoverMergeArchives(ctx context.Context) error {
+	if s.cfg.Homes == nil || s.cfg.MergedDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(s.cfg.MergedDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("sshd: recover merge archives: %w", err)
+	}
+	ms, ok := s.cfg.Store.(store.MergeStore)
+	if !ok {
+		return nil
+	}
+	merges, err := ms.ListMerges(ctx, "")
+	if err != nil {
+		return fmt.Errorf("sshd: recover merge archives: %w", err)
+	}
+	recorded := make(map[string]bool, len(merges))
+	for _, m := range merges {
+		recorded[m.ID] = true
+	}
+	for _, e := range entries {
+		if recorded[e.Name()] {
+			continue
+		}
+		dir := filepath.Join(s.cfg.MergedDir, e.Name())
+		member, err := os.ReadFile(filepath.Join(dir, mergeMemberFile))
+		if err != nil {
+			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+		}
+		home := filepath.Join(dir, "home")
+		if _, err := os.Lstat(home); err == nil {
+			if err := s.cfg.Homes.Unarchive(domain.MemberID(member), home); err != nil {
+				return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+			}
+			slog.Warn("sshd: put back the home of a merge that never committed", "member", string(member), "archive", dir)
+		}
+		if err := os.Remove(filepath.Join(dir, mergeMemberFile)); err != nil {
+			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+		}
+		if err := os.Remove(dir); err != nil {
+			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 // connDescription names the connection a call came in on for the merge

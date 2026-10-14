@@ -99,16 +99,21 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	owner := member
-	if caller.Role == domain.RoleAdmin {
-		owner = ""
-	}
-	devs, err := ids.ListDevices(ctx, owner)
+	devs, err := ids.ListDevices(ctx, "")
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Device, 0, len(devs))
 	for _, d := range devs {
+		if caller.Role != domain.RoleAdmin && d.Member != member {
+			linked, err := linksTo(ctx, ids, d, member)
+			if err != nil {
+				return nil, rpcError(err)
+			}
+			if !linked {
+				continue
+			}
+		}
 		w := deviceToWire(d)
 		if d.Status.AwaitsApproval() {
 			_, name, role, err := s.admitsAs(ctx, ids, d)
@@ -123,6 +128,22 @@ func (s *Server) memberDeviceList(ctx context.Context, member domain.MemberID, _
 		out = append(out, w)
 	}
 	return protocol.MemberDeviceListResult{Devices: out}, nil
+}
+
+// linksTo reports whether dev waits on a link to member, which member
+// approves.
+func linksTo(ctx context.Context, ids store.IdentityStore, dev *domain.Device, member domain.MemberID) (bool, error) {
+	if dev.Invitation == "" {
+		return false, nil
+	}
+	inv, err := ids.GetInvitation(ctx, dev.Invitation)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return inv.Member == member, nil
 }
 
 // admitsAs returns whom approving dev admits it as: its own member or the
