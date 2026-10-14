@@ -800,6 +800,44 @@ func TestRestoreReportsAnInterruptedTurn(t *testing.T) {
 	}
 }
 
+func TestRestoreStopsTasksALostSessionLeftRunning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.items.jsonl")
+	log, err := OpenLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := &ToolCall{ID: "call-1", Title: "Workflow", Status: "completed", Task: &ToolTask{ID: "bg-1", Type: "local_workflow", Status: "running"}}
+	for _, it := range []Item{
+		{Kind: KindTurnStart, Turn: 1},
+		{Kind: KindToolCall, Turn: 1, ToolCall: launch},
+		{Kind: KindBackground, Turn: 1, Tasks: []Task{{ID: "bg-1", Type: "local_workflow", Holds: true}}},
+		{Kind: KindTurnEnd, Turn: 1, StopReason: "end_turn"},
+		{Kind: KindTurnStart, Turn: 2},
+		{Kind: KindTurnEnd, Turn: 2, StopReason: "end_turn"},
+	} {
+		if err := log.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = log.Close()
+	var statuses []string
+	var turns []int64
+	for range 2 {
+		m := newMockAgent(t, loadFixture(t, "claude"))
+		s, rec := startMock(t, m, Config{ClaudeCode: true, LogPath: path, SessionID: m.sessionID()})
+		rec.waitIdle(t)
+		statuses, turns = nil, nil
+		for _, it := range ofKind(items(t, s), KindToolCall) {
+			statuses = append(statuses, it.ToolCall.Task.Status)
+			turns = append(turns, it.Turn)
+		}
+		_ = s.Close()
+	}
+	if !slices.Equal(statuses, []string{"running", "stopped"}) || !slices.Equal(turns, []int64{1, 1}) {
+		t.Fatalf("snapshots of the launching call went %v in turns %v, want running then one stopped, both in turn 1", statuses, turns)
+	}
+}
+
 func TestSessionMetaCarriesTheSystemPromptAndTaskFrames(t *testing.T) {
 	failed := &acp.RequestError{Code: -32603, Message: "Internal error"}
 	frames, err := json.Marshal(claudeTaskFrames)

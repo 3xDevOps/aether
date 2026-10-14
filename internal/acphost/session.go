@@ -270,6 +270,14 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 	}
 	if cfg.ClaudeCode {
 		s.mu.Lock()
+		now := s.turn
+		for _, it := range RunningTaskCalls(log) {
+			// The snapshot belongs to the turn that launched the call.
+			s.turn = it.Turn
+			s.taskCalls[it.ToolCall.Task.ID] = *it.ToolCall
+			s.taskEndedLocked(it.ToolCall.Task.ID, "stopped")
+		}
+		s.turn = now
 		s.interruptTasksLocked(LastItem(log, KindBackground))
 		s.mu.Unlock()
 	}
