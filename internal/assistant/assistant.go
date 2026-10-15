@@ -770,9 +770,9 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 		return false, err
 	}
 	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
-	if errors.Is(err, acphost.ErrClosed) {
-		// The adapter died after ensure saw it alive: once its session has
-		// ended, start a new one and send there.
+	if errors.Is(err, acphost.ErrPromptUnsent) {
+		// The adapter died after ensure saw it alive and before the prompt
+		// left: once its session has ended, start a new one and send there.
 		select {
 		case <-live.ended:
 		case <-ctx.Done():

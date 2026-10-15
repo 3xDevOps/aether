@@ -23,6 +23,10 @@ import (
 // ErrClosed is returned once the agent connection has ended.
 var ErrClosed = errors.New("acphost: agent connection closed")
 
+// ErrPromptUnsent is ErrClosed for a prompt refused before any of it reached
+// the agent, so sending it on a new session cannot repeat it.
+var ErrPromptUnsent = fmt.Errorf("%w; the prompt was not sent", ErrClosed)
+
 // ErrUnsupportedImage means the agent does not accept image prompts; no input
 // was sent or queued.
 var ErrUnsupportedImage = errors.New("acphost: agent does not support image prompts")
@@ -514,7 +518,7 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock, del
 	s.mu.Lock()
 	if s.closingLocked() {
 		s.mu.Unlock()
-		return false, ErrClosed
+		return false, ErrPromptUnsent
 	}
 	if s.turnActive || s.autonomous || s.owingLocked() || len(s.queue) > 0 {
 		s.mu.Unlock()
