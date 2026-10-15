@@ -81,6 +81,7 @@ import type {
   ServerInfo,
   ServerUpdateResult,
   ServerUpdateStatus,
+  SysboxStatus,
   ServerUpdateWhen,
   SyncSessionState,
   SyncStatusResult,
@@ -756,6 +757,11 @@ export const api = {
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>
     call<ServerUpdateResult>('server.update', { when }),
+  /** Admin only. Whether runs can run Docker inside their containers. */
+  sysboxStatus: () => call<SysboxStatus>('server.sysbox.status'),
+  /** Admin only. Starts the install in the background; poll sysboxStatus. */
+  sysboxInstall: () =>
+    call<SysboxStatus>('server.sysbox.install'),
   memberInvite: (ttlSeconds?: number) =>
     call<{ code: string; expires_at: string }>('member.invite', {
       ttl_seconds: ttlSeconds,

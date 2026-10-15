@@ -839,6 +839,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    sysboxStatus: vi.fn(async () => ({ state: 'on' as const })),
+    sysboxInstall: vi.fn(async () => ({ state: 'installing' as const })),
     serverUpdate: vi.fn(async () => ({
       status: 'scheduled' as const,
       version: 'v1.3.0',

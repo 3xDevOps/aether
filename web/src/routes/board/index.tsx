@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Ellipsis } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { SysboxNudge } from '@/components/sysbox-nudge'
 import { Callout } from '@/components/ui/callout'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -130,6 +131,7 @@ export function Board() {
           }}
         >
           {mergeError && <div className="shrink-0 px-4 pt-4"><ProposalsReadError /></div>}
+          <div className="shrink-0 px-4 pt-4 empty:hidden"><SysboxNudge /></div>
           {body}
           {focusedCard?.isConnected && <CardKeys card={focusedCard} />}
         </TabsContent>

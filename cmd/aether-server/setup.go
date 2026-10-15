@@ -57,7 +57,8 @@ func setup(args []string) error {
 		return err
 	}
 	_, tailscaled := os.Stat(reachability.DefaultTailscaledSocket)
-	values, err := askServerOptions(os.Stdout, os.Stdin, *configPath, tailscaled == nil)
+	p := newPrompter(os.Stdout, os.Stdin)
+	values, err := askServerOptions(p, *configPath, tailscaled == nil)
 	if err != nil {
 		return err
 	}
@@ -65,10 +66,27 @@ func setup(args []string) error {
 		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
 		return nil
 	}
+	wantSysbox := askSysbox(p)
 	if err := writeAndReport(os.Stdout, *unitPath, *configPath, values, *force); err != nil {
 		return err
 	}
-	return reportEdge(os.Stdout, *configPath)
+	if err := reportEdge(os.Stdout, *configPath); err != nil {
+		return err
+	}
+	if wantSysbox {
+		_, _ = fmt.Fprintln(os.Stdout)
+		installSysbox(os.Stdout)
+	}
+	return nil
+}
+
+// askSysbox offers Docker inside runs unless the daemon already has Sysbox.
+func askSysbox(p *prompter) bool {
+	if p.err != nil || sysboxOn() {
+		return false
+	}
+	_, _ = fmt.Fprintln(p.w)
+	return p.confirm("Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)", true) && p.err == nil
 }
 
 // reportEdge prints what a person needs to reach the server through the
@@ -125,12 +143,12 @@ func reportEdge(w io.Writer, configPath string) error {
 // tailscaled is on this host, which is what makes the dashboard port
 // worth offering. It returns a nil map when the operator declines the
 // summary.
-func askServerOptions(w io.Writer, in io.Reader, configPath string, tailnet bool) (map[string]string, error) {
+func askServerOptions(p *prompter, configPath string, tailnet bool) (map[string]string, error) {
+	w := p.w
 	current, err := serversetup.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
-	p := &prompter{w: w, lines: bufio.NewReader(in), options: serveFlagSet()}
 	// An existing config answers first, then the packaged service posture,
 	// then the flag's own default, so re-running setup is not destructive
 	// and a first run offers what a service install would have used.
@@ -275,6 +293,10 @@ func askEdgeAccess(p *prompter, values map[string]string) {
 			p.err = err
 		}
 	}
+}
+
+func newPrompter(w io.Writer, in io.Reader) *prompter {
+	return &prompter{w: w, lines: bufio.NewReader(in), options: serveFlagSet()}
 }
 
 // prompter reads answers off one line-oriented stream, latching the first

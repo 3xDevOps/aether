@@ -285,39 +285,68 @@ inside the container, so it needs no `--privileged` and no host Docker
 socket. `docker run`, `docker build` and `docker compose up` work in a run
 as they do on a laptop.
 
-Install Sysbox once on the server host (Ubuntu or Debian, amd64 or arm64,
-Linux 5.19 or newer or a kernel with the `shiftfs` module, Docker already
-running):
+`aether-server setup` installs Sysbox when you accept its Docker-inside-runs
+question. On an existing server, press **Install** under **Settings >
+Server** in the dashboard (admins only), or run on the server host:
 
 ```sh
-sudo sh scripts/install-sysbox.sh
-# or, without a checkout:
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install-sysbox.sh | sudo sh
-sudo systemctl restart aether-server
+sudo aether-server sysbox install
+aether-server sysbox status     # prints on or off
 ```
 
-The script downloads Sysbox CE 0.7.1, verifies its pinned SHA-256, installs
-the package and checks that `docker info` lists `sysbox-runc`. It exits 0
-without changes when that version is already installed.
+`sysbox status` asks Docker, so run it as a user that can reach the Docker
+socket, or with `sudo`.
+
+The host must be Ubuntu or Debian on amd64 or arm64, run Docker, and have
+Linux 5.19 or newer or a kernel with the `shiftfs` module. On any other host
+the install stops with `Docker inside runs is unavailable on this host:
+<reason>` and changes nothing; runs work without Docker inside.
+
+`aether-server` carries the installer, `scripts/install-sysbox.sh`, so the
+binary and the script are the same release. It downloads Sysbox CE 0.7.1,
+verifies its pinned SHA-256, installs the package and checks that
+`docker info` lists `sysbox-runc`. It exits 0 without changes when that
+version is already installed, 3 when the host cannot run Sysbox, 4 when a registered
+Sysbox failed its probe and could not be removed, and 1 on any other failure. Its output is shown as it runs; the dashboard keeps the last
+8 KiB. When the dashboard starts the install, the server runs it in a
+transient systemd unit, `aether-sysbox-install`, so restarting the server
+does not interrupt apt; a server update waits until it finishes. If an
+install is cut off anyway, running it again finishes the interrupted dpkg
+step first. The script needs `curl`, downloads and verifies the package
+before it edits `/etc/docker/daemon.json`, and waits up to 5 minutes for
+the apt lock.
 
 Sysbox's installer refuses to run while any container exists, stopped ones
 included, if it must restart Docker, and it must when `/etc/docker/daemon.json`
 lacks `bip` or `default-address-pools`. The script therefore adds a missing
-or empty key itself, keeping the other keys: `"bip": "172.20.0.1/16"` and
-`"default-address-pools": [{"base": "172.25.0.0/16", "size": 24}]`. It creates
-the file as `{}` if it is missing. If either range overlaps a route or
-address on the host, the script stops without changing the file; set that key to a free range
-yourself and run it again. The script does not restart Docker and running
-containers keep running; Docker applies the new keys at its next restart.
+or empty key itself, keeping the other keys and never changing one that is
+set. It picks the first free /16 from `10.200.0.0` to `10.254.0.0`, then
+`172.24.0.0` to `172.31.0.0`, then `192.168.0.0`: `bip` takes the first as
+`x.y.0.1/16`, and `default-address-pools` takes the next with size 24. A /16
+is free when it overlaps no IPv4 route, interface address or Docker network
+subnet on the host. The 10.200 range comes first because 172.24 to 172.31 is
+still inside Docker's default pools until Docker restarts. The script prints each value it writes, and creates the
+file as `{}` if it is missing. If no free /16 is left it stops without
+changing the file; set the key to a free range yourself and run it again.
+The script does not restart Docker and running containers keep running;
+Docker applies the new keys at its next restart.
 
 The script ends by pulling `busybox:1.36` and running it with
 `--runtime sysbox-runc -u 1000:1000` against a host directory owned by
 1000:1000. It fails with "bind mounts are not ID-mapped on this host" only if
-the container user cannot write the directory; a pull or start failure reports
-Docker's own error.
+the container user cannot write the directory; a pull failure reports Docker's
+own error. When the probe fails, the script runs `apt-get purge -y sysbox-ce`,
+waits until Docker no longer lists `sysbox-runc`, and exits 1 with the probe's
+reason and "Sysbox was removed again"; the `bip` and `default-address-pools`
+keys stay. If the purge fails it exits 4. The dashboard then shows the install
+as failed, and the server stops using `sysbox-runc` for new containers until an
+install succeeds. Running the script again on a host that already has the
+package runs the probe too, and exits 4 if it fails.
 
-The server picks its container runtime once, at first use, from
-`--container-runtime` (config key `container-runtime`):
+The server picks its container runtime from `--container-runtime` (config
+key `container-runtime`). With `auto` it keeps `sysbox-runc` once it sees it
+and looks again once a minute while Docker lacks it, so a Sysbox you just
+installed needs no restart. A change to the option itself does:
 
 | Value | Meaning |
 | --- | --- |
@@ -350,8 +379,8 @@ Things to know:
   namespace, not the host's. Reach it from the run at `127.0.0.1`; the
   run's browser companion opens it at `127.0.0.1` as well.
 - Existing containers keep the runtime they were created with. After
-  installing Sysbox and restarting `aether-server`, new runs and new
-  Environment terminals get Docker; close and reopen an Environment
+  installing Sysbox, new runs and new Environment terminals get Docker
+  within a minute; close and reopen an Environment
   terminal that is already open.
 - A saved member image that predates Docker in the standard image has no
   Docker CLI. In the Environment terminal run

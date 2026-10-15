@@ -229,8 +229,9 @@ func TestInstallRecordsOnlyNamedOptions(t *testing.T) {
 	_ = fs.String("config", serversetup.DefaultConfigPath, "options file")
 	_ = fs.String("unit", serversetup.UnitPath, "unit file")
 	_ = fs.Bool("force", false, "overwrite")
+	_ = fs.Bool("sysbox", true, "install Sysbox")
 	serveFlags(fs)
-	if err := fs.Parse([]string{"-config", "/tmp/x.conf", "-addr", ":2300", "-tailnet-auto-join", "-browser-image", "registry.example/browser:v1"}); err != nil {
+	if err := fs.Parse([]string{"-sysbox=false", "-config", "/tmp/x.conf", "-addr", ":2300", "-tailnet-auto-join", "-browser-image", "registry.example/browser:v1"}); err != nil {
 		t.Fatal(err)
 	}
 	values := installValues(fs)

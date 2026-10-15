@@ -15,6 +15,7 @@ func install(args []string) error {
 	configPath := fs.String("config", serversetup.DefaultConfigPath, "options file to write")
 	unitPath := fs.String("unit", serversetup.UnitPath, "systemd unit file to write")
 	force := fs.Bool("force", false, "overwrite an existing config file")
+	sysbox := fs.Bool("sysbox", true, "install the Sysbox runtime so runs get Docker inside, when this host can and does not have it")
 	serveFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -26,7 +27,14 @@ func install(args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
-	return writeAndReport(os.Stdout, *unitPath, *configPath, values, *force)
+	if err := writeAndReport(os.Stdout, *unitPath, *configPath, values, *force); err != nil {
+		return err
+	}
+	if *sysbox && !sysboxOn() {
+		_, _ = fmt.Fprintln(os.Stdout)
+		installSysbox(os.Stdout)
+	}
+	return nil
 }
 
 // requireEdgeAccess refuses to turn the edge on without a policy: who
@@ -47,7 +55,7 @@ func installValues(fs *flag.FlagSet) map[string]string {
 	values := map[string]string{}
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "config", "unit", "force":
+		case "config", "unit", "force", "sysbox":
 		default:
 			values[f.Name] = f.Value.String()
 		}

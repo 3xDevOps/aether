@@ -75,9 +75,16 @@ type Docker struct {
 	networkMode string
 
 	containerRuntime string
+	now              func() time.Time // nil means time.Now
 	runtimeMu        sync.Mutex
-	autoRuntime      *string
+	sysboxFound      bool
+	sysboxMissingAt  time.Time
+	sysboxVeto       func() bool
 }
+
+// sysboxRecheck is how long a daemon without Sysbox is trusted to stay
+// without it, so an installed Sysbox is used without restarting the server.
+const sysboxRecheck = time.Minute
 
 var _ Runtime = (*Docker)(nil)
 
@@ -182,25 +189,63 @@ func (d *Docker) pull(ctx context.Context, ref string) error {
 	return nil
 }
 
-// resolveRuntime caches only a successful lookup of the daemon's runtimes.
+// SysboxRegistered reports whether the daemon lists the sysbox-runc runtime.
+func (d *Docker) SysboxRegistered(ctx context.Context) (bool, error) {
+	info, err := d.cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return false, fmt.Errorf("runtime: read docker runtimes: %w", err)
+	}
+	_, ok := info.Info.Runtimes[runtimeSysbox]
+	return ok, nil
+}
+
+// VetoSysbox makes RuntimeAuto skip sysbox-runc while veto returns true, for a
+// Sysbox that an install is still checking or saw fail its probe. It must not
+// call back into this Docker.
+func (d *Docker) VetoSysbox(veto func() bool) {
+	d.runtimeMu.Lock()
+	defer d.runtimeMu.Unlock()
+	d.sysboxVeto = veto
+}
+
+// ForgetRuntime makes the next RuntimeAuto lookup ask the daemon again.
+func (d *Docker) ForgetRuntime() {
+	d.runtimeMu.Lock()
+	defer d.runtimeMu.Unlock()
+	d.sysboxFound, d.sysboxMissingAt = false, time.Time{}
+}
+
+// resolveRuntime caches a found sysbox-runc for good and a missing one for
+// sysboxRecheck; a failed lookup is not cached.
 func (d *Docker) resolveRuntime(ctx context.Context) (string, error) {
 	if d.containerRuntime != RuntimeAuto {
 		return d.containerRuntime, nil
 	}
 	d.runtimeMu.Lock()
 	defer d.runtimeMu.Unlock()
-	if d.autoRuntime == nil {
-		info, err := d.cli.Info(ctx, client.InfoOptions{})
-		if err != nil {
-			return "", fmt.Errorf("runtime: read docker runtimes: %w", err)
-		}
-		var name string
-		if _, ok := info.Info.Runtimes[runtimeSysbox]; ok {
-			name = runtimeSysbox
-		}
-		d.autoRuntime = &name
+	if d.sysboxVeto != nil && d.sysboxVeto() {
+		return "", nil
 	}
-	return *d.autoRuntime, nil
+	if d.sysboxFound {
+		return runtimeSysbox, nil
+	}
+	now := time.Now
+	if d.now != nil {
+		now = d.now
+	}
+	if !d.sysboxMissingAt.IsZero() && now().Sub(d.sysboxMissingAt) < sysboxRecheck {
+		return "", nil
+	}
+	found, err := d.SysboxRegistered(ctx)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		d.sysboxFound = true
+		return runtimeSysbox, nil
+	}
+	d.sysboxMissingAt = now()
+	return "", nil
 }
 
 // containerConfig always overrides the entrypoint so Spec.Command is exactly

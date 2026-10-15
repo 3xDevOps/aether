@@ -2,13 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/serversetup"
+	"github.com/3xDevOps/Aether/internal/sysbox"
 )
 
 // answers builds the stdin an operator would type: one line per prompt, in
@@ -22,7 +27,7 @@ func answers(lines ...string) *strings.Reader {
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "", "", "2", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +50,7 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
 	in := answers(":2300", "/srv/aether", "true", "true", "1", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +73,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "2", "yes"), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +85,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "not-a-bool", "true", "", "2", "yes")
-	values, err := askServerOptions(&out, in, filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +99,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "2", "no"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "no")), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +110,7 @@ func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 
 func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +122,7 @@ func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	}
 
 	out.Reset()
-	values, err = askServerOptions(&out, answers("", "", "", "", "8443", "", "yes"), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "8443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +141,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			values, err := askServerOptions(&out, answers(tc.input...), filepath.Join(t.TempDir(), "absent.conf"), tc.tailnet)
+			values, err := askServerOptions(newPrompter(&out, answers(tc.input...)), filepath.Join(t.TempDir(), "absent.conf"), tc.tailnet)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +157,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 
 func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "2", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +178,7 @@ func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +194,7 @@ func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 			input = append(input, "1")
 		}
 		var out bytes.Buffer
-		values, err := askServerOptions(&out, answers(append(input, "yes")...), filepath.Join(t.TempDir(), "absent.conf"), true)
+		values, err := askServerOptions(newPrompter(&out, answers(append(input, "yes")...)), filepath.Join(t.TempDir(), "absent.conf"), true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +208,7 @@ func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 // again, and input that ends unanswered writes nothing.
 func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "", "3", "account", "2", "yes"), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "3", "account", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +228,7 @@ func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 	}
 
 	out.Reset()
-	values, err = askServerOptions(&out, answers("", "", "", "", ""), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "")), filepath.Join(t.TempDir(), "absent.conf"), false)
 	if err == nil || values != nil {
 		t.Fatalf("setup without a policy answer = %v, %v; want refused", values, err)
 	}
@@ -237,11 +242,70 @@ func TestAskServerOptionsAsksNoPolicyWithTheEdgeOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(&out, answers("", "", "", "", "yes"), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := values["edge-access"]; ok || strings.Contains(out.String(), "Choose 1 or 2") {
 		t.Errorf("policy asked or written with the edge off: %v\n%s", values, out.String())
+	}
+}
+
+func fakeSysbox(t *testing.T, on bool, install func(io.Writer) error) *int {
+	t.Helper()
+	oldStatus, oldInstall := sysboxStatus, sysboxInstall
+	t.Cleanup(func() { sysboxStatus, sysboxInstall = oldStatus, oldInstall })
+	sysboxStatus = func(context.Context) (string, error) {
+		if on {
+			return protocol.SysboxOn, nil
+		}
+		return protocol.SysboxOff, nil
+	}
+	installs := new(int)
+	sysboxInstall = func(_ context.Context, w io.Writer) error {
+		*installs++
+		return install(w)
+	}
+	return installs
+}
+
+func TestAskSysboxDefaultsToYes(t *testing.T) {
+	fakeSysbox(t, false, nil)
+	for answer, want := range map[string]bool{"": true, "yes": true, "n": false, "no": false} {
+		var out bytes.Buffer
+		if got := askSysbox(newPrompter(&out, answers(answer))); got != want {
+			t.Errorf("answer %q = %v, want %v", answer, got, want)
+		}
+		if !strings.Contains(out.String(), "Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)") {
+			t.Errorf("prompt = %q", out.String())
+		}
+	}
+}
+
+func TestAskSysboxIsSilentWhenSysboxIsOn(t *testing.T) {
+	fakeSysbox(t, true, nil)
+	var out bytes.Buffer
+	if askSysbox(newPrompter(&out, answers("yes"))) || out.Len() != 0 {
+		t.Errorf("askSysbox with Sysbox on = prompt %q, want no question", out.String())
+	}
+}
+
+func TestInstallSysboxReportsWithoutFailingSetup(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"done":        {nil, ""},
+		"unsupported": {&sysbox.UnsupportedError{Reason: "kernel 5.4 cannot ID-map bind mounts"}, "Docker inside runs is unavailable on this host: kernel 5.4 cannot ID-map bind mounts\n"},
+		"failure":     {errors.New("sysbox: install: exit status 1: checksum mismatch"), "checksum mismatch\nInstall it later with: sudo aether-server sysbox install\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			installs := fakeSysbox(t, false, func(io.Writer) error { return tc.err })
+			var out bytes.Buffer
+			installSysbox(&out)
+			if *installs != 1 || !strings.Contains(out.String(), tc.want) {
+				t.Errorf("installs = %d, output %q; want it to contain %q", *installs, out.String(), tc.want)
+			}
+		})
 	}
 }

@@ -167,6 +167,11 @@ type Config struct {
 	// containers: DefaultContainerRuntime picks sysbox-runc when Docker has
 	// it registered, empty means the Docker daemon default.
 	ContainerRuntime string
+
+	// SysboxInstaller lets admins install Sysbox on the host through the
+	// control channel. Only cmd/aether-server sets it; an embedded server
+	// never runs host installers.
+	SysboxInstaller bool
 }
 
 const DefaultContainerRuntime = runtime.RuntimeAuto

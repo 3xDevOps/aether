@@ -42,6 +42,8 @@ type env struct {
 	now      time.Time
 	// busy is what Config.Busy reports; the zero value is an idle server.
 	busy domain.ServerBusy
+	// hold is what Config.Hold reports.
+	hold string
 	// underSystemd is what Host.UnderSystemd reports.
 	underSystemd bool
 
@@ -197,6 +199,7 @@ func newEnv(t *testing.T, poison bool) *env {
 			UnderSystemd: func() bool { return e.underSystemd },
 		},
 		Busy: func(context.Context) domain.ServerBusy { return e.busy },
+		Hold: func() string { return e.hold },
 		Now:  func() time.Time { return e.now },
 	})
 	if err != nil {
@@ -692,5 +695,25 @@ func TestAnUnknownBusyStateNeverApplies(t *testing.T) {
 	e.svc.Tick(t.Context())
 	if got := e.read(t, e.self); got != "the old binary" {
 		t.Fatalf("aether-server = %q, want it untouched on an unknown busy state", got)
+	}
+}
+
+// A held server applies nothing, from the RPC or the idle poll, and leaves
+// the binaries alone.
+func TestAHeldServerDoesNotApply(t *testing.T) {
+	e := newEnv(t, false)
+	e.hold = "Sysbox is installing"
+	_, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrHeld) || !strings.Contains(err.Error(), "Sysbox is installing") {
+		t.Fatalf("Update now = %v, want ErrHeld naming the reason", err)
+	}
+	if _, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	e.svc.Tick(t.Context())
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatalf("aether-server = %q, want it untouched while held", got)
 	}
 }

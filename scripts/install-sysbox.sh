@@ -8,11 +8,17 @@
 # The package registers the sysbox-runc runtime with Docker. Its installer
 # refuses to run while any container exists, stopped ones included, if it must
 # restart Docker, and it must when /etc/docker/daemon.json lacks "bip" or
-# "default-address-pools". This script adds those two keys itself, with the
-# values Sysbox would choose, so the installer only reloads Docker's runtimes.
+# "default-address-pools". This script adds whichever is missing itself, with
+# the first /16 that overlaps no route, interface or Docker network, so the
+# installer only reloads Docker's runtimes. It never changes a key that is set.
 # Docker applies the new keys at its next restart; running containers keep
 # running. It then checks that bind mounts are ID-mapped, which Sysbox needs
 # and which takes Linux 5.19 or newer, or the shiftfs module.
+#
+# Exit status: 0 installed, 3 the host cannot run Sysbox (not Debian or
+# Ubuntu, unsupported architecture, no ID-mapped mounts, no Docker), 4 Sysbox
+# is registered with Docker but failed the bind-mount probe and could not be
+# removed, 1 any other failure.
 set -eu
 
 VERSION="0.7.1"
@@ -28,20 +34,25 @@ die() {
 	exit 1
 }
 
+unsupported() {
+	echo "install-sysbox: $*" >&2
+	exit 3
+}
+
 say() {
 	echo "install-sysbox: $*"
 }
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo sh install-sysbox.sh"
 
-for tool in dpkg apt-get docker uname ip; do
-	command -v "$tool" >/dev/null 2>&1 || die "${tool} not found; this script needs an Ubuntu or Debian host with Docker installed"
+for tool in dpkg apt-get docker uname ip curl; do
+	command -v "$tool" >/dev/null 2>&1 || unsupported "${tool} not found; this script needs an Ubuntu or Debian host with Docker installed"
 done
 
 case "$(dpkg --print-architecture)" in
 amd64) want_sha="$SHA256_AMD64" ;;
 arm64) want_sha="$SHA256_ARM64" ;;
-*) die "unsupported architecture $(dpkg --print-architecture); Sysbox publishes amd64 and arm64 packages" ;;
+*) unsupported "unsupported architecture $(dpkg --print-architecture); Sysbox publishes amd64 and arm64 packages" ;;
 esac
 deb="sysbox-ce_${VERSION}.linux_$(dpkg --print-architecture).deb"
 
@@ -51,7 +62,7 @@ kernel_minor="${kernel#*.}"
 kernel_minor="${kernel_minor%%[!0-9]*}"
 if [ "$kernel_major" -lt 5 ] || { [ "$kernel_major" -eq 5 ] && [ "${kernel_minor:-0}" -lt 19 ]; }; then
 	command -v modinfo >/dev/null 2>&1 && modinfo shiftfs >/dev/null 2>&1 ||
-		die "kernel ${kernel} cannot ID-map bind mounts, which Sysbox needs: use Linux 5.19 or newer, or a kernel with the shiftfs module"
+		unsupported "kernel ${kernel} cannot ID-map bind mounts, which Sysbox needs: use Linux 5.19 or newer, or a kernel with the shiftfs module"
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -64,44 +75,103 @@ runtimes() { docker info --format '{{json .Runtimes}}'; }
 
 runtimes_out="$(runtimes 2>&1)" || die "docker info failed: ${runtimes_out}"
 
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+# Sets probe_reason and returns 1 when a container on sysbox-runc cannot write
+# a host directory it owns, which means bind mounts are not ID-mapped. A failed
+# image pull says nothing about Sysbox and dies instead.
+run_probe() {
+	probe="$tmp/probe"
+	mkdir -p "$probe"
+	chown 1000:1000 "$probe"
+	pull_out="$(docker pull busybox:1.36 2>&1)" || die "cannot pull the probe image busybox:1.36: ${pull_out}"
+	probe_rc=0
+	probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 sh -c 'touch /m/probe || exit 42' 2>&1)" || probe_rc=$?
+	case "$probe_rc" in
+	0) return 0 ;;
+	42) probe_reason="bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
+	*) probe_reason="cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
+	esac
+	return 1
+}
+
+# Sysbox is registered but unusable, and this script is not removing it.
+broken() {
+	echo "install-sysbox: $1. Docker still lists sysbox-runc; remove it with: sudo apt-get purge -y sysbox-ce" >&2
+	exit 4
+}
+
+# Already installed: the probe still decides, so a retry cannot report success
+# for a Sysbox that failed it.
+already_installed() {
+	run_probe || broken "$probe_reason"
+	say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
+	exit 0
+}
+
 installed="$(dpkg-query -W -f='${Version}' sysbox-ce 2>/dev/null || true)"
 case "$runtimes_out" in
 *'"sysbox-runc"'*)
 	if [ "$installed" = "${VERSION}.linux" ]; then
-		say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
-		exit 0
+		already_installed
 	fi
 	die "Docker already lists sysbox-runc (sysbox-ce ${installed:-not installed from a package}). Upgrade by following https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md#upgrading-sysbox-or-sysbox-enterprise"
 	;;
 esac
+# A server restart or a lost session can interrupt dpkg mid-install, leaving
+# sysbox-ce half configured; finish that before judging what is installed.
+if [ -n "$(dpkg --audit 2>&1)" ]; then
+	say "finishing an interrupted package install: dpkg --configure -a"
+	dpkg --configure -a || die "dpkg --configure -a failed; its output is above"
+	runtimes_out="$(runtimes 2>&1)" || die "docker info failed: ${runtimes_out}"
+	installed="$(dpkg-query -W -f='${Version}' sysbox-ce 2>/dev/null || true)"
+	case "$runtimes_out" in
+	*'"sysbox-runc"'*)
+		if [ "$installed" = "${VERSION}.linux" ]; then
+			already_installed
+		fi
+		;;
+	esac
+fi
 [ -z "$installed" ] || die "sysbox-ce ${installed} is installed but Docker does not list sysbox-runc. Run: systemctl restart docker, or purge it with: apt-get purge -y sysbox-ce"
 
 apt_updated=no
 apt_install() {
 	if [ "$apt_updated" = no ]; then
-		apt-get update || die "apt-get update failed"
+		apt-get -o DPkg::Lock::Timeout=300 update || die "apt-get update failed; its output is above"
 		apt_updated=yes
 	fi
-	apt-get install -y "$@"
+	apt-get -o DPkg::Lock::Timeout=300 install -y "$@" || die "apt-get install $* failed; its output is above"
 }
 
 command -v jq >/dev/null 2>&1 || apt_install jq
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 tmp_json="$tmp/daemon.json"
-BIP="172.20.0.1/16"
-POOL_BASE="172.25.0.0/16"
 
-# docker0 already carrying the bip is not a conflict with it.
-docker0_has_bip=
-ip -4 -o address show dev docker0 2>/dev/null | grep -qF " $BIP " && docker0_has_bip=yes
-
-# Every IPv4 network on the host's routes and interfaces, except docker0's own
-# bip network. A route without a prefix length is a host route.
+# Download and verify before touching daemon.json, so an offline host or a bad
+# download leaves it as it was.
+say "downloading ${deb}"
+curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
+got="$(sha256_of "$tmp/$deb")"
+[ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
+# Every IPv4 network on the host's routes, in every routing table, and on its
+# interfaces, from the output of ip route and ip address. A route without a
+# prefix length is a host route; local and broadcast entries only repeat an
+# interface address.
 local_networks() {
-	ip -4 -o route | awk -v skip="$docker0_has_bip" '{net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ && !(skip != "" && $0 ~ / dev docker0( |$)/) {print net}'
-	ip -4 -o address | awk -v skip="$docker0_has_bip" '!(skip != "" && $2 == "docker0") {print $4}'
+	echo "$routes" | awk '$1 ~ /^(local|broadcast|multicast|anycast)$/ {next} {net = $1} net ~ /^(unicast|blackhole|unreachable|prohibit|throw)$/ {net = $2} net ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print net}'
+	echo "$addrs" | awk '{print $4}'
+}
+
+# The IPv4 subnet of every Docker network, running or not. It runs in a
+# subshell, so callers check its status.
+docker_networks() {
+	ids="$(docker network ls -q 2>&1)" || die "docker network ls failed: ${ids}"
+	[ -n "$ids" ] || return 0
+	# shellcheck disable=SC2086
+	nets="$(docker network inspect $ids --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2>&1)" || die "docker network inspect failed: ${nets}"
+	echo "$nets" | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' || true
 }
 
 ipv4_to_int() {
@@ -124,26 +194,70 @@ networks_overlap() {
 	[ $(($(ipv4_to_int "${1%/*}") >> shift_by)) -eq $(($(ipv4_to_int "${2%/*}") >> shift_by)) ]
 }
 
-overlaps_local_subnet() {
+overlaps_used() {
 	while read -r network; do
-		networks_overlap "$network" "$1" && return 0
-	done <<EOF
-$(local_networks)
-EOF
+		[ -n "$network" ] && networks_overlap "$network" "$1" && return 0
+	done <<EOT
+$used_networks
+EOT
+	return 1
+}
+
+# 172.17-31 is Docker's default pool until Docker restarts and applies the
+# new keys, so a network created in between could take a 172.24-31 range and
+# collide with the new bip. 10.200-254 is outside it and comes first; 192.168
+# is the last resort.
+candidates() {
+	n=200
+	while [ "$n" -le 254 ]; do
+		echo "10.$n.0.0/16"
+		n=$((n + 1))
+	done
+	for n in 24 25 26 27 28 29 30 31; do echo "172.$n.0.0/16"; done
+	echo "192.168.0.0/16"
+}
+
+# Sets picked to the first candidate that overlaps nothing in use, then marks
+# it in use so the next pick differs.
+pick_network() {
+	while read -r candidate; do
+		overlaps_used "$candidate" && continue
+		picked="$candidate"
+		used_networks="${used_networks}
+${candidate}"
+		return 0
+	done <<EOT
+$(candidates)
+EOT
 	return 1
 }
 
 add_bip=false
 add_pool=false
-if ! jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null 2>&1; then
-	overlaps_local_subnet "172.20.0.0/16" &&
-		die "cannot add \"bip\": ${BIP} overlaps a subnet on this host. Set \"bip\" in ${DAEMON_JSON} to a free range, then re-run this script."
-	add_bip=true
-fi
-if ! jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null 2>&1; then
-	overlaps_local_subnet "$POOL_BASE" &&
-		die "cannot add \"default-address-pools\": ${POOL_BASE} overlaps a subnet on this host. Set \"default-address-pools\" in ${DAEMON_JSON} to a free range, then re-run this script."
-	add_pool=true
+jq -e '(.bip // "") != ""' "$DAEMON_JSON" >/dev/null 2>&1 || add_bip=true
+jq -e '((."default-address-pools" // []) | length) > 0' "$DAEMON_JSON" >/dev/null 2>&1 || add_pool=true
+
+BIP=
+POOL_BASE=
+if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
+	routes="$(ip -4 -o route show table all 2>&1)" || die "ip route failed: ${routes}"
+	addrs="$(ip -4 -o address 2>&1)" || die "ip address failed: ${addrs}"
+	docker_nets="$(docker_networks)" || exit 1
+	local_nets="$(local_networks)"
+	set_nets="$(jq -r '.bip // empty, ((."default-address-pools" // [])[].base)' "$DAEMON_JSON" 2>/dev/null || true)"
+	used_networks="${local_nets}
+${docker_nets}
+${set_nets}"
+	none_free="no free /16 among 10.200-254.0.0, 172.24-31.0.0 and 192.168.0.0 that avoids this host's routes, interfaces and Docker networks"
+	if [ "$add_bip" = true ]; then
+		pick_network || die "cannot add \"bip\" to ${DAEMON_JSON}: ${none_free}. Set it to a free range, then re-run this script."
+		BIP="${picked%/*}"
+		BIP="${BIP%.0}.1/16"
+	fi
+	if [ "$add_pool" = true ]; then
+		pick_network || die "cannot add \"default-address-pools\" to ${DAEMON_JSON}: ${none_free}. Set it to a free range, then re-run this script."
+		POOL_BASE="$picked"
+	fi
 fi
 
 if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
@@ -162,11 +276,6 @@ if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
 	say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
 fi
 
-say "downloading ${deb}"
-curl -fsSL -o "$tmp/$deb" "${BASE_URL}/${deb}" || die "cannot download ${BASE_URL}/${deb}"
-got="$(sha256_of "$tmp/$deb")"
-[ "$got" = "$want_sha" ] || die "checksum mismatch for ${deb}: expected ${want_sha}, got ${got}"
-
 say "installing ${deb}"
 apt_install "$tmp/$deb"
 
@@ -179,19 +288,19 @@ done
 
 say "Docker lists sysbox-runc"
 
-probe="$tmp/probe"
-mkdir "$probe"
-chown 1000:1000 "$probe"
-pull_out="$(docker pull busybox:1.36 2>&1)" || die "cannot pull the probe image busybox:1.36: ${pull_out}"
-probe_rc=0
-probe_out="$(docker run --rm --runtime sysbox-runc -u 1000:1000 -v "$probe:/m" busybox:1.36 sh -c 'touch /m/probe || exit 42' 2>&1)" || probe_rc=$?
-case "$probe_rc" in
-0) ;;
-42) die "bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
-*) die "cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
-esac
+if ! run_probe; then
+	echo "install-sysbox: ${probe_reason}" >&2
+	say "removing Sysbox again: apt-get purge -y sysbox-ce"
+	apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce || broken "${probe_reason}; apt-get purge -y sysbox-ce also failed"
+	tries=0
+	while runtimes | grep -q '"sysbox-runc"'; do
+		tries=$((tries + 1))
+		[ "$tries" -lt 15 ] || broken "${probe_reason}; Docker still lists sysbox-runc after the purge"
+		sleep 1
+	done
+	die "${probe_reason}. Sysbox was removed again"
+fi
 say "bind-mount probe passed"
 echo
-echo "next:"
-echo "  sudo systemctl restart aether-server   # the server picks its runtime once, at first use"
-echo "New runs and terminals use Sysbox. Existing containers keep their runtime."
+echo "New runs and terminals use Sysbox within a minute. Existing containers keep their runtime."
+echo "A server that predates automatic Sysbox detection needs: sudo systemctl restart aether-server"
