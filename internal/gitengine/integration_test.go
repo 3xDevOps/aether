@@ -1000,7 +1000,7 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	}
 	first := ev.Payload.(events.RunDiffPayload)
 	files := first.Files
-	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2}) {
+	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2, Status: "added"}) {
 		t.Fatalf("diff files = %+v", files)
 	}
 	// Every snapshot records a tree, and the first one's parent is the
@@ -1068,10 +1068,10 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("final diff files = %+v", got)
 	}
-	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Additions: 1, Deletions: 1}) {
+	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Additions: 1, Deletions: 1, Status: "modified"}) {
 		t.Errorf("file.txt stat = %+v", got["file.txt"])
 	}
-	if got["sub/deep.txt"] != (events.FileDiffStat{Path: "sub/deep.txt", Additions: 1}) {
+	if got["sub/deep.txt"] != (events.FileDiffStat{Path: "sub/deep.txt", Additions: 1, Status: "added"}) {
 		t.Errorf("sub/deep.txt stat = %+v", got["sub/deep.txt"])
 	}
 

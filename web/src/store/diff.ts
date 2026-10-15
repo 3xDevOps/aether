@@ -227,12 +227,17 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
     }),
 })
 
-const reading = new Set<string>()
+/** Runs with a read in flight, and whether a reconnect asked for another after it. */
+const reading = new Map<string, boolean>()
 
-/** Reads the newest persisted `run.diff`, which a page load has not seen. */
-export async function readPersistedDiff(store: RootStore, client: Api, run: Pick<Run, 'id' | 'workspace_id'>): Promise<void> {
-  if (reading.has(run.id)) return
-  reading.add(run.id)
+/** Reads the newest persisted `run.diff`, which a page load has not seen.
+ * `fresh` asks for an answer newer than any read already in flight. */
+export async function readPersistedDiff(store: RootStore, client: Api, run: Pick<Run, 'id' | 'workspace_id'>, fresh = false): Promise<void> {
+  if (reading.has(run.id)) {
+    if (fresh) reading.set(run.id, true)
+    return
+  }
+  reading.set(run.id, false)
   try {
     const page = await client.workspaceTimeline({ workspace_id: run.workspace_id, run_id: run.id, types: ['run.diff'], newest: true, limit: 1 })
     const ev = page.events.at(-1)
@@ -240,6 +245,8 @@ export async function readPersistedDiff(store: RootStore, client: Api, run: Pick
   } catch (err) {
     store.getState().setDiff(run.id, { persistedError: err instanceof Error ? err.message : String(err) })
   } finally {
+    const again = reading.get(run.id)
     reading.delete(run.id)
+    if (again) void readPersistedDiff(store, client, run)
   }
 }

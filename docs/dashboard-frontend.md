@@ -1942,7 +1942,8 @@ once opened. Expanded, it lists each file with its status letter and
 `+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
 the Changes view at that file; **Review** opens its **Current diff**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
-The bar is hidden while nothing has changed and once the checkout is gone; a
+The bar is hidden while nothing has changed and once the run is merged or
+abandoned, which removes its checkout; a
 failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come

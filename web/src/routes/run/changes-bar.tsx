@@ -5,7 +5,6 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { ChangedFileRow } from '@/routes/diff/file-list'
 import { Counts } from '@/routes/diff/patch-view'
-import { isLiveRun } from '@/routes/files/sources'
 import { sessionColumn } from '@/routes/run/session-rows'
 import { useStore } from '@/store'
 import { diffTotals, readPersistedDiff } from '@/store/diff'
@@ -18,14 +17,15 @@ export function ChangesBar({ run }: { run: RunRecord }) {
   const connected = useStore((s) => s.connection === 'live')
   const expanded = useStore((s) => s.changesOpen[run.id] === true)
   const listID = useId()
-  const checkout = isLiveRun(run)
+  // Closing a run removes its checkout; a failed or interrupted one keeps it until cleanup.
+  const checkout = run.status !== 'merged' && run.status !== 'abandoned'
   const wasConnected = useRef(connected)
   useEffect(() => {
     // Before its first live snapshot the page may hold no replay cursor, so
     // a reconnect reads the newest one again.
     const back = connected && !wasConnected.current
     wasConnected.current = connected
-    if (checkout && connected && !latest && (back || (persisted === undefined && !error))) void readPersistedDiff(useStore, api, run)
+    if (checkout && connected && !latest && (back || (persisted === undefined && !error))) void readPersistedDiff(useStore, api, run, back)
   }, [checkout, connected, latest, persisted, error, run])
 
   if (!checkout) return null

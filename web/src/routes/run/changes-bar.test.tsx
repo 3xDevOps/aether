@@ -17,7 +17,7 @@ const files: FileDiffStat[] = [
   { path: 'internal/old.go', additions: 3, deletions: 5, status: 'modified' },
 ]
 
-function seed(opts: { files?: FileDiffStat[]; truncated?: boolean; status?: 'running' | 'merged' } = {}) {
+function seed(opts: { files?: FileDiffStat[]; truncated?: boolean; status?: 'running' | 'merged' | 'failed' } = {}) {
   const record = toRecord(run({ id: 'run_1', status: opts.status ?? 'running' }))
   useStore.setState({
     runs: { [record.id]: record },
@@ -70,13 +70,34 @@ describe('ChangesBar', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1', view: 'changes', diff: 'current' } })
   })
 
-  it('renders nothing without files or once the run is merged', () => {
+  it('renders nothing without files or once the run is merged, but stays for a failed run', () => {
     const empty = render(<ChangesBar run={seed({ files: [] })} />)
     expect(empty.container.innerHTML).toBe('')
     empty.unmount()
 
     const merged = render(<ChangesBar run={seed({ files, status: 'merged' })} />)
     expect(merged.container.innerHTML).toBe('')
+    merged.unmount()
+
+    render(<ChangesBar run={seed({ files, status: 'failed' })} />)
+    expect(screen.getByText('2 files changed')).not.toBeNull()
+  })
+
+  it('reads again after a read that was in flight when the connection returned', async () => {
+    const timeline = vi.mocked(api.workspaceTimeline)
+    const record = seed()
+    let answer!: (page: Awaited<ReturnType<typeof api.workspaceTimeline>>) => void
+    timeline.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    timeline.mockResolvedValueOnce({
+      events: [{ time: '2026-08-14T10:07:00Z', payload: { files } }],
+    } as Awaited<ReturnType<typeof api.workspaceTimeline>>)
+    render(<ChangesBar run={record} />)
+    act(() => useStore.setState({ connection: 'reconnecting' }))
+    act(() => useStore.setState({ connection: 'live' }))
+    expect(timeline).toHaveBeenCalledTimes(1)
+    await act(async () => answer({ events: [{ time: '2026-08-14T10:05:00Z', payload: { files: files.slice(1) } }] } as Awaited<ReturnType<typeof api.workspaceTimeline>>))
+    expect(await screen.findByText('2 files changed')).not.toBeNull()
+    expect(timeline).toHaveBeenCalledTimes(2)
   })
 
   it('updates the count when a live snapshot arrives', () => {
@@ -110,9 +131,10 @@ describe('ChangesBar', () => {
     const timeline = vi.mocked(api.workspaceTimeline)
     const record = seed()
     timeline.mockRejectedValueOnce(new Error('timeline unavailable'))
-    render(<><ChangesBar run={record} /><ChangesBar run={record} /></>)
+    const both = render(<><ChangesBar run={record} /><ChangesBar run={record} /></>)
     await screen.findAllByRole('alert')
     expect(timeline).toHaveBeenCalledTimes(1)
+    both.rerender(<ChangesBar run={record} />)
 
     timeline.mockResolvedValueOnce({
       events: [{ time: '2026-08-14T10:05:00Z', payload: { files } }],
@@ -120,7 +142,7 @@ describe('ChangesBar', () => {
     act(() => useStore.setState({ connection: 'reconnecting' }))
     expect(timeline).toHaveBeenCalledTimes(1)
     act(() => useStore.setState({ connection: 'live' }))
-    expect(await screen.findAllByText('2 files changed')).toHaveLength(2)
+    expect(await screen.findByText('2 files changed')).not.toBeNull()
     expect(timeline).toHaveBeenCalledTimes(2)
 
     timeline.mockResolvedValueOnce({
@@ -128,7 +150,7 @@ describe('ChangesBar', () => {
     } as Awaited<ReturnType<typeof api.workspaceTimeline>>)
     act(() => useStore.setState({ connection: 'reconnecting' }))
     act(() => useStore.setState({ connection: 'live' }))
-    expect(await screen.findAllByText('1 file changed')).toHaveLength(2)
+    expect(await screen.findByText('1 file changed')).not.toBeNull()
     expect(timeline).toHaveBeenCalledTimes(3)
   })
 
