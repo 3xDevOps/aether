@@ -225,6 +225,10 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await page.keyboard.press('Escape')
   await expect(inspector).toBeHidden()
 
+  // goBack loaded a new page. A lease the reloaded page was granted as it
+  // unloaded stays held for the 15 s reconnect window, and until this page
+  // holds control a message waits 45 s for moderation.
+  await expect(page.getByRole('group', { name: 'Run controller' })).toHaveText(/· You control$/, { timeout: 30_000 })
   await box.fill('workflow')
   await box.press('Enter')
   await expect(log.getByText('The workflow is running.')).toBeVisible({ timeout: 30_000 })
