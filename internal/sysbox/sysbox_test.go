@@ -109,14 +109,35 @@ func TestManagerBrokenOutranksOn(t *testing.T) {
 	}
 
 	m.Install(t.Context())
-	if st := waitState(t, m, protocol.SysboxFailed); !strings.Contains(st.Reason, "purge failed") || !m.Broken() {
-		t.Fatalf("status = %+v, broken = %v, want failed and broken while Docker lists the runtime", st, m.Broken())
+	if st := waitState(t, m, protocol.SysboxFailed); !strings.Contains(st.Reason, "purge failed") || !m.Unusable() {
+		t.Fatalf("status = %+v, unusable = %v, want failed and unusable while Docker lists the runtime", st, m.Unusable())
 	}
 	h.err = nil
 	m.Install(t.Context())
 	waitState(t, m, protocol.SysboxOn)
-	if m.Broken() {
-		t.Error("a successful install left the runtime broken")
+	if m.Unusable() {
+		t.Error("a successful install left the runtime unusable")
+	}
+}
+
+// A run started while an install is still checking Sysbox must not use it,
+// and every outcome makes the runtime ask Docker again, so a rolled-back
+// Sysbox is not requested from a cache.
+func TestManagerHoldsRuntimeDuringInstall(t *testing.T) {
+	h := &fakeHost{root: true, err: errors.New("probe failed; Sysbox was removed again")}
+	m := newFakeManager(h)
+	t.Cleanup(func() { _ = m.Close() })
+	m.Install(t.Context())
+	if !m.Unusable() {
+		t.Fatal("Sysbox is usable while its install is still checking it")
+	}
+	close(h.release)
+	waitState(t, m, protocol.SysboxFailed)
+	if m.Unusable() {
+		t.Error("a rolled-back install left the runtime unusable")
+	}
+	if h.rechecks.Load() != 1 {
+		t.Errorf("rechecks = %d after a failed install, want 1", h.rechecks.Load())
 	}
 }
 
@@ -200,9 +221,6 @@ func TestManagerReportsUnsupportedAndFailed(t *testing.T) {
 	m.Install(t.Context())
 	if st := waitState(t, m, protocol.SysboxUnsupported); st.Reason != "kernel too old" || st.Log != "working\n" {
 		t.Fatalf("status = %+v, want the reason and log", st)
-	}
-	if h.rechecks.Load() != 0 {
-		t.Error("a failed install forced a runtime recheck")
 	}
 
 	h.err = errors.New("apt-get update failed")

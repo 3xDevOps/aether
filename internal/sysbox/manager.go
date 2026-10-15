@@ -35,6 +35,7 @@ type Manager struct {
 	// the bind-mount probe. It is atomic because the Docker runtime reads
 	// it while holding its own lock.
 	broken atomic.Bool
+	busy   atomic.Bool
 
 	mu     sync.Mutex
 	state  string
@@ -97,9 +98,9 @@ func (m *Manager) statusLocked(ctx context.Context) protocol.SysboxStatus {
 	return protocol.SysboxStatus{State: protocol.SysboxOff}
 }
 
-// Broken reports whether the last install left a registered Sysbox that
-// failed its probe, so new containers must not use it.
-func (m *Manager) Broken() bool { return m.broken.Load() }
+// Unusable reports whether new containers must not use a registered Sysbox:
+// an install is still checking it, or the last one saw it fail its probe.
+func (m *Manager) Unusable() bool { return m.busy.Load() || m.broken.Load() }
 
 // Installing reports whether an install is running, which holds back a
 // server self-update: a restart would cut it off.
@@ -122,6 +123,7 @@ func (m *Manager) Install(ctx context.Context) protocol.SysboxStatus {
 		return st
 	}
 	m.state, m.reason, m.log = protocol.SysboxInstalling, "", &tail{}
+	m.busy.Store(true)
 	log := m.log
 	m.wg.Add(1)
 	go func() {
@@ -137,13 +139,14 @@ func (m *Manager) finish(err error) {
 	var broken *BrokenError
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.busy.Store(false)
+	if m.Recheck != nil {
+		defer m.Recheck()
+	}
 	switch {
 	case err == nil:
 		m.broken.Store(false)
 		m.state, m.reason = protocol.SysboxOn, ""
-		if m.Recheck != nil {
-			m.Recheck()
-		}
 	case errors.As(err, &broken):
 		m.broken.Store(true)
 		m.state, m.reason = protocol.SysboxFailed, broken.Reason

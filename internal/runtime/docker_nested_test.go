@@ -94,6 +94,8 @@ func TestResolveRuntimeRechecksMissingSysbox(t *testing.T) {
 	resolve(runtimeSysbox, 3)
 	clock = clock.Add(time.Hour)
 	resolve(runtimeSysbox, 3)
+	d.ForgetRuntime()
+	resolve(runtimeSysbox, 4)
 }
 
 func TestResolveRuntimeVeto(t *testing.T) {

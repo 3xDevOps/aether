@@ -200,8 +200,8 @@ func (d *Docker) SysboxRegistered(ctx context.Context) (bool, error) {
 }
 
 // VetoSysbox makes RuntimeAuto skip sysbox-runc while veto returns true, for a
-// Sysbox that is registered but failed its probe. It must not call back into
-// this Docker.
+// Sysbox that an install is still checking or saw fail its probe. It must not
+// call back into this Docker.
 func (d *Docker) VetoSysbox(veto func() bool) {
 	d.runtimeMu.Lock()
 	defer d.runtimeMu.Unlock()
@@ -212,7 +212,7 @@ func (d *Docker) VetoSysbox(veto func() bool) {
 func (d *Docker) ForgetRuntime() {
 	d.runtimeMu.Lock()
 	defer d.runtimeMu.Unlock()
-	d.sysboxMissingAt = time.Time{}
+	d.sysboxFound, d.sysboxMissingAt = false, time.Time{}
 }
 
 // resolveRuntime caches a found sysbox-runc for good and a missing one for

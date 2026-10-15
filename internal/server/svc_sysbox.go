@@ -2,8 +2,8 @@ package server
 
 import "github.com/3xDevOps/Aether/internal/sysbox"
 
-// The admin-triggered Sysbox install. After it succeeds the Docker runtime
-// forgets that the daemon lacked Sysbox, so the next container uses it.
+// The admin-triggered Sysbox install. Once it ends the Docker runtime asks
+// the daemon again, so the next container follows what the install left.
 func init() {
 	registerService("sysbox", func(d Deps) (Service, error) {
 		if !d.Config.SysboxInstaller {
@@ -15,7 +15,7 @@ func init() {
 			VetoSysbox(func() bool)
 		}); ok {
 			m.Recheck = docker.ForgetRuntime
-			docker.VetoSysbox(m.Broken)
+			docker.VetoSysbox(m.Unusable)
 		}
 		d.SSH.Services.Sysbox = m
 		return m, nil
