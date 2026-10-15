@@ -245,7 +245,7 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 // offer sends n to the next device of the run's owner that has not had it,
 // and reports whether there was one.
 func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]bool) bool {
-	payload, err := json.Marshal(notification{Title: runTitle(run), Body: n.body, Run: string(run.ID)})
+	payload, err := json.Marshal(notification{Title: RunTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
 		return false
@@ -255,14 +255,13 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 		slog.Warn("push: list subscriptions", "member", run.MemberID, "error", err)
 		return false
 	}
-	digest := sha256.Sum256([]byte(run.ID))
 	for _, sub := range subs {
 		device := [2]string{n.key, sub.Endpoint}
 		if offered[device] {
 			continue
 		}
 		offered[device] = true
-		if err := s.send(ctx, sub, payload, b64.EncodeToString(digest[:])[:32]); err != nil {
+		if err := s.send(ctx, sub, payload, runTopic(run.ID)); err != nil {
 			slog.Warn("push: notification not delivered", "member", run.MemberID, "error", err)
 		}
 		return true
@@ -297,6 +296,43 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 		n.key = string(run.MemberID) + "|" + n.key
 	}
 	return run, n
+}
+
+func runTopic(run domain.RunID) string {
+	digest := sha256.Sum256([]byte(run))
+	return b64.EncodeToString(digest[:])[:32]
+}
+
+// Notify sends a notification about run to every device of member, once
+// member has been away from every dashboard for the quiet period. It uses
+// the run's topic, so a device shows it in place of an earlier notification
+// for the same run. It returns after the last device was tried, with the
+// errors of those that did not take it.
+func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID) error {
+	for {
+		wait := time.Until(s.freeAt(member))
+		if wait <= 0 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("push: wait for %s to leave the dashboard: %w", member, ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run)})
+	if err != nil {
+		return fmt.Errorf("push: encode notification: %w", err)
+	}
+	subs, err := s.store.ListPushSubscriptions(ctx, member)
+	if err != nil {
+		return fmt.Errorf("push: list subscriptions: %w", err)
+	}
+	var errs []error
+	for _, sub := range subs {
+		errs = append(errs, s.send(ctx, sub, payload, runTopic(run)))
+	}
+	return errors.Join(errs...)
 }
 
 // freeAt is when member will have been away from every dashboard for the

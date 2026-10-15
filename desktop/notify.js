@@ -16,6 +16,16 @@ let attempt = 0
 let reconnectTimer = null
 let gateway = { origin: '', token: '' }
 let openRun = () => {}
+let selfID = null
+
+// When each run last raised a notification, by either path. The same
+// transition can reach us as run.status and as assistant.notice.
+const lastShown = new Map()
+const duplicateWindowMs = 5000
+
+function recentlyShown(runId) {
+  return Date.now() - (lastShown.get(runId) || 0) < duplicateWindowMs
+}
 
 /**
  * Start streaming events from the gateway.
@@ -28,6 +38,8 @@ function start(addr, url, onOpen) {
   stopped = false
   attempt = 0
   openRun = onOpen
+  selfID = null
+  lastShown.clear()
 
   if (typeof globalThis.WebSocket !== 'function') {
     // Older Electron main processes have no WHATWG WebSocket, and adding an
@@ -67,6 +79,10 @@ function connect(wsURL) {
       attempt = 0
       return
     }
+    if (ev.type === 'assistant.notice') {
+      void showNotice(ev.payload || {})
+      return
+    }
     if (ev.type !== 'run.status' || !ev.run_id) return
     const p = ev.payload || {}
     if (p.to === 'needs-attention') {
@@ -74,7 +90,9 @@ function connect(wsURL) {
         const shown = { notification: null }
         needsAttention.set(ev.run_id, shown)
         updateBadge()
-        void show(ev.run_id, p.reason, shown)
+        const duplicate = recentlyShown(ev.run_id)
+        lastShown.set(ev.run_id, Date.now())
+        if (!duplicate) void show(ev.run_id, p.reason, shown)
       }
     } else if (needsAttention.has(ev.run_id)) {
       needsAttention.get(ev.run_id).notification?.close()
@@ -108,6 +126,35 @@ function scheduleReconnect(wsURL) {
     reconnectTimer = null
     connect(wsURL)
   }, delay)
+}
+
+async function memberID() {
+  if (selfID) return selfID
+  const res = await fetch(`${gateway.origin}/api/v1/server.info`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}` },
+    body: '{}',
+  })
+  if (!res.ok) throw new Error(`server.info: ${res.status}`)
+  selfID = (await res.json()).member.id
+  return selfID
+}
+
+// assistant.notice goes to every subscriber; only the member it names reacts.
+async function showNotice(p) {
+  if (!Notification.isSupported() || !p.run_id) return
+  try {
+    if (p.member_id !== (await memberID())) return
+  } catch (err) {
+    console.log(`notify: cannot tell who this member is: ${err.message}`)
+    return
+  }
+  const duplicate = recentlyShown(p.run_id)
+  lastShown.set(p.run_id, Date.now())
+  if (duplicate) return
+  const notification = new Notification({ title: p.title || p.run_id, body: p.body || '' })
+  notification.on('click', () => openRun(p.run_id))
+  notification.show()
 }
 
 async function show(runId, reason, shown) {

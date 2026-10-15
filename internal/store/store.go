@@ -208,6 +208,7 @@ type Store interface {
 	RunMessageHistoryStore
 	PushStore
 	AssistantStore
+	AssistantFollowStore
 
 	Close() error
 }

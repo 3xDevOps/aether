@@ -124,7 +124,7 @@ func TestRunTitle(t *testing.T) {
 		"neither":         {domain.Run{}, "Untitled run"},
 		"long is clipped": {domain.Run{Task: long}, strings.TrimRight(long[:fallbackTitleRunes], " ") + "…"},
 	} {
-		if got := runTitle(&tc.run); got != tc.want {
+		if got := RunTitle(&tc.run); got != tc.want {
 			t.Errorf("%s: runTitle = %q, want %q", name, got, tc.want)
 		}
 	}

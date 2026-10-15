@@ -1709,6 +1709,19 @@ CREATE TABLE assistant_prompt_keys (
 	PRIMARY KEY (member_id, generation, key)
 );
 `,
+	// v65: the runs a member's assistant launched or messaged, which Aether
+	// follows for them. notified_key is the last state announced, so a
+	// restart does not announce it again.
+	`
+CREATE TABLE assistant_follows (
+	member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	created_at   INTEGER NOT NULL,
+	notified_key TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (member_id, run_id)
+);
+CREATE INDEX idx_assistant_follows_run ON assistant_follows(run_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -2026,6 +2026,23 @@ overflow - the socket closes with code **1012** (service restart), reason
 resubscribe from your last `seq`, not an error to surface; the replay recovers
 anything dropped.
 
+### Assistant notices
+
+When a member's [assistant](assistant.md#notifications) launches or messages a
+run, the server publishes `assistant.notice` as the run finishes or needs the
+member. The envelope carries the run's `workspace_id` and `run_id`, and the
+member as `actor_id`. It is a workspace event, so every subscriber of the
+workspace receives it; a client shows it only to the member in `member_id`.
+
+```json
+{"type":"assistant.notice","payload":{"member_id":"mem_...","run_id":"run_...",
+ "kind":"needs_input","title":"Run \"Fix flaky login test\" needs your input",
+ "body":"Question: Which database should the test use?"}}
+```
+
+`kind` is `finished`, `needs_input`, `needs_approval` or `needs_attention`.
+The event is published once per announced state.
+
 ### `GET /ws/attach/<run_id>`
 
 PTY attach. Output is binary; JSON text frames carry the header, input,

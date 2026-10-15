@@ -446,6 +446,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Homes:  homes,
 		Runs:   s.sched,
 		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
+		// Follows run notices the member's assistant owes them.
+		Bus:     s.bus,
+		Follows: s.db,
 	})
 	sshCfg.Services.Assistant = s.assistant
 	sshCfg.EdgeAccess = cfg.EdgeAccess
@@ -470,6 +473,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Control:    s.control,
 		Evidence:   s.evidence,
 		Workspaces: workspaces,
+		Assistant:  s.assistant,
 	}); err != nil {
 		return nil, err
 	}
@@ -573,6 +577,9 @@ func (s *Server) Run(ctx context.Context) error {
 		return errors.Join(fmt.Errorf("server: adapter manager: %w", err), s.Close())
 	}
 	if err := s.startServices(ctx); err != nil {
+		return errors.Join(err, s.Close())
+	}
+	if err := s.assistant.StartFollowing(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
 	if s.web != nil {

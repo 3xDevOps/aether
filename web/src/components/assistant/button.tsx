@@ -8,8 +8,11 @@ import { useCapability, useSelfRole } from '@/store/hooks'
 
 export const assistantTriggerID = 'assistant-trigger'
 
-function label(waiting: number): string {
-  return waiting > 0 ? `Assistant, ${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting` : 'Assistant'
+function label(waiting: number, updates: number): string {
+  const parts = []
+  if (waiting > 0) parts.push(`${waiting} ${waiting === 1 ? 'request' : 'requests'} waiting`)
+  if (updates > 0) parts.push(`${updates} ${updates === 1 ? 'update' : 'updates'}`)
+  return ['Assistant', ...parts].join(', ')
 }
 
 /** assistant.prompt needs the Launch capability, so anyone who cannot start a run is not offered the assistant. */
@@ -25,6 +28,7 @@ export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'se
   const open = useStore((s) => s.assistantOpen)
   const setOpen = useStore((s) => s.setAssistantOpen)
   const waiting = useStore(assistantWaiting)
+  const updates = useStore((s) => s.assistantNotices)
   if (!supported) return null
   return (
     <span className="relative shrink-0">
@@ -32,7 +36,7 @@ export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'se
         id={assistantTriggerID}
         variant={variant}
         size="icon"
-        label={label(waiting)}
+        label={label(waiting, updates)}
         hint={`Assistant · ${shortcutLabel('assistant')}`}
         aria-expanded={open}
         aria-controls="assistant"
@@ -40,7 +44,7 @@ export function AssistantButton({ variant = 'ghost' }: { variant?: 'ghost' | 'se
       >
         <Sparkles />
       </Button>
-      {waiting > 0 && <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />}
+      {waiting + updates > 0 && <span aria-hidden className="pointer-events-none absolute top-2 right-2 size-2 rounded-full bg-state-needs-you" />}
     </span>
   )
 }

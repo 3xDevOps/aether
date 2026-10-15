@@ -27,6 +27,7 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
+import { applyAssistantNotice } from '@/store/assistant-notice'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { diffSnapshot } from '@/store/diff'
@@ -446,6 +447,9 @@ export async function applyEvent(
       }
       break
     }
+    case 'assistant.notice':
+      applyAssistantNotice(store, ev)
+      break
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break

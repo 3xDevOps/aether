@@ -76,6 +76,16 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 	return out, nil
 }
 
+// ACPPending is the requests the run's live session waits on, with their
+// text; none without a live session.
+func (s *Scheduler) ACPPending(run domain.RunID) []acphost.Request {
+	sess := s.acp.session(run)
+	if sess == nil {
+		return nil
+	}
+	return sess.State().Pending
+}
+
 func (s *Scheduler) ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error) {
 	if beforeSeq <= 0 {
 		beforeSeq = math.MaxInt64

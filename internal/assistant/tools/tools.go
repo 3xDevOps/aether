@@ -65,6 +65,9 @@ type Server struct {
 	// Member is the member the socket belongs to; "mine" in a run.list
 	// request selects their runs.
 	Member string
+	// Follow, when set, is told the id of each run a launch or message
+	// reached, after it succeeded.
+	Follow func(ctx context.Context, runID string)
 }
 
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
@@ -207,7 +210,33 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: req.Method + " was not approved: " + err.Error()}
 		}
 	}
-	return s.Caller.Call(ctx, req.Method, req.Params)
+	result, rpcErr := s.Caller.Call(ctx, req.Method, req.Params)
+	if rpcErr == nil && s.Follow != nil {
+		if id := s.followed(req, result); id != "" {
+			s.Follow(ctx, id)
+		}
+	}
+	return result, rpcErr
+}
+
+// followed is the run a successful launch or message reached.
+func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
+	switch req.Method {
+	case protocol.MethodRunLaunch:
+		launched, err := protocol.DecodeParams[protocol.RunResult](result)
+		if err != nil {
+			slog.Warn("assistant tools: read the launched run", "error", err)
+			return ""
+		}
+		return launched.Run.ID
+	case protocol.MethodRunInject:
+		p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
+		if err != nil {
+			return ""
+		}
+		return p.RunID
+	}
+	return ""
 }
 
 func (s *Server) summarize(ctx context.Context, req protocol.Request) (string, *protocol.Error) {

@@ -25,6 +25,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -62,6 +63,10 @@ type Config struct {
 	Homes  *memberhome.Manager
 	Runs   *scheduler.Scheduler
 	Caller func(domain.MemberID) tools.Caller
+	// Bus and Follows enable following runs; without either, nothing is
+	// followed.
+	Bus     events.Bus
+	Follows FollowStore
 }
 
 type Service struct {
@@ -72,11 +77,21 @@ type Service struct {
 
 	mu      sync.Mutex
 	members map[domain.MemberID]*member
+	sub     events.Subscription
+
+	follower *follower
+	notices  chan notice
+	notify   Notifier
 }
 
 func New(cfg Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
+	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
+	if cfg.Bus != nil && cfg.Follows != nil && cfg.Runs != nil {
+		s.notices = make(chan notice, 128)
+		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue}
+	}
+	return s
 }
 
 type member struct {
@@ -187,6 +202,9 @@ func (s *Service) logPath(id domain.MemberID) string {
 func (s *Service) Close() error {
 	s.cancel()
 	s.mu.Lock()
+	if s.sub != nil {
+		_ = s.sub.Close()
+	}
 	members := make([]*member, 0, len(s.members))
 	for _, m := range s.members {
 		members = append(members, m)
@@ -405,6 +423,9 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		return nil, err
 	}
 	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: m.confirms.confirm, Member: string(m.id)}
+	if s.follower != nil {
+		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
+	}
 	s.wg.Go(func() {
 		if serveErr := srv.Serve(sessCtx, ln); serveErr != nil {
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)

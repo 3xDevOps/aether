@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -256,5 +257,61 @@ func TestDisconnectWithdrawsConfirmation(t *testing.T) {
 		if m == protocol.MethodEnvSave {
 			t.Fatal("env.save ran for a caller that left")
 		}
+	}
+}
+
+type launchCaller struct {
+	fakeCaller
+	fail map[string]bool
+}
+
+func (c *launchCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if c.fail[method] {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "boom"}
+	}
+	if method == protocol.MethodRunLaunch {
+		return json.RawMessage(`{"run":{"id":"run-9"}}`), nil
+	}
+	return c.fakeCaller.Call(ctx, method, params)
+}
+
+func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
+	var followed []string
+	var verdict error
+	caller := &launchCaller{fail: map[string]bool{}}
+	srv := &Server{
+		Caller: caller, Member: "m1",
+		Confirm: func(context.Context, protocol.AssistantConfirmation) error { return verdict },
+		Follow:  func(_ context.Context, run string) { followed = append(followed, run) },
+	}
+	call := func(method string, params any) *protocol.Error {
+		raw, _ := json.Marshal(params)
+		_, perr := srv.dispatch(t.Context(), protocol.Request{Method: method, Params: raw})
+		return perr
+	}
+	launch := protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "t"}
+	inject := protocol.RunInjectParams{RunID: "run-1", Message: "hi"}
+
+	verdict = errors.New("no")
+	_ = call(protocol.MethodRunLaunch, launch)
+	_ = call(protocol.MethodRunInject, inject)
+	caller.fail[protocol.MethodRunLaunch], caller.fail[protocol.MethodRunInject] = true, true
+	verdict = nil
+	_ = call(protocol.MethodRunLaunch, launch)
+	_ = call(protocol.MethodRunInject, inject)
+	if len(followed) != 0 {
+		t.Fatalf("followed %v after declines and errors, want none", followed)
+	}
+
+	caller.fail = map[string]bool{}
+	if perr := call(protocol.MethodRunLaunch, launch); perr != nil {
+		t.Fatal(perr)
+	}
+	if perr := call(protocol.MethodRunInject, inject); perr != nil {
+		t.Fatal(perr)
+	}
+	_ = call(protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-1"})
+	if want := []string{"run-9", "run-1"}; !slices.Equal(followed, want) {
+		t.Fatalf("followed %v, want %v", followed, want)
 	}
 }
