@@ -15,14 +15,15 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// TestSendAuthorizationFollowsTheRadar covers the whole authorization
-// model: only a run the radar has this one in conflict with is reachable,
-// the grace window keeps an in-flight reply landing after the overlap
-// clears, and the window really does expire.
+// TestSendAuthorizationFollowsTheRadar covers the radar route: a run the
+// workspace route cannot reach is reachable only while the radar has it in
+// conflict with the sender, the grace window keeps an in-flight reply
+// landing after the overlap clears, and the window really does expire.
 func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 	h := newHarness(t, 3)
 	ctx := context.Background()
 	a, b, c := h.run(0), h.run(1), h.run(2)
+	h.isolate(1, 2)
 
 	send := func(from, to domain.RunID) *protocol.Error {
 		_, err := h.svc.Send(ctx, from, sendParams(to, "ping"))
@@ -30,12 +31,14 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 	}
 
 	// No overlap at all: nobody is reachable. The message is pinned by the
-	// wire-v1 error fixtures, so it is asserted verbatim here.
+	// wire-v3 error fixtures, so it is asserted verbatim here.
 	err := send(a, b)
 	if err == nil || err.Code != protocol.CodeDenied {
 		t.Fatalf("send without an overlap = %v, want CodeDenied", err)
 	}
-	if want := fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s", b, a); err.Message != want {
+	if want := fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: member %s (collaborator) "+
+		"may not message it: run is protected: only its owner or an admin may message it; "+
+		"run `aether-internal status` to list the runs it can message", b, a, h.runs[0].MemberID); err.Message != want {
 		t.Fatalf("denial message = %q, want %q", err.Message, want)
 	}
 
@@ -83,12 +86,15 @@ func TestSendAuthorizationFollowsTheRadar(t *testing.T) {
 }
 
 // TestStatusReportsExactlyTheSendableSet pins the equality the agent
-// depends on: every peer status lists is sendable, and nothing else is.
+// depends on: every peer status lists is sendable, and nothing else is. An
+// independent run in the same workspace is listed and reachable with no
+// overlap; a protected run of another member is neither.
 func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
-	h := newHarness(t, 3)
+	h := newHarness(t, 4)
 	ctx := context.Background()
-	a, b, c := h.run(0), h.run(1), h.run(2)
+	a, b, c, d := h.run(0), h.run(1), h.run(2), h.run(3)
 	h.peers.pair(a, b, "src/auth.go")
+	h.isolate(3)
 
 	st, err := h.svc.Status(ctx, a)
 	if err != nil {
@@ -97,14 +103,21 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	if st.WireVersion != protocol.CoordWireVersion || st.RunID != string(a) || st.WorkspaceID != string(h.workspace) {
 		t.Fatalf("status identity = %+v, want the calling run", st)
 	}
+	if len(st.Peers) != 2 || st.PeerTotal != 2 || st.PeersTruncated {
+		t.Fatalf("status peers = %+v (total %d), want b then c", st.Peers, st.PeerTotal)
+	}
+	if p := st.Peers[0]; p.RunID != string(b) || p.State != protocol.CoordPeerActive || p.MemberID == "" || len(p.Files) == 0 {
+		t.Fatalf("peer 0 = %+v, want b as an attributed active peer with files", p)
+	}
+	if p := st.Peers[1]; p.RunID != string(c) || p.State != protocol.CoordPeerWorkspace || p.MemberID == "" ||
+		p.Task != "task 2" || p.RunStatus != string(domain.RunRunning) || len(p.Files) != 0 {
+		t.Fatalf("peer 1 = %+v, want c as a running workspace peer with its task", p)
+	}
 	listed := make(map[string]bool, len(st.Peers))
 	for _, p := range st.Peers {
 		listed[p.RunID] = true
-		if p.State != protocol.CoordPeerActive || p.MemberID == "" || len(p.Files) == 0 {
-			t.Fatalf("peer %+v, want an attributed active peer with files", p)
-		}
 	}
-	for _, target := range []domain.RunID{b, c} {
+	for _, target := range []domain.RunID{b, c, d} {
 		_, serr := h.svc.Send(ctx, a, sendParams(target, "ping"))
 		if listed[string(target)] != (serr == nil) {
 			t.Fatalf("run %s listed=%v but send error=%v", target, listed[string(target)], serr)
@@ -113,7 +126,7 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	if st.Unread != 0 {
 		t.Fatalf("unread = %d, want 0", st.Unread)
 	}
-	if st, err = h.svc.Status(ctx, b); err != nil || st.Unread != 1 {
+	if st, err = h.svc.Status(ctx, c); err != nil || st.Unread != 1 {
 		t.Fatalf("target unread = %d (err %v), want 1", st.Unread, err)
 	}
 }
@@ -154,6 +167,7 @@ func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
 	h := newHarness(t, 4, func(c *Config) { c.Mission = stub })
 	ctx := context.Background()
 	worker, integrator, outsider, unrelated := h.run(0), h.run(1), h.run(2), h.run(3)
+	h.isolate(3)
 	stub.mission = []domain.RunID{worker, integrator}
 	h.peers.hub(worker, []domain.RunID{integrator, outsider}, "src/auth.go")
 
@@ -188,7 +202,7 @@ func TestMissionRunSeesAndMessagesRadarPeers(t *testing.T) {
 	}
 	_, err = h.svc.Send(ctx, worker, sendParams(unrelated, "ping"))
 	if err == nil || err.Code != protocol.CodeDenied ||
-		err.Message != fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s", unrelated, worker) {
+		!strings.HasPrefix(err.Message, fmt.Sprintf("coord.send: run %s is not an authorized peer of run %s: ", unrelated, worker)) {
 		t.Fatalf("send to an unrelated run = %v, want CodeDenied", err)
 	}
 	if st, err = h.svc.Status(ctx, outsider); err != nil || st.Unread != 2 {
@@ -268,6 +282,9 @@ func TestSendRejectsFinishedAndSelfTargets(t *testing.T) {
 		err.Message != fmt.Sprintf("coord.send: run %s has finished", b) {
 		t.Fatalf("send to a finished run = %v, want CodeUnavailable", err)
 	}
+	if st, serr := h.svc.Status(ctx, a); serr != nil || len(st.Peers) != 0 || st.PeerTotal != 0 {
+		t.Fatalf("status peers = %+v (err %v), want the finished overlapping run omitted", st, serr)
+	}
 }
 
 // TestInboxBatchAndTokenSemantics drives the at-least-once contract
@@ -338,6 +355,7 @@ func TestGraceWindowRunsFromTheLastOverlap(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
+	h.isolate(1)
 
 	h.peers.pair(a, b, "src/auth.go")
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
@@ -368,6 +386,7 @@ func TestGraceWindowRunsFromAWitnessedClear(t *testing.T) {
 	ctx := context.Background()
 	h.start()
 	a, b, c := h.run(0), h.run(1), h.run(2)
+	h.isolate(1, 2)
 
 	h.peers.pair(a, b, "src/auth.go")
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
@@ -579,6 +598,7 @@ func TestWitnessedClearSurvivesAnInterleavedRefresh(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
+	h.isolate(1)
 
 	h.peers.pair(a, b, "src/auth.go")
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "ping-active")); err != nil {
@@ -609,6 +629,7 @@ func TestAskReplyCorrelationAndAuthorization(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
+	h.isolate(0)
 	h.peers.pair(a, b, "src/auth.go")
 
 	asked, err := h.svc.Ask(ctx, a, protocol.CoordAskParams{

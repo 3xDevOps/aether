@@ -211,6 +211,37 @@ func (h *coordHarness) advance(d time.Duration) {
 
 func (h *coordHarness) run(i int) domain.RunID { return h.runs[i].ID }
 
+var testMemberSeq atomic.Uint64
+
+func (h *coordHarness) member(role domain.Role) *domain.Member {
+	h.t.Helper()
+	n := testMemberSeq.Add(1)
+	m := &domain.Member{DisplayName: fmt.Sprintf("Member %d", n), TailnetLogin: fmt.Sprintf("member-%d@example.com", n),
+		Color: "#3cb44b", Role: role}
+	if err := h.db.CreateMember(context.Background(), m); err != nil {
+		h.t.Fatalf("create member: %v", err)
+	}
+	return m
+}
+
+func (h *coordHarness) ownBy(i int, owner domain.MemberID, protected bool) {
+	h.t.Helper()
+	r := h.runs[i]
+	r.MemberID, r.Protected = owner, protected
+	if err := h.db.UpdateRun(context.Background(), r); err != nil {
+		h.t.Fatalf("update run %d: %v", i, err)
+	}
+}
+
+// isolate gives each run its own protected owner, so only the swarm and
+// radar routes reach it.
+func (h *coordHarness) isolate(runs ...int) {
+	h.t.Helper()
+	for _, i := range runs {
+		h.ownBy(i, h.member(domain.RoleCollaborator).ID, true)
+	}
+}
+
 func (h *coordHarness) start() {
 	h.t.Helper()
 	if err := h.svc.Start(context.Background()); err != nil {

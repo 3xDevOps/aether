@@ -95,6 +95,9 @@ const (
 	// CoordPeerMission is a peer authorized by the current mission
 	// membership/assignment even when no file overlap exists.
 	CoordPeerMission = "mission"
+	// CoordPeerWorkspace is a live run in the caller's workspace that the
+	// caller's owner may message without a file overlap or swarm.
+	CoordPeerWorkspace = "workspace"
 )
 
 // CoordMissionAssignment is the live mission authority for the run behind a
@@ -137,7 +140,8 @@ const (
 
 // CoordPeer is one run the caller is authorized to message. Files are the
 // paths both runs touch, empty once the overlap has cleared; ExpiresAt is
-// set only in the grace state and is RFC3339.
+// set only in the grace state and is RFC3339. RunStatus is the peer run's
+// lifecycle status.
 type CoordPeer struct {
 	RunID          string   `json:"run_id"`
 	MemberID       string   `json:"member_id"`
@@ -149,6 +153,7 @@ type CoordPeer struct {
 	FilesTruncated bool     `json:"files_truncated,omitempty"`
 	State          string   `json:"state"`
 	ExpiresAt      string   `json:"expires_at,omitempty"`
+	RunStatus      string   `json:"run_status,omitempty"`
 }
 
 // CoordStatusResult is the result of coord.status: who the caller is,
@@ -170,6 +175,15 @@ type CoordStatusResult struct {
 	WaitSupported    bool                    `json:"wait_supported,omitempty"`
 	UnreadMessageIDs []string                `json:"unread_message_ids,omitempty"`
 	WakeAdmitted     bool                    `json:"wake_admitted,omitempty"`
+	Overlaps         []CoordOverlap          `json:"overlaps,omitempty"`
+}
+
+// CoordOverlap is one run whose edits overlap the caller's. Only
+// coord.hook.status sets it: an overlap warning does not depend on whether
+// the caller may message that run.
+type CoordOverlap struct {
+	RunID string   `json:"run_id"`
+	Files []string `json:"files"`
 }
 
 // CoordHookStatusParams opts a native hook into one bounded, non-consuming
@@ -205,9 +219,11 @@ type CoordSendParams struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
-// CoordSendResult is the result of coord.send.
+// CoordSendResult is the result of coord.send. RecipientStatus is the
+// recipient run's lifecycle status when the receipt was issued.
 type CoordSendResult struct {
-	MessageID string `json:"message_id"`
+	MessageID       string `json:"message_id"`
+	RecipientStatus string `json:"recipient_status,omitempty"`
 }
 
 // CoordAskParams are the params of coord.ask.
@@ -217,9 +233,11 @@ type CoordAskParams struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
-// CoordAskResult is the result of coord.ask.
+// CoordAskResult is the result of coord.ask. RecipientStatus is the
+// recipient run's lifecycle status when the receipt was issued.
 type CoordAskResult struct {
-	QuestionID string `json:"question_id"`
+	QuestionID      string `json:"question_id"`
+	RecipientStatus string `json:"recipient_status,omitempty"`
 }
 
 // CoordReplyParams are the params of coord.reply. The question ID identifies
