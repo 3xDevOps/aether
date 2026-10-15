@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -23,21 +25,37 @@ func AssistantSocketDir(root string, member domain.MemberID) string {
 	return filepath.Join(root, string(member), "sock")
 }
 
-// AssistantAdapter is the argv of agent's ACP server and the session mode the
-// assistant runs in: the one Enhanced runs use, which acts without asking.
-func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID, agent string) (argv []string, mode string, err error) {
+// AssistantLaunch is how the assistant starts agent's ACP server: the same
+// command, session mode and agent environment an Enhanced run uses. Claude
+// Code refuses its bypass mode as root without the profile's IS_SANDBOX.
+type AssistantLaunch struct {
+	Argv []string
+	Mode string
+	Env  []string
+}
+
+func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID, agent string) (AssistantLaunch, error) {
 	profile, argvs, err := s.launchProfile(ctx, member, member, agent)
 	if err != nil {
-		return nil, "", err
+		return AssistantLaunch{}, err
 	}
-	argv = argvs[domain.LaunchACP]
+	argv := argvs[domain.LaunchACP]
 	if len(argv) == 0 {
-		return nil, "", fmt.Errorf("agent %q has no ACP command", agent)
+		return AssistantLaunch{}, fmt.Errorf("agent %q has no ACP command", agent)
 	}
 	if profile.ACPMode == "" {
-		return nil, "", fmt.Errorf("agent %q has no mode that acts without asking", agent)
+		return AssistantLaunch{}, fmt.Errorf("agent %q has no mode that acts without asking", agent)
 	}
-	return argv, profile.ACPMode, nil
+	env := map[string]string{}
+	if err := harness.MergeEnv(env, profile.PermissionEnv); err != nil {
+		return AssistantLaunch{}, fmt.Errorf("scheduler: apply %s's permission setting: %w", profile.Name, err)
+	}
+	maps.Copy(env, profile.Env)
+	launch := AssistantLaunch{Argv: argv, Mode: profile.ACPMode}
+	for _, key := range slices.Sorted(maps.Keys(env)) {
+		launch.Env = append(launch.Env, key+"="+env[key])
+	}
+	return launch, nil
 }
 
 // AssistantTerminalStale reports whether the member's running terminal lacks

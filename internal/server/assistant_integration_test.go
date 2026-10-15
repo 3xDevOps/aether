@@ -318,7 +318,7 @@ func TestIntegrationAssistant(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
-	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1" {
+	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 IS_SANDBOX=1" {
 		t.Fatalf("adapter env = %q", got)
 	}
 	if !strings.HasSuffix(execs[0].spec.WorkingDir, "/.aether/assistant") {

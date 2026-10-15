@@ -388,7 +388,7 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 }
 
 func (s *Service) open(ctx context.Context, m *member, agent string, row *store.AssistantSession) (*session, error) {
-	argv, mode, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
+	launch, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
@@ -410,7 +410,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)
 		}
 	})
-	live, err := s.openSession(ctx, m, agent, mode, argv, row)
+	live, err := s.openSession(ctx, m, agent, launch, row)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -420,7 +420,8 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	return live, nil
 }
 
-func (s *Service) openSession(ctx context.Context, m *member, agent, mode string, argv []string, row *store.AssistantSession) (*session, error) {
+func (s *Service) openSession(ctx context.Context, m *member, agent string, launch scheduler.AssistantLaunch, row *store.AssistantSession) (*session, error) {
+	argv, mode := launch.Argv, launch.Mode
 	if err := s.stopStale(ctx, m, row); err != nil {
 		return nil, err
 	}
@@ -430,7 +431,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, mode string
 	}
 	exec, cwd, err := s.cfg.Runs.StartAssistantExec(ctx, m.id, runtime.ExecSpec{
 		Argv: argv, WorkingDir: workDir, CreationKey: "assistant-" + rand.Text(),
-		Env: []string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"},
+		Env: append([]string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"}, launch.Env...),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assistant: start %s: %w", argv[0], err)
