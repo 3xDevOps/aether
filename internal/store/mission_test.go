@@ -424,7 +424,7 @@ func TestSubmitAttemptKeepsEveryScopeViolation(t *testing.T) {
 	}
 	violations := make([]string, 200)
 	for i := range violations {
-		violations[i] = fmt.Sprintf("outside/%03d.go", i)
+		violations[i] = fmt.Sprintf("outside/%s/%03d.go", strings.Repeat("d", 400), i)
 	}
 	submission, err := db.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.SubmissionRef{
 		WorkspaceID: workspace.ID, RunID: attempt.RunID, EvidenceRef: "packet-wide", RetainedRevision: "tree-wide",
