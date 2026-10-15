@@ -8,6 +8,12 @@
    trackpad keeps the desktop density and a tablet does not. */
 @custom-variant coarse (@media (pointer: coarse));
 
+/* Keyboard focus only. Text fields keep the native rule, which outlines them
+   however they were focused; everything else also needs `data-tabbing`
+   (set in src/App.tsx), so a key press followed by a scripted focus move
+   never outlines a control nobody tabbed to. */
+@custom-variant focus-visible (&:focus-visible:where([data-tabbing] *, textarea, input:not([type='checkbox'], [type='radio'])));
+
 /* Latin subset only; other scripts fall through to the fallback below. */
 @font-face {
   font-family: 'DM Sans Variable';
@@ -403,6 +409,10 @@
 @layer base {
   * {
     @apply border-seam;
+  }
+  /* The browser's own focus ring, on controls without one of ours. */
+  :root:not([data-tabbing]) :focus-visible:not(textarea, input:not([type='checkbox'], [type='radio'])) {
+    outline: none;
   }
   html,
   body {
