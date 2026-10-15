@@ -5178,8 +5178,8 @@ CSS class or source-string contracts.
 followed by a scripted focus move - Enter sending a message, a shortcut, a
 dialog returning focus - so a control nobody tabbed to could wear an outline.
 `index.css` redefines the `focus-visible:` variant to also need
-`data-tabbing` on the root, which `useTabFocus` (`src/lib/tab-focus.ts`) sets
-on Tab and clears on the next pointer press, and removes the browser's own
+`data-tabbing` on the root, which an effect in `App.tsx` sets on Tab and
+clears on the next pointer press, and removes the browser's own
 ring outside that state. Text fields keep the native rule, so a clicked field
 still shows its outline.
 

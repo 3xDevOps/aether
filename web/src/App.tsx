@@ -8,7 +8,6 @@ import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
-import { useTabFocus } from '@/lib/tab-focus'
 import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
 import { connect } from '@/store/sync'
@@ -49,7 +48,25 @@ export function App() {
   // in-memory session token.
   const [attempt, setAttempt] = useState(0)
   useKeyboardInset()
-  useTabFocus()
+  // Browsers match :focus-visible after any key press followed by a scripted
+  // focus move (Enter to send, a shortcut, a closing dialog); focus outlines
+  // also need `data-tabbing`, which Tab sets and the next pointer press clears.
+  useEffect(() => {
+    const root = document.documentElement
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') root.dataset.tabbing = ''
+    }
+    const pointer = () => {
+      delete root.dataset.tabbing
+    }
+    window.addEventListener('keydown', key)
+    window.addEventListener('pointerdown', pointer, true)
+    return () => {
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('pointerdown', pointer, true)
+      delete root.dataset.tabbing
+    }
+  }, [])
 
   useEffect(() => connect(useStore), [attempt, epoch])
   useEffect(() => bindRouteToUrl(useStore), [])

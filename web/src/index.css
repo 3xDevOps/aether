@@ -10,7 +10,7 @@
 
 /* Keyboard focus only. Text fields keep the native rule, which outlines them
    however they were focused; everything else also needs `data-tabbing`
-   (src/lib/tab-focus.ts), so a key press followed by a scripted focus move
+   (set in src/App.tsx), so a key press followed by a scripted focus move
    never outlines a control nobody tabbed to. */
 @custom-variant focus-visible (&:focus-visible:where([data-tabbing] *, textarea, input:not([type='checkbox'], [type='radio'])));
 
