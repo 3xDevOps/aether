@@ -5174,6 +5174,15 @@ colour transition, and focus remains on a real control when a row or pane
 changes. Verify focus, keyboard and accessibility as observable behavior, not
 CSS class or source-string contracts.
 
+**Only after Tab.** Browsers match `:focus-visible` after any key press
+followed by a scripted focus move - Enter sending a message, a shortcut, a
+dialog returning focus - so a control nobody tabbed to could wear an outline.
+`index.css` redefines the `focus-visible:` variant to also need
+`data-tabbing` on the root, which `useTabFocus` (`src/lib/tab-focus.ts`) sets
+on Tab and clears on the next pointer press, and removes the browser's own
+ring outside that state. Text fields keep the native rule, so a clicked field
+still shows its outline.
+
 It is an outline rather than a ring, for two reasons. Windows High Contrast
 (`forced-colors: active`) discards box shadows, which is what Tailwind's
 `ring-*` compiles to, and would leave the app with no focus indicator at all.

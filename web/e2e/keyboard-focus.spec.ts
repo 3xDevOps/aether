@@ -183,7 +183,9 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await openFirstRun(page, aether)
 
   // `:focus-visible` follows the last input, and the wizard used the mouse, so
-  // a scripted focus() does not match in Chromium. Every focus ends on a key press.
+  // a scripted focus() does not match in Chromium. Every focus ends on a key press,
+  // after a Tab: outlines also need one since the last pointer press.
+  await page.keyboard.press('Tab')
   const tabs = page.getByRole('tablist', { name: 'Run views' })
   await tabs.getByRole('tab', { name: 'Terminal' }).focus()
   await page.keyboard.press('ArrowLeft')
@@ -214,6 +216,11 @@ test('keyboard focus paints a visible outline on the shell controls', async ({
   await board.click()
   await expect(board).toBeFocused()
   expect((await indicator(board)).outlineStyle).toBe('none')
+
+  // Nor may any other key followed by a scripted focus move, as when Enter sends.
+  await page.keyboard.press('Shift')
+  await missions.focus()
+  expect((await indicator(missions)).outlineStyle).toBe('none')
 })
 
 test('resizing the sidebar follows the pointer delta and keeps minimum controls reachable', async ({

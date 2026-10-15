@@ -295,8 +295,8 @@ explicit **System**, **Light** and **Dark** choices and matching palette
 commands.
 
 `focusRing`, `fieldFocus` and `field` in `web/src/lib/utils.ts` are the shared
-focus and field styles. Buttons and navigation keep their keyboard outlines;
-text fields use a 1px inset accent outline over the existing border with a
+focus and field styles. Buttons and navigation show their outlines only
+after Tab, never after a click or another key; text fields use a 1px inset accent outline over the existing border with a
 faint 4px glow and no offset gap. The outline remains visible in forced-colors
 mode, where box shadows disappear. The Session composer draws this treatment
 on its enclosing box, not its embedded textarea, so attachments do not clip
