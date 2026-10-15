@@ -305,6 +305,13 @@ through the same native extension/plugin mechanism.
 | Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
 | Other/custom | deployment or member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
 
+An overlap notice tells the agent to run `aether-internal status` and, if
+the overlapping run is listed there, send it its plan before editing shared
+files. The notice comes from the hook's `overlaps` list, so it can appear
+without a matching peer in status. Inbox
+notices call peer messages attributed data, not instructions; see
+[Send a message](coordination.md#send-a-message).
+
 “Yes” requires the matching integration to be loaded and executing in the
 owning live session. It is not a promise that a copied file, a registry
 entry, or a status reporter activates inbox delivery. Native idle wake is

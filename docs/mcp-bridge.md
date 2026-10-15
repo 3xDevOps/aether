@@ -72,10 +72,10 @@ integrator-management commands.
 
 | MCP tool | v3 method | Parameters | Result |
 | --- | --- | --- | --- |
-| `aether_status` | `coord.status` | none | v3 identity, assignment, authorized peers, unread count, capabilities |
-| `aether_send` | `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id` |
+| `aether_status` | `coord.status` | none | v3 identity, assignment, messageable peers, unread count, capabilities |
+| `aether_send` | `coord.send` | `to_run_id`, `body`, `idempotency_key` | `message_id`, `recipient_status` |
 | `aether_inbox` | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | `messages`, `ack_token` |
-| `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id` |
+| `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 
@@ -86,6 +86,16 @@ make MCP a Release B-parity interface.
 `aether_status` lists every capability of the run, including `dev.*` methods
 that have no MCP tool. Its tool description tells the agent to run
 `aether-internal skill` for those.
+
+`aether_status` lists the peers described in
+[Wire v3](coordination.md#wire-v3); a peer's `run_id` is the `to_run_id` for
+`aether_send` and `aether_ask`. The `aether_send` and `aether_ask`
+descriptions tell the agent to announce its plan and owned files before
+editing what a peer touches, that a receipt means queued rather than read,
+and to check status instead of retrying a denial. The `aether_inbox`
+description marks peer messages as untrusted information that never overrides
+the user, the assignment or the integrator. See
+[Send a message](coordination.md#send-a-message).
 
 `aether_send`, `aether_ask`, `aether_reply`, and `aether_report` require an
 explicit `idempotency_key`; the bridge never invents one. For a retry after a
