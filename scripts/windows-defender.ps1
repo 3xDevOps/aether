@@ -1,10 +1,12 @@
 # Disposable GitHub-hosted runners only: Prepare removes inherited antivirus
 # exclusions before artifacts arrive. Scan uses that baseline to reject every
 # new detection, including threats Defender has already remediated.
+# StartUpdate runs Update in the background so a job can overlap the signature
+# download with other work; the next Prepare waits for it instead of updating.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Prepare', 'Scan')]
+    [ValidateSet('StartUpdate', 'Update', 'Prepare', 'Scan')]
     [string]$Mode,
     [string]$ArtifactDirectory = 'dist'
 )
@@ -17,6 +19,8 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 }
 
 $statePath = Join-Path $env:RUNNER_TEMP 'aether-defender-state.json'
+$updatePath = Join-Path $env:RUNNER_TEMP 'aether-defender-update'
+$deadline = (Get-Date).AddMinutes(5)
 $mpcmdrun = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
 $scanningFlags = @(
     'DisableRealtimeMonitoring', 'DisableIOAVProtection',
@@ -67,28 +71,118 @@ function Assert-Protection {
     }
 }
 
+# Fresh runners update the Defender platform shortly after boot, which
+# restarts WinDefend. Meanwhile cmdlets fail with 0x800106ba (RPC server
+# unavailable), MpCmdRun with 0x80070652 (another update is installing), and
+# real-time protection reports disabled for a while after it is enabled.
+function Wait-Defender([switch]$RealTime) {
+    while ($true) {
+        $service = Get-Service -Name WinDefend
+        if ($service.StartType -eq 'Disabled') {
+            throw 'The WinDefend service is disabled on this runner image.'
+        }
+        try {
+            if ($service.Status -eq 'Stopped') { Start-Service -Name WinDefend }
+            $status = Get-MpComputerStatus
+            $state = "AMServiceEnabled=$($status.AMServiceEnabled) AntivirusEnabled=$($status.AntivirusEnabled) RealTimeProtectionEnabled=$($status.RealTimeProtectionEnabled)"
+            if ($status.AMServiceEnabled -and $status.AntivirusEnabled -and (-not $RealTime -or $status.RealTimeProtectionEnabled)) {
+                return
+            }
+        } catch {
+            $state = "$_"
+            Write-Host "Defender is not answering yet; retrying: $state"
+        }
+        if ((Get-Date) -gt $deadline) {
+            throw "Defender was not ready by $deadline. WinDefend: $($service.Status). Last status: $state"
+        }
+        Start-Sleep -Seconds 5
+    }
+}
+
+function Invoke-Defender([string]$Action, [scriptblock]$Command) {
+    while ($true) {
+        Wait-Defender
+        try {
+            & $Command
+            return
+        } catch {
+            if ("$_" -notmatch '0x800106ba|0x80070652' -or (Get-Date) -gt $deadline) {
+                throw "${Action} failed: $_"
+            }
+            Write-Host "${Action} hit a Defender restart or concurrent update; retrying: $_"
+        }
+        Start-Sleep -Seconds 10
+    }
+}
+
+function Update-Signatures {
+    Invoke-Defender 'Defender signature update' {
+        $output = (& $mpcmdrun -SignatureUpdate) -join "`n"
+        Write-Host $output
+        if ($LASTEXITCODE -ne 0) { throw "MpCmdRun exit ${LASTEXITCODE}: $output" }
+    }
+}
+
+if ($Mode -eq 'StartUpdate') {
+    # Without redirection Start-Process uses ShellExecute, so the child holds
+    # no copy of this step's output pipes and the runner does not wait for it.
+    $process = Start-Process -FilePath powershell.exe -PassThru -WindowStyle Hidden `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Mode', 'Update')
+    Set-Content -LiteralPath "$updatePath.pid" -Value "$($process.Id) $($process.StartTime.ToFileTimeUtc())"
+    Write-Host "Defender signature update running in the background as process $($process.Id)."
+    return
+}
+if ($Mode -eq 'Update') {
+    try {
+        Update-Signatures *> "$updatePath.log"
+        Set-Content -LiteralPath "$updatePath.ok" -Value $env:GITHUB_RUN_ID
+    } catch {
+        Add-Content -LiteralPath "$updatePath.log" -Value "$_"
+        throw
+    }
+    return
+}
+
 Write-Evidence "## Windows Defender: $Mode"
 if ($Mode -eq 'Prepare') {
     # Record before arming or downloading, so real-time detections during the
     # download cannot become part of a later, apparently clean baseline.
-    $baseline = @(Get-MpThreatDetection | ForEach-Object { [string]$_.DetectionID })
-    Set-MpPreference -DisableRealtimeMonitoring $false
-    Set-MpPreference -DisableIOAVProtection $false
-    Set-MpPreference -DisableBehaviorMonitoring $false
-    Set-MpPreference -DisableScriptScanning $false
-    Set-MpPreference -DisableArchiveScanning $false
-    Set-MpPreference -DisableBlockAtFirstSeen $false
-    Set-MpPreference -MAPSReporting 2
-    Set-MpPreference -SubmitSamplesConsent 1
-    $preferences = Get-MpPreference
-    if ($preferences.ExclusionPath) { Remove-MpPreference -ExclusionPath $preferences.ExclusionPath }
-    if ($preferences.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $preferences.ExclusionProcess }
-    if ($preferences.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $preferences.ExclusionExtension }
-    & $mpcmdrun -SignatureUpdate
-    if ($LASTEXITCODE -ne 0) {
-        throw "Defender signature update failed (exit $LASTEXITCODE)."
+    $baseline = @(Invoke-Defender 'Reading the detection baseline' {
+        Get-MpThreatDetection | ForEach-Object { [string]$_.DetectionID }
+    })
+    Invoke-Defender 'Arming Defender' {
+        Set-MpPreference -DisableRealtimeMonitoring $false
+        Set-MpPreference -DisableIOAVProtection $false
+        Set-MpPreference -DisableBehaviorMonitoring $false
+        Set-MpPreference -DisableScriptScanning $false
+        Set-MpPreference -DisableArchiveScanning $false
+        Set-MpPreference -DisableBlockAtFirstSeen $false
+        Set-MpPreference -MAPSReporting 2
+        Set-MpPreference -SubmitSamplesConsent 1
+        $preferences = Get-MpPreference
+        if ($preferences.ExclusionPath) { Remove-MpPreference -ExclusionPath $preferences.ExclusionPath }
+        if ($preferences.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $preferences.ExclusionProcess }
+        if ($preferences.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $preferences.ExclusionExtension }
     }
-    Assert-Protection
+    if (Test-Path -LiteralPath "$updatePath.pid") {
+        # Windows reuses process IDs quickly, so match the start time as well.
+        $updateId, $updateStart = (Get-Content -LiteralPath "$updatePath.pid" -Raw).Trim() -split ' '
+        try {
+            Get-Process -Id $updateId -ErrorAction SilentlyContinue |
+                Where-Object { $_.StartTime.ToFileTimeUtc() -eq [long]$updateStart } |
+                Wait-Process -Timeout ([math]::Max(1, [int]($deadline - (Get-Date)).TotalSeconds))
+        } finally {
+            Write-Host 'Background signature update output:'
+            Get-Content -LiteralPath "$updatePath.log" -ErrorAction Continue | ForEach-Object { Write-Host $_ }
+        }
+        if (-not (Test-Path -LiteralPath "$updatePath.ok")) {
+            throw 'The background Defender signature update failed; its output is above.'
+        }
+    } else {
+        Update-Signatures
+    }
+    Wait-Defender -RealTime
+    Invoke-Defender 'Verifying Defender protection' { Assert-Protection }
     [ordered]@{
         RunID = $env:GITHUB_RUN_ID
         RunAttempt = $env:GITHUB_RUN_ATTEMPT

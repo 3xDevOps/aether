@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Start the Defender signature update in the background
+        shell: powershell
+        run: ./scripts/windows-defender.ps1 -Mode StartUpdate
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -75,22 +78,7 @@ jobs:
           save-modules: 'false'
       - name: Enable Defender realtime and cloud protection
         shell: powershell
-        run: |
-          Set-MpPreference -DisableRealtimeMonitoring $false
-          Set-MpPreference -DisableIOAVProtection $false
-          Set-MpPreference -DisableBehaviorMonitoring $false
-          Set-MpPreference -DisableScriptScanning $false
-          Set-MpPreference -DisableArchiveScanning $false
-          Set-MpPreference -DisableBlockAtFirstSeen $false
-          Set-MpPreference -ScanAvgCPULoadFactor 50
-          Set-MpPreference -MAPSReporting 2
-          Set-MpPreference -SubmitSamplesConsent 1
-          $p = Get-MpPreference
-          if ($p.ExclusionPath) { Remove-MpPreference -ExclusionPath $p.ExclusionPath }
-          if ($p.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $p.ExclusionProcess }
-          if ($p.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $p.ExclusionExtension }
-          & "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -SignatureUpdate
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: ./scripts/windows-defender.ps1 -Mode Prepare
       - name: Install, rebuild, and launch the desktop under Defender
         run: ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" ${{ matrix.smokeArgs }}
       - name: Upload the installed desktop screenshot
