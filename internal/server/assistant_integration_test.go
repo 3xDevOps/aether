@@ -241,6 +241,24 @@ func (e *assistantEnv) watch(ctx context.Context, afterSeq int64) *assistantFram
 	return out
 }
 
+// sessionMode is the mode the live assistant session reports in its stream
+// ack.
+func (e *assistantEnv) sessionMode(ctx context.Context) string {
+	e.t.Helper()
+	stream, ack, err := e.srv.ssh.Local(e.member.ID).Assistant(ctx, protocol.AssistantStreamRequest{})
+	if err != nil {
+		e.t.Fatalf("assistant stream: %v (%+v)", err, ack)
+	}
+	_ = stream.Close()
+	var state struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(ack.State, &state); err != nil {
+		e.t.Fatalf("assistant stream ack state %q: %v", ack.State, err)
+	}
+	return state.Mode
+}
+
 // until returns the first frame match accepts.
 func (f *assistantFrames) until(t *testing.T, what string, match func(protocol.AssistantFrame) bool) protocol.AssistantFrame {
 	t.Helper()
@@ -300,17 +318,21 @@ func TestIntegrationAssistant(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
-	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1" {
+	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 IS_SANDBOX=1" {
 		t.Fatalf("adapter env = %q", got)
 	}
 	if !strings.HasSuffix(execs[0].spec.WorkingDir, "/.aether/assistant") {
 		t.Fatalf("adapter working directory = %q, want $HOME/.aether/assistant", execs[0].spec.WorkingDir)
 	}
-	for _, name := range []string{"AGENTS.md", "CLAUDE.md", ".claude/settings.json"} {
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		b, err := os.ReadFile(filepath.Join(env.data, "homes", string(env.member.ID), ".aether", "assistant", name))
 		if err != nil || len(b) == 0 {
 			t.Fatalf("%s in the assistant directory = %q, %v", name, b, err)
 		}
+	}
+
+	if mode := env.sessionMode(ctx); mode != "bypassPermissions" {
+		t.Fatalf("new assistant session mode = %q, want bypassPermissions", mode)
 	}
 
 	frames := env.watch(ctx, 0)
@@ -433,7 +455,7 @@ func TestIntegrationAssistant(t *testing.T) {
 		t.Fatalf("restarted adapter received %v, want a resume of the stored session", methods)
 	}
 	if !slices.Contains(methods, "session/set_mode") {
-		t.Fatalf("restarted adapter received %v, want the asking mode set", methods)
+		t.Fatalf("restarted adapter received %v, want the session mode set", methods)
 	}
 
 	viewer := env.watch(ctx, 0)

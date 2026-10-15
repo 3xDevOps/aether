@@ -43,12 +43,6 @@ const (
 	maxKeys      = 128
 )
 
-// claudeSettings lets Claude Code call the Aether tools without asking: the
-// server holds the confirmed ones for the member's approval, and the shell
-// still asks.
-const claudeSettings = `{"permissions":{"allow":["mcp__aether"]}}
-`
-
 var (
 	// ErrNotRunning means the member's assistant has no live session.
 	ErrNotRunning = errors.New("assistant: no live session; send a prompt or start it")
@@ -394,11 +388,11 @@ func (s *Service) ensureLocked(ctx context.Context, m *member, requested string)
 }
 
 func (s *Service) open(ctx context.Context, m *member, agent string, row *store.AssistantSession) (*session, error) {
-	argv, askMode, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
+	launch, err := s.cfg.Runs.AssistantAdapter(ctx, m.id, agent)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
-	files := map[string]string{"AGENTS.md": Instructions, "CLAUDE.md": Instructions, ".claude/settings.json": claudeSettings}
+	files := map[string]string{"AGENTS.md": Instructions, "CLAUDE.md": Instructions}
 	for name, content := range files {
 		if err = s.cfg.Homes.HomeUpload(m.id, workDir+"/"+name, []byte(content), true); err != nil {
 			return nil, fmt.Errorf("assistant: write %s: %w", name, err)
@@ -416,7 +410,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)
 		}
 	})
-	live, err := s.openSession(ctx, m, agent, askMode, argv, row)
+	live, err := s.openSession(ctx, m, agent, launch, row)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -426,7 +420,8 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	return live, nil
 }
 
-func (s *Service) openSession(ctx context.Context, m *member, agent, askMode string, argv []string, row *store.AssistantSession) (*session, error) {
+func (s *Service) openSession(ctx context.Context, m *member, agent string, launch scheduler.AssistantLaunch, row *store.AssistantSession) (*session, error) {
+	argv, mode := launch.Argv, launch.Mode
 	if err := s.stopStale(ctx, m, row); err != nil {
 		return nil, err
 	}
@@ -436,7 +431,7 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 	}
 	exec, cwd, err := s.cfg.Runs.StartAssistantExec(ctx, m.id, runtime.ExecSpec{
 		Argv: argv, WorkingDir: workDir, CreationKey: "assistant-" + rand.Text(),
-		Env: []string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"},
+		Env: append([]string{"AETHER_ASSISTANT=1", "NO_BROWSER=1"}, launch.Env...),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assistant: start %s: %w", argv[0], err)
@@ -470,10 +465,10 @@ func (s *Service) openSession(ctx context.Context, m *member, agent, askMode str
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("assistant: open the %s session%s: %w", agent, stderr.suffix(), err), stopExec(exec))
 	}
-	if acpSess.State().Mode != askMode {
-		if err = acpSess.SetMode(ctx, askMode); err != nil {
+	if acpSess.State().Mode != mode {
+		if err = acpSess.SetMode(ctx, mode); err != nil {
 			_ = acpSess.Close()
-			return nil, errors.Join(fmt.Errorf("assistant: set the %q mode, without which the assistant does not run: %w", askMode, err), stopExec(exec))
+			return nil, errors.Join(fmt.Errorf("assistant: set the %q mode: %w", mode, err), stopExec(exec))
 		}
 	}
 	record.HarnessSessionID = acpSess.SessionID()

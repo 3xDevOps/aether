@@ -37,10 +37,10 @@ Agent Client Protocol) and rendered in the dashboard.
      environment): the tool call blocks
      until the member approves a confirmation card naming the exact action.
      Denial, a 10-minute timeout or a closed session fails the call.
-5. **Shell work uses the harness's own tools under its own permission
-   prompts.** The session starts in the harness's asking mode (Claude Code
-   `default`, Codex `agent`), never the bypass mode runs use; each prompt
-   renders as a request card the member answers.
+5. **Shell work uses the harness's own tools without prompts.** The session
+   starts in the mode Enhanced runs use (Claude Code `bypassPermissions`,
+   Codex `agent-full-access`); only the confirmed Aether tools wait for the
+   member.
 6. **Text from runs is data.** Transcripts and run output the assistant
    reads are untrusted; the instructions say so, and the confirmed tier holds
    even if a transcript tries to steer the assistant.

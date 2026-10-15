@@ -486,22 +486,20 @@ container, driven from the dashboard. The boundaries:
   call goes away. The socket does not serve
   `assistant.confirm`; the approval is a control call from the member's own
   dashboard session.
-- **Shell work asks first.** The session starts in the harness's asking mode
-  (Claude Code `default`, Codex `agent`), not the bypass mode runs use. Each
-  prompt goes to the member as a request card.
+- **Shell work does not ask.** The session starts in the mode Enhanced runs
+  use (Claude Code `bypassPermissions`, Codex `agent-full-access`), so the
+  agent's shell and file tools run without a prompt. The tiers above are the
+  only approvals, and they are enforced by the server, not the harness.
 - **Run text is untrusted.** Transcripts and output the assistant reads can
   contain injected instructions. The assistant's instructions say to treat
   them as data, but the control is the server: a steered assistant still
   cannot launch, message or stop a run, or save the environment, without a
-  click.
+  click. It can run commands in the member's environment, which is the
+  member's own container.
 - **No account sharing.** The assistant session always uses the sign-in in the
   member's own home and counts against their own subscription. Runs it
   launches may use quota fallback onto accounts shared with the member, the
   same as the member's own launches.
-- **Claude Code settings.** The server writes
-  `~/.aether/assistant/.claude/settings.json` allowing the `aether` MCP tools,
-  so read tools do not each prompt. The confirmed tools are held by the
-  server, and the shell still asks.
 
 Stated plainly:
 
@@ -517,7 +515,7 @@ Stated plainly:
 The agent is a process in the member's
 environment container, the same as `aether terminal`. It can read the member's
 home, including agent logins and other credentials, and run any command there
-subject only to the harness's permission prompts. Tiers gate Aether
+without asking. Tiers gate Aether
 operations, not what the shell can do to the container. The assistant is told
 not to reveal secrets, which is an instruction, not a control.
 
