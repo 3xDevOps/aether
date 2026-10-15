@@ -396,9 +396,6 @@ func (d *DB) SubmitAttempt(ctx context.Context, id domain.AttemptID, authority, 
 	if err != nil {
 		return nil, err
 	}
-	if len(scopeJSON) > domain.MaxMissionScopeBytes || len(scopeViolations) > domain.MaxTaskEvidenceRequirements {
-		return nil, ErrMissionLimit
-	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err

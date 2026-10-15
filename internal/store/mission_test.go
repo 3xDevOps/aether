@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -404,6 +405,47 @@ func mustSubmitMissionAttempt(t *testing.T, db *DB, mission *domain.Mission, tas
 		t.Fatalf("SubmitAttempt: %v", err)
 	}
 	return submission
+}
+
+func TestSubmitAttemptKeepsEveryScopeViolation(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	mission := mustCreateMission(t, db, workspace.ID, member.ID)
+	task := mustCreateMissionTask(t, db, mission.ID, "wide change")
+	attempt, _, err := reserveMissionAttempt(t, db, mission, task, "wide-change")
+	if err != nil {
+		t.Fatalf("ReserveAttempt: %v", err)
+	}
+	run := &domain.Run{ID: attempt.RunID, WorkspaceID: workspace.ID, MemberID: member.ID, Task: task.Revision.Title, Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunQueued}
+	if createErr := db.CreateRunWithID(ctx, run); createErr != nil {
+		t.Fatalf("CreateRunWithID: %v", createErr)
+	}
+	violations := make([]string, 200)
+	for i := range violations {
+		violations[i] = fmt.Sprintf("outside/%s/%03d.go", strings.Repeat("d", 400), i)
+	}
+	submission, err := db.SubmitAttempt(ctx, attempt.ID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.SubmissionRef{
+		WorkspaceID: workspace.ID, RunID: attempt.RunID, EvidenceRef: "packet-wide", RetainedRevision: "tree-wide",
+	}, []domain.SubmissionEvidence{{Kind: "retained_packet", Ref: "packet-wide", Available: true}}, violations)
+	if err != nil {
+		t.Fatalf("SubmitAttempt with %d scope violations: %v", len(violations), err)
+	}
+	stored, err := db.GetSubmission(ctx, submission.ID)
+	if err != nil {
+		t.Fatalf("GetSubmission: %v", err)
+	}
+	if !slices.Equal(stored.ScopeViolations, violations) {
+		t.Fatalf("stored scope violations = %d paths, want all %d", len(stored.ScopeViolations), len(violations))
+	}
+	got, err := db.GetAttempt(ctx, attempt.ID)
+	if err != nil {
+		t.Fatalf("GetAttempt: %v", err)
+	}
+	if got.State != domain.AttemptSubmitted {
+		t.Fatalf("attempt state = %q, want submitted", got.State)
+	}
 }
 
 func mustAcceptMissionSubmission(t *testing.T, db *DB, mission *domain.Mission, submission *domain.Submission, key string) *domain.Acceptance {

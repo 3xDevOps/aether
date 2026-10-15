@@ -1358,7 +1358,12 @@ What a report does depends on the run:
   and retention/evidence cleanup has settled. Blocked is a durable
   observation: it does not stop the worker or submit the task. A worker may
   file several blocked reports and still report success or failure after
-  them.
+  them. The submission's `ScopeViolations` lists every path outside the
+  task's accepted scope among the changed files the evidence packet keeps,
+  which is at most 512. If submission fails after the outcome is recorded,
+  the outcome keeps the terminal slot, so a new key conflicts; retry the
+  same idempotency key and inputs. The server's report outbox also retries
+  the submission on its own.
 - **Swarm integrator.** Success completes an `active` swarm and stops
   any leftover workers; it is refused in `planning`. Failure leaves the
   swarm in its phase for another attempt or **Replace integrator**.
