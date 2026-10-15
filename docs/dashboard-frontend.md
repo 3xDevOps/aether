@@ -1863,8 +1863,12 @@ request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another tab**.
 **Multiplayer** still opens Details for shared notes and run facts.
-The watcher roster moves below the controls when the strip is narrow and
-scrolls horizontally rather than replacing names with a count. Offline or
+The strip is one row at every width, so it never costs a second line of
+height. The roster takes the space left between **Multiplayer** and the
+controls and scrolls horizontally rather than replacing names with a count;
+below a 34rem strip it shows avatars with the names kept for screen readers,
+and below 30rem **Multiplayer** keeps only its icon. The controller summary
+truncates instead of wrapping. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
 
@@ -1878,15 +1882,14 @@ generation. Takeover denials belong to the requester, not the holder.
 timeline, under the frame toolbar. The component is one SVG strip, 8rem tall,
 over the top of its parent: a single top-edge path, drawn from right to left
 so the light pours out of the control button, rendered as a blurred wide
-glow and a tight halo under the `pool` mask, a rim under the `rim` mask, and
-a near-white core under the `hot` mask. Each mask holds the same radial
-spots, so every layer brightens at the same pools; all layers inherit the
-SVG's animated `stroke-dashoffset` and colour, which is what the acquisition,
-release, hold and takeover animations drive. While lit, a timer adds a pool
-every five seconds and drops pools older than their 13-second life; each
-spot runs the `control-pool` CSS keyframes with its own peak, drift and a
-negative delay, so the two seed pools start mid-life. During a hold the teal
-copy takes a dash pattern that leaves out the span the red copy covers. Its appearance follows
+glow, a tight halo and a rim. All three inherit the SVG's animated
+`stroke-dashoffset` and colour, which is what the acquisition, release, hold
+and takeover animations drive. Strength is the SVG's own opacity, a separate
+animation: full while the light moves or a hold is under way, then half once
+acquisition settles, breathing on an infinite 8-second loop. Animating the
+`<svg>` element's opacity, not its blurred strokes, lets the compositor run
+the loop without repainting. During a hold the teal copy takes a dash
+pattern that leaves out the span the red copy covers. Its appearance follows
 the acknowledged ACP lease, not the unused agent terminal's history or
 connection state. Voluntary release retracts it; takeover feedback requires
 an explicit revocation matching the held session and generation.
@@ -1925,8 +1928,10 @@ from `next_seq`, which a backward page sets to the head. The list is
 **Send**) posts a room `steer_request` with the lease the tab holds; its rules
 are in [Run control](terminal.md#run-control). A refused send or image upload
 shows the error above the textarea (`role="alert"`, **Dismiss**); Details
-shows only the failures of its own actions. **Hide agent messages** sits on
-its own row above the list. `Esc` in an empty composer focuses the list's
+shows only the failures of its own actions. Details' **Agent messages**
+section ends with **Hide from Session** (**Show in Session** once hidden),
+which drops those messages from the timeline; the choice is per run, in
+`hiddenAgentMessages`, until the page reloads. `Esc` in an empty composer focuses the list's
 viewport; the next `Esc` is the run's `leave-run`.
 
 The composer fills the Session pane with 16px gutters on both sides; on wide

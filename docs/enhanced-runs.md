@@ -125,8 +125,8 @@ line per call with its duration, and click a call for the command, the end of
 its output or its diff. The agent's plan, the files a turn changed (each opens
 **Changes** at that file), notices and a **Finished** line per turn sit in
 between, and
-messages between agents show inline (**Hide agent messages**, above the
-timeline, turns them off). While a turn runs, one moving line says what the
+messages between agents show inline (**Hide from Session**, under **Agent
+messages** in Details, turns them off). While a turn runs, one moving line says what the
 agent is doing now; while it waits on you it reads "Waiting for your
 approval: <command>" or "Waiting for your answer" with an amber dot. When a
 turn ends without a request, the run waits for your reply: the board, the
@@ -152,8 +152,9 @@ timeline components with fixture ACP items, not a live agent.
 The **Multiplayer** strip stays below the view switch, including on Terminal
 and Changes. It shows the controller's name and avatar, each watcher's name
 and avatar, and **Take control** or **Release**. Your name stays visible when
-you control the run. On narrow screens the watcher roster moves to its own
-row; longer rosters scroll horizontally without opening Details.
+you control the run. The strip stays one row: longer rosters scroll
+horizontally without opening Details, and narrow screens show watchers as
+avatars.
 Select **Multiplayer** for shared notes and run details.
 Hold **Take control** for five seconds to
 request an occupied run; the holder has seven seconds to accept or deny
@@ -161,8 +162,8 @@ before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
 
 In Session, the same animated teal control light as a Standard terminal
-glows along the top edge of the conversation, under the toolbar, and pours
-leftward from **Release**. **Release** drains it back to the right; an
+glows along the top edge of the conversation, under the toolbar. It pours
+leftward from **Release**, then dims to half strength and slowly breathes. **Release** drains it back to the right; an
 incoming hold turns it red from the right, and a takeover drains the red
 light. Read-only tabs and disconnected sessions
 have no light. Reduced motion makes ownership changes instant and the takeover

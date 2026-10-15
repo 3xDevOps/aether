@@ -120,10 +120,6 @@
   stroke-dashoffset: 1;
 }
 
-.terminal-control-border mask {
-  stroke: none;
-}
-
 .terminal-control-border .control-glow {
   stroke-width: 40;
   opacity: var(--control-glow);
@@ -135,31 +131,6 @@
 
 .terminal-control-border .control-rim {
   stroke-width: 1.5;
-}
-
-.terminal-control-border .control-core {
-  stroke: color-mix(in oklab, currentColor 25%, white);
-  stroke-width: 2;
-}
-
-@keyframes control-pool {
-  0% {
-    opacity: 0;
-    transform: none;
-    animation-timing-function: ease-in-out;
-  }
-  23% {
-    opacity: var(--peak);
-    animation-timing-function: linear;
-  }
-  77% {
-    opacity: var(--peak);
-    animation-timing-function: ease-in-out;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(var(--drift));
-  }
 }
 
 /* Design tokens, v2. docs/styles.md lists each role. The contrast pairs are

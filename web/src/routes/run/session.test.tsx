@@ -334,6 +334,27 @@ describe('the Enhanced session view', () => {
     expect(api.runInputAnswer).toHaveBeenLastCalledWith('run_1', 'req_1', 'reject', expect.anything(), undefined)
   })
 
+  it('drops agent messages from the timeline from Details', async () => {
+    const body = 'Worker A pushed the overlap warnings.'
+    vi.mocked(api.coordMessagesList).mockResolvedValue({ messages: [{
+      id: 'msg_1', workspace_id: workspace.id, from_run_id: 'run_2', to_run_id: 'run_1', kind: 'message', body, created_at: '2026-10-08T11:30:00Z',
+    }] })
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4 }, [
+      item('turn_start', 1),
+      say(1, 'user', 'Round the totals'),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await screen.findByText(body)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Show details' }))
+    const details = within(await screen.findByRole('dialog', { name: 'Run details' }))
+    fireEvent.click(details.getByRole('button', { name: 'Hide from Session' }))
+    expect(details.getByRole('button', { name: 'Show in Session' })).toBeDefined()
+    expect(screen.getAllByText(body)).toHaveLength(1)
+    fireEvent.click(details.getByRole('button', { name: 'Show in Session' }))
+    await waitFor(() => expect(screen.getAllByText(body)).toHaveLength(2))
+  })
+
   it('points Details at the docked request instead of repeating it', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [permission] }) }, [
