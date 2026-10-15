@@ -64,6 +64,7 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
   const error = useStore((s) => s.messageErrors[key])
   const [all, setAll] = useState(false)
   const [loading, setLoading] = useState(false)
+  const hidden = useStore((s) => s.hiddenAgentMessages[run.id] === true)
   useMessageList(useStore, api, scope)
   if (messages.length === 0 && !run.mission_id) return null
   const label = (id: string) => (id === run.id ? 'This run' : undefined)
@@ -89,6 +90,11 @@ function AgentMessages({ run, inset }: { run: RunRecord; inset: boolean }) {
       </ol>
       {!all && (messages.length > recentMessages || olderCursor) && (
         <Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show all</Button>
+      )}
+      {messages.length > 0 && (
+        <Button size="sm" variant="ghost" onClick={() => useStore.getState().toggleAgentMessages(run.id)}>
+          {hidden ? 'Show in Session' : 'Hide from Session'}
+        </Button>
       )}
     </Section>
   )

@@ -203,13 +203,12 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   switchable: boolean
 }) {
   const enhanced = run.acp === true
-  const [showMessages, setShowMessages] = useState(true)
+  const showMessages = useStore((s) => !s.hiddenAgentMessages[run.id])
   const { rows, session, missingRoomImages } = useRows(run, enhanced, showMessages)
   const expanded = useStore((s) => s.expandedRows[run.id])
   const log = useStore((s) => (enhanced ? undefined : s.sessionLogs[run.id]))
   const roomError = useStore((s) => s.roomError[run.id])
   const roomLoading = useStore((s) => s.roomLoading[run.id] === true)
-  const hasMessages = useStore((s) => (s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids.length ?? 0) > 0)
   const olderRoom = useStore((s) => {
     const page = s.roomPagination[run.id]
     return Boolean(page?.initialized && !page.exhausted && s.roomNextBefore[run.id] !== undefined)
@@ -325,13 +324,6 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
             : agent.controlUnavailable ? 'hidden' : agent.roomControl?.loss ?? 'hidden'}
           takeoverProgress={agent.takeover.holderProgress}
         />
-      )}
-      {hasMessages && (
-        <div className={cn(sessionColumn, 'flex shrink-0 justify-end pt-1')}>
-          <Button size="sm" variant="ghost" aria-pressed={!showMessages} onClick={() => setShowMessages(!showMessages)}>
-            {showMessages ? 'Hide agent messages' : 'Show agent messages'}
-          </Button>
-        </div>
       )}
       {session?.truncatedBefore && (
         <div className={cn(sessionColumn, 'shrink-0 pt-2')}>

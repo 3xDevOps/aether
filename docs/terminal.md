@@ -143,8 +143,10 @@ you answer the agent's permission requests.
 
 Enhanced runs keep a **Multiplayer** strip below the view switch on every
 view. The controller and watchers appear by name with their member avatars,
-alongside **Take control** or **Release**. Watchers move to a separate,
-horizontally scrollable row on narrow screens. **Multiplayer** opens Details
+alongside **Take control** or **Release**, on one row unless the controls
+cannot fit beside the roster, as on a phone, where they wrap to a second
+line. A long roster scrolls horizontally; on narrow screens watchers show as avatars and
+**Multiplayer** as its icon. **Multiplayer** opens Details
 with shared notes and run facts. Run shells keep their own separate
 controls; opening a shell does not take control of the agent.
 
@@ -283,13 +285,13 @@ listed in the run's **Details** panel.
 
 Live local ownership is shown by **You control** and a teal **Release**. Teal
 light glows along the top edge of the terminal viewport only, never the
-toolbar, find bar, or UI above it: a thin rim with two pools of light that
-slowly hand off to new spots, each spilling a soft glow downward. After this
-tab acknowledges live input, the light pours leftward from the right end,
-under **Release**. An acknowledged voluntary release drains it back to the
+toolbar, find bar, or UI above it: a uniform bar with a soft glow spilling
+downward. After this tab acknowledges live input, the light pours leftward
+from the right end, under **Release**, then dims to half strength and slowly
+breathes. An acknowledged voluntary release drains it back to the
 right. Both decelerate toward their endpoints. While another member holds
-**Take control**, red light spreads leftward from the right end over the
-teal. An explicit server takeover notification for this session's current
+**Take control**, the light returns to full strength and red spreads
+leftward from the right end over the teal. An explicit server takeover notification for this session's current
 lease turns the light red, then drains it to the right over about two
 seconds. A completed hold has already made the light red; it stays red
 through the handoff. Presence names never trigger takeover feedback. Input is fenced

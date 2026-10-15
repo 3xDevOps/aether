@@ -75,6 +75,8 @@ export interface SessionsSlice {
 
   acpSessions: Record<string, AcpSession>
   expandedRows: Record<string, Record<string, true>>
+  /** Runs whose Session timeline leaves out messages between agents. */
+  hiddenAgentMessages: Record<string, true>
   acpAck: (runID: string, ack: SessionStreamAck) => void
   acpFrames: (runID: string, frames: SessionFrame[]) => void
   acpOlder: (runID: string, frames: SessionFrame[], more: boolean, truncatedBefore?: boolean) => void
@@ -85,6 +87,7 @@ export interface SessionsSlice {
   acpTakeover: (runID: string, takeover: TakeoverSnapshot | undefined, error?: string) => void
   touchAcpSession: (runID: string, open: (runID: string) => boolean) => void
   toggleSessionRow: (runID: string, rowID: string) => void
+  toggleAgentMessages: (runID: string) => void
 }
 
 export const residentSessions = 3
@@ -215,6 +218,7 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
 
   acpSessions: {},
   expandedRows: {},
+  hiddenAgentMessages: {},
   acpAck: (runID, ack) =>
     set((s) => {
       const held = s.acpSessions[runID] ?? emptySession
@@ -310,6 +314,13 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       if (rows[rowID]) delete rows[rowID]
       else rows[rowID] = true
       return { expandedRows: { ...s.expandedRows, [runID]: rows } }
+    }),
+  toggleAgentMessages: (runID) =>
+    set((s) => {
+      const hidden = { ...s.hiddenAgentMessages }
+      if (hidden[runID]) delete hidden[runID]
+      else hidden[runID] = true
+      return { hiddenAgentMessages: hidden }
     }),
 })
 

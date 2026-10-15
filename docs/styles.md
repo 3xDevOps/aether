@@ -314,8 +314,10 @@ button led by a `StatusDot`: failed, working, done or neutral. Details is a 320p
 never overlays the terminal on wide screens. Standard runs keep control in
 the terminal toolbar; Enhanced runs keep a compact **Multiplayer** strip
 below the view switch on every view. Names and member avatars identify the
-controller and watchers directly in that strip. On narrow strips the watcher
-roster gets its own horizontally scrollable row; control actions stay separate.
+controller and watchers directly in that strip, which stays one row while
+the controls fit beside a 6rem roster and otherwise wraps them to a second
+line. The roster scrolls horizontally, and below 34rem watchers show as avatars and
+below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.
 Request cards use the needs-you soft fill; the Session transcript column is
@@ -354,12 +356,11 @@ session and startup timing.
 
 Live local control lights the top edge of the terminal viewport or the
 Enhanced Session conversation, just under the toolbar; the other edges stay
-dark. The light is a 1.5px `--control-light` rim that brightens where light
-pools, a soft glow spilling down from each pool, and a near-white core at its
-centre. Two pools are lit at a time. Every five seconds the older one fades
-over three seconds while a new one brightens to 70-100% at a random point at
-least a third of the width from the other, and each pool drifts 3% of the
-width over its 13-second life. `--control-light` is the accent teal in light
+dark. The light is a uniform bar across the whole edge: a 1.5px
+`--control-light` rim with a tight halo and a soft glow spilling down. It is
+at full strength while it moves or turns red. Once acquisition settles it
+dims to half over 1.2s, then breathes between 42% and 60% on an 8-second
+cycle. `--control-light` is the accent teal in light
 theme and a brighter teal in dark; `--control-glow` dims the glow to 0.3 in
 light theme. **Release**, shown while you control, has the accent fill;
 **Take control** is a secondary button. The light is pointer-transparent and
@@ -375,6 +376,6 @@ the holder's **Release** diagonally in red and spreads red light leftward
 from the right end of the holder's edge, replacing the teal it reaches; text
 on either side of the fill edge keeps its own contrast. A seven-second holder
 decision follows. Under `prefers-reduced-motion: reduce`, ownership changes
-are instant, two pools stay fixed, and takeover fills and light become
-static red indicators with countdowns; labels keep the state meaning. Loading spinners and delayed skeletons remain functional
+are instant, the settled light holds at half without breathing, and takeover
+fills and light become static red indicators with countdowns; labels keep the state meaning. Loading spinners and delayed skeletons remain functional
 feedback.

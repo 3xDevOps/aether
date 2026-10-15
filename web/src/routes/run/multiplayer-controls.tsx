@@ -55,11 +55,11 @@ export function MultiplayerControls({ run, agent, onPeople }: {
   return (
     <div role="group" aria-label="Multiplayer controls" className="@container/multiplayer shrink-0 border-b border-seam bg-chrome px-2 py-1">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Button size="sm" variant="ghost" hint="See people and notes for this run" onClick={onPeople}>
+        <Button size="sm" variant="ghost" className="shrink-0" hint="See people and notes for this run" onClick={onPeople}>
           <Users />
-          Multiplayer
+          <span className="@max-[30rem]/multiplayer:sr-only">Multiplayer</span>
         </Button>
-        <div className="order-last flex w-full min-w-0 items-center gap-2 px-1 py-1 text-ui-sm @[48rem]/multiplayer:order-none @[48rem]/multiplayer:w-auto @[48rem]/multiplayer:flex-1">
+        <div className="flex min-w-24 flex-1 items-center gap-2 px-1 text-ui-sm">
           <span className="shrink-0 text-muted">Watching{status && staleWatchers && ' (last known)'}</span>
           <div role="group" aria-label="Run watchers" tabIndex={status?.watchers.length ? 0 : undefined} className="flex min-w-0 flex-1 touch-pan-x items-center gap-3 overflow-x-auto whitespace-nowrap">
             {status ? status.watchers.length > 0 ? status.watchers.map((id) => {
@@ -68,19 +68,19 @@ export function MultiplayerControls({ run, agent, onPeople }: {
               return (
                 <span key={id} className="inline-flex shrink-0 items-center gap-1.5">
                   <Avatar name={name} color={member?.color} />
-                  <span>{name}</span>
+                  <span className="@max-[34rem]/multiplayer:sr-only">{name}</span>
                 </span>
               )
             }) : <span className="text-muted">Nobody</span> : <span className="text-muted">{presenceError ? 'Unavailable' : 'Checking…'}</span>}
           </div>
         </div>
-        <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 @[48rem]/multiplayer:flex-initial">
-          {run.protected && <span className="inline-flex items-center gap-1 text-ui-sm text-muted"><Shield />Protected</span>}
+        <div className="ml-auto flex min-w-0 items-center justify-end gap-2">
+          {run.protected && <span className="inline-flex shrink-0 items-center gap-1 text-ui-sm text-muted"><Shield />Protected</span>}
           <div role="group" aria-label="Run controller" className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted">
             {agent.steerable && controllerID && <Avatar name={controllerName ?? controllerID} color={controller?.color} />}
-            <span className="min-w-0 break-words">{agent.steerable ? controllerSummary : agent.starting ? 'Starting…' : 'Run finished · read-only'}</span>
+            <span className="min-w-0 max-w-48 truncate @[48rem]/multiplayer:max-w-none">{agent.steerable ? controllerSummary : agent.starting ? 'Starting…' : 'Run finished · read-only'}</span>
           </div>
-          {agent.steerable && stream !== 'live' && <span className="text-ui-sm text-state-needs-you">{connection}</span>}
+          {agent.steerable && stream !== 'live' && <span className="shrink-0 text-ui-sm text-state-needs-you">{connection}</span>}
           {agent.steerable && maySteer && (
             <ControlButton
               ownsControl={agent.localControl}
@@ -90,7 +90,7 @@ export function MultiplayerControls({ run, agent, onPeople }: {
               takeover={agent.takeover.interaction}
             />
           )}
-          {agent.steerable && !maySteer && <span className="text-ui-sm text-muted">View only</span>}
+          {agent.steerable && !maySteer && <span className="shrink-0 text-ui-sm text-muted">View only</span>}
         </div>
       </div>
       {controlError && <p role="alert" className="px-1 py-1 text-ui-sm text-state-failed">Control request failed: {controlError}</p>}
