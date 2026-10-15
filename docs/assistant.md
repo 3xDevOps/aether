@@ -123,14 +123,16 @@ failure and not retry. The server enforces this; the assistant cannot
 approve for you. If the agent's call goes away, for example because you
 stopped the turn, its card is withdrawn.
 
-## Shell permission prompts
+## Shell and file tools
 
-The assistant's own shell and file tools are the agent's, under the agent's
-permission prompts. It starts in the agent's asking mode (Claude Code
-`default`, Codex `agent`), never the bypass mode runs use. Each prompt appears
-as a card with the command and the agent's options; answer it there, or press
-the number shown on a button. If the mode cannot be set, the start fails with
-`assistant: set the "<mode>" mode, without which the assistant does not run`.
+The assistant's own shell and file tools are the agent's, and they run without
+asking. The session starts in the same mode Enhanced runs use: Claude Code
+`bypassPermissions` (the ACP form of `--dangerously-skip-permissions`), Codex
+`agent-full-access`. Installing a tool, editing a file or running a command in
+your environment therefore needs no click. Only the Aether actions above
+(launch, message, stop, save the environment) wait for a card. If the mode
+cannot be set, the start fails with `assistant: set the "<mode>" mode: <error>`.
+A question the agent asks you still appears as a card.
 
 ## Conversations
 
@@ -147,9 +149,6 @@ and discards the transcript and the agent's session. What the assistant
 already did stays done. The server keeps the transcript in an item log that
 grows for the life of a conversation; **New conversation** clears it, and
 removing a member deletes the assistant's files for that member.
-
-The server also writes `.claude/settings.json` next to those instructions,
-allowing the Aether MCP tools so Claude Code does not prompt for each read.
 
 ## Limits
 

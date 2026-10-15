@@ -216,7 +216,7 @@ func isPathWithin(candidate, root string) bool {
 
 // Profile converts a generic definition to a launch profile. The registry
 // entry of the same name still supplies what is not part of the argv:
-// EnvPassthrough, Env, PermissionEnv, ACPMode, ACPAskMode, ModelArgs and ModelEnv.
+// EnvPassthrough, Env, PermissionEnv, ACPMode, ModelArgs and ModelEnv.
 func (d Definition) Profile() Profile {
 	p := Profile{
 		Name:            d.Name,
@@ -232,7 +232,6 @@ func (d Definition) Profile() Profile {
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
 		p.ACPMode = registered.ACPMode
-		p.ACPAskMode = registered.ACPAskMode
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}
@@ -256,9 +255,6 @@ type Profile struct {
 	// ACPMode is the session mode a new enhanced session starts in: the
 	// agent's mode that acts without asking. Empty keeps the agent's default.
 	ACPMode string
-	// ACPAskMode is the session mode that asks before acting, the one the
-	// assistant runs in. Empty when the agent has none.
-	ACPAskMode string
 	// ACPSystemPrompt marks an ACP server that appends session/new,
 	// session/resume and session/load _meta.systemPrompt.append to the
 	// agent's system prompt, so run instructions need no prompt of their own.
@@ -399,7 +395,6 @@ var profiles = map[string]Profile{
 		ACPArgs:         []string{claudeACP.Binary},
 		ACPInstall:      claudeACP,
 		ACPMode:         "bypassPermissions",
-		ACPAskMode:      "default",
 		ACPTitleLookup:  true,
 		ACPSystemPrompt: true,
 		ACPClaudeCode:   true,
@@ -443,7 +438,6 @@ var profiles = map[string]Profile{
 		ACPArgs:         []string{codexACP.Binary},
 		ACPInstall:      codexACP,
 		ACPMode:         "agent-full-access",
-		ACPAskMode:      "agent",
 		ACPDefault:      true,
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},

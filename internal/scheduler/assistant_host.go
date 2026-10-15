@@ -23,9 +23,9 @@ func AssistantSocketDir(root string, member domain.MemberID) string {
 	return filepath.Join(root, string(member), "sock")
 }
 
-// AssistantAdapter is the argv of agent's ACP server and the session mode in
-// which it asks before acting.
-func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID, agent string) (argv []string, askMode string, err error) {
+// AssistantAdapter is the argv of agent's ACP server and the session mode the
+// assistant runs in: the one Enhanced runs use, which acts without asking.
+func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID, agent string) (argv []string, mode string, err error) {
 	profile, argvs, err := s.launchProfile(ctx, member, member, agent)
 	if err != nil {
 		return nil, "", err
@@ -34,10 +34,10 @@ func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID
 	if len(argv) == 0 {
 		return nil, "", fmt.Errorf("agent %q has no ACP command", agent)
 	}
-	if profile.ACPAskMode == "" {
-		return nil, "", fmt.Errorf("agent %q has no mode that asks before acting", agent)
+	if profile.ACPMode == "" {
+		return nil, "", fmt.Errorf("agent %q has no mode that acts without asking", agent)
 	}
-	return argv, profile.ACPAskMode, nil
+	return argv, profile.ACPMode, nil
 }
 
 // AssistantTerminalStale reports whether the member's running terminal lacks
