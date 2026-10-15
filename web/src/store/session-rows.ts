@@ -21,12 +21,6 @@ export interface WorkItem {
   diffs?: { path: string; patch: string }[]
 }
 
-export interface ChangedFile {
-  path: string
-  additions: number
-  deletions: number
-}
-
 export interface MessageImageRef {
   messageID: string
   index: number
@@ -60,7 +54,6 @@ export type SessionRow =
   | { kind: 'live'; id: string; at: string; label: string; waiting?: boolean }
   | { kind: 'terminal-note'; id: string; at: string }
   | { kind: 'plan'; id: string; at: string; entries: { content: string; status?: string }[] }
-  | { kind: 'changed-files'; id: string; at: string; files: ChangedFile[] }
   | {
       kind: 'request'
       id: string
@@ -161,16 +154,6 @@ function workItem(turn: number, track: ToolTrack, ended: boolean): WorkItem {
     exitCode: call.exit_code,
     diffs: call.diffs?.length ? call.diffs : undefined,
   }
-}
-
-export function patchCounts(patch: string): { additions: number; deletions: number } {
-  let additions = 0
-  let deletions = 0
-  for (const line of patch.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++
-    else if (line.startsWith('-') && !line.startsWith('---')) deletions++
-  }
-  return { additions, deletions }
 }
 
 const stopText: Record<string, [string, Tone]> = {
@@ -369,20 +352,6 @@ export function turnRows(turn: Turn): SessionRow[] {
   flush()
   flushAgents()
 
-  const files = new Map<string, ChangedFile>()
-  for (const { call } of tools.values()) {
-    for (const diff of call.diffs ?? []) {
-      const counted = patchCounts(diff.patch)
-      const prior = files.get(diff.path)
-      files.set(diff.path, {
-        path: diff.path,
-        additions: (prior?.additions ?? 0) + counted.additions,
-        deletions: (prior?.deletions ?? 0) + counted.deletions,
-      })
-    }
-  }
-  const end = ended?.time ?? turn.items.at(-1)?.time ?? ''
-  if (files.size > 0) rows.push({ kind: 'changed-files', id: `files:${turn.turn}`, at: end, files: [...files.values()] })
   if (ended) {
     const [text, tone] = stopText[ended.stop_reason ?? ''] ?? [`Stopped: ${ended.stop_reason ?? 'unknown reason'}`, 'failed']
     const elapsed = started ? Date.parse(ended.time) - Date.parse(started.time) : 0

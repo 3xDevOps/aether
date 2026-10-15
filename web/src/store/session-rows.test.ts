@@ -9,7 +9,7 @@ const turnOf = (items: SessionItem[], closed = true): Turn => ({ turn: items[0]?
 const kinds = (turn: Turn) => turnRows(turn).map((row) => row.kind)
 
 describe('session rows from the item log', () => {
-  it('builds one turn: the person, the work folded, the plan, the answer, the files and the finish', () => {
+  it('builds one turn: the person, the work folded, the plan, the answer and the finish', () => {
     const rows = turnRows(turnOf([
       item('turn_start', 1),
       say(1, 'user', 'round the totals'),
@@ -23,7 +23,7 @@ describe('session rows from the item log', () => {
       say(1, 'assistant', 'Done.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ]))
-    expect(rows.map((row) => row.kind)).toEqual(['user', 'thinking', 'plan', 'work', 'assistant', 'changed-files', 'finished'])
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'thinking', 'plan', 'work', 'assistant', 'finished'])
     expect(rows[2]).toMatchObject({ entries: [{ content: 'Read', status: 'completed' }] })
     expect(rows[3]).toMatchObject({
       summary: 'Read 1 file, ran 1 command and edited 1 file',
@@ -33,8 +33,7 @@ describe('session rows from the item log', () => {
         { label: 'Edited src/a.js' },
       ],
     })
-    expect(rows[5]).toMatchObject({ files: [{ path: 'src/a.js', additions: 1, deletions: 1 }] })
-    expect(rows[6]).toMatchObject({ text: 'Finished in 10s', tone: 'done' })
+    expect(rows[5]).toMatchObject({ text: 'Finished in 10s', tone: 'done' })
   })
 
   it('appends streamed message segments and command output to the first row they opened', () => {
@@ -213,7 +212,6 @@ describe('subagent rows', () => {
     expect(turns.map((turn) => turn.items.length)).toEqual([4, 1])
     const rows = turns.flatMap(rowsOfTurn)
     expect(rows.filter((row) => row.kind === 'work')).toHaveLength(1)
-    expect(rows.filter((row) => row.kind === 'changed-files')).toMatchObject([{ files: [{ additions: 1, deletions: 1 }] }])
   })
 
   it('keeps a carried call running while its snapshots arrive after its turn ended', () => {

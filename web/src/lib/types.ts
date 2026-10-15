@@ -862,6 +862,8 @@ export interface FileDiffStat {
   path: string
   additions: number
   deletions: number
+  /** Absent on snapshots from servers that predate it. */
+  status?: 'added' | 'deleted' | 'modified'
 }
 
 export interface RunDiffPayload {

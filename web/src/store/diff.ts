@@ -1,4 +1,6 @@
-import type { FileDiffStat, Overlap, OverlapPeer, RunPatch } from '@/lib/types'
+import type { Api } from '@/lib/api'
+import type { FileDiffStat, Overlap, OverlapPeer, Run, RunDiffPayload, RunPatch } from '@/lib/types'
+import type { RootStore } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 
 /**
@@ -21,6 +23,29 @@ export interface DiffSnapshot {
   parentTree?: string
   historyGap?: boolean
   snapshotError?: string
+}
+
+export function diffSnapshot(time: string, p: RunDiffPayload): DiffSnapshot {
+  return {
+    time,
+    files: p.files ?? [],
+    truncated: p.truncated,
+    tree: p.tree,
+    parentTree: p.parent_tree,
+    historyGap: p.history_gap,
+    snapshotError: p.snapshot_error,
+  }
+}
+
+export function diffTotals(files: { additions: number; deletions: number }[] | undefined) {
+  if (!files) return undefined
+  let additions = 0
+  let deletions = 0
+  for (const file of files) {
+    additions += file.additions
+    deletions += file.deletions
+  }
+  return { additions, deletions }
 }
 
 /**
@@ -65,6 +90,13 @@ export interface RunDiffState {
   /** The revision the patch, or the error, answers for; -1 before the first. */
   fetched: number
   snapshots: DiffSnapshot[]
+  /**
+   * The newest `run.diff` in the run's history, read while this page has
+   * seen none: `undefined` until answered, `null` when the run has none. Any
+   * live snapshot is newer.
+   */
+  persisted?: DiffSnapshot | null
+  persistedError?: string
 }
 
 export const initialDiff: RunDiffState = {
@@ -85,6 +117,9 @@ const maxSnapshots = 40
 
 export interface DiffSlice {
   diffs: Record<string, RunDiffState>
+  /** Runs whose Session changes bar is expanded. */
+  changesOpen: Record<string, true>
+  toggleChanges: (runID: string) => void
   overlaps: Record<string, OverlapPeer[]>
   setDiff: (runID: string, patch: Partial<RunDiffState>) => void
   applyPatch: (patch: RunPatch, revision: number) => void
@@ -97,6 +132,14 @@ export interface DiffSlice {
 
 export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
   diffs: {},
+  changesOpen: {},
+  toggleChanges: (runID) =>
+    set((s) => {
+      const changesOpen = { ...s.changesOpen }
+      if (changesOpen[runID]) delete changesOpen[runID]
+      else changesOpen[runID] = true
+      return { changesOpen }
+    }),
   overlaps: {},
   setDiff: (runID, patch) =>
     set((s) => ({
@@ -183,3 +226,27 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
       return { overlaps: next }
     }),
 })
+
+/** Runs with a read in flight, and whether a reconnect asked for another after it. */
+const reading = new Map<string, boolean>()
+
+/** Reads the newest persisted `run.diff`, which a page load has not seen.
+ * `fresh` asks for an answer newer than any read already in flight. */
+export async function readPersistedDiff(store: RootStore, client: Api, run: Pick<Run, 'id' | 'workspace_id'>, fresh = false): Promise<void> {
+  if (reading.has(run.id)) {
+    if (fresh) reading.set(run.id, true)
+    return
+  }
+  reading.set(run.id, false)
+  try {
+    const page = await client.workspaceTimeline({ workspace_id: run.workspace_id, run_id: run.id, types: ['run.diff'], newest: true, limit: 1 })
+    const ev = page.events.at(-1)
+    store.getState().setDiff(run.id, { persisted: ev ? diffSnapshot(ev.time, ev.payload as RunDiffPayload) : null, persistedError: undefined })
+  } catch (err) {
+    store.getState().setDiff(run.id, { persistedError: err instanceof Error ? err.message : String(err) })
+  } finally {
+    const again = reading.get(run.id)
+    reading.delete(run.id)
+    if (again) void readPersistedDiff(store, client, run)
+  }
+}

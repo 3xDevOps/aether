@@ -13,6 +13,7 @@ import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { ChangesBar } from '@/routes/run/changes-bar'
 import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
@@ -103,8 +104,8 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
 export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
   if (!turns) return []
   const held = new Set(turns.map((turn) => turn.turn))
-  const lost = [...extras].flatMap(([turn, { orphans, files }]): SessionRow[] => (orphans && !held.has(turn)
-    ? [{ kind: 'subagents', id: `orphans:${turn}`, ...orphans }, ...(files ? [{ kind: 'changed-files' as const, id: `files:${turn}`, at: orphans.at, files }] : [])]
+  const lost = [...extras].flatMap(([turn, { orphans }]): SessionRow[] => (!held.has(turn)
+    ? [{ kind: 'subagents', id: `orphans:${turn}`, ...orphans }]
     : []))
   const rows = byTime(turns.flatMap((turn) => withAgentRows(rowsOfTurn(turn), turn.turn, extras)), lost)
   const open = turns.at(-1)
@@ -421,6 +422,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           <SessionFailureCallout run={run} session={session} switchable={switchable} shells={shells} nav={nav} />
         </div>
       )}
+      <ChangesBar run={run} />
       <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>

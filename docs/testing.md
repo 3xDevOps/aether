@@ -777,7 +777,8 @@ adapters and answers prompts by their text, so tests can drive a permission
 request (`ask permission`), a form question (`ask form`), a turn that runs
 until cancelled (`wait`), Claude's usage-limit prompt error (`hit the usage
 limit`) or a paced turn with a plan, tool calls, command
-output and a diff (`demo`). The
+output and a diff (`demo`; `demo edit` also writes that edit to the
+session's working directory). The
 scheduler's unit tests run it behind the fake runtime;
 `TestIntegrationEnhancedRunDocker` (scheduler) and
 `TestIntegrationEnhancedRunGateway` (server) build it as a static binary and
@@ -801,7 +802,8 @@ the same agent: the e2e fixture `installACPMock` builds it (`go build`, so
 the e2e host needs Go) into the member's `~/.local/bin` and registers it as
 the member agent `mock`. The spec launches an Enhanced run, watches the
 stream, answers a permission with the digit key, expands a work entry's
-diff and interrupts a turn. Its two-member scenario checks shared notes,
+diff, opens the edited file from the changes bar, checks the bar again after
+a reload and interrupts a turn. Its two-member scenario checks shared notes,
 moderated instructions, occupied-click refusal, early hold cancellation,
 holder denial, automatic transfer after the five-second hold and seven-second
 review, explicit release without reacquisition, controls across view switches

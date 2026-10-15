@@ -14,8 +14,7 @@ import { noAgents, turnExtras } from '@/store/subagents'
 const bottomSlack = 24
 
 export function assistantRows(session: AcpSession) {
-  // Changed-files rows open a run's Changes view, which the assistant has none of.
-  return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null).filter((row) => row.kind !== 'changed-files')
+  return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null)
 }
 
 export function Transcript({ session }: { session: AcpSession }) {
@@ -40,7 +39,6 @@ export function Transcript({ session }: { session: AcpSession }) {
     ownerID: self,
     hasAgentTerminal: false,
     openTerminal: () => {},
-    openChange: () => {},
     reveal: () => {},
   }), [self])
 

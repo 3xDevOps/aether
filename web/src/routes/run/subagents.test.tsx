@@ -265,14 +265,6 @@ describe('subagents in the session view', () => {
     expect(within(card).getByText('Its launch is not in the session history · Read billing.js')).toBeDefined()
   })
 
-  it('lists the edits of a subagent whose turn holds no main item', async () => {
-    open()
-    acpSocket().open({}, [tool(1, 'e1', 'edit', 'Edit billing.js', 'completed', { parent_id: 'ghost', diffs: [{ path: 'billing.js', patch: '+a\n' }] })])
-    const log = await screen.findByRole('log', { name: 'Session' })
-    expect(await within(log).findByText('Changed 1 file')).toBeDefined()
-    expect(within(log).getByText('billing.js')).toBeDefined()
-  })
-
   it('previews a report without Latin letters', async () => {
     open()
     acpSocket().open({}, [item('turn_start', 1), launch(1, 'a1', 'Check', 'completed', { content: [{ type: 'text', text: '## 检查完成' }] })])
@@ -336,7 +328,7 @@ describe('subagents in the session view', () => {
     expect(within(within(log).getByRole('button', { name: 'Listing, Explore, Done' })).getByText('bold item')).toBeDefined()
   })
 
-  it('lists a subagent edit once in the main changed-files row', async () => {
+  it('adds no changed-files row for a subagent edit', async () => {
     open()
     acpSocket().open({}, [
       item('turn_start', 1),
@@ -346,9 +338,8 @@ describe('subagents in the session view', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await screen.findByRole('log', { name: 'Session' })
-    await waitFor(() => expect(within(log).getAllByText('a.go')).toHaveLength(1))
-    expect(log.textContent).toContain('+2')
-    expect(log.textContent).toContain('−1')
+    await within(log).findByRole('button', { name: /Edit it/ })
+    expect(log.textContent).not.toContain('Changed')
   })
 
   it('steps and closes subagents without history entries, and ties the group to its cards', async () => {

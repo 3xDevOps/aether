@@ -74,12 +74,12 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
     })
   }, [files, virtual, ids])
 
-  // A link to one file names it in the route; it is opened in the current
-  // diff once that diff has it.
+  // A link to the current diff, or to one file in it, says so in the route;
+  // the file is opened once the diff has it.
   useEffect(() => {
-    if (!isRunRoute(route, runID) || route.params.view !== 'changes' || !route.params.file) return
+    if (!isRunRoute(route, runID) || route.params.view !== 'changes' || (!route.params.file && route.params.diff !== 'current')) return
     setSnapshot(null)
-    setAsked(route.params.file)
+    if (route.params.file) setAsked(route.params.file)
   }, [route, runID])
   useEffect(() => {
     if (!asked || snapshot) return

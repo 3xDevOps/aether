@@ -29,6 +29,7 @@ import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
+import { diffSnapshot } from '@/store/diff'
 import { coalesce } from '@/store/coalesce'
 import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
@@ -600,16 +601,7 @@ export async function applyEvent(
     }
     case 'run.diff': {
       // Also signals that the run's cumulative patch text is behind.
-      const p = ev.payload as RunDiffPayload
-      store.getState().noteDiffSnapshot(ev.run_id, {
-        time: ev.time,
-        files: p.files ?? [],
-        truncated: p.truncated,
-        tree: p.tree,
-        parentTree: p.parent_tree,
-        historyGap: p.history_gap,
-        snapshotError: p.snapshot_error,
-      })
+      store.getState().noteDiffSnapshot(ev.run_id, diffSnapshot(ev.time, ev.payload as RunDiffPayload))
       break
     }
     case 'workspace.approval':

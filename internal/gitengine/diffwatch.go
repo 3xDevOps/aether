@@ -2,6 +2,7 @@ package gitengine
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -882,9 +883,11 @@ func (w *diffWatch) warnTree(err error) {
 // to read.
 var errCountBudget = errors.New("gitengine: untracked content exceeds the stat set's read budget")
 
-// diffStats builds the snapshot stat set: numstat against base for tracked
-// work (committed and uncommitted) plus untracked files at their line
-// counts. Both listings use -z (NUL-separated, unquoted) so non-ASCII
+var rawStatus = map[byte]string{'A': "added", 'D': "deleted"}
+
+// diffStats builds the snapshot stat set: raw status and numstat against
+// base for tracked work (committed and uncommitted) plus untracked files,
+// added at their line counts. Both listings use -z (NUL-separated, unquoted) so non-ASCII
 // paths survive verbatim, and --no-renames so a rename reports its real
 // old and new paths rather than a munged "old => new". Never mutates the
 // index. Sorted by path.
@@ -894,19 +897,26 @@ var errCountBudget = errors.New("gitengine: untracked content exceeds the stat s
 // MaxSnapshotInputBytes, the most a snapshot would stage. truncated reports
 // a file left unread at zero, which makes the totals a floor.
 func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) (files []events.FileDiffStat, truncated bool, err error) {
-	numstat, err := e.gitCheckout(ctx, run, checkout, "diff", "--numstat", "--no-renames", "-z", base)
+	out, err := e.gitCheckout(ctx, run, checkout, "diff", "--raw", "--numstat", "--no-renames", "-z", base)
 	if err != nil {
 		return nil, false, err
 	}
 	files = make([]events.FileDiffStat, 0, 8)
-	for record := range strings.SplitSeq(numstat, "\x00") {
-		parts := strings.SplitN(record, "\t", 3)
+	status := map[string]string{}
+	tokens := strings.Split(out, "\x00")
+	for i := 0; i < len(tokens); i++ {
+		if strings.HasPrefix(tokens[i], ":") && i+1 < len(tokens) {
+			status[tokens[i+1]] = cmp.Or(rawStatus[tokens[i][len(tokens[i])-1]], "modified")
+			i++
+			continue
+		}
+		parts := strings.SplitN(tokens[i], "\t", 3)
 		if len(parts) != 3 {
 			continue
 		}
 		add, _ := strconv.Atoi(parts[0]) // "-" (binary) parses as 0
 		del, _ := strconv.Atoi(parts[1])
-		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del})
+		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del, Status: status[parts[2]]})
 	}
 	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
@@ -929,7 +939,7 @@ func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base
 			continue
 		}
 		budget -= read
-		files = append(files, events.FileDiffStat{Path: path, Additions: lines})
+		files = append(files, events.FileDiffStat{Path: path, Additions: lines, Status: "added"})
 	}
 	slices.SortFunc(files, func(a, b events.FileDiffStat) int {
 		return strings.Compare(a.Path, b.Path)

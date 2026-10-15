@@ -95,34 +95,3 @@ export function OutputTail({ output, exitCode }: { output: string; exitCode?: nu
     </figure>
   )
 }
-
-export function ChangedFiles({
-  files,
-  onOpen,
-}: {
-  files: { path: string; additions: number; deletions: number }[]
-  onOpen: (path: string) => void
-}) {
-  return (
-    <div data-slot="changed-files" className="flex flex-col text-ui-sm">
-      <span className="flex h-6 items-center text-muted">
-        Changed {files.length} {files.length === 1 ? 'file' : 'files'}
-      </span>
-      <ul>
-        {files.map((file) => (
-          <li key={file.path}>
-            <button
-              type="button"
-              onClick={() => onOpen(file.path)}
-              className={cn(focusRingInset, 'flex h-6 w-full min-w-0 items-center gap-2 rounded-control pl-5 text-left hover:bg-hover coarse:h-11')}
-            >
-              <span className="min-w-0 flex-1 truncate font-code text-text">{file.path}</span>
-              <span className="shrink-0 font-code text-diff-add tabular-nums">+{file.additions}</span>
-              <span className="shrink-0 font-code text-diff-del tabular-nums">−{file.deletions}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}

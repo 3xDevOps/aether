@@ -7,9 +7,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +60,9 @@ const (
 	// PromptDemo plays a paced turn with a thought, a plan, reads, a
 	// command with output, an edit with a diff and a markdown answer.
 	PromptDemo = "demo"
+	// PromptDemoEdit plays PromptDemo and also writes its edit to
+	// src/billing.js under the session's cwd.
+	PromptDemoEdit = "demo edit"
 	// PromptSubagents plays a turn in which the main agent launches
 	// subagents the way Claude's adapter reports them: nested, concurrent,
 	// and with later updates that omit the parent link.
@@ -124,6 +130,7 @@ type Agent struct {
 
 	mu      sync.Mutex
 	session string
+	cwd     string
 	// frames says the session asked for Claude Code's task frames; live
 	// maps each live background task to its type.
 	frames  bool
@@ -212,6 +219,7 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 	a.mu.Unlock()
 	var p struct {
 		SessionID string `json:"sessionId"`
+		Cwd       string `json:"cwd"`
 		Prompt    []struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
@@ -228,12 +236,12 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		return a.fix.Initialize, nil
 	case acp.AgentMethodSessionNew:
 		a.mu.Lock()
-		a.session, a.frames = a.fix.SessionID(), frames
+		a.session, a.cwd, a.frames = a.fix.SessionID(), p.Cwd, frames
 		a.mu.Unlock()
 		return a.fix.SessionNew, nil
 	case acp.AgentMethodSessionResume, acp.AgentMethodSessionLoad:
 		a.mu.Lock()
-		a.session, a.frames = p.SessionID, frames
+		a.session, a.cwd, a.frames = p.SessionID, p.Cwd, frames
 		a.mu.Unlock()
 		if method == acp.AgentMethodSessionLoad {
 			for _, u := range a.fix.Load.Updates {
@@ -357,8 +365,8 @@ func (a *Agent) prompt(ctx context.Context, text string) (any, *acp.RequestError
 		content, _ := json.Marshal(res.Content)
 		a.text(ctx, "form: "+res.Action+" "+string(content))
 		return map[string]any{"stopReason": "end_turn"}, nil
-	case PromptDemo:
-		return a.demo(ctx, cancelled), nil
+	case PromptDemo, PromptDemoEdit:
+		return a.demo(ctx, cancelled, text == PromptDemoEdit), nil
 	case PromptSubagents:
 		a.subagents(ctx)
 		return map[string]any{"stopReason": "end_turn"}, nil
@@ -405,6 +413,8 @@ const demoAnswer = "The totals now round to cents before they are returned.\n\n"
 	"```js\nexport function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n```\n\n" +
 	"Run `npm test` again after you change the rounding rule."
 
+const demoNewBilling = "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n"
+
 func demoPlan(done int) json.RawMessage {
 	steps := []string{"Read the billing module", "Run the tests", "Round totals to cents"}
 	entries := make([]map[string]any, len(steps))
@@ -433,7 +443,7 @@ func demoTool(id, kind, title, status string, extra map[string]any) json.RawMess
 	return b
 }
 
-func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
+func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}, write bool) any {
 	thought, _ := json.Marshal(map[string]any{
 		"sessionUpdate": "agent_thought_chunk",
 		"content":       map[string]any{"type": "text", "text": "The billing total should round to cents; read the module and its tests first."},
@@ -456,11 +466,12 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		{demoTool("demo-edit", "edit", "Edit src/billing.js", "completed", map[string]any{"content": []any{map[string]any{
 			"type": "diff", "path": "src/billing.js",
 			"oldText": "export function total(a, b) {\n  return a + b\n}\n",
-			"newText": "export function total(a, b) {\n  return Math.round((a + b) * 100) / 100\n}\n",
+			"newText": demoNewBilling,
 		}}})},
 		{demoPlan(3)},
 	}
-	for _, step := range steps {
+	editStep := len(steps) - 2
+	for i, step := range steps {
 		select {
 		case <-cancelled:
 			return map[string]any{"stopReason": "cancelled"}
@@ -470,6 +481,21 @@ func (a *Agent) demo(ctx context.Context, cancelled <-chan struct{}) any {
 		}
 		for _, u := range step {
 			a.update(ctx, u)
+		}
+		if write && i == editStep {
+			a.mu.Lock()
+			cwd := a.cwd
+			a.mu.Unlock()
+			err := errors.New("the session has no cwd")
+			if cwd != "" {
+				err = os.MkdirAll(filepath.Join(cwd, "src"), 0o755)
+			}
+			if err == nil {
+				err = os.WriteFile(filepath.Join(cwd, "src", "billing.js"), []byte(demoNewBilling), 0o644)
+			}
+			if err != nil {
+				a.text(ctx, "write failed: "+err.Error())
+			}
 		}
 	}
 	for _, word := range strings.SplitAfter(demoAnswer, " ") {

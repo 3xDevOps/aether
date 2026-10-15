@@ -1000,7 +1000,7 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	}
 	first := ev.Payload.(events.RunDiffPayload)
 	files := first.Files
-	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2}) {
+	if len(files) != 1 || files[0] != (events.FileDiffStat{Path: "notes.txt", Additions: 2, Status: "added"}) {
 		t.Fatalf("diff files = %+v", files)
 	}
 	// Every snapshot records a tree, and the first one's parent is the
@@ -1068,10 +1068,10 @@ func TestDiffWatchQuiescence(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("final diff files = %+v", got)
 	}
-	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Additions: 1, Deletions: 1}) {
+	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Additions: 1, Deletions: 1, Status: "modified"}) {
 		t.Errorf("file.txt stat = %+v", got["file.txt"])
 	}
-	if got["sub/deep.txt"] != (events.FileDiffStat{Path: "sub/deep.txt", Additions: 1}) {
+	if got["sub/deep.txt"] != (events.FileDiffStat{Path: "sub/deep.txt", Additions: 1, Status: "added"}) {
 		t.Errorf("sub/deep.txt stat = %+v", got["sub/deep.txt"])
 	}
 
@@ -1391,16 +1391,16 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 	for _, f := range files {
 		got[f.Path] = f
 	}
-	if got["日本語.txt"] != (events.FileDiffStat{Path: "日本語.txt", Additions: 2}) {
+	if got["日本語.txt"] != (events.FileDiffStat{Path: "日本語.txt", Additions: 2, Status: "added"}) {
 		t.Errorf("non-ASCII untracked stat = %+v (files %+v)", got["日本語.txt"], files)
 	}
-	if got[`literal\backslash.txt`] != (events.FileDiffStat{Path: `literal\backslash.txt`, Additions: 2}) {
+	if got[`literal\backslash.txt`] != (events.FileDiffStat{Path: `literal\backslash.txt`, Additions: 2, Status: "added"}) {
 		t.Errorf("backslash untracked stat = %+v (files %+v)", got[`literal\backslash.txt`], files)
 	}
-	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Deletions: 2}) {
+	if got["file.txt"] != (events.FileDiffStat{Path: "file.txt", Deletions: 2, Status: "deleted"}) {
 		t.Errorf("rename old-path stat = %+v", got["file.txt"])
 	}
-	if got["renamed.txt"] != (events.FileDiffStat{Path: "renamed.txt", Additions: 2}) {
+	if got["renamed.txt"] != (events.FileDiffStat{Path: "renamed.txt", Additions: 2, Status: "added"}) {
 		t.Errorf("rename new-path stat = %+v", got["renamed.txt"])
 	}
 	for path := range got {
@@ -1408,7 +1408,7 @@ func TestDiffStatsHostilePaths(t *testing.T) {
 			t.Errorf("mangled path in stat set: %q", path)
 		}
 	}
-	if got["pipelink"] != (events.FileDiffStat{Path: "pipelink", Additions: 1}) {
+	if got["pipelink"] != (events.FileDiffStat{Path: "pipelink", Additions: 1, Status: "added"}) {
 		t.Errorf("symlink stat = %+v", got["pipelink"])
 	}
 }
