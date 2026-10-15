@@ -81,7 +81,7 @@ export function TerminalControlBorder({
   useLayoutEffect(() => {
     const svg = ref.current
     if (!svg) return
-    const level = steady ? 0.5 : 1
+    const level = steady ? 0.5 : 0.7
     if (reducedMotion || !svg.animate) {
       svg.style.opacity = String(level)
       return
@@ -121,10 +121,10 @@ export function TerminalControlBorder({
     <svg ref={ref} aria-hidden="true" className="terminal-control-border" data-control-appearance={appearance}>
       <defs>
         <filter id={`${id}-glow`} filterUnits="userSpaceOnUse" {...region}>
-          <feGaussianBlur stdDeviation="18" />
+          <feGaussianBlur stdDeviation="12.6" />
         </filter>
         <filter id={`${id}-halo`} filterUnits="userSpaceOnUse" {...region}>
-          <feGaussianBlur stdDeviation="3" />
+          <feGaussianBlur stdDeviation="2.1" />
         </filter>
       </defs>
       {/* Red replaces the teal it reaches rather than mixing over it. */}

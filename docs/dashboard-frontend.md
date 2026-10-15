@@ -1881,13 +1881,13 @@ automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
 `SessionView` reuses `TerminalControlBorder` along the top of the Enhanced
-timeline, under the frame toolbar. The component is one SVG strip, 8rem tall,
+timeline, under the frame toolbar. The component is one SVG strip, 5.6rem tall,
 over the top of its parent: a single top-edge path, drawn from right to left
 so the light pours out of the control button, rendered as a blurred wide
 glow, a tight halo and a rim. All three inherit the SVG's animated
 `stroke-dashoffset` and colour, which is what the acquisition, release, hold
 and takeover animations drive. Strength is the SVG's own opacity, a separate
-animation: full while the light moves or a hold is under way, then half once
+animation: 70% while the light moves or a hold is under way, then half once
 acquisition settles, breathing on an infinite 8-second loop. Animating the
 `<svg>` element's opacity, not its blurred strokes, lets the compositor run
 the loop without repainting. During a hold the teal copy takes a dash
