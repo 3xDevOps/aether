@@ -1584,7 +1584,9 @@ signed release binary: the client sends no script, URL or version. It
 downloads the pinned Sysbox package, verifies its SHA-256 and installs it with
 `apt-get`, in a transient systemd unit named `aether-sysbox-install` when the
 host runs systemd; it may also add `bip` and `default-address-pools` to
-`/etc/docker/daemon.json`. A server that does not run as root answers off and
+`/etc/docker/daemon.json`. On Ubuntu hosts that enforce the `fusermount3`
+AppArmor profile it also appends mount rules for `/var/lib/sysboxfs/**/` to
+`/etc/apparmor.d/local/fusermount3`; a failed install reverts both files. A server that does not run as root answers off and
 names `sudo aether-server sysbox install`. While it runs, a server update
 is refused with a conflict error. Only admins can call either Sysbox
 method. An admin can already run arbitrary code on the Docker daemon, so

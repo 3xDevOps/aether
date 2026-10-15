@@ -343,6 +343,22 @@ as failed, and the server stops using `sysbox-runc` for new containers until an
 install succeeds. Running the script again on a host that already has the
 package runs the probe too, and exits 4 if it fails.
 
+On Ubuntu 25.04 and later, an enforced AppArmor profile for `fusermount3`
+allows FUSE mounts only under home, `/mnt`, `/run/user`, `/media`, `/tmp` and
+`/cvmfs`, so every Sysbox container fails with `failed to pre-register with
+sysbox-fs` ([sysbox#947](https://github.com/nestybox/sysbox/issues/947)).
+When `/etc/apparmor.d/fusermount3` is loaded in enforce mode, the script
+appends FUSE mount and unmount rules for `/var/lib/sysboxfs/**/` only, between
+`# BEGIN aether sysbox` and `# END aether sysbox`, to
+`/etc/apparmor.d/local/fusermount3` and reloads the profile, which stays
+enforced. It retries the probe once after 3 seconds, because Sysbox can fail
+intermittently when containers start concurrently
+([sysbox#1044](https://github.com/nestybox/sysbox/issues/1044)). Any failure
+after the script first changed the host purges `sysbox-ce`, removes the
+override and restores `/etc/docker/daemon.json` (or deletes it if the script
+created it), without restarting Docker. If `daemon.json` changed in between
+beyond Sysbox's own `runtimes` entry, the script leaves it and says so.
+
 The server picks its container runtime from `--container-runtime` (config
 key `container-runtime`). With `auto` it keeps `sysbox-runc` once it sees it
 and looks again once a minute while Docker lacks it, so a Sysbox you just

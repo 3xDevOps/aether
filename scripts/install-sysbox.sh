@@ -15,6 +15,11 @@
 # running. It then checks that bind mounts are ID-mapped, which Sysbox needs
 # and which takes Linux 5.19 or newer, or the shiftfs module.
 #
+# On a host where Ubuntu enforces an AppArmor profile for fusermount3, it also
+# adds a narrow override to /etc/apparmor.d/local/fusermount3 so Sysbox's
+# filesystem can mount under /var/lib/sysboxfs. A failure after the first host
+# change purges the package and undoes the AppArmor and daemon.json edits.
+#
 # Exit status: 0 installed, 3 the host cannot run Sysbox (not Debian or
 # Ubuntu, unsupported architecture, no ID-mapped mounts, no Docker), 4 Sysbox
 # is registered with Docker but failed the bind-mount probe and could not be
@@ -29,8 +34,73 @@ SHA256_ARM64="04ca894ae0b53f0fa54eaacc173ce40363c9a95ea5450f773716a84ef650a69b"
 BASE_URL="${AETHER_SYSBOX_BASE_URL:-https://github.com/nestybox/sysbox/releases/download/v${VERSION}}"
 DAEMON_JSON="${AETHER_SYSBOX_DAEMON_JSON:-/etc/docker/daemon.json}"
 
+AA_DIR="${AETHER_SYSBOX_APPARMOR_DIR:-/etc/apparmor.d}"
+AA_PROFILES="${AETHER_SYSBOX_APPARMOR_PROFILES:-/sys/kernel/security/apparmor/profiles}"
+aa_profile="$AA_DIR/fusermount3"
+aa_local="$AA_DIR/local/fusermount3"
+aa_begin="# BEGIN aether sysbox"
+aa_end="# END aether sysbox"
+
+tmp=
+tmp_json=
+fail_msg=
+rolling=no
+daemon_edited=no
+daemon_existed=no
+aa_added=no
+aa_created=no
+pkg_attempted=no
+
+# Whether daemon.json differs from the script's own edit only by the
+# sysbox-runc runtime entry that the package's postinst adds and postrm removes.
+daemon_json_unchanged() {
+	filter='del(.runtimes["sysbox-runc"]) | if (.runtimes // {}) == {} then del(.runtimes) else . end'
+	now="$(jq -S -c "$filter" "$DAEMON_JSON" 2>/dev/null)" || return 1
+	wrote="$(jq -S -c "$filter" "$tmp_json")" || return 1
+	[ "$now" = "$wrote" ]
+}
+
+rollback() {
+	[ "$rolling" = no ] || return 0
+	rolling=yes
+	if [ "$pkg_attempted" = yes ] && dpkg-query -W sysbox-ce >/dev/null 2>&1; then
+		say "removing Sysbox again: apt-get purge -y sysbox-ce"
+		apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce || broken "${fail_msg}; apt-get purge -y sysbox-ce also failed"
+		tries=0
+		while runtimes | grep -q '"sysbox-runc"'; do
+			tries=$((tries + 1))
+			[ "$tries" -lt 15 ] || broken "${fail_msg}; Docker still lists sysbox-runc after the purge"
+			sleep 1
+		done
+		say "Sysbox was removed again"
+	fi
+	if [ "$aa_added" = yes ]; then
+		sed "/^${aa_begin}\$/,/^${aa_end}\$/d" "$aa_local" >"$tmp/aa.local"
+		if [ "$aa_created" = yes ] && [ ! -s "$tmp/aa.local" ]; then
+			rm -f "$aa_local"
+		else
+			cat "$tmp/aa.local" >"$aa_local"
+		fi
+		say "removed the AppArmor override from ${aa_local}"
+		aa_out="$(apparmor_parser -r "$aa_profile" 2>&1)" || echo "install-sysbox: cannot reload ${aa_profile}: ${aa_out}" >&2
+	fi
+	if [ "$daemon_edited" = yes ]; then
+		if [ -e "$DAEMON_JSON" ] && ! daemon_json_unchanged; then
+			say "left ${DAEMON_JSON} as it is: it changed beyond the Sysbox runtime entry after this script edited it"
+		elif [ "$daemon_existed" = yes ]; then
+			cat "$tmp/daemon.orig" >"$DAEMON_JSON"
+			say "restored ${DAEMON_JSON} to its original content"
+		else
+			rm -f "$DAEMON_JSON"
+			say "removed ${DAEMON_JSON}, which did not exist before"
+		fi
+	fi
+}
+
 die() {
 	echo "install-sysbox: $*" >&2
+	fail_msg="$*"
+	rollback
 	exit 1
 }
 
@@ -81,7 +151,7 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 # Sets probe_reason and returns 1 when a container on sysbox-runc cannot write
 # a host directory it owns, which means bind mounts are not ID-mapped. A failed
 # image pull says nothing about Sysbox and dies instead.
-run_probe() {
+probe_once() {
 	probe="$tmp/probe"
 	mkdir -p "$probe"
 	chown 1000:1000 "$probe"
@@ -93,7 +163,24 @@ run_probe() {
 	42) probe_reason="bind mounts are not ID-mapped on this host: a container user cannot write a host directory it owns: ${probe_out}" ;;
 	*) probe_reason="cannot start the bind-mount probe container (exit ${probe_rc}): ${probe_out}" ;;
 	esac
+	case "$probe_out" in
+	*"pre-register with sysbox-fs"*)
+		if command -v journalctl >/dev/null 2>&1; then
+			probe_reason="${probe_reason}
+sysbox-fs log (journalctl -u sysbox-fs --no-pager -n 20):
+$(journalctl -u sysbox-fs --no-pager -n 20 2>&1)"
+		fi
+		;;
+	esac
 	return 1
+}
+
+# One retry covers the intermittent "FuseServer InitWait error" under
+# concurrent container creation (sysbox #1044).
+run_probe() {
+	probe_once && return 0
+	sleep 3
+	probe_once
 }
 
 # Sysbox is registered but unusable, and this script is not removing it.
@@ -269,6 +356,11 @@ if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
 	jq --indent 4 --arg bip "$BIP" --arg base "$POOL_BASE" --argjson add_bip "$add_bip" --argjson add_pool "$add_pool" \
 		'(if $add_bip then .bip = $bip else . end) | (if $add_pool then ."default-address-pools" = [{"base": $base, "size": 24}] else . end)' \
 		"$source_json" >"$tmp_json" || die "cannot edit ${DAEMON_JSON}"
+	if [ -e "$DAEMON_JSON" ]; then
+		cp "$DAEMON_JSON" "$tmp/daemon.orig"
+		daemon_existed=yes
+	fi
+	daemon_edited=yes
 	mkdir -p "$(dirname "$DAEMON_JSON")"
 	cat "$tmp_json" >"$DAEMON_JSON"
 	[ "$add_bip" = false ] || say "added \"bip\": \"${BIP}\" to ${DAEMON_JSON}"
@@ -276,7 +368,32 @@ if [ "$add_bip" = true ] || [ "$add_pool" = true ]; then
 	say "Docker applies these at its next restart; this script does not restart it, and running containers keep running"
 fi
 
+# Ubuntu 25.04 and later enforce an AppArmor profile that lets fusermount3
+# mount only under home, /mnt, /run/user, /media, /tmp and /cvmfs, which blocks
+# sysbox-fs (sysbox #947, #1005).
+if [ -f "$aa_profile" ] && grep -q 'fusermount3 (enforce)' "$AA_PROFILES" 2>/dev/null &&
+	! grep -qF "$aa_begin" "$aa_local" 2>/dev/null; then
+	fuse_types='@{fuse_types}'
+	grep -qF '@{fuse_types}' "$aa_profile" || fuse_types='fuse.*'
+	mkdir -p "$(dirname "$aa_local")"
+	[ -e "$aa_local" ] || aa_created=yes
+	aa_added=yes
+	if [ -s "$aa_local" ] && [ -n "$(tail -c1 "$aa_local")" ]; then
+		echo >>"$aa_local"
+	fi
+	cat >>"$aa_local" <<EOT
+${aa_begin}
+mount fstype=${fuse_types} options=(nosuid,nodev,rw) -> /var/lib/sysboxfs/**/,
+mount fstype=${fuse_types} options=(nosuid,nodev,ro) -> /var/lib/sysboxfs/**/,
+umount /var/lib/sysboxfs/**/,
+${aa_end}
+EOT
+	aa_out="$(apparmor_parser -r "$aa_profile" 2>&1)" || die "apparmor_parser -r ${aa_profile} failed: ${aa_out}"
+	say "added mount rules to ${aa_local}: lets Sysbox's filesystem mount under /var/lib/sysboxfs; Ubuntu's fusermount3 profile blocks it otherwise"
+fi
+
 say "installing ${deb}"
+pkg_attempted=yes
 apt_install "$tmp/$deb"
 
 tries=0
@@ -288,18 +405,7 @@ done
 
 say "Docker lists sysbox-runc"
 
-if ! run_probe; then
-	echo "install-sysbox: ${probe_reason}" >&2
-	say "removing Sysbox again: apt-get purge -y sysbox-ce"
-	apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce || broken "${probe_reason}; apt-get purge -y sysbox-ce also failed"
-	tries=0
-	while runtimes | grep -q '"sysbox-runc"'; do
-		tries=$((tries + 1))
-		[ "$tries" -lt 15 ] || broken "${probe_reason}; Docker still lists sysbox-runc after the purge"
-		sleep 1
-	done
-	die "${probe_reason}. Sysbox was removed again"
-fi
+run_probe || die "${probe_reason}"
 say "bind-mount probe passed"
 echo
 echo "New runs and terminals use Sysbox within a minute. Existing containers keep their runtime."
