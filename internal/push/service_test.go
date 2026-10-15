@@ -529,7 +529,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
@@ -544,7 +544,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
@@ -559,7 +559,7 @@ func TestNotifyReturnsTheDeviceError(t *testing.T) {
 	gone := h.subscribe(h.ada)
 	gone.answer.Store(http.StatusGone)
 	run := h.run(h.ada, "Task", domain.LaunchACP)
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil); !errors.Is(err, ErrDelivery) {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, nil); !errors.Is(err, ErrDelivery) {
 		t.Fatalf("Notify = %v, want ErrDelivery", err)
 	}
 }
@@ -571,7 +571,7 @@ func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
 	run := h.run(h.ada, "Task", domain.LaunchACP)
 	h.svc.Active(h.ada.ID)
 	var asked atomic.Bool
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, func(context.Context) bool {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, func(context.Context) bool {
 		asked.Store(true)
 		return false
 	}); err != nil {
@@ -581,4 +581,31 @@ func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
 		t.Fatal("the need was not checked again")
 	}
 	phone.expectNone(t, testQuiet)
+}
+
+func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Task", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	flush := make(chan struct{})
+	done := make(chan error, 2)
+	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, flush, nil) }()
+	go func() {
+		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, flush, func(context.Context) bool { return false })
+	}()
+	phone.expectNone(t, testQuiet/3)
+	start := time.Now()
+	close(flush)
+	phone.expect(t, notification{Title: "kept", Body: "b", Run: string(run.ID)})
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if time.Since(start) > testQuiet {
+		t.Fatalf("flush took %v, want it to skip the %v quiet window", time.Since(start), testQuiet)
+	}
+	phone.expectNone(t, testQuiet/3)
 }

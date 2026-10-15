@@ -717,10 +717,20 @@ func (s *Session) Answer(requestID, optionID string, content map[string]any) err
 	return s.conn.answer(requestID, optionID, content)
 }
 
-func (s *Session) Notice(severity, title, description string) {
+// Notice records a notice item. It returns ErrClosed once the session is
+// closed, and the log's error when the item was not recorded.
+func (s *Session) Notice(severity, title, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}})
+	if s.closed {
+		return ErrClosed
+	}
+	it := Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}, Turn: s.turn}
+	if err := s.log.Append(&it); err != nil {
+		return fmt.Errorf("acphost: record notice: %w", err)
+	}
+	s.fanoutLocked(it)
+	return nil
 }
 
 func (s *Session) ListSessions(ctx context.Context, cwd, cursor string) ([]SessionSummary, string, error) {
@@ -818,6 +828,10 @@ func (s *Session) appendLocked(it Item) {
 		s.logger.Error("acphost: item not recorded", "kind", it.Kind, "err", err)
 		return
 	}
+	s.fanoutLocked(it)
+}
+
+func (s *Session) fanoutLocked(it Item) {
 	for ch := range s.subs {
 		select {
 		case ch <- it:

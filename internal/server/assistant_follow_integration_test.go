@@ -21,9 +21,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// TestIntegrationAssistantFollowsRun launches a run through the assistant's
-// tool socket and checks that Aether itself tells the member when it needs
-// them and when it finishes: once per state, in the transcript and on the bus.
 func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)

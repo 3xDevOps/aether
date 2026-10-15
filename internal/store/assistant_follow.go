@@ -8,23 +8,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// AssistantFollow is a run Aether watches for a member whose assistant
-// launched or messaged it.
 type AssistantFollow struct {
-	MemberID domain.MemberID
-	RunID    domain.RunID
-	// NotifiedKey identifies the last state announced to the member.
+	MemberID    domain.MemberID
+	RunID       domain.RunID
 	NotifiedKey string
 	CreatedAt   time.Time
 }
 
-// AssistantFollowStore persists the runs followed for members. Removing a
-// member or a run removes its follows.
 type AssistantFollowStore interface {
-	// PutAssistantFollow records the follow; one that exists is kept as is.
 	PutAssistantFollow(ctx context.Context, member domain.MemberID, run domain.RunID) error
 	ListAssistantFollows(ctx context.Context, run domain.RunID) ([]*AssistantFollow, error)
-	// ListFollowedRuns returns every run with a follow.
 	ListFollowedRuns(ctx context.Context) ([]domain.RunID, error)
 	SetAssistantFollowNotified(ctx context.Context, member domain.MemberID, run domain.RunID, key string) error
 	DeleteAssistantFollow(ctx context.Context, member domain.MemberID, run domain.RunID) error

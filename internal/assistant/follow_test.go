@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -292,7 +295,6 @@ func newServiceFixture(t *testing.T, run *domain.Run) *serviceFixture {
 	rs := &fakeRunState{}
 	svc := New(Config{Dir: t.TempDir(), Store: newMemStore(), Bus: bus, Follows: fs})
 	svc.follower = &follower{store: fs, runs: rs, deliver: svc.enqueue, queued: map[[2]string]string{}}
-	svc.queues, svc.delivering = map[domain.MemberID][]notice{}, map[domain.MemberID]bool{}
 	return &serviceFixture{svc: svc, fs: fs, rs: rs}
 }
 
@@ -428,7 +430,7 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var calls []call
-	x.svc.UseNotifier(func(_ context.Context, member domain.MemberID, _, _ string, _ domain.RunID, current func(context.Context) bool) error {
+	x.svc.UseNotifier(func(_ context.Context, member domain.MemberID, _, _ string, _ domain.RunID, _ <-chan struct{}, current func(context.Context) bool) error {
 		mu.Lock()
 		defer mu.Unlock()
 		calls = append(calls, call{member, current != nil})
@@ -452,5 +454,101 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 	slices.SortFunc(want, func(a, b call) int { return strings.Compare(string(a.member), string(b.member)) })
 	if !slices.Equal(calls, want) {
 		t.Fatalf("pushes = %+v, want the owner's finish and the other member's need only: %+v", calls, want)
+	}
+}
+
+func TestAFinishThatOverlapsAnOlderNoticeIsQueuedOnce(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "agent idle"), follows: map[domain.MemberID]*store.AssistantFollow{}}
+	_ = fs.PutAssistantFollow(ctx, "m1", "run-1")
+	var queued []notice
+	f := &follower{store: fs, runs: &fakeRunState{}, queued: map[[2]string]string{}, deliver: func(n notice) { queued = append(queued, n) }}
+	f.check(ctx, "run-1", false)
+	fs.setRun(newRun(domain.RunCompleted, ""))
+	f.check(ctx, "run-1", false)
+	if len(queued) != 2 {
+		t.Fatalf("queued %d notices, want the attention and the finish", len(queued))
+	}
+	f.finish(queued[0], true)
+	f.check(ctx, "run-1", false)
+	if len(queued) != 2 {
+		t.Fatalf("the finish was queued again behind the older notice: %d queued", len(queued))
+	}
+	f.finish(queued[1], true)
+	if len(fs.follows) != 0 || len(f.queued) != 0 {
+		t.Fatalf("follows %v and queued %v after the finish", fs.follows, f.queued)
+	}
+}
+
+func TestANoticeReachesTheTranscriptWhetherOrNotTheSessionTakesIt(t *testing.T) {
+	t.Parallel()
+	fix, err := acpmock.Load("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := newServiceFixture(t, newRun(domain.RunCompleted, ""))
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go acpmock.New(fix).Serve(agentIn, agentOut)
+	sess, err := acphost.Start(t.Context(), hostIn, hostOut, acphost.Config{LogPath: x.svc.logPath("m1"), Cwd: t.TempDir(), Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := x.svc.member("m1")
+	m.mu.Lock()
+	m.sess = &session{acp: sess, ended: make(chan struct{})}
+	m.mu.Unlock()
+
+	n := *classify(x.fs.run, nil, nil, nil)
+	n.member = "m1"
+	if err := x.svc.transcribe(m, n); err != nil {
+		t.Fatalf("a live session: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = agentOut.Close()
+	_ = agentIn.Close()
+	<-sess.Done()
+	if err := sess.Notice("info", "late", ""); !errors.Is(err, acphost.ErrClosed) {
+		t.Fatalf("Notice on a closed session = %v, want ErrClosed", err)
+	}
+	n.title = "after the close"
+	if err := x.svc.transcribe(m, n); err != nil {
+		t.Fatalf("a closed session: %v", err)
+	}
+	log := x.transcript("m1")
+	if !strings.Contains(log, `finished`) || !strings.Contains(log, "after the close") {
+		t.Fatalf("transcript = %q, want both notices", log)
+	}
+}
+
+func TestACloseSendsThePushesStillWaitingForTheMember(t *testing.T) {
+	ctx := context.Background()
+	x := newServiceFixture(t, newRun(domain.RunCompleted, ""))
+	sent := make(chan string, 1)
+	x.svc.UseNotifier(func(ctx context.Context, _ domain.MemberID, title, _ string, _ domain.RunID, flush <-chan struct{}, _ func(context.Context) bool) error {
+		select {
+		case <-flush:
+			sent <- title
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
+	x.svc.follower.check(ctx, "run-1", false)
+	eventually(t, "the finish to be announced", func() bool { _, ok := x.fs.notified("m1"); return !ok })
+	if err := x.svc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case title := <-sent:
+		if !strings.Contains(title, "finished") {
+			t.Fatalf("pushed %q", title)
+		}
+	default:
+		t.Fatal("Close dropped the push waiting for the member")
 	}
 }

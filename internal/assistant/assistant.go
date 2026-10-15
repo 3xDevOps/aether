@@ -58,13 +58,11 @@ var (
 type Config struct {
 	// Dir is the host directory holding <member>/items.jsonl and
 	// <member>/sock.
-	Dir    string
-	Store  store.AssistantStore
-	Homes  *memberhome.Manager
-	Runs   *scheduler.Scheduler
-	Caller func(domain.MemberID) tools.Caller
-	// Bus and Follows enable following runs; without either, nothing is
-	// followed.
+	Dir     string
+	Store   store.AssistantStore
+	Homes   *memberhome.Manager
+	Runs    *scheduler.Scheduler
+	Caller  func(domain.MemberID) tools.Caller
 	Bus     events.Bus
 	Follows FollowStore
 }
@@ -79,19 +77,25 @@ type Service struct {
 	members map[domain.MemberID]*member
 	sub     events.Subscription
 
-	follower *follower
-	notify   Notifier
-	// dmu guards the per-member notice queues and who is delivering them.
+	follower   *follower
+	notify     Notifier
 	dmu        sync.Mutex
 	queues     map[domain.MemberID][]notice
 	delivering map[domain.MemberID]bool
+	pushing    int
+	flush      chan struct{}
+	flushOnce  sync.Once
+	pushCtx    context.Context
+	pushCancel context.CancelFunc
 }
 
 func New(cfg Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
+	s.queues, s.delivering = make(map[domain.MemberID][]notice), make(map[domain.MemberID]bool)
+	s.flush = make(chan struct{})
+	s.pushCtx, s.pushCancel = context.WithCancel(context.Background())
 	if cfg.Bus != nil && cfg.Follows != nil && cfg.Runs != nil {
-		s.queues, s.delivering = make(map[domain.MemberID][]notice), make(map[domain.MemberID]bool)
 		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue, queued: make(map[[2]string]string)}
 	}
 	return s
@@ -209,7 +213,7 @@ func (s *Service) Close() error {
 	if sub != nil {
 		_ = sub.Close()
 	}
-	s.drainNotices()
+	s.shutdownNotices()
 	s.cancel()
 	s.mu.Lock()
 	members := make([]*member, 0, len(s.members))
@@ -766,6 +770,19 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 		return false, err
 	}
 	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+	if errors.Is(err, acphost.ErrClosed) {
+		// The adapter died after ensure saw it alive: once its session has
+		// ended, start a new one and send there.
+		select {
+		case <-live.ended:
+		case <-ctx.Done():
+			return false, fmt.Errorf("assistant: wait for the ended session: %w", ctx.Err())
+		}
+		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
+			return false, err
+		}
+		started, err = live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+	}
 	switch {
 	case err == nil && !started:
 		return false, ErrTurnRunning

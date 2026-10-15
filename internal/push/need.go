@@ -81,8 +81,6 @@ func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputR
 	}
 }
 
-// AttentionBody says why a needs-attention run waits, as a notification
-// would, or "" when the status carries no reason worth announcing.
 func AttentionBody(run *domain.Run) string {
 	return clip(statusBody(run, run.MissionRole == "worker", false, false), maxBodyRunes)
 }

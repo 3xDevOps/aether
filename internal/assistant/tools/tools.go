@@ -65,8 +65,6 @@ type Server struct {
 	// Member is the member the socket belongs to; "mine" in a run.list
 	// request selects their runs.
 	Member string
-	// Follow, when set, is told the id of each run a launch or message
-	// reached, after it succeeded.
 	Follow func(ctx context.Context, runID string)
 }
 
@@ -219,7 +217,6 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 	return result, rpcErr
 }
 
-// followed is the run a successful launch or message reached.
 func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	switch req.Method {
 	case protocol.MethodRunLaunch:

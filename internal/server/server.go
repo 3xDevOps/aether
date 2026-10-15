@@ -441,12 +441,11 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		DeleteWorkspace:   workspaces.Delete,
 	}
 	s.assistant = assistant.New(assistant.Config{
-		Dir:    filepath.Join(cfg.DataDir, "assistant"),
-		Store:  s.db,
-		Homes:  homes,
-		Runs:   s.sched,
-		Caller: func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
-		// Follows run notices the member's assistant owes them.
+		Dir:     filepath.Join(cfg.DataDir, "assistant"),
+		Store:   s.db,
+		Homes:   homes,
+		Runs:    s.sched,
+		Caller:  func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
 		Bus:     s.bus,
 		Follows: s.db,
 	})

@@ -507,7 +507,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	var modelErr error
 	if run.Model != "" {
 		if modelErr = sess.SetModel(ctx, run.Model); modelErr != nil {
-			sess.Notice("error", "Model not set", modelErr.Error())
+			if err := sess.Notice("error", "Model not set", modelErr.Error()); err != nil {
+				slog.Warn("scheduler: record the model notice", "run", runID, "error", err)
+			}
 		}
 	}
 	r := &acpRun{session: sess, exec: exec, stderr: stderr}
