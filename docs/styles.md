@@ -314,8 +314,9 @@ button led by a `StatusDot`: failed, working, done or neutral. Details is a 320p
 never overlays the terminal on wide screens. Standard runs keep control in
 the terminal toolbar; Enhanced runs keep a compact **Multiplayer** strip
 below the view switch on every view. Names and member avatars identify the
-controller and watchers directly in that strip, which stays one row: the
-roster scrolls horizontally, and below 34rem watchers show as avatars and
+controller and watchers directly in that strip, which stays one row while
+the controls fit beside a 6rem roster and otherwise wraps them to a second
+line. The roster scrolls horizontally, and below 34rem watchers show as avatars and
 below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.

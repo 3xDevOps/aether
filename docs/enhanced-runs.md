@@ -152,7 +152,8 @@ timeline components with fixture ACP items, not a live agent.
 The **Multiplayer** strip stays below the view switch, including on Terminal
 and Changes. It shows the controller's name and avatar, each watcher's name
 and avatar, and **Take control** or **Release**. Your name stays visible when
-you control the run. The strip stays one row: longer rosters scroll
+you control the run. The strip stays one row unless the controls cannot fit
+beside the roster: longer rosters scroll
 horizontally without opening Details, and narrow screens show watchers as
 avatars.
 Select **Multiplayer** for shared notes and run details.

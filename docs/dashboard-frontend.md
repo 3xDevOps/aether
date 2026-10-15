@@ -1863,12 +1863,14 @@ request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another tab**.
 **Multiplayer** still opens Details for shared notes and run facts.
-The strip is one row at every width, so it never costs a second line of
-height. The roster takes the space left between **Multiplayer** and the
-controls and scrolls horizontally rather than replacing names with a count;
+The strip is one row whenever the controls fit beside a 6rem roster, which
+covers desktop windows. Only when they cannot, as on a phone with
+**Protected** and a connection word, do the controls wrap to a second line
+rather than overlap the roster. The roster takes the space left between
+**Multiplayer** and the controls and scrolls horizontally rather than replacing names with a count;
 below a 34rem strip it shows avatars with the names kept for screen readers,
 and below 30rem **Multiplayer** keeps only its icon. The controller summary
-truncates instead of wrapping. Offline or
+truncates instead of wrapping, at 12rem below a 48rem strip. Offline or
 failed presence reads mark the retained roster **(last known)**. Control and
 presence failures stay beside the action rather than inside a closed composer.
 

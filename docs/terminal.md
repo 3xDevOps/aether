@@ -143,8 +143,9 @@ you answer the agent's permission requests.
 
 Enhanced runs keep a **Multiplayer** strip below the view switch on every
 view. The controller and watchers appear by name with their member avatars,
-alongside **Take control** or **Release**, on one row at every width. A long
-roster scrolls horizontally; on narrow screens watchers show as avatars and
+alongside **Take control** or **Release**, on one row unless the controls
+cannot fit beside the roster, as on a phone, where they wrap to a second
+line. A long roster scrolls horizontally; on narrow screens watchers show as avatars and
 **Multiplayer** as its icon. **Multiplayer** opens Details
 with shared notes and run facts. Run shells keep their own separate
 controls; opening a shell does not take control of the agent.
