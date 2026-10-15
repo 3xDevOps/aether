@@ -93,6 +93,9 @@ func TestAssistantFollows(t *testing.T) {
 			t.Fatalf("%s notified %q, want %q", f.MemberID, f.NotifiedKey, want)
 		}
 	}
+	if runs, err := db.ListFollowedRuns(ctx); err != nil || len(runs) != 1 || runs[0] != run.ID {
+		t.Fatalf("followed runs = %v, %v", runs, err)
+	}
 	if err := db.SetAssistantFollowNotified(ctx, ada, "missing", "k"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("notifying a missing follow: %v, want ErrNotFound", err)
 	}

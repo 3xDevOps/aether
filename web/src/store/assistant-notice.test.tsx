@@ -4,7 +4,7 @@ import { Toaster } from 'sonner'
 import { AssistantButton } from '@/components/assistant/button'
 import type { AssistantNoticePayload, Event } from '@/lib/types'
 import { useStore } from '@/store'
-import { applyEvent } from '@/store/sync'
+import { applyEvent, hydrate } from '@/store/sync'
 import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
 
 const now = new Date('2026-10-15T12:00:00Z')
@@ -84,6 +84,14 @@ describe('assistant.notice', () => {
     await deliver(notice({}, { time: new Date(now.getTime() - 10 * 60_000).toISOString() }))
     expect(screen.queryByText('Fix login finished')).toBeNull()
     expect(screen.getByRole('button', { name: 'Assistant, 1 update' })).toBeTruthy()
+  })
+
+  it('judges liveness on the server clock when the client clock is skewed', async () => {
+    await act(async () => {
+      await hydrate(useStore, fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfo, time: new Date(now.getTime() - 5 * 60_000).toISOString() })) }))
+    })
+    await deliver(notice({ title: 'Skewed clock' }, { time: new Date(now.getTime() - 5 * 60_000).toISOString() }))
+    expect(await screen.findByText('Skewed clock')).toBeTruthy()
   })
 
   it('names requests and updates in the button label, and opening the panel clears the updates', async () => {

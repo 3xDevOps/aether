@@ -529,7 +529,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
@@ -544,7 +544,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
@@ -559,7 +559,26 @@ func TestNotifyReturnsTheDeviceError(t *testing.T) {
 	gone := h.subscribe(h.ada)
 	gone.answer.Store(http.StatusGone)
 	run := h.run(h.ada, "Task", domain.LaunchACP)
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID); !errors.Is(err, ErrDelivery) {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil); !errors.Is(err, ErrDelivery) {
 		t.Fatalf("Notify = %v, want ErrDelivery", err)
 	}
+}
+
+func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Task", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	var asked atomic.Bool
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, func(context.Context) bool {
+		asked.Store(true)
+		return false
+	}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if !asked.Load() {
+		t.Fatal("the need was not checked again")
+	}
+	phone.expectNone(t, testQuiet)
 }

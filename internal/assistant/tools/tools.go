@@ -213,7 +213,7 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 	result, rpcErr := s.Caller.Call(ctx, req.Method, req.Params)
 	if rpcErr == nil && s.Follow != nil {
 		if id := s.followed(req, result); id != "" {
-			s.Follow(ctx, id)
+			s.Follow(context.WithoutCancel(ctx), id)
 		}
 	}
 	return result, rpcErr

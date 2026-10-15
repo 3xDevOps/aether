@@ -80,16 +80,19 @@ type Service struct {
 	sub     events.Subscription
 
 	follower *follower
-	notices  chan notice
 	notify   Notifier
+	// dmu guards the per-member notice queues and who is delivering them.
+	dmu        sync.Mutex
+	queues     map[domain.MemberID][]notice
+	delivering map[domain.MemberID]bool
 }
 
 func New(cfg Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
 	if cfg.Bus != nil && cfg.Follows != nil && cfg.Runs != nil {
-		s.notices = make(chan notice, 128)
-		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue}
+		s.queues, s.delivering = make(map[domain.MemberID][]notice), make(map[domain.MemberID]bool)
+		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue, queued: make(map[[2]string]string)}
 	}
 	return s
 }
@@ -200,11 +203,15 @@ func (s *Service) logPath(id domain.MemberID) string {
 }
 
 func (s *Service) Close() error {
+	s.mu.Lock()
+	sub := s.sub
+	s.mu.Unlock()
+	if sub != nil {
+		_ = sub.Close()
+	}
+	s.drainNotices()
 	s.cancel()
 	s.mu.Lock()
-	if s.sub != nil {
-		_ = s.sub.Close()
-	}
 	members := make([]*member, 0, len(s.members))
 	for _, m := range s.members {
 		members = append(members, m)

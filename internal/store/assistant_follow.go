@@ -24,6 +24,8 @@ type AssistantFollowStore interface {
 	// PutAssistantFollow records the follow; one that exists is kept as is.
 	PutAssistantFollow(ctx context.Context, member domain.MemberID, run domain.RunID) error
 	ListAssistantFollows(ctx context.Context, run domain.RunID) ([]*AssistantFollow, error)
+	// ListFollowedRuns returns every run with a follow.
+	ListFollowedRuns(ctx context.Context) ([]domain.RunID, error)
 	SetAssistantFollowNotified(ctx context.Context, member domain.MemberID, run domain.RunID, key string) error
 	DeleteAssistantFollow(ctx context.Context, member domain.MemberID, run domain.RunID) error
 }
@@ -57,6 +59,26 @@ func (d *DB) ListAssistantFollows(ctx context.Context, run domain.RunID) ([]*Ass
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list assistant follows: %w", err)
+	}
+	return out, nil
+}
+
+func (d *DB) ListFollowedRuns(ctx context.Context) ([]domain.RunID, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT run_id FROM assistant_follows ORDER BY run_id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list followed runs: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var out []domain.RunID
+	for rows.Next() {
+		var id domain.RunID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: list followed runs: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list followed runs: %w", err)
 	}
 	return out, nil
 }

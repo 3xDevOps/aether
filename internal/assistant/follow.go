@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -24,6 +25,7 @@ const maxNoticeBodyRunes = 500
 type FollowStore interface {
 	store.AssistantFollowStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
+	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	ListApprovals(ctx context.Context, workspace domain.WorkspaceID, decision string) ([]*store.Approval, error)
 }
 
@@ -33,8 +35,13 @@ type RunState interface {
 	ACPPending(run domain.RunID) []acphost.Request
 }
 
-// Notifier sends a push notification about run to member's devices.
-type Notifier func(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID) error
+// Notifier sends a push notification about run to member's devices. A
+// non-nil current is asked again just before sending, and a false answer
+// drops the notification.
+type Notifier func(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, current func(context.Context) bool) error
+
+// closeDrain bounds how long Close waits for queued notices to be delivered.
+var closeDrain = 5 * time.Second
 
 // notice is one announcement to a member about a followed run.
 type notice struct {
@@ -51,38 +58,27 @@ type notice struct {
 type follower struct {
 	store   FollowStore
 	runs    RunState
-	deliver func(ctx context.Context, n notice)
+	deliver func(n notice)
 
-	// mu serializes checks, so one state is announced once however many
-	// events and records ask for it.
+	// mu guards queued and serializes the reads that decide what to announce.
 	mu sync.Mutex
+	// queued holds the key of each notice handed to delivery and not yet
+	// finished, by member and run, so a state is queued once.
+	queued map[[2]string]string
 }
 
-// check announces the state of run to the members who follow it, unless it
-// was announced already. A run that finished is no longer followed. With
-// finishedOnly, other states are left for the events that report them.
-func (f *follower) check(ctx context.Context, id domain.RunID, finishedOnly bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	follows, err := f.store.ListAssistantFollows(ctx, id)
-	if err != nil {
-		slog.Warn("assistant: list follows", "run", id, "error", err)
-		return
-	}
-	if len(follows) == 0 {
-		return
-	}
+// read is what run id needs of its followers now, or nil.
+func (f *follower) read(ctx context.Context, id domain.RunID) (*notice, error) {
 	run, err := f.store.GetRun(ctx, id)
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Warn("assistant: read followed run", "run", id, "error", err)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil
 		}
-		return
+		return nil, fmt.Errorf("read followed run: %w", err)
 	}
 	approvals, err := f.store.ListApprovals(ctx, run.WorkspaceID, store.ApprovalRequested)
 	if err != nil {
-		slog.Warn("assistant: list approvals", "run", id, "error", err)
-		return
+		return nil, fmt.Errorf("list approvals: %w", err)
 	}
 	var approval *store.Approval
 	for _, a := range approvals {
@@ -91,26 +87,79 @@ func (f *follower) check(ctx context.Context, id domain.RunID, finishedOnly bool
 			break
 		}
 	}
-	n := classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), approval)
-	if n == nil || finishedOnly && n.kind != events.AssistantNoticeFinished {
-		return
+	return classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), approval), nil
+}
+
+// check hands the state of run to delivery for each member who follows it
+// and has not been told. With finishedOnly, other states are left for the
+// events that report them.
+func (f *follower) check(ctx context.Context, id domain.RunID, finishedOnly bool) {
+	for _, n := range f.due(ctx, id, finishedOnly) {
+		f.deliver(n)
 	}
+}
+
+func (f *follower) due(ctx context.Context, id domain.RunID, finishedOnly bool) []notice {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	follows, err := f.store.ListAssistantFollows(ctx, id)
+	if err != nil {
+		slog.Warn("assistant: list follows", "run", id, "error", err)
+		return nil
+	}
+	if len(follows) == 0 {
+		return nil
+	}
+	n, err := f.read(ctx, id)
+	if err != nil {
+		slog.Warn("assistant: read the followed run", "run", id, "error", err)
+		return nil
+	}
+	if n == nil || finishedOnly && n.kind != events.AssistantNoticeFinished {
+		return nil
+	}
+	var due []notice
 	for _, follow := range follows {
-		if follow.NotifiedKey != n.key {
-			if err := f.store.SetAssistantFollowNotified(ctx, follow.MemberID, id, n.key); err != nil {
-				slog.Warn("assistant: record the announced state", "run", id, "member", follow.MemberID, "error", err)
-				continue
-			}
+		slot := [2]string{string(follow.MemberID), string(id)}
+		switch {
+		case f.queued[slot] == n.key:
+		case follow.NotifiedKey == n.key:
+			f.end(ctx, n, follow.MemberID)
+		default:
+			f.queued[slot] = n.key
 			mine := *n
 			mine.member = follow.MemberID
-			f.deliver(ctx, mine)
-		}
-		if n.kind == events.AssistantNoticeFinished {
-			if err := f.store.DeleteAssistantFollow(ctx, follow.MemberID, id); err != nil {
-				slog.Warn("assistant: end the follow", "run", id, "member", follow.MemberID, "error", err)
-			}
+			due = append(due, mine)
 		}
 	}
+	return due
+}
+
+// end drops the follow of a run that finished and was announced.
+func (f *follower) end(ctx context.Context, n *notice, member domain.MemberID) {
+	if n.kind != events.AssistantNoticeFinished {
+		return
+	}
+	if err := f.store.DeleteAssistantFollow(ctx, member, n.run.ID); err != nil {
+		slog.Warn("assistant: end the follow", "run", n.run.ID, "member", member, "error", err)
+	}
+}
+
+// finish records that n was announced, so it is not announced again, and
+// lets a failed one be queued again.
+func (f *follower) finish(n notice, announced bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if announced {
+		if err := f.store.SetAssistantFollowNotified(ctx, n.member, n.run.ID, n.key); err != nil {
+			slog.Warn("assistant: record the announced state", "run", n.run.ID, "member", n.member, "error", err)
+		} else {
+			f.end(ctx, &n, n.member)
+		}
+	}
+	f.mu.Lock()
+	delete(f.queued, [2]string{string(n.member), string(n.run.ID)})
+	f.mu.Unlock()
 }
 
 // classify is what run now needs of its follower, or nil while it is queued
@@ -177,9 +226,9 @@ func truncate(s string, limit int) string {
 	return strings.TrimRight(string(runes[:limit]), " ") + "…"
 }
 
-// StartFollowing has the service follow the runs its assistants launch or message:
-// it announces each when it finishes or needs its member. ctx bounds only the
-// setup; the watcher runs until Close. It does nothing without a bus.
+// StartFollowing has the service follow the runs its assistants launch or
+// message: it announces each when it finishes or needs its member. ctx bounds
+// only the setup; the watcher runs until Close. It does nothing without a bus.
 func (s *Service) StartFollowing(ctx context.Context) error {
 	if s.follower == nil {
 		return nil
@@ -189,6 +238,11 @@ func (s *Service) StartFollowing(ctx context.Context) error {
 	}}})
 	if err != nil {
 		return fmt.Errorf("assistant: subscribe to run events: %w", err)
+	}
+	followed, err := s.cfg.Follows.ListFollowedRuns(ctx)
+	if err != nil {
+		_ = sub.Close()
+		return fmt.Errorf("assistant: list the followed runs: %w", err)
 	}
 	s.mu.Lock()
 	s.sub = sub
@@ -201,23 +255,18 @@ func (s *Service) StartFollowing(ctx context.Context) error {
 		}
 	})
 	s.wg.Go(func() {
-		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case n := <-s.notices:
-				s.deliver(n)
-			}
+		for _, id := range followed {
+			s.follower.check(s.ctx, id, false)
 		}
 	})
 	return nil
 }
 
-// UseNotifier has the service also push each notice to its member's devices.
+// UseNotifier has the service also push notices to its member's devices.
 func (s *Service) UseNotifier(notify Notifier) { s.notify = notify }
 
 // follow records that member's assistant launched or messaged run. A run
-// that already finished is announced at once.
+// that finished in the meantime is announced at once.
 func (s *Service) follow(ctx context.Context, member domain.MemberID, run domain.RunID) {
 	if err := s.cfg.Follows.PutAssistantFollow(ctx, member, run); err != nil {
 		slog.Warn("assistant: follow the run", "run", run, "member", member, "error", err)
@@ -228,19 +277,66 @@ func (s *Service) follow(ctx context.Context, member domain.MemberID, run domain
 	}
 }
 
-// enqueue hands n to the delivery goroutine, which runs in order so notices
-// reach the transcript as they arose, whatever the member's session is doing.
-func (s *Service) enqueue(ctx context.Context, n notice) {
-	select {
-	case s.notices <- n:
-	case <-ctx.Done():
+// enqueue queues n behind the member's earlier notices. Each member has a
+// delivery goroutine of their own while they have notices, so one whose
+// session is slow to start holds back no one else's.
+func (s *Service) enqueue(n notice) {
+	s.dmu.Lock()
+	s.queues[n.member] = append(s.queues[n.member], n)
+	start := !s.delivering[n.member]
+	s.delivering[n.member] = true
+	s.dmu.Unlock()
+	if start {
+		s.wg.Go(func() { s.drain(n.member) })
 	}
 }
 
-func (s *Service) deliver(n notice) {
-	m := s.member(n.member)
-	if err := s.transcribe(m, n); err != nil {
-		slog.Warn("assistant: write the notice to the transcript", "member", n.member, "run", n.run.ID, "error", err)
+func (s *Service) drain(id domain.MemberID) {
+	for {
+		s.dmu.Lock()
+		queue := s.queues[id]
+		if len(queue) == 0 {
+			delete(s.queues, id)
+			delete(s.delivering, id)
+			s.dmu.Unlock()
+			return
+		}
+		n := queue[0]
+		s.queues[id] = queue[1:]
+		s.dmu.Unlock()
+		s.follower.finish(n, s.deliver(n))
+	}
+}
+
+// drainNotices waits, for a bounded time, until every queued notice was
+// delivered.
+func (s *Service) drainNotices() {
+	deadline := time.Now().Add(closeDrain)
+	for time.Now().Before(deadline) {
+		s.dmu.Lock()
+		idle := len(s.delivering) == 0
+		s.dmu.Unlock()
+		if idle {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// deliver announces n and reports whether it reached the member's
+// transcript, which is what makes it announced.
+func (s *Service) deliver(n notice) bool {
+	if _, err := s.cfg.Follows.GetMember(s.ctx, n.member); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			slog.Warn("assistant: read the member of a notice", "member", n.member, "error", err)
+		}
+		return false
+	}
+	if err := s.transcribe(s.member(n.member), n); err != nil {
+		if !errors.Is(err, ErrRemoving) {
+			slog.Warn("assistant: write the notice to the transcript", "member", n.member, "run", n.run.ID, "error", err)
+		}
+		return false
 	}
 	if _, err := s.cfg.Bus.Publish(s.ctx, events.Event{
 		WorkspaceID: n.run.WorkspaceID, RunID: n.run.ID, ActorID: n.member,
@@ -248,13 +344,22 @@ func (s *Service) deliver(n notice) {
 	}); err != nil {
 		slog.Warn("assistant: publish the notice", "member", n.member, "run", n.run.ID, "error", err)
 	}
-	if s.notify != nil {
+	// The owner of a run is already pushed what it needs; only its end is new.
+	if s.notify != nil && (n.kind == events.AssistantNoticeFinished || n.run.MemberID != n.member) {
 		s.wg.Go(func() {
-			if err := s.notify(s.ctx, n.member, n.title, n.body, n.run.ID); err != nil {
+			var current func(context.Context) bool
+			if n.kind != events.AssistantNoticeFinished {
+				current = func(ctx context.Context) bool {
+					now, err := s.follower.read(ctx, n.run.ID)
+					return err == nil && now != nil && now.key == n.key
+				}
+			}
+			if err := s.notify(s.ctx, n.member, n.title, n.body, n.run.ID, current); err != nil {
 				slog.Warn("assistant: push the notice", "member", n.member, "run", n.run.ID, "error", err)
 			}
 		})
 	}
+	return true
 }
 
 // transcribe puts n in the member's transcript: in the live session, or else

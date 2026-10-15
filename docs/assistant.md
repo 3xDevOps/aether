@@ -156,18 +156,23 @@ notice reaches you four ways:
   ([local-gateway.md](local-gateway.md#assistant-notices)) raises a toast and
   badges the Assistant button.
 - **Desktop app.** The same event shows an OS notification.
-- **Phone.** A Web Push notification to your subscribed devices, replacing any
-  earlier notification for that run and waiting while you are using a
-  dashboard ([networking.md](networking.md#notifications)).
+- **Phone.** A Web Push notification to your subscribed devices, for
+  `finished` always, and for the `needs_*` kinds only on runs you do not own,
+  since your own runs already notify you when they need you. It replaces any
+  earlier notification for that run and waits while you are using a dashboard
+  ([networking.md](networking.md#notifications)); if the run no longer needs
+  you when the wait ends, nothing is sent.
 
 Each state is announced once. Aether stores the last state it announced for
-each followed run, so answering a question, a server restart or a repeated
-status event does not repeat a notice; the next question or a new
-`needs-attention` reason is a new state. The follow ends when the run
-finishes. Messaging a run again starts a new follow, and messaging a run that
-has already finished is announced at once. Deleting the run or removing the
-member removes the follow. A run that finishes while the server is down is
-announced only if a later event for it arrives.
+each followed run, after it is in your transcript, so answering a question, a
+server restart or a repeated status event does not repeat a notice, and a
+notice still queued when the server stops is announced after it starts. The
+next question or a new `needs-attention` reason is a new state. The follow
+ends when the run finishes, and a run that finished while the server was down
+is announced at startup. A run that finishes between the call and the moment
+Aether records the follow is announced at once. Deleting the run or removing
+the member removes the follow, and a member merged into another keeps their
+follows on the surviving member.
 
 ## Conversations
 

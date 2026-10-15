@@ -3,17 +3,24 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type fakeFollows struct {
 	mu       sync.Mutex
+	gone     bool
 	run      *domain.Run
 	approval *store.Approval
 	follows  map[domain.MemberID]*store.AssistantFollow
@@ -56,6 +63,43 @@ func (f *fakeFollows) GetRun(context.Context, domain.RunID) (*domain.Run, error)
 	defer f.mu.Unlock()
 	c := *f.run
 	return &c, nil
+}
+
+func (f *fakeFollows) GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if f.gone {
+		return nil, store.ErrNotFound
+	}
+	return &domain.Member{ID: id}, nil
+}
+
+func (f *fakeFollows) ListFollowedRuns(context.Context) ([]domain.RunID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.follows) == 0 {
+		return nil, nil
+	}
+	return []domain.RunID{f.run.ID}, nil
+}
+
+func (f *fakeFollows) setRun(r *domain.Run) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.run = r
+}
+
+func (f *fakeFollows) notified(m domain.MemberID) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fl := f.follows[m]
+	if fl == nil {
+		return "", false
+	}
+	return fl.NotifiedKey, true
 }
 
 func (f *fakeFollows) ListApprovals(context.Context, domain.WorkspaceID, string) ([]*store.Approval, error) {
@@ -143,13 +187,22 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func newTestFollower(fs *fakeFollows, rs *fakeRunState, got *[]notice) *follower {
+	f := &follower{store: fs, runs: rs, queued: map[[2]string]string{}}
+	f.deliver = func(n notice) {
+		*got = append(*got, n)
+		f.finish(n, true)
+	}
+	return f
+}
+
 func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	fs := &fakeFollows{run: newRun(domain.RunRunning, ""), follows: map[domain.MemberID]*store.AssistantFollow{}}
 	rs := &fakeRunState{}
 	var got []notice
-	f := &follower{store: fs, runs: rs, deliver: func(_ context.Context, n notice) { got = append(got, n) }}
+	f := newTestFollower(fs, rs, &got)
 	_ = fs.PutAssistantFollow(ctx, "m1", "run-1")
 	_ = fs.PutAssistantFollow(ctx, "m2", "run-1")
 
@@ -166,7 +219,7 @@ func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 	}
 
 	// A restart rebuilds the follower; what is stored keeps it quiet.
-	f = &follower{store: fs, runs: rs, deliver: func(_ context.Context, n notice) { got = append(got, n) }}
+	f = newTestFollower(fs, rs, &got)
 	f.check(ctx, "run-1", false)
 	if len(got) != 2 {
 		t.Fatalf("a restart announced the standing state again: %+v", got)
@@ -197,5 +250,207 @@ func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 	f.check(ctx, "run-1", false)
 	if len(got) != 6 {
 		t.Fatalf("a finished run announced again: %+v", got[6:])
+	}
+}
+
+func TestAStateInFlightIsQueuedOnceAndAFailedOneAgain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "agent idle"), follows: map[domain.MemberID]*store.AssistantFollow{}}
+	_ = fs.PutAssistantFollow(ctx, "m1", "run-1")
+	var queued []notice
+	f := &follower{store: fs, runs: &fakeRunState{}, queued: map[[2]string]string{}, deliver: func(n notice) { queued = append(queued, n) }}
+	f.check(ctx, "run-1", false)
+	f.check(ctx, "run-1", false)
+	if len(queued) != 1 {
+		t.Fatalf("a state in flight was queued %d times", len(queued))
+	}
+	f.finish(queued[0], false)
+	if key, _ := fs.notified("m1"); key != "" {
+		t.Fatalf("an undelivered notice stored its key %q", key)
+	}
+	f.check(ctx, "run-1", false)
+	if len(queued) != 2 {
+		t.Fatalf("a notice that failed was not queued again")
+	}
+}
+
+type serviceFixture struct {
+	svc *Service
+	fs  *fakeFollows
+	rs  *fakeRunState
+}
+
+func newServiceFixture(t *testing.T, run *domain.Run) *serviceFixture {
+	t.Helper()
+	bus, err := events.NewInProc(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	fs := &fakeFollows{run: run, follows: map[domain.MemberID]*store.AssistantFollow{}}
+	rs := &fakeRunState{}
+	svc := New(Config{Dir: t.TempDir(), Store: newMemStore(), Bus: bus, Follows: fs})
+	svc.follower = &follower{store: fs, runs: rs, deliver: svc.enqueue, queued: map[[2]string]string{}}
+	svc.queues, svc.delivering = map[domain.MemberID][]notice{}, map[domain.MemberID]bool{}
+	return &serviceFixture{svc: svc, fs: fs, rs: rs}
+}
+
+func (x *serviceFixture) transcript(member domain.MemberID) string {
+	b, _ := os.ReadFile(x.svc.logPath(member))
+	return string(b)
+}
+
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestAStalledMemberDoesNotHoldBackAnother(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
+	_ = x.fs.PutAssistantFollow(ctx, "m2", "run-1")
+	stalled := x.svc.member("m1")
+	stalled.op.Lock()
+
+	x.svc.follower.check(ctx, "run-1", false)
+	eventually(t, "m2's notice", func() bool { k, _ := x.fs.notified("m2"); return k != "" })
+	if k, _ := x.fs.notified("m1"); k != "" {
+		t.Fatalf("m1 was announced while their session was starting: %q", k)
+	}
+	stalled.op.Unlock()
+	eventually(t, "m1's notice", func() bool { k, _ := x.fs.notified("m1"); return k != "" })
+	if !strings.Contains(x.transcript("m1"), "needs your attention") || !strings.Contains(x.transcript("m2"), "needs your attention") {
+		t.Fatalf("transcripts: %q, %q", x.transcript("m1"), x.transcript("m2"))
+	}
+	if err := x.svc.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestANoticeQueuedAtShutdownIsAnnouncedAfterTheRestart(t *testing.T) {
+	ctx := context.Background()
+	was := closeDrain
+	closeDrain = 100 * time.Millisecond
+	t.Cleanup(func() { closeDrain = was })
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
+	m := x.svc.member("m1")
+	m.op.Lock()
+	x.svc.follower.check(ctx, "run-1", false)
+	eventually(t, "the first notice to be taken up", func() bool {
+		x.svc.dmu.Lock()
+		defer x.svc.dmu.Unlock()
+		return len(x.svc.queues["m1"]) == 0 && x.svc.delivering["m1"]
+	})
+	// A second state queues behind the first, which waits on the session.
+	x.fs.setRun(newRun(domain.RunCompleted, "agent exited 0"))
+	x.svc.follower.check(ctx, "run-1", false)
+
+	closed := make(chan error, 1)
+	go func() { closed <- x.svc.Close() }()
+	time.Sleep(3 * closeDrain)
+	m.op.Unlock()
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := x.fs.notified("m1"); !ok || !strings.HasPrefix(k, "attention:") {
+		t.Fatalf("after shutdown the follow holds %q (present %v), want the first state announced and the follow kept", k, ok)
+	}
+	if strings.Contains(x.transcript("m1"), "finished") {
+		t.Fatalf("the notice dropped at shutdown reached the transcript: %q", x.transcript("m1"))
+	}
+
+	var got []notice
+	f := newTestFollower(x.fs, x.rs, &got)
+	f.check(ctx, "run-1", false)
+	if len(got) != 1 || got[0].kind != "finished" {
+		t.Fatalf("after the restart announced %+v, want the finished notice", got)
+	}
+}
+
+func TestNoNoticeIsWrittenForAMemberBeingRemoved(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	x := newServiceFixture(t, newRun(domain.RunCompleted, ""))
+	n := classify(x.fs.run, nil, nil, nil)
+	n.member = "gone"
+	x.fs.gone = true
+	if x.svc.deliver(*n) {
+		t.Fatal("a notice was delivered to a member whose row is gone")
+	}
+	n.member = "fenced"
+	x.fs.gone = false
+	if err := x.svc.Fence(ctx, "fenced"); err != nil {
+		t.Fatal(err)
+	}
+	if x.svc.deliver(*n) {
+		t.Fatal("a notice was delivered to a fenced member")
+	}
+	for _, id := range []domain.MemberID{"gone", "fenced"} {
+		if _, err := os.Stat(filepath.Dir(x.svc.logPath(id))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("files were recreated for %s: %v", id, err)
+		}
+	}
+}
+
+func TestStartupResolvesRunsThatFinishedWhileTheServerWasDown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	x := newServiceFixture(t, newRun(domain.RunCompleted, "agent exited 0"))
+	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
+	if err := x.svc.StartFollowing(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the follow to end", func() bool { _, ok := x.fs.notified("m1"); return !ok })
+	if !strings.Contains(x.transcript("m1"), "finished") {
+		t.Fatalf("transcript = %q, want the finished notice", x.transcript("m1"))
+	}
+	if err := x.svc.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
+	t.Parallel()
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	type call struct {
+		member  domain.MemberID
+		checked bool
+	}
+	var mu sync.Mutex
+	var calls []call
+	x.svc.UseNotifier(func(_ context.Context, member domain.MemberID, _, _ string, _ domain.RunID, current func(context.Context) bool) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, call{member, current != nil})
+		return nil
+	})
+	needs := classify(x.fs.run, nil, nil, nil)
+	finished := classify(newRun(domain.RunCompleted, ""), nil, nil, nil)
+	for _, c := range []struct {
+		n      *notice
+		member domain.MemberID
+	}{{needs, "m1"}, {needs, "m2"}, {finished, "m1"}} {
+		n := *c.n
+		n.member = c.member
+		if !x.svc.deliver(n) {
+			t.Fatal("not delivered")
+		}
+	}
+	x.svc.wg.Wait()
+	want := []call{{"m2", true}, {"m1", false}}
+	slices.SortFunc(calls, func(a, b call) int { return strings.Compare(string(a.member), string(b.member)) })
+	slices.SortFunc(want, func(a, b call) int { return strings.Compare(string(a.member), string(b.member)) })
+	if !slices.Equal(calls, want) {
+		t.Fatalf("pushes = %+v, want the owner's finish and the other member's need only: %+v", calls, want)
 	}
 }

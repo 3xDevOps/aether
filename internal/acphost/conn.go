@@ -232,6 +232,18 @@ func (in *agentInput) promptUnsent() <-chan struct{} {
 	return in.unsent
 }
 
+// gatedReader holds back reads until open is closed: the SDK's receive loop
+// starts inside NewConnection and reads the logger SetLogger writes.
+type gatedReader struct {
+	open <-chan struct{}
+	r    io.Reader
+}
+
+func (g gatedReader) Read(p []byte) (int, error) {
+	<-g.open
+	return g.r.Read(p)
+}
+
 func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logger) *Conn {
 	outR, outW := io.Pipe()
 	c := &Conn{
@@ -247,8 +259,10 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 	c.sessionID.Store("")
 	c.touch()
 	marker := strings.NewReader(`{"jsonrpc":"2.0","method":"` + deliveryMarker + `"}` + "\n")
-	c.rpc = acp.NewConnection(c.handle, c.w, io.MultiReader(marker, outR))
+	open := make(chan struct{})
+	c.rpc = acp.NewConnection(c.handle, c.w, gatedReader{open, io.MultiReader(marker, outR)})
 	c.rpc.SetLogger(logger)
+	close(open)
 	return c
 }
 

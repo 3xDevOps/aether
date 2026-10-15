@@ -557,9 +557,9 @@ a toast with an **Open run** action (warning style for `needs_*`, plain for
 `finished`) and adds one to `assistantNotices`. The Assistant button counts
 those updates beside the waiting requests, named "Assistant, 1 request
 waiting, 2 updates", and opening the panel clears them. The stream does not
-mark replayed events, so a notice older than 30 seconds counts toward the
+mark replayed events, so a notice older than 30 seconds on the server's clock (the offset read from `server.info`) counts toward the
 badge but raises no toast. The desktop app shows the same notice as an OS
-notification that opens the run on click (`desktop/notify.js`), and skips it
+notification that opens the run on click (`desktop/notify.js`), and skips a `needs_attention` one
 when a needs-attention notification for the same run fired within five
 seconds. A phone gets the web push the server sends for the same notice.
 

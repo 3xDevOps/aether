@@ -306,9 +306,10 @@ func runTopic(run domain.RunID) string {
 // Notify sends a notification about run to every device of member, once
 // member has been away from every dashboard for the quiet period. It uses
 // the run's topic, so a device shows it in place of an earlier notification
-// for the same run. It returns after the last device was tried, with the
-// errors of those that did not take it.
-func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID) error {
+// for the same run. A non-nil current is asked once the wait is over, and a
+// false answer sends nothing. It returns after the last device was tried,
+// with the errors of those that did not take it.
+func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, current func(context.Context) bool) error {
 	for {
 		wait := time.Until(s.freeAt(member))
 		if wait <= 0 {
@@ -319,6 +320,9 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 			return fmt.Errorf("push: wait for %s to leave the dashboard: %w", member, ctx.Err())
 		case <-time.After(wait):
 		}
+	}
+	if current != nil && !current(ctx) {
+		return nil
 	}
 	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run)})
 	if err != nil {

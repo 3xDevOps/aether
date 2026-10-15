@@ -166,10 +166,10 @@ push service reports the address gone, and when your member record is
 removed.
 
 When one of your runs starts needing you, or a run your
-[assistant](assistant.md#notifications) launched or messaged finishes, your
-server sends one HTTPS request per subscribed browser to that browser's
-address. Nothing is sent for a
-member with no subscribed browser, and nothing is sent to the publisher. The
+[assistant](assistant.md#notifications) launched or messaged finishes, or
+needs you and is another member's, your server sends one HTTPS request per
+subscribed browser to that browser's address. Nothing is sent for a member
+with no subscribed browser, and nothing is sent to the publisher. The
 push service receives:
 
 - **The address**, which is its own identifier for your browser, and your

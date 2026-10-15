@@ -18,8 +18,9 @@ let gateway = { origin: '', token: '' }
 let openRun = () => {}
 let selfID = null
 
-// When each run last raised a notification, by either path. The same
-// transition can reach us as run.status and as assistant.notice.
+// When each run last raised a needs-attention notification, by either path.
+// The same transition can reach us as run.status and as assistant.notice
+// kind needs_attention; other notice kinds are different events.
 const lastShown = new Map()
 const duplicateWindowMs = 5000
 
@@ -149,9 +150,11 @@ async function showNotice(p) {
     console.log(`notify: cannot tell who this member is: ${err.message}`)
     return
   }
-  const duplicate = recentlyShown(p.run_id)
-  lastShown.set(p.run_id, Date.now())
-  if (duplicate) return
+  if (p.kind === 'needs_attention') {
+    const duplicate = recentlyShown(p.run_id)
+    lastShown.set(p.run_id, Date.now())
+    if (duplicate) return
+  }
   const notification = new Notification({ title: p.title || p.run_id, body: p.body || '' })
   notification.on('click', () => openRun(p.run_id))
   notification.show()
