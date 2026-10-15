@@ -496,6 +496,13 @@ container, driven from the dashboard. The boundaries:
   cannot launch, message or stop a run, or save the environment, without a
   click. It can run commands in the member's environment, which is the
   member's own container.
+- **Notices name the run.** Aether follows the runs the assistant launches or
+  messages and writes a notice to the member's own transcript and to their
+  devices through Web Push. A notice holds the run's title and a reason,
+  question or action taken from the run, so it is run text too. The
+  `assistant.notice` event is a workspace event: any client subscribed to the
+  workspace receives it, the same as the run's `run.status` events, and the
+  dashboard shows it only to the member named in `member_id`.
 - **No account sharing.** The assistant session always uses the sign-in in the
   member's own home and counts against their own subscription. Runs it
   launches may use quota fallback onto accounts shared with the member, the

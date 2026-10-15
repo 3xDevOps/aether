@@ -34,6 +34,9 @@ export interface AssistantSlice {
   assistantSending: boolean
   /** Bumped by a new conversation so the stream reconnects from sequence 0. */
   assistantGeneration: number
+  /** Run notices from the assistant that arrived while the panel was closed. */
+  assistantNotices: number
+  noteAssistantNotice: () => void
   setAssistantOpen: (open: boolean) => void
   setAssistantWidth: (width: number) => void
   setAssistantStatus: (status: AssistantStatus) => void
@@ -56,7 +59,9 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantAttempt: null,
   assistantSending: false,
   assistantGeneration: 0,
-  setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
+  assistantNotices: 0,
+  noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
+  setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),
   setAssistantWidth: (width) => set({ assistantWidth: clampAssistantWidth(width) }),
   setAssistantStatus: (assistantStatus) =>
     set({ assistantStatus, assistantStatusError: null, assistantConfirmations: assistantStatus.confirmations ?? [] }),
@@ -75,6 +80,6 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
     }),
   resetAssistant: () => {
     get().restartAssistantConversation()
-    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '' })
+    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '', assistantNotices: 0 })
   },
 })

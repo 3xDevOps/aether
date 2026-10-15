@@ -23,6 +23,10 @@ import (
 // ErrClosed is returned once the agent connection has ended.
 var ErrClosed = errors.New("acphost: agent connection closed")
 
+// ErrPromptUnsent is ErrClosed for a prompt refused before any of it reached
+// the agent, so sending it on a new session cannot repeat it.
+var ErrPromptUnsent = fmt.Errorf("%w; the prompt was not sent", ErrClosed)
+
 // ErrUnsupportedImage means the agent does not accept image prompts; no input
 // was sent or queued.
 var ErrUnsupportedImage = errors.New("acphost: agent does not support image prompts")
@@ -514,7 +518,7 @@ func (s *Session) PromptIdle(ctx context.Context, blocks []acp.ContentBlock, del
 	s.mu.Lock()
 	if s.closingLocked() {
 		s.mu.Unlock()
-		return false, ErrClosed
+		return false, ErrPromptUnsent
 	}
 	if s.turnActive || s.autonomous || s.owingLocked() || len(s.queue) > 0 {
 		s.mu.Unlock()
@@ -717,10 +721,20 @@ func (s *Session) Answer(requestID, optionID string, content map[string]any) err
 	return s.conn.answer(requestID, optionID, content)
 }
 
-func (s *Session) Notice(severity, title, description string) {
+// Notice records a notice item. It returns ErrClosed once the session is
+// closed, and the log's error when the item was not recorded.
+func (s *Session) Notice(severity, title, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}})
+	if s.closed {
+		return ErrClosed
+	}
+	it := Item{Kind: KindNotice, Notice: &Notice{Severity: severity, Title: title, Description: description}, Turn: s.turn}
+	if err := s.log.Append(&it); err != nil {
+		return fmt.Errorf("acphost: record notice: %w", err)
+	}
+	s.fanoutLocked(it)
+	return nil
 }
 
 func (s *Session) ListSessions(ctx context.Context, cwd, cursor string) ([]SessionSummary, string, error) {
@@ -818,6 +832,10 @@ func (s *Session) appendLocked(it Item) {
 		s.logger.Error("acphost: item not recorded", "kind", it.Kind, "err", err)
 		return
 	}
+	s.fanoutLocked(it)
+}
+
+func (s *Session) fanoutLocked(it Item) {
 	for ch := range s.subs {
 		select {
 		case ch <- it:

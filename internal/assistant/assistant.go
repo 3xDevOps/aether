@@ -25,6 +25,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -57,11 +58,13 @@ var (
 type Config struct {
 	// Dir is the host directory holding <member>/items.jsonl and
 	// <member>/sock.
-	Dir    string
-	Store  store.AssistantStore
-	Homes  *memberhome.Manager
-	Runs   *scheduler.Scheduler
-	Caller func(domain.MemberID) tools.Caller
+	Dir     string
+	Store   store.AssistantStore
+	Homes   *memberhome.Manager
+	Runs    *scheduler.Scheduler
+	Caller  func(domain.MemberID) tools.Caller
+	Bus     events.Bus
+	Follows FollowStore
 }
 
 type Service struct {
@@ -72,11 +75,30 @@ type Service struct {
 
 	mu      sync.Mutex
 	members map[domain.MemberID]*member
+	sub     events.Subscription
+
+	follower   *follower
+	notify     Notifier
+	dmu        sync.Mutex
+	queues     map[domain.MemberID][]notice
+	delivering map[domain.MemberID]bool
+	pushing    int
+	flush      chan struct{}
+	flushOnce  sync.Once
+	pushCtx    context.Context
+	pushCancel context.CancelFunc
 }
 
 func New(cfg Config) *Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
+	s := &Service{cfg: cfg, ctx: ctx, cancel: cancel, members: make(map[domain.MemberID]*member)}
+	s.queues, s.delivering = make(map[domain.MemberID][]notice), make(map[domain.MemberID]bool)
+	s.flush = make(chan struct{})
+	s.pushCtx, s.pushCancel = context.WithCancel(context.Background())
+	if cfg.Bus != nil && cfg.Follows != nil && cfg.Runs != nil {
+		s.follower = &follower{store: cfg.Follows, runs: cfg.Runs, deliver: s.enqueue, queued: make(map[[2]string]string)}
+	}
+	return s
 }
 
 type member struct {
@@ -185,6 +207,13 @@ func (s *Service) logPath(id domain.MemberID) string {
 }
 
 func (s *Service) Close() error {
+	s.mu.Lock()
+	sub := s.sub
+	s.mu.Unlock()
+	if sub != nil {
+		_ = sub.Close()
+	}
+	s.shutdownNotices()
 	s.cancel()
 	s.mu.Lock()
 	members := make([]*member, 0, len(s.members))
@@ -405,6 +434,9 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		return nil, err
 	}
 	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: m.confirms.confirm, Member: string(m.id)}
+	if s.follower != nil {
+		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
+	}
 	s.wg.Go(func() {
 		if serveErr := srv.Serve(sessCtx, ln); serveErr != nil {
 			slog.Warn("assistant: tool socket stopped", "member", m.id, "error", serveErr)
@@ -738,6 +770,19 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 		return false, err
 	}
 	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+	if errors.Is(err, acphost.ErrPromptUnsent) {
+		// The adapter died after ensure saw it alive and before the prompt
+		// left: once its session has ended, start a new one and send there.
+		select {
+		case <-live.ended:
+		case <-ctx.Done():
+			return false, fmt.Errorf("assistant: wait for the ended session: %w", ctx.Err())
+		}
+		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
+			return false, err
+		}
+		started, err = live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+	}
 	switch {
 	case err == nil && !started:
 		return false, ErrTurnRunning

@@ -148,11 +148,25 @@ func New(fix Fixture) *Agent {
 	return &Agent{fix: fix, ready: make(chan struct{})}
 }
 
+// gatedReader holds back reads until open is closed: the SDK's receive loop
+// starts inside NewConnection and reads the logger SetLogger writes.
+type gatedReader struct {
+	open <-chan struct{}
+	r    io.Reader
+}
+
+func (g gatedReader) Read(p []byte) (int, error) {
+	<-g.open
+	return g.r.Read(p)
+}
+
 func (a *Agent) Serve(r io.Reader, w io.Writer) {
 	in, out := io.Pipe()
 	go a.route(r, out)
-	a.conn = acp.NewConnection(a.handle, w, in)
+	open := make(chan struct{})
+	a.conn = acp.NewConnection(a.handle, w, gatedReader{open, in})
 	a.conn.SetLogger(slog.New(slog.DiscardHandler))
+	close(open)
 	close(a.ready)
 	<-a.conn.Done()
 	_ = in.Close()

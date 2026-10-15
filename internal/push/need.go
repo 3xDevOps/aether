@@ -81,6 +81,10 @@ func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputR
 	}
 }
 
+func AttentionBody(run *domain.Run) string {
+	return clip(statusBody(run, run.MissionRole == "worker", false, false), maxBodyRunes)
+}
+
 func statusBody(run *domain.Run, worker, background, paused bool) string {
 	switch run.Status {
 	case domain.RunNeedsAttention:
@@ -152,9 +156,9 @@ func inputKey(request *domain.RunInputRequest) string {
 	return "input:" + request.SessionID + "|" + request.Kind + "|" + request.ID
 }
 
-// runTitle names a run the way the dashboard does (runLabel in
+// RunTitle names a run the way the dashboard does (runLabel in
 // web/src/lib/status.ts): its title, else the first line of its task.
-func runTitle(run *domain.Run) string {
+func RunTitle(run *domain.Run) string {
 	if title := strings.TrimSpace(run.Title); title != "" {
 		return clip(title, fallbackTitleRunes)
 	}

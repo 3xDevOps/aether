@@ -50,6 +50,7 @@ type device struct {
 	*browser
 	service  *httptest.Server
 	received chan notification
+	topic    atomic.Value
 	answer   atomic.Int32
 	// While slow is set, the push service takes a message and answers only
 	// once release is closed.
@@ -143,6 +144,7 @@ func (h *harness) subscribe(member *domain.Member) *device {
 			h.t.Errorf("payload %q is not a notification: %v", plain, err)
 			return
 		}
+		d.topic.Store(r.Header.Get("Topic"))
 		d.received <- n
 		if d.slow.Load() {
 			<-d.release
@@ -516,4 +518,94 @@ func TestSubscribeValidatesAndBoundsDevices(t *testing.T) {
 	if err := h.svc.Unsubscribe(h.ctx, h.ada.ID, "https://push.example/0"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unsubscribing twice = %v, want ErrNotFound", err)
 	}
+}
+
+func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	other := h.subscribe(h.bob)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	started := time.Now()
+
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil, nil); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
+	if waited := time.Since(started); waited < testQuiet {
+		t.Fatalf("sent after %v, want it held for the %v quiet window", waited, testQuiet)
+	}
+	other.expectNone(t, testQuiet/2)
+
+	// The topic is the one needOf notifications use, so a device collapses them.
+	h.status(run, domain.RunNeedsAttention, "agent idle")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Waiting for your reply", Run: string(run.ID)})
+	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+		t.Fatalf("needs topic = %v, want %v", got, want)
+	}
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil, nil); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
+	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+		t.Fatalf("notify topic = %v, want %v", got, want)
+	}
+}
+
+func TestNotifyReturnsTheDeviceError(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	gone := h.subscribe(h.ada)
+	gone.answer.Store(http.StatusGone)
+	run := h.run(h.ada, "Task", domain.LaunchACP)
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, nil); !errors.Is(err, ErrDelivery) {
+		t.Fatalf("Notify = %v, want ErrDelivery", err)
+	}
+}
+
+func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Task", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	var asked atomic.Bool
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, func(context.Context) bool {
+		asked.Store(true)
+		return false
+	}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if !asked.Load() {
+		t.Fatal("the need was not checked again")
+	}
+	phone.expectNone(t, testQuiet)
+}
+
+func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Task", domain.LaunchACP)
+	h.svc.Active(h.ada.ID)
+	flush := make(chan struct{})
+	done := make(chan error, 2)
+	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, flush, nil) }()
+	go func() {
+		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, flush, func(context.Context) bool { return false })
+	}()
+	phone.expectNone(t, testQuiet/3)
+	start := time.Now()
+	close(flush)
+	phone.expect(t, notification{Title: "kept", Body: "b", Run: string(run.ID)})
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if time.Since(start) > testQuiet {
+		t.Fatalf("flush took %v, want it to skip the %v quiet window", time.Since(start), testQuiet)
+	}
+	phone.expectNone(t, testQuiet/3)
 }

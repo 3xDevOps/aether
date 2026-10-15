@@ -1428,3 +1428,16 @@ func TestSubscribeHasNoGap(t *testing.T) {
 		t.Fatalf("subscriber saw %d items, log has %d after seq %d", len(got), len(want), after)
 	}
 }
+
+// A prompt refused because the session already closed never reached the
+// agent, which is what lets a caller send it again on a new session.
+func TestPromptIdleOnAClosedSessionIsUnsent(t *testing.T) {
+	s, _ := startMock(t, newMockAgent(t, loadFixture(t, "claude")), Config{})
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	started, err := s.PromptIdle(context.Background(), textPrompt("hello"), nil)
+	if started || !errors.Is(err, ErrPromptUnsent) || !errors.Is(err, ErrClosed) {
+		t.Fatalf("PromptIdle after Close = %v, %v; want unsent, which is also ErrClosed", started, err)
+	}
+}

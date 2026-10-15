@@ -549,6 +549,20 @@ A prompt being sent and its idempotency key live in the slice next to the
 draft, so reopening the panel retries under the same key; a changed draft, a
 success or a new conversation clears them. `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
 
+When the assistant launches or messages a run for the member, the server
+follows it and publishes `assistant.notice` on `/ws/events` as the run
+finishes or needs input, approval or attention. Only the member named by
+`member_id` reacts. `applyAssistantNotice` (`store/assistant-notice.ts`) raises
+a toast with an **Open run** action (warning style for `needs_*`, plain for
+`finished`) and adds one to `assistantNotices`. The Assistant button counts
+those updates beside the waiting requests, named "Assistant, 1 request
+waiting, 2 updates", and opening the panel clears them. The stream does not
+mark replayed events, so a notice older than 30 seconds on the server's clock (the offset read from `server.info`) counts toward the
+badge but raises no toast. The desktop app shows the same notice as an OS
+notification that opens the run on click (`desktop/notify.js`), and skips a `needs_attention` one
+when a needs-attention notification for the same run fired within five
+seconds. A phone gets the web push the server sends for the same notice.
+
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
 component mounted in one place at a time: the sidebar's **New run** row (a secondary
 icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or

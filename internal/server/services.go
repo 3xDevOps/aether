@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/3xDevOps/Aether/internal/assistant"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
@@ -45,6 +46,7 @@ type Deps struct {
 	// room handoffs, and SSH/local evidence reads.
 	Evidence   *evidence.Service
 	Workspaces *workspaceDeletion
+	Assistant  *assistant.Service
 }
 
 type serviceBuilder struct {

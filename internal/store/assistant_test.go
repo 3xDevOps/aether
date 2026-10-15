@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func TestAssistantSessionLifecycle(t *testing.T) {
@@ -57,5 +60,58 @@ func TestAssistantSessionLifecycle(t *testing.T) {
 	var n int
 	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM assistant_prompt_keys WHERE member_id = ?`, ada).Scan(&n); err != nil || n != MaxAssistantPromptKeys {
 		t.Fatalf("%d keys kept, %v, want %d", n, err, MaxAssistantPromptKeys)
+	}
+}
+
+func TestAssistantFollows(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	ada, bo := mustCreateMember(t, db).ID, mustCreateTeammate(t, db).ID
+	run := mustCreateRun(t, db, mustCreateWorkspace(t, db).ID, ada, domain.RunRunning)
+
+	for range 2 {
+		if err := db.PutAssistantFollow(ctx, ada, run.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SetAssistantFollowNotified(ctx, ada, run.ID, "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutAssistantFollow(ctx, ada, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PutAssistantFollow(ctx, bo, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	follows, err := db.ListAssistantFollows(ctx, run.ID)
+	if err != nil || len(follows) != 2 {
+		t.Fatalf("follows = %+v, %v, want two", follows, err)
+	}
+	for _, f := range follows {
+		if want := map[domain.MemberID]string{ada: "k1", bo: ""}[f.MemberID]; f.NotifiedKey != want {
+			t.Fatalf("%s notified %q, want %q", f.MemberID, f.NotifiedKey, want)
+		}
+	}
+	if runs, err := db.ListFollowedRuns(ctx); err != nil || len(runs) != 1 || runs[0] != run.ID {
+		t.Fatalf("followed runs = %v, %v", runs, err)
+	}
+	if err := db.SetAssistantFollowNotified(ctx, ada, "missing", "k"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("notifying a missing follow: %v, want ErrNotFound", err)
+	}
+	if err := db.PutAssistantFollow(ctx, ada, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("following a missing run: %v, want ErrNotFound", err)
+	}
+	if err := db.DeleteAssistantFollow(ctx, ada, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if follows, _ = db.ListAssistantFollows(ctx, run.ID); len(follows) != 1 || follows[0].MemberID != bo {
+		t.Fatalf("follows after delete = %+v", follows)
+	}
+	if err := db.DeleteRun(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if follows, _ = db.ListAssistantFollows(ctx, run.ID); len(follows) != 0 {
+		t.Fatalf("follows survived the run: %+v", follows)
 	}
 }

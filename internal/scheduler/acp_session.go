@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 
@@ -74,6 +75,14 @@ func (s *Scheduler) ACPSubscribe(run domain.RunID, afterSeq int64) (ACPStream, e
 	out.Replay, out.Reset, out.TruncatedBefore = replay.Items, replay.Reset, replay.TruncatedBefore
 	out.Epoch, out.Seq, out.OldestSeq = replay.Epoch, replay.Seq, replay.OldestSeq
 	return out, nil
+}
+
+func (s *Scheduler) ACPPending(run domain.RunID) []acphost.Request {
+	sess := s.acp.session(run)
+	if sess == nil {
+		return nil
+	}
+	return sess.State().Pending
 }
 
 func (s *Scheduler) ACPHistory(run domain.RunID, beforeSeq int64, limit int) (acphost.HistoryPage, error) {
@@ -182,7 +191,9 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 		return nil
 	}
 	if err = domain.ValidModel(model); err != nil {
-		sess.Notice("error", "Model not recorded", err.Error())
+		if nerr := sess.Notice("error", "Model not recorded", err.Error()); nerr != nil {
+			slog.Warn("scheduler: record the model notice", "run", run, "error", nerr)
+		}
 		return nil
 	}
 	if err = s.cfg.Store.SetRunModel(ctx, run, model); err != nil {

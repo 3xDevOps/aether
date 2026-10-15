@@ -134,6 +134,46 @@ your environment therefore needs no click. Only the Aether actions above
 cannot be set, the start fails with `assistant: set the "<mode>" mode: <error>`.
 A question the agent asks you still appears as a card.
 
+## Notifications
+
+Aether follows every run the assistant launches (`run.launch`) or messages
+(`run.inject`) for you. The assistant does not poll or ask to be reminded; the
+server tells you itself when the run:
+
+| Kind | When | Body |
+| --- | --- | --- |
+| `finished` | The run is completed, merged, failed, stopped or interrupted | The run's reason, if any |
+| `needs_input` | The agent asks a question, a permission or a form | `Question: <text>`, `Permission: <title>` or `Form: <title>` |
+| `needs_approval` | An approval is requested for the run | The requested action |
+| `needs_attention` | The run reaches `needs-attention` | Why, worded as in [push notifications](networking.md#notifications) |
+
+The title names the run, for example `Run "Fix flaky login test" finished`. A
+notice reaches you four ways:
+
+- **Assistant transcript.** A notice item, `info` for `finished` and `warning`
+  for the rest. It is appended while the assistant is idle too.
+- **Dashboard.** The `assistant.notice` event
+  ([local-gateway.md](local-gateway.md#assistant-notices)) raises a toast and
+  badges the Assistant button.
+- **Desktop app.** The same event shows an OS notification.
+- **Phone.** A Web Push notification to your subscribed devices, for
+  `finished` always, and for the `needs_*` kinds only on runs you do not own,
+  since your own runs already notify you when they need you. It replaces any
+  earlier notification for that run and waits while you are using a dashboard
+  ([networking.md](networking.md#notifications)); if the run no longer needs
+  you when the wait ends, nothing is sent.
+
+Each state is announced once. Aether stores the last state it announced for
+each followed run, after it is in your transcript, so answering a question, a
+server restart or a repeated status event does not repeat a notice, and a
+notice still queued when the server stops is announced after it starts. The
+next question or a new `needs-attention` reason is a new state. The follow
+ends when the run finishes, and a run that finished while the server was down
+is announced at startup. A run that finishes between the call and the moment
+Aether records the follow is announced at once. Deleting the run or removing
+the member removes the follow, and a member merged into another keeps their
+follows on the surviving member.
+
 ## Conversations
 
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in

@@ -1747,3 +1747,11 @@ export interface EnvAgentsResult {
   warning?: string
   repo_path?: string
 }
+
+export interface AssistantNoticePayload {
+  member_id: string
+  run_id: string
+  kind: 'finished' | 'needs_input' | 'needs_approval' | 'needs_attention'
+  title: string
+  body: string
+}

@@ -27,6 +27,7 @@ import type {
 } from '@/lib/types'
 import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
+import { applyAssistantNotice, noteServerTime } from '@/store/assistant-notice'
 import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { diffSnapshot } from '@/store/diff'
@@ -169,6 +170,7 @@ export async function hydrate(
       store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {} })
     }
     s.setIdentityKey(incomingIdentity)
+    noteServerTime(store, info.time)
     s.setInfo(info)
     s.setWorkspaces(workspaces)
     const active = store.getState().activeWorkspace
@@ -446,6 +448,9 @@ export async function applyEvent(
       }
       break
     }
+    case 'assistant.notice':
+      applyAssistantNotice(store, ev)
+      break
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
       break
