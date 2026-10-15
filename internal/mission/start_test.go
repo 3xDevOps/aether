@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -244,4 +245,34 @@ func slicesContain(in []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestPeersListsEveryCurrentWorker: coord authorizes swarm messages against
+// Peers, so an integrator with more workers than the coordination peer cap
+// still finds every one of them.
+func TestPeersListsEveryCurrentWorker(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	const workers = 10
+	specs := make([]taskSpec, 0, workers)
+	for i := range workers {
+		specs = append(specs, taskSpec{key: fmt.Sprintf("propose-%d", i), title: fmt.Sprintf("task %d", i),
+			paths: []string{fmt.Sprintf("internal/p%d", i)}})
+	}
+	for i, task := range f.activate(t, specs...) {
+		if err := f.startWorker(t, task, fmt.Sprintf("dispatch-%d", i)); err != nil {
+			t.Fatalf("worker.start %d: %v", i, err)
+		}
+	}
+	peers, err := f.svc.Peers(ctx, f.mission.CurrentIntegratorRunID)
+	if err != nil {
+		t.Fatalf("Peers: %v", err)
+	}
+	if len(peers) != workers {
+		t.Fatalf("integrator peers = %d, want all %d workers", len(peers), workers)
+	}
+	worker, err := f.svc.Peers(ctx, domain.RunID(peers[0].RunID))
+	if err != nil || len(worker) != workers {
+		t.Fatalf("worker peers = %d (err %v), want the integrator and %d siblings", len(worker), err, workers-1)
+	}
 }

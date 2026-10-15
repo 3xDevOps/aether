@@ -42,8 +42,8 @@ func TestCoordWireV3Golden(t *testing.T) {
 			Unread:       1,
 			Capabilities: []string{MethodCoordStatus, MethodCoordSend, MethodCoordInbox, MethodCoordAsk, MethodCoordReply, MethodCoordReport},
 		})},
-		{JSONRPC: "2.0", ID: json.RawMessage("2"), Result: mustJSON(t, CoordSendResult{MessageID: "msg_01"})},
-		{JSONRPC: "2.0", ID: json.RawMessage("3"), Result: mustJSON(t, CoordAskResult{QuestionID: "q_01"})},
+		{JSONRPC: "2.0", ID: json.RawMessage("2"), Result: mustJSON(t, CoordSendResult{MessageID: "msg_01", RecipientStatus: "running"})},
+		{JSONRPC: "2.0", ID: json.RawMessage("3"), Result: mustJSON(t, CoordAskResult{QuestionID: "q_01", RecipientStatus: "needs-attention"})},
 		{JSONRPC: "2.0", ID: json.RawMessage("4"), Result: mustJSON(t, CoordReplyResult{MessageID: "msg_03"})},
 		{JSONRPC: "2.0", ID: json.RawMessage("5"), Result: mustJSON(t, CoordInboxResult{
 			Messages: []CoordMessage{{

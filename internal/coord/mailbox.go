@@ -43,7 +43,8 @@ const (
 )
 
 // maxPeers is how many distinct runs one run may ever open a conversation
-// with. Existing conversations may continue to send messages and replies.
+// with over the radar and workspace routes. Existing conversations may
+// continue to send messages and replies; swarm peers are not counted.
 const maxPeers = 8
 
 var coordinationCapabilities = []string{
@@ -56,9 +57,7 @@ var coordinationCapabilities = []string{
 }
 
 // Status answers coord.status for run: who it is, exactly the peers it
-// may message, and how many messages are waiting. A mission run lists its
-// server-authorized assignment peers first, then the radar's active/grace
-// peers; an ordinary run lists only the radar's.
+// may message, and how many messages are waiting.
 func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
 	const method = protocol.MethodCoordStatus
 	if !s.enterRun(run) {
@@ -113,69 +112,9 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 			}
 		}
 	}
-	radarPeers, radarTotal, radarTruncated, radarErr := s.radar.authorizedSetBounded(ctx, run, protocol.CoordMaxStatusPeers)
-	if radarErr != nil {
-		return protocol.CoordStatusResult{}, internalError(method, radarErr)
-	}
-	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
-	seen := make(map[domain.RunID]int, len(missionPeers)+len(radarPeers))
-	appendPeer := func(peer protocol.CoordPeer) {
-		id := domain.RunID(peer.RunID)
-		if id == "" || id == run {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			// MissionService and the radar each return a bounded unique set;
-			// a duplicate keeps the first current-authority entry.
-			return
-		}
-		if len(peers) >= protocol.CoordMaxStatusPeers {
-			return
-		}
-		seen[id] = len(peers)
-		peers = append(peers, peer)
-	}
-	missionTotal, shared := 0, 0
-	for _, peer := range missionPeers {
-		if target, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err != nil ||
-			target == nil || target.Status.Terminal() {
-			continue
-		}
-		missionTotal++
-		peer.State = protocol.CoordPeerMission
-		// The bounded radar view may omit this peer; the full set says
-		// whether the two overlap.
-		p, radarErr := s.radar.authorized(ctx, run, domain.RunID(peer.RunID))
-		if radarErr != nil {
-			return protocol.CoordStatusResult{}, internalError(method, radarErr)
-		}
-		if p.state != "" {
-			shared++
-			peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(p.files)
-		}
-		appendPeer(s.decoratePeer(ctx, peer))
-	}
-	for _, p := range radarPeers {
-		task, taskBytes, taskTruncated := "", 0, false
-		memberID := ""
-		if r, gerr := s.cfg.Store.GetRun(ctx, p.run); gerr == nil && r != nil {
-			memberID = string(r.MemberID)
-			task, taskBytes, taskTruncated = boundStatusText(r.Task)
-		}
-		peer := protocol.CoordPeer{
-			RunID: string(p.run), MemberID: memberID, Task: task, TaskBytes: taskBytes,
-			TaskTruncated: taskTruncated, State: p.state,
-		}
-		peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(p.files)
-		if !p.expiry.IsZero() {
-			peer.ExpiresAt = p.expiry.UTC().Format(time.RFC3339)
-		}
-		appendPeer(peer)
-	}
-	total, truncated := radarTotal, radarTruncated
-	if assignment != nil {
-		total = missionTotal + radarTotal - shared
-		truncated = total > len(peers)
+	peers, total, err := s.statusPeers(ctx, self, missionPeers)
+	if err != nil {
+		return protocol.CoordStatusResult{}, internalError(method, err)
 	}
 	unread, err := s.cfg.Mail.CountUnackedRunMessages(ctx, run)
 	if err != nil {
@@ -195,7 +134,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		WorkspaceID: string(self.WorkspaceID), MemberID: string(self.MemberID),
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
 		Assignment: assignment, Peers: peers, PeerTotal: total,
-		PeersTruncated: truncated, Unread: unread,
+		PeersTruncated: total > len(peers), Unread: unread,
 		Capabilities: capabilities,
 	}, nil
 }
@@ -230,23 +169,6 @@ func boundStatusFiles(all []string) ([]string, int, bool) {
 		files = append(files, path)
 	}
 	return files, len(all), len(all) > len(files)
-}
-
-func (s *Service) decoratePeer(ctx context.Context, peer protocol.CoordPeer) protocol.CoordPeer {
-	if peer.TaskBytes == 0 && peer.Task != "" {
-		peer.Task, peer.TaskBytes, peer.TaskTruncated =
-			boundStatusText(peer.Task)
-	}
-	if peer.MemberID == "" {
-		if r, err := s.cfg.Store.GetRun(ctx, domain.RunID(peer.RunID)); err == nil && r != nil {
-			peer.MemberID = string(r.MemberID)
-			if peer.Task == "" {
-				peer.Task, peer.TaskBytes, peer.TaskTruncated =
-					boundStatusText(r.Task)
-			}
-		}
-	}
-	return peer
 }
 
 func missionRPCError(method string, err error) *protocol.Error {
@@ -339,12 +261,12 @@ func (s *Service) Send(ctx context.Context, from domain.RunID, p protocol.CoordS
 	if err := validateMessageParams(method, from, to, p.Body, p.IdempotencyKey); err != nil {
 		return protocol.CoordSendResult{}, err
 	}
-	msg, rpcErr := s.sendMessage(ctx, method, from, to, p.Body,
+	msg, recipient, rpcErr := s.sendMessage(ctx, method, from, to, p.Body,
 		store.RunMessageKindMessage, "", p.IdempotencyKey, false)
 	if rpcErr != nil {
 		return protocol.CoordSendResult{}, rpcErr
 	}
-	return protocol.CoordSendResult{MessageID: msg.ID}, nil
+	return protocol.CoordSendResult{MessageID: msg.ID, RecipientStatus: string(recipient)}, nil
 }
 
 // Ask answers coord.ask, creating a durable question whose ID is also its
@@ -362,12 +284,12 @@ func (s *Service) Ask(ctx context.Context, from domain.RunID, p protocol.CoordAs
 	if err := validateMessageParams(method, from, to, p.Body, p.IdempotencyKey); err != nil {
 		return protocol.CoordAskResult{}, err
 	}
-	msg, rpcErr := s.sendMessage(ctx, method, from, to, p.Body,
+	msg, recipient, rpcErr := s.sendMessage(ctx, method, from, to, p.Body,
 		store.RunMessageKindQuestion, "", p.IdempotencyKey, false)
 	if rpcErr != nil {
 		return protocol.CoordAskResult{}, rpcErr
 	}
-	return protocol.CoordAskResult{QuestionID: msg.ID}, nil
+	return protocol.CoordAskResult{QuestionID: msg.ID, RecipientStatus: string(recipient)}, nil
 }
 
 // Reply answers coord.reply. It routes only to the original question sender,
@@ -430,7 +352,7 @@ func (s *Service) Reply(ctx context.Context, from domain.RunID, p protocol.Coord
 	if question.FromRun == "" || question.FromRun == from {
 		return protocol.CoordReplyResult{}, invalidParams(method, "question_id does not identify a reply target")
 	}
-	msg, rpcErr := s.sendMessage(ctx, method, from, question.FromRun, p.Body,
+	msg, _, rpcErr := s.sendMessage(ctx, method, from, question.FromRun, p.Body,
 		store.RunMessageKindReply, p.QuestionID, p.IdempotencyKey, true)
 	if rpcErr != nil {
 		return protocol.CoordReplyResult{}, rpcErr
@@ -1127,10 +1049,11 @@ func (s *Service) publishCoordAudit(ctx context.Context, outbox store.CoordAudit
 }
 
 // sendMessage is shared by send, ask, and reply. For replies, correlated is
-// true and radar authorization is intentionally skipped only after the
+// true and route authorization is intentionally skipped only after the
 // question ownership check in Reply.
 type peerMessageStore interface {
 	AppendRunMessageWithPeer(context.Context, *store.RunMessage, int, int, bool) (bool, error)
+	CoordConversationsAtCap(context.Context, domain.RunID, int) (bool, map[domain.RunID]bool, error)
 }
 
 func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.RunMessage, openPeer bool) (bool, error) {
@@ -1147,22 +1070,26 @@ func appendRunMessage(ctx context.Context, mail store.MessageStore, msg *store.R
 }
 
 func (s *Service) sendMessage(ctx context.Context, method string, from, to domain.RunID, body string,
-	kind store.RunMessageKind, correlation, idempotency string, correlated bool) (*store.RunMessage, *protocol.Error) {
+	kind store.RunMessageKind, correlation, idempotency string, correlated bool) (*store.RunMessage, domain.RunStatus, *protocol.Error) {
 	// The transport budget is charged at the authenticated socket boundary.
 	// Retries still avoid radar refresh and mutation work here.
 	if prior, err := s.cfg.Mail.GetRunMessageByIdempotency(ctx, from, idempotency); err == nil {
 		if !coordMessageMatches(prior, to, body, kind, correlation) {
-			return nil, &protocol.Error{
+			return nil, "", &protocol.Error{
 				Code:    protocol.CodeConflict,
 				Message: fmt.Sprintf("%s: idempotency_key %q was used with different message inputs", method, idempotency),
 			}
 		}
-		return prior, nil
+		target, rpcErr := s.resolveRun(ctx, method, to)
+		if rpcErr != nil {
+			return nil, "", rpcErr
+		}
+		return prior, target.Status, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return nil, internalError(method, err)
+		return nil, "", internalError(method, err)
 	}
 	if !s.allow(from) {
-		return nil, &protocol.Error{
+		return nil, "", &protocol.Error{
 			Code: protocol.CodeConflict,
 			Message: fmt.Sprintf("%s: rate limit exceeded (burst %d, 1 message per %ds)",
 				method, sendBurst, int(sendRefill.Seconds())),
@@ -1170,79 +1097,58 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 	}
 	sender, rpcErr := s.resolveRun(ctx, method, from)
 	if rpcErr != nil {
-		return nil, rpcErr
+		return nil, "", rpcErr
 	}
 	target, rpcErr := s.resolveRun(ctx, method, to)
 	if rpcErr != nil {
-		return nil, rpcErr
+		return nil, "", rpcErr
+	}
+	if target.WorkspaceID != sender.WorkspaceID {
+		return nil, "", deniedPeer(method, from, to, "it is in a different workspace")
 	}
 	if target.Status.Terminal() {
-		return nil, &protocol.Error{
+		return nil, "", &protocol.Error{
 			Code:    protocol.CodeUnavailable,
 			Message: fmt.Sprintf("%s: run %s has finished", method, to),
 		}
 	}
+	// A server-assigned swarm peer does not spend one of the sender's
+	// peer slots, so an integrator can reach every worker it dispatched.
+	openPeer := false
 	if !correlated {
-		// A mission assignment adds peers; the radar's active/grace set
-		// stays reachable for coordination discovered through hook context.
-		authorized := false
-		if s.cfg.Mission != nil {
-			assignment, err := s.cfg.Mission.Assignment(ctx, from)
-			if err != nil {
-				return nil, missionRPCError(method, err)
-			}
-			if assignment.MissionID != "" && target.WorkspaceID == sender.WorkspaceID {
-				peers, err := s.cfg.Mission.Peers(ctx, from)
-				if err != nil {
-					return nil, missionRPCError(method, err)
-				}
-				for _, peer := range peers {
-					if domain.RunID(peer.RunID) == to {
-						authorized = true
-						break
-					}
-				}
-			}
+		route, rpcErr := s.route(ctx, method, sender, target)
+		if rpcErr != nil {
+			return nil, "", rpcErr
 		}
-		if !authorized {
-			peer, err := s.radar.authorized(ctx, from, to)
-			if err != nil {
-				return nil, internalError(method, err)
-			}
-			if peer.state == "" {
-				return nil, &protocol.Error{
-					Code:    protocol.CodeDenied,
-					Message: fmt.Sprintf("%s: run %s is not an authorized peer of run %s", method, to, from),
-				}
-			}
-		}
+		openPeer = route != protocol.CoordPeerMission
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: body,
 		Kind: kind, CorrelationID: correlation, IdempotencyKey: idempotency,
 	}
-	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, !correlated)
+	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, openPeer)
 	if errors.Is(err, store.ErrIdempotencyConflict) {
-		return nil, &protocol.Error{
+		return nil, "", &protocol.Error{
 			Code:    protocol.CodeConflict,
 			Message: fmt.Sprintf("%s: idempotency_key %q was used for another message kind", method, idempotency),
 		}
 	}
 	if errors.Is(err, store.ErrCoordPeerLimit) {
-		return nil, &protocol.Error{
-			Code:    protocol.CodeConflict,
-			Message: fmt.Sprintf("%s: run %s has reached its limit of %d coordination peers", method, from, maxPeers),
+		return nil, "", &protocol.Error{
+			Code: protocol.CodeConflict,
+			Message: fmt.Sprintf("%s: run %s has reached its limit of %d coordination peers; "+
+				"it can still message the runs it already wrote to and its swarm peers", method, from, maxPeers),
 		}
 	}
 	if errors.Is(err, store.ErrInboxFull) {
-		return nil, &protocol.Error{
+		return nil, "", &protocol.Error{
 			Code: protocol.CodeConflict,
 			Message: fmt.Sprintf("%s: run %s inbox is full (%d unacknowledged messages)",
 				method, to, protocol.CoordMaxUnread),
 		}
 	}
 	if err != nil {
-		return nil, internalError(method, err)
+		return nil, "", internalError(method, err)
 	}
 	if created {
 		if audit, ok := s.cfg.Mail.(store.CoordAuditStore); ok {
@@ -1257,7 +1163,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		// Wake readers only after the durable mailbox append has committed.
 		s.wakeInbox(msg.ToRun)
 	}
-	return msg, nil
+	return msg, target.Status, nil
 }
 func coordMessageMatches(prior *store.RunMessage, to domain.RunID, body string,
 	kind store.RunMessageKind, correlation string) bool {

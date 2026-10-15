@@ -14,7 +14,6 @@ import (
 const (
 	missionRoleIntegrator = "integrator"
 	missionRoleWorker     = "worker"
-	missionPeerLimit      = 8
 )
 
 // resolveAssignment is the sole authority lookup for mission coordination.
@@ -223,9 +222,11 @@ func workerCapabilities() []string {
 	}
 }
 
-// Peers returns the current mission membership, not historical attempts and
-// not human takeover rows.  Every member is resolved from its durable run so
-// peer authorization is workspace-bound and symmetric.
+// Peers returns the full current mission membership, not historical
+// attempts and not human takeover rows. It is unbounded because coord
+// authorizes swarm messages against it; coord.status bounds what it lists.
+// Every member is resolved from its durable run so peer authorization is
+// workspace-bound and symmetric.
 func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.CoordPeer, error) {
 	m, _, err := s.resolveAssignment(ctx, run)
 	if err != nil {
@@ -234,7 +235,7 @@ func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.Coord
 	if m == nil {
 		return nil, nil
 	}
-	ids := make(map[domain.RunID]struct{}, missionPeerLimit+1)
+	ids := map[domain.RunID]struct{}{}
 	ids[m.CurrentIntegratorRunID] = struct{}{}
 	attempts, err := s.cfg.Missions.ListAttempts(ctx, m.ID, "")
 	if err != nil {
@@ -274,7 +275,7 @@ func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.Coord
 		}
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
-	out := make([]protocol.CoordPeer, 0, missionPeerLimit)
+	out := make([]protocol.CoordPeer, 0, len(ordered))
 	for _, id := range ordered {
 		r, runErr := s.cfg.Store.GetRun(ctx, id)
 		if errors.Is(runErr, store.ErrNotFound) {
@@ -285,9 +286,6 @@ func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.Coord
 		}
 		if r == nil || r.WorkspaceID != m.WorkspaceID || r.Status.Final() {
 			continue
-		}
-		if len(out) == missionPeerLimit {
-			break
 		}
 		out = append(out, protocol.CoordPeer{RunID: string(r.ID), MemberID: string(r.MemberID), Task: r.Task, State: protocol.CoordPeerMission})
 	}

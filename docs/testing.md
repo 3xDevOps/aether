@@ -54,22 +54,26 @@ Layers, per the design spec's testing strategy:
   to one package and `INTEGRATION_SKIP` leaves some out. `INTEGRATION_RUN` and
   `INTEGRATION_SKIP_PATTERN`, when set, append `-run` and `-skip`. CI runs on
   GitHub-hosted runners, with `GOFLAGS=-v` so each test's duration is in the
-  job log. Six browser-independent shards in the `integration` matrix in
-  `.github/workflows/ci.yml` start without waiting for browser images:
+  job log. The `integration` matrix in `.github/workflows/ci.yml` has five
+  shards that need no browser image:
   `server-chaos` (`INTEGRATION_RUN=^TestIntegrationChaos`),
-  `server-coordination` (`INTEGRATION_RUN=^TestIntegrationCoordination`),
-  `server-mission` (`INTEGRATION_RUN=^TestIntegrationMission`),
+  `server-mission-coordination`
+  (`INTEGRATION_RUN='^TestIntegration(Mission|Coordination)'`),
   `server-heavy`
   (`INTEGRATION_RUN='^TestIntegration(EndToEnd|MultiMember|ServerUpdate)'`),
   `scheduler` (`INTEGRATION_PKGS=./internal/scheduler`), and `rest`.
-  The four named server shards use `INTEGRATION_PKGS=./internal/server`.
+  The three named server shards use `INTEGRATION_PKGS=./internal/server`.
   `rest` dynamically discovers integration packages, excluding
   `./internal/harness`, `./internal/scheduler`, and `./internal/server`;
   it skips `^TestDockerBrowser`, whose coverage belongs to the native
   amd64/arm64 `browser` jobs. The separate `integration-server-rest` job
-  loads `browser-image-amd64` and runs `./internal/server` with
+  builds `images/browser/Dockerfile` itself, reading the `browser-amd64-main`
+  build cache that the `browser` job writes on pushes to `main`, and runs
+  `./internal/server` with
   `INTEGRATION_SKIP_PATTERN='^TestIntegration(Chaos|Coordination|Mission|EndToEnd|MultiMember|ServerUpdate)'`.
   This catch-all retains tests that do not start with `TestIntegration`.
+  No integration job waits for another job's image, so all of them start
+  when `changes` finishes.
   Both integration job families use `sudo env`, preserving `PATH`, `HOME`,
   `GOFLAGS`, `AETHER_BROWSER_TEST_IMAGE`, and `AETHER_BROWSER_IMAGE`.
   The separate unit suites remain unprivileged: the root-only
@@ -80,7 +84,7 @@ Layers, per the design spec's testing strategy:
   and native Git checks.
   A docs-only pull request (only `docs/**` and root `*.md`) runs
   `audit` and skips every other job, including these, the dashboard jobs, and
-  the release matrix. A markdown file anywhere else, including a dashboard
+  `release-build`. A markdown file anywhere else, including a dashboard
   end-to-end fixture, does not. The `changes` job runs
   `scripts/ci-classify-changes.sh` from the pull request's base revision, so
   a change to that script cannot make the decision itself, and a rename is
@@ -163,12 +167,22 @@ Layers, per the design spec's testing strategy:
   `aether-server`. They own the paths a person walks in the dashboard, which
   no Go test and no jsdom test reaches. CI runs four isolated
   `dashboard-e2e` runners, each with its own Docker daemon and Playwright
-  `workers: 1`; `fullyParallel` remains `false`. Each runner loads the tested
-  browser and standard images and runs `make test-e2e` with
+  `workers: 1`. Each runner builds the browser and standard images itself,
+  reading the `browser-amd64-main` and `standard-amd64-main` build caches
+  that the `browser` and `smoke` jobs write on pushes to `main`, so it starts
+  without waiting for those jobs. A change to an image's Dockerfile or its
+  inputs misses that cache from the changed step on, in its pull request,
+  its merge queue entry and the push to `main` that lands it: those runs
+  read the cache before `browser` and `smoke` write the new layers. In each
+  of them every shard, and `integration-server-rest`, rebuilds those layers
+  itself, network downloads included. Each runner then
+  runs `make test-e2e` with
   `E2E_ARGS='--shard=1/4'` (or `2/4`, `3/4`, `4/4`). Local
   `make test-e2e` remains unsharded and still builds the embedded dashboard
   and binaries first. The four shards partition the desktop and mobile cases
-  once each. File boundaries can make shard sizes unequal.
+  once each. `fullyParallel: true` makes `--shard` split by test rather than
+  by file; with one worker, tests still run one at a time, and a file split
+  across shards runs its `beforeAll` hooks in each.
   The `chromium` project excludes `**/*.mobile.spec.ts`; only the `mobile`
   project owns those specs. The opt-in real-GitHub case keeps its existing
   credential gate; listing or sharding it does not prove it ran.
@@ -301,21 +315,21 @@ malformed, or failed API responses and a newer pending or failed run reject
 publication; an older success, PR run, or merge-group run cannot substitute.
 See [release instructions](install.md#releases) for the publishing gate.
 
-CI's `release-build` matrix has six Go lanes: Linux, Darwin, and Windows,
-each for amd64 and arm64. They call `make release-binaries` with
-`SERVER_PLATFORMS`, `EDGE_PLATFORMS`, and `CLI_PLATFORMS` selecting one
-target: Linux builds server, edge, and CLI; Darwin and Windows build CLI
-only. Each lane uploads `binaries-go-<goos>-<goarch>`. The independent
-`android` job validates the Gradle wrapper and runs `make android`, uploading
-`aether-android-unsigned.apk` and `aether-android-unsigned.aab` in
-`binaries-android`. All seven artifacts have seven-day retention and missing
-outputs fail upload. Locally, `make release-binaries` builds all ten Go
-assets by default without Android or Docker; `make release` still adds
-Android. Go builds still need the dashboard's Bun and Node toolchain.
+CI's `release-build` job runs `make release-binaries`, which builds all ten
+Go assets in parallel: server and edge for Linux, and the CLI for Linux,
+Darwin, and Windows, each for amd64 and arm64. It uploads the two Windows
+clients as `binaries-go-windows` and the other eight as `binaries-go`. The
+independent `android` job validates the Gradle wrapper and runs
+`make android`, uploading `aether-android-unsigned.apk` and
+`aether-android-unsigned.aab` in `binaries-android`. All three artifacts
+have seven-day retention and missing outputs fail upload. Locally,
+`make release-binaries` builds the same ten assets without Android or
+Docker; `make release` still adds Android. Go builds still need the
+dashboard's Bun and Node toolchain.
 
-`windows-defender` depends on the Go matrix, not Android. It downloads only
-the current run's `binaries-go-windows-*` artifacts, merges their contents,
-and requires both `aether-windows-amd64.exe` and `aether-windows-arm64.exe`.
+`windows-defender` depends on `release-build`, not Android. It downloads
+only the current run's `binaries-go-windows` artifact and requires both
+`aether-windows-amd64.exe` and `aether-windows-arm64.exe`.
 CI and release publication share `scripts/windows-defender.ps1`: prepare the
 hosted runner before downloading artifacts, remove inherited antivirus
 exclusions, enable and verify effective realtime/cloud protection, automatic
@@ -331,20 +345,22 @@ publication depends
 on that exact-byte scan succeeding. A scan of CI's earlier build cannot stand
 in for this release scan. Windows executables remain unsigned.
 These static scans supplement, rather than replace, the runtime installer
-Defender scenarios above. Android and every Go lane remain required CI coverage.
+Defender scenarios above. Android and every Go target remain required CI coverage.
 
 Go caches separate module downloads from compiled objects. Both are scoped
 to host OS/architecture, runner environment, resolved toolchain, and module
 digest; compiler caches also isolate the lane and commit, with fallback only
 within the same lane. Only pushes to `main` write: `build-and-test`,
 `windows`, and arm64 `smoke` own their respective host's module/native
-compiler archives; each Go release-build lane owns its
-`release-<goos>-<goarch>` compiler archive. PRs and releases restore only.
-The installer uses a separate `windows-install` compiler lane; only its
-PowerShell/system-Node main lane saves that cache and its Bun dependency
-cache, leaving Windows module writes to CI's `windows` job. It saves them
-right after the build, before arming Defender, whose realtime scan made
-archiving the Bun cache take eight minutes. Before compressing
+compiler archives; `release-build` owns the `release` compiler archive,
+which the release workflow's per-platform lanes restore. PRs and releases
+restore only. The installer uses a separate `windows-install` compiler lane;
+only its PowerShell/system-Node main lane saves that cache, leaving Windows
+module writes to CI's `windows` job. It saves right after the build, before
+arming Defender, whose realtime scan made archiving take eight minutes. The
+installer restores no Bun cache: on Windows, restoring the 115 MB archive
+took 50 seconds at the median and 90 at p90, longer than the 39-second
+dashboard build it served. Before compressing
 an archive, each writer checks whether its exact key already exists and skips
 the save on a hit. Cache reuse does not replace any build or validation gate.
 

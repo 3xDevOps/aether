@@ -1,6 +1,6 @@
 // Package permissions is the pure capability policy for Aether: who may
-// view, steer, kill, hand off, protect, launch, and administer, given the
-// actor's role, run ownership, the run's protected flag, and the
+// view, steer, kill, message, hand off, protect, launch, and administer,
+// given the actor's role, run ownership, the run's protected flag, and the
 // workspace's steer-others setting. It performs no I/O - callers resolve
 // the actor and target from the store and map ErrDenied to the wire's
 // CodeDenied.
@@ -14,9 +14,13 @@
 //	| admin        | everything | everything          | members, settings, ... |
 //
 // modified by two restrictions: a workspace with steer_others=admins_only
-// limits steering and killing others' runs to owner and admins, and a
-// protected run limits steer AND kill to its owner and admins regardless
-// of the workspace setting.
+// limits messaging, steering and killing others' runs to owner and admins,
+// and a protected run limits each of them to its owner and admins
+// regardless of the workspace setting.
+//
+// Message lets one run's owner open a coordination conversation with
+// another run in the same workspace. Coordination mail can start a turn in
+// an idle run, so it follows the same two restrictions; a viewer has none.
 //
 // Git push over SSH is the Push capability: writing to a workspace's
 // repository is a collaborator action, so a viewer is read-only on the
@@ -42,6 +46,9 @@ const (
 	Steer Capability = "steer"
 	// Kill terminates a run: kill and close.
 	Kill Capability = "kill"
+	// Message opens a coordination conversation from a run the actor owns
+	// to the target run. It grants no other access to the target.
+	Message Capability = "message"
 	// Launch starts new runs; collaborator and admin only.
 	Launch Capability = "launch"
 	// Push writes to a workspace's git repository (receive-pack);
@@ -72,8 +79,8 @@ type Target struct {
 	// Owner is the targeted run's owning member; empty when no run is
 	// targeted.
 	Owner domain.MemberID
-	// Protected restricts Steer and Kill to owner and admins regardless
-	// of the workspace setting.
+	// Protected restricts Steer, Kill and Message to owner and admins
+	// regardless of the workspace setting.
 	Protected bool
 	// SteerOthers is the workspace's steer-others policy: "" (permissive
 	// default) or domain.SteerOthersAdminsOnly.
@@ -134,6 +141,20 @@ func Check(cap Capability, actor Actor, target Target) error {
 		}
 		if target.SteerOthers == domain.SteerOthersAdminsOnly {
 			return deny("workspace restricts " + string(cap) + " of others' runs to their owner and admins")
+		}
+		return nil
+	case Message:
+		if actor.Role != domain.RoleCollaborator {
+			return deny("messaging another run requires the collaborator role")
+		}
+		if owner {
+			return nil
+		}
+		if target.Protected {
+			return deny("run is protected: only its owner or an admin may message it")
+		}
+		if target.SteerOthers == domain.SteerOthersAdminsOnly {
+			return deny("workspace restricts messaging others' runs to their owner and admins")
 		}
 		return nil
 	}

@@ -61,7 +61,7 @@ func sameMessageIDs(current []string, seen map[string]struct{}) bool {
 // admitting a wake, so a command hook can tell new mail from mail it already
 // announced even when the unread count is unchanged.
 func (s *Service) commandHookStatus(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
-	status, rpcErr := s.Status(ctx, run)
+	status, rpcErr := s.hookRunStatus(ctx, run)
 	if rpcErr != nil {
 		return status, rpcErr
 	}
@@ -74,6 +74,30 @@ func (s *Service) commandHookStatus(ctx context.Context, run domain.RunID) (prot
 		return status, internalError(protocol.MethodCoordHookStatus, err)
 	}
 	status.UnreadMessageIDs = ids
+	return status, nil
+}
+
+// hookRunStatus is Status plus the run's active overlaps, which hooks
+// announce even for overlapping runs the run may not message.
+func (s *Service) hookRunStatus(ctx context.Context, run domain.RunID) (protocol.CoordStatusResult, *protocol.Error) {
+	status, rpcErr := s.Status(ctx, run)
+	if rpcErr != nil || s.cfg.Disabled {
+		return status, rpcErr
+	}
+	active, err := s.radar.authorizedSet(ctx, run)
+	if err != nil {
+		return status, internalError(protocol.MethodCoordHookStatus, err)
+	}
+	for _, p := range active {
+		if len(status.Overlaps) == protocol.CoordMaxStatusPeers {
+			break
+		}
+		if len(p.files) == 0 {
+			continue
+		}
+		files, _, _ := boundStatusFiles(p.files)
+		status.Overlaps = append(status.Overlaps, protocol.CoordOverlap{RunID: string(p.run), Files: files})
+	}
 	return status, nil
 }
 
@@ -90,7 +114,7 @@ func (s *Service) observeHook(ctx context.Context, run domain.RunID, p protocol.
 	}
 	mail, supported := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
 	if !supported {
-		status, err := s.Status(ctx, run)
+		status, err := s.hookRunStatus(ctx, run)
 		return hookObservation{status: status}, err
 	}
 	waiter := s.registerHookWaiter(run)
@@ -122,7 +146,7 @@ func (s *Service) observeHook(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		return observation, internalError(method, err)
 	}
-	status, rpcErr := s.Status(ctx, run)
+	status, rpcErr := s.hookRunStatus(ctx, run)
 	if rpcErr != nil {
 		return observation, rpcErr
 	}

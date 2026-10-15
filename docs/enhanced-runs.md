@@ -161,9 +161,10 @@ before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
 
 In Session, the same animated teal control light as a Standard terminal
-glows along the edges of the conversation and composer, not the toolbar or
-Details. **Release** retracts it; an incoming hold traces it red, and a
-takeover retracts the red light. Read-only tabs and disconnected sessions
+glows along the top edge of the conversation, under the toolbar, and pours
+leftward from **Release**. **Release** drains it back to the right; an
+incoming hold turns it red from the right, and a takeover drains the red
+light. Read-only tabs and disconnected sessions
 have no light. Reduced motion makes ownership changes instant and the takeover
 indicator static.
 

@@ -585,7 +585,7 @@ export function ShellTerminal({ shells, tabs, onCaptures }: {
       )}
       {processRunning && activeHasControl && <span className="px-1 text-ui-sm text-muted">You control</span>}
       {processRunning && (activeHasControl
-        ? <Button size="sm" variant="ghost" disabled={busy} hint="Let the agent or a teammate type in this shell" onClick={() => void releaseShellControl()}>Release</Button>
+        ? <Button size="sm" variant="primary" disabled={busy} hint="Let the agent or a teammate type in this shell" onClick={() => void releaseShellControl()}>Release</Button>
         : !typeToControl && <Button ref={takeTrigger} size="sm" variant="secondary" disabled={busy || attachedIdentity === null} onClick={() => {
           if (controlledByOther) setConfirmingTake(true)
           else takeShellControl()

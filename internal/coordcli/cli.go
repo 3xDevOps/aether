@@ -180,7 +180,9 @@ in the v3 JSON envelope. --json is optional; output is always JSON.
 peers lists every run you may message, with its state (mission: same swarm;
 active or grace: overlapping edits, with files; workspace: same workspace),
 task summary and, for workspace peers, run_status. Use a peer's run_id with
-send --to or ask --to. A viewer-owned run has no peers and cannot send or ask.
+send --to or ask --to. A viewer-owned run has no peers; it can only reply to
+questions it was asked. At the 8-peer cap, only swarm peers and existing
+conversations are listed.
 `,
 	"skill": `usage: aether-internal skill [terminal|browser|git]
        aether-internal skill --hooks
@@ -465,7 +467,9 @@ const skillWorkflow = `Coordination and completion:
 Stay within your assignment. aether-internal status lists the peers you may
 message with state mission (same swarm), active or grace (overlapping edits,
 with files) or workspace (same workspace, with run_status), and each task.
-A viewer-owned run has no peers.
+A viewer-owned run has no peers; at the 8-peer cap only swarm peers and
+existing conversations are listed. An overlap notice can name a run status
+does not list; message it only if listed.
 Before editing files a peer is touching or its task covers, send a short,
 specific note: your plan, the files you own, any conflict, your status. Ask
 when the decision is the peer's; replies arrive in the inbox:
