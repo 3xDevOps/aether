@@ -117,7 +117,7 @@
   z-index: 40;
   pointer-events: none;
   width: 100%;
-  height: min(8rem, 100%);
+  height: min(5.6rem, 100%);
   fill: none;
   stroke: currentColor;
   stroke-width: 1;
@@ -127,12 +127,12 @@
 }
 
 .terminal-control-border .control-glow {
-  stroke-width: 40;
+  stroke-width: 28;
   opacity: var(--control-glow);
 }
 
 .terminal-control-border .control-halo {
-  stroke-width: 6;
+  stroke-width: 4.2;
 }
 
 .terminal-control-border .control-rim {

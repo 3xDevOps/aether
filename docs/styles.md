@@ -358,7 +358,7 @@ Live local control lights the top edge of the terminal viewport or the
 Enhanced Session conversation, just under the toolbar; the other edges stay
 dark. The light is a uniform bar across the whole edge: a 1.5px
 `--control-light` rim with a tight halo and a soft glow spilling down. It is
-at full strength while it moves or turns red. Once acquisition settles it
+at 70% strength while it moves or turns red. Once acquisition settles it
 dims to half over 1.2s, then breathes between 42% and 60% on an 8-second
 cycle. `--control-light` is the accent teal in light
 theme and a brighter teal in dark; `--control-glow` dims the glow to 0.3 in

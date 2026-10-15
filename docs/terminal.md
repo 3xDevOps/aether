@@ -290,7 +290,7 @@ downward. After this tab acknowledges live input, the light pours leftward
 from the right end, under **Release**, then dims to half strength and slowly
 breathes. An acknowledged voluntary release drains it back to the
 right. Both decelerate toward their endpoints. While another member holds
-**Take control**, the light returns to full strength and red spreads
+**Take control**, the light returns to its moving strength (70%) and red spreads
 leftward from the right end over the teal. An explicit server takeover notification for this session's current
 lease turns the light red, then drains it to the right over about two
 seconds. A completed hold has already made the light red; it stays red
