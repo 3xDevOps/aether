@@ -90,6 +90,7 @@ function Wait-Defender([switch]$RealTime) {
             }
         } catch {
             $state = "$_"
+            Write-Host "Defender is not answering yet; retrying: $state"
         }
         if ((Get-Date) -gt $deadline) {
             throw "Defender was not ready by $deadline. WinDefend: $($service.Status). Last status: $state"
@@ -127,7 +128,7 @@ if ($Mode -eq 'StartUpdate') {
     # no copy of this step's output pipes and the runner does not wait for it.
     $process = Start-Process -FilePath powershell.exe -PassThru -WindowStyle Hidden `
         -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Mode', 'Update')
-    Set-Content -LiteralPath "$updatePath.pid" -Value $process.Id
+    Set-Content -LiteralPath "$updatePath.pid" -Value "$($process.Id) $($process.StartTime.ToFileTimeUtc())"
     Write-Host "Defender signature update running in the background as process $($process.Id)."
     return
 }
@@ -146,8 +147,9 @@ Write-Evidence "## Windows Defender: $Mode"
 if ($Mode -eq 'Prepare') {
     # Record before arming or downloading, so real-time detections during the
     # download cannot become part of a later, apparently clean baseline.
-    Wait-Defender
-    $baseline = @(Get-MpThreatDetection | ForEach-Object { [string]$_.DetectionID })
+    $baseline = @(Invoke-Defender 'Reading the detection baseline' {
+        Get-MpThreatDetection | ForEach-Object { [string]$_.DetectionID }
+    })
     Invoke-Defender 'Arming Defender' {
         Set-MpPreference -DisableRealtimeMonitoring $false
         Set-MpPreference -DisableIOAVProtection $false
@@ -163,9 +165,11 @@ if ($Mode -eq 'Prepare') {
         if ($preferences.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $preferences.ExclusionExtension }
     }
     if (Test-Path -LiteralPath "$updatePath.pid") {
-        $updateId = [int](Get-Content -LiteralPath "$updatePath.pid" -Raw)
+        # Windows reuses process IDs quickly, so match the start time as well.
+        $updateId, $updateStart = (Get-Content -LiteralPath "$updatePath.pid" -Raw).Trim() -split ' '
         try {
             Get-Process -Id $updateId -ErrorAction SilentlyContinue |
+                Where-Object { $_.StartTime.ToFileTimeUtc() -eq [long]$updateStart } |
                 Wait-Process -Timeout ([math]::Max(1, [int]($deadline - (Get-Date)).TotalSeconds))
         } finally {
             Write-Host 'Background signature update output:'
@@ -178,7 +182,7 @@ if ($Mode -eq 'Prepare') {
         Update-Signatures
     }
     Wait-Defender -RealTime
-    Assert-Protection
+    Invoke-Defender 'Verifying Defender protection' { Assert-Protection }
     [ordered]@{
         RunID = $env:GITHUB_RUN_ID
         RunAttempt = $env:GITHUB_RUN_ATTEMPT
