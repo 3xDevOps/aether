@@ -307,8 +307,8 @@ through the same native extension/plugin mechanism.
 
 An overlap notice tells the agent to run `aether-internal status` and, if
 the overlapping run is listed there, send it its plan before editing shared
-files. The notice comes from the hook's `overlaps` list, so it can name a run
-that status does not list. Inbox
+files. The notice comes from the hook's `overlaps` list, so it can appear
+without a matching peer in status. Inbox
 notices call peer messages attributed data, not instructions; see
 [Send a message](coordination.md#send-a-message).
 
