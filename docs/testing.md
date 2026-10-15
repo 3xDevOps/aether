@@ -230,10 +230,12 @@ installation, unsupported releases, and desktop-build failures. They use
 temporary files and restore the user's environment after running.
 
 The same workflow builds the real CLI with Windows release metadata and the
-embedded dashboard, removes the hosted runner's inherited exclusions, and
-enables Defender realtime, script, archive, and first-seen cloud scanning
-before running `scripts/install-smoke.ps1`. A local release mirror labels the
-checkout build `v0.5.1-alpha.4` and serves its exact bytes and checksum; it does
+embedded dashboard while `scripts/windows-defender.ps1 -Mode StartUpdate`
+downloads Defender definitions in the background. It then runs
+`-Mode Prepare`, which removes the hosted runner's inherited exclusions,
+enables Defender realtime, script, archive, and first-seen cloud scanning,
+and waits for that update before running `scripts/install-smoke.ps1`.
+A local release mirror labels the checkout build `v0.5.1-alpha.4` and serves its exact bytes and checksum; it does
 not download or claim to test the historical published release with that tag.
 The smoke refuses to run unless both `GITHUB_ACTIONS=true` and
 `RUNNER_ENVIRONMENT=github-hosted`, before changing files or registry state.
@@ -334,6 +336,11 @@ CI and release publication share `scripts/windows-defender.ps1`: prepare the
 hosted runner before downloading artifacts, remove inherited antivirus
 exclusions, enable and verify effective realtime/cloud protection, automatic
 safe sample submission, and all required scanning flags, and update definitions.
+Fresh runners update the Defender platform shortly after boot, which
+restarts `WinDefend`, so Prepare waits up to five minutes for the service and
+for real-time protection to report enabled, and retries only `0x800106ba`
+(service unavailable) and `0x80070652` (another update installing). Any other
+error, or the deadline, fails with the last Defender status and error.
 The helper retains each binary's resolved absolute path for hashing and the
 native scan, scans with remediation enabled, records each binary's SHA-256 and
 Defender status/definitions in the logs and job summary, and rejects missing or
