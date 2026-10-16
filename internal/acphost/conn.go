@@ -60,6 +60,7 @@ type AgentInfo struct {
 	List            bool
 	Steering        bool
 	PromptImages    bool
+	PromptEmbedded  bool
 	AuthMethods     json.RawMessage
 }
 
@@ -68,7 +69,8 @@ type initializeResult struct {
 	AgentCapabilities struct {
 		LoadSession        bool `json:"loadSession"`
 		PromptCapabilities struct {
-			Image bool `json:"image"`
+			Image           bool `json:"image"`
+			EmbeddedContext bool `json:"embeddedContext"`
 		} `json:"promptCapabilities"`
 		SessionCapabilities struct {
 			Resume json.RawMessage `json:"resume"`
@@ -372,6 +374,7 @@ func (c *Conn) initialize(ctx context.Context) error {
 		List:            present(caps.SessionCapabilities.List),
 		Steering:        res.Meta.Steering.Supported,
 		PromptImages:    caps.PromptCapabilities.Image,
+		PromptEmbedded:  caps.PromptCapabilities.EmbeddedContext,
 		AuthMethods:     res.AuthMethods,
 	}
 	if res.AgentInfo != nil {

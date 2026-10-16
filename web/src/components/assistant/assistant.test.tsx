@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
+import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
 import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -42,7 +43,7 @@ afterAll(() => {
 const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
 
 function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
-  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, ...over }
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, share_view: true, ...over }
 }
 
 const stop: AssistantConfirmation = {
@@ -495,6 +496,8 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).toBe(first![1])
+    expect(first![2]).toMatchObject({ version: 1, route: { name: 'board' } })
+    expect(second![2]).toBe(first![2])
     expect(useStore.getState().assistantAttempt).toBeNull()
   })
 
@@ -511,6 +514,41 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).not.toBe(first![1])
+  })
+})
+
+describe('the view context', () => {
+  it('shows what is sent, and once turned off sends nothing more', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(api.assistantPrompt).mockResolvedValue({})
+      vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, share_view: false })
+      useStore.getState().navigate('run', { runId: 'run-8x2', view: 'changes' })
+      const aside = await openPanel()
+      acpOpen()
+      await act(() => vi.advanceTimersByTimeAsync(viewSyncDelay))
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(api.assistantView).mock.calls[0]![0].route).toMatchObject({ run_id: 'run-8x2', view: 'changes' })
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const chip = await within(aside).findByRole('button', { name: 'Sharing: run run-8x2 · Changes' })
+      expect(chip.getAttribute('aria-describedby')).toBeTruthy()
+      await user.click(chip)
+      expect(within(aside).getByRole('region', { name: 'Sent with this message' }).textContent).toContain('"run_id": "run-8x2"')
+      await user.click(within(aside).getByRole('checkbox', { name: 'Share the page I am on with the assistant' }))
+      expect(api.assistantSettings).toHaveBeenCalledWith({ share_view: false })
+      expect(within(aside).getByRole('button', { name: 'Not sharing this page' })).toBeDefined()
+
+      act(() => useStore.getState().navigate('board'))
+      await act(() => vi.advanceTimersByTimeAsync(5 * viewSyncDelay))
+      await user.type(within(aside).getByRole('textbox', { name: 'Message the assistant' }), 'what is this?{Enter}')
+      await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(api.assistantPrompt).mock.calls[0]![2]).toBeUndefined()
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(useStore.getState().assistantStatus?.share_view).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

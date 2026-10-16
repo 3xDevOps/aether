@@ -48,6 +48,10 @@ type AssistantStore interface {
 	// confirmed tools run without a card; false when never set.
 	AssistantAutoApprove(ctx context.Context, member domain.MemberID) (bool, error)
 	SetAssistantAutoApprove(ctx context.Context, member domain.MemberID, on bool) error
+	// AssistantShareView reports whether the member sends the assistant their
+	// dashboard view context; true when never set.
+	AssistantShareView(ctx context.Context, member domain.MemberID) (bool, error)
+	SetAssistantShareView(ctx context.Context, member domain.MemberID, on bool) error
 }
 
 func (d *DB) GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error) {
@@ -175,6 +179,27 @@ func (d *DB) SetAssistantAutoApprove(ctx context.Context, member domain.MemberID
 		member, on)
 	if err != nil {
 		return fmt.Errorf("store: set assistant auto-approval: %w", mapConstraint(err, ErrNotFound))
+	}
+	return nil
+}
+
+func (d *DB) AssistantShareView(ctx context.Context, member domain.MemberID) (bool, error) {
+	on := true
+	err := d.db.QueryRowContext(ctx,
+		`SELECT share_view FROM assistant_settings WHERE member_id = ?`, member).Scan(&on)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("store: get assistant view sharing: %w", err)
+	}
+	return on, nil
+}
+
+func (d *DB) SetAssistantShareView(ctx context.Context, member domain.MemberID, on bool) error {
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO assistant_settings (member_id, share_view, updated_at) VALUES (?, ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET share_view = excluded.share_view, updated_at = excluded.updated_at`,
+		member, on)
+	if err != nil {
+		return fmt.Errorf("store: set assistant view sharing: %w", mapConstraint(err, ErrNotFound))
 	}
 	return nil
 }

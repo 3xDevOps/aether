@@ -572,6 +572,23 @@ the bottom instead of at a stale offset. A transcript pinned to the bottom stays
 pinned, so it follows output that arrived while the panel was closed. A
 different conversation starts at the bottom.
 
+`store/view-context.ts` builds the view context each prompt carries (see
+[assistant.md](assistant.md#what-it-sees)): the route's ids, the run view
+`RunFrame` reports through `setShownRunView`, the active file only on the
+Files page or its own run's Files view, and `viewHistory`, the last 8 pages,
+recorded only while sharing is on and never persisted. The prompt's context is kept in the retry attempt with its
+key. While the panel is open and sharing is on, `syncViewContext` sends
+`assistant.view` at most once a second when the context changed, one call at a
+time, retrying a failed one with backoff and sending it again after each
+prompt. `ContextChip` (`components/assistant/context-chip.tsx`)
+above the composer shows it and turns sharing off with
+`assistant.settings {share_view}`; `assistantShareChoice` holds the choice
+until the server saves it, sending one save at a time so an older choice
+never lands after a newer one, retrying with backoff from 3 seconds up to a
+minute, stopping on `-32004` or `-32602`, or once another member signs in
+(`resetAssistant` drops the choice). `status.share_view` carries it to other
+tabs and devices.
+
 When the assistant launches or messages a run for the member, the server
 follows it and publishes `assistant.notice` on `/ws/events` as the run
 finishes or needs input, approval or attention. Only the member named by

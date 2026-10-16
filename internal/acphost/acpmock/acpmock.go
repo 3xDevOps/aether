@@ -136,6 +136,7 @@ type Agent struct {
 	frames  bool
 	live    map[string]string
 	methods []string
+	prompts []json.RawMessage
 	listed  int
 	options []map[string]any
 	// turn ends at a session/cancel that follows the latest session/prompt
@@ -211,6 +212,13 @@ func (a *Agent) Methods() []string {
 	return append([]string(nil), a.methods...)
 }
 
+// Prompts are the content blocks of each session/prompt, in order.
+func (a *Agent) Prompts() []json.RawMessage {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]json.RawMessage(nil), a.prompts...)
+}
+
 func (a *Agent) update(ctx context.Context, u json.RawMessage) {
 	a.mu.Lock()
 	session := a.session
@@ -264,6 +272,13 @@ func (a *Agent) handle(ctx context.Context, method string, params json.RawMessag
 		}
 		return a.fix.Load.Result, nil
 	case acp.AgentMethodSessionPrompt:
+		var raw struct {
+			Prompt json.RawMessage `json:"prompt"`
+		}
+		_ = json.Unmarshal(params, &raw)
+		a.mu.Lock()
+		a.prompts = append(a.prompts, raw.Prompt)
+		a.mu.Unlock()
 		var text strings.Builder
 		for _, b := range p.Prompt {
 			text.WriteString(b.Text)

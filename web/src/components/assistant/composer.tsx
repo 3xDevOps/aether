@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type * as React from 'react'
+import { ContextChip } from '@/components/assistant/context-chip'
 import { ArrowUp, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -9,6 +10,7 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
+import { assistantShareView, buildViewContext } from '@/store/view-context'
 
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
@@ -26,14 +28,16 @@ export function AssistantComposer({ textarea, running, dock }: {
     const text = draft.trim()
     if (!text || busy || running) return
     const state = useStore.getState()
-    // A retry of the same text reuses its key, so a lost reply cannot send it twice.
-    const attempt = state.assistantAttempt?.text === text ? state.assistantAttempt : { text, key: crypto.randomUUID() }
+    // A retry of the same text reuses its key and view context, so a lost reply cannot send it twice.
+    const attempt = state.assistantAttempt?.text === text
+      ? state.assistantAttempt
+      : { text, key: crypto.randomUUID(), viewContext: assistantShareView(state) ? buildViewContext(state) : undefined }
     const generation = state.assistantGeneration
     state.setAssistantAttempt(attempt)
     state.setAssistantSending(true)
     setError(undefined)
     try {
-      await api.assistantPrompt(text, attempt.key)
+      await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : undefined)
       const now = useStore.getState()
       if (now.assistantGeneration !== generation) return
       now.setAssistantAttempt(null)
@@ -65,6 +69,7 @@ export function AssistantComposer({ textarea, running, dock }: {
       <div className="flex flex-col gap-2 px-3 py-3">
         {dock}
         {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
+        <ContextChip />
         <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>
           <Textarea
             variant="embedded"
