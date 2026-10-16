@@ -40,7 +40,7 @@ func run(args []string) error {
 		return err
 	}
 	if *tag == "" || *commit == "" || *out == "" || fs.NArg() == 0 {
-		return errors.New("usage: release-manifest -version <tag> -commit <sha> -out <dir> <asset>...")
+		return errors.New("usage: release-manifest -version <tag> -commit <sha> -out <dir> <asset> [<asset>]")
 	}
 	key, err := signingKey(os.Getenv(keyEnv))
 	if err != nil {

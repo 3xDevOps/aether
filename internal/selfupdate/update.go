@@ -194,9 +194,9 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		targets = append(targets, struct{ asset, dst string }{name + suffix, path})
 	}
 
-	m, err := fetchManifest(ctx, baseURL, tag)
-	if err != nil {
-		return nil, err
+	m, merr := fetchManifest(ctx, baseURL, tag)
+	if merr != nil {
+		return nil, merr
 	}
 	staged := make([]*Staged, 0, len(targets))
 	defer func() {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // Key signs every release this package serves. Serve makes selfupdate trust
@@ -33,12 +34,13 @@ var trust sync.Once
 type Release struct {
 	*httptest.Server
 
-	mu       sync.Mutex
-	latest   string
-	assets   map[string][]byte
-	served   map[string][]byte
-	unsigned bool
-	requests map[string]int
+	mu          sync.Mutex
+	latest      string
+	assets      map[string][]byte
+	served      map[string][]byte
+	unsigned    bool
+	storeSchema int
+	requests    map[string]int
 }
 
 // Serve starts a release host whose latest release is latest, publishing
@@ -46,7 +48,13 @@ type Release struct {
 func Serve(t testing.TB, latest string, assets map[string][]byte) *Release {
 	t.Helper()
 	trust.Do(func() { selfupdate.TrustKeysForTest(Key.Public().(ed25519.PublicKey)) })
-	r := &Release{latest: latest, assets: assets, served: map[string][]byte{}, requests: map[string]int{}}
+	r := &Release{
+		latest:      latest,
+		assets:      assets,
+		served:      map[string][]byte{},
+		storeSchema: store.SchemaVersion(),
+		requests:    map[string]int{},
+	}
 	r.Server = httptest.NewServer(http.HandlerFunc(r.serveHTTP))
 	t.Cleanup(r.Close)
 	return r
@@ -68,6 +76,14 @@ func (r *Release) Unsign() {
 	r.unsigned = true
 }
 
+// SetStoreSchema sets the store schema every manifest records; it starts
+// at this build's.
+func (r *Release) SetStoreSchema(n int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.storeSchema = n
+}
+
 // Tamper serves body for the asset name while the manifest keeps
 // describing the original.
 func (r *Release) Tamper(name string, body []byte) {
@@ -85,13 +101,19 @@ func (r *Release) Requests(path string) int {
 
 // Manifest is the manifest served for tag.
 func (r *Release) Manifest(tag string) selfupdate.Manifest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.manifest(tag)
+}
+
+func (r *Release) manifest(tag string) selfupdate.Manifest {
 	m := selfupdate.Manifest{
 		Schema:      selfupdate.ManifestSchema,
 		Version:     tag,
 		Commit:      "0123456789abcdef0123456789abcdef01234567",
 		PublishedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
 		NotesURL:    r.URL + "/releases/tag/" + tag,
-		StoreSchema: 1,
+		StoreSchema: r.storeSchema,
 		Assets:      map[string]selfupdate.Asset{},
 	}
 	for name, body := range r.assets {
@@ -135,7 +157,7 @@ func (r *Release) body(tag, name string) ([]byte, bool) {
 		if r.unsigned {
 			return nil, false
 		}
-		data, sig, err := selfupdate.SignManifest(r.Manifest(tag), Key)
+		data, sig, err := selfupdate.SignManifest(r.manifest(tag), Key)
 		if err != nil {
 			panic(err)
 		}
@@ -145,7 +167,7 @@ func (r *Release) body(tag, name string) ([]byte, bool) {
 		return data, true
 	case "checksums.txt":
 		var b strings.Builder
-		for asset, m := range r.Manifest(tag).Assets {
+		for asset, m := range r.manifest(tag).Assets {
 			fmt.Fprintf(&b, "%s  %s\n", m.SHA256, asset)
 		}
 		return []byte(b.String()), true

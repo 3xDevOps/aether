@@ -273,7 +273,8 @@ func (c *Checker) BaseURL() string { return c.baseURL }
 
 // Check reports whether a newer release exists, reusing a cached answer
 // until it expires. Only a release whose signed manifest is published
-// counts; until it is, the check reports no update. A dev build and an opted-out process never dial out.
+// counts; until it is, the check reports no update. A dev build and an
+// opted-out process never dial out.
 // Two callers arriving on an expired cache may both resolve the tag; that
 // costs one extra redirect at worst, where serializing them behind the
 // fetch would make one caller's cancelled context everyone's wait. The
