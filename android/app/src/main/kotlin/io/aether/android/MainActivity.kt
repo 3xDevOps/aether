@@ -140,13 +140,7 @@ class MainActivity : ComponentActivity() {
         connection.setOnClickListener { openSetup() }
         gatewayError = findViewById(R.id.gateway_error)
         findViewById<Button>(R.id.gateway_retry).setOnClickListener {
-            if (rendererCrashed) {
-                rendererCrashed = false
-                gatewayError.visibility = View.GONE
-                loaded?.let(web::loadUrl)
-            } else {
-                startGateway()
-            }
+            if (rendererCrashed) connect(null) else startGateway()
         }
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
 
@@ -217,12 +211,20 @@ class MainActivity : ComponentActivity() {
 
     private fun connect(intent: Intent?) {
         gatewayError.visibility = View.GONE
+        // The WebView a renderer crash left behind is empty, so the
+        // dashboard loads again even at an unchanged address.
+        val reload = rendererCrashed
+        rendererCrashed = false
         when (mode) {
             ConnectionMode.TAILSCALE -> {
                 stopGateway()
+                if (reload) loaded = null
                 open(storedDashboardUrl() ?: return, intent)
             }
-            ConnectionMode.EDGE -> openEdge(intent)
+            ConnectionMode.EDGE -> {
+                if (reload) loaded?.let(web::loadUrl)
+                openEdge(intent)
+            }
         }
     }
 

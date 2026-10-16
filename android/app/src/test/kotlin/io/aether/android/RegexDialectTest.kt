@@ -22,7 +22,8 @@ class RegexDialectTest {
         val refused =
             sources.flatMap { file ->
                 literal.findAll(file.readText()).mapNotNull { match ->
-                    val pattern = unescapeKotlin(match.groupValues[1])
+                    // Undoes the Kotlin string's escapes.
+                    val pattern = match.groupValues[1].replace(Regex("""\\(.)"""), "$1")
                     strayBrace(pattern)?.let { "${file.name}: index $it of $pattern" }
                 }.toList()
             }
@@ -34,17 +35,6 @@ class RegexDialectTest {
         assertEquals(6, strayBrace("""^\{"a"}$"""))
         assertEquals(1, strayBrace("""a{b"""))
         assertEquals(null, strayBrace("""^\{"a"\}[{}]\d{1,5}x{2,}$"""))
-    }
-
-    private fun unescapeKotlin(text: String): String {
-        val out = StringBuilder()
-        var i = 0
-        while (i < text.length) {
-            if (text[i] == '\\' && i + 1 < text.length) i++
-            out.append(text[i])
-            i++
-        }
-        return out.toString()
     }
 
     /** The index of the first brace outside a class, an escape and a quantifier. */
