@@ -4899,8 +4899,9 @@ again.
 The desktop shell does not use Web Push. `desktop/notify.js` applies push's
 rule to each `run.status` event (see
 [failure-handling.md](failure-handling.md#run-activity)): it reads the run
-with `run.get` for its title, `paused` and `mission_role`, notifies once per
-need, keyed on the run's status, state, reason and `status_changed_at`, and
+with `run.get` for its title, `paused`, `mission_role` and `member_id`, and
+announces only runs the signed-in member owns, as push does. When `run.get`
+fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
 words it as `internal/push/need.go` does. An event whose `status_seq` is not
 above the last one seen is ignored. `idle`, `waiting-*` and `working` never
 notify. A need counts toward the dock badge and its notification closes when

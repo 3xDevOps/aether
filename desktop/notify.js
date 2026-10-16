@@ -170,10 +170,18 @@ function onStatus(runId, p) {
   }
   const token = {}
   reading.set(runId, token)
-  void readRun(runId).then((run) => {
+  void Promise.all([readRun(runId), memberID().catch(() => null)]).then(([run, self]) => {
     if (reading.get(runId) !== token) return
     reading.delete(runId)
-    announce(runId, run || seen)
+    // /ws/events carries every run in the workspace; like push, only the
+    // run's owner hears about it. Without the run or the member there is no
+    // owner to check, so nothing is announced.
+    if (!run || !self) return
+    if (run.member_id !== self) {
+      resolve(runId)
+      return
+    }
+    announce(runId, run)
   })
 }
 
@@ -190,8 +198,9 @@ async function readRun(runId) {
       body: JSON.stringify({ run_id: runId }),
     })
     if (res.ok) return (await res.json()).run
-  } catch {
-    // the gateway went away; the event alone still announces the run
+    console.log(`notify: run.get ${runId}: ${res.status}`)
+  } catch (err) {
+    console.log(`notify: run.get ${runId}: ${err.message}`)
   }
   return null
 }
@@ -223,7 +232,7 @@ function announce(runId, run) {
   }
   if (!Notification.isSupported()) return
   const notification = new Notification({
-    title: 'id' in run ? titleOf(run) : runId,
+    title: titleOf(run),
     body,
     ...(attention ? {} : { silent: true, urgency: 'low' }),
   })

@@ -43,9 +43,11 @@ globalThis.WebSocket = class {
 }
 
 const runs = new Map()
-globalThis.fetch = async (_url, init) => {
-  const run = runs.get(JSON.parse(init.body).run_id)
-  return { ok: Boolean(run), json: async () => ({ run }) }
+let readFails = false
+globalThis.fetch = async (url, init) => {
+  if (url.endsWith('/server.info')) return { ok: true, json: async () => ({ member: { id: 'me' } }) }
+  const run = readFails ? undefined : runs.get(JSON.parse(init.body).run_id)
+  return { ok: Boolean(run), status: 500, json: async () => ({ run }) }
 }
 
 let seq = 0
@@ -70,11 +72,12 @@ async function status(run, fields) {
 }
 
 function lead(id) {
-  return { id, title: `run ${id}`, status: 'running', state: 'working', reason: '', status_changed_at: '2026-10-16T00:00:00Z' }
+  return { id, member_id: 'me', title: `run ${id}`, status: 'running', state: 'working', reason: '', status_changed_at: '2026-10-16T00:00:00Z' }
 }
 
 beforeEach(() => {
   shown.length = 0
+  readFails = false
   notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
 })
 
@@ -137,6 +140,30 @@ test('a finished run gets one non-urgent notice outside the badge', async () => 
   assert.equal(shown[0].options.body, 'Agent reported success, review the result')
   assert.equal(shown[0].options.silent, true)
   assert.equal(badge, 0)
+  await status(run, {})
+  assert.equal(shown.length, 1)
+})
+
+test("another member's run never notifies or counts", async () => {
+  const run = { ...lead('r7'), member_id: 'someone-else' }
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no credentials for the registry' })
+  await status(run, { state: 'finished', reason: 'agent reported success', outcome_unseen: true })
+  assert.equal(shown.length, 0)
+  assert.equal(badge, 0)
+})
+
+test('a failed read announces nothing, and the next read announces the need once', async () => {
+  const run = lead('r8')
+  readFails = true
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  assert.equal(shown.length, 0)
+  assert.equal(badge, 0)
+
+  readFails = false
+  await status(run, {})
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.body, 'pick a database')
+  assert.equal(badge, 1)
   await status(run, {})
   assert.equal(shown.length, 1)
 })
