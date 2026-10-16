@@ -20,8 +20,9 @@ const (
 
 // Patch is one rendered diff of a run checkout, as unified patch text.
 type Patch struct {
-	// Base is what the diff is taken against: the recorded fork point for a
-	// cumulative render, the from tree for an interval render.
+	// Base is what the diff is taken against: the run's effective base commit
+	// for a live cumulative render, its tree for a recorded one, the from tree
+	// for an interval render.
 	Base string
 	// Text is the unified diff, empty when nothing changed against Base.
 	Text string
@@ -34,7 +35,7 @@ type Patch struct {
 }
 
 // PatchRequest names one rendering. From and To are empty for the run's
-// current diff against its fork point; set to snapshot trees recorded by
+// current diff against its effective base; set to snapshot trees recorded by
 // run.diff events they render what one interval changed. MaxBytes caps the
 // patch text when positive; zero uses MaxPatchBytes.
 type PatchRequest struct {
@@ -46,8 +47,9 @@ type PatchRequest struct {
 // RunPatch renders a run's live or recorded diff.
 //
 // With an empty range and an available checkout it covers committed work,
-// uncommitted edits and untracked files against the recorded fork point.
-// After checkout cleanup it returns the last recorded cumulative snapshot
+// uncommitted edits and untracked files against the run's effective base: the
+// newest upstream commit it contains, so merged upstream work is not counted as
+// the run's. After checkout cleanup it returns the last recorded cumulative snapshot
 // with Recorded set. With both range ends set it renders that exact interval;
 // one end alone is ErrInvalidObjectID because a range needs both.
 //
@@ -71,6 +73,16 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	ctx, cancel := context.WithTimeout(ctx, snapshotTimeout)
 	defer cancel()
 
+	patch, err := e.renderPatch(ctx, run, checkout, req, maxBytes)
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// A git killed by the deadline reports "signal: killed", not the
+		// deadline.
+		return Patch{}, fmt.Errorf("gitengine: render diff for run %s: %w: %w", run, ctx.Err(), err)
+	}
+	return patch, err
+}
+
+func (e *Engine) renderPatch(ctx context.Context, run domain.RunID, checkout string, req PatchRequest, maxBytes int) (Patch, error) {
 	if req.From != "" || req.To != "" {
 		return e.rangePatch(ctx, run, checkout, req.From, req.To, maxBytes)
 	}
@@ -85,6 +97,7 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 	if err != nil {
 		return Patch{}, err
 	}
+	base := e.effectiveBase(ctx, run, checkout, meta.Base, meta.BaseBranch)
 	if err = e.checkCaptureBounds(ctx, run, checkout, MaxSnapshotInputBytes, ErrSnapshotStorageLimit); err != nil {
 		return Patch{}, err
 	}
@@ -104,11 +117,11 @@ func (e *Engine) RunPatch(ctx context.Context, run domain.RunID, req PatchReques
 		return Patch{}, err
 	}
 	text, truncated, err := e.gitStaged(ctx, checkout, index, maxBytes,
-		"diff", "--cached", "--no-color", "--no-renames", meta.Base)
+		"diff", "--cached", "--no-color", "--no-renames", base)
 	if err != nil {
 		return Patch{}, err
 	}
-	return Patch{Base: meta.Base, Text: trimToLastLine(text, truncated), Truncated: truncated}, nil
+	return Patch{Base: base, Text: trimToLastLine(text, truncated), Truncated: truncated}, nil
 }
 
 // rangePatch renders one snapshot tree against another out of the run's own
@@ -229,11 +242,11 @@ func (e *Engine) recordedPatch(ctx context.Context, run domain.RunID, maxBytes i
 		return Patch{}, statErr
 	}
 	refs, _, err := e.gitBareBounded(ctx, store, 1024, "for-each-ref", "--format=%(refname) %(objectname)",
-		"refs/aether/base", snapshotPublishedRef, "refs/aether/latest")
+		"refs/aether/base", snapshotUpstreamRef, snapshotPublishedRef, "refs/aether/latest")
 	if err != nil {
 		return Patch{}, err
 	}
-	var base, published, latest string
+	var base, upstream, published, latest string
 	for line := range strings.SplitSeq(refs, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
@@ -242,11 +255,16 @@ func (e *Engine) recordedPatch(ctx context.Context, run domain.RunID, maxBytes i
 		switch fields[0] {
 		case "refs/aether/base":
 			base = fields[1]
+		case snapshotUpstreamRef:
+			upstream = fields[1]
 		case snapshotPublishedRef:
 			published = fields[1]
 		case "refs/aether/latest":
 			latest = fields[1]
 		}
+	}
+	if upstream != "" {
+		base = upstream
 	}
 	if published == "" {
 		published = latest
