@@ -67,13 +67,46 @@ func diskReserve(total uint64, override int64) uint64 {
 // under the same gate so the next probe cannot reuse a pre-completion snapshot.
 func (s *Scheduler) reserveCapacity(ctx context.Context) (func(), error) {
 	release, err := s.tryReserveCapacity(ctx)
-	if errors.Is(err, ErrDiskFull) && s.cfg.Homes != nil && ctx.Err() == nil {
-		// One eligible-owned cleanup attempt, then fresh measurements. Never
-		// loop, evict active owners, or reinterpret unavailable capacity.
-		s.sweepCaches(ctx, true)
+	if errors.Is(err, ErrDiskFull) && ctx.Err() == nil {
+		// One reclaim pass, then fresh measurements. Never loop or
+		// reinterpret unavailable capacity.
+		s.reclaimDisk(ctx, "")
 		return s.tryReserveCapacity(ctx)
 	}
 	return release, err
+}
+
+// measureCapacity returns the Aether data filesystem (unless the free-disk
+// guard is disabled) and, when the runtime reports it, the runtime's capacity.
+func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCapacity, *runtime.HostCapacity, error) {
+	var filesystems []runtime.FilesystemCapacity
+	if s.cfg.MinFreeBytes >= 0 {
+		measure := s.cfg.filesystemCapacity
+		if measure == nil {
+			measure = disk.Filesystem
+		}
+		path := s.cfg.DataDir
+		if path == "" {
+			path = s.cfg.StateDir
+		}
+		data, err := measure(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: Aether data filesystem: %w", ErrCapacityUnknown, err)
+		}
+		filesystems = append(filesystems, runtime.FilesystemCapacity{Name: "Aether data filesystem", TotalBytes: data.TotalBytes, FreeBytes: data.FreeBytes})
+	}
+	provider, ok := s.cfg.Runtime.(runtime.CapacityRuntime)
+	if !ok {
+		return filesystems, nil, nil
+	}
+	capacity, err := provider.Capacity(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: runtime filesystems and host memory: %w", ErrCapacityUnknown, err)
+	}
+	if s.cfg.MinFreeBytes >= 0 && len(capacity.Filesystems) == 0 {
+		return nil, nil, fmt.Errorf("%w: runtime filesystems were not measured", ErrCapacityUnknown)
+	}
+	return append(filesystems, capacity.Filesystems...), &capacity, nil
 }
 
 func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
@@ -102,36 +135,16 @@ func (s *Scheduler) tryReserveCapacity(ctx context.Context) (func(), error) {
 		}
 		return nil
 	}
-	if s.cfg.MinFreeBytes >= 0 {
-		measure := s.cfg.filesystemCapacity
-		if measure == nil {
-			measure = disk.Filesystem
-		}
-		path := s.cfg.DataDir
-		if path == "" {
-			path = s.cfg.StateDir
-		}
-		data, err := measure(path)
-		if err != nil {
-			return nil, fmt.Errorf("%w: Aether data filesystem: %w", ErrCapacityUnknown, err)
-		}
-		if err := checkDisk(runtime.FilesystemCapacity{Name: "Aether data filesystem", TotalBytes: data.TotalBytes, FreeBytes: data.FreeBytes}); err != nil {
+	filesystems, capacity, err := s.measureCapacity(probeCtx)
+	if err != nil {
+		return nil, err
+	}
+	for _, fs := range filesystems {
+		if err := checkDisk(fs); err != nil {
 			return nil, err
 		}
 	}
-	if provider, ok := s.cfg.Runtime.(runtime.CapacityRuntime); ok {
-		capacity, err := provider.Capacity(probeCtx)
-		if err != nil {
-			return nil, fmt.Errorf("%w: runtime filesystems and host memory: %w", ErrCapacityUnknown, err)
-		}
-		if s.cfg.MinFreeBytes >= 0 && len(capacity.Filesystems) == 0 {
-			return nil, fmt.Errorf("%w: runtime filesystems were not measured", ErrCapacityUnknown)
-		}
-		for _, fs := range capacity.Filesystems {
-			if err := checkDisk(fs); err != nil {
-				return nil, err
-			}
-		}
+	if capacity != nil {
 		if capacity.MemoryTotalBytes == 0 || capacity.MemoryAvailableBytes > capacity.MemoryTotalBytes {
 			return nil, fmt.Errorf("%w: host memory measurement is invalid", ErrCapacityUnknown)
 		}

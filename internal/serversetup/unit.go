@@ -38,6 +38,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
+OOMScoreAdjust=-500
 # Runs as root. Two reasons, both deliberate (docs/security.md):
 #   1. The unit needs the Docker socket, and Docker socket access is already
 #      root-equivalent on the host - a dedicated user in the docker group

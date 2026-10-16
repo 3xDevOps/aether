@@ -39,6 +39,8 @@ const (
 	// labelCreationKey persists Spec.CreationKey so FindByCreationKey can
 	// recover a container created before its ID was persisted.
 	labelCreationKey = "aether.creation-key"
+	// labelFingerprint persists Spec.Fingerprint, readable through Inspect.
+	labelFingerprint = "aether.fingerprint"
 
 	// RuntimeAuto picks sysbox-runc when the daemon has it registered.
 	RuntimeAuto   = "auto"
@@ -248,6 +250,18 @@ func (d *Docker) resolveRuntime(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// agentOOMScoreAdj makes the host OOM killer pick a container process before
+// aether-server, which runs at OOMScoreAdjust=-500.
+const agentOOMScoreAdj = 500
+
+// memorySwapLimit is the memory+swap ceiling: the memory limit plus a quarter
+// of it as swap. Equal values mean zero swap, which runc's systemd driver
+// never sends as MemorySwapMax, so a daemon-reload resets it to unlimited
+// (moby/moby#51446).
+func memorySwapLimit(memory int64) int64 {
+	return memory + memory/4
+}
+
 // containerConfig always overrides the entrypoint so Spec.Command is exactly
 // the main process; a setup script or dockerd holds it behind gateEntrypoint.
 // containerRuntime is the resolved runtime of a NestedDocker spec.
@@ -277,6 +291,7 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	for _, key := range []string{labelSetupScript, labelSetupSentinel, labelNestedDocker, labelSecretEnv} {
 		cfg.Labels[key] = ""
 	}
+	cfg.Labels[labelFingerprint] = spec.Fingerprint
 	nestedDockerd := spec.NestedDocker && containerRuntime == runtimeSysbox
 	if spec.SetupScript != "" || nestedDockerd {
 		sentinel := newSetupSentinel()
@@ -301,10 +316,11 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 		// init reaps the orphans.
 		Init:        &initEnabled,
 		NetworkMode: container.NetworkMode(d.networkMode),
+		OomScoreAdj: agentOOMScoreAdj,
 		Resources: container.Resources{
 			NanoCPUs:   nanoCPUs(spec.CPULimit),
 			Memory:     spec.MemoryLimitBytes,
-			MemorySwap: spec.MemoryLimitBytes,
+			MemorySwap: memorySwapLimit(spec.MemoryLimitBytes),
 		},
 		LogConfig: container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "3"}},
 	}
@@ -926,7 +942,21 @@ func (d *Docker) Inspect(ctx context.Context, id ID) (ContainerInfo, error) {
 		User:         info.Container.Config.User,
 		Env:          append([]string(nil), info.Container.Config.Env...),
 		MountTargets: targets,
+		Fingerprint:  info.Container.Config.Labels[labelFingerprint],
 	}, nil
+}
+
+// InitPID returns the host PID of the container's init process, or 0 when the
+// container is not running.
+func (d *Docker) InitPID(ctx context.Context, id ID) (int, error) {
+	info, err := d.cli.ContainerInspect(ctx, string(id), client.ContainerInspectOptions{})
+	if err != nil {
+		return 0, dockerWaitError("inspect", id, err)
+	}
+	if info.Container.State == nil {
+		return 0, nil
+	}
+	return info.Container.State.Pid, nil
 }
 
 // FindByCreationKey matches containers in any state.

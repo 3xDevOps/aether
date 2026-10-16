@@ -549,6 +549,7 @@ export interface DiskUsage {
   home_bytes?: number
   cache_bytes?: number
   evidence_bytes?: number
+  scratch_bytes?: number
   other_bytes?: number
   /** Included in worktree_bytes, not an additional category. */
   snapshot_bytes?: number

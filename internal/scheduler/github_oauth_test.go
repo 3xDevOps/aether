@@ -24,10 +24,9 @@ import (
 // command exit and completes its existing home/signing configuration path.
 type githubOAuthTestRuntime struct {
 	*fakeRuntime
-	started     chan *githubOAuthTestExec
-	startErr    error
-	startGate   <-chan struct{}
-	failDestroy atomic.Bool
+	started   chan *githubOAuthTestExec
+	startErr  error
+	startGate <-chan struct{}
 }
 
 type githubOAuthTestExec struct {
@@ -77,9 +76,6 @@ func (r *githubOAuthTestRuntime) StartExecPipe(ctx context.Context, container ru
 func (r *githubOAuthTestRuntime) Destroy(ctx context.Context, id runtime.ID) error {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if r.failDestroy.Load() {
-		return errors.New("test: destroy unavailable")
 	}
 	return r.fakeRuntime.Destroy(ctx, id)
 }
@@ -925,7 +921,8 @@ func TestGitHubOAuthTerminalStopInterruptsConnectionCompletion(t *testing.T) {
 func TestGitHubOAuthStartRepairsExitedTerminalCleanup(t *testing.T) {
 	t.Parallel()
 	e, rt, _ := newGitHubOAuthTestEnv(t)
-	rt.failDestroy.Store(true)
+	failingStore := &failingPutTerminalStore{Store: e.db, deleteErr: errors.New("test: terminal row delete unavailable")}
+	e.sched.cfg.Store = failingStore
 	startGitHubOAuthTest(t, e, e.member.ID)
 	oldCommand := nextGitHubOAuthExec(t, rt)
 	publishGitHubDeviceCode(t, oldCommand)
@@ -949,14 +946,14 @@ func TestGitHubOAuthStartRepairsExitedTerminalCleanup(t *testing.T) {
 		t.Fatal("failed cleanup did not retain the exited supervision")
 	}
 
-	rt.failDestroy.Store(false)
+	failingStore.deleteErr = nil
 	// OAuth start alone must repair the old cleanup, not cancel itself while
 	// ensuring the replacement Environment.
 	startGitHubOAuthTest(t, e, e.member.ID)
 	command := nextGitHubOAuthExec(t, rt)
 	publishGitHubDeviceCode(t, command)
-	if command.identity.ContainerID == old.containerID {
-		t.Fatal("OAuth reused the exited Environment")
+	if command.identity.ContainerID != old.containerID {
+		t.Fatal("OAuth did not restart the kept Environment container")
 	}
 	status, err := e.sched.GitHubOAuthStatus(t.Context(), e.member.ID, "")
 	if err != nil || status.State != "pending" {

@@ -26,7 +26,7 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db}}
+	s := &Scheduler{cfg: Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}}
 	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
 		Variables: map[string]string{"PATH": "/workspace/bin", "EXTRA": "yes"},
 	}}
@@ -36,7 +36,11 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 		if planErr != nil {
 			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, planErr)
 		}
-		if len(plan.Mounts) != 2 {
+		wantMounts := 2
+		if purpose == EnvironmentPurposeTerminal {
+			wantMounts = 3
+		}
+		if len(plan.Mounts) != wantMounts {
 			t.Fatalf("purpose %q mounts = %v, want home plus isolated cache mount", purpose, plan.Mounts)
 		}
 		home, homeErr := homes.Path(member.ID)
@@ -184,5 +188,19 @@ func TestBuildEnvironmentPlanAppliesHarnessLaunchEnv(t *testing.T) {
 	}
 	if plan.Env["IS_SANDBOX"] != "1" {
 		t.Fatalf("IS_SANDBOX = %q, want 1", plan.Env["IS_SANDBOX"])
+	}
+}
+
+func TestApplyInstallEnvironmentKeepsExplicitPrefixes(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{}
+	applyInstallEnvironment(env, "/home/dev")
+	if env["NPM_CONFIG_PREFIX"] != "/home/dev/.local" || env["CARGO_INSTALL_ROOT"] != "/home/dev/.local" {
+		t.Fatalf("defaults = %v, want both under /home/dev/.local", env)
+	}
+	env = map[string]string{"npm_config_prefix": "/opt/npm", "CARGO_INSTALL_ROOT": "/opt/cargo"}
+	applyInstallEnvironment(env, "/home/dev")
+	if _, added := env["NPM_CONFIG_PREFIX"]; added || env["npm_config_prefix"] != "/opt/npm" || env["CARGO_INSTALL_ROOT"] != "/opt/cargo" {
+		t.Fatalf("explicit settings = %v, want them unchanged", env)
 	}
 }

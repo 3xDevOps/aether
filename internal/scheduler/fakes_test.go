@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
+
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -191,7 +193,11 @@ func (r *fakeRuntime) Start(_ context.Context, id runtime.ID) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.state != "created" {
+	switch c.state {
+	case "created":
+	case "stopped":
+		c.exit, c.done = nil, make(chan struct{})
+	default:
 		return fmt.Errorf("fake runtime: start from state %q", c.state)
 	}
 	c.state = "running"
@@ -401,6 +407,8 @@ func (r *fakeRuntime) Inspect(_ context.Context, id runtime.ID) (runtime.Contain
 		Image: c.spec.Image,
 		User:  c.spec.User,
 		Env:   env,
+
+		Fingerprint: c.spec.Fingerprint,
 	}, nil
 }
 
@@ -466,7 +474,7 @@ func (r *fakeRuntime) RemoveImage(_ context.Context, tag string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.heldImages[tag] {
-		return fmt.Errorf("fake runtime: image %s is in use by a container", tag)
+		return fmt.Errorf("fake runtime: image %s is in use by a container: %w", tag, cerrdefs.ErrConflict)
 	}
 	delete(r.images, tag)
 	return nil

@@ -716,8 +716,30 @@ func TestDeleteRunCleansRunOwnedData(t *testing.T) {
 		}
 	}
 
+	for i, id := range []domain.RunID{run.ID, other.ID, run.ID} {
+		if _, err := db.db.ExecContext(ctx,
+			`INSERT INTO events (id, ts, workspace_id, run_id, actor_id, type, payload) VALUES (?, 1, ?, ?, '', 'test', '{}')`,
+			fmt.Sprintf("ev-%d", i), w.ID, id,
+		); err != nil {
+			t.Fatalf("insert event: %v", err)
+		}
+	}
+
+	var maxSeq int64
+	if err := db.db.QueryRowContext(ctx, `SELECT MAX(seq) FROM events`).Scan(&maxSeq); err != nil {
+		t.Fatalf("max seq: %v", err)
+	}
 	if err := db.DeleteRun(ctx, run.ID); err != nil {
 		t.Fatalf("DeleteRun: %v", err)
+	}
+	var gotMax int64
+	var owned int
+	if err := db.db.QueryRowContext(ctx, `SELECT MAX(seq), COUNT(*) FROM events WHERE run_id = ?`, run.ID).Scan(&gotMax, &owned); err != nil || gotMax != maxSeq || owned != 1 {
+		t.Fatalf("deleted run events: newest seq %d, count %d, %v; want newest %d kept alone", gotMax, owned, err, maxSeq)
+	}
+	var kept int
+	if err := db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = ?`, other.ID).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("unrelated run events = %d, %v; want 1", kept, err)
 	}
 	if _, err := db.GetRun(ctx, run.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetRun after delete: %v, want ErrNotFound", err)

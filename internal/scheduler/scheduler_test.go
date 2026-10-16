@@ -1121,7 +1121,7 @@ func TestLaunchSpecIdentityAndCreationKey(t *testing.T) {
 	if c.spec.CreationKey != string(run.ID) {
 		t.Errorf("creation key = %q, want %q", c.spec.CreationKey, run.ID)
 	}
-	if len(c.spec.Mounts) != 2 {
+	if len(c.spec.Mounts) != 3 {
 		t.Fatalf("mounts = %v, want persistent home plus isolated cache", c.spec.Mounts)
 	}
 	wantHome, err := e.cfg.Homes.Path(e.member.ID)
@@ -1158,7 +1158,7 @@ func TestSharedAccountLaunchUsesLauncherHomeAndKeepsActorIdentity(t *testing.T) 
 		t.Fatalf("run actor/account = %s/%s, want %s/%s", run.MemberID, run.AccountMember(), e.member.ID, account.ID)
 	}
 	c := e.rt.byName(string(run.ID))
-	if c == nil || len(c.spec.Mounts) != 2 {
+	if c == nil || len(c.spec.Mounts) != 3 {
 		t.Fatalf("container mounts = %+v, want only launcher's home/cache", c)
 	}
 	wantHome, err := e.cfg.Homes.Path(e.member.ID)
@@ -1195,7 +1195,7 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member home: %v", err)
 	}
-	if len(c.spec.Mounts) != 2 {
+	if len(c.spec.Mounts) != 3 {
 		t.Fatalf("mounts = %v, want home plus isolated cache", c.spec.Mounts)
 	}
 	if got := c.spec.Mounts[0]; got.HostPath != wantHome || got.ContainerPath != "/root" || got.ReadOnly {
@@ -1206,7 +1206,7 @@ func TestLaunchMountsPersistentHome(t *testing.T) {
 		t.Fatalf("second Launch: %v", err)
 	}
 	c2 := e.rt.byName(string(run2.ID))
-	if c2 == nil || len(c2.spec.Mounts) != 2 || c2.spec.Mounts[0].HostPath != wantHome {
+	if c2 == nil || len(c2.spec.Mounts) != 3 || c2.spec.Mounts[0].HostPath != wantHome {
 		t.Fatalf("second home mount = %+v, want %q", c2.spec.Mounts, wantHome)
 	}
 }
@@ -1518,7 +1518,7 @@ func TestLaunchPinsProfileWithoutMount(t *testing.T) {
 	if c == nil {
 		t.Fatal("no container")
 	}
-	if len(c.spec.Mounts) != 2 || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
+	if len(c.spec.Mounts) != 3 || c.spec.Mounts[0].ContainerPath != "/root" || c.spec.Mounts[0].ReadOnly {
 		t.Fatalf("mounts = %v, want writable home/cache without profile mount", c.spec.Mounts)
 	}
 }
@@ -1540,7 +1540,7 @@ func TestLaunchWithoutSnapshotUsesHomeAndCache(t *testing.T) {
 		t.Fatalf("unexpected pin %q", got.ProfileSnapshotID)
 	}
 	c := e.rt.byName(string(run.ID))
-	if c == nil || len(c.spec.Mounts) != 2 || c.spec.Mounts[0].ContainerPath != "/root" {
+	if c == nil || len(c.spec.Mounts) != 3 || c.spec.Mounts[0].ContainerPath != "/root" {
 		t.Fatalf("mounts = %v, want only home/cache mounts", c.spec.Mounts)
 	}
 }

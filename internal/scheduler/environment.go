@@ -169,6 +169,20 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: resolve member cache: %w", cacheErr)
 		}
 		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: cachePath, ContainerPath: "/aether-cache"})
+		scratch := ""
+		switch {
+		case purpose == EnvironmentPurposeTerminal:
+			scratch = terminalScratchName(member.ID)
+		case run != nil && run.ID != "":
+			scratch = string(run.ID)
+		}
+		if scratch != "" {
+			scratchPath, scratchErr := s.ensureScratch(scratch)
+			if scratchErr != nil {
+				return nil, scratchErr
+			}
+			plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: scratchPath, ContainerPath: "/tmp"})
+		}
 		if resolver, ok := s.cfg.Runtime.(imageCacheEnvironmentResolver); ok {
 			inherited, err := resolver.ImageCacheEnvironment(ctx, image)
 			if err != nil {
@@ -180,10 +194,11 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 			return nil, fmt.Errorf("scheduler: protect explicit home caches: %w", err)
 		}
 		applyCacheEnvironment(env)
+		applyInstallEnvironment(env, home)
 	}
 	var roots []string
 	if s.cfg.Homes != nil {
-		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot()}
+		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot()}
 	}
 	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{
 		OwnedRoots:        roots,
@@ -218,7 +233,11 @@ func (s *Scheduler) workspaceEnvironment(ctx context.Context, ws *domain.Workspa
 	return current, secrets, nil
 }
 
-var cacheEnvironmentKeys = [...]string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE"}
+var cacheEnvironmentKeys = [...]string{"npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE", "BUN_INSTALL_CACHE_DIR", "YARN_CACHE_FOLDER", "npm_config_store_dir"}
+
+// inheritedEnvironmentKeys are the image settings that win over Aether's
+// defaults: the cache variables and the global-install prefixes.
+var inheritedEnvironmentKeys = append(slices.Clone(cacheEnvironmentKeys[:]), "NPM_CONFIG_PREFIX", "npm_config_prefix", "CARGO_INSTALL_ROOT")
 
 func explicitEnvironment(profile harness.Profile, ws *domain.Workspace, secrets map[string]string) (map[string]string, error) {
 	env := make(map[string]string)
@@ -264,7 +283,7 @@ func (s *Scheduler) harnessEnvironment(ctx context.Context, run *domain.Run, pro
 }
 
 func inheritCacheEnvironment(env, inherited map[string]string) {
-	for _, key := range cacheEnvironmentKeys {
+	for _, key := range inheritedEnvironmentKeys {
 		if value, present := inherited[key]; present {
 			if _, explicit := env[key]; !explicit {
 				env[key] = value
@@ -368,10 +387,26 @@ func applyCacheEnvironment(env map[string]string) {
 		{"UV_CACHE_DIR", "/aether-cache/uv"},
 		{"GOCACHE", "/aether-cache/go-build"},
 		{"GOMODCACHE", "/aether-cache/go-mod"},
+		{"BUN_INSTALL_CACHE_DIR", "/aether-cache/bun"},
+		{"YARN_CACHE_FOLDER", "/aether-cache/yarn"},
+		{"npm_config_store_dir", "/aether-cache/pnpm"},
 	} {
 		if _, set := env[setting.key]; !set {
 			env[setting.key] = setting.value
 		}
+	}
+}
+
+// Global npm and cargo installs go to the member home, which persists, rather
+// than the image prefix, which vanishes with the container.
+func applyInstallEnvironment(env map[string]string, home string) {
+	prefix := path.Join(home, ".local")
+	_, npmLower := env["npm_config_prefix"]
+	if _, npmUpper := env["NPM_CONFIG_PREFIX"]; !npmLower && !npmUpper {
+		env["NPM_CONFIG_PREFIX"] = prefix
+	}
+	if _, set := env["CARGO_INSTALL_ROOT"]; !set {
+		env["CARGO_INSTALL_ROOT"] = prefix
 	}
 }
 

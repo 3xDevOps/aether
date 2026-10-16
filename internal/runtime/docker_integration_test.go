@@ -261,7 +261,7 @@ func TestDockerResourceLimits(t *testing.T) {
 		t.Errorf("Memory = %d, want %d", got, 128<<20)
 	}
 	h := info.Container.HostConfig
-	if h.MemorySwap != spec.MemoryLimitBytes || h.PidsLimit == nil || *h.PidsLimit != spec.PidsLimit {
+	if h.MemorySwap != spec.MemoryLimitBytes+spec.MemoryLimitBytes/4 || h.PidsLimit == nil || *h.PidsLimit != spec.PidsLimit {
 		t.Fatalf("swap/PID limits = %+v", h.Resources)
 	}
 	if h.LogConfig.Type != "local" || h.LogConfig.Config["max-size"] != "10m" || h.LogConfig.Config["max-file"] != "3" {
@@ -284,9 +284,9 @@ fi`}, "")
 	if len(fields) != 6 || fields[1] != "134217728" || fields[3] != "64" {
 		t.Fatalf("effective cgroup limits = %q", out)
 	}
-	wantSwap := "0"
+	wantSwap := "33554432"
 	if fields[0] == "v1" {
-		wantSwap = "134217728"
+		wantSwap = "167772160"
 	}
 	if fields[2] != wantSwap {
 		t.Fatalf("swap limit = %q, want %s", fields[2], wantSwap)

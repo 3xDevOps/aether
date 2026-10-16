@@ -2,6 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -97,15 +100,16 @@ func (s *Scheduler) EnsureTerminal(ctx context.Context, member domain.MemberID) 
 
 // The caller holds terminalLock. Only disk-pressure reclamation releases it:
 // provisioning is then restarted under the lock, rechecking member existence
-// and terminal ownership before admission. Existing terminals need no admission.
+// and terminal ownership before admission. The reclaim pass keeps the kept
+// container being opened. Existing terminals need no admission.
 func (s *Scheduler) ensureTerminalAdmittedLocked(ctx context.Context, member domain.MemberID) (*domain.Terminal, error) {
 	terminal, err := s.ensureTerminalLocked(ctx, member)
-	if !errors.Is(err, ErrDiskFull) || s.cfg.Homes == nil || ctx.Err() != nil {
+	if !errors.Is(err, ErrDiskFull) || ctx.Err() != nil {
 		return terminal, err
 	}
 	lock := s.terminalLock(member)
 	lock.Unlock()
-	s.sweepCaches(ctx, true)
+	s.reclaimDisk(ctx, member)
 	lock.Lock()
 	return s.ensureTerminalLocked(ctx, member)
 }
@@ -161,6 +165,14 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		if adoptErr != nil {
 			return nil, adoptErr
 		}
+		if destroyErr := s.destroyTerminalContainer(ctx, runtime.ID(row.ContainerID)); destroyErr != nil {
+			s.retainTerminalAfterRuntimeError(m, row, runtime.ID(row.ContainerID))
+			return nil, fmt.Errorf("scheduler: destroy stale terminal: %w", destroyErr)
+		}
+	}
+	var kept runtime.ID
+	if findErr == nil {
+		kept = cid
 	}
 	release, err := s.tryReserveCapacity(ctx)
 	if err != nil {
@@ -168,6 +180,7 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 	}
 	defer release()
 
+	s.removeScratch(terminalScratchName(member))
 	plan, err := s.BuildEnvironmentPlan(ctx, nil, nil, m, harness.Profile{}, EnvironmentPurposeTerminal)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: build terminal environment: %w", err)
@@ -207,7 +220,8 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		PidsLimit:        s.cfg.RunPidsLimit,
 		NestedDocker:     true,
 	}
-	cid, err = s.createAndStartTerminal(ctx, spec)
+	spec.Fingerprint = terminalFingerprint(spec, s.cfg.StandardImage)
+	cid, image, err := s.startOrCreateTerminal(ctx, kept, spec)
 	if err != nil {
 		if cid == "" {
 			s.releaseTerminalCoordination(member)
@@ -236,13 +250,125 @@ func (s *Scheduler) ensureTerminalLocked(ctx context.Context, member domain.Memb
 		}
 	}
 	terminalReservation.containerID = cid
-	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: plan.Image, StartedAt: startedAt}
+	terminal := &domain.Terminal{Member: member, ContainerID: string(cid), Image: image, StartedAt: startedAt}
 	sup := s.registerTerminal(terminal, terminalReservation.userReservation, plan.Home)
 	sup.persistPending = true
 	if err := s.ensureTerminalReady(ctx, sup, terminal); err != nil {
 		return nil, err
 	}
 	return terminal, nil
+}
+
+// terminalFingerprint identifies the settings a terminal container was
+// created from. The image is the standard image, not the member's: saving
+// the environment changes the member's image without changing the kept
+// container, and only the standard image can differ for a given container
+// otherwise. Env values are hashed, never stored.
+func terminalFingerprint(spec runtime.Spec, standardImage string) string {
+	spec.Image, spec.Name, spec.CreationKey, spec.Fingerprint = standardImage, "", "", ""
+	data, err := json.Marshal(spec)
+	if err != nil {
+		panic(fmt.Sprintf("scheduler: fingerprint terminal spec: %v", err))
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// startOrCreateTerminal starts the member's kept container when it was
+// created from spec's settings, and otherwise replaces it with a fresh one.
+// A kept container that fails to start is replaced too, so a broken container
+// never forces a Reset that would also discard the saved image. It also
+// returns the image the container was created from, which a kept container
+// keeps across saves.
+func (s *Scheduler) startOrCreateTerminal(ctx context.Context, kept runtime.ID, spec runtime.Spec) (runtime.ID, string, error) {
+	if kept != "" {
+		info, err := s.cfg.Runtime.Inspect(ctx, kept)
+		switch {
+		case err == nil && info.Fingerprint == spec.Fingerprint:
+			startErr := s.cfg.Runtime.Start(ctx, kept)
+			if startErr == nil {
+				return kept, info.Image, nil
+			}
+			if ctx.Err() != nil {
+				// A cancelled open says nothing about the container.
+				return "", "", fmt.Errorf("scheduler: start kept terminal: %w", startErr)
+			}
+			slog.Warn("scheduler: kept terminal did not start; recreating it from the saved image", "container", kept, "error", startErr)
+		case err != nil && !errors.Is(err, runtime.ErrNotFound):
+			return "", "", fmt.Errorf("scheduler: inspect kept terminal: %w", err)
+		}
+		if err := s.destroyTerminalContainer(ctx, kept); err != nil {
+			return "", "", fmt.Errorf("scheduler: replace kept terminal: %w", err)
+		}
+	}
+	cid, err := s.createAndStartTerminal(ctx, spec)
+	return cid, spec.Image, err
+}
+
+func (s *Scheduler) destroyTerminalContainer(ctx context.Context, cid runtime.ID) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
+	defer cancel()
+	if err := s.cfg.Runtime.Destroy(cleanupCtx, cid); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+// terminalContainerRunning probes with a short Wait; its deadline means the
+// main process is still running.
+func (s *Scheduler) terminalContainerRunning(ctx context.Context, cid runtime.ID, timeout time.Duration) (bool, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	_, err := s.cfg.Runtime.Wait(probeCtx, cid)
+	switch {
+	case err == nil, errors.Is(err, runtime.ErrNotFound):
+		return false, nil
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	case errors.Is(err, context.DeadlineExceeded):
+		return true, nil
+	}
+	return false, err
+}
+
+// DestroyStoppedTerminal destroys the member's kept terminal container when
+// it is stopped, discarding its unsaved changes, and reports whether it did.
+// A terminal whose lock is held is left alone.
+func (s *Scheduler) DestroyStoppedTerminal(ctx context.Context, member domain.MemberID) (bool, error) {
+	lock := s.terminalLock(member)
+	if !lock.TryLock() {
+		return false, nil
+	}
+	defer lock.Unlock()
+	return s.destroyKeptTerminalLocked(ctx, member, true)
+}
+
+// destroyKeptTerminalLocked destroys the container found by the member's
+// creation key. With onlyStopped, a supervised or running one is left alone.
+func (s *Scheduler) destroyKeptTerminalLocked(ctx context.Context, member domain.MemberID, onlyStopped bool) (bool, error) {
+	if onlyStopped && s.lookupLiveTerminal(member) != nil {
+		return false, nil
+	}
+	cid, err := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member))
+	if errors.Is(err, runtime.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("scheduler: find kept terminal: %w", err)
+	}
+	if onlyStopped {
+		running, err := s.terminalContainerRunning(ctx, cid, s.cfg.ExitProbeTimeout)
+		if err != nil {
+			return false, fmt.Errorf("scheduler: probe kept terminal: %w", err)
+		}
+		if running {
+			return false, nil
+		}
+	}
+	if err := s.destroyTerminalContainer(ctx, cid); err != nil {
+		return false, fmt.Errorf("scheduler: destroy kept terminal: %w", err)
+	}
+	return true, nil
 }
 
 func (s *Scheduler) createAndStartTerminal(ctx context.Context, spec runtime.Spec) (runtime.ID, error) {
@@ -490,24 +616,16 @@ type terminalAdoption struct {
 }
 
 // tryAdoptTerminal adopts cid when its main process is still running. An
-// exited container is destroyed so the caller falls through to create a
-// fresh one: the plan's contract is that exiting the shell and reopening
-// recreates the environment. The probe mirrors recoverSupervised: a short
-// non-destructive Wait whose deadline means "still running".
+// exited container is left in place: the caller either starts it again or
+// replaces it, depending on its fingerprint. The probe mirrors
+// recoverSupervised: a short non-destructive Wait whose deadline means
+// "still running".
 func (s *Scheduler) tryAdoptTerminal(ctx context.Context, member *domain.Member, row *domain.Terminal, cid runtime.ID) (*terminalAdoption, bool, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, s.cfg.ExitProbeTimeout)
 	_, waitErr := s.cfg.Runtime.Wait(probeCtx, cid)
 	cancel()
 	switch {
-	case waitErr == nil:
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalCleanupTimeout)
-		defer cleanupCancel()
-		if destroyErr := s.cfg.Runtime.Destroy(cleanupCtx, cid); destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
-			s.retainTerminalAfterRuntimeError(member, row, cid)
-			return nil, false, fmt.Errorf("scheduler: destroy exited terminal: %w", destroyErr)
-		}
-		return nil, false, nil
-	case errors.Is(waitErr, runtime.ErrNotFound):
+	case waitErr == nil, errors.Is(waitErr, runtime.ErrNotFound):
 		return nil, false, nil
 	case errors.Is(waitErr, context.DeadlineExceeded):
 		// Still running: adopt it.
@@ -604,10 +722,10 @@ func (s *Scheduler) attachTerminalSession(ctx context.Context, member domain.Mem
 	return nil
 }
 
-// cleanupExitedTerminalLocked removes an exited terminal only after both its
-// container and its matching durable row are handled. The supervision entry
-// stays registered while either operation can be retried, so a later Ensure
-// cannot create a replacement that an old supervisor would delete.
+// cleanupExitedTerminalLocked unregisters an exited terminal once its matching
+// durable row is handled. The container stays, stopped, for the next open. The
+// supervision entry stays registered while the row can be retried, so a later
+// Ensure cannot create a replacement that an old supervisor would delete.
 func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *terminalSupervision) error {
 	if sup == nil {
 		return nil
@@ -624,9 +742,6 @@ func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *termin
 	cleanupCtx, cancel := context.WithTimeout(ctx, terminalCleanupTimeout)
 	defer cancel()
 	s.cfg.PTY.StopSessionsWithPrefix(cleanupCtx, terminalPrefix(sup.member))
-	if err := s.cfg.Runtime.Destroy(cleanupCtx, sup.containerID); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-		return fmt.Errorf("scheduler: destroy exited terminal: %w", err)
-	}
 
 	row, err := s.cfg.Store.GetTerminal(cleanupCtx, sup.member)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -646,8 +761,8 @@ func (s *Scheduler) cleanupExitedTerminalLocked(ctx context.Context, sup *termin
 		delete(s.terminals, sup.member)
 	}
 	s.mu.Unlock()
-	// The staged CLI is released only after runtime destruction is confirmed
-	// and the matching durable terminal row is handled.
+	// The staged CLI is released once the matching durable terminal row is
+	// handled; the next open stages it again before starting the container.
 	s.releaseTerminalCoordination(sup.member)
 	// The reservation belongs to this supervision, not to whichever
 	// replacement may now occupy the member slot. Release it even when the
@@ -778,9 +893,10 @@ func (s *Scheduler) StopTerminal(ctx context.Context, member domain.MemberID) er
 }
 
 // WithStoppedTerminal keeps EnsureTerminal excluded through an operation that
-// follows confirmed stop, such as deleting the member row and home. afterStop
-// may acquire the member cache lock (terminal -> cache ordering), but must not
-// reenter terminal lifecycle methods. Nil performs only the stop.
+// follows confirmed stop, such as deleting the member row and home. A non-nil
+// afterStop is member removal, so the kept container is destroyed first.
+// afterStop may acquire the member cache lock (terminal -> cache ordering), but
+// must not reenter terminal lifecycle methods. Nil performs only the stop.
 func (s *Scheduler) WithStoppedTerminal(ctx context.Context, member domain.MemberID, afterStop func() error) error {
 	// Interrupt OAuth completion before waiting on its short terminal-locked
 	// native setup. stopTerminalLocked repeats this under the admission fence.
@@ -793,12 +909,16 @@ func (s *Scheduler) WithStoppedTerminal(ctx context.Context, member domain.Membe
 	}
 	s.touchTerminalCache(member)
 	if afterStop != nil {
+		if _, err := s.destroyKeptTerminalLocked(ctx, member, false); err != nil {
+			return err
+		}
 		return afterStop()
 	}
 	return nil
 }
 
 // stopTerminalLocked stops a member's terminal while its member lock is held.
+// The stopped container is kept; ResetEnvironment and member removal destroy it.
 func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.MemberID) error {
 	s.stopTerminalGitHubOAuth(member)
 	row, err := s.cfg.Store.GetTerminal(ctx, member)
@@ -824,9 +944,6 @@ func (s *Scheduler) stopTerminalLocked(ctx context.Context, member domain.Member
 	if cid != "" {
 		if stopErr := s.cfg.Runtime.Stop(ctx, runtime.ID(cid), s.cfg.StopGrace); stopErr != nil && !errors.Is(stopErr, runtime.ErrNotFound) {
 			return fmt.Errorf("scheduler: stop terminal: %w", stopErr)
-		}
-		if destroyErr := s.cfg.Runtime.Destroy(ctx, runtime.ID(cid)); destroyErr != nil && !errors.Is(destroyErr, runtime.ErrNotFound) {
-			return fmt.Errorf("scheduler: destroy terminal: %w", destroyErr)
 		}
 	}
 	if err := s.cfg.Store.DeleteTerminal(ctx, member); err != nil {
@@ -914,6 +1031,9 @@ func (s *Scheduler) recoverTerminalLocked(ctx context.Context, member *domain.Me
 		found, findErr := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID))
 		switch {
 		case findErr == nil && string(found) != row.ContainerID:
+			if err = s.destroyTerminalContainer(ctx, runtime.ID(row.ContainerID)); err != nil {
+				return fmt.Errorf("scheduler: destroy stale terminal: %w", err)
+			}
 			adopted, adoptedOK, err = s.tryAdoptTerminal(ctx, member, row, found)
 			if err != nil {
 				return err

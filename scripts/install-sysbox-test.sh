@@ -34,6 +34,7 @@ stub ip 'case "$*" in
 esac'
 stub docker 'case "$1" in
 info) if [ -n "${FAKE_RUNTIMES:-}" ]; then echo "$FAKE_RUNTIMES"; elif [ -e "$STATE_FILE" ]; then echo "{\"runc\":{},\"sysbox-runc\":{}}"; else echo "{\"runc\":{}}"; fi ;;
+ps) [ -z "${FAKE_RUNNING:-}" ] || echo abc123 ;;
 pull) [ -z "${FAKE_PULL_FAIL:-}" ] || { echo "pull access denied"; exit 1; } ;;
 run) exit "${FAKE_PROBE_RC:-0}" ;;
 network) case "$2" in
@@ -45,6 +46,7 @@ stub apt-get 'echo "apt-get $*" >>"$CMD_LOG"; case "$*" in
 *.deb*) [ -n "${FAKE_APT_OK:-}" ] || { echo "E: Unmet dependencies"; exit 100; }; touch "$STATE_FILE" ;;
 *purge*) [ -z "${FAKE_PURGE_FAIL:-}" ] || { echo "E: dpkg was interrupted"; exit 100; }; rm -f "$STATE_FILE" ;;
 esac'
+stub systemctl 'echo "systemctl $*" >>"$CMD_LOG"'
 stub sha256sum 'case "${FAKE_ARCH:-amd64}" in arm64) h=04ca894ae0b53f0fa54eaacc173ce40363c9a95ea5450f773716a84ef650a69b ;; *) h=9d6d5484f980d0a17f86c492c1262015c2afb66280bdb97215b79fde6a0261c5 ;; esac; echo "${FAKE_SHA:-$h}  $1"'
 stub curl 'out=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done; echo not-a-deb >"$out"'
 stub jq 'exec "$REAL_JQ" "$@"'
@@ -52,11 +54,13 @@ REAL_JQ=$(command -v jq) || { echo "install-sysbox-test: jq is required" >&2; ex
 export REAL_JQ CMD_LOG="$log" STATE_FILE="$tmp/sysbox-registered"
 
 daemon_json="$tmp/daemon.json"
+dropin="$tmp/mgr.d/aether.conf"
+export AETHER_SYSBOX_MGR_DROPIN="$dropin"
 daemon_content='{}'
 
 run() {
 	: >"$log"
-	rm -f "$STATE_FILE"
+	rm -f "$STATE_FILE" "$dropin"
 	printf '%s\n' "$daemon_content" >"$daemon_json"
 	if env PATH="$bin:$PATH" AETHER_SYSBOX_DAEMON_JSON="$daemon_json" "$@" sh "$script" >"$tmp/out" 2>&1; then
 		status=0
@@ -219,11 +223,15 @@ expect 1 "is installed but Docker does not list sysbox-runc"
 daemon_content='{}'
 run FAKE_APT_OK=1
 expect 0 "bind-mount probe passed"
+grep -qF "ExecStart=/usr/bin/sysbox-mgr --disable-inner-image-preload" "$dropin" || { echo "install-sysbox-test: drop-in missing the preload flag" >&2; exit 1; }
+grep -qx "ExecStart=" "$dropin" || { echo "install-sysbox-test: drop-in does not clear ExecStart" >&2; exit 1; }
+grep -q "systemctl restart sysbox" "$log" || { echo "install-sysbox-test: sysbox was not restarted" >&2; exit 1; }
 grep -q purge "$log" && { echo "install-sysbox-test: a passing probe purged Sysbox" >&2; exit 1; }
 
 run FAKE_APT_OK=1 FAKE_PROBE_RC=42
 expect 1 "bind mounts are not ID-mapped on this host"
 expect 1 "Sysbox was removed again"
+[ ! -e "$dropin" ] || { echo "install-sysbox-test: drop-in survived the purge" >&2; exit 1; }
 grep -qF "apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce" "$log" || { echo "install-sysbox-test: the failed probe did not purge Sysbox" >&2; exit 1; }
 [ ! -e "$STATE_FILE" ] || { echo "install-sysbox-test: Docker still lists sysbox-runc" >&2; exit 1; }
 
@@ -241,6 +249,16 @@ grep -q purge "$log" && { echo "install-sysbox-test: a pull failure purged Sysbo
 
 run FAKE_INSTALLED=0.7.1.linux 'FAKE_RUNTIMES={"runc":{},"sysbox-runc":{}}' FAKE_PROBE_RC=42
 expect 4 "bind mounts are not ID-mapped on this host"
+
+# Re-running on a host that already has Sysbox adds the drop-in; a running
+# container defers the restart.
+run FAKE_INSTALLED=0.7.1.linux 'FAKE_RUNTIMES={"runc":{},"sysbox-runc":{}}'
+expect 0 "nothing to do"
+[ -s "$dropin" ] || { echo "install-sysbox-test: re-run did not add the drop-in" >&2; exit 1; }
+grep -q "systemctl restart sysbox" "$log" || { echo "install-sysbox-test: re-run did not restart sysbox" >&2; exit 1; }
+run FAKE_RUNNING=1 FAKE_INSTALLED=0.7.1.linux 'FAKE_RUNTIMES={"runc":{},"sysbox-runc":{}}'
+expect 0 "keeps its old flags"
+! grep -q "systemctl restart" "$log" || { echo "install-sysbox-test: restarted sysbox under running containers" >&2; exit 1; }
 
 # Routes in other tables count, local and broadcast entries do not.
 run 'FAKE_ROUTE=10.200.0.0/16 dev wg0 table 100'

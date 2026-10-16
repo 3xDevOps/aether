@@ -362,6 +362,42 @@ sha256sum aether-linux-amd64
 `openssl` prints `Signature Verified Successfully`, and the two digests must
 match. On macOS use `shasum -a 256` in place of `sha256sum`.
 
+### Settings an update does not rewrite
+
+`aether update` replaces binaries only. The systemd unit and the Sysbox
+services keep the settings they were installed with, so an install that
+predates these two needs a one-time step for each.
+
+`OOMScoreAdjust=-500` makes a host-wide OOM kill an agent process before
+`aether-server`. Add it as a drop-in and restart the server; runs keep
+running and are re-adopted:
+
+```sh
+sudo mkdir -p /etc/systemd/system/aether-server.service.d
+printf '[Service]\nOOMScoreAdjust=-500\n' | sudo tee /etc/systemd/system/aether-server.service.d/oom.conf
+sudo systemctl daemon-reload && sudo systemctl restart aether-server
+systemctl show aether-server -p OOMScoreAdjust
+```
+
+The last command prints `OOMScoreAdjust=-500`.
+
+On a Sysbox host, `sysbox-mgr --disable-inner-image-preload` stops Sysbox
+copying each container's inner `/var/lib/docker` into its writable layer on
+every stop. Re-run the installer to add it:
+
+```sh
+sudo aether-server sysbox install
+```
+
+With containers running, it writes the setting but does not restart Sysbox:
+
+```
+install-sysbox: containers are running, so sysbox-mgr keeps its old flags until: sudo systemctl restart sysbox
+```
+
+Restarting Sysbox breaks running containers, so run that command when no
+one is working.
+
 ### Environment image migration
 
 The member environment image change is one-way. Workspaces no longer carry an
@@ -1528,6 +1564,13 @@ sudo aether-server sysbox install
 aether-server sysbox status
 ```
 
+The installer also writes a systemd drop-in,
+`/etc/systemd/system/sysbox-mgr.service.d/aether.conf`, that starts
+`sysbox-mgr` with `--disable-inner-image-preload`. Without it, Sysbox copies a
+container's inner `/var/lib/docker` into its writable layer on every stop.
+Re-running the install on a host that already has Sysbox applies it; Sysbox
+restarts only when no container is running.
+
 `aether update` prints the install command after replacing `aether-server`
 on a Debian or Ubuntu host whose Docker lacks Sysbox. It never runs it.
 
@@ -1599,7 +1642,7 @@ uses the default; negative values have the semantics in the table.
 | `--poll-interval` | `30s` | How often stalls are checked. |
 | `--checkout-ttl` | `72h` | How long a finished run's worktree is kept. Negative disables the GC. |
 | `--run-container-ttl` | `168h` (7 days) | Grace for the exact compute environment after a Standard or Enhanced run is explicitly closed, or a swarm worker completes. `0` uses the default; a positive duration overrides it; negative means immediate release. Interactive outcome reports leave the session open and start no expiry timer. Paused containers still consume RAM during grace. |
-| `--min-free-disk` | `0` (automatic) | Free-byte reserve on the Aether data and runtime storage filesystems: 5% of each filesystem, at least 5 GiB and at most 20 GiB. A positive integer overrides the reserve in bytes; negative disables disk admission, not memory checks. Provisioning also needs a 1 GiB startup allowance. |
+| `--min-free-disk` | `0` (automatic) | Free-byte reserve on the Aether data and runtime storage filesystems: 5% of each filesystem, at least 5 GiB and at most 20 GiB. A positive integer overrides the reserve in bytes; negative disables disk admission, not memory checks. Provisioning also needs a 1 GiB startup allowance. When free space on any of these filesystems falls below the reserve plus 4 GiB, Aether frees rebuildable data before it refuses a launch; see below. |
 | `--run-cpus` | `0` (automatic) | CPU ceiling per run, member environment and candidate verification: up to 8 CPUs, clamped to the host CPU count. A positive number overrides it. |
 | `--run-memory` | `0` (automatic) | Memory ceiling per run, member environment and candidate verification: 8 GiB. A positive integer overrides it in bytes, for example `17179869184` for 16 GiB. |
 | `--run-pids` | `0` (automatic) | Process/thread ceiling per run, member environment and candidate verification: 4096. A positive integer overrides it. |
@@ -1627,7 +1670,28 @@ Candidate verification uses these same admission checks. Its temporary
 provisioning allowance spans container creation/start, not the full command
 lifetime; its runtime cache ownership lasts until confirmed destruction.
 
-Low capacity refuses new work with a resource-specific reason; it does not evict
+When free space on any checked filesystem falls below the reserve plus 4 GiB,
+the scheduler frees rebuildable data, checking about once a minute and again
+before refusing a launch. It re-measures after each step and stops as soon as
+every filesystem is back above that line. A filesystem smaller than the
+reserve plus 4 GiB never triggers it, because freeing data could not reach
+that line. In order:
+
+1. Paused containers of closed runs, oldest expiry first. The run gets a
+   timeline note and can no longer be reopened; its branch, evidence and
+   history are kept.
+2. Finished run checkouts, regardless of a positive `--checkout-ttl`; a
+   negative one keeps them. The usual safety checks apply: active runs,
+   retained containers and uncaptured evidence keep their checkout.
+3. Stopped environment terminal containers, which discards their unsaved
+   environment changes.
+4. Idle cache pools, obsolete saved images and legacy in-home caches. Legacy
+   caches go even while the member has runs open.
+5. Leftover `/tmp` scratch directories.
+
+`--run-container-ttl` and `--checkout-ttl` stay upper bounds. Each step logs the
+free bytes before and after at info level. Low capacity that this pass cannot
+fix refuses new work with a resource-specific reason; it does not evict
 an active run. Reopening a retained run reuses existing compute and skips
 capacity admission.
 New browser companions and agent-updater containers share these admission
@@ -1845,7 +1909,7 @@ Storage rules:
   Git results and failed cleanup remain protected. Source repositories and
   event history are not cache eviction targets.
 - **Managed caches are reclaimed automatically.** Startup after recovery,
-  hourly maintenance and a single retry on disk pressure reclaim only inactive,
+  hourly maintenance and the disk-pressure pass reclaim only inactive,
   proven-owned pools. Soft targets are 4 GiB per pool, 16 GiB total and 7 days
   since last genuine use/release. Active, retained, finalizing and uncertain
   owners can exceed those targets; these are not live-write quotas. No idle
@@ -1853,6 +1917,9 @@ Storage rules:
   credentials and installed tools in `homes/`. Settings > **Server** reports
   cache ownership, deadlines and cleanup failures. Byte accounting de-duplicates
   hardlinks and is not a guarantee that deletion returns those bytes to disk.
+- **`scratch/` is disposable.** It holds each run's and terminal's `/tmp`,
+  is deleted with the container, and the hourly sweep removes leftovers.
+  Settings > **Server** lists it as **Scratch**. Do not back it up.
 - **User history persists until explicit deletion.** Terminal recordings,
   Enhanced conversations and recorded diff history outlive compute, checkout
   cleanup and archiving. Browser rendering and history requests remain bounded.

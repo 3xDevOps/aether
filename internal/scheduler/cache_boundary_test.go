@@ -76,8 +76,8 @@ func TestEnsureTerminalReclaimsOwnRecentInactiveCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.ContainerID == "" || probes != 2 {
-		t.Fatalf("terminal=%+v probes=%d", terminal, probes)
+	if terminal.ContainerID == "" || probes < 2 || probes > 8 {
+		t.Fatalf("terminal=%+v probes=%d, want one bounded reclaim pass", terminal, probes)
 	}
 	requireCacheExists(t, path, false)
 	// Reuse bypasses admission even when the disk becomes full again.

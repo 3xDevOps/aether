@@ -45,6 +45,13 @@ type CapacityRuntime interface {
 	Capacity(context.Context) (HostCapacity, error)
 }
 
+// InitPIDRuntime optionally reports a container's init process ID in the host
+// PID namespace, so a caller on the same host can find its cgroup. A stopped
+// container reports 0.
+type InitPIDRuntime interface {
+	InitPID(context.Context, ID) (int, error)
+}
+
 // Mount is one additional mount into a run container. Host paths are
 // validated against Aether-owned roots by the mount validator (see
 // mounts.go) before a spec reaches any runtime; the runtime itself only
@@ -77,6 +84,8 @@ type ContainerInfo struct {
 	Env []string
 	// MountTargets are the container paths of the container's mounts.
 	MountTargets []string
+	// Fingerprint is the Spec.Fingerprint the container was created with.
+	Fingerprint string
 }
 
 // Spec describes one run container, engine-neutrally: the image,
@@ -144,6 +153,11 @@ type Spec struct {
 	// right before a crash can be found again via FindByCreationKey. The
 	// caller is responsible for uniqueness.
 	CreationKey string
+	// Fingerprint is an opaque caller-chosen digest persisted with the
+	// container (Docker: an aether-owned label) so a caller can tell whether
+	// a surviving container was created from the same settings. It is stored
+	// in clear, so it must not be derived reversibly from secrets.
+	Fingerprint string
 }
 
 // Validate reports every problem that makes the spec unusable by any

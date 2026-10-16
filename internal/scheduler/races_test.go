@@ -314,7 +314,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 		t.Fatalf("CreateRun relaunched: %v", cerr)
 	}
 
-	e.sched.sweepCheckouts(ctx)
+	e.sched.sweepCheckouts(ctx, time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 
 	if _, serr := os.Stat(path); serr != nil {
 		t.Fatalf("shared checkout removed under the live run: %v", serr)
@@ -363,7 +363,7 @@ func TestSweepSkipsReopenedCheckoutFromStaleTerminalSnapshot(t *testing.T) {
 	e.sched.runs[run.ID] = entry
 	e.sched.mu.Unlock()
 
-	e.sched.sweepCheckouts(ctx)
+	e.sched.sweepCheckouts(ctx, time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 
 	if _, statErr := os.Stat(path); statErr != nil {
 		t.Fatalf("reopened checkout removed from stale terminal snapshot: %v", statErr)

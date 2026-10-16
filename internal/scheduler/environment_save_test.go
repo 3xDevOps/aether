@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -163,5 +164,78 @@ func TestSaveEnvironmentRetriesTagsStillInUse(t *testing.T) {
 	}
 	if e.rt.hasImage(first) || e.rt.hasImage(second) {
 		t.Fatalf("images after reset: first=%v second=%v, want none", e.rt.hasImage(first), e.rt.hasImage(second))
+	}
+}
+
+func TestResetEnvironmentDestroysStoppedKeptTerminal(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	terminal, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	if err = e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	if err = e.sched.ResetEnvironment(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("ResetEnvironment: %v", err)
+	}
+	if _, getErr := e.rt.get(runtime.ID(terminal.ContainerID)); !errors.Is(getErr, runtime.ErrNotFound) {
+		t.Fatalf("kept container after reset = %v, want ErrNotFound", getErr)
+	}
+}
+
+func TestSaveAfterStopReleasesPreviousSaveTag(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.Now = stepClock(2 * time.Second) })
+	first, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	savedFirst, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("first SaveEnvironment: %v", err)
+	}
+	if err = e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	reopened, err := e.sched.EnsureTerminal(t.Context(), e.member.ID)
+	if err != nil || reopened.ContainerID != first.ContainerID {
+		t.Fatalf("reopen = %+v, %v, want the kept container", reopened, err)
+	}
+	savedSecond, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("second SaveEnvironment: %v", err)
+	}
+	if commits := e.rt.commitCalls(); commits[len(commits)-1].id != runtime.ID(first.ContainerID) {
+		t.Fatalf("second save committed %q, want the kept container %q", commits[len(commits)-1].id, first.ContainerID)
+	}
+	if e.rt.hasImage(savedFirst) || !e.rt.hasImage(savedSecond) {
+		t.Fatalf("images after second save: first=%v second=%v, want only the second", e.rt.hasImage(savedFirst), e.rt.hasImage(savedSecond))
+	}
+}
+
+func TestStoppedKeptTerminalDoesNotOwnCache(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	if _, err := e.sched.EnsureTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("EnsureTerminal: %v", err)
+	}
+	owned := func() bool {
+		owners := newCacheOwnership()
+		info := memberhome.CacheInfo{Member: e.member.ID, Pool: memberhome.CachePoolTerminal}
+		if err := e.sched.resolveCacheRuntimeOwners(t.Context(), &info, &owners); err != nil {
+			t.Fatalf("resolveCacheRuntimeOwners: %v", err)
+		}
+		return owners.terminal[e.member.ID]
+	}
+	if !owned() {
+		t.Fatal("running terminal does not own its cache pool")
+	}
+	if err := e.sched.StopTerminal(t.Context(), e.member.ID); err != nil {
+		t.Fatalf("StopTerminal: %v", err)
+	}
+	if owned() {
+		t.Fatal("stopped kept terminal still owns its cache pool")
 	}
 }

@@ -26,6 +26,7 @@ function diskParts(disk: DiskUsage): string[] {
     `Homes ${knownBytes(disk.home_bytes)}`,
     `Caches ${knownBytes(disk.cache_bytes)}`,
     `Evidence ${knownBytes(disk.evidence_bytes)}`,
+    `Scratch ${knownBytes(disk.scratch_bytes)}`,
     `Other ${knownBytes(disk.other_bytes)}`,
   ]
 }

@@ -16,6 +16,11 @@ nothing else of this home. See [teams.md](teams.md#agent-accounts).
 The home is the member's durable environment:
 
 - Executables installed in `~/.local/bin`
+- Global installs: `npm install -g` and `cargo install` write to `~/.local`,
+  because Aether sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT` to it unless
+  the image, workspace or profile already sets them. nvm refuses to switch
+  versions while `NPM_CONFIG_PREFIX` is set; put `unset NPM_CONFIG_PREFIX`
+  before nvm's lines in `~/.bashrc` if you use it
 - Vendor login state and other files written by the agent
 - Agent configuration uploaded with `aether config push` or edited in **Files**
 - The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
@@ -26,9 +31,18 @@ The home is the member's durable environment:
   (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it is
   downloaded once; see [terminal.md](terminal.md#editors)
 
-Files outside the home live in the container layer. **Save environment** on the
-**Environment** page turns that layer into your member image so later runs get it; see
-[environments.md](environments.md).
+`/tmp` is scratch on disk, not part of the home and not tmpfs, so it does
+not count against container memory. Each run gets `<data>/scratch/<run-id>`,
+removed with the run's container. The environment terminal gets
+`<data>/scratch/terminal-<member-id>`, emptied each time the environment
+starts. **Save environment** never captures `/tmp`, because it commits the
+container layer, not bind mounts. An hourly sweep deletes scratch
+directories whose run or terminal is gone.
+
+Other files outside the home live in the environment terminal's container
+layer, which survives a stop until **Reset to standard**. **Save environment**
+on the **Environment** page turns that layer into your member image so later
+runs get it; see [environments.md](environments.md#save-the-environment).
 
 ## Automatic tool caches
 
@@ -58,6 +72,9 @@ Only tool variables unset by the image, workspace and profile receive defaults:
 | `UV_CACHE_DIR` | `/aether-cache/uv` |
 | `GOCACHE` | `/aether-cache/go-build` |
 | `GOMODCACHE` | `/aether-cache/go-mod` |
+| `BUN_INSTALL_CACHE_DIR` | `/aether-cache/bun` |
+| `YARN_CACHE_FOLDER` | `/aether-cache/yarn` |
+| `npm_config_store_dir` (pnpm) | `/aether-cache/pnpm` |
 
 `AETHER_CACHE_DIR` identifies the mount. Explicit tool cache paths remain
 unchanged and outside automatic cleanup; Aether does not replace `HOME`,
@@ -90,10 +107,14 @@ Before the first managed cache is created, an absent cache root is an empty
 inventory. Existing broken or unreadable roots remain measurement errors.
 
 For homes created before managed caches, cleanup waits until all users of
-the old home are gone, then removes only `.npm/_cacache`, `.npm/_logs`,
-`.cache/pip`, `.cache/uv`, `.cache/go-build` and `go/pkg/mod`. It never clears
-all of `.npm`, `_npx`, `.cache`, `.local`, `.config`, `.ssh`, vendor stores or
-arbitrary home files. Symlink targets and external hardlink contents are
+the old home are gone. Under disk pressure it does not wait: containers keep
+npm, pip, uv, Go, bun, yarn and pnpm caches under `/aether-cache`, so these
+paths are not in use, and they are removed even while the member has runs
+open. Pending updaters and verification runs still protect them. Either way
+it removes only `.npm/_cacache`, `.npm/_logs`, `.cache/pip`, `.cache/uv`,
+`.cache/go-build`, `go/pkg/mod`, `.bun/install/cache`, `.cache/yarn` and
+`.local/share/pnpm/store`. It never clears all of `.npm`, `_npx`, `.cache`,
+`.local`, `.config`, `.ssh`, vendor stores or arbitrary home files. Symlink targets and external hardlink contents are
 not mutated. Saved-image maintenance removes only obsolete exact member
 tags, preserving current member, terminal and configured base/browser
 references; it does not run broad Docker image or volume prune.

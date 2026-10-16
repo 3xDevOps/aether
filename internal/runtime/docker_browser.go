@@ -55,13 +55,14 @@ func (d *Docker) browserContainerConfig(spec BrowserSpec) (*container.Config, *c
 			Init:           &initEnabled,
 			NetworkMode:    container.NetworkMode("container:" + string(spec.RunContainer)),
 			IpcMode:        "private",
+			OomScoreAdj:    agentOOMScoreAdj,
 			ShmSize:        BrowserSharedMemoryBytes,
 			ReadonlyRootfs: true,
 			CapDrop:        []string{"ALL"},
 			SecurityOpt:    []string{"no-new-privileges=true", "seccomp=" + browserSeccomp},
 			Tmpfs:          map[string]string{"/tmp": "rw,nosuid,nodev,size=536870912,mode=1777"},
 			Mounts:         []mount.Mount{{Type: mount.TypeBind, Source: spec.ControlHostPath, Target: "/aether-control", BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate}}},
-			Resources:      container.Resources{NanoCPUs: nanoCPUs(spec.CPULimit), Memory: spec.MemoryLimitBytes, MemorySwap: spec.MemoryLimitBytes, PidsLimit: &pids},
+			Resources:      container.Resources{NanoCPUs: nanoCPUs(spec.CPULimit), Memory: spec.MemoryLimitBytes, MemorySwap: memorySwapLimit(spec.MemoryLimitBytes), PidsLimit: &pids},
 			LogConfig:      container.LogConfig{Type: "local", Config: map[string]string{"max-size": "10m", "max-file": "2"}},
 		}
 }
