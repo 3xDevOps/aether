@@ -82,10 +82,10 @@ The GitHub sign-in itself happens in the phone's browser, not in the app.
 Everything is encrypted in transit. Deletion: the edge's Account page, linked
 from the privacy policy. The permission `ACCESS_NETWORK_STATE` reads the
 active network's DNS servers into `resolv.conf`; they are not sent anywhere.
-In Edge mode the bundled CLI asks `github.com` for the newest release's tag,
-reusing an answer for an hour, retrying a failed request after five minutes at
-the soonest and asking again when the gateway restarts; the request carries no user data, and nothing is
-downloaded or installed.
+In both modes the bundled CLI asks `github.com` for the newest release's tag
+when the app comes to the front, at most once an hour, and in Edge mode the
+gateway asks too while the dashboard is open. The request carries no user
+data, and nothing is downloaded or installed.
 
 ## Other declarations on the same page
 

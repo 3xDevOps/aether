@@ -1762,11 +1762,13 @@ the server snapshot from loading.
   `forward.status` and `forward.stop` too: a forward listens on `127.0.0.1`,
   which every app on a phone can reach. `update.check` still reports the
   newest release, with `packaged` set, `can_self_update` false and no
-  `asset`, so the dashboard can say an update exists. `update.apply` refuses
-  from the configuration, before any lookup, and `aether update` refuses
-  likewise, both with `this aether is part of the Android app, which installs
-  its updates; update the Android app instead`: the APK is the update unit,
-  and the sidecar never replaces its own binary.
+  `asset`, so the dashboard can say an update exists, and `aether update
+  --check --json` prints the same check for the app's own banner.
+  `update.apply` refuses from the configuration, before any lookup, and
+  `aether update` without `--check` refuses likewise, both with `this aether
+  is part of the Android app, which installs its updates; update the Android
+  app instead`: the APK is the update unit, and the sidecar never replaces
+  its own binary.
 - On Android the CLI reads `AETHER_RESOLV_CONF`, a resolv.conf path, only when
   `/etc/resolv.conf` is absent; the app writes the phone's DNS servers there
   ([networking.md](networking.md#android-dns)).

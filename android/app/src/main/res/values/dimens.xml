@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <dimen name="edge_margin">24dp</dimen>
+    <dimen name="update_notice_margin">12dp</dimen>
 </resources>

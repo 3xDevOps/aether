@@ -6,6 +6,11 @@ private const val PREFS = "aether"
 private const val DASHBOARD_URL = "dashboard_url"
 private const val MODE = "connection_mode"
 private const val GATEWAY_PORT = "gateway_port"
+private const val UPDATE_CHECKED_AT = "update_checked_at"
+private const val UPDATE_CHECK = "update_check"
+private const val UPDATE_SEEN_TAG = "update_seen_tag"
+private const val UPDATE_SEEN_AT = "update_seen_at"
+private const val UPDATE_DISMISSED = "update_dismissed"
 
 /** How the shell reaches a server. */
 enum class ConnectionMode(val stored: String) {
@@ -61,6 +66,28 @@ fun Context.gatewayPort(): Int {
     val port = (20000..59999).random()
     prefs().edit().putInt(GATEWAY_PORT, port).apply()
     return port
+}
+
+fun Context.storedUpdate(): StoredUpdate {
+    val prefs = prefs()
+    return StoredUpdate(
+        checkedAt = prefs.getLong(UPDATE_CHECKED_AT, 0),
+        line = prefs.getString(UPDATE_CHECK, null),
+        seenTag = prefs.getString(UPDATE_SEEN_TAG, null),
+        seenAt = prefs.getLong(UPDATE_SEEN_AT, 0),
+        dismissed = prefs.getString(UPDATE_DISMISSED, null),
+    )
+}
+
+fun Context.storeUpdate(update: StoredUpdate) {
+    prefs()
+        .edit()
+        .putLong(UPDATE_CHECKED_AT, update.checkedAt)
+        .putString(UPDATE_CHECK, update.line)
+        .putString(UPDATE_SEEN_TAG, update.seenTag)
+        .putLong(UPDATE_SEEN_AT, update.seenAt)
+        .putString(UPDATE_DISMISSED, update.dismissed)
+        .apply()
 }
 
 private fun Context.prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)

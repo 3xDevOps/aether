@@ -23,7 +23,6 @@ import {
   bannerContent,
   bannerIcon,
   Dismiss,
-  packagedLine,
   verbatim,
 } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
@@ -42,6 +41,10 @@ import type { RunRecord } from '@/store/runs'
 import type { UpdateKind } from '@/store/ui'
 
 export const RECHECK_MS = 30 * 60 * 1000
+
+export function packagedLine(packaged: string): string {
+  return `Updates come from the ${packaged}: install its new version to update Aether.`
+}
 
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
@@ -139,13 +142,17 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const setOpen = useStore((s) => s.setUpdatesOpen)
   const anything = useUpdateNotice() !== null
   const packaged = serves ? update?.cli.packaged : undefined
+  const packagedLatest = packaged && update?.cli.update_available ? update.cli.latest : undefined
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Updates</DialogTitle>
           {packaged ? (
-            <DialogDescription>{packagedLine(packaged)}</DialogDescription>
+            <DialogDescription>
+              {packagedLine(packaged)}
+              {packagedLatest && ` Aether ${packagedLatest} is available from Google Play or the release page.`}
+            </DialogDescription>
           ) : (
             !anything && <DialogDescription>Nothing to update.</DialogDescription>
           )}
@@ -174,7 +181,8 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   const cliVersion = useStore((s) => s.capabilities?.version)
   const serves = caps.hasLocal('update.check')
   const latest = update?.cli.latest ?? ''
-  if (serves && update?.cli.update_available && latest && dismissed.cli !== latest) {
+  // A packaged CLI's notice is its app's own, outside the dashboard.
+  if (serves && update?.cli.update_available && !update.cli.packaged && latest && dismissed.cli !== latest) {
     return { text: `Aether ${bareVersion(latest)} is available`, action: true }
   }
   const flow = serverFlow(status, progress)

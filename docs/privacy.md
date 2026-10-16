@@ -76,14 +76,18 @@ device-to-device transfer (`allowBackup=false` and
   stores](#what-an-edge-stores) lists and cannot read the stream, which is
   encrypted end to end between the phone and your server. The GitHub sign-in
   happens in the phone's browser, under GitHub's own policy. While the
-  dashboard is open, the CLI asks `github.com` for the tag of the newest
-  Aether release so the dashboard can say an update exists. An answer is
-  reused for an hour; a failed request is retried after five minutes at the
-  soonest, and a restarted gateway asks again; GitHub sees the phone's IP address and that request, nothing about
-  you or your server. It never downloads the release: you install it from
-  Google Play or the release page. The CLI resolves host names with plain DNS over port 53 to the active
-  network's DNS servers, bypassing Android Private DNS (DNS-over-TLS), so that
-  network can see which names it looks up.
+  dashboard is open, the gateway also asks `github.com` for the newest
+  release's tag, as the next item describes, reusing an answer for an hour,
+  retrying a failed request after five minutes at the soonest, and asking
+  again when it restarts. The CLI resolves host names with plain DNS over
+  port 53 to the active network's DNS servers, bypassing Android Private DNS
+  (DNS-over-TLS), so that network can see which names it looks up.
+- **In both modes, to `github.com` for the newest release.** When the app
+  comes to the front, at most once an hour, the bundled CLI asks `github.com`
+  for the tag of the newest Aether release, so the app can say an update
+  exists. GitHub sees the phone's IP address and that request, nothing about
+  you or your server. Nothing is downloaded: you install a release from
+  Google Play or the release page.
 - **In Tailscale mode, your identity reaches the server through Tailscale, not
   through the app.** The server asks its own tailscaled which tailnet login
   owns the connecting device. The app sends no name, email, or identifier of

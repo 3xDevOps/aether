@@ -56,9 +56,20 @@ private const val SYSTEM_CA_DIR = "/system/etc/security/cacerts"
  */
 fun caDirectory(apexExists: Boolean): String = if (apexExists) APEX_CA_DIR else SYSTEM_CA_DIR
 
-// The exit status `aether gui --json` uses to say it replaced its own binary
-// (localgw.ExitRelaunch).
-private const val RELAUNCH_EXIT = 75
+/** The environment of every run of the bundled CLI, which reads DNS servers from [resolvConf]. */
+fun cliEnvironment(context: Context, resolvConf: File): Map<String, String> =
+    mapOf(
+        "HOME" to context.filesDir.absolutePath,
+        "TMPDIR" to context.cacheDir.absolutePath,
+        "AETHER_PACKAGED" to "Android app",
+        "AETHER_RESOLV_CONF" to resolvConf.absolutePath,
+        // The x86_64 CLI is a linux/amd64 build (Go's android/amd64 needs
+        // cgo), which knows only the CA paths of desktop Linux. Only the
+        // system store: the app's network security config does not trust
+        // user-installed CAs, so neither may the CLI.
+        "SSL_CERT_DIR" to caDirectory(File(APEX_CA_DIR).isDirectory),
+    )
+
 private const val MAX_RESPAWNS = 3
 private const val HANDSHAKE_TIMEOUT_SECONDS = 15L
 private const val STDERR_LINES = 40
@@ -174,13 +185,6 @@ class Gateway(
             // right after its handshake would otherwise restart forever.
             if (served && SystemClock.elapsedRealtime() - servedAt >= STABLE_RUN_MS) respawns = 0
             try {
-                if (code == RELAUNCH_EXIT) {
-                    // The gateway replaced its binary. Desktop relaunches its
-                    // shell; this one has no rebuild step, so a fresh start is
-                    // the whole of it, and not a failure.
-                    Thread.sleep(1000)
-                    continue
-                }
                 respawns += 1
                 if (respawns > MAX_RESPAWNS) {
                     val why =
@@ -200,17 +204,7 @@ class Gateway(
     private fun runOnce(bin: File, port: Int, onHandshake: () -> Unit): Int {
         val builder =
             ProcessBuilder(bin.absolutePath, "gui", "--json", "--port", port.toString())
-        builder.environment().apply {
-            put("HOME", context.filesDir.absolutePath)
-            put("TMPDIR", context.cacheDir.absolutePath)
-            put("AETHER_PACKAGED", "Android app")
-            put("AETHER_RESOLV_CONF", resolvConfFile().absolutePath)
-            // The x86_64 CLI is a linux/amd64 build (Go's android/amd64 needs
-            // cgo), which knows only the CA paths of desktop Linux. Only the
-            // system store: the app's network security config does not trust
-            // user-installed CAs, so neither may the CLI.
-            put("SSL_CERT_DIR", caDirectory(File(APEX_CA_DIR).isDirectory))
-        }
+        builder.environment().putAll(cliEnvironment(context, resolvConfFile()))
         synchronized(stderrTail) { stderrTail.clear() }
         val child = builder.start()
         process = child

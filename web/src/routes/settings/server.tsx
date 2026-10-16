@@ -1,5 +1,4 @@
-import { useUpdateNotice } from '@/components/update-banner'
-import { packagedLine } from '@/components/update-banner-shared'
+import { packagedLine, useUpdateNotice } from '@/components/update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code'

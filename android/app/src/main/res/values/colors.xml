@@ -6,5 +6,14 @@
          scripts/make-icons.py composites onto. -->
     <color name="window_background">#ffffff</color>
     <color name="error_text">#b3261e</color>
+    <!-- The update notice wears the dashboard's raised surface, seam, text
+         and accent tokens, so it reads as part of the page beneath it. -->
+    <color name="raised">#ffffff</color>
+    <color name="seam">#14000000</color>
+    <color name="text">#1f1f1f</color>
+    <color name="text_muted">#6b6b6b</color>
+    <color name="accent_fill">#367f77</color>
+    <color name="accent_text">#306f69</color>
+    <color name="on_accent">#ffffff</color>
     <color name="ic_launcher_background">#0a0a0a</color>
 </resources>
