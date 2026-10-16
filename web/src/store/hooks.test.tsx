@@ -69,17 +69,18 @@ describe('useNeedsYouCount', () => {
     expect(count()).toBe('0')
   })
 
-  it("counts the viewer's unreviewed outcomes, not another member's", () => {
-    const mine = run({ id: 'mine', status: 'completed', outcome_unseen: true })
-    const theirs = run({ id: 'theirs', member_id: bob.id, status: 'failed', outcome_unseen: true })
-    useStore.setState({ runs: Object.fromEntries([mine, theirs].map((r) => [r.id, toRecord(r)])) })
+  it("counts the viewer's unreviewed failures, not another member's or a success", () => {
+    const mine = run({ id: 'mine', status: 'needs-attention', state: 'failed', outcome_unseen: true })
+    const success = run({ id: 'success', status: 'needs-attention', state: 'finished', outcome_unseen: true })
+    const theirs = run({ id: 'theirs', member_id: bob.id, status: 'needs-attention', state: 'failed', outcome_unseen: true })
+    useStore.setState({ runs: Object.fromEntries([mine, success, theirs].map((r) => [r.id, toRecord(r)])) })
     render(<Probe />)
     expect(count()).toBe('1')
   })
 
   it('counts every workspace, or one when named', () => {
-    const here = run({ id: 'here', status: 'needs-attention' })
-    const there = run({ id: 'there', workspace_id: otherWorkspace.id, status: 'needs-attention' })
+    const here = run({ id: 'here', status: 'needs-attention', state: 'needs-you' })
+    const there = run({ id: 'there', workspace_id: otherWorkspace.id, status: 'needs-attention', state: 'needs-you' })
     useStore.setState({ runs: Object.fromEntries([here, there].map((r) => [r.id, toRecord(r)])) })
     render(
       <>

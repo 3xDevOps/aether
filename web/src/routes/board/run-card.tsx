@@ -5,8 +5,8 @@ import { Avatar } from '@/components/ui/avatar'
 import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { StateLine, type Tone } from '@/components/ui/status-dot'
-import { runLabel } from '@/lib/status'
+import { StateLine } from '@/components/ui/status-dot'
+import { runLabel, stateLabel, stateTone } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
@@ -37,7 +37,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
   const action = cardAction(card, approval)
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
-  const tone: Tone = needsYou ? 'needs-you' : card.state
+  const state = needsYou && !card.needsYou ? 'needs-you' : card.state
   const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
   const owner = card.owner?.display_name ?? run.member_id
 
@@ -45,7 +45,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
     <Popover open={replying} onOpenChange={setReplying}>
       <PopoverAnchor asChild>
         <Card ref={cardRef} data-run-id={run.id} selected={replying} style={variant === 'map' ? { height: '100%' } : undefined}>
-          <StateLine tone={tone} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
+          <StateLine tone={stateTone[state]} label={stateLabel[state]} strong={needsYou} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
             {reason}
           </StateLine>
           <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>
@@ -94,7 +94,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
 })
 
 function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
-  if (card.state === 'needs-you') return card.reason
+  if (card.needsYou) return card.reason
   if (card.group === 'needs-you') return card.children[0]?.reason ?? card.reason
   if (card.unread) return card.reason
   return phase ? phaseWord[phase] : 'Swarm'

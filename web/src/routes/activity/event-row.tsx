@@ -6,21 +6,15 @@ import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { resolveMember } from '@/lib/member-name'
-import { runLabel } from '@/lib/status'
-import type { CoordMessageAckedPayload, CoordMessagePayload, Event, RunStatus } from '@/lib/types'
+import { liveStateOf, runLabel, stateTone } from '@/lib/status'
+import type { CoordMessageAckedPayload, CoordMessagePayload, Event, RunStatusPayload } from '@/lib/types'
 import type { Visit } from '@/routes/activity/visits'
 import { useStore } from '@/store'
 
-const statusTone: Record<RunStatus, Tone> = {
-  queued: 'working',
-  provisioning: 'working',
-  running: 'working',
-  'needs-attention': 'needs-you',
-  completed: 'done',
-  merged: 'done',
-  abandoned: 'done',
-  failed: 'failed',
-  interrupted: 'failed',
+function statusTone({ to, state }: Partial<RunStatusPayload>): Tone | undefined {
+  if (!to) return undefined
+  if (to === 'running' || to === 'needs-attention') return stateTone[liveStateOf(to, state)]
+  return to === 'failed' || to === 'interrupted' ? 'failed' : to === 'queued' || to === 'provisioning' ? 'working' : 'done'
 }
 
 function MessageEvent({ payload }: { payload: CoordMessagePayload }) {
@@ -91,7 +85,7 @@ export const VisitRow = memo(function VisitRow({ visit }: { visit: Visit }) {
 })
 
 export const EventRow = memo(function EventRow({ event, raw }: { event: Event; raw: boolean }) {
-  const status = event.type === 'run.status' ? statusTone[(event.payload as { to?: RunStatus } | undefined)?.to as RunStatus] : undefined
+  const status = event.type === 'run.status' ? statusTone((event.payload ?? {}) as Partial<RunStatusPayload>) : undefined
   const message = event.type === 'coord.message' || event.type === 'coord.message.acked'
   const kind = message ? ((event.payload as Partial<CoordMessagePayload>)?.kind ?? 'message') : ''
   if (raw) {

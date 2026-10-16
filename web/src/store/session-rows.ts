@@ -51,7 +51,7 @@ export type SessionRow =
   | { kind: 'thinking'; id: string; at: string; text: string }
   | { kind: 'work'; id: string; at: string; summary: string; entries: WorkItem[] }
   | { kind: 'subagents'; id: string; at: string; ids: string[] }
-  | { kind: 'live'; id: string; at: string; label: string; waiting?: boolean }
+  | { kind: 'live'; id: string; at: string; label: string; tone: Tone }
   | { kind: 'terminal-note'; id: string; at: string }
   | { kind: 'plan'; id: string; at: string; entries: { content: string; status?: string }[] }
   | {
@@ -375,7 +375,7 @@ export function rowsOfTurn(turn: Turn): SessionRow[] {
 
 export interface LiveActivity {
   label: string
-  waiting: boolean
+  tone: Tone
 }
 
 export function liveActivity(turn: Turn | undefined): LiveActivity | null {
@@ -398,16 +398,16 @@ export function liveActivity(turn: Turn | undefined): LiveActivity | null {
   const request = [...asking.values()].at(-1)
   if (request?.kind === 'permission') {
     const call = request.tool_call_id ? running.get(request.tool_call_id) : undefined
-    return { label: `Waiting for your approval: ${call ? toolTarget(call) : request.title}`, waiting: true }
+    return { label: `Waiting for your approval: ${call ? toolTarget(call) : request.title}`, tone: 'needs-you' }
   }
-  if (request) return { label: 'Waiting for your answer', waiting: true }
+  if (request) return { label: 'Waiting for your answer', tone: 'needs-you' }
   const current = [...running.values()].filter((call) => !isLaunch(call)).at(-1)
-  if (current) return { label: toolLabel(current, 'running'), waiting: false }
+  if (current) return { label: toolLabel(current, 'running'), tone: 'working' }
   const agents = [...running.values()].length
-  if (agents) return { label: `Waiting on ${agents} ${agents === 1 ? 'subagent' : 'subagents'}`, waiting: false }
-  if (last?.kind === 'thought' && !last.message?.complete) return { label: 'Thinking', waiting: false }
+  if (agents) return { label: `Waiting on ${agents} ${agents === 1 ? 'subagent' : 'subagents'}`, tone: 'working' }
+  if (last?.kind === 'thought' && !last.message?.complete) return { label: 'Thinking', tone: 'working' }
   if (last?.kind === 'message' && last.message?.role === 'assistant' && !last.message.complete) return null
-  return { label: 'Working', waiting: false }
+  return { label: 'Working', tone: 'working' }
 }
 
 function turnIndex(turns: Turn[], turn: number): number {

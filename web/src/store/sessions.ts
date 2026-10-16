@@ -1,8 +1,8 @@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
-import { needsInputPrefix, stalledPrefix } from '@/lib/needs-you'
-import { plainReason } from '@/lib/status'
+import { needsInputPrefix, plainReason, stalledPrefix } from '@/lib/reasons'
+import { liveStateOf, stateLabel, stateTone } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
 import type { BackgroundTask, SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
@@ -469,10 +469,13 @@ function sameSteer(row: SessionRow, steer: RoomMessage): boolean {
 
 function liveRows(run: RunRecord, paused: boolean): SessionRow[] {
   if (run.status !== 'running' || paused || run.pending_inputs?.length) return []
-  const at = run.activity?.at ?? run.stateChangedAt
-  const label = run.activity?.running ? `${run.activity.verb} ${run.activity.target}`.trimEnd() : 'Working'
+  const at = run.toolActivity?.at ?? run.stateChangedAt
+  const state = liveStateOf(run.status, run.state)
+  const live = run.toolActivity?.running
+    ? { label: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd(), tone: 'working' as const }
+    : { label: stateLabel[state], tone: stateTone[state] }
   return [
-    { kind: 'live', id: 'live', at, label },
+    { kind: 'live', id: 'live', at, ...live },
     { kind: 'terminal-note', id: 'terminal-note', at },
   ]
 }

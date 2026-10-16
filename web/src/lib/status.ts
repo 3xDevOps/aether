@@ -1,21 +1,24 @@
+import type { Tone } from '@/components/ui/status-dot'
 import {
   isPaused,
   memberName,
   needsYou,
-  stopReasons,
-  stoppedBecause,
-  reportedOutcome,
-  supervised,
   unreadMail,
   unreadReason,
   waitingOn,
   type NeedsYouCondition,
   type StateContext,
 } from '@/lib/needs-you'
+import { plainReason } from '@/lib/reasons'
 import type { BackgroundTask } from '@/lib/session-types'
+import type { RunActivity } from '@/lib/types'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-export type PresentationState = 'needs-you' | 'working' | 'paused' | 'done' | 'failed'
+/** A live run's state; one without a state is shown by its status. */
+type LiveState = RunActivity | 'running' | 'needs-attention'
+
+/** A live run's state, a finished run's outcome, or Paused. */
+export type PresentationState = LiveState | 'paused'
 
 export type RunGroup = 'needs-you' | 'working' | 'finished'
 
@@ -26,23 +29,42 @@ export interface RunPresentation {
   unread?: number
 }
 
-// Mirrors acpBackgroundReason in internal/scheduler/acp_turn.go.
-const backgroundPrefix = 'working in background'
-
 export function backgroundReason(tasks: BackgroundTask[]): string {
   const held = tasks.filter((task) => task.holds).length
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-function workingReason(run: RunRecord, ctx: StateContext): string {
-  if (run.status === 'queued') return 'Queued'
-  if (run.status === 'provisioning') return 'Starting'
+/** A run or stored event from before the server derived a state, or one with a state this dashboard does not know, is shown by its status. */
+export function liveStateOf(status: 'running' | 'needs-attention', state: string | undefined): LiveState {
+  return state && state !== status && state in stateReasons ? (state as RunActivity) : status
+}
+
+const stateReasons: Record<LiveState, string> = {
+  working: 'Agent working',
+  'waiting-agents': 'Waiting on its agents',
+  'waiting-tools': 'Waiting on a tool',
+  'needs-you': 'The agent needs you',
+  idle: 'Agent idle',
+  finished: 'Agent reported success',
+  failed: 'Agent reported failure',
+  disconnected: 'Agent disconnected',
+  running: 'Running',
+  'needs-attention': 'Parked',
+}
+
+function liveState(run: RunRecord, ctx: StateContext): { state: PresentationState; reason: string } {
+  if (run.status === 'queued') return { state: 'working', reason: 'Queued' }
+  if (run.status === 'provisioning') return { state: 'working', reason: 'Starting' }
+  const state = liveStateOf(run.status as 'running' | 'needs-attention', run.state)
   const waiter = waitingOn(run, ctx)
-  if (waiter !== undefined) return `Waiting for ${memberName(waiter, ctx)}`
-  if (supervised(run, ctx) && run.status === 'needs-attention') return 'Waiting for the integrator'
-  if (run.status === 'running' && run.reason?.startsWith(backgroundPrefix)) return plainReason(run.reason)
-  if (run.activity) return `${run.activity.verb} ${run.activity.target}`.trimEnd()
-  return run.status === 'needs-attention' ? 'Agent idle' : 'Agent working'
+  if (waiter !== undefined) return { state: state === 'needs-you' ? 'idle' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
+  if (state === 'needs-you' && run.mission_role === 'worker') return { state: 'waiting-agents', reason: 'Waiting for the integrator' }
+  if (state === 'working' && run.toolActivity) {
+    return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
+  }
+  const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
+  if (state === 'finished' || state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
+  return { state, reason }
 }
 
 function finishedReason(run: RunRecord): string {
@@ -60,85 +82,28 @@ function finishedReason(run: RunRecord): string {
   }
 }
 
-const turnEnds: Record<string, string> = {
-  end_turn: 'The agent finished its turn',
-  cancelled: 'The turn was cancelled',
-}
-
-const savedResults = "the worker's saved results"
-
-// Mirrors the reason strings internal/scheduler, internal/agentstatus and internal/coord write.
-const plainReasons: [RegExp, (...groups: string[]) => string][] = [
-  [/^(.*); retained container$/, (rest) => plainReason(rest)],
-  [/^agent reported success$/, () => 'Agent reported success'],
-  [/^agent reported failure$/, () => 'Agent reported failure'],
-  [/^agent exited; results committed$/, () => 'Agent exited and its changes were committed'],
-  [/^agent exited (-?\d+)(.*)$/s, (code, rest) => `Agent exited with code ${code}${rest}`],
-  [/^worker finished$/, () => 'Worker finished'],
-  [/^closed$/, () => 'Closed'],
-  [/^killed$/, () => 'Stopped'],
-  [/^retained container expired$/, () => 'Its container was removed when it expired'],
-  [/^retained container unavailable$/, () => 'Its container is no longer available'],
-  [/^server restarted: container exited (-?\d+)$/, (code) => `Its container had stopped with exit code ${code} when the server restarted`],
-  [/^agent idle$/, () => 'Agent idle'],
-  [/^agent resumed$/, () => 'Agent resumed'],
-  [/^agent failed$/, () => 'Agent failed'],
-  [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
-  [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
-  [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
-  [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],
-  [/^turn cancelled$/, () => 'Turn cancelled'],
-  [/^turn interrupted$/, () => 'Turn interrupted'],
-  [/^turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
-  [/^the agent's turn ended: (\w+)$/, (stop) => (stop in stopReasons ? stoppedBecause(stop) : turnEnds[stop] ?? `The agent's turn ended (${stop})`)],
-  [/^send the task to the agent: (.*)$/s, (err) => `Could not send the task to the agent: ${err}`],
-  [/^review retained evidence$/, () => `Review ${savedResults}`],
-  [/^resolve the blocker using the retained evidence$/, () => `Resolve the blocker using ${savedResults}`],
-  [/^retained evidence (?:is )?unavailable(.*)$/s, (rest) => `The worker's saved results are unavailable${rest}`],
-]
-
-export function plainReason(reason: string): string {
-  for (const [pattern, words] of plainReasons) {
-    const match = pattern.exec(reason)
-    if (match) return words(...match.slice(1))
-  }
-  return reason
-}
-
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const condition = needsYou(run, ctx)
-  if (condition) return { state: 'needs-you', reason: condition.reason(run, ctx), needsYou: condition }
+  if (condition) return { state: condition.state, reason: condition.reason(run, ctx), needsYou: condition }
   if (isTerminal(run.status)) {
     return {
-      state: run.status === 'failed' || run.status === 'interrupted' ? 'failed' : 'done',
+      state: run.status === 'failed' || run.status === 'interrupted' ? 'failed' : 'finished',
       reason: finishedReason(run),
     }
   }
   if (isPaused(run, ctx)) return { state: 'paused', reason: 'Paused' }
+  const live = liveState(run, ctx)
   const unread = unreadMail(run, ctx.now)
   if (unread > 0 && waitingOn(run, ctx) === undefined) {
-    return { state: 'working', reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
+    return { state: live.state, reason: unreadReason(unread, run.oldest_unacked_at!, ctx.now), unread }
   }
-  const outcome = reportedOutcome(run)
-  if (outcome) {
-    return {
-      state: outcome === 'success' ? 'done' : 'failed',
-      reason: `Agent reported ${outcome}. Run remains open for follow-up.`,
-    }
-  }
-  return { state: 'working', reason: workingReason(run, ctx) }
+  return live
 }
 
-export function groupOf(state: PresentationState): RunGroup {
-  switch (state) {
-    case 'needs-you':
-      return 'needs-you'
-    case 'working':
-    case 'paused':
-      return 'working'
-    default:
-      return 'finished'
-  }
+/** A row lists in Needs you when a condition applies to the viewer, whatever its label. */
+export function groupOf({ state, needsYou }: Pick<RunPresentation, 'state' | 'needsYou'>): RunGroup {
+  if (needsYou) return 'needs-you'
+  return state === 'finished' || state === 'failed' ? 'finished' : 'working'
 }
 
 const fallbackLabelLength = 120
@@ -163,11 +128,32 @@ export function runLabel(run: { task: string; title?: string }): string {
 }
 
 export const stateLabel: Record<PresentationState, string> = {
-  'needs-you': 'Needs you',
   working: 'Working',
-  paused: 'Paused',
-  done: 'Done',
+  'waiting-agents': 'Waiting on agents',
+  'waiting-tools': 'Waiting on tools',
+  'needs-you': 'Needs you',
+  idle: 'Idle',
+  finished: 'Finished',
   failed: 'Failed',
+  disconnected: 'Disconnected',
+  paused: 'Paused',
+  running: 'Running',
+  'needs-attention': 'Parked',
+}
+
+/** Each state's dot: the tone picks both its colour and its shape. */
+export const stateTone: Record<PresentationState, Tone> = {
+  working: 'working',
+  'waiting-agents': 'waiting',
+  'waiting-tools': 'waiting',
+  'needs-you': 'needs-you',
+  idle: 'idle',
+  finished: 'done',
+  failed: 'failed',
+  disconnected: 'disconnected',
+  paused: 'paused',
+  running: 'neutral',
+  'needs-attention': 'neutral',
 }
 
 export const groupLabel: Record<RunGroup, string> = {

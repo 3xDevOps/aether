@@ -3,12 +3,13 @@ import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { VList, type VListHandle } from 'virtua'
 import { TerminalControlBorder } from '@/components/terminal-control-border'
+import type { Tone } from '@/components/ui/status-dot'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
 import { memberName } from '@/lib/member-name'
-import { backgroundReason, runLabel } from '@/lib/status'
+import { backgroundReason, liveStateOf, runLabel, stateTone } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -101,7 +102,7 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
   return byTime(matched, waiting)
 }
 
-export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string } | null): SessionRow[] {
+export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extras: ReturnType<typeof turnExtras>, wait: { label: string; at: string; tone: Tone } | null): SessionRow[] {
   if (!turns) return []
   const held = new Set(turns.map((turn) => turn.turn))
   const lost = [...extras].flatMap(([turn, { orphans }]): SessionRow[] => (!held.has(turn)
@@ -111,7 +112,7 @@ export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extr
   const open = turns.at(-1)
   const live = streaming ? liveActivity(open) : null
   if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
-  else if (wait) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? wait.at, label: wait.label, waiting: false })
+  else if (wait) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? wait.at, label: wait.label, tone: wait.tone })
   return rows
 }
 
@@ -135,7 +136,7 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   const messageIDs = useStore((s) => s.messageLists[messageScopeKey({ kind: 'run', workspaceID: run.workspace_id, runID: run.id })]?.ids ?? emptyIDs)
   const messages = useStore(useShallow((s) => messageIDs.map((id) => s.runMessages[id]!)))
   const rows = useMemo(() => {
-    const wait = waitLabel === undefined ? null : { label: waitLabel, at: lastActivity }
+    const wait = waitLabel === undefined ? null : { label: waitLabel, at: lastActivity, tone: stateTone[liveStateOf(run.status as 'running', run.state)] }
     const floor = historyFloor(turns, agentFloor, more)
     const base = enhanced
       ? withSteers(enhancedRows(turns, streaming, extras, wait), room, floor)

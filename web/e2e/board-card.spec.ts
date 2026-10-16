@@ -2,11 +2,14 @@
 // stretched open target, and a real server takes the reply it sends.
 
 import { expect, test } from './fixtures'
+import { runCoordCLI } from './harness/coord'
 import { dockerReachable } from './harness/server'
 import { memberID, seedWorkspace } from './harness/setup'
 
 // The container may still be provisioning, so the first report retries
 // until the socket answers; the turn then ends once the run is running.
+// Only `agent idle` marks a turn end, as the real pi reporter sends it; a
+// question waits for one.
 const idleAgent = `i=0
 until /opt/aether/aether-server report pi --json '{"state":"working"}' >/dev/null; do
   i=$((i + 1))
@@ -14,12 +17,12 @@ until /opt/aether/aether-server report pi --json '{"state":"working"}' >/dev/nul
   sleep 0.1
 done
 sleep 2
-/opt/aether/aether-server report pi --json '{"state":"waiting"}'
+/opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
 sleep 600`
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
 
-test('an idle agent takes a reply from its Needs you card', async ({ page, aether }) => {
+test('an idle agent stays in Working until it asks, then takes a reply from its Needs you card', async ({ page, aether }) => {
   const alice = await aether.member('alice')
   const repo = await aether.seedRepo('project')
   await seedWorkspace(alice, aether.server.addr, repo)
@@ -34,8 +37,14 @@ test('an idle agent takes a reply from its Needs you card', async ({ page, aethe
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
-  const card = page.getByRole('region', { name: 'Needs you' }).getByRole('article').filter({ hasText: task })
-  await expect(card.getByText(/^Agent idle/)).toBeVisible({ timeout: 180_000 })
+  const column = (name: string) => page.getByRole('region', { name }).getByRole('article').filter({ hasText: task })
+  await expect(column('Working').getByRole('img', { name: 'Idle' })).toBeVisible({ timeout: 180_000 })
+  await expect(column('Needs you')).toHaveCount(0)
+
+  runCoordCLI(run.id, ['report', '--outcome', 'needs-input', '--summary', 'Which suite next?', '--idempotency-key', 'board-question'])
+  const card = column('Needs you')
+  await expect(card.getByText('Agent asks: Which suite next?')).toBeVisible({ timeout: 30_000 })
+  await expect(card.getByRole('img', { name: 'Needs you' })).toBeVisible()
 
   const reply = card.getByRole('button', { name: 'Reply' })
   await expect(reply).toBeHidden()

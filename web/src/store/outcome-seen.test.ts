@@ -71,8 +71,10 @@ describe('watchOutcomeSeen', () => {
     })) })
     const stop = watchOutcomeSeen(store, client, fakeDocument())
     store.getState().navigate('run', { runId: initial.id })
+    let seq = 0
     for (const outcome of ['success', 'failure'] as const) {
-      store.getState().applyRunStatus(initial.id, 'needs-attention', `agent reported ${outcome}`, '2026-08-14T11:00:00Z', true)
+      const state = outcome === 'success' ? 'finished' : 'failed'
+      store.getState().applyRunStatus(initial.id, { to: 'needs-attention', state, reason: `agent reported ${outcome}`, status_seq: ++seq, outcome_unseen: true }, '2026-08-14T11:00:00Z')
       expect(store.getState().runs[initial.id].outcome_unseen).toBe(true)
       await settle()
       const seen = store.getState().runs[initial.id]
@@ -84,7 +86,7 @@ describe('watchOutcomeSeen', () => {
       store.getState().applyRunInput(initial.id, [question])
       expect(store.getState().runs[initial.id].pending_inputs).toEqual([question])
       store.getState().applyRunInput(initial.id, [])
-      store.getState().applyRunStatus(initial.id, 'running', 'agent resumed', '2026-08-14T11:01:00Z')
+      store.getState().applyRunStatus(initial.id, { to: 'running', state: 'working', reason: 'agent resumed', status_seq: ++seq }, '2026-08-14T11:01:00Z')
       expect(store.getState().runs[initial.id].outcome_unseen).toBe(false)
     }
     expect(client.runSeen).toHaveBeenCalledTimes(2)
@@ -113,7 +115,7 @@ describe('watchOutcomeSeen', () => {
     const stop = watchOutcomeSeen(store, client, doc)
     store.getState().navigate('run', { runId: reported.id })
 
-    store.getState().applyRunStatus(reported.id, 'completed', 'agent reported success', '2026-08-14T11:00:00Z', true, true)
+    store.getState().applyRunStatus(reported.id, { to: 'completed', reason: 'agent reported success', status_seq: 1, outcome_unseen: true, finish_unopened: true }, '2026-08-14T11:00:00Z')
     expect(client.runSeen).not.toHaveBeenCalled()
 
     doc.hidden = false
@@ -136,7 +138,7 @@ describe('watchOutcomeSeen', () => {
     const stop = watchOutcomeSeen(store, client, doc)
     store.getState().navigate('run', { runId: reported.id })
 
-    store.getState().applyRunStatus(reported.id, 'completed', 'agent reported success', '2026-08-14T11:00:00Z', true)
+    store.getState().applyRunStatus(reported.id, { to: 'completed', reason: 'agent reported success', status_seq: 1, outcome_unseen: true }, '2026-08-14T11:00:00Z')
     expect(client.runSeen).not.toHaveBeenCalled()
 
     doc.hidden = false
@@ -157,8 +159,8 @@ describe('watchOutcomeSeen', () => {
     expect(client.runSeen).toHaveBeenCalledTimes(1)
 
     // The run goes back to work and reports again while the first answer is in flight.
-    store.getState().applyRunStatus(reported.id, 'running', undefined, '2026-08-14T11:00:00Z')
-    store.getState().applyRunStatus(reported.id, 'failed', 'agent reported failure', '2026-08-14T11:05:00Z', true, true)
+    store.getState().applyRunStatus(reported.id, { to: 'running', state: 'working', status_seq: 1 }, '2026-08-14T11:00:00Z')
+    store.getState().applyRunStatus(reported.id, { to: 'failed', reason: 'agent reported failure', status_seq: 2, outcome_unseen: true, finish_unopened: true }, '2026-08-14T11:05:00Z')
     expect(client.runSeen).toHaveBeenCalledTimes(1)
 
     const cleared = { ...reported, outcome_unseen: false, finish_unopened: false }

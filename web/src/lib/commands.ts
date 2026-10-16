@@ -361,6 +361,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         record: {
           status: 'abandoned',
           reason: 'killed',
+          state: '',
           stateChangedAt: new Date().toISOString(),
           stateChangedAtEstimated: true,
           stateChangedAtPredicted: true,

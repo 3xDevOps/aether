@@ -7,7 +7,7 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
-import { StatusDot, type Tone } from '@/components/ui/status-dot'
+import { StatusDot } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
@@ -16,7 +16,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -28,17 +28,9 @@ import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
-import { useHeaderPrimary, useRunPresentation } from '@/store/hooks'
+import { useHeaderPrimary, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
-
-export const stateTone: Record<PresentationState, Tone> = {
-  'needs-you': 'needs-you',
-  working: 'working',
-  paused: 'paused',
-  done: 'done',
-  failed: 'failed',
-}
 
 export interface RunNavigation {
   go: (view: RunView) => void
@@ -106,6 +98,7 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
 
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const presented = useRunPresentation(run)
+  const asks = useNeedsYouRuns([run.id]).has(run.id)
   const { state, reason } = run.switching
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
@@ -117,7 +110,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
     <div className="@container/state w-full min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
         <StatusDot tone={stateTone[state]} pulse={state === 'working'} label={stateLabel[state]} />
-        <span className={state === 'needs-you' ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
+        <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
         <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden>·</span>
           <AgentGlyph agent={run.harness} />

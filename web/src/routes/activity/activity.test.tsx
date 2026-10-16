@@ -35,7 +35,7 @@ const history: Event[] = [
     run_id: 'run_1',
     actor_id: bob.id,
     type: 'run.status',
-    payload: { to: 'needs-attention', reason: 'waiting on a question' },
+    payload: { to: 'needs-attention', state: 'needs-you', reason: 'waiting on a question', status_seq: 2 },
   },
 ]
 
@@ -150,6 +150,14 @@ describe('activity feed', () => {
     expect(pause.querySelector('[data-slot="status-dot"]')).toBeNull()
   })
 
+  it('labels a stored event without a state by its status alone', async () => {
+    const old: Event = { ...history[1], id: 'evt_old', payload: { to: 'running', reason: 'agent resumed', status_seq: 0 } }
+    seed()
+    render(<ActivityRoute params={{}} client={feedApi([old])} />)
+    const row = (await screen.findByText('Running')).closest('li')
+    expect(row?.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe('neutral')
+  })
+
   it('renders retention metadata without a business-state dot and clears stale metadata', async () => {
     const deadline = '2026-08-21T10:04:00Z'
     const cause = 'Evidence preservation failed; cleanup will retry'
@@ -244,7 +252,7 @@ describe('activity feed', () => {
     fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' })
     fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Raw events' }))
     expect(await screen.findByText('run.status')).toBeDefined()
-    expect(screen.getByText('{"to":"needs-attention","reason":"waiting on a question"}')).toBeDefined()
+    expect(screen.getByText('{"to":"needs-attention","state":"needs-you","reason":"waiting on a question","status_seq":2}')).toBeDefined()
   })
 
   it('mounts only the rows near the viewport of a long log', async () => {

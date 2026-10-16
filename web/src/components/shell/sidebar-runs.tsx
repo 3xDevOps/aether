@@ -13,7 +13,7 @@ import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest, targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
@@ -234,6 +234,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
     <RunRow
       runID={tree.run.id}
       state={tree.state}
+      waiting={tree.needsYou !== undefined}
       reason={tree.reason}
       since={tree.since}
       workspaceName={tree.workspaceName}
@@ -246,6 +247,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
 const RunRow = memo(function RunRow({ runID, ...shown }: {
   runID: string
   state: PresentationState
+  waiting: boolean
   reason: string
   since: string
   workspaceName?: string
@@ -258,9 +260,10 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
 
 const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
 
-function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread }: {
+function RunRowButton({ run, state, waiting, reason, since, workspaceName, swarm, unread }: {
   run: RunRecord
   state: PresentationState
+  waiting: boolean
   reason: string
   since: string
   workspaceName?: string
@@ -275,13 +278,14 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
   const counts = swarm ? swarmCounts(swarm) : ''
   const open = () => {
     if (swarm) navigate('run', { runId: run.id })
-    else if (state === 'needs-you') {
+    else if (waiting) {
       const route = needsYouRoute(run, stateContextOf(useStore.getState(), Date.now()))
       navigate(route.name, route.params)
     } else navigate('run', { runId: run.id })
   }
-  const unopened = run.finish_unopened === true && (state === 'done' || state === 'failed')
-  const recedes = state !== 'needs-you' && !unopened && (state !== 'working' || (!swarm && run.member_id !== self))
+  const unopened = run.finish_unopened === true && (state === 'finished' || state === 'failed')
+  const active = state === 'working' || state === 'waiting-agents' || state === 'waiting-tools'
+  const recedes = !waiting && !unopened && (!active || (!swarm && run.member_id !== self))
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const people = useRunPeople(run)
@@ -307,11 +311,11 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
     <span className={cn('flex items-center gap-2 text-ui-sm tabular-nums', selected ? 'text-text' : 'text-muted')}>
       <RelativeTime at={since} compact title={undefined} />
       <AgentGlyph agent={run.harness} />
-      {people.length > 0 && <PeopleStack people={people} yields={state === 'needs-you'} />}
+      {people.length > 0 && <PeopleStack people={people} yields={waiting} />}
     </span>
   )
   return (
-    <RunDetails run={run} state={state} reason={reason} since={since} counts={counts} people={people} label={label}>
+    <RunDetails run={run} state={state} waiting={waiting} reason={reason} since={since} counts={counts} people={people} label={label}>
       <ListRow
         data-run-row=""
         aria-label={label}
@@ -321,7 +325,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
         onClick={open}
         leading={
           <>
-            <StatusDot tone={state} />
+            <StatusDot tone={stateTone[state]} />
             <span
               data-slot="owner-mark"
               aria-hidden
@@ -346,7 +350,7 @@ function RunRowButton({ run, state, reason, since, workspaceName, swarm, unread 
             {indicators}
           </>
         )}
-        hoverAction={state === 'needs-you' && <AnswerButton run={run} />}
+        hoverAction={waiting && <AnswerButton run={run} />}
       >
         {workspaceName && <span className="text-muted">{workspaceName} · </span>}
         <span className={cn(recedes && !selected && 'text-muted')}>{title}</span>

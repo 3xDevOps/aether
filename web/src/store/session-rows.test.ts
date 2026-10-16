@@ -113,11 +113,11 @@ describe('session rows from the item log', () => {
     const asked = { id: 'p1', kind: 'permission' as const, title: 'rm -rf build', status: 'pending' as const, tool_call_id: 'x1' }
     const call = tool(1, 'x1', 'execute', 'rm -rf build', 'pending')
     const waiting = liveActivity(turnOf([item('turn_start', 1), call, item('request', 1, { request: asked })], false))
-    expect(waiting).toEqual({ label: 'Waiting for your approval: rm -rf build', waiting: true })
+    expect(waiting).toEqual({ label: 'Waiting for your approval: rm -rf build', tone: 'needs-you' })
     const answered = liveActivity(turnOf([item('turn_start', 1), call, item('request', 1, { request: asked }), item('request', 1, { request: { ...asked, status: 'answered', answer: 'allow' } })], false))
-    expect(answered).toEqual({ label: 'Running rm -rf build', waiting: false })
+    expect(answered).toEqual({ label: 'Running rm -rf build', tone: 'working' })
     const question = { id: 'q1', kind: 'question' as const, title: 'Which database?', status: 'pending' as const }
-    expect(liveActivity(turnOf([item('turn_start', 1), item('request', 1, { request: question })], false))).toEqual({ label: 'Waiting for your answer', waiting: true })
+    expect(liveActivity(turnOf([item('turn_start', 1), item('request', 1, { request: question })], false))).toEqual({ label: 'Waiting for your answer', tone: 'needs-you' })
   })
 })
 
@@ -127,7 +127,7 @@ describe('autonomous turns and background tasks', () => {
   it('opens a turn for an autonomous turn_start, names its work and closes it on turn_end', () => {
     const turns = appendItems([], [...prompt, item('turn_start', 2, { autonomous: true })])
     expect(turns.map((t) => [t.turn, t.closed])).toEqual([[1, true], [2, false]])
-    expect(liveActivity(turns.at(-1))).toEqual({ label: 'Working', waiting: false })
+    expect(liveActivity(turns.at(-1))).toEqual({ label: 'Working', tone: 'working' })
     const working = appendItems(turns, [tool(2, 'x', 'execute', 'make', 'in_progress')])
     expect(liveActivity(working.at(-1))?.label).toBe('Running make')
     const ended = appendItems(working, [item('turn_end', 2, { autonomous: true, origin: 'task-notification', stop_reason: 'end_turn' })])

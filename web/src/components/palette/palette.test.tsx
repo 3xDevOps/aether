@@ -388,7 +388,7 @@ describe('command palette', () => {
     const first = screen.getByRole('option', { name: /rewrite the checkout flow/ })
     fireEvent.pointerMove(first)
     act(() => {
-      useStore.getState().applyRunStatus(active.id, 'merged', undefined, '2026-10-02T10:00:00Z')
+      useStore.getState().applyRunStatus(active.id, { to: 'merged', status_seq: 1 }, '2026-10-02T10:00:00Z')
       useStore.getState().applyRunArchived(active.id, '2026-10-02T10:01:00Z')
     })
     await waitFor(() => expect(screen.queryByRole('option', { name: /rewrite the checkout flow/ })).toBeNull())

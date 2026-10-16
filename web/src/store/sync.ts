@@ -484,7 +484,7 @@ export async function applyEvent(
           }
         }
       }
-      store.getState().applyRunStatus(ev.run_id, p.to, p.reason, ev.time, p.outcome_unseen, p.finish_unopened)
+      store.getState().applyRunStatus(ev.run_id, p, ev.time)
       break
     }
     case 'run.retention': {

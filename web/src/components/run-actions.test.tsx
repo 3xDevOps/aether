@@ -115,7 +115,7 @@ test.each(['Kill run', 'Delete run'])('%s waits for explicit confirmation before
   if (name === 'Kill run') {
     await waitFor(() => expect(api.runKill).toHaveBeenCalledWith(record.id))
     expect(useStore.getState().runs[record.id]?.status).toBe('abandoned')
-    act(() => useStore.getState().applyRunStatus(record.id, 'abandoned', 'killed', '2020-08-14T10:00:00Z'))
+    act(() => useStore.getState().applyRunStatus(record.id, { to: 'abandoned', reason: 'killed', status_seq: 1 }, '2020-08-14T10:00:00Z'))
     expect(useStore.getState().runs[record.id]?.stateChangedAt).toBe('2020-08-14T10:00:00Z')
   } else {
     await waitFor(() => expect(api.runDelete).toHaveBeenCalledWith(record.id))
@@ -360,7 +360,7 @@ test('a refusal leaves a state the server sent while the verb was pending', asyn
   render(<RunActions run={seed({ paused: false })} />)
   await choose(verbs[2])
   await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
-  act(() => useStore.getState().applyRunStatus('run_1', 'failed', 'exited 1', new Date().toISOString()))
+  act(() => useStore.getState().applyRunStatus('run_1', { to: 'failed', reason: 'exited 1', status_seq: 1 }, new Date().toISOString()))
   await act(async () => reject(refusal('run is finishing')))
   expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
   expect(runOne(useStore.getState()).status).toBe('failed')
@@ -532,7 +532,7 @@ test('an open More menu offers predicted verbs again once the pending one is ans
 test('a status event keeps the estimated change time of a run no verb predicted', () => {
   const record = seed({ run: { status: 'running', status_changed_at: undefined } })
   expect(record.stateChangedAtEstimated).toBe(true)
-  act(() => useStore.getState().applyRunStatus('run_1', 'running', undefined, '2030-01-01T00:00:00Z'))
+  act(() => useStore.getState().applyRunStatus('run_1', { to: 'running', state: 'working', status_seq: 1 }, '2030-01-01T00:00:00Z'))
   expect(runOne(useStore.getState()).stateChangedAt).toBe(record.stateChangedAt)
 })
 

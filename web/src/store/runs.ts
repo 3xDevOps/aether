@@ -1,5 +1,5 @@
-import type { Run, RunInputRequest, RunStatus } from '@/lib/types'
-import { nextActivity, type AgentPayload, type RunActivity } from '@/store/activity'
+import type { Run, RunInputRequest, RunStatus, RunStatusPayload } from '@/lib/types'
+import { nextActivity, type AgentPayload, type ToolActivity } from '@/store/activity'
 import type { SliceCreator } from '@/store/slice'
 
 /** A run plus its last execution-status change time, for sorting and acknowledgments. */
@@ -12,10 +12,31 @@ export type RunRecord = Omit<Run, 'status_changed_at'> & {
   /** A pending kill's prediction wrote `stateChangedAt`, so the server's event replaces it. */
   stateChangedAtPredicted?: boolean
   /** Client-side only: what the agent did last, from `run.agent` events. */
-  activity?: RunActivity
+  toolActivity?: ToolActivity
 }
 
-export function toRecord(run: Run, previous?: RunRecord): RunRecord {
+export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
+  // A snapshot read before an applied status event must not undo what that event set.
+  const run: Run = previous && snapshot.status_seq < previous.status_seq
+    ? {
+        ...snapshot,
+        status: previous.status,
+        reason: previous.reason,
+        state: previous.state,
+        status_seq: previous.status_seq,
+        outcome_unseen: previous.outcome_unseen,
+        finish_unopened: previous.finish_unopened,
+        finished_at: previous.finished_at,
+        status_changed_at: undefined,
+      }
+    : previous && snapshot.status_seq === previous.status_seq
+      // Only a status change sets an outcome flag; a read from before the owner opened the run must not set it again.
+      ? {
+          ...snapshot,
+          outcome_unseen: snapshot.outcome_unseen === true && previous.outcome_unseen === true,
+          finish_unopened: snapshot.finish_unopened === true && previous.finish_unopened === true,
+        }
+      : snapshot
   const { status_changed_at: snapshotAt, ...wire } = run
   const carry = previous && previous.status === run.status
   // A snapshot can be older than the events already applied, so it never moves
@@ -35,8 +56,8 @@ export function toRecord(run: Run, previous?: RunRecord): RunRecord {
       (carry ? previous.stateChangedAt : (run.finished_at ?? run.started_at ?? run.created_at)),
     stateChangedAtEstimated: !changedAt && (carry ? previous.stateChangedAtEstimated : !run.finished_at),
   }
-  // No snapshot carries activity, so a re-read must not erase it.
-  if (carry && previous.activity) record.activity = previous.activity
+  // No snapshot carries tool activity, so a re-read must not erase it.
+  if (carry && previous.toolActivity) record.toolActivity = previous.toolActivity
   return record
 }
 
@@ -74,14 +95,8 @@ export interface RunsSlice {
   /** Clearing leaves alone a lock another verb's marker holds. */
   setPredicting: (runID: string, marker: PredictionMarker, pending: boolean) => void
   applyRunInput: (runID: string, requests: RunInputRequest[]) => void
-  applyRunStatus: (
-    runID: string,
-    to: RunStatus,
-    reason: string | undefined,
-    time: string,
-    outcomeUnseen?: boolean,
-    finishUnopened?: boolean,
-  ) => void
+  /** Ignores an event whose `status_seq` is not past the held one. */
+  applyRunStatus: (runID: string, payload: RunStatusPayload, time: string) => void
   /** Clears `outcome_unseen`: the owner has opened the run. */
   applyOutcomeSeen: (runID: string) => void
   /** Clears `finish_unopened`: a member has opened the run. */
@@ -143,10 +158,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (pending) return { predicting: { ...s.predicting, [runID]: marker } }
       return s.predicting[runID] === marker ? { predicting: pruneRuns(s.predicting, (id) => id !== runID) } : {}
     }),
-  applyRunStatus: (runID, to, reason, time, outcomeUnseen = false, finishUnopened = false) =>
+  applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false }, time) =>
     set((s) => {
       const current = s.runs[runID]
-      if (!current) return {}
+      if (!current || status_seq <= current.status_seq) return {}
       // The server moves `status_changed_at` on the same changes and no others.
       const changed = to !== current.status || (to === 'needs-attention' && reason !== current.reason)
       const timed = changed || current.stateChangedAtPredicted
@@ -154,13 +169,15 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         ...current,
         status: to,
         reason,
+        state,
+        status_seq,
         stateChangedAt: timed ? time : current.stateChangedAt,
         stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,
-        outcome_unseen: outcomeUnseen,
-        finish_unopened: finishUnopened,
+        outcome_unseen,
+        finish_unopened,
       }
       delete next.stateChangedAtPredicted
-      if (to !== current.status) delete next.activity
+      if (to !== current.status) delete next.toolActivity
       if (to === 'running' && !next.started_at) next.started_at = time
       if (isTerminal(to)) {
         next.finished_at = time
@@ -209,9 +226,9 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     set((s) => {
       const current = s.runs[runID]
       if (!current) return {}
-      const activity = nextActivity(current.activity, payload, time)
-      if (activity === current.activity) return {}
-      return { runs: { ...s.runs, [runID]: { ...current, activity } } }
+      const toolActivity = nextActivity(current.toolActivity, payload, time)
+      if (toolActivity === current.toolActivity) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, toolActivity } } }
     }),
 
   applyRunTitle: (runID, title) =>

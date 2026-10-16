@@ -70,7 +70,7 @@ function useIntegratorLine(runID: string | undefined) {
     const ctx = stateContextOf(s, now)
     const shown = presentRun(run, ctx)
     const problem = isTerminal(run.status) ? undefined : needsYouConditions.find((c) => !swarmConditions.has(c.id) && c.applies(run, ctx))
-    return JSON.stringify([shown.reason, shown.state === 'needs-you', shown.unread ?? 0, isTerminal(run.status), problem?.reason(run, ctx) ?? ''])
+    return JSON.stringify([shown.reason, shown.needsYou !== undefined, shown.unread ?? 0, isTerminal(run.status), problem?.reason(run, ctx) ?? ''])
   })
   return useMemo(() => {
     if (!key) return undefined

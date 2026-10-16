@@ -16,7 +16,7 @@ import {
   useCommandRunner,
   type Command,
 } from '@/lib/commands'
-import { runLabel, stateLabel } from '@/lib/status'
+import { runLabel, stateLabel, stateTone } from '@/lib/status'
 import { surfaces } from '@/lib/surfaces'
 import { useStore } from '@/store'
 import { useCapability, useListedRuns, useSelf } from '@/store/hooks'
@@ -171,7 +171,7 @@ export function PaletteBody({
               onSelect={() => go('run', { runId: run.id })}
               className="items-start py-1"
             >
-              <StatusDot tone={state} className="mx-1 mt-1 shrink-0" />
+              <StatusDot tone={stateTone[state]} className="mx-1 mt-1 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{runLabel(run)}</span>
                 <span className="block truncate text-ui-sm text-muted">
