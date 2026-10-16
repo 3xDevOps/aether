@@ -161,6 +161,8 @@ describe('the connection state on a link through an edge', () => {
     StubSocket.install()
   })
   afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -203,7 +205,7 @@ describe('the connection state on a link through an edge', () => {
     stop()
   })
 
-  it('keeps a failed read over a live stream and re-reads at once', async () => {
+  it('re-reads at once, not on backoff, when a replay reconnect goes live over a failed read', async () => {
     let reads = 0
     const unreachable = new ApiError(503, `server.info: server unreachable: connect to server ${serverID}: ssh: handshake failed: EOF`, -32004)
     const client = fakeApi({
@@ -216,18 +218,30 @@ describe('the connection state on a link through an edge', () => {
       runGet: vi.fn(async () => { throw unreachable }),
     })
     const { store, stop } = await live(client)
+    vi.useFakeTimers()
+    // backoff(n) is then 250ms * 2^n for the hydration retry and the stream alike.
+    vi.spyOn(Math, 'random').mockReturnValue(0)
 
-    // An event names a run this client has not loaded; its read fails.
+    // An event names a run this client has not loaded; its read fails, and
+    // so does the hydration that repairs it.
     StubSocket.last().onmessage?.({
       data: JSON.stringify({ seq: 8, type: 'run.title', run_id: 'run_new', workspace_id: 'ws', time: '', payload: { title: 't' } }),
     })
-    await vi.waitFor(() => expect(store.getState().unreachable).toBe('server'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getState().unreachable).toBe('server')
+    // The first retry fails too; the next one is 500ms out.
+    await vi.advanceTimersByTimeAsync(250)
+    StubSocket.last().onclose?.({ code: 4000 })
+    await vi.advanceTimersByTimeAsync(250)
+    const socket = StubSocket.last()
+    socket.onopen?.()
 
     const before = reads
-    ;(await reopen()).onmessage?.({ data: JSON.stringify({ ok: true }) })
+    socket.onmessage?.({ data: JSON.stringify({ ok: true }) })
+    await vi.advanceTimersByTimeAsync(0)
     expect(store.getState().connection).toBe('live')
-    await vi.waitFor(() => expect(reads).toBeGreaterThan(before))
-    await vi.waitFor(() => expect(store.getState().unreachable).toBe('server'))
+    expect(reads).toBe(before + 1)
+    expect(store.getState().unreachable).toBe('server')
     stop()
   })
 
