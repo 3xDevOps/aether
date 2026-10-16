@@ -8,6 +8,8 @@ import { memberID, seedWorkspace } from './harness/setup'
 
 // The container may still be provisioning, so the first report retries
 // until the socket answers; the turn then ends once the run is running.
+// Only `agent idle` marks a turn end, as the real pi reporter sends it; a
+// question waits for one.
 const idleAgent = `i=0
 until /opt/aether/aether-server report pi --json '{"state":"working"}' >/dev/null; do
   i=$((i + 1))
@@ -15,7 +17,7 @@ until /opt/aether/aether-server report pi --json '{"state":"working"}' >/dev/nul
   sleep 0.1
 done
 sleep 2
-/opt/aether/aether-server report pi --json '{"state":"waiting"}'
+/opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
 sleep 600`
 
 test.skip(!dockerReachable(), 'a run needs a reachable Docker daemon')
