@@ -41,6 +41,11 @@ import java.util.concurrent.Executors
 
 private const val TAG = "aether"
 
+// Not the main thread: a WebView waiting on a hung renderer can be blocking
+// it. One for the process, never shut down, since WebView may deliver to it
+// after any one window is gone.
+private val rendererWatch = Executors.newSingleThreadExecutor()
+
 /**
  * The whole shell: one WebView on a dashboard.
  *
@@ -90,10 +95,6 @@ class MainActivity : ComponentActivity() {
      */
     @Volatile
     private var terminatedRenderer = false
-
-    // Not the main thread: a WebView waiting on a hung renderer can be
-    // blocking it.
-    private val rendererWatch = Executors.newSingleThreadExecutor()
 
     /**
      * Whether the platform backgrounds this window itself when back is
@@ -223,7 +224,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         stopGateway()
-        rendererWatch.shutdown()
         super.onDestroy()
     }
 
@@ -326,7 +326,10 @@ class MainActivity : ComponentActivity() {
                 object : WebViewRenderProcessClient() {
                     override fun onRenderProcessUnresponsive(view: WebView, renderer: WebViewRenderProcess?) {
                         Log.w(TAG, "dashboard renderer not responding; ending it")
-                        terminatedRenderer = renderer?.terminate() == true
+                        // Set first: onRenderProcessGone can run before
+                        // terminate returns.
+                        terminatedRenderer = true
+                        if (renderer?.terminate() != true) terminatedRenderer = false
                     }
 
                     override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {}
