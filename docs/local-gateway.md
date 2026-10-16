@@ -218,7 +218,9 @@ with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
 as its own request lasts, and a dial gives up after 90 seconds. A dial
 abandoned because the link changed, by `link.apply` or a config reload,
-hands its waiting requests to a dial of the new link. A link (`link.apply`, `edge.link`, `edge.claim`,
+hands its waiting requests to a dial of the new link. The gateway reloads
+`config.json` on every request whose file has changed, so `aether link` in
+a terminal moves the next request onto the server it names. A link (`link.apply`, `edge.link`, `edge.claim`,
 `edge.join`) is bounded the same way, including the `server.info` call that
 completes it.
 
