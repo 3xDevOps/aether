@@ -30,7 +30,6 @@ function collapsedByDefault(file: PatchFile): boolean {
   return file.contentLines > largeFile || file.size > largeText || file.status === 'binary' || file.status === 'deleted'
 }
 
-/** Parses `patch`, keeping the file objects of the previous result that did not change. */
 function useParsed(patch: string): PatchFile[] {
   const previous = useRef<PatchFile[]>([])
   return useMemo(() => (previous.current = parsePatch(patch, previous.current)), [patch])
@@ -55,6 +54,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   const ids = useId()
   const [focusedFile, setFocusedFile] = useState<number | null>(null)
   const list = useRef<VirtualizerHandle>(null)
+  const scroller = useRef<HTMLDivElement>(null)
   const behind = usePatch(run ? runID : '')
 
   const interval = useInterval(run ? runID : '', snapshot)
@@ -169,13 +169,13 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
       )}
       <div className="flex min-h-0 flex-1">
         {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
-        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div ref={scroller} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           {virtual ? (
             <div onFocus={(event) => {
               const id = (event.target as HTMLElement).closest('section')?.id ?? ''
               if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
             }}>
-              <Virtualizer ref={list} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
+              <Virtualizer ref={list} scrollRef={scroller} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
                 {patchAt}
               </Virtualizer>
             </div>

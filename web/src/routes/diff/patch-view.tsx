@@ -14,7 +14,6 @@ import { addComment, commentable, growComment, placeComments, reach, useFileComm
 export const largeFile = 500
 /** A file whose patch text is longer than this starts closed, whatever its line count. */
 export const largeText = 256 * 1024
-/** A line renders at most this many characters; the rest stays in the data. */
 const longLine = 3000
 const noLines: PatchLine[] = []
 
