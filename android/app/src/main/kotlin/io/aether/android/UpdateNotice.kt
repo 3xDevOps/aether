@@ -63,17 +63,19 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         check =
             executor.submit {
                 val read = installFacts(context)
-                val due = checkDue(System.currentTimeMillis(), stored.checkedAt, read.updatedAt)
-                val line = if (due) runCheck(context) else null
                 main.post {
                     if (destroyed) return@post
                     facts = read
-                    var next = activity.storedUpdate()
-                    if (due) {
-                        next = afterCheck(next, System.currentTimeMillis(), line, read.updatedAt)
+                    render(activity.storedUpdate())
+                }
+                if (checkDue(System.currentTimeMillis(), stored.checkedAt, read.updatedAt)) {
+                    val line = runCheck(context)
+                    main.post {
+                        if (destroyed) return@post
+                        val next = afterCheck(activity.storedUpdate(), System.currentTimeMillis(), line, read.updatedAt)
                         activity.storeUpdate(next)
+                        render(next)
                     }
-                    render(next)
                 }
             }
     }
