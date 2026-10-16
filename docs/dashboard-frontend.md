@@ -4050,7 +4050,11 @@ difference?** beside the page's lead opens the Standard and Enhanced cards
 **Run** remembers the agent and its default mode and opens **New run** on it;
 in onboarding it moves to First run with that agent preselected. **Add
 agent…** (`add-agent.tsx`) asks for a name, a Standard and a Background
-command and an optional Enhanced command, sent through `agent.register`.
+command and an optional Enhanced command, Enhanced start mode and login file,
+sent through `agent.register`. The Background default follows the Standard
+command's first word, which is also the executable. A session that is not
+signed in offers its terminal login method, typed as the ACP server command
+(`agent_command` in the session state) with the method's args.
 
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the

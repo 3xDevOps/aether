@@ -60,6 +60,9 @@ type Config struct {
 	// Code's background task frames, and takes agent output that arrives
 	// with no prompt open for a turn the agent runs on its own.
 	ClaudeCode bool
+	// AgentCommand is the ACP server's executable. A terminal auth method's
+	// args belong to it.
+	AgentCommand string
 
 	OnState func(TurnState)
 	// OnInputs reports the complete set of pending requests whenever it
@@ -127,6 +130,7 @@ type State struct {
 	Steering      bool            `json:"steering,omitempty"`
 	PromptImages  bool            `json:"prompt_images"`
 	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
+	AgentCommand  string          `json:"agent_command,omitempty"`
 	Usage         *Usage          `json:"usage,omitempty"`
 }
 
@@ -754,6 +758,7 @@ func (s *Session) State() State {
 	info := s.conn.Info()
 	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
 	st.PromptImages = info.PromptImages
+	st.AgentCommand = s.cfg.AgentCommand
 	return st
 }
 

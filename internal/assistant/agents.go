@@ -31,7 +31,7 @@ func readiness(listed []protocol.AgentInfo) []protocol.AssistantAgent {
 			agent.Ready, agent.Reason = false, "Not installed"
 		case !a.EnhancedInstalled:
 			agent.Ready, agent.Reason = false, "Enhanced adapter not installed"
-		case !a.LoginFound:
+		case a.LoginFound != nil && !*a.LoginFound:
 			agent.Ready, agent.Reason = false, "No sign-in found"
 		}
 		out = append(out, agent)

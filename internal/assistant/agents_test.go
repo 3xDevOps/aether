@@ -7,7 +7,7 @@ import (
 )
 
 func listed(name string, installed, adapter, login bool) protocol.AgentInfo {
-	return protocol.AgentInfo{Name: name, DisplayName: name, Installed: installed, EnhancedInstalled: adapter, LoginFound: login}
+	return protocol.AgentInfo{Name: name, DisplayName: name, Installed: installed, EnhancedInstalled: adapter, LoginFound: &login}
 }
 
 func TestReadiness(t *testing.T) {

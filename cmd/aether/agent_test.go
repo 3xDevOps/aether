@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,6 +108,13 @@ func TestResolveAgentArgs(t *testing.T) {
 			wantBackground: []string{"myagent", "bg", "{task}"},
 		},
 		{
+			name:           "background default follows the standard command",
+			agent:          "mycursor",
+			standardFlag:   "agent {task}",
+			wantStandard:   []string{"agent", "{task}"},
+			wantBackground: []string{"agent", "-p", "{task}"},
+		},
+		{
 			name:           "nil reader takes defaults without prompting",
 			agent:          "myagent",
 			wantStandard:   []string{"myagent", "{task}"},
@@ -131,6 +139,9 @@ func TestResolveAgentArgs(t *testing.T) {
 			}
 		})
 	}
+	if _, _, err := resolveAgentArgs("myagent", "   ", "", false, nil); err == nil || err.Error() != "--standard is blank" {
+		t.Fatalf("blank --standard error = %v, want --standard is blank", err)
+	}
 }
 
 func TestParseAgentAdd(t *testing.T) {
@@ -146,5 +157,17 @@ func TestParseAgentAdd(t *testing.T) {
 	}
 	if _, err := parseAgentAdd([]string{"myagent", "--workspace", "ws"}); err == nil {
 		t.Fatal("removed --workspace flag was accepted")
+	}
+}
+
+func TestParseAgentAddLoginUnderLocalHome(t *testing.T) {
+	t.Setenv("HOME", "/home/alice")
+	t.Setenv("USERPROFILE", "/home/alice")
+	opts, err := parseAgentAdd([]string{"mycursor", "--login", "/home/alice/.cursor/auth.json", "--login", "~/.config/x.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"~/.cursor/auth.json", "~/.config/x.json"}; !slices.Equal(opts.login, want) {
+		t.Fatalf("login = %v, want %v: a shell-expanded local home goes back to ~/", opts.login, want)
 	}
 }

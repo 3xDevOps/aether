@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -341,5 +343,35 @@ func TestWorkerReportLeavesCompletionToTheMission(t *testing.T) {
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if row.Reason != retainedCompletionReason || row.OutcomeUnseen || !row.FinishUnopened {
 		t.Fatalf("completed worker = %q, unseen %v, unopened %v; want %q, seen and unopened", row.Reason, row.OutcomeUnseen, row.FinishUnopened, retainedCompletionReason)
+	}
+}
+
+// A worker's AETHER_HARNESS is its agent's name, which coordination keys on;
+// the command it launches is the agent's executable.
+func TestMissionWorkerOfAnAgentNamedApartFromItsCommand(t *testing.T) {
+	e := newTestEnv(t, nil)
+	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
+		Name:         "mycursor",
+		Executable:   "agent",
+		TUIArgs:      []string{"agent", "{task}"},
+		HeadlessArgs: []string{"agent", "-p", "{task}"},
+	})
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "named-apart-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+		Harness: "mycursor", Mode: domain.LaunchTUI,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := e.rt.byName(string(run.ID))
+	if container == nil {
+		t.Fatal("worker container not created")
+	}
+	if got := container.spec.Env["AETHER_HARNESS"]; got != "mycursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want the agent's name mycursor", got)
+	}
+	if !slices.Contains(container.spec.Command, "agent") || !slices.Contains(container.spec.Command, "do the work") {
+		t.Fatalf("worker command = %q, want the agent executable with the task", container.spec.Command)
 	}
 }
