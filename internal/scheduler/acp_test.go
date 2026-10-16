@@ -505,6 +505,25 @@ func TestEnhancedRunCancel(t *testing.T) {
 	}
 }
 
+func TestEnhancedRunClosedMidTurnNeverNeedsYou(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	sub := e.subscribe(t)
+	run := e.launchACP(t, acpmock.PromptWait)
+	e.waitAgentWorking(t, run.ID)
+	if err := e.sched.CloseRun(t.Context(), run.ID, e.member.ID, domain.RunAbandoned); err != nil {
+		t.Fatal(err)
+	}
+	trail := e.statusTrail(t, sub, run.ID, func(trail []events.RunStatusPayload) bool {
+		return slices.ContainsFunc(trail, func(p events.RunStatusPayload) bool { return p.To == domain.RunAbandoned })
+	})
+	for _, p := range trail {
+		if p.To == domain.RunNeedsAttention || p.Activity == domain.ActivityNeedsYou {
+			t.Fatalf("status events %+v, want no needs-you before the close", trail)
+		}
+	}
+}
+
 func TestACPIdleReason(t *testing.T) {
 	t.Parallel()
 	for stop, want := range map[string]string{
