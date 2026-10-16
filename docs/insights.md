@@ -25,7 +25,7 @@ Authorization: Bearer <local-gateway-token>
 | `workspace_id` | One workspace, or `""` for every workspace. An unknown workspace is error `-32000`. |
 | `scope` | `mine`: runs you own and swarms you are accountable for. `everyone`: every member's, summed; never broken down per member. Any member who can see runs can ask for either. |
 | `from`, `to` | RFC3339 times; the range is `[from, to)`. `to` must be after `from` and the range at most 400 local days. |
-| `time_zone` | IANA name, such as `Europe/Berlin`, that days are counted in, DST included. `""` is UTC; `Local` and unknown names are rejected. |
+| `time_zone` | IANA name, such as `Europe/Berlin`, that days are counted in, DST included. `""` is UTC; `Local` and unknown names are rejected. The server binary carries its own zone database, so a host without system tzdata resolves every name. |
 
 A bad param is error `-32602` with the reason, for example
 `range spans 401 days; the limit is 400`.
