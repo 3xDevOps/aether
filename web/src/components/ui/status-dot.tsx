@@ -1,16 +1,31 @@
 import type * as React from 'react'
 import { cn } from '@/lib/utils'
 
-export type Tone = 'working' | 'waiting' | 'needs-you' | 'idle' | 'failed' | 'disconnected' | 'done' | 'paused' | 'neutral'
+export type Tone =
+  | 'working'
+  | 'waiting'
+  | 'ended'
+  | 'needs-you'
+  | 'review'
+  | 'failed'
+  | 'interrupted'
+  | 'disconnected'
+  | 'done'
+  | 'closed'
+  | 'paused'
+  | 'neutral'
 
 const classes: Record<Tone, { text: string; soft: string }> = {
   working: { text: 'text-state-working', soft: 'bg-state-working-soft' },
-  waiting: { text: 'text-state-working', soft: 'bg-state-working-soft' },
-  idle: { text: 'text-muted', soft: 'bg-chrome' },
-  disconnected: { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
+  waiting: { text: 'text-muted', soft: 'bg-chrome' },
+  ended: { text: 'text-muted', soft: 'bg-chrome' },
+  disconnected: { text: 'text-muted', soft: 'bg-chrome' },
   'needs-you': { text: 'text-state-needs-you', soft: 'bg-state-needs-you-soft' },
+  review: { text: 'text-accent', soft: 'bg-accent-soft' },
   failed: { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
+  interrupted: { text: 'text-state-failed', soft: 'bg-state-failed-soft' },
   done: { text: 'text-state-done', soft: 'bg-state-done-soft' },
+  closed: { text: 'text-muted', soft: 'bg-chrome' },
   paused: { text: 'text-state-paused', soft: 'bg-state-paused-soft' },
   neutral: { text: 'text-muted', soft: 'bg-chrome' },
 }
@@ -24,14 +39,28 @@ const shapes: Record<Tone, React.ReactNode> = {
   waiting: (
     <>
       <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
-      <circle cx="5" cy="5" r="1.75" fill="currentColor" />
+      <path d="M5 2.75V5h1.75" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
     </>
   ),
+  ended: <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" strokeDasharray="2.3 1.135" />,
   'needs-you': <circle cx="5" cy="5" r="3.5" fill="none" stroke="currentColor" strokeWidth="2" />,
-  idle: (
+  review: (
+    <>
+      <circle cx="5" cy="5" r="5" fill="currentColor" />
+      <path d="M2.9 5.1 4.4 6.6 7.1 3.7" fill="none" stroke="var(--canvas)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  closed: (
     <>
       <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
       <path d="M3.25 5h3.5" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+    </>
+  ),
+  interrupted: (
+    <>
+      <circle cx="5" cy="5" r="4.375" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M5 2.9v2.6" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <circle cx="5" cy="7.1" r="0.7" fill="currentColor" />
     </>
   ),
   disconnected: (

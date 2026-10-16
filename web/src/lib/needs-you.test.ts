@@ -32,7 +32,10 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
   }, stateContext())?.id).toBe('question')
   const success = { ...parked, state: 'finished' as const, reason: 'agent reported success' }
   expect(needsYou(success, stateContext())).toBeUndefined()
-  expect(presentRun(success, stateContext())).toEqual({ state: 'finished', reason: 'Agent reported success. Run remains open for follow-up.' })
+  expect(presentRun(success, stateContext())).toMatchObject({ state: 'ready', reason: 'Agent reported success' })
+  const ready = { ...success, review: 'ready' as const }
+  expect(needsYou(ready, stateContext())?.id).toBe('ready')
+  expect(needsYou({ ...ready, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }] }, stateContext())?.id).toBe('question')
 })
 
 const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
@@ -165,6 +168,13 @@ const rows: {
     reason: 'Agent asks: Which database?',
   },
   {
+    id: 'ready',
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'finished', reason: 'checkout rewritten', review: 'ready' }),
+    ctx: {},
+    reason: 'checkout rewritten',
+    state: 'ready',
+  },
+  {
     id: 'failed',
     run: record({
       mode: 'acp', acp: true, status: 'needs-attention', state: 'failed',
@@ -233,18 +243,21 @@ describe('needs you conditions', () => {
   })
 
   it.each([
-    ['idle', 'agent idle', 'Agent idle'],
-    ['idle', 'stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
-    ['idle', 'turn cancelled', 'Turn cancelled'],
-    ['waiting-agents', 'waiting on 3 workers', 'waiting on 3 workers'],
-    ['waiting-agents', 'working in background: 2 tasks', 'Working in background: 2 tasks'],
-    ['waiting-tools', '', 'Waiting on a tool'],
-  ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shown) => {
+    ['idle', 'agent idle', 'waiting', 'Turn ended without a report'],
+    ['waiting', 'turn ended without a report', 'waiting', 'Turn ended without a report'],
+    ['waiting', 'no update for 12m', 'waiting', 'No update for 12m'],
+    ['idle', 'stalled: no output or file changes for 10m0s', 'waiting', 'No output or file changes for 10m0s'],
+    ['idle', 'turn cancelled', 'waiting', 'Turn cancelled'],
+    ['waiting-agents', 'waiting on 3 workers', 'waiting-agents', 'waiting on 3 workers'],
+    ['waiting-agents', 'working in background: 2 tasks', 'waiting-agents', 'Working in background: 2 tasks'],
+    ['waiting-ci', 'waiting for the PR checks', 'waiting-ci', 'waiting for the PR checks'],
+    ['waiting-tools', '', 'waiting-tools', 'Waiting for a background process'],
+  ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shownState, shown) => {
     for (const acp of [false, true]) {
       const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', state, reason: reason || undefined })
       expect(needsYou(parked, stateContext())).toBeUndefined()
       expect(waitingOn(parked, stateContext())).toBeUndefined()
-      expect(presentRun(parked, stateContext())).toEqual({ state, reason: shown })
+      expect(presentRun(parked, stateContext())).toMatchObject({ state: shownState, reason: shown })
     }
   })
 
@@ -277,7 +290,7 @@ describe('needs you conditions', () => {
     const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' })
     const ctx = stateContext({ viewerID: bob.id, viewerRole: bob.role })
     expect(needsYou(asking, ctx)).toBeUndefined()
-    expect(presentRun(asking, ctx)).toEqual({ state: 'idle', reason: 'Waiting for Alice' })
+    expect(presentRun(asking, ctx)).toEqual({ state: 'waiting', reason: 'Waiting for Alice' })
   })
 
   it("shows a paused run as Paused, not the agent's question", () => {
@@ -323,12 +336,12 @@ describe('needs you conditions', () => {
 describe('viewer scoping', () => {
   const bobViewing = { viewerID: bob.id, viewerRole: bob.role }
 
-  it("shows another member's waiting run as Idle, waiting for its owner", () => {
+  it("shows another member's waiting run as Waiting, waiting for its owner", () => {
     const stopped = record({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
     const ctx = stateContext(bobViewing)
     expect(needsYou(stopped, ctx)).toBeUndefined()
     expect(waitingOn(stopped, ctx)).toBe(alice.id)
-    expect(presentRun(stopped, ctx)).toEqual({ state: 'idle', reason: 'Waiting for Alice' })
+    expect(presentRun(stopped, ctx)).toEqual({ state: 'waiting', reason: 'Waiting for Alice' })
   })
 
   it('names a waiting run by the member its owner was merged into', () => {
@@ -337,9 +350,9 @@ describe('viewer scoping', () => {
     expect(presentRun(stopped, ctx).reason).toBe('Waiting for Alice (merged)')
   })
 
-  it("leaves another member's unreviewed finish Finished", () => {
+  it("leaves another member's unreviewed finish Completed", () => {
     const finished = record({ status: 'completed', outcome_unseen: true })
-    expect(presentRun(finished, stateContext(bobViewing))).toEqual({ state: 'finished', reason: 'Finished' })
+    expect(presentRun(finished, stateContext(bobViewing))).toEqual({ state: 'completed', reason: 'Finished' })
   })
 
   it('needs the terminal controller for a permission on a run they hold', () => {
@@ -444,7 +457,9 @@ describe('swarm workers', () => {
     for (const status of ['running', 'failed'] as const) {
       const ctx = stateContext({ runs: runRecords({ ...integrator, status }) })
       expect(needsYou(stoppedWorker, ctx)).toBeUndefined()
-      expect(presentRun(stoppedWorker, ctx)).toEqual({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
+      expect(presentRun(stoppedWorker, ctx)).toEqual({
+        state: 'waiting-agents', reason: 'Waiting for the integrator', next: 'It continues when the integrator answers.',
+      })
     }
   })
 
@@ -480,7 +495,7 @@ describe('background runs', () => {
   it('leave an unreviewed finished run in its group, labelled by its outcome', () => {
     const failed = record({ mode: 'headless', status: 'failed', state: '', reason: 'exit status 1', outcome_unseen: true })
     expect(presentRun(failed, stateContext())).toEqual({ state: 'failed', reason: 'Failed: exit status 1' })
-    expect(presentRun({ ...failed, status: 'completed' }, stateContext())).toEqual({ state: 'finished', reason: 'Finished' })
+    expect(presentRun({ ...failed, status: 'completed' }, stateContext())).toEqual({ state: 'completed', reason: 'Finished' })
   })
 })
 

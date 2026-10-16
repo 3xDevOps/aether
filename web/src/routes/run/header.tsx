@@ -7,6 +7,7 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
+import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
@@ -16,7 +17,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, stateTone } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -30,6 +31,7 @@ import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import { useHeaderPrimary, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
+import { agentState } from '@/store/subagents'
 import { stateContextOf } from '@/store/selectors'
 
 export interface RunNavigation {
@@ -99,18 +101,33 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const presented = useRunPresentation(run)
   const asks = useNeedsYouRuns([run.id]).has(run.id)
-  const { state, reason } = run.switching
+  const presentation = run.switching
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
+  const { state, reason } = presentation
+  const subagents = useStore((s) =>
+    state === 'waiting-agents'
+      ? Object.values(s.acpSessions[run.id]?.agents.agents ?? {}).filter((agent) => agentState(agent) === 'running').length
+      : 0,
+  )
+  const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
   const owner = useStore((s) => resolveMember(s, run.member_id).member)
   const ownerName = useStore((s) => memberName(s, run.member_id))
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
   const accountOwner = useStore((s) => memberName(s, accountID))
   return (
     <div className="@container/state w-full min-w-0">
-      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
-        <StatusDot tone={stateTone[state]} pulse={state === 'working'} label={stateLabel[state]} />
-        <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted" title={stateTitle(presentation, since)}>
+        <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
+        <span role="status" className="shrink-0 text-text">{stateLabel[state]}</span>
+        <span className="hidden shrink-0 items-center gap-1.5 @xs/state:flex">
+          <span aria-hidden>·</span>
+          <RelativeTime at={since} compact title={undefined} className="tabular-nums" />
+        </span>
+        <span aria-hidden>·</span>
+        <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>
+          {subagents > 0 ? `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running · ${reason}` : reason}
+        </span>
         <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden>·</span>
           <AgentGlyph agent={run.harness} />

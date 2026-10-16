@@ -213,7 +213,7 @@ it('does not refit an intentional blank pan for new arrays or live status and me
   view.rerender(<RunMap cards={[original]} scope={workspace.id} agentNames={{}} />)
   expect(camera()).toEqual(blank)
   view.rerender(<RunMap cards={[{
-    ...card({ id: 'stable', status: 'completed', task: 'Updated live task' }), state: 'finished',
+    ...card({ id: 'stable', status: 'completed', task: 'Updated live task' }), state: 'completed',
     owner: { ...alice, display_name: 'Renamed member' },
   }]} scope={workspace.id} agentNames={{}} />)
   expect(screen.getByRole('button', { name: 'Updated live task' })).toBeDefined()

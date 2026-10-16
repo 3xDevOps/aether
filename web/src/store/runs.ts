@@ -1,4 +1,4 @@
-import type { Run, RunInputRequest, RunStatus, RunStatusPayload } from '@/lib/types'
+import type { Run, RunInputRequest, RunReviewPayload, RunStatus, RunStatusPayload } from '@/lib/types'
 import { nextActivity, type AgentPayload, type ToolActivity } from '@/store/activity'
 import type { SliceCreator } from '@/store/slice'
 
@@ -26,6 +26,8 @@ export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
         status_seq: previous.status_seq,
         outcome_unseen: previous.outcome_unseen,
         finish_unopened: previous.finish_unopened,
+        review: previous.review,
+        review_changed_at: previous.review_changed_at,
         finished_at: previous.finished_at,
         status_changed_at: undefined,
       }
@@ -97,6 +99,8 @@ export interface RunsSlice {
   applyRunInput: (runID: string, requests: RunInputRequest[]) => void
   /** Ignores an event whose `status_seq` is not past the held one. */
   applyRunStatus: (runID: string, payload: RunStatusPayload, time: string) => void
+  /** Ignores an event whose `status_seq` is not past the held one, as `applyRunStatus` does. */
+  applyRunReview: (runID: string, payload: RunReviewPayload, time: string) => void
   /** Clears `outcome_unseen`: the owner has opened the run. */
   applyOutcomeSeen: (runID: string) => void
   /** Clears `finish_unopened`: a member has opened the run. */
@@ -158,7 +162,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (pending) return { predicting: { ...s.predicting, [runID]: marker } }
       return s.predicting[runID] === marker ? { predicting: pruneRuns(s.predicting, (id) => id !== runID) } : {}
     }),
-  applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false }, time) =>
+  applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current || status_seq <= current.status_seq) return {}
@@ -175,6 +179,8 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,
         outcome_unseen,
         finish_unopened,
+        review,
+        review_changed_at: review_changed_at ?? (review === (current.review ?? '') ? current.review_changed_at : time),
       }
       delete next.stateChangedAtPredicted
       if (to !== current.status) delete next.toolActivity
@@ -189,6 +195,12 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         delete next.cleanup_error
       }
       return { runs: { ...s.runs, [runID]: next } }
+    }),
+  applyRunReview: (runID, { review, review_changed_at, status_seq }, time) =>
+    set((s) => {
+      const current = s.runs[runID]
+      if (!current || status_seq <= current.status_seq) return {}
+      return { runs: { ...s.runs, [runID]: { ...current, review, review_changed_at: review_changed_at ?? time, status_seq } } }
     }),
   applyOutcomeSeen: (runID) =>
     set((s) => {

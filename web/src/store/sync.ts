@@ -22,6 +22,7 @@ import type {
   RunModelPayload,
   RunProtectedPayload,
   RunRetentionPayload,
+  RunReviewPayload,
   RunStatusPayload,
   RunTitlePayload,
   ServerUpdatePayload,
@@ -552,6 +553,9 @@ export async function applyEvent(
       })
       break
     }
+    case 'run.review':
+      store.getState().applyRunReview(ev.run_id, ev.payload as RunReviewPayload, ev.time)
+      break
     case 'run.outcome_seen':
       store.getState().applyOutcomeSeen(ev.run_id)
       store.getState().applyFinishOpened(ev.run_id)

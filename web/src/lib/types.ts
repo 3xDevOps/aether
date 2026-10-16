@@ -19,12 +19,18 @@ export type RunStatus =
 export type RunActivity =
   | 'working'
   | 'waiting-agents'
+  | 'waiting-ci'
   | 'waiting-tools'
+  | 'waiting'
   | 'needs-you'
+  /** Written before `waiting` replaced it; shown as `waiting`. */
   | 'idle'
   | 'finished'
   | 'failed'
   | 'disconnected'
+
+/** `ready` awaits the owner's Mark complete; `later` is their Not yet. */
+export type RunReview = '' | 'ready' | 'later' | 'accepted'
 
 export interface RunInputRequest {
   id: string
@@ -91,6 +97,9 @@ export interface Run {
   outcome_unseen?: boolean
   /** A finish no member has opened yet; absent on older gateways. */
   finish_unopened?: boolean
+  /** The owner's answer to a reported success; absent on older gateways. */
+  review?: RunReview
+  review_changed_at?: string
   base_commit?: string
   base_branch?: string
   base_source?: string
@@ -809,6 +818,14 @@ export interface RunStatusPayload {
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
   finish_unopened?: boolean
+  review?: RunReview
+  review_changed_at?: string
+}
+
+export interface RunReviewPayload {
+  review: RunReview
+  review_changed_at?: string
+  status_seq: number
 }
 
 /** Complete runtime ownership metadata; omitted fields clear previous values. */

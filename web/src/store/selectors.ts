@@ -22,6 +22,7 @@ export interface RunRow {
   run: RunRecord
   state: PresentationState
   reason: string
+  next?: string
   needsYou?: NeedsYouID
   unread?: number
   group: RunGroup
@@ -47,6 +48,7 @@ export interface RunTree extends RunRow {
 export interface RunGroups {
   'needs-you': RunTree[]
   working: RunTree[]
+  review: RunTree[]
   finished: RunTree[]
 }
 
@@ -86,6 +88,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       run,
       state: shown.state,
       reason: shown.reason,
+      next: shown.next,
       needsYou: shown.needsYou?.id,
       unread: shown.unread,
       group: groupOf(shown),
@@ -157,9 +160,10 @@ const failedFirst = (a: RunRow, b: RunRow) =>
 const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
   'needs-you': byWait,
   working: byChange,
+  review: byChange,
   finished: failedFirst,
 }
-const groupOrder: RunGroup[] = ['needs-you', 'working', 'finished']
+const groupOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
 
 function located(row: RunRow, s: RunsInput): RunRow {
   if (!s.workspace || row.run.workspace_id === s.workspace) return row
@@ -168,7 +172,7 @@ function located(row: RunRow, s: RunsInput): RunRow {
 }
 
 export function runGroups(s: RunsInput): RunGroups {
-  const groups: RunGroups = { 'needs-you': [], working: [], finished: [] }
+  const groups: RunGroups = { 'needs-you': [], working: [], review: [], finished: [] }
   for (const tree of runTrees(runRows(s.ctx), s.ctx)) {
     if (tree.group !== 'needs-you') {
       if (s.workspace && tree.run.workspace_id !== s.workspace) continue

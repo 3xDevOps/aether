@@ -106,7 +106,7 @@ describe('run rows', () => {
     })
     render(<AppShell />)
 
-    expect(runList().getByRole('button', { name: /^Waiting on agents · busy agent · Working in background: 2 tasks/ })).toBeDefined()
+    expect(runList().getByRole('button', { name: /^Waiting for agents · busy agent · Working in background: 2 tasks/ })).toBeDefined()
     expect(runList().getByRole('button', { name: /^Needs you · asking agent · Agent asks: Which database\?/ })).toBeDefined()
   })
 
@@ -181,8 +181,8 @@ describe('run rows', () => {
     }
 
     expect(shown('Failed', 'bump the linter')).toEqual({ unopened: true, muted: false })
-    expect(shown('Finished', 'port the parser')).toEqual({ unopened: true, muted: false })
-    expect(shown('Finished', 'tidy the readme')).toEqual({ unopened: false, muted: true })
+    expect(shown('Completed', 'port the parser')).toEqual({ unopened: true, muted: false })
+    expect(shown('Merged', 'tidy the readme')).toEqual({ unopened: false, muted: true })
 
     act(() => useStore.getState().applyFinishOpened('run_5'))
 
@@ -263,7 +263,7 @@ describe('run rows', () => {
         })
         const shown = within(details()!)
         expect(shown.getByText('rewrite the checkout flow')).toBeDefined()
-        expect(shown.getByText('Agent working')).toBeDefined()
+        expect(shown.getByText(/^Working since .* — Agent working\.$/)).toBeDefined()
         expect(shown.getByText('main-repo')).toBeDefined()
         expect(shown.getByText('aether/run-1-checkout')).toBeDefined()
         expect(shown.getByText('Started').nextElementSibling?.textContent).toBe(

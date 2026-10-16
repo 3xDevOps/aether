@@ -5,7 +5,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
-import { clipLabel, runLabel, stateTone, type PresentationState } from '@/lib/status'
+import { clipLabel, runLabel, stateTitle, stateTone, type PresentationState } from '@/lib/status'
 import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
@@ -17,6 +17,7 @@ interface Shown {
   /** The row lists in Needs you. */
   waiting: boolean
   reason: string
+  next?: string
   since: string
   /** A swarm parent's worker counts. */
   counts: string
@@ -82,7 +83,7 @@ const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 // Default and Large text sizes. Larger text or a shorter window gives lines up in `Details`.
 const peopleLines = 7
 
-function Details({ run, state, waiting, reason, since, counts, people }: Shown) {
+function Details({ run, state, waiting, reason, next, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -131,7 +132,7 @@ function Details({ run, state, waiting, reason, since, counts, people }: Shown) 
               !waiting && 'text-muted',
             )}
           >
-            {reason}
+            {stateTitle({ state, reason, next }, since)}
           </span>
         </p>
       </div>

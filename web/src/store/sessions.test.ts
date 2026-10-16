@@ -101,7 +101,7 @@ describe('session rows', () => {
     ])
     expect(rows({ run: toRecord(run()), events: [], room: [], memberName, paused: false }).at(-2)).toEqual({ kind: 'live', label: 'Working', tone: 'working' })
     expect(rows({ run: toRecord(run({ state: 'waiting-agents' })), events: [], room: [], memberName, paused: false }).at(-2))
-      .toEqual({ kind: 'live', label: 'Waiting on agents', tone: 'waiting' })
+      .toEqual({ kind: 'live', label: 'Waiting for agents', tone: 'waiting' })
     expect(rows({ run: working, events: [], room: [], memberName, paused: true }).at(-1)).toEqual({ kind: 'event', text: 'Run started' })
   })
 

@@ -6,8 +6,10 @@ import {
   Archive,
   ArchiveRestore,
   Cable,
+  Check,
   CircleCheck,
   Download,
+  Hourglass,
   FileText,
   House,
   List,
@@ -31,6 +33,7 @@ import {
 } from '@/components/icons'
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
 import { errorSentence, message } from '@/lib/format'
+import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
 import type { LinkStatus, Member, PullResult, Run, Workspace } from '@/lib/types'
 import { dismissOnIdentityChange } from '@/components/failure'
@@ -333,6 +336,43 @@ export function runCommands(ctx: RunCommandContext): Command[] {
     }
   }
 
+  if (cap.hasMethod('run.review') && mayKill && completable(run)) {
+    const live = !finished
+    list.push({
+      id: 'complete',
+      label: 'Mark complete',
+      short: 'Mark complete',
+      Icon: Check,
+      done: 'Marked complete',
+      predict: () => ({
+        runID: id,
+        record: live
+          ? {
+              review: 'accepted',
+              status: 'completed',
+              state: '',
+              stateChangedAt: new Date().toISOString(),
+              stateChangedAtEstimated: true,
+              stateChangedAtPredicted: true,
+            }
+          : { review: 'accepted' },
+      }),
+      slow: live,
+      perform: (d) => d.api.runReview(id, 'complete'),
+    })
+    if (run.review === 'ready') {
+      list.push({
+        id: 'not-yet',
+        label: 'Not yet: keep the run open',
+        short: 'Not yet',
+        Icon: Hourglass,
+        done: 'Kept open',
+        predict: () => ({ runID: id, record: { review: 'later' } }),
+        perform: (d) => d.api.runReview(id, 'later'),
+      })
+    }
+  }
+
   // Close works from any state that holds a record: a live run is stopped first.
   if (run.status !== 'queued' && mayKill) {
     list.push({
@@ -477,6 +517,11 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
   return ctx.predicting ? list.filter((command) => !command.predict) : list
+}
+
+/** A run whose agent reported success and that its owner has not marked complete. */
+export function completable(run: RunRecord): boolean {
+  return awaitsCompletion(run) || ((run.status === 'running' || run.status === 'needs-attention') && run.state === 'finished' && run.review !== 'accepted')
 }
 
 /** Older agent-report finishes can still have a retained interactive runtime. */

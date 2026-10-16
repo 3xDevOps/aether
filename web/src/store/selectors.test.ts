@@ -221,6 +221,37 @@ describe('needsYouByWorkspace', () => {
   })
 })
 
+describe('the Needs you count', () => {
+  const ready = record({ id: 'ready', status: 'needs-attention', state: 'finished', review: 'ready', review_changed_at: '2026-08-14T10:06:00Z' })
+  const later = record({ id: 'later', status: 'needs-attention', state: 'finished', review: 'later' })
+  const headless = record({ id: 'headless', mode: 'headless', status: 'completed', review: 'ready' })
+  const accepted = record({ id: 'accepted', status: 'completed', review: 'accepted' })
+  const agents = record({ id: 'agents', status: 'running', state: 'waiting-agents' })
+  const waiting = record({ id: 'waiting', status: 'needs-attention', state: 'waiting' })
+  const runs = [stopped, ready, later, headless, accepted, agents, waiting]
+
+  it('counts needs-you and ready runs alike in the sidebar, the badge and the list', () => {
+    const sidebar = sidebarGroups(input(runs)).find((group) => group.key === 'needs-you')
+    expect(sidebar?.count).toBe(3)
+    expect(ids(sidebar?.runs ?? [])).toEqual(['headless', 'stopped', 'ready'])
+    expect(needsYouByWorkspace(input(runs).ctx)).toEqual({ [workspace.id]: 3 })
+    expect(listedRuns(workspace.id, input(runs).ctx).filter((row) => row.needsYou).map((row) => row.run.id).sort())
+      .toEqual(['headless', 'ready', 'stopped'])
+  })
+
+  it('lists a run answered Not yet quietly under Ready for review, outside the count', () => {
+    const groups = sidebarGroups(input(runs))
+    expect(groups.map((group) => group.key)).toEqual(['needs-you', 'working', 'review', 'finished'])
+    expect(ids(groups.find((group) => group.key === 'review')?.runs ?? [])).toEqual(['later'])
+    expect(ids(groups.find((group) => group.key === 'working')?.runs ?? []).sort()).toEqual(['agents', 'waiting'])
+  })
+
+  it('keeps a ready run in Needs you after its owner opens it', () => {
+    const opened = { ...ready, outcome_unseen: false, finish_unopened: false }
+    expect(needsYouByWorkspace(input([opened]).ctx)).toEqual({ [workspace.id]: 1 })
+  })
+})
+
 describe('listedRuns', () => {
   it('lists one workspace in group order', () => {
     const rows = listedRuns(workspace.id, input([done, working, stopped, elsewhere, failed]).ctx)

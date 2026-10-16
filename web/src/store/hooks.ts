@@ -54,11 +54,11 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
     const shown = presentRun(run, stateContextOf(s, now))
-    return JSON.stringify([shown.state, shown.reason])
+    return JSON.stringify([shown.state, shown.reason, shown.next])
   })
   return useMemo(() => {
-    const [state, reason] = JSON.parse(key) as [PresentationState, string]
-    return { state, reason }
+    const [state, reason, next] = JSON.parse(key) as [PresentationState, string, string | undefined]
+    return next === undefined ? { state, reason } : { state, reason, next }
   }, [key])
 }
 

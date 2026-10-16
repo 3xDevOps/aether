@@ -52,7 +52,7 @@ function MissionName({ id }: { id: unknown }) {
 const statusWords: Record<Exclude<RunStatus, 'running' | 'needs-attention'>, string> = {
   queued: 'Run queued',
   provisioning: 'Run starting',
-  completed: 'Finished',
+  completed: 'Completed',
   merged: 'Merged',
   abandoned: 'Closed without merging',
   failed: 'Failed',
@@ -270,6 +270,9 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'run.archived': (p, e) => <><Who id={e.actor_id} fallback="Aether" /> {p.archived_at ? 'archived the run' : 'restored the run'}</>,
   'run.outcome_seen': (_, e) => <><Who id={e.actor_id} fallback="The owner" /> opened the finished run</>,
   'run.finish_opened': (_, e) => <><Who id={e.actor_id} fallback="A member" /> opened the finished run</>,
+  'run.review': (p, e) => (
+    <><Who id={e.actor_id} fallback="The owner" /> {text(p.review) === 'later' ? 'chose Not yet on the finished task' : 'marked the run complete'}</>
+  ),
   'run.title': (p) => <>Agent set the title to <Quote>{bounded(p.title, 160)}</Quote></>,
   'run.agent': (p) => agentLine(p),
   'run.diff': (p) => `${files(p.files)} changed`,

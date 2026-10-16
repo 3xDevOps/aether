@@ -13,7 +13,7 @@ import { timeAgo } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
-import { runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
+import { groupOf, runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest, targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
@@ -236,6 +236,7 @@ function RunRowItem({ tree }: { tree: RunTree }) {
       state={tree.state}
       waiting={tree.needsYou !== undefined}
       reason={tree.reason}
+      next={tree.next}
       since={tree.since}
       workspaceName={tree.workspaceName}
       swarm={tree.swarm}
@@ -249,6 +250,7 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
   state: PresentationState
   waiting: boolean
   reason: string
+  next?: string
   since: string
   workspaceName?: string
   swarm?: SwarmSummary
@@ -260,11 +262,12 @@ const RunRow = memo(function RunRow({ runID, ...shown }: {
 
 const names = new Intl.ListFormat(undefined, { type: 'conjunction' })
 
-function RunRowButton({ run, state, waiting, reason, since, workspaceName, swarm, unread }: {
+function RunRowButton({ run, state, waiting, reason, next, since, workspaceName, swarm, unread }: {
   run: RunRecord
   state: PresentationState
   waiting: boolean
   reason: string
+  next?: string
   since: string
   workspaceName?: string
   swarm?: SwarmSummary
@@ -283,8 +286,8 @@ function RunRowButton({ run, state, waiting, reason, since, workspaceName, swarm
       navigate(route.name, route.params)
     } else navigate('run', { runId: run.id })
   }
-  const unopened = run.finish_unopened === true && (state === 'finished' || state === 'failed')
-  const active = state === 'working' || state === 'waiting-agents' || state === 'waiting-tools'
+  const unopened = run.finish_unopened === true && (state === 'ready' || groupOf({ state }) === 'finished')
+  const active = state === 'working' || state === 'waiting-agents' || state === 'waiting-ci' || state === 'waiting-tools'
   const recedes = !waiting && !unopened && (!active || (!swarm && run.member_id !== self))
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -315,7 +318,7 @@ function RunRowButton({ run, state, waiting, reason, since, workspaceName, swarm
     </span>
   )
   return (
-    <RunDetails run={run} state={state} waiting={waiting} reason={reason} since={since} counts={counts} people={people} label={label}>
+    <RunDetails run={run} state={state} waiting={waiting} reason={reason} next={next} since={since} counts={counts} people={people} label={label}>
       <ListRow
         data-run-row=""
         aria-label={label}

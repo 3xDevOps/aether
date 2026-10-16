@@ -38,7 +38,7 @@ test('an idle agent stays in Working until it asks, then takes a reply from its 
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(alice.url)
   const column = (name: string) => page.getByRole('region', { name }).getByRole('article').filter({ hasText: task })
-  await expect(column('Working').getByRole('img', { name: 'Idle' })).toBeVisible({ timeout: 180_000 })
+  await expect(column('Working').getByRole('img', { name: 'Waiting' })).toBeVisible({ timeout: 180_000 })
   await expect(column('Needs you')).toHaveCount(0)
 
   runCoordCLI(run.id, ['report', '--outcome', 'needs-input', '--summary', 'Which suite next?', '--idempotency-key', 'board-question'])

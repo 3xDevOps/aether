@@ -638,6 +638,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runACPItem: vi.fn(async () => needsOverride('runACPItem')),
     runModeSwitch: vi.fn(async () => needsOverride('runModeSwitch')),
     runClose: vi.fn(async () => run({ status: 'merged' })),
+    runReview: vi.fn(async (runID: string, action: 'complete' | 'later') =>
+      run({ id: runID, status: action === 'complete' ? 'completed' : 'needs-attention', state: action === 'complete' ? '' : 'finished', review: action === 'complete' ? 'accepted' : 'later' })),
     runHandoff: vi.fn(async () => ({})),
     runRoomList: vi.fn(async () => ({ messages: [] })),
     coordMessagesList: vi.fn(async () => ({ messages: [] })),

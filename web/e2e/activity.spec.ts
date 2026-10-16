@@ -28,7 +28,7 @@ test('Activity narrows the log from one filter and switches to agent messages', 
   await page.goto(alice.url)
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Activity', exact: true }).click()
   const feed = page.getByRole('region', { name: 'Activity feed' })
-  const runState = /Run queued|Run starting|Working|Waiting on agents|Waiting on tools|Needs you|Idle|Finished|Failed|Disconnected|Stopped/
+  const runState = /Run queued|Run starting|Working|Waiting for agents|Waiting for CI|Waiting for process|Waiting|Needs you|Ready for review|Completed|Failed|Disconnected|Stopped/
   await expect(feed.getByRole('listitem').filter({ hasText: 'Working' }).first()).toBeVisible({ timeout: 120_000 })
   await expect(feed.getByText(/run\.status|needs-attention/)).toHaveCount(0)
 
