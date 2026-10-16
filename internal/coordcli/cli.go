@@ -277,18 +277,19 @@ phase for Replace integrator. Interactive Standard/TUI and Enhanced/ACP runs,
 integrators included, stay open: end your turn and await follow-up; only an
 explicit user Close shuts the session. Background runs have one success or
 failure per launch; workers have one per attempt.
+` + coordhooks.ReviewRule + ` A worker's success goes to its integrator.
 Blocked is nonterminal and may repeat; its summary is the Needs you reason at
 turn end, not while input is open.
 Needs-input is nonterminal and takes no --evidence-ref: the summary is one
 specific question shown as the Needs you reason at turn end. End your turn
 after it; the reply arrives as your next prompt. Refused for Background runs
 and mission workers, who ask their integrator with ask.
-Waiting is nonterminal, takes no --evidence-ref and is allowed for every role:
-report it when you end your turn while awaiting subagents, workers, peers or
-tools, with what you wait on as the summary. Your next turn clears it. Only
-Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
-integrations are resumed by mail while idle; elsewhere, and in Background runs, wait inside your turn with
-inbox --wait 30 instead.
+Waiting is nonterminal, takes no --evidence-ref and is allowed for every role;
+the summary is what you wait on, and your next turn clears it. Report it when
+` + coordhooks.WaitingUse + `
+Only Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
+integrations are resumed by mail while idle; elsewhere, and in Background
+runs, wait inside your turn with inbox --wait 30 instead.
 Use a fresh idempotency key for each new report. Retry the same request with
 the same key; a superseded report's key conflicts.
 A summary file of "-" reads standard input.

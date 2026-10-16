@@ -53,9 +53,12 @@ const (
 // Report outcome meanings shared by the role card, the MCP bridge and the skill.
 const (
 	BlockedUse = "a human must intervene, such as missing access or a broken environment; not a way to wait."
-	WaitingUse = "you end your turn while awaiting subagents, workers, peers or tools; mail or the next prompt resumes you. " +
+	WaitingUse = "you end your turn while work you started goes on. Name it with --for (waiting_for in aether_report): agents, the default, for subagents, workers or peers; ci for a CI run or review bot; process for a build, deploy or other background command. " +
+		"The run then shows Waiting for agents, CI or process; a turn that ends with no report shows only Waiting. " +
+		"Mail or the next prompt resumes you; nothing does when CI or a process finishes. " +
 		"Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn."
-	neverRule = "Never report while still working, and report only what you verified. A turn that only answers or discusses ends without a report."
+	ReviewRule = "Success shows the run as Ready for review until the user marks it complete or later."
+	neverRule  = "Never report while still working, and report only what you verified. A turn that only answers or discusses ends without a report."
 )
 
 // Brief is the reporting rule set for g, or nothing for a run whose server
@@ -72,7 +75,7 @@ func Brief(g Guide) string {
 	case g.Role == RoleWorker:
 		needsInput = "never needs-input: ask your integrator with aether_ask; "
 	}
-	waiting := "waiting when ending your turn to await agents, peers or tools, unless protected. "
+	waiting := "waiting when ending your turn to await agents, CI or a process, unless protected. "
 	if !g.Wake {
 		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds. "
 	}
@@ -120,6 +123,9 @@ func Outcomes(g Guide) []Outcome {
 		needsInput = "integrators only; a worker asks its integrator with `aether-internal ask`."
 	case RoleBackground:
 		success = "report one before your final turn ends; the run finishes with it."
+	}
+	if g.Role != RoleWorker && g.Role != RoleMission {
+		success += " " + ReviewRule
 	}
 	out := []Outcome{{"success | failure", success}}
 	if !g.Background {
