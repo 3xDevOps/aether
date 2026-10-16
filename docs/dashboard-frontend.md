@@ -5500,12 +5500,15 @@ that runs a newer release than a client refuses that client
   release shows the prompt again. A dismissal hides only an offer. A
   scheduled, applying, failed or rolled-back server update still shows.
 - **Desktop notifications.** In the desktop shell, a newly available
-  release raises one OS notification per version, through
+  release raises one OS notification per target and version, through
   `desktop/notify.js`. It names the server release for an admin whose
   server is behind, and the client release otherwise. It fires only while
   no app window is focused; in front, the notice row is the notice. The
-  version announced persists as `notifiedUpdate`, so a reload does not
-  repeat it. Clicking the notification opens the dialog and runs a check.
+  shell owns the record of what it announced, keyed `server:<tag>` or
+  `cli:<tag>`, in `announced-updates.json` under Electron's `userData`
+  directory: the gateway listens on a new port every launch, so the page's
+  own storage would start empty each time. Clicking the notification opens
+  the dialog and runs a check.
 - **The desktop shell has a prompt of its own.** The SPA ships inside the
   CLI, but the Electron shell around it is whatever `aether gui build`
   last produced. That build records the complete CLI version and its

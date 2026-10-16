@@ -25,8 +25,9 @@ export type AetherDesktop = {
   onFolderChosen?: (cb: (path: string) => void) => () => void
   /** The shell's Check for Updates… menu item; absent in older shells. */
   onCheckForUpdates?: (cb: () => void) => () => void
-  /** Shown only while no app window is focused, once per version. */
-  notifyUpdate?: (update: { version: string; title: string; body: string }) => void
+  /** Shown only while no app window is focused, once per `key`
+   * (`server:<tag>` or `cli:<tag>`). */
+  notifyUpdate?: (update: { key: string; title: string; body: string }) => void
 }
 
 export function desktopBridge(): AetherDesktop | undefined {

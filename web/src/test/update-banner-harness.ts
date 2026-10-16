@@ -47,7 +47,6 @@ export function seed(
     serverChecking: false,
     clientApply: { name: 'idle' },
     clientBuild: null,
-    notifiedUpdate: '',
   })
 }
 

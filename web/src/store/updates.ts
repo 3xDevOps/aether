@@ -52,9 +52,6 @@ export interface UpdatesSlice {
   serverChecking: boolean
   clientApply: ClientApply
   clientBuild: UpdateBuildStatus | null
-  /** The last version announced through the desktop shell's notification. */
-  notifiedUpdate: string
-  setNotifiedUpdate: (version: string) => void
 }
 
 export const createUpdatesSlice: SliceCreator<UpdatesSlice> = (set) => ({
@@ -65,8 +62,6 @@ export const createUpdatesSlice: SliceCreator<UpdatesSlice> = (set) => ({
   serverChecking: false,
   clientApply: { name: 'idle' },
   clientBuild: null,
-  notifiedUpdate: '',
-  setNotifiedUpdate: (notifiedUpdate) => set({ notifiedUpdate }),
 })
 
 function gatedBy(s: Pick<RootState, 'updateRequired'>, update: UpdateStatus | null): boolean {

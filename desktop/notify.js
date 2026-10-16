@@ -5,6 +5,8 @@
 
 'use strict'
 
+const fs = require('node:fs')
+const path = require('node:path')
 const { app, BrowserWindow, Notification } = require('electron')
 
 // Runs that need the member now, with the need's key and notification; its
@@ -321,20 +323,48 @@ function updateBadge() {
   }
 }
 
-// Versions already announced. Not cleared by start(): a sidecar respawn must
-// not announce the same update again.
-const announcedVersions = new Set()
+// Updates already announced, as `server:<tag>` or `cli:<tag>`. Kept on disk
+// because the gateway listens on a new port every launch, so the page's own
+// per-origin record starts empty each time; a sidecar respawn must not
+// announce the same update again either.
+const announcedKeep = 20
+let announcedUpdates = null
+
+function announcedFile() {
+  return path.join(app.getPath('userData'), 'announced-updates.json')
+}
+
+function loadAnnounced() {
+  if (announcedUpdates) return announcedUpdates
+  announcedUpdates = []
+  try {
+    const saved = JSON.parse(fs.readFileSync(announcedFile(), 'utf8'))
+    if (Array.isArray(saved)) announcedUpdates = saved.filter((key) => typeof key === 'string')
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.log(`notify: read ${announcedFile()}: ${err.message}`)
+  }
+  return announcedUpdates
+}
+
+function saveAnnounced(key) {
+  announcedUpdates = [...loadAnnounced(), key].slice(-announcedKeep)
+  try {
+    fs.writeFileSync(announcedFile(), JSON.stringify(announcedUpdates))
+  } catch (err) {
+    console.log(`notify: write ${announcedFile()}: ${err.message}`)
+  }
+}
 
 /**
- * Announce an available update, once per version, when no app window has
+ * Announce an available update, once per key, when no app window has
  * focus; a focused window already shows it in the dashboard.
- * @param {{ version: string, title: string, body: string }} update
+ * @param {{ key: string, title: string, body: string }} update
  * @param {() => void} onClick
  */
-function showUpdate({ version, title, body }, onClick) {
-  if (announcedVersions.has(version) || BrowserWindow.getFocusedWindow() !== null) return
+function showUpdate({ key, title, body }, onClick) {
+  if (loadAnnounced().includes(key) || BrowserWindow.getFocusedWindow() !== null) return
   if (!Notification.isSupported()) return
-  announcedVersions.add(version)
+  saveAnnounced(key)
   const notification = new Notification({ title: clip(title, 120), body: clip(body, 240) })
   notification.on('click', onClick)
   notification.show()

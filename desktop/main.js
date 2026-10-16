@@ -312,10 +312,10 @@ function main() {
   })
 
   ipcMain.on('updates:notify', (_event, update) => {
-    const { version, title, body } = update || {}
-    if (typeof version !== 'string' || !version || version.length > 64) return
+    const { key, title, body } = update || {}
+    if (typeof key !== 'string' || !/^(server|cli):\S{1,64}$/.test(key)) return
     if (typeof title !== 'string' || typeof body !== 'string') return
-    notify.showUpdate({ version, title, body }, checkForUpdates)
+    notify.showUpdate({ key, title, body }, checkForUpdates)
   })
 
   // KDE's portal backend shows nothing for the x11: parent handle Chromium sends

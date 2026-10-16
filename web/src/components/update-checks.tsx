@@ -149,13 +149,12 @@ export function UpdateChecks({ client = api }: { client?: Api }) {
       const admin = s.info?.member.role === 'admin'
       const offer =
         admin && server.state === 'available'
-          ? { version: server.latest, title: `Server ${bareVersion(server.latest)} is available`, body: `The server runs ${server.version}. Open Aether to update it.` }
+          ? { key: `server:${server.latest}`, title: `Server ${bareVersion(server.latest)} is available`, body: `The server runs ${server.version}. Open Aether to update it.` }
           : cli.state === 'available' && !s.update?.cli.packaged
-            ? { version: cli.latest, title: `Aether ${bareVersion(cli.latest)} is available`, body: `This computer runs ${cli.version}. Open Aether to update.` }
+            ? { key: `cli:${cli.latest}`, title: `Aether ${bareVersion(cli.latest)} is available`, body: `This computer runs ${cli.version}. Open Aether to update.` }
             : null
-      if (!offer || s.notifiedUpdate === offer.version) return
-      s.setNotifiedUpdate(offer.version)
-      desktop.notifyUpdate?.(offer)
+      // The shell announces each key once, across launches.
+      if (offer) desktop.notifyUpdate?.(offer)
     }
     announce()
     return useStore.subscribe((s, previous) => {
