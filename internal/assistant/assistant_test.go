@@ -36,7 +36,10 @@ func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (sto
 	return m.settings[id], nil
 }
 
-func (m *memStore) PutAssistantSettings(_ context.Context, id domain.MemberID, settings store.AssistantSettings) error {
+func (m *memStore) PutAssistantSettings(ctx context.Context, id domain.MemberID, settings store.AssistantSettings) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settings[id] = settings

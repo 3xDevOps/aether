@@ -214,14 +214,14 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("inject: %v", err)
 	}
-	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || got.OtherOwner != "Grace" {
+	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("inject summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, nil)
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("kill: %v", err)
 	}
-	if want := `Stop run run-1 ("Fix login"), owned by Grace`; got.Summary != want || got.OtherOwner != "Grace" {
+	if want := `Stop run run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
 		t.Fatalf("kill summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	for _, m := range fc.called() {
@@ -234,7 +234,7 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 		return errors.New("no")
 	})
 	_ = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
-	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherOwner != "" {
+	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
 		t.Fatalf("own run summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
 	}
 }

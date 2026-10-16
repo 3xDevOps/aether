@@ -223,8 +223,8 @@ func TestAutoApprovalStillAsksForAnotherMembersRunAndUnlistedMethods(t *testing.
 	t.Cleanup(func() { _ = svc.Close() })
 	m := svc.member("m1")
 	for _, c := range []protocol.AssistantConfirmation{
-		{Method: protocol.MethodRunInject, Summary: `Send to run r1, owned by Grace: "hi"`, OtherOwner: "Grace"},
-		{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherOwner: "Grace"},
+		{Method: protocol.MethodRunInject, Summary: `Send to run r1, owned by Grace: "hi"`, OtherMember: true},
+		{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherMember: true},
 		{Method: "run.delete", Summary: "Delete run r1"},
 	} {
 		if err := answerCard(t, svc, m, c, true); err != nil {
@@ -282,11 +282,34 @@ func TestSuggestionFollowsManualApprovals(t *testing.T) {
 	if suggested() {
 		t.Fatal("suggested after a timeout and two approvals")
 	}
+	withdraw := func(end func(cancel context.CancelFunc)) error {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- svc.approver(m)(ctx, c) }()
+		for len(m.confirms.snapshot()) == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		end(cancel)
+		return wait(t, done)
+	}
+	if err := withdraw(func(context.CancelFunc) { m.confirms.cancelAll() }); !errors.Is(err, errSessionEnded) || st.settings["m1"].Approvals != 0 {
+		t.Fatalf("card withdrawn by the session's end = %v, approvals %d, want reset", err, st.settings["m1"].Approvals)
+	}
+	approveN(2)
+	if err := withdraw(func(cancel context.CancelFunc) { cancel() }); !errors.Is(err, context.Canceled) || st.settings["m1"].Approvals != 0 {
+		t.Fatalf("card withdrawn by the caller = %v, approvals %d, want reset", err, st.settings["m1"].Approvals)
+	}
+	approveN(2)
+	if suggested() {
+		t.Fatal("suggested after a withdrawn card and two approvals")
+	}
 	approveN(1)
 	if !suggested() {
 		t.Fatal("not suggested after three approvals in a row")
 	}
-	other := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherOwner: "Grace"}
+	other := protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1, owned by Grace", OtherMember: true}
 	if err := answerCard(t, svc, m, other, true); err != nil || !suggested() || st.settings["m1"].Approvals != 3 {
 		t.Fatalf("approving a card on another member's run = %v, approvals %d", err, st.settings["m1"].Approvals)
 	}
@@ -320,8 +343,8 @@ func TestSuggestionAnswers(t *testing.T) {
 				t.Fatalf("answer %d: not suggested before it", i+1)
 			}
 			before := time.Now()
-			if got := set(t, svc, later); got.SuggestAutoApprove {
-				t.Fatalf("answer %d: still suggested after Not now", i+1)
+			if got := set(t, svc, later); got.SuggestAutoApprove || got.SuggestionOff {
+				t.Fatalf("answer %d: after Not now = %+v, want snoozed", i+1, got)
 			}
 			row := st.settings["m1"]
 			if row.Approvals != 0 || row.NoSuggest || row.SnoozedUntil.Before(before.Add(snooze)) || row.SnoozedUntil.After(time.Now().Add(snooze)) {
@@ -338,9 +361,8 @@ func TestSuggestionAnswers(t *testing.T) {
 				t.Fatalf("answer %d: not suggested after the snooze ended", i+1)
 			}
 		}
-		set(t, svc, later)
-		if row := st.settings["m1"]; !row.NoSuggest {
-			t.Fatalf("third Not now = %+v, want it to count as never", row)
+		if got := set(t, svc, later); !got.SuggestionOff || !st.settings["m1"].NoSuggest {
+			t.Fatalf("third Not now = %+v, want it to count as never", got)
 		}
 	})
 

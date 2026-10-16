@@ -48,10 +48,11 @@ type AssistantConfirmation struct {
 	Params    json.RawMessage `json:"params"`
 	CreatedAt time.Time       `json:"created_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
-	// OtherOwner names the member who owns the run the call acts on, when
-	// that is not the caller. Such a call shows a card even with
+	// OtherMember means the run the call acts on belongs to another
+	// member, named by OtherOwner. Such a call shows a card even with
 	// auto-approval on.
-	OtherOwner string `json:"other_owner,omitempty"`
+	OtherMember bool   `json:"other_member,omitempty"`
+	OtherOwner  string `json:"other_owner,omitempty"`
 }
 
 type AssistantStatus struct {
@@ -85,6 +86,8 @@ type AssistantSettings struct {
 	// AutoApprove runs confirmed tools without a card, as if approved.
 	AutoApprove        bool `json:"auto_approve"`
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
+	// SuggestionOff means the suggestion will not show again.
+	SuggestionOff bool `json:"suggestion_off"`
 }
 
 type AssistantStartParams struct {

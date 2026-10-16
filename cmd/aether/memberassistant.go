@@ -42,7 +42,7 @@ func memberAssistant(args []string) error {
 		}
 		fmt.Println("auto-approve  " + state)
 		fmt.Println("covers        launching runs, messaging and stopping your own runs, saving your environment")
-		fmt.Println("always asks   messaging or stopping another member's run, and any other action that asks")
+		fmt.Println("always asks   messaging or stopping another member's run")
 		fmt.Println("not covered   the assistant's own shell and file tools, which never ask")
 		return nil
 	})

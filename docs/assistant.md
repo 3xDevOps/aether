@@ -146,7 +146,7 @@ aether member assistant --auto-approve off
 ```
 auto-approve  off: each action below waits for your approval on a card
 covers        launching runs, messaging and stopping your own runs, saving your environment
-always asks   messaging or stopping another member's run, and any other action that asks
+always asks   messaging or stopping another member's run
 not covered   the assistant's own shell and file tools, which never ask
 ```
 
@@ -157,10 +157,9 @@ says **Acts without asking** under its header.
 - **It covers a fixed list.** Only `run.launch`, `run.inject`, `run.kill` and
   `env.save` can pass without a card. A confirmed tool added later asks until
   it is added to that list.
-- **Another member's run always asks.** Messaging or stopping a run someone
-  else owns shows a card even with auto-approval on. The card says who owns
-  the run (`other_owner` in the confirmation, `owned by <name>` in the
-  summary).
+- **Messaging or stopping another member's run always asks.** It shows a
+  card even with auto-approval on. The card says who owns the run (`other_member` and `other_owner` in the confirmation, `owned by
+  <name>` in the summary).
 - **The server decides.** It reads the setting on every confirmed call, so a
   change applies to the live session at once, with no restart. A call and a
   change of the setting never overlap: each call sees the setting from before
@@ -191,16 +190,19 @@ After you approve three cards in a row that auto-approval would have passed,
 with auto-approval off, `assistant.status` reports `suggest_auto_approve:
 true`. The panel then shows **Skip approval cards for the assistant?** below
 the conversation, once the assistant is idle with nothing waiting on you. It
-never appears mid-turn or in an empty conversation. A declined or unanswered
-card starts the count over; a card on another member's run does not count.
+never appears mid-turn or in an empty conversation. Approving a card on
+another member's run does not add to the count; declining, not answering or
+having any card withdrawn (the turn stopped or the session ended) starts it
+over.
 
 | Button | `assistant.settings` | Effect |
 | --- | --- | --- |
 | **Turn on auto-approval** | `{"auto_approve":true}` | Turns it on at once; the notice is the warning |
-| **Not now** | `{"suggestion":"later"}` | Starts the count over and waits 7 days, 30 the second time; the third time counts as never |
+| **Not now** | `{"suggestion":"later"}` | Starts the count over and waits 7 days, 30 the second time; the third time counts as never and returns `suggestion_off: true` |
 | **Don't suggest again** | `{"suggestion":"never"}` | Stops the suggestion; the setting stays in Settings |
 
-Turning auto-approval off after it was on also stops the suggestion. The
+Turning auto-approval off after it was on also stops the suggestion. Once it
+is stopped, `assistant.settings` returns `suggestion_off: true`. The
 assistant's tool socket cannot answer it. The count and the answers are
 stored per member on the server.
 

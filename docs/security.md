@@ -510,8 +510,9 @@ container, driven from the dashboard. The boundaries:
   environment, without a click. With it on, that click is gone, and for the
   agent the instruction is the only guard: a steered assistant can launch
   runs, message and stop the member's own runs and save the environment;
-  another member's run still needs a click. It can run commands in the member's environment, which is the
-  member's own container, either way.
+  messaging or stopping another member's run still needs a click. It can
+  run commands in the member's environment, which is the member's own
+  container, either way.
 - **Notices name the run.** Aether follows the runs the assistant launches or
   messages and writes a notice to the member's own transcript and to their
   devices through Web Push. A notice holds the run's title and a reason,

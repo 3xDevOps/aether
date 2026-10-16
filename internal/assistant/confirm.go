@@ -139,7 +139,7 @@ const (
 // autoApprovable reports whether auto-approval may pass c: a listed method
 // that does not act on another member's run.
 func autoApprovable(c protocol.AssistantConfirmation) bool {
-	return c.OtherOwner == "" && slices.Contains(autoApproved, c.Method)
+	return !c.OtherMember && slices.Contains(autoApproved, c.Method)
 }
 
 func suggests(st store.AssistantSettings, now time.Time) bool {
@@ -147,7 +147,7 @@ func suggests(st store.AssistantSettings, now time.Time) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: suggests(st, time.Now())}
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: suggests(st, time.Now()), SuggestionOff: st.NoSuggest}
 }
 
 // approver passes a confirmed call at once when the member turned
@@ -162,10 +162,10 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 			return err
 		}
 		err = m.confirms.confirm(ctx, c)
-		if err == nil || errors.Is(err, errDeclined) || errors.Is(err, errExpired) {
-			if cerr := s.countApproval(ctx, m, c, err == nil); cerr != nil {
-				return errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
-			}
+		// A withdrawn card ends with the caller's context done; its reset
+		// must still be stored.
+		if cerr := s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
+			return errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
 		}
 		if err != nil {
 			return err
@@ -179,8 +179,8 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 }
 
 // countApproval counts a card auto-approval would have passed toward the
-// suggestion to turn it on; a decline or timeout of any card starts the
-// count over.
+// suggestion to turn it on; a decline, timeout or withdrawal of any card
+// starts the count over.
 func (s *Service) countApproval(ctx context.Context, m *member, c protocol.AssistantConfirmation, approved bool) error {
 	if approved && !autoApprovable(c) {
 		return nil
@@ -191,9 +191,12 @@ func (s *Service) countApproval(ctx context.Context, m *member, c protocol.Assis
 	if err != nil {
 		return err
 	}
-	if approved {
+	switch {
+	case approved:
 		st.Approvals++
-	} else {
+	case st.Approvals == 0:
+		return nil
+	default:
 		st.Approvals = 0
 	}
 	if err = s.cfg.Store.PutAssistantSettings(ctx, m.id, st); err != nil {
@@ -282,7 +285,7 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 	slog.Info("assistant auto-approval changed", "member", id, "auto", st.AutoApprove)
 	severity, title, body := "info", "Auto-approval turned off", "Launching, messaging and stopping runs and saving the environment wait for your approval again."
 	if st.AutoApprove {
-		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your runs and saves the environment without asking. An action on another member's run still asks."
+		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your runs and saves the environment without asking. Messaging or stopping another member's run still asks."
 	}
 	if err = s.note(ctx, m, severity, title, body); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)

@@ -102,7 +102,7 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 		t.Fatalf("answering the suggestion through the tool socket = %+v, want method not found", resp)
 	}
 	var settings protocol.AssistantSettings
-	if perr := env.call(protocol.MethodAssistantSettings, protocol.AssistantSettingsParams{Suggestion: protocol.AssistantSuggestionLater}, &settings); perr != nil || settings.SuggestAutoApprove || settings.AutoApprove {
+	if perr := env.call(protocol.MethodAssistantSettings, protocol.AssistantSettingsParams{Suggestion: protocol.AssistantSuggestionLater}, &settings); perr != nil || settings.SuggestAutoApprove || settings.SuggestionOff || settings.AutoApprove {
 		t.Fatalf("Not now = %+v, %v", settings, perr)
 	}
 	if perr := env.call(protocol.MethodAssistantSettings, protocol.AssistantSettingsParams{Suggestion: "soon"}, nil); perr == nil || perr.Code != protocol.CodeInvalidParams {
@@ -188,7 +188,7 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 		{protocol.MethodRunKill, protocol.RunIDParams{RunID: graceRun.Run.ID}},
 	} {
 		card, resp := answer(call.method, call.params, "owned by Grace", false)
-		if card.OtherOwner != "Grace" || resp.Error == nil || !strings.Contains(resp.Error.Message, "declined") {
+		if !card.OtherMember || card.OtherOwner != "Grace" || resp.Error == nil || !strings.Contains(resp.Error.Message, "declined") {
 			t.Fatalf("%s on Grace's run with auto-approval on: card %+v, response %+v; want a card the member declined", call.method, card, resp)
 		}
 	}
@@ -200,7 +200,7 @@ func TestIntegrationAssistantAutoApprove(t *testing.T) {
 	if perr := env.call(protocol.MethodAssistantSettings, protocol.AssistantSettingsParams{}, &settings); perr != nil || settings.AutoApprove {
 		t.Fatalf("assistant.settings read = %+v, %v", settings, perr)
 	}
-	if settings.SuggestAutoApprove {
+	if settings.SuggestAutoApprove || !settings.SuggestionOff {
 		t.Fatalf("suggested after turning auto-approval off = %+v", settings)
 	}
 	if _, resp := answer(protocol.MethodEnvSave, struct{}{}, "Save your environment", false); resp.Error == nil || !strings.Contains(resp.Error.Message, "declined") {
