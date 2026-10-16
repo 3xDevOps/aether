@@ -270,9 +270,16 @@ func (s *Server) handleRequest(ctx context.Context, member domain.MemberID, line
 }
 
 // dispatch runs one control-channel method for member: the SSH control
-// loop and the in-process client (Local) both call it, so the pending
-// gate and the per-call capability checks have one implementation.
+// loop and the in-process client (Local) both call it, so the version and
+// pending gates and the per-call capability checks have one
+// implementation. The version gate runs before the method lookup: a
+// method an older client names may no longer exist.
 func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if !ungatedMethods[method] {
+		if perr := s.upgradeRequired(ctx); perr != nil {
+			return nil, perr
+		}
+	}
 	handler, ok := methodHandlers[method]
 	if !ok {
 		return nil, &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "method not found: " + method}

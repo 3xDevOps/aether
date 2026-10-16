@@ -200,8 +200,9 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
-signed manifest ([Verified releases](#verified-releases)). On Linux, an `aether-server` beside the CLI is updated too;
-restart it with `sudo systemctl restart aether-server`. The command never asks
+signed manifest ([Verified releases](#verified-releases)). On Linux, an
+`aether-server` beside the CLI is updated too; restart it with
+`sudo systemctl restart aether-server`. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -236,6 +237,43 @@ The server's default standard image follows the server build, so a server
 update brings that release's environment image with it - though not into a
 member environment that is already open
 ([environments.md](environments.md#the-standard-image)).
+
+### When the server refuses an older client
+
+Update the server first, then each client. A server refuses every client
+older than its own release, because an older client calls methods and
+expects fields that the server has since changed. The refusal is error
+`-32005` (upgrade required), and the CLI prints it and exits 1:
+
+```
+aether: rpc error -32005: this aether is v0.7.0-alpha.11 and the server runs v0.8.0; update this client first: run `aether update` (desktop: Update in the app; Android: install the latest aether-android.apk), then retry
+```
+
+Run `aether update` on that machine, or **Update now** in the dashboard's
+blocking update screen, then retry. These keep working while the server
+refuses the client, because none of them needs the server: `aether update`,
+the gateway's `update.*` verbs, `server.info`, `server.update_status`,
+and git fetch and push over SSH. Everything else is refused, including
+streams and port forwards; a refused forward fails as `administratively
+prohibited` with the same message.
+
+The client sends its version in its SSH banner, `SSH-2.0-Aether
+<version>`. A client from before this change sends none and is treated as
+older than any release. Builds whose version is not a release (`dev`, a
+bare commit) are never refused, and they never cause a refusal. A server
+built past a tag (`v0.8.0-3-gabc123`) asks for that tag (`v0.8.0`), which
+is what `server.info` reports as `min_client_version`. A client newer than
+the server is accepted. `aether link` saves the link before it reports the
+refusal. It sets no git remote for `--repo`, because that needs the
+server, so re-run `aether link --repo` after `aether update`. A dashboard
+claim or join through an edge still moves the clone's `aether` remote onto
+the edge before it reports the refusal, because that is local git config.
+
+A refused sync daemon (`aether daemon run`) logs the refusal once and
+waits, checking every 30 seconds whether its executable on disk changed.
+Once `aether update` replaces it, the daemon exits 1 and its systemd or
+launchd unit starts the new binary. Until then the unit does not restart
+it into the same refusal.
 
 ### Verified releases
 
@@ -367,11 +405,11 @@ and exits 0 either way; `--check --json` prints one JSON object for a script:
 
 It resolves the tag from the GitHub releases redirect, with no token and no
 rate limit, and counts a release only once its signed manifest is published.
-Until then it reports no update and prints `running <version>; no signed
-release is published yet`.
-An answer is reused for an hour. A failed check is reused for five minutes,
-doubling with each failure in a row up to an hour, give or take a tenth. A
-build whose version is `dev` never reports an update. Set
+Until then it reports no update and prints `no signed release is published
+yet (running <version>)`. An answer is reused for an hour. A failed check is
+reused for five minutes, doubling with each failure in a row up to an hour,
+give or take a tenth. A build whose version is `dev` never reports an update.
+Set
 `AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release check on
 an air-gapped machine: the CLI's, the `aether gui` startup line, and the
 dashboard's update prompt all answer `disabled` without touching the network.

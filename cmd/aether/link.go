@@ -180,6 +180,12 @@ func runLink(args []string) error {
 		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, result.Info.Member.Role)
 	}
 	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
+		if cfg.Repo != "" {
+			fmt.Println("git remote not set; re-run aether link --repo after aether update")
+		}
+		return perr
+	}
 
 	if cfg.Repo == "" {
 		return nil

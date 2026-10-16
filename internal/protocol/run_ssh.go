@@ -1,5 +1,7 @@
 package protocol
 
+import "encoding/json"
+
 // SubsystemRunSSH carries one SSH connection into a run's container. After
 // the header and the ack below, the channel is an ordinary SSH transport: the
 // server speaks the SSH server protocol on it, so a standard ssh client whose
@@ -14,9 +16,10 @@ type RunSSHRequest struct {
 // authorized_keys line of the key the nested SSH server presents. Notice is
 // something the person connecting must be told; the client prints it.
 type RunSSHResponse struct {
-	OK      bool   `json:"ok"`
-	Error   string `json:"error,omitempty"`
-	Code    int    `json:"code,omitempty"`
-	HostKey string `json:"host_key,omitempty"`
-	Notice  string `json:"notice,omitempty"`
+	OK      bool            `json:"ok"`
+	Error   string          `json:"error,omitempty"`
+	Code    int             `json:"code,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+	HostKey string          `json:"host_key,omitempty"`
+	Notice  string          `json:"notice,omitempty"`
 }
