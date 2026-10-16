@@ -67,7 +67,7 @@ test('the first run completes', async ({ page, aether }) => {
   await expect(terminal).toContainText('hello-from-agent', { timeout: 30_000 })
 
   const header = page.locator('header').filter({ hasText: 'write the result file' })
-  await expect(header).toContainText('Agent working')
+  await expect(header).toContainText('Working')
 
   // Closing is an explicit user action for an interactive run. The agent
   // committed its work, so record the successful outcome through the real UI.

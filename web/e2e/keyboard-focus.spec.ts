@@ -39,12 +39,12 @@ async function openFirstRun(page: Page, aether: Aether): Promise<void> {
   await expect(page.getByRole('heading', { name: task, exact: true })).toBeVisible()
   // The fake agent exits, but the interactive run keeps its supervised shell.
   await expect(page.locator('.xterm-rows:not([data-aether-frozen-view] *)')).toContainText('agent-ready')
-  await expect(page.locator('header').filter({ hasText: task })).toContainText('Agent working')
+  await expect(page.locator('header').filter({ hasText: task })).toContainText('Working')
 }
 
 async function closeFirstRun(page: Page): Promise<void> {
   const header = page.locator('header').filter({ hasText: task })
-  await expect(header).toContainText('Agent working')
+  await expect(header).toContainText('Working')
   await header.getByRole('button', { name: 'More', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Close run…', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Close this run?' })
