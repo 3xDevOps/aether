@@ -963,16 +963,22 @@ silences that version only, on this phone; the next release shows it again.
 **Update gate (Edge mode).** The server refuses a client older than its own
 release (`-32005`, HTTP 426 through the gateway). In Edge mode the bundled
 CLI is that client, so the app asks the gateway's `update.check`
-(`POST /local/v1/update.check`) when the gateway starts, on every resume, and
-whenever the dashboard gets an HTTP 426. When it reports
-`client_update_required`, a native screen replaces the dashboard and cannot
-be dismissed: `This app (v0.7.0) is too old for the server (v0.8.0 needs
-v0.8.0 or newer).` **Download update** opens the newest release's
-`aether-android.apk` (the release the server names when GitHub cannot be
-reached), or the Play listing for a Play install, with no 7-day wait. The
-URL is printed on the screen to copy. Installing the update restarts the app,
-whose new gateway answers that no update is required, so the dashboard comes
-back. **Check for updates** asks again; **Switch server** opens the
+(`POST /local/v1/update.check`) when the gateway starts, on every resume,
+whenever a dashboard page finishes loading (a refused WebSocket reports no
+HTTP status), and whenever the dashboard gets an HTTP 426; the first check
+after a 426 passes `refresh` so the gateway looks past its cached release
+lookup. When it reports `client_update_required`, a native screen replaces
+the dashboard and cannot be dismissed: `This app (v0.7.0) is too old for the
+server (v0.8.0 needs v0.8.0 or newer).` **Download update** opens
+`https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`,
+or the Play listing for a Play install, with no 7-day wait. The tag is the
+gateway's `target_version` (the server's release), else its `latest`, else
+`min_client_version`, and never one older than `min_client_version`: GitHub's
+latest release skips prereleases and can lag, and Android refuses an older
+APK as a downgrade. The URL is printed on the screen to copy. Installing the
+update restarts the app, whose new gateway answers that no update is
+required, so the dashboard comes back. **Check for updates** asks again,
+with `refresh`; **Switch server** opens the
 Connection screen; **Copy details** puts the versions and the download URL on
 the clipboard. A dev build or a version that is not a release tag is never
 gated. Tailscale mode has no gate: the server hosts that dashboard, so it is

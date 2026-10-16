@@ -11,9 +11,11 @@ private fun body(
     serverVersion: String = "v0.8.0",
     required: Boolean? = true,
     minClient: String = "v0.8.0",
+    target: String? = null,
 ): String {
     val latestField = latest?.let { "\"latest\":\"$it\"," } ?: ""
-    val gateFields = required?.let { ",\"client_update_required\":$it,\"min_client_version\":\"$minClient\"" } ?: ""
+    val targetField = target?.let { ",\"target_version\":\"$it\"" } ?: ""
+    val gateFields = required?.let { ",\"client_update_required\":$it,\"min_client_version\":\"$minClient\"$targetField" } ?: ""
     return "{\"cli\":{\"version\":\"$version\",\"commit\":\"abc1234\",$latestField\"update_available\":true," +
         "\"dev\":false,\"disabled\":false,\"packaged\":\"Android app\",\"can_self_update\":false}," +
         "\"server_version\":\"$serverVersion\",\"server_behind\":false,\"supervised\":false$gateFields}\n"
@@ -31,6 +33,28 @@ class GateCheckTest {
     fun withoutTheNewestReleaseTheGateInstallsTheOneTheServerNeeds() {
         assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = null)))?.tag)
         assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "garbage")))?.tag)
+    }
+
+    @Test
+    fun theGatewaysTargetReleaseWins() {
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(target = "v0.8.0")))?.tag)
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = null, target = "v0.8.0")))?.tag)
+        // A target the gate cannot use falls back as if it were absent.
+        assertEquals("v0.8.1", gateFor(parseGateCheck(body(target = "dev")))?.tag)
+        assertEquals("v0.8.1", gateFor(parseGateCheck(body(target = "v0.7.9")))?.tag)
+    }
+
+    @Test
+    fun noReleaseOlderThanTheServerNeedsIsOffered() {
+        // GitHub's latest skips prereleases and lags behind a new release.
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "v0.7.9")))?.tag)
+        assertEquals("v0.9.0-rc.2", gateFor(parseGateCheck(body(latest = "v0.8.1", minClient = "v0.9.0-rc.2")))?.tag)
+        assertEquals("v0.9.0-rc.10", gateFor(parseGateCheck(body(latest = "v0.9.0-rc.10", minClient = "v0.9.0-rc.2")))?.tag)
+        assertEquals("v0.9.0", gateFor(parseGateCheck(body(latest = "v0.9.0", minClient = "v0.9.0-rc.2")))?.tag)
+        assertEquals("v0.9.0", gateFor(parseGateCheck(body(latest = "v0.9.0-rc.2", minClient = "v0.9.0")))?.tag)
+        assertEquals("v0.10.0", gateFor(parseGateCheck(body(latest = "v0.10.0", minClient = "v0.9.0")))?.tag)
+        // Equal to the oldest accepted is enough.
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "v0.8.0")))?.tag)
     }
 
     @Test

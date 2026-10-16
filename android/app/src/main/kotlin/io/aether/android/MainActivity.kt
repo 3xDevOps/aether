@@ -442,6 +442,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
+                    // A refusal on the dashboard's WebSocket never reaches
+                    // onReceivedHttpError, so every gateway page asks too.
+                    gatewayUrl?.let { if (url.startsWith(it.substringBefore("?"))) gate?.check(it) }
                     if (!clearHistoryOnLoad) return
                     clearHistoryOnLoad = false
                     view.clearHistory()
@@ -475,7 +478,11 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest,
                     errorResponse: WebResourceResponse,
                 ) {
-                    if (errorResponse.statusCode == 426) gatewayUrl?.let { gate?.check(it) }
+                    // The first refusal asks past the gateway's release cache,
+                    // which can predate the release the server now needs.
+                    if (errorResponse.statusCode == 426) {
+                        gatewayUrl?.let { gate?.check(it, refresh = gate?.isShown != true) }
+                    }
                 }
 
                 // Unhandled, WebView kills the app along with its renderer.
