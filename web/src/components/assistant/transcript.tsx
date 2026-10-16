@@ -1,5 +1,5 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { VList, type VListHandle } from 'virtua'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type CacheSnapshot, VList, type VListHandle } from 'virtua'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,9 @@ import { noAgents, turnExtras } from '@/store/subagents'
 
 const bottomSlack = 24
 
+/** Where the reader left the conversation when the panel closed; reopening the same conversation returns there. */
+let kept: { conversation: string; cache: CacheSnapshot; offset: number; pinned: boolean } | null = null
+
 export function assistantRows(session: AcpSession) {
   return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null)
 }
@@ -23,7 +26,12 @@ export function Transcript({ session }: { session: AcpSession }) {
   const rows = useMemo(() => assistantRows(session), [session])
   const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
-  const pinned = useRef(true)
+  const generation = useStore((s) => `${s.identityKey}:${s.assistantGeneration}`)
+  const conversation = useRef('')
+  // The first row changes when earlier messages load, which moves every offset and cached size.
+  conversation.current = `${generation}:${session.epoch}:${session.historyGeneration}:${session.more}:${flat[0]?.key}`
+  const [restored] = useState(() => (kept?.conversation === conversation.current ? kept : null))
+  const pinned = useRef(restored?.pinned ?? true)
   const firstKey = useRef(flat[0]?.key)
   const shift = firstKey.current !== undefined && flat[0]?.key !== firstKey.current
   const older = session.more
@@ -32,6 +40,14 @@ export function Transcript({ session }: { session: AcpSession }) {
     firstKey.current = flat[0]?.key
     if (pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
   })
+  useLayoutEffect(() => {
+    const handle = list.current
+    if (!handle) return
+    if (restored && !restored.pinned) handle.scrollTo(restored.offset)
+    return () => {
+      kept = { conversation: conversation.current, cache: handle.cache, offset: handle.scrollOffset, pinned: pinned.current }
+    }
+  }, [])
 
   const ctx: RowContext = useMemo(() => ({
     runID: assistantSessionID,
@@ -50,6 +66,7 @@ export function Transcript({ session }: { session: AcpSession }) {
       aria-label="Assistant conversation"
       className="min-h-0 flex-1"
       data={older ? [null, ...flat] : flat}
+      cache={restored?.cache}
       shift={shift}
       onScroll={(offset) => {
         const handle = list.current

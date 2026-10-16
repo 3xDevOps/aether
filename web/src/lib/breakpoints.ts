@@ -7,3 +7,6 @@ export const mobileScreen = `(max-width: ${MOBILE_MAX_WIDTH}px)`
 export function useIsMobile(): boolean {
   return useMediaQuery(mobileScreen)
 }
+
+/** The narrowest a run's content stays beside a docked panel. Narrower, the panel overlays instead. */
+export const minReadableWidth = 560

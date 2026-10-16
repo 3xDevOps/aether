@@ -21,13 +21,22 @@ Every entry point is offered only when the server supports the assistant.
 - The **Assistant** button in the sidebar beside **New run**, or in the top bar while the sidebar is hidden, or in the phone toolbar. Every entry point is hidden from members who cannot launch runs, because the assistant needs that capability. A dot on it means an action waits
   for your approval.
 - The command palette entry **Ask Aether**.
-- `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel. It is
-  inactive while a text field, an editor or a terminal has focus.
+- `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel,
+  including while a text field, an editor or a terminal has focus. A
+  terminal loses nothing to it: `Ctrl+Space` without Shift still sends NUL.
+  It is inactive while a dialog or menu is open.
 - **Ask Aether** on the board when it is empty, and **Stuck? Ask Aether** in
   the onboarding steps.
 
-On desktop the panel sits to the right of the board and can be resized; on a
-phone it is a side sheet.
+On desktop the panel docks to the right of the page and can be resized, as
+long as the page keeps 560px beside it. A run's Details panel hides to make
+that room and returns when the assistant closes; an open Subagent panel
+closes. In a window too narrow for that, the panel floats over the right of
+the page instead, without dimming it and leaving at least 240px of the page
+uncovered: the run underneath keeps its size, the part you can see stays
+usable, and `Esc` inside the panel or the shortcut closes it. On a phone it is a side
+sheet. Closing the panel keeps your unsent message and your place in the
+conversation.
 
 ## First use
 
@@ -317,6 +326,6 @@ You:       Launch a run in api to fix the flaky login test.
            [card] Approve this action?
            Launch claude (acp) in api: "Fix the flaky login test"   [Approve] [Decline]
 You:       Install Rust in my environment.
-           [card] Run `curl ... | sh -s -- -y`?   [Allow] [Reject]
-Assistant: rustc 1.xx installed. Save the environment so new runs have it?
+Assistant: (runs `curl ... | sh -s -- -y` without asking)
+           rustc 1.xx installed. Save the environment so new runs have it?
 ```

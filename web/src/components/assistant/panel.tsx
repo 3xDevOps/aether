@@ -16,7 +16,7 @@ import { StateLine } from '@/components/ui/status-dot'
 import type { Tone } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantState } from '@/lib/assistant-types'
-import { useIsMobile } from '@/lib/breakpoints'
+import { minReadableWidth, useIsMobile } from '@/lib/breakpoints'
 import { useDrag } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
@@ -157,10 +157,13 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   const announcement = useAnnouncement()
   const agent = status?.agents.find((item) => item.name === status.agent)?.display_name ?? status?.agent
   const ready = status !== null && status.state !== 'setup' && status.state !== 'needs_restart'
+  const onRun = useStore((s) => s.route.name === 'run')
   return (
     <>
       <PaneHeader
         title="Assistant"
+        level={2}
+        size={onRun ? 'run' : 'view'}
         stateLine={status && (
           <StateLine tone={waiting ? 'needs-you' : stateTone[status.state]} pulse={status.state === 'running' && !waiting}>
             {[agent, waiting ? 'Waiting for you' : stateWord[status.state]].filter(Boolean).join(' · ')}
@@ -200,24 +203,38 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   )
 }
 
-/** What `main` keeps beside the assistant. */
-const minMainWidth = 400
-
 function subscribeResize(notify: () => void) {
   window.addEventListener('resize', notify)
   return () => window.removeEventListener('resize', notify)
 }
 
-/** The width the window leaves the assistant after the sidebar and a usable `main`. */
-function useRoom(): number {
+/** The width of `main` with nothing docked beside it. */
+function useMainWidth(): number {
   const sidebar = useStore((s) => (s.sidebarCollapsed ? 0 : s.sidebarWidth))
   const innerWidth = useSyncExternalStore(subscribeResize, () => window.innerWidth)
-  return innerWidth - sidebar - minMainWidth
+  return innerWidth - sidebar
 }
 
-function DesktopAside({ children, room }: { children: React.ReactNode; room: number }) {
+/** What a floating assistant leaves uncovered at the left of `main`. */
+const uncoveredWidth = 240
+
+function docks(main: number): boolean {
+  return main - minReadableWidth >= minAssistantWidth
+}
+
+export function useAssistantDocked(): boolean {
+  const supported = useAssistantAvailable()
+  const open = useStore((s) => s.assistantOpen)
+  const phone = useIsMobile()
+  const main = useMainWidth()
+  return supported && open && !phone && docks(main)
+}
+
+function DesktopAside({ children, main, onClose }: { children: React.ReactNode; main: number; onClose: () => void }) {
+  const floating = !docks(main)
+  const room = main - minReadableWidth
   const preferred = useStore((s) => clampAssistantWidth(s.assistantWidth))
-  const width = Math.min(preferred, room)
+  const width = Math.min(preferred, floating ? Math.max(minAssistantWidth, main - uncoveredWidth) : room)
   const maxWidth = Math.min(maxAssistantWidth, room)
   const setWidth = useStore((s) => s.setAssistantWidth)
   const beginDrag = useDrag()
@@ -243,31 +260,39 @@ function DesktopAside({ children, room }: { children: React.ReactNode; room: num
       aria-label="Assistant"
       tabIndex={-1}
       style={{ width }}
-      className="relative flex h-full min-w-0 shrink-0 flex-col border-l border-seam bg-canvas pr-[env(safe-area-inset-right)] outline-none"
+      onKeyDown={(event) => {
+        if (!floating || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return
+        event.preventDefault()
+        onClose()
+      }}
+      className={cn(
+        'flex flex-col border-l border-seam bg-canvas pr-[env(safe-area-inset-right)] outline-none',
+        floating ? 'absolute inset-y-0 right-0 z-30 shadow-overlay animate-sheet-right motion-reduce:animate-none' : 'relative h-full min-w-0 shrink-0',
+      )}
     >
       {children}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize assistant"
-        aria-controls="assistant"
-        aria-valuenow={Math.round(width)}
-        aria-valuemin={minAssistantWidth}
-        aria-valuemax={maxWidth}
-        tabIndex={0}
-        onPointerDown={startResize}
-        onKeyDown={resizeKey}
-        className={cn(focusRing, 'absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none hover:bg-hover-chrome coarse:-left-3 coarse:w-6')}
-      />
+      {!floating && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize assistant"
+          aria-controls="assistant"
+          aria-valuenow={Math.round(width)}
+          aria-valuemin={minAssistantWidth}
+          aria-valuemax={maxWidth}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={resizeKey}
+          className={cn(focusRing, 'absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none hover:bg-hover-chrome coarse:-left-3 coarse:w-6')}
+        />
+      )}
     </aside>
   )
 }
 
 export function AssistantPanel() {
   const phone = useIsMobile()
-  const room = useRoom()
-  // Too narrow for the sidebar, a usable main and the smallest panel: the sheet takes over.
-  const mobile = phone || room < minAssistantWidth
+  const main = useMainWidth()
   const open = useStore((s) => s.assistantOpen)
   const setOpen = useStore((s) => s.setAssistantOpen)
   const generation = useStore((s) => s.assistantGeneration)
@@ -282,10 +307,18 @@ export function AssistantPanel() {
   // Closed, the stream stays up only while the assistant works or waits on an approval.
   const streamable = hasSession && (open || state === 'running' || state === 'starting' || waiting)
 
+  const close = () => {
+    setOpen(false)
+    if (!phone) queueMicrotask(() => document.getElementById(assistantTriggerID)?.focus())
+  }
+
   useKeybindings('global', supported ? {
     assistant: (event) => {
+      // Stopped as well, so a focused terminal or Browser page is not sent the chord.
       event.preventDefault()
-      setOpen(!useStore.getState().assistantOpen)
+      event.stopPropagation()
+      if (useStore.getState().assistantOpen) close()
+      else setOpen(true)
     },
   } : {})
 
@@ -302,17 +335,12 @@ export function AssistantPanel() {
   useEffect(() => {
     const was = opened.current
     opened.current = shown
-    if (shown && !was && !mobile) (textarea.current ?? document.getElementById('assistant'))?.focus()
-  }, [shown, mobile])
-
-  const close = () => {
-    setOpen(false)
-    if (!mobile) queueMicrotask(() => document.getElementById(assistantTriggerID)?.focus())
-  }
+    if (shown && !was && !phone) (textarea.current ?? document.getElementById('assistant'))?.focus()
+  }, [shown, phone])
 
   if (!shown) return null
   const content = <Content textarea={textarea} onClose={close} />
-  if (mobile) {
+  if (phone) {
     return (
       <Dialog open onOpenChange={setOpen}>
         <DialogContent
@@ -334,7 +362,5 @@ export function AssistantPanel() {
       </Dialog>
     )
   }
-  return (
-    <DesktopAside room={room}>{content}</DesktopAside>
-  )
+  return <DesktopAside main={main} onClose={close}>{content}</DesktopAside>
 }
