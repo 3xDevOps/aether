@@ -440,7 +440,9 @@ class MainActivity : ComponentActivity() {
             if (decision == Navigation.LOAD) return false
             if (decision == Navigation.EXTERNAL) openExternally(Uri.parse(url))
             done = true
-            popup.post { popup.destroy() }
+            // Through the attached WebView: a detached view holds what it is
+            // posted until it is attached, which this one never is.
+            web.post { popup.destroy() }
             return true
         }
         popup.webViewClient =
