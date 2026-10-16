@@ -200,8 +200,9 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
-`checksums.txt`. On Linux, an `aether-server` beside the CLI is updated too;
-restart it with `sudo systemctl restart aether-server`. The command never asks
+signed manifest ([Verified releases](#verified-releases)). On Linux, an
+`aether-server` beside the CLI is updated too; restart it with
+`sudo systemctl restart aether-server`. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -210,6 +211,36 @@ command to run:
 ```
 aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
 ```
+
+Update the server before its clients: a server only moves to a release
+whose client binaries are all published, and a client newer than its server
+gains nothing. Before it installs a newer release, `aether update` asks the
+linked server for its version, and refuses when the server is behind and you
+are an admin of a server that can update itself:
+
+```
+aether: update the server first: aether server update (the server runs v0.8.0 and this installs v0.9.0; --force skips this check)
+```
+
+A member who is not an admin is told to ask one, and the install goes ahead.
+So does an install with no linked server, an unreachable one, or one already
+on the release.
+
+Without `--version`, a client behind its linked server installs the server's
+release rather than the latest one, so it never moves ahead of the server:
+
+```
+installing v0.9.0 to match the server
+```
+
+`--force` skips asking the server: no refusal, and no matching.
+
+`sudo` usually resets `HOME` to root's, so `sudo aether update` finds no
+link, asks no server, and installs the latest release. To match a server
+that is behind it, pass the server's version, which `aether server update
+--status` prints as `server version`: `sudo aether update --version
+v0.9.0`. Where the binary sits in a directory you own, run `aether update`
+without `sudo`.
 
 With nothing to install, it prints the path of the binary it checked,
 because `sudo` and `PATH` order can each pick a different `aether` than the
@@ -237,6 +268,100 @@ update brings that release's environment image with it - though not into a
 member environment that is already open
 ([environments.md](environments.md#the-standard-image)).
 
+### When the server refuses an older client
+
+A server refuses every client older than its own release, because an
+older client calls methods and expects fields that the server has since
+changed. The refusal is error
+`-32005` (upgrade required), and the CLI prints it and exits 1:
+
+```
+aether: rpc error -32005: this aether is v0.7.0-alpha.11 and the server runs v0.8.0; update this client first: run `aether update` (desktop: Update in the app; Android: install the latest aether-android.apk), then retry
+```
+
+Run `aether update` on that machine, or **Update now** in the dashboard's
+blocking update screen, then retry; both install the server's release. These keep working while the server
+refuses the client, because none of them needs the server: `aether update`,
+the gateway's `update.*` verbs, `server.info`, `server.update_status`,
+and git fetch and push over SSH. Everything else is refused, including
+streams and port forwards; a refused forward fails as `administratively
+prohibited` with the same message.
+
+An Android app from before this check has no blocking update screen: once
+the server updates, its calls fail with the `-32005` refusal and the app
+offers no update. Tell those users to install the
+latest `aether-android.apk` from the release page by hand
+([Android app](#android-app)).
+
+The client sends its version in its SSH banner, `SSH-2.0-Aether
+<version>`. A client from before this change sends none and is treated as
+older than any release. Builds whose version is not a release (`dev`, a
+bare commit) are never refused, and they never cause a refusal. A server
+built past a tag (`v0.8.0-3-gabc123`) asks for that tag (`v0.8.0`), which
+is what `server.info` reports as `min_client_version`. A client newer than
+the server is accepted. `aether link` saves the link before it reports the
+refusal. It sets no git remote for `--repo`, because that needs the
+server, so re-run `aether link --repo` after `aether update`. A dashboard
+claim or join through an edge still moves the clone's `aether` remote onto
+the edge before it reports the refusal, because that is local git config.
+
+A refused sync daemon (`aether daemon run`) logs the refusal and waits,
+checking every 30 seconds whether its executable on disk changed. Once
+`aether update` replaces it, the daemon exits 1 and its systemd or
+launchd unit starts the new binary. Until then the unit does not restart
+it into the same refusal. Every 5 minutes the daemon reconnects, so a
+server that rolled back its update or was downgraded gets its sync back
+without a restart.
+
+### Verified releases
+
+Each release since signing began publishes `aether-release.json`, listing
+every asset's SHA-256 and size, and `aether-release.json.sig`, a base64
+ed25519 signature over the file's exact bytes. The release workflow uploads
+these two last, after downloading every other asset back anonymously and
+matching it against the manifest. An updater - `aether update`, the
+dashboard's **Update now**, `aether server update` - installs a release only
+when:
+
+- the signature verifies against a public key built into the running binary
+  (`internal/selfupdate/keys.go`),
+- the manifest's `version` is the tag being installed, and
+- each downloaded binary has the manifest's size and SHA-256.
+
+Downloads stream to disk, never read past the manifest's size, never follow
+a redirect off https, and retry network and server errors three times with
+backoff. A failure shows the real error and leaves every binary as it was. A
+release without a manifest, which is every release from before signing, is
+refused by name:
+
+```
+aether: release v0.7.0 has no signed aether-release.json (GET https://github.com/3xDevOps/Aether/releases/download/v0.7.0/aether-release.json: 404 Not Found): it predates signed releases or is still being published, and no updater installs it
+```
+
+Install such a release with the install script or by hand
+([Manual install](#manual-install)). `checksums.txt` is still published for
+those and for older clients.
+
+**Verify a release by hand.** With `openssl` 3 and `jq`, in a directory
+holding the downloaded asset, `aether-release.json` and
+`aether-release.json.sig` from the same release:
+
+```sh
+cat > aether-release.pub <<'EOF'
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAJ+AIq6GUVbRtEQ1ORqKJe3uh9JhvZkEQJQtYpxKbxD8=
+-----END PUBLIC KEY-----
+EOF
+base64 -d aether-release.json.sig > aether-release.sig.bin
+openssl pkeyutl -verify -pubin -inkey aether-release.pub -rawin \
+  -in aether-release.json -sigfile aether-release.sig.bin
+jq -r '.assets["aether-linux-amd64"].sha256' aether-release.json
+sha256sum aether-linux-amd64
+```
+
+`openssl` prints `Signature Verified Successfully`, and the two digests must
+match. On macOS use `shasum -a 256` in place of `sha256sum`.
+
 ### Environment image migration
 
 The member environment image change is one-way. Workspaces no longer carry an
@@ -246,9 +371,10 @@ gone, and the bootstrap image is no longer published. Saved member images
 live only in the server's Docker daemon; `aether env reset` removes a saved
 image and returns that member to the standard image.
 
-**From the dashboard.** The **Update now** button installs whatever is newest
-at the click: the version in the prompt is re-read first, so it names the
-release the install is about to write. It runs the same swap from the
+**From the dashboard.** The **Update now** button installs what is newest
+at the click, or the linked server's release when the server is ahead of
+this CLI, as `aether update` does: the version in the prompt is re-read
+first, so it names the release the install is about to write. It runs the same swap from the
 `aether gui` process, which runs as you. A CLI in
 a directory you own - `~/.local/bin`, a Homebrew prefix - is replaced without
 a question on macOS and Linux (Windows has no self-update). A CLI in a
@@ -317,10 +443,15 @@ and exits 0 either way; `--check --json` prints one JSON object for a script:
 ```
 
 It resolves the tag from the GitHub releases redirect, with no token and no
-rate limit. A build whose version is `dev` never reports an update. Set
-`AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release check on
-an air-gapped machine: the CLI's, the `aether gui` startup line, and the
-dashboard's update prompt all answer `disabled` without touching the network.
+rate limit, and counts a release only once its signed manifest is published.
+Until then it reports no update and prints `no signed release is published
+yet (running <version>)`. An answer is reused for an hour. A failed check is
+reused for five minutes, doubling with each failure in a row up to an hour,
+give or take a tenth. A build whose version is `dev` never reports an update.
+Set `AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release
+check on an air-gapped machine: the CLI's, the `aether gui` startup line, and
+the dashboard's update prompt all answer `disabled` without touching the
+network.
 
 A binary built from a checkout reports what `git describe` produced
 (`v1.2.3-4-gabc123`, plus `-dirty` for uncommitted changes). The comparison
@@ -364,34 +495,128 @@ the "desktop app is out of date" prompt then shows that error above the
 `aether gui build` to run by hand. A successful build clears it.
 
 On a single-box install the same update replaces the `aether-server` beside
-the CLI. The prompt then names both binaries and the
-`sudo systemctl restart aether-server` that the running server still needs.
+the CLI, and prints the restart the running server still needs:
+
+```
+aether-server on disk is now v0.9.0; the running server keeps its old version until you restart it: sudo systemctl restart aether-server
+```
 
 Administrators see a second prompt when the **server** is behind the latest
 release. An admin updates it from their laptop, no shell on the server box
 needed:
 
 ```sh
-aether server update [--version <tag>] [--when now|idle] [--cancel] [--yes]
+aether server update [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]
 aether server update --status
 ```
 
-`--when now` (the default) downloads both binaries and verifies them
-against `checksums.txt` before replacing either, then renames
-`aether-server` and the `aether` beside it into place. It restarts by
-re-executing the new binary with the same argv and environment, keeping the
-same PID: the shipped unit is `Restart=on-failure`, so a clean exit would
-not come back. If the re-exec itself fails under systemd, the server falls
-back to `systemctl restart aether-server`.
+**Preflight.** Before it downloads anything, the server fetches the release's
+signed manifest, `aether-release.json`, and checks that clients can follow
+it: `aether-{linux,darwin}-{amd64,arm64}`,
+`aether-windows-{amd64,arm64}.exe` and `aether-android.apk` must each be
+listed and answer an anonymous request with the size the manifest records.
+A release that fails is refused, naming the asset and its URL:
 
-`--when idle` instead records one pending update, applied the first time no
+```
+aether: rpc error -32002: release preflight failed: aether-android.apk (https://github.com/3xDevOps/Aether/releases/download/v0.9.0/aether-android.apk): HEAD answered 404 Not Found
+```
+
+**Downgrades.** A tag older than the running release is refused unless
+`--allow-downgrade` is passed, which only works with `--when now`; the tag
+the server already runs is always refused. Without `--version` the server
+takes the latest signed release only when it is newer than the running one,
+and otherwise answers `no update: aether-server v0.9.0 is not older than the
+latest release v0.9.0`. A release whose manifest records an older database
+schema than this server's database is always refused: that binary could not
+open the database. `aether update` on a server host refuses such a release
+the same way, naming both schemas:
+
+```
+aether: refusing to install aether-server v0.9.0: it knows store schema 90 and this build's server migrates the database to schema 91
+```
+
+**The swap.** `--when now` (the default) downloads both binaries and
+verifies them against the manifest before replacing either, then renames
+`aether-server` and the `aether` beside it into place. The files they
+replace stay beside them as `aether-server.prev` and `aether.prev`. Until
+both renames are done, `<data-dir>/server-update/swap.json` says `swapping`,
+and a start that finds it so puts the `.prev` files back. The server then
+closes its listeners and the database. When the release migrates the
+database, it copies it to `<data-dir>/server-update/aether.db.pre-update`
+now, so the copy holds every write. It re-executes the new binary with the
+same argv and environment, keeping the same PID: the shipped unit is
+`Restart=on-failure`, so a clean exit would not come back. If the re-exec
+itself fails under systemd, the server falls back to
+`systemctl restart aether-server`.
+
+**Rollback.** The new binary records the update `applied` only after it has
+opened and migrated the database, bound its SSH listener, and recovered the
+runs and terminals from before the restart, and then deletes the database
+copy. A migration may take as long as it needs; once
+it finishes, the binary has 5 minutes to bind and record, or it exits. If it
+exits before recording more than twice, or the next start finds those 5
+minutes gone, that start restores the database copy when the schema already
+moved, puts the `.prev` binaries back, records `rolled_back` with the error,
+and executes the previous binary. A re-exec that fails outright is undone
+the same way. A restored copy loses every write made after it, and the error
+says so with the time of the copy. A rollback that cannot restore a file
+records why and exits with that error instead of executing anything.
+Until the new binary has recorded `applied`, another update is refused
+with `a server update is already being applied: v0.9.0 is still verifying
+its first start (...)`. `--status` shows the outcome until the next
+update:
+
+```
+update        rolled_back v0.8.0 -> v0.9.0
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...; database restored to its snapshot of 2026-10-16T09:12:03Z; changes made after it are lost
+```
+
+`aether server update` prints each phase - checking the release, applying,
+restarting - then reconnects and exits 0 only once `server.info` reports the
+new version. A rollback, a failure, or a server that is not back on the new
+version within 8 minutes exits non-zero with the server's own error.
+
+**Release checks.** The server checks for a new signed release itself every
+6 hours, give or take 10%. A failed check is retried after 5 minutes,
+doubling up to 6 hours; the schedule survives restarts. `--status` prints the
+latest release, when it was checked, and a failed check's error verbatim. A
+build without a release version, or a server with `AETHER_NO_UPDATE_CHECK`
+set, does not check.
+
+**Recovering by hand.** When the new binary cannot start far enough to roll
+itself back, restore the previous one on the server host. The database
+lines are only needed if `<data-dir>/server-update/aether.db.pre-update`
+exists, which it does only while an update that migrates the database has
+not been recorded `applied`:
+
+```sh
+sudo systemctl stop aether-server
+sudo mv /usr/local/bin/aether-server.prev /usr/local/bin/aether-server
+sudo mv /usr/local/bin/aether.prev /usr/local/bin/aether
+sudo rm -f /var/lib/aether/aether.db-wal /var/lib/aether/aether.db-shm
+sudo mv /var/lib/aether/server-update/aether.db.pre-update /var/lib/aether/aether.db
+sudo systemctl start aether-server
+```
+
+The restored server records the update as rolled back by hand.
+
+`--when idle` instead runs the preflight, then records one pending update,
+applied the first time no
 run is working, no terminal is attached and no SSH connection into a run
 ([terminal.md](terminal.md#ssh-and-editors)) is open. Two kinds of run do not hold
 it back: one parked at `needs-attention`, waiting on a person, and one
 paused with `aether pause`, whose container is frozen. Neither has anything
 running inside it and both survive the restart like any other run. An SSH
 connection left open into a paused run still holds the update back. A second
-`--when idle` call replaces the pending one, and `--cancel` clears it.
+`--when idle` call replaces the pending one, and `--cancel` clears it. The
+update stays pending until the swap, so a server that stops mid-download
+retries it at the next idle moment; an `--allow-downgrade` update is not
+left pending and has to be run again. A release it cannot fetch at that
+moment - its manifest, a binary, or a client asset the preflight checks
+answering with a network error, 5xx or 429 - is retried at the next idle
+poll, up to three attempts. A run that starts while the release
+downloads puts the previous binaries back, and the update waits for the
+next idle moment.
 
 A run that survives the restart keeps the Aether helper binary its
 container was created with. What a newer server adds to that helper, such as
@@ -400,10 +625,10 @@ file transfer and port forwarding over ssh
 after the upgrade.
 
 `--yes` skips the confirmation prompt. `--status` prints the running
-version, the latest release, whether this server can update itself, any
-pending update and what it is still waiting for, and the outcome of the
-last attempt. `server update` is admin only; any member can read
-`--status`.
+version, the latest release and its check, whether this server can update
+itself, the current or last update's phase and error, any pending update and
+what it is still waiting for, and the outcome of the last attempt.
+`server update` is admin only; any member can read `--status`.
 
 Runs keep going through the restart: the scheduler reattaches to their live
 containers when the server comes back. Attached terminals and live syncs do
@@ -917,39 +1142,77 @@ gateway exits, until the restarted gateway prints its new URL. Pages the
 dashboard opens in a new window, such as the sign-in verification page, open
 in the phone's browser.
 
-**Updates.** The app never downloads or installs an update itself; you do,
-from the page it opens. In both modes, when the app comes to the front and
-its last check is an hour old or more, it runs the bundled CLI's `aether
-update --check --json` in the background, so the release lookup and version
-order are the desktop's. A check that fails, offline for example, shows
-nothing and runs again an hour later. When a newer release is out, a banner
-over the top of the dashboard names the new version and the one you run,
-with one button. Which button depends on who signed the app and which
-installer Android recorded (`getInstallSourceInfo` on Android 11 and newer,
-`getInstallerPackageName` before):
+**Updates.** The app never installs an update silently: you open the APK
+it links to, or update it in Google Play, and Android's installer asks you to
+confirm. In both modes, when the app comes to the front and its next check is
+due, about an hour after the last one (±10%, so phones do not check in step),
+it runs the bundled CLI's `aether update --check --json` in the background,
+so the release lookup and version order are the desktop's. **Check for
+updates** on the Connection screen (long-press the launcher icon, or
+**Connection** on a failed load) runs one now and always answers: `You're up
+to date (v0.8.0). Checked 14:05.`, the newer version with its button, or the
+CLI's error verbatim; a result saved before the app was last installed or
+updated is not shown. A background check that fails stays quiet until the
+last answer is 24 hours old; from then on the banner shows `Could not check
+for updates: <error>` as one muted line until a check succeeds or you dismiss
+it.
+
+When a newer release is out, a banner over the top of the dashboard names the
+new version and the one you run. Its buttons depend on who signed the app and
+which installer Android recorded (`getInstallSourceInfo` on Android 11 and
+newer, `getInstallerPackageName` before):
 
 - Installed by Google Play, or signed with any key but the release key:
   **Open Google Play** opens the app's listing in the Play app
   (`market://details?id=io.aether.android`), or in the browser when Play is
-  missing. **Release notes** opens the GitHub release. Play App Signing
-  re-signs what Play serves, so a Play build installed through another store
-  or as sideloaded split APKs still updates from Play. GitHub publishes a
-  release before Play has reviewed and rolled it out, so this banner shows
-  only once the app has been behind a release for 7 days; newer releases in
-  that week do not restart the wait.
+  missing. Play App Signing re-signs what Play serves, so a Play build
+  installed through another store or as sideloaded split APKs still updates
+  from Play. GitHub publishes a release before Play has reviewed and rolled
+  it out, so this banner shows only once the app has been behind a release
+  for 7 days; newer releases in that week do not restart the wait.
 - Installed any other way and signed with the release key, such as the APK
-  from a release page: **Open release page** opens that release in the
-  browser. Download `aether-android.apk` and open it; it installs over the
-  app and keeps its data. The release key's certificate SHA-256 is
+  from a release page: **Download update** opens
+  `https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`
+  in the browser. Open the download; Android asks to confirm, checks that it
+  is signed with the same key as the installed app, and installs it over the
+  app with its data. The release key's certificate SHA-256 is
   `2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a`, as
   `apksigner verify --print-certs aether-android.apk` prints it. A `make
   android-debug` build is signed with another key, so Android will not
   install the release APK over it, and its banner points at Google Play.
 
-If the page does not open, the banner shows Android's own error. Dismissing
-the banner silences that version only, on this phone; the next release shows
-it again. In Edge mode the dashboard's Updates dialog also names the newer
-version, with no button.
+Both carry **Release notes**, which opens the GitHub release. If a page does
+not open, the banner shows Android's own error. Dismissing the banner
+silences that version only, on this phone; the next release shows it again.
+
+**Update gate (Edge mode).** The server refuses a client older than its own
+release (`-32005`, HTTP 426 through the gateway). In Edge mode the bundled
+CLI is that client, so the app asks the gateway's `update.check`
+(`POST /local/v1/update.check`) when the gateway starts, on every resume,
+whenever a dashboard page finishes loading (a refused WebSocket reports no
+HTTP status), and whenever the dashboard gets an HTTP 426; the first check
+after a 426 passes `refresh` so the gateway looks past its cached release
+lookup. When it reports `client_update_required`, a native screen replaces
+the dashboard and cannot be dismissed: `This app (v0.7.0) is too old for the
+server (v0.8.0 needs v0.8.0 or newer).` **Download update** opens
+`https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`,
+or the Play listing for a Play install, with no 7-day wait. The tag is the
+gateway's `target_version` (the server's release), else
+`min_client_version`, and never one older than `min_client_version`, which
+Android would refuse as a downgrade. GitHub's latest release is not used: it
+can be newer than the server, which refuses a newer client too. The URL is
+printed on the screen to copy. While the screen is up the dashboard is
+unloaded, so it stops calling the server. Installing the update restarts the
+app, whose new gateway answers that no update is required, so the dashboard
+comes back. A check whose answer has no `server_version` (the gateway could
+not reach the server; `server_error` says why) leaves the screen as it was
+and shows the error under it. **Check for updates** asks again, with
+`refresh`; **Connection** opens the Connection screen, which switches between
+Aether Edge and Tailscale (choosing another Edge server happens in the
+dashboard, after updating); **Copy details** puts the versions and the
+download URL on the clipboard. A dev build or a version that is not a release tag is never
+gated. Tailscale mode has no gate: the server hosts that dashboard, so it is
+always the server's own version, and only the banner applies to the app.
 
 The app does not hold `REQUEST_INSTALL_PACKAGES`, and the CLI never replaces
 itself (`AETHER_PACKAGED` is set to `Android app`): `aether update` without
@@ -1538,6 +1801,7 @@ automatic.
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
+| `server-update/` | Server update state: `swap.json`, the last update's versions, outcome and replaced binaries, read before the database opens; `check.json`, the release-check schedule; and `aether.db.pre-update`, the database as it was before an update that migrates it, deleted once that update is recorded `applied`. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes, mirror credentials and workspace secrets are server-owned
@@ -1820,14 +2084,37 @@ aether-android.apk        aether-android.aab
 ```
 
 Missing or unexpected files, including unsigned Android names, stop the upload.
-The job writes and verifies `checksums.txt` with SHA-256, then uploads all twelve
-assets plus the checksum file. Only after that succeeds do `standard-latest`
+The job writes and verifies `checksums.txt` with SHA-256, then signs the
+release manifest ([Verified releases](#verified-releases)) with
+
+```sh
+go run ./internal/selfupdate/cmd/release-manifest \
+  -version <tag> -commit <full-sha> -store-schema <n> -out dist dist/<asset>...
+```
+
+An earlier step, run without the secret, prints `<n>` with
+`go run ./internal/store/cmd/schema-version`, so the signing process does
+not link the store. The generator reads the ed25519 seed from the
+`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
+`store_schema`, and checks its own
+output against the keys the tag's code trusts, so a seed that does not match
+fails here. `release-policy` fails the whole release before any build when
+that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
+then uploads the twelve assets and `checksums.txt`, downloads each asset
+anonymously from
+`https://github.com/<repository>/releases/download/<tag>/<name>`, compares
+its SHA-256 and size with the manifest, and only then uploads
+`aether-release.json.sig`, then `aether-release.json`. Updaters treat a
+release missing either file as unsigned, so a run that fails between the two
+can be rerun; it replaces the lone signature. It refuses a release that
+already has `aether-release.json` rather than replace assets that manifest
+signed; publish a new tag instead. Only after that succeeds do `standard-latest`
 and `edge-latest` move their respective `latest` tags to the verified images;
 each checks that `latest` carries the expected architecture digests. Releases
 share one workflow-wide concurrency group. The GitHub release itself is
 already published when the workflow starts, so a failed run can still leave
-`/releases/latest` pointing at a release without assets; image `latest` is not
-moved by a failed pre-upload run.
+`/releases/latest` pointing at a release without a manifest. Updaters treat
+that as no update. Image `latest` is not moved by a failed pre-upload run.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from

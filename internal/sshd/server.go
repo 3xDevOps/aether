@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // memberIDExtension is the ssh.Permissions extension carrying the
@@ -141,6 +142,9 @@ type Config struct {
 	// re-checks its authorization; zero means defaultRevalidateInterval.
 	// Unexported test knob.
 	revalidateInterval time.Duration
+	// release is the version this server reports and gates clients on;
+	// empty means version.Version. Unexported test knob.
+	release string
 }
 
 type Server struct {
@@ -257,6 +261,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.revalidateInterval <= 0 {
 		cfg.revalidateInterval = defaultRevalidateInterval
+	}
+	if cfg.release == "" {
+		cfg.release = version.Version
 	}
 	signer, err := LoadOrCreateHostKey(cfg.HostKeyPath)
 	if err != nil {
@@ -576,6 +583,7 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 	if err != nil {
 		return
 	}
+	id.clientVersion, id.legacyClient = parseClientBanner(string(sconn.ClientVersion()))
 	// A revocation between authentication and this registration closed
 	// nothing, so re-check once the connection is findable.
 	s.bindConn(c, id)
@@ -609,6 +617,10 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 		case "session":
 			s.spawn(func() { s.handleSession(connCtx, member, nc, abortConn) })
 		case "direct-tcpip":
+			if perr := s.upgradeRequired(connCtx); perr != nil {
+				rejectDirectTCPIP(nc, ssh.Prohibited, perr.Message)
+				continue
+			}
 			s.spawn(func() { s.handleDirectTCPIP(connCtx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")

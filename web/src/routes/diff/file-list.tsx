@@ -1,3 +1,4 @@
+import { VList } from 'virtua'
 import { ListRow } from '@/components/ui/list-row'
 import { cn } from '@/lib/utils'
 import type { FileStatus, PatchFile } from '@/routes/diff/parse'
@@ -42,6 +43,8 @@ export function ChangedFileRow({
   )
 }
 
+const virtualFiles = 100
+
 export function FileList({
   files,
   current,
@@ -51,15 +54,22 @@ export function FileList({
   current: string | null
   onJump: (path: string) => void
 }) {
+  const row = (file: PatchFile) => (
+    <ChangedFileRow file={file} selected={file.path === current} onOpen={onJump} />
+  )
   return (
     <nav aria-label="Changed files" className="hidden w-56 shrink-0 overflow-y-auto border-r border-seam bg-chrome p-1 @min-[780px]:block">
-      <ul>
-        {files.map((file) => (
-          <li key={file.path}>
-            <ChangedFileRow file={file} selected={file.path === current} onOpen={onJump} />
-          </li>
-        ))}
-      </ul>
+      {files.length > virtualFiles ? (
+        <VList role="list" data={files}>
+          {(file) => <div role="listitem">{row(file)}</div>}
+        </VList>
+      ) : (
+        <ul>
+          {files.map((file) => (
+            <li key={file.path}>{row(file)}</li>
+          ))}
+        </ul>
+      )}
     </nav>
   )
 }

@@ -353,9 +353,9 @@ whether anyone is needed:
 | `needs input: <question>` | `needs-you` | The agent asked you with `aether-internal report --outcome needs-input` ([coordination.md](coordination.md)) and ended its turn. |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker and ended its turn. |
 | `<summary>` of a `waiting` report | `waiting-agents` | The agent reported it waits on its own agents and ended its turn. |
-| `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. |
-| `turn interrupted` | `idle` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. |
-| `turn ended: <stop reason>` | `idle` | Any other ACP stop reason, such as `max_tokens` or `refusal`. |
+| `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. Whoever cancelled it already knows, so it does not ask anyone. |
+| `turn interrupted` | `needs-you` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. Send a message to continue. |
+| `turn ended: <stop reason>` | `needs-you` | Any other ACP stop reason, such as `max_tokens` or `refusal`. Send a message to continue. |
 | `enhanced turn failed: <error>` | `failed` | The agent failed the prompt while staying connected. |
 | `enhanced session ended: <cause>` | `disconnected` | The adapter exited or closed its output. Reopening the session clears it. |
 | `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session. |
@@ -462,30 +462,15 @@ Limits:
 
 ### Run instructions
 
-Every run whose container has the run socket gets three rules: the
-discovery instruction ([harnesses.md](harnesses.md#how-aether-launches-them)),
-a report rule while coordination reporting is enabled, and the co-author
-rule. The report rule depends on the run. An ordinary interactive run gets:
-
-```
-When you need the user's decision or information, you MUST run `aether-internal report --outcome needs-input --summary "<your question>"` and then end your turn; the reply arrives as your next prompt. When a task you were given is done or cannot be done, or an external blocker stops it, you MUST report success, failure or blocked with `aether-internal report` before ending that turn. A turn that only answers or discusses, or that ends waiting on workers, peers or mail, ends without a report.
-```
-
-A Background run gets:
-
-```
-Before your final turn ends you MUST run `aether-internal report` with outcome success or failure, or blocked if an external blocker stops you.
-```
-
-A swarm worker or integrator gets:
-
-```
-Report outcomes only as `aether-internal skill` describes for your role; do not report while waiting on workers or peers.
-```
+Every run whose container has the run socket gets the
+[agent instructions](coordination.md#agent-instructions): its role card,
+with report lines while coordination reporting is enabled, and the
+co-author rule.
 
 Claude's adapter takes the rules as `_meta.systemPrompt.append` on
 `session/new`, `session/resume` and `session/load`, so a run with no task
-gets them too, and its task prompt is the bare task. Every other agent gets
+gets them too, and its task prompt is the bare task; its MCP bridge then
+sends only the short brief. Every other agent gets
 them appended to its task prompt. Without a task, they go in a separate text
 block after the first message or mail prompt the agent accepts. A message
 that waited and was never delivered keeps them for the next one, as does a
@@ -578,8 +563,8 @@ agent session with `session/resume`, or `session/load` with the replayed
 history dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
-the run parks at `needs-attention` with `turn interrupted` until the next
-prompt. The same happens when the run was waiting for background tasks: they
+the run parks at `needs-attention` with `turn interrupted`, state `needs-you`,
+until the next prompt. The same happens when the run was waiting for background tasks: they
 end with the old adapter, the log gets a **Background work interrupted**
 notice naming them, and a `background` item with no tasks and
 `stop_reason: "interrupted"` records that none outlived the connection. A

@@ -143,11 +143,7 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request, kind stri
 		return
 	}
 
-	c, open, err := r.register(kind, serverID, account, device, addr)
-	var server net.Conn
-	if err == nil {
-		server, err = r.attachDevice(req.Context(), c, open, token)
-	}
+	c, server, err := r.open(req.Context(), kind, serverID, account, device, addr, token)
 	if err != nil {
 		if req.Context().Err() == nil {
 			r.refuse(w, err)
@@ -161,6 +157,28 @@ func (r *Relay) serveConnect(w http.ResponseWriter, req *http.Request, kind stri
 		return
 	}
 	r.splice(c, spliceSide(c, ws), server)
+}
+
+// open registers a connection and attaches its server. An open the
+// server's replaced control channel took is sent again on the newer one,
+// once: the server reconnecting is still connected.
+func (r *Relay) open(ctx context.Context, kind, serverID string, account edgeproto.Account, device edgeproto.Device,
+	addr netip.AddrPort, token string) (*relayConn, net.Conn, error) {
+	for retried := false; ; retried = true {
+		c, msg, err := r.register(kind, serverID, account, device, addr)
+		if err != nil {
+			return nil, nil, err
+		}
+		server, err := r.attachDevice(ctx, c, msg, token)
+		switch {
+		case err == nil:
+			return c, server, nil
+		case !errors.Is(err, errReplaced):
+			return nil, nil, err
+		case retried:
+			return nil, nil, edgeproto.RefusalNotConnected
+		}
+	}
 }
 
 // spliceConn is one side of a splice. Closing it tells that side the
@@ -279,8 +297,11 @@ func (r *Relay) attach(ctx context.Context, c *relayConn, msg edgeproto.Open) (n
 // exceeds. A server that is not claimed takes claim connections only.
 func (r *Relay) admitLocked(c *relayConn) (*registration, error) {
 	reg := r.servers[c.serverID]
-	if r.closing || reg == nil || (!reg.claimed && c.kind != edgeproto.KindClaim) {
+	if r.closing || reg == nil || reg.ctx.Err() != nil {
 		return nil, edgeproto.RefusalNotConnected
+	}
+	if !reg.claimed && c.kind != edgeproto.KindClaim {
+		return nil, edgeproto.RefusalNotClaimed
 	}
 	perServer, perDevice := 0, 0
 	for _, o := range r.conns {
@@ -297,9 +318,18 @@ func (r *Relay) admitLocked(c *relayConn) (*registration, error) {
 	return reg, nil
 }
 
+// await sends msg on reg and waits for c's data socket. It fails with
+// errReplaced when the server enrolled again before or after the send,
+// and otherwise drops reg when the open cannot be written to it: a
+// control channel that takes no writes is dead, whatever its idle timer
+// says.
 func (r *Relay) await(ctx context.Context, reg *registration, c *relayConn, msg edgeproto.Open) (net.Conn, error) {
 	if err := reg.send(msg); err != nil {
-		slog.Info("relay: open not delivered", "server", reg.id, "error", err)
+		if errors.Is(ended(reg), errReplaced) {
+			return nil, errReplaced
+		}
+		slog.Info("relay: open not delivered; closing the control channel", "server", reg.id, "error", err)
+		r.unregister(reg, err)
 		return nil, edgeproto.RefusalNotConnected
 	}
 	deadline := time.NewTimer(r.attachDeadline)
@@ -315,13 +345,21 @@ func (r *Relay) await(ctx context.Context, reg *registration, c *relayConn, msg 
 		case <-deadline.C:
 			return nil, edgeproto.RefusalNotAttached
 		case <-reg.ctx.Done():
-			return nil, edgeproto.RefusalNotConnected
+			return nil, ended(reg)
 		case <-c.ctx.Done():
 			return nil, context.Cause(c.ctx)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// ended is why an open on the ended reg failed.
+func ended(reg *registration) error {
+	if errors.Is(context.Cause(reg.ctx), errReplaced) {
+		return errReplaced
+	}
+	return edgeproto.RefusalNotConnected
 }
 
 func (r *Relay) drop(c *relayConn) {

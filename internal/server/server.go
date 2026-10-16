@@ -12,8 +12,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -58,14 +56,11 @@ const (
 // DefaultStandardImage is the published image matching this build.
 var DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
 
-var describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
-
 // releaseImageTag reduces a build version to a published image tag. The
 // release workflow tags every published image with the release ref name, so
 // a release version is its own image tag.
 func releaseImageTag(buildVersion string) string {
-	tag := describeSuffixPattern.ReplaceAllString(buildVersion, "")
-	tag = strings.TrimSuffix(tag, "-dirty")
+	tag, _ := version.TrimDescribe(buildVersion)
 	if scheduler.ReleaseTag(tag) {
 		return tag
 	}
@@ -124,8 +119,8 @@ type Config struct {
 	WhoIs sshd.WhoIsResolver
 	// SelfUpdate overrides the server self-update service's release feed
 	// and restart mechanics; the zero value is the pinned GitHub releases
-	// and a real re-exec of this binary. Store and Bus are the server's
-	// own and are ignored here. The E2E suite sets it so an update runs
+	// and no host controls. Store, Bus, StateDir, and Database are the
+	// server's own and are ignored here. The E2E suite sets it so an update runs
 	// against a stub release server and never replaces a real binary.
 	SelfUpdate serverupdate.Config
 	// Harnesses are server-owned, administrator-supplied launch definitions.
@@ -557,6 +552,10 @@ func (s *Server) Bus() events.Bus { return s.bus }
 // SSHAddr returns the bound SSH listen address, or nil before Run has
 // bound it.
 func (s *Server) SSHAddr() net.Addr { return s.ssh.Addr() }
+
+// Recovered is closed once the scheduler has reconciled the runs and
+// terminals from before this start.
+func (s *Server) Recovered() <-chan struct{} { return s.sched.RecoveryReady() }
 
 // Run ensures every workspace has its bare repo, then serves SSH and runs
 // the scheduler until ctx is done or one of them fails, and finally shuts

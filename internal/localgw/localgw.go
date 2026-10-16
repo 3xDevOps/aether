@@ -150,7 +150,8 @@ func mintToken() (string, error) {
 
 // authorize accepts ?token= only on a handshake, which cannot set headers.
 // The token guards the loopback port; the SSH key behind the backend is the
-// identity.
+// identity. It reloads the link config first, so a request after `aether
+// link` in a terminal reaches the server that link names.
 func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *webgate.Refusal) {
 	token := ""
 	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
@@ -168,6 +169,7 @@ func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *
 			},
 		}
 	}
+	g.followLink()
 	return g.cfg.Backend, nil
 }
 

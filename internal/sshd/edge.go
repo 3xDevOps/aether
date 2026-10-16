@@ -28,11 +28,14 @@ const (
 
 // connIdentity is who an authenticated connection is. device and deviceKey
 // are set on connections that authenticated with an edge device key,
-// relayed or direct.
+// relayed or direct. clientVersion and legacyClient come from the SSH
+// banner; see parseClientBanner.
 type connIdentity struct {
-	member    domain.MemberID
-	device    domain.DeviceID
-	deviceKey string
+	member        domain.MemberID
+	device        domain.DeviceID
+	deviceKey     string
+	clientVersion string
+	legacyClient  bool
 }
 
 // connIdentityKey carries a connection's connIdentity in the context of its

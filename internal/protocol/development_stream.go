@@ -23,10 +23,11 @@ type DevArtifactDownloadRequest struct {
 	AttachmentIndex  *int   `json:"attachment_index,omitempty"`
 }
 type DevStreamResponse struct {
-	OK       bool         `json:"ok"`
-	Error    string       `json:"error,omitempty"`
-	Code     int          `json:"code,omitempty"`
-	Artifact *DevArtifact `json:"artifact,omitempty"`
+	OK       bool            `json:"ok"`
+	Error    string          `json:"error,omitempty"`
+	Code     int             `json:"code,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Artifact *DevArtifact    `json:"artifact,omitempty"`
 }
 type DevBrowserFrameMetadata struct {
 	RunID           string    `json:"run_id"`

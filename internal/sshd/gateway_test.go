@@ -72,16 +72,27 @@ func TestRunPatchReturnsCompleteDiffRequest(t *testing.T) {
 		t.Errorf("unknown run code = %d, want %d", pe.Code, protocol.CodeNotFound)
 	}
 
-	// A run with no checkout answers Unavailable without echoing the
-	// engine's error, which names paths on the server.
-	patcher.err = errors.New("stat /srv/aether/checkouts/run_1: no such file or directory")
-	err = c.Call(protocol.MethodRunPatch, protocol.RunIDParams{RunID: string(e.run.ID)}, nil)
-	pe := wireErrOf(t, err)
-	if pe.Code != protocol.CodeUnavailable {
-		t.Errorf("no-checkout code = %d, want %d", pe.Code, protocol.CodeUnavailable)
-	}
-	if pe.Message != "run.patch: this run has no checkout to diff" {
-		t.Errorf("no-checkout message = %q, must not echo server paths", pe.Message)
+	// Only a missing checkout gets the friendly message; every other failure
+	// reaches the client with its real cause.
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"no checkout", fmt.Errorf("gitengine: %w", gitengine.ErrCheckoutNotFound), "run.patch: this run has no checkout to diff"},
+		{"no identity record", gitengine.ErrRunMetadataNotFound, "run.patch: this run has no checkout to diff"},
+		{"deadline", fmt.Errorf("render: %w: signal: killed", context.DeadlineExceeded), "run.patch: rendering the diff took longer than 30s: render: context deadline exceeded: signal: killed"},
+		{"git failure", errors.New("gitengine: git diff: exit status 128: fatal: bad object"), "run.patch: gitengine: git diff: exit status 128: fatal: bad object"},
+	} {
+		patcher.err = tc.err
+		err = c.Call(protocol.MethodRunPatch, protocol.RunIDParams{RunID: string(e.run.ID)}, nil)
+		pe := wireErrOf(t, err)
+		if pe.Code != protocol.CodeUnavailable {
+			t.Errorf("%s: code = %d, want %d", tc.name, pe.Code, protocol.CodeUnavailable)
+		}
+		if pe.Message != tc.want {
+			t.Errorf("%s: message = %q, want %q", tc.name, pe.Message, tc.want)
+		}
 	}
 }
 
@@ -104,6 +115,14 @@ func TestRunPatchSnapshotRange(t *testing.T) {
 	}
 	if got.Base != "aaa" {
 		t.Errorf("base = %q, want the from tree", got.Base)
+	}
+
+	patcher.patch = gitengine.Patch{Base: "ccc", ForkTree: "fff"}
+	if err := c.Call(protocol.MethodRunPatch, protocol.RunPatchParams{RunID: string(e.run.ID), From: "ccc"}, &got); err != nil {
+		t.Fatalf("run.patch with from alone: %v", err)
+	}
+	if patcher.got.From != "ccc" || patcher.got.To != "" || got.ForkTree != "fff" {
+		t.Errorf("from-only: engine saw %+v, fork_tree = %q", patcher.got, got.ForkTree)
 	}
 
 	patcher.err = gitengine.ErrInvalidObjectID

@@ -1,6 +1,10 @@
 package selfupdate
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/3xDevOps/Aether/internal/version"
+)
 
 // releaseTag matches a published Aether release tag: "v" plus a semver
 // core, with an optional prerelease ("v0.1.2", "v0.1.2-alpha.12"). Build
@@ -15,6 +19,6 @@ func ValidTag(tag string) bool {
 	if !releaseTag.MatchString(tag) {
 		return false
 	}
-	_, described := trimDescribe(tag)
+	_, described := version.TrimDescribe(tag)
 	return !described
 }

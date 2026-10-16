@@ -23,6 +23,7 @@ import (
 	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -496,6 +497,7 @@ func dialSSH(t *testing.T, addr string, signer ssh.Signer) *ssh.Client {
 		User:            "aether",
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		ClientVersion:   cli.ClientBanner(),
 		Timeout:         10 * time.Second,
 	})
 	if err != nil {

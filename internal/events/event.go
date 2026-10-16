@@ -262,6 +262,15 @@ type RunDiffPayload struct {
 	// set reads: every changed path is still in Files, the files left
 	// unread count zero, and the totals are a floor.
 	Truncated bool `json:"truncated,omitempty"`
+	// Base is the commit Files is measured against: the newest upstream
+	// commit the worktree's HEAD contains, or the fork point while it has
+	// merged none. Empty on events from a server that predates it.
+	Base string `json:"base,omitempty"`
+	// Head is the checkout's HEAD commit when the snapshot was taken, and
+	// HeadSubject that commit's subject line cut to 200 bytes. A Head that
+	// differs from the previous snapshot's means a commit landed between them.
+	Head        string `json:"head,omitempty"`
+	HeadSubject string `json:"head_subject,omitempty"`
 	// Tree is the git tree recorded for this snapshot: the whole worktree's
 	// content at that instant. Empty when the tree could not be written, or
 	// on events from a server that predates snapshot trees.

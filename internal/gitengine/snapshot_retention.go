@@ -17,6 +17,7 @@ const snapshotPublishedRef = "refs/aether/published"
 const snapshotHistoryRoot = "refs/aether/history/"
 const snapshotInflightParentRef = "refs/aether/inflight/parent"
 const snapshotInflightTreeRef = "refs/aether/inflight/tree"
+const snapshotInflightUpstreamRef = "refs/aether/inflight/upstream"
 
 func (e *Engine) initSnapshotStore(ctx context.Context, run domain.RunID, checkout, store string) error {
 	if err := e.ensureScratchGitDir(ctx, store, checkout); err != nil {

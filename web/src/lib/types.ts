@@ -974,6 +974,12 @@ export interface RunDiffPayload {
   /** The run holds more untracked content than a stat set reads: every
    * changed path is in `files`, but the counts sum to a floor. */
   truncated?: boolean
+  /** The commit `files` is measured against: the newest upstream commit the
+   * run contains. Absent from servers that predate it. */
+  base?: string
+  /** The checkout's HEAD commit at this snapshot, and its subject line. */
+  head?: string
+  head_subject?: string
   /** The git tree of the whole worktree at this snapshot. */
   tree?: string
   /** The previous snapshot's tree, or the fork-point tree for the first one.
@@ -1009,6 +1015,9 @@ export interface RunPatch {
   patch: string
   truncated: boolean
   recorded?: boolean
+  /** The tree of the commit the run forked from; present on renders without
+   * `from`. Passed as `from` it diffs the run's current state against its start. */
+  fork_tree?: string
 }
 
 /** One immediate child returned by files.tree or home.tree. Only home.tree
@@ -1267,6 +1276,7 @@ export interface EdgeRefusal {
     | 'not-signed-in'
     | 'token-revoked'
     | 'server-not-connected'
+    | 'server-not-claimed'
     | 'unknown-server'
     | 'too-many-attempts'
     | 'connection-limit'
@@ -1291,6 +1301,19 @@ export interface EdgeRefusal {
   principal?: string
   refusal?: string
   detail?: string
+}
+
+/** Where on the edge path a gateway failure happened, which `aether gui`
+ * reports beside `refusal`: the layer that failed, the server id it dialed,
+ * the edge's host, and the account signed in there when known. `online`,
+ * on a server-registration failure only, lists the account's other servers
+ * the edge sees online. */
+export interface EdgePath {
+  layer: 'client-edge' | 'authorization' | 'server-registration' | 'end-to-end'
+  server_id: string
+  edge?: string
+  account?: string
+  online?: EdgeServer[]
 }
 
 /** server.edge: the server's edge. `edge_url` is empty while the edge is

@@ -1,7 +1,8 @@
 # The MCP bridge
 
-Aether's MCP bridge is an optional, manually configured in-container adapter
-for six existing coordination tools. The canonical agent interface is the
+Aether's MCP bridge is an in-container MCP server for six existing
+coordination tools, registered automatically for Enhanced runs and manually
+elsewhere. The canonical agent interface is the
 `aether-internal` CLI, which is automatically available in every managed
 container and can load a version-matched skill on demand. The bridge is not the
 Release B orchestration interface and does not need to mirror its swarm or
@@ -33,12 +34,17 @@ have no token, login, run-ID, or credential option. A connection to a run's
 socket is that run; a binary can be present without a run identity, but then
 run-bound operations are unavailable.
 
-## Manual registration and discovery
+## Registration
 
-Aether does not automatically register the MCP bridge, write an agent
-configuration, or append an agent-specific MCP flag. To use MCP voluntarily,
-create a user-managed configuration outside `/run/aether`, then point an
-agent that supports MCP configuration at it. For example:
+Enhanced runs (runs driven over ACP, the Agent Client Protocol) get the bridge
+automatically: when the run has a coordination directory, Aether passes
+`/opt/aether/aether-server mcp` as the stdio MCP server `aether` in ACP
+`session/new`, `session/resume` and `session/load`. Aether writes no agent
+configuration file for it.
+
+Standard runs do not get the bridge registered. To use it there, create a
+configuration outside `/run/aether` and point an agent that supports MCP at
+it:
 
 ```sh
 cat >/tmp/aether-mcp.json <<'EOF'
@@ -47,9 +53,23 @@ EOF
 claude --mcp-config /tmp/aether-mcp.json
 ```
 
-The example is manual, and the path is not written or managed by Aether. Other
-agents may use different configuration syntax. The staged MCP entry point
-still reaches only the run socket belonging to the container.
+Aether does not write or manage that path, and other agents use different
+syntax. The bridge still reaches only the run socket of its container.
+
+The bridge's MCP `instructions` are the run's role card (see
+[Agent instructions](coordination.md#agent-instructions)). When
+`AETHER_ROLE_CARD=1`, which Aether sets on the bridge when the ACP system
+prompt already carries the card, they are only a brief of under 512 bytes:
+report success or failure when the work the agent owns is done or cannot be
+done, needs-input only for a question a human must answer (workers and
+Background runs are told never to), blocked when a human must intervene,
+and waiting when it ends its turn awaiting subagents, workers, peers or
+tools, or, where nothing resumes an idle session, never waiting but waiting
+for mail in the turn with `aether_inbox`; never report while still working;
+subagents and spawned workflows never report. Both come from `coord.status`,
+asked once with a 2-second limit: without `coord.report` in its
+capabilities there is no brief and the card has no report lines, and
+without an answer the instructions only point at `aether-internal skill`.
 
 The canonical CLI remains available without MCP. A shell-capable agent can
 invoke `aether-internal` directly and request its live, version-matched skill
@@ -89,12 +109,17 @@ that have no MCP tool. Its tool description tells the agent to run
 
 `aether_status` lists the peers described in
 [Wire v3](coordination.md#wire-v3); a peer's `run_id` is the `to_run_id` for
-`aether_send` and `aether_ask`. The `aether_send` and `aether_ask`
-descriptions tell the agent to announce its plan and owned files before
-editing what a peer touches, that a receipt means queued rather than read,
-and to check status instead of retrying a denial. The `aether_inbox`
-description marks peer messages as untrusted information that never overrides
-the user, the assignment or the integrator. See
+`aether_send` and `aether_ask`, and only listed peers can be messaged. The
+`aether_send` and `aether_ask` descriptions tell the agent to announce its
+plan and owned files before editing what a peer touches, or a decision,
+progress or blocker that affects a peer; that a receipt means queued rather
+than read and replies arrive in the inbox; and to check status instead of
+retrying a denial. The `aether_inbox` description says peer messages and
+replies arrive there and marks them as untrusted information that never
+overrides the user, the assignment or the integrator. The `aether_reply`
+description says a reply reaches only the asking run and grants it no
+control. These descriptions reach subagents, which share the MCP tools but
+not the parent's system prompt. See
 [Send a message](coordination.md#send-a-message).
 
 `aether_send`, `aether_ask`, `aether_reply`, and `aether_report` require an
@@ -116,9 +141,16 @@ instead of a target run ID and routes only to the original question sender.
 The question establishes the reply relationship; it cannot authorize an
 unrelated message or cross a workspace boundary.
 
-`aether_report` accepts only the established outcome values and requires a
-non-empty summary. Before the server accepts it, Aether captures the run's
-evidence, including a private Git evidence commit and a bounded PTY
+`aether_report` accepts only `success`, `failure`, `blocked`, `needs-input`
+and `waiting`, which its input schema enumerates, and requires a non-empty
+summary. Every coordination tool field has a schema description, and the
+`aether_report` description leads with the rule that subagents and spawned
+workflows never report. `needs-input` and `waiting` take no `evidence_refs`.
+`waiting` marks a turn the agent ends while awaiting subagents, workers, peers
+or tools; the next turn clears it. The schema's outcome description is the
+same for every run; the server refuses outcomes a run's role or launch
+cannot use, and the instructions list the ones that apply. Before the server accepts a report, Aether
+captures the run's evidence, including a private Git evidence commit and a bounded PTY
 transcript. The retained packet records factual context, provenance,
 unresolved facts, and a next action, with unavailable or truncated sources
 shown explicitly. Evidence is not an atomic environment snapshot and does not

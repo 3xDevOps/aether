@@ -365,6 +365,41 @@ store: begin migration 1: database is locked (5) (SQLITE_BUSY)
 Investigate the competing writer before retrying startup. Do not delete the
 database or edit `schema_migrations` to bypass the failure.
 
+### Interrupted or failed server update
+
+An update started by `aether server update`, other than an
+`--allow-downgrade` one, stays pending until both binaries are replaced. A
+server that stops during the download leaves it pending, and the next idle
+moment after the restart retries it. A scheduled update that cannot fetch
+the release's manifest or a binary, or whose preflight finds a client asset
+failing with a network error, 5xx or 429, is retried at the next idle poll,
+up to three attempts, then recorded `failed` with the error. Nothing is
+replaced until every binary has downloaded and verified. A server that
+stops while it renames the binaries puts the `.prev` files back on its next
+start and records `rolled_back`.
+
+After the swap, the new binary has to open and migrate the database, then
+bind its SSH listener and recover the runs from before the restart within 5
+minutes of the migration finishing. If it
+exits first more than twice, or misses those 5 minutes, the next start
+rolls back: the pre-update database copy is restored if the schema already
+moved, losing every write made after it, the `.prev` binaries go back into
+place, and the previous binary records `rolled_back` with the error. A
+re-exec that fails outright is rolled back by the running server. `aether
+server update --status` prints it:
+
+```text
+update        rolled_back v0.8.0 -> v0.9.0
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...; database restored to its snapshot of 2026-10-16T09:12:03Z; changes made after it are lost
+```
+
+A rollback that cannot restore a file records `rollback incomplete:` with
+the error and exits without executing either binary.
+
+Fix the cause, then update again. A binary that cannot start at all cannot
+roll itself back; restore it by hand with the commands in
+[install.md](install.md#upgrading).
+
 ### Server reboot, or a hard kill
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs
@@ -582,7 +617,7 @@ the container and shell are still healthy, not that an OOM spared them.
 | --- | --- |
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
-| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`; background tasks the old server was running are gone. |
+| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`, state `needs-you`; background tasks the old server was running are gone. |
 | A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
 | A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop. While such a task is live, the run parks `stalled:` only after three times the stall threshold with nothing from the agent ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
@@ -880,8 +915,8 @@ published change of the run's status, reason, state or outcome flags; each
 | `working` | A turn is in progress. |
 | `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting` report this turn. |
 | `waiting-tools` | No turn runs, and the agent waits on a background tool, such as a Claude monitor. A backgrounded shell such as a dev server does not count. |
-| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, or a usage limit Aether will not continue from on another account. A Background run's question does not count: it has no terminal to answer it in. |
-| `idle` | The turn ended with none of the above, including a stall. |
+| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, a usage limit Aether will not continue from on another account, or an interactive Enhanced turn that ended `turn interrupted` or `turn ended: <stop reason>` and waits for a message to continue. A Background run's question does not count: it has no terminal to answer it in. |
+| `idle` | The turn ended with none of the above, including a stall and `turn cancelled`: whoever cancelled the turn already knows. |
 | `finished` | An interactive run reported `success` and is parked for review. |
 | `failed` | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
 | `disconnected` | The Enhanced session failed or ended while the run is open. Reopening the session clears it. |
@@ -901,7 +936,7 @@ notices all apply it:
 | `failed`, result not yet seen by the owner | yes | once, on the transition |
 | `failed`, result seen | no | no |
 | `finished` | no; the board lists it under Finished until seen | a non-urgent notice once |
-| `working`, `waiting-agents`, `waiting-tools`, `idle` | no | no |
+| `working`, `waiting-agents`, `waiting-tools`, `idle` (including `turn cancelled`) | no | no |
 | any state while paused | no | no |
 
 A swarm worker's requests go to its integrator, so only its `blocked`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"golang.org/x/term"
 
@@ -34,13 +36,14 @@ func runServer(args []string) error {
 }
 
 type serverUpdateOptions struct {
-	status  bool
-	version string
-	when    string
-	yes     bool
+	status         bool
+	version        string
+	when           string
+	yes            bool
+	allowDowngrade bool
 }
 
-const serverUpdateUsage = "usage: aether server update [--status] [--version <tag>] [--when now|idle] [--cancel] [--yes]"
+const serverUpdateUsage = "usage: aether server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]"
 
 // parseServerUpdate parses the flags of "aether server update". --status
 // and --cancel each stand alone: --status reports state rather than
@@ -55,6 +58,7 @@ func parseServerUpdate(args []string) (serverUpdateOptions, error) {
 	when := fs.String("when", protocol.ServerUpdateNow, `"now" or "idle"`)
 	cancel := fs.Bool("cancel", false, "cancel a pending update")
 	yes := fs.Bool("yes", false, "skip the confirmation")
+	allowDowngrade := fs.Bool("allow-downgrade", false, "install a release older than the server's")
 	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
 		return serverUpdateOptions{}, errors.New(serverUpdateUsage)
 	}
@@ -62,7 +66,7 @@ func parseServerUpdate(args []string) (serverUpdateOptions, error) {
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
 	if *status {
-		if seen["version"] || seen["when"] || seen["cancel"] || seen["yes"] {
+		if seen["version"] || seen["when"] || seen["cancel"] || seen["yes"] || seen["allow-downgrade"] {
 			return serverUpdateOptions{}, errors.New("aether server update: --status cannot be combined with other flags")
 		}
 		return serverUpdateOptions{status: true}, nil
@@ -74,12 +78,18 @@ func parseServerUpdate(args []string) (serverUpdateOptions, error) {
 		if seen["version"] {
 			return serverUpdateOptions{}, errors.New("aether server update: --cancel and --version cannot be used together")
 		}
+		if seen["allow-downgrade"] {
+			return serverUpdateOptions{}, errors.New("aether server update: --cancel and --allow-downgrade cannot be used together")
+		}
 		return serverUpdateOptions{when: protocol.ServerUpdateCancel}, nil
 	}
 	if *when != protocol.ServerUpdateNow && *when != protocol.ServerUpdateIdle {
 		return serverUpdateOptions{}, errors.New(`aether server update: --when must be "now" or "idle"`)
 	}
-	return serverUpdateOptions{version: *version, when: *when, yes: *yes}, nil
+	if *allowDowngrade && *when == protocol.ServerUpdateIdle {
+		return serverUpdateOptions{}, errors.New("aether server update: --allow-downgrade applies now only; drop --when idle")
+	}
+	return serverUpdateOptions{version: *version, when: *when, yes: *yes, allowDowngrade: *allowDowngrade}, nil
 }
 
 func serverUpdate(args []string) error {
@@ -95,7 +105,7 @@ func serverUpdate(args []string) error {
 	case opts.when == protocol.ServerUpdateIdle:
 		return serverUpdateIdle(opts.version)
 	default:
-		return serverUpdateNow(opts.version, opts.yes)
+		return serverUpdateNow(opts)
 	}
 }
 
@@ -125,6 +135,18 @@ func printServerUpdateStatus(w io.Writer, res protocol.ServerUpdateStatusResult)
 		available = "yes"
 	}
 	_, _ = fmt.Fprintf(tw, "update available\t%s\n", available)
+	if res.CheckedAt != "" {
+		_, _ = fmt.Fprintf(tw, "checked\t%s\n", shortTime(res.CheckedAt))
+	}
+	if res.CheckError != "" {
+		_, _ = fmt.Fprintf(tw, "check failed\t%s\n", printable(res.CheckError))
+	}
+	if res.Phase != "" && res.Phase != protocol.ServerUpdatePhaseIdle {
+		_, _ = fmt.Fprintf(tw, "update\t%s %s -> %s\n", res.Phase, res.FromVersion, res.ToVersion)
+	}
+	if res.Error != "" {
+		_, _ = fmt.Fprintf(tw, "error\t%s\n", printable(res.Error))
+	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
@@ -221,8 +243,10 @@ func serverUpdateIdle(version string) error {
 
 // serverUpdateNow counts active runs, confirms unless --yes was passed,
 // then opens the event subscription before making the call (like
-// envRebuild) so no event between the two can be missed.
-func serverUpdateNow(version string, yes bool) error {
+// envRebuild) so no event between the two can be missed. The restart
+// drops the connection, so success is only reported once a fresh
+// connection finds the server on the target version.
+func serverUpdateNow(opts serverUpdateOptions) error {
 	cfg, err := cli.Load()
 	if err != nil {
 		return err
@@ -243,8 +267,8 @@ func serverUpdateNow(version string, yes bool) error {
 		return err
 	}
 
-	if !yes && term.IsTerminal(int(os.Stdout.Fd())) {
-		ok, cerr := confirmServerUpdateNow(os.Stdin, os.Stdout, version, len(rl.Runs))
+	if !opts.yes && term.IsTerminal(int(os.Stdout.Fd())) {
+		ok, cerr := confirmServerUpdateNow(os.Stdin, os.Stdout, opts.version, len(rl.Runs))
 		if cerr != nil {
 			return cerr
 		}
@@ -261,13 +285,86 @@ func serverUpdateNow(version string, yes bool) error {
 	defer func() { _ = stream.Close() }()
 
 	var res protocol.ServerUpdateResult
-	if err = c.Call(protocol.MethodServerUpdate, protocol.ServerUpdateParams{Version: version, When: protocol.ServerUpdateNow}, &res); err != nil {
+	if err = c.Call(protocol.MethodServerUpdate, protocol.ServerUpdateParams{
+		Version: opts.version, When: protocol.ServerUpdateNow, AllowDowngrade: opts.allowDowngrade,
+	}, &res); err != nil {
 		return err
 	}
-	// The result already reports the applying phase, which is also the
-	// first event on the feed; pass it as reported so it prints once.
+	// The result already reports the applying phase; pass it as reported
+	// so it prints once.
 	fmt.Printf("%s %s\n", res.Status, res.Version)
-	return followServerUpdate(stream, os.Stdout, res.Version, events.ServerUpdateApplying)
+	if err := followServerUpdate(stream, os.Stdout, res.Version, events.ServerUpdateApplying); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), serverReturnTimeout)
+	defer cancel()
+	return awaitServerVersion(ctx, os.Stdout, res.Version, dialProbe(cfg), 2*time.Second)
+}
+
+// serverReturnTimeout covers a new binary's whole trial: up to three
+// starts and the rollback after them.
+const serverReturnTimeout = 8 * time.Minute
+
+// serverProbe reads the server's version and update state over a fresh
+// connection.
+type serverProbe func(ctx context.Context) (string, protocol.ServerUpdateStatusResult, error)
+
+func dialProbe(cfg cli.Config) serverProbe {
+	return func(ctx context.Context) (string, protocol.ServerUpdateStatusResult, error) {
+		var status protocol.ServerUpdateStatusResult
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		conn, err := cli.DialContext(ctx, cfg)
+		if err != nil {
+			return "", status, err
+		}
+		defer func() { _ = conn.Close() }()
+		// Calls take no context; closing the connection is what ends one
+		// stalled past the timeout.
+		defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
+		c, err := conn.Control()
+		if err != nil {
+			return "", status, err
+		}
+		defer func() { _ = c.Close() }()
+		var info protocol.ServerInfoResult
+		if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+			return "", status, err
+		}
+		if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err != nil {
+			return info.ServerVersion, status, err
+		}
+		return info.ServerVersion, status, nil
+	}
+}
+
+// awaitServerVersion polls probe until server.info names target. A
+// rollback or failure recorded for target ends the wait with the
+// server's own error; running out of time is a failure that says what
+// the server last answered.
+func awaitServerVersion(ctx context.Context, w io.Writer, target string, probe serverProbe, interval time.Duration) error {
+	var last string
+	for {
+		running, status, err := probe(ctx)
+		switch {
+		case running == target:
+			_, perr := fmt.Fprintf(w, "the server is running %s\n", target)
+			return perr
+		case status.ToVersion == target && status.Phase == protocol.ServerUpdatePhaseRolledBack:
+			return fmt.Errorf("server update to %s was rolled back; the server runs %s: %s", target, running, status.Error)
+		case status.ToVersion == target && status.Phase == protocol.ServerUpdatePhaseFailed:
+			return fmt.Errorf("server update to %s failed: %s", target, status.Error)
+		case err != nil:
+			last = err.Error()
+		default:
+			last = fmt.Sprintf("the server runs %s (update phase %s)", running, status.Phase)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the server did not come back on %s: %s; check with: aether server update --status", target, last)
+		case <-time.After(interval):
+		}
+	}
 }
 
 // confirmServerUpdateNow prints what applying now costs and reads one line
@@ -296,10 +393,10 @@ func confirmServerUpdateNow(r io.Reader, w io.Writer, version string, activeRuns
 }
 
 // followServerUpdate reads server.update events until the stream ends,
-// which is the server restarting onto the new binary - the expected way
-// this call finishes, not a failure. The event is published once per
-// workspace with no workspace filter on the subscription, so the same
-// phase can arrive more than once; each is printed only the first time.
+// which is the server restarting - the caller then confirms the version
+// on a fresh connection. The event is published once per workspace with
+// no workspace filter on the subscription, so the same phase can arrive
+// more than once; each is printed only the first time.
 func followServerUpdate(stream io.Reader, w io.Writer, version string, reported ...events.ServerUpdatePhase) error {
 	r := bufio.NewReaderSize(stream, 64<<10)
 	seen := map[events.ServerUpdatePhase]bool{}
@@ -309,7 +406,7 @@ func followServerUpdate(stream io.Reader, w io.Writer, version string, reported 
 	for {
 		line, err := protocol.ReadLine(r)
 		if err != nil {
-			_, printErr := fmt.Fprintf(w, "connection closed: the server is restarting on %s; reconnect in a moment\n", version)
+			_, printErr := fmt.Fprintf(w, "connection closed; waiting for the server to come back on %s\n", version)
 			return printErr
 		}
 		var ev protocol.Event
@@ -325,6 +422,10 @@ func followServerUpdate(stream io.Reader, w io.Writer, version string, reported 
 		}
 		seen[payload.Phase] = true
 		switch payload.Phase {
+		case events.ServerUpdatePreflight:
+			if _, err := fmt.Fprintf(w, "checking release %s\n", payload.Version); err != nil {
+				return err
+			}
 		case events.ServerUpdateApplying:
 			if _, err := fmt.Fprintf(w, "applying %s\n", payload.Version); err != nil {
 				return err
@@ -335,6 +436,8 @@ func followServerUpdate(stream io.Reader, w io.Writer, version string, reported 
 			}
 		case events.ServerUpdateFailed:
 			return fmt.Errorf("server update failed: %s", payload.Detail)
+		case events.ServerUpdateRolledBack:
+			return fmt.Errorf("server update to %s was rolled back: %s", payload.Version, payload.Detail)
 		}
 	}
 }

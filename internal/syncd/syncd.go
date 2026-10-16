@@ -146,14 +146,41 @@ func New(cfg Config) (*Daemon, error) {
 // exponential backoff plus jitter on any failure. The backoff resets only
 // after a session that was acknowledged and held for stableSession, so a
 // long-lived connection dropping reconnects promptly while an ack-then-
-// drop server still backs off.
+// drop server still backs off. A server that refuses this client's
+// release ends the daemon once this executable is replaced: an update
+// fixes that, and a supervisor restarting the daemon sooner would only be
+// refused again. Until then the daemon asks again every upgradeRecheck,
+// because a server that rolls back a trial release or is downgraded stops
+// refusing with no update here.
 func (d *Daemon) Run(ctx context.Context) error {
 	attempt := 0
+	var exe string
+	var refusedExe os.FileInfo
 	for {
 		started := time.Now()
 		subscribed, err := d.connectOnce(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if protocol.IsUpgradeRequired(err) {
+			slog.Error("syncd: refused; waiting for this executable to be updated", "error", err, "recheck", upgradeRecheck)
+			if refusedExe == nil {
+				var exeErr error
+				if exe, exeErr = os.Executable(); exeErr == nil {
+					refusedExe, exeErr = os.Stat(exe)
+				}
+				if exeErr != nil {
+					return fmt.Errorf("%w; find this executable to wait for its update: %w", err, exeErr)
+				}
+			}
+			replaced, waitErr := waitReplaced(ctx, exe, refusedExe, updatePoll, upgradeRecheck)
+			if waitErr != nil {
+				return waitErr
+			}
+			if replaced {
+				return fmt.Errorf("%w; %s changed, so exiting to run it", err, exe)
+			}
+			continue
 		}
 		attempt = nextAttempt(attempt, subscribed, time.Since(started))
 		delay := backoffDelay(attempt, rand.Float64())
@@ -162,6 +189,39 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-time.After(delay):
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+	}
+}
+
+// updatePoll is how often a refused daemon checks whether its executable
+// was replaced, and upgradeRecheck how often it asks the server again.
+const (
+	updatePoll     = 30 * time.Second
+	upgradeRecheck = 5 * time.Minute
+)
+
+// waitReplaced reports true once path names a file other than before, or
+// that file's size or modification time changes, and false once recheck
+// passes with neither. It returns ctx.Err() when ctx ends first.
+func waitReplaced(ctx context.Context, path string, before os.FileInfo, poll, recheck time.Duration) (bool, error) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	deadline := time.NewTimer(recheck)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-deadline.C:
+			return false, nil
+		case <-ticker.C:
+		}
+		now, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if !os.SameFile(before, now) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+			return true, nil
 		}
 	}
 }
@@ -263,6 +323,7 @@ func (d *Daemon) dial(ctx context.Context) (*ssh.Client, error) {
 	defer auth.Close()
 	conf := &ssh.ClientConfig{
 		User:            d.cfg.User,
+		ClientVersion:   cli.ClientBanner(),
 		Auth:            auth.Methods(),
 		HostKeyCallback: hostKeys,
 		BannerCallback:  auth.Banner,

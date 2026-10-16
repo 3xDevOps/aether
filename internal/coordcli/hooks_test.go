@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -169,6 +170,27 @@ func TestEnhancedRunHooksStaySilent(t *testing.T) {
 	code, err := Run(t.Context(), []string{"hook", "omp", "wake"}, Config{Socket: socket, In: strings.NewReader(`{"seen_message_ids":[]}`), Out: &out})
 	if code != ExitUsage || err == nil || !strings.Contains(err.Error(), "enhanced run") {
 		t.Fatalf("wake receiver in an enhanced run = %d, %v; want a usage error that stops it", code, err)
+	}
+}
+
+// A manual claude.json copy in a home shared with Background runs re-adds
+// the inbox Stop hook, which would race the status reporter of a managed
+// launch.
+func TestClaudeStopIsInertOnlyInManagedLaunch(t *testing.T) {
+	_, db, socket, run := hookMailbox(t)
+	for _, managed := range []string{"1", ""} {
+		t.Setenv(coordtransport.ManagedHooksEnv, managed)
+		var out bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", "claude", "Stop"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out})
+		if err != nil || code != ExitOK {
+			t.Fatalf("managed=%q: hook = %d, %v", managed, code, err)
+		}
+		if blocked := strings.Contains(out.String(), `"decision":"block"`); blocked != (managed == "") {
+			t.Fatalf("managed=%q: Stop output = %q", managed, out.String())
+		}
+	}
+	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 1 {
+		t.Fatalf("Stop hook consumed mail: %d, %v", count, err)
 	}
 }
 
@@ -330,6 +352,64 @@ func TestCommandHooksAnnounceUnchangedStateOnce(t *testing.T) {
 	var pi bytes.Buffer
 	if code, err := Run(t.Context(), []string{"hook", "pi", "context"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &pi}); err != nil || code != ExitOK || !strings.Contains(pi.String(), "aether-internal inbox") {
 		t.Fatalf("per-call context must keep repeating: %d, %v, %q", code, err, pi.String())
+	}
+	resumed := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"resume"}`)
+	if !strings.Contains(resumed, "role: integrator") || strings.Contains(resumed, "overlapping edits") || strings.Contains(resumed, "Mission update") {
+		t.Fatalf("SessionStart(resume) must carry the role card and no announced notice: %s", resumed)
+	}
+	compacted := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"compact"}`)
+	for _, want := range []string{"role: integrator", "never report waiting", "mission plan show --wait 30", coordhooks.PeerRule, coordhooks.UntrustedRule, "aether-internal inbox", "mission plan show", "overlapping edits"} {
+		if !strings.Contains(strings.ToLower(compacted), strings.ToLower(want)) {
+			t.Fatalf("SessionStart(compact) lacks %q: %s", want, compacted)
+		}
+	}
+	if again := hook("PostToolBatch", "{}"); again != "" {
+		t.Fatalf("notices re-announced at compaction were announced again: %s", again)
+	}
+	if subagent := hook("SubagentStart", `{"hook_event_name":"SubagentStart","agent_id":"agent-1"}`); !strings.Contains(subagent, `"additionalContext":"`+coordhooks.SubagentRule+" "+coordhooks.SubagentPeerRule) {
+		t.Fatalf("SubagentStart must hand the subagent the subagent and peer rules: %s", subagent)
+	}
+	t.Setenv(coordtransport.RoleCardEnv, "1")
+	if started := hook("SessionStart", `{"hook_event_name":"SessionStart","source":"startup"}`); started != "" {
+		t.Fatalf("SessionStart(startup) repeated a card the system prompt carries: %s", started)
+	}
+	compacted = hook("SessionStart", `{"hook_event_name":"SessionStart","source":"compact"}`)
+	if strings.Contains(compacted, "role: integrator") || !strings.Contains(compacted, "aether-internal inbox") {
+		t.Fatalf("SessionStart(compact) must re-announce only the notices compaction dropped: %s", compacted)
+	}
+}
+
+// A subagent is told only the rules its run's capabilities back, from a
+// single status call.
+func TestSubagentStartFollowsCapabilities(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		capabilities []string
+		want         string
+	}{
+		{"report and send", []string{protocol.MethodCoordReport, protocol.MethodCoordSend}, coordhooks.SubagentRule + " " + coordhooks.SubagentPeerRule},
+		{"send only", []string{protocol.MethodCoordSend}, coordhooks.SubagentPeerRule},
+		{"neither", []string{protocol.MethodCoordStatus}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			socket := newCLISocket(t, func(protocol.Request) protocol.Response {
+				result, _ := json.Marshal(protocol.CoordStatusResult{WireVersion: protocol.CoordWireVersion, RunID: "run-1", Capabilities: tc.capabilities})
+				return protocol.Response{Result: result}
+			})
+			code, out := runCLI(t, socket.path, []string{"hook", "claude", "SubagentStart"}, `{"hook_event_name":"SubagentStart","agent_id":"agent-1"}`)
+			if code != ExitOK || len(socket.requests()) != 1 {
+				t.Fatalf("hook = %d after %d status calls, want one", code, len(socket.requests()))
+			}
+			if tc.want == "" {
+				if out != "" {
+					t.Fatalf("a run without report or send capabilities briefed its subagent: %s", out)
+				}
+				return
+			}
+			if !strings.Contains(out, `"additionalContext":"`+tc.want+`"`) {
+				t.Fatalf("SubagentStart context = %s, want %q", out, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,14 +1,13 @@
 package serverupdate
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -37,6 +37,8 @@ type env struct {
 	self     string
 	sibling  string
 	release  *httptest.Server
+	rel      *releasetest.Release
+	state    string
 	execs    chan execCall
 	restarts chan struct{}
 	now      time.Time
@@ -51,6 +53,14 @@ type env struct {
 	// checksum is wrong. The release handler reads it per request.
 	poisonMu sync.Mutex
 	poisoned map[string]bool
+	// missing names assets the release host answers 404 for.
+	missing map[string]bool
+	// unavailable names assets the release host answers 503 for, and
+	// counts the requests for each.
+	unavailable map[string]int
+	// stalled, when set, receives once the server binary's download has
+	// started, which then waits for resume.
+	stalled, resume chan struct{}
 }
 
 // companionAsset is the aether binary that sits beside aether-server.
@@ -65,11 +75,53 @@ func (e *env) poisonCompanion() {
 	e.poisoned = map[string]bool{companionAsset(): true}
 }
 
-// isPoisoned reports whether asset's published checksum should be wrong.
+// isPoisoned reports whether asset's download should not match the manifest.
 func (e *env) isPoisoned(asset string) bool {
 	e.poisonMu.Lock()
 	defer e.poisonMu.Unlock()
 	return e.poisoned[asset]
+}
+
+func (e *env) isMissing(asset string) bool {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	return e.missing[asset]
+}
+
+func (e *env) setMissing(asset string) {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	e.missing = map[string]bool{asset: true}
+}
+
+func (e *env) setUnavailable(asset string) {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	e.unavailable = map[string]int{asset: 0}
+}
+
+// unavailableHit counts a request for an unavailable asset and reports
+// whether it is one.
+func (e *env) unavailableHit(asset string) bool {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	n, ok := e.unavailable[asset]
+	if ok {
+		e.unavailable[asset] = n + 1
+	}
+	return ok
+}
+
+func (e *env) unavailableHits(asset string) int {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	return e.unavailable[asset]
+}
+
+func (e *env) heal() {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	e.poisoned, e.missing, e.unavailable = nil, nil, nil
 }
 
 type execCall struct {
@@ -85,38 +137,43 @@ const (
 	releaseTagUnderTest = "v0.2.0"
 )
 
-// releaseServer serves the release assets for tag the way GitHub does:
-// /releases/latest redirects to the tag page, and the download directory
-// carries checksums.txt plus one asset per binary. Which checksums are
-// wrong is read per request from e, so a test can break one asset alone.
+// releaseServer serves the signed release for tag the way GitHub does.
+// Which assets are corrupted in transit is read per request from e, so a
+// test can break one asset alone.
 func (e *env) releaseServer(t *testing.T, tag string) *httptest.Server {
 	t.Helper()
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
-	assets := map[string]string{
-		"aether-server" + suffix: newServerBinary,
-		"aether" + suffix:        newCLIBinary,
+	assets := map[string][]byte{
+		"aether-server" + suffix: []byte(newServerBinary),
+		"aether" + suffix:        []byte(newCLIBinary),
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
-	})
-	base := "/releases/download/" + tag
-	mux.HandleFunc(base+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		for name, body := range assets {
-			sum := sha256.Sum256([]byte(body))
-			digest := hex.EncodeToString(sum[:])
-			if e.isPoisoned(name) {
-				digest = strings.Repeat("0", 64)
-			}
-			_, _ = fmt.Fprintf(w, "%s  %s\n", digest, name)
+	for _, name := range clientAssets {
+		if _, ok := assets[name]; !ok {
+			assets[name] = []byte("client " + name)
 		}
-	})
-	for name, body := range assets {
-		mux.HandleFunc(base+"/"+name, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(body))
-		})
 	}
-	srv := httptest.NewServer(mux)
+	rel := releasetest.Serve(t, tag, assets)
+	e.rel = rel
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := path.Base(r.URL.Path)
+		if e.stalled != nil && r.Method == http.MethodGet && strings.HasPrefix(name, "aether-server-") {
+			e.stalled <- struct{}{}
+			<-e.resume
+		}
+		if e.isMissing(name) {
+			http.NotFound(w, r)
+			return
+		}
+		if e.unavailableHit(name) {
+			http.Error(w, "try again later", http.StatusServiceUnavailable)
+			return
+		}
+		if e.isPoisoned(name) {
+			_, _ = w.Write(bytes.ToUpper(assets[name]))
+			return
+		}
+		rel.Config.Handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -181,7 +238,10 @@ func newEnv(t *testing.T, poison bool) *env {
 	t.Cleanup(func() { _ = sub.Close() })
 	e.sub = sub
 
+	e.state = filepath.Join(dir, "server-update")
 	svc, err := New(Config{
+		StateDir:   e.state,
+		Database:   filepath.Join(dir, "aether.db"),
 		Store:      db,
 		Bus:        bus,
 		Checker:    selfupdate.NewChecker(e.release.URL, time.Hour),
@@ -254,29 +314,37 @@ func TestUpdateNowReplacesBothBinariesAndReExecs(t *testing.T) {
 	if got := e.read(t, e.sibling); got != newCLIBinary {
 		t.Fatalf("aether = %q, want %q", got, newCLIBinary)
 	}
-	if p := e.phase(t); p.Phase != events.ServerUpdateApplying || p.ActorID != "mem_admin" {
-		t.Fatalf("first phase = %+v, want applying by mem_admin", p)
+	// The replaced files stay beside the new ones for a rollback.
+	for _, path := range []string{e.self, e.sibling} {
+		if got := e.read(t, prevPath(path)); got != "the old binary" {
+			t.Fatalf("%s = %q, want the replaced binary", prevPath(path), got)
+		}
+	}
+	for _, want := range []events.ServerUpdatePhase{events.ServerUpdatePreflight, events.ServerUpdateApplying} {
+		if p := e.phase(t); p.Phase != want || p.ActorID != "mem_admin" || p.Version != "v0.2.0" {
+			t.Fatalf("phase = %+v, want %s v0.2.0 by mem_admin", p, want)
+		}
 	}
 
-	// The swap is recorded the moment the binaries are replaced, before
-	// anything is restarted: that is what a status call after a restart
-	// the server could not complete has to read.
+	// Only the new process records applied, once it has booted; until
+	// then the swap record says what to verify or roll back.
 	state, err := e.db.GetServerUpdate(t.Context())
 	if err != nil {
 		t.Fatalf("GetServerUpdate: %v", err)
 	}
-	if state.Last == nil || state.Last.Outcome != store.ServerUpdateApplied || state.Last.Version != "v0.2.0" {
-		t.Fatalf("last = %+v, want an applied v0.2.0", state.Last)
+	if state.Last != nil || state.Pending != nil {
+		t.Fatalf("state = %+v, want no outcome and nothing pending before the restart", state)
 	}
-	if state.Pending != nil {
-		t.Fatalf("pending = %+v, want none", state.Pending)
+	rec, err := loadRecord(e.state)
+	if err != nil || rec == nil || rec.Phase != recordVerifying || rec.ToVersion != "v0.2.0" || rec.Binaries[0] != e.self {
+		t.Fatalf("swap record = %+v, %v; want verifying v0.2.0 starting with %s", rec, err, e.self)
 	}
 
 	// The result is written before the restart runs, which is why Update
 	// hands the restart back instead of taking it.
 	restart()
 	if p := e.phase(t); p.Phase != events.ServerUpdateRestarting || p.Version != "v0.2.0" {
-		t.Fatalf("second phase = %+v, want restarting v0.2.0", p)
+		t.Fatalf("phase = %+v, want restarting v0.2.0", p)
 	}
 	select {
 	case call := <-e.execs:
@@ -292,17 +360,29 @@ func TestUpdateNowReplacesBothBinariesAndReExecs(t *testing.T) {
 	default:
 		t.Fatal("the restart did not re-exec the new binary")
 	}
-	// This stub exec fails and the process is not under systemd, so the
-	// swapped-but-not-restarted state is recorded honestly, naming the
-	// version that starts on the next restart.
+	// The stub exec fails and nothing else would start the new binary, so
+	// the swap is undone and recorded with the real error.
+	for _, path := range []string{e.self, e.sibling} {
+		if got := e.read(t, path); got != "the old binary" {
+			t.Fatalf("%s = %q after a failed re-exec, want the old binary back", path, got)
+		}
+	}
+	p := e.phase(t)
+	if p.Phase != events.ServerUpdateRolledBack || !strings.Contains(p.Detail, "exec stub") {
+		t.Fatalf("phase = %+v, want rolled_back carrying the exec error", p)
+	}
 	if state, err = e.db.GetServerUpdate(t.Context()); err != nil {
 		t.Fatalf("GetServerUpdate: %v", err)
 	}
-	if state.Last == nil || state.Last.Outcome != store.ServerUpdateFailed {
-		t.Fatalf("last after a failed re-exec = %+v, want failed", state.Last)
+	if state.Last == nil || state.Last.Outcome != store.ServerUpdateRolledBack || !strings.Contains(state.Last.Detail, "exec stub") {
+		t.Fatalf("last after a failed re-exec = %+v, want rolled_back with the real error", state.Last)
 	}
-	if !strings.Contains(state.Last.Detail, "v0.2.0 is installed") {
-		t.Fatalf("last detail = %q, want it to say the new binary is installed", state.Last.Detail)
+	status, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Phase != protocol.ServerUpdatePhaseRolledBack || status.ToVersion != "v0.2.0" || status.Error != state.Last.Detail {
+		t.Fatalf("status = %+v, want rolled_back to v0.2.0 with the error", status)
 	}
 	select {
 	case <-e.restarts:
@@ -325,8 +405,9 @@ func TestUpdateNowRecordsAFailedApply(t *testing.T) {
 	if got := e.read(t, e.self); got != "the old binary" {
 		t.Fatalf("aether-server = %q, want the old binary untouched", got)
 	}
+	e.phase(t) // preflight
 	if p := e.phase(t); p.Phase != events.ServerUpdateApplying {
-		t.Fatalf("first phase = %+v, want applying", p)
+		t.Fatalf("phase = %+v, want applying", p)
 	}
 	p := e.phase(t)
 	if p.Phase != events.ServerUpdateFailed || !strings.Contains(p.Detail, "checksum mismatch") {
@@ -426,6 +507,7 @@ func TestUpdateRejectsWhatIsNotAReleaseTag(t *testing.T) {
 }
 
 func TestUpdateWithNoVersionResolvesTheLatestRelease(t *testing.T) {
+	setVersion(t, "v0.1.0")
 	e := newEnv(t, false)
 	res, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateIdle})
 	if err != nil {
@@ -433,6 +515,64 @@ func TestUpdateWithNoVersionResolvesTheLatestRelease(t *testing.T) {
 	}
 	if res.Version != "v0.2.0" {
 		t.Fatalf("version = %q, want the latest release v0.2.0", res.Version)
+	}
+}
+
+// With no version, only a release newer than the running server is an
+// update; a release feed with nothing signed yet is no update either.
+func TestUpdateWithNoVersionNeverGoesBackwards(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	e := newEnv(t, false)
+	_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrUpToDate) || !strings.Contains(err.Error(), "aether-server v0.3.0 is not older than the latest release v0.2.0") {
+		t.Fatalf("err = %v, want no update", err)
+	}
+	e.untouched(t)
+	e.rel.Unsign()
+	if _, _, err = e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateNow}); !errors.Is(err, ErrUpToDate) {
+		t.Fatalf("err = %v, want no update for a release without a manifest", err)
+	}
+	if state, serr := e.db.GetServerUpdate(t.Context()); serr != nil || state.Last != nil {
+		t.Fatalf("last = %+v, %v; no update is not a failed attempt", state.Last, serr)
+	}
+}
+
+// A run that starts while a scheduled release downloads undoes the swap;
+// the update stays pending for the next idle moment.
+func TestARunStartedDuringTheDownloadUndoesTheSwap(t *testing.T) {
+	e := newEnv(t, false)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	calls := 0
+	e.svc.cfg.Busy = func(context.Context) domain.ServerBusy {
+		calls++
+		if calls == 1 {
+			return domain.ServerBusy{}
+		}
+		return domain.ServerBusy{Runs: 1}
+	}
+	e.svc.Tick(t.Context())
+	for _, path := range []string{e.self, e.sibling} {
+		if got := e.read(t, path); got != "the old binary" {
+			t.Fatalf("%s = %q, want the previous binary back", path, got)
+		}
+	}
+	if rec, err := loadRecord(e.state); err != nil || rec != nil {
+		t.Fatalf("swap record = %+v, %v; want none", rec, err)
+	}
+	state, err := e.db.GetServerUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Pending == nil || state.Last != nil {
+		t.Fatalf("state = %+v, want the update still pending", state)
+	}
+	select {
+	case call := <-e.execs:
+		t.Fatalf("re-executed %v while a run was working", call.argv)
+	default:
 	}
 }
 
@@ -463,9 +603,15 @@ func TestTickAppliesThePendingUpdateOnlyWhenIdle(t *testing.T) {
 	// Paused and parked runs are not working, so a server holding only
 	// those is idle and the update lands.
 	e.busy = domain.ServerBusy{Paused: 2}
+	// Under systemd a failed re-exec leaves the new binary for the unit
+	// restart, so the swap stays visible here.
+	e.underSystemd = true
 	e.svc.Tick(t.Context())
 	if got := e.read(t, e.self); got != newServerBinary {
 		t.Fatalf("aether-server = %q, want the new binary", got)
+	}
+	if p := e.phase(t); p.Phase != events.ServerUpdatePreflight {
+		t.Fatalf("phase = %+v, want preflight", p)
 	}
 	if p := e.phase(t); p.Phase != events.ServerUpdateApplying {
 		t.Fatalf("phase = %+v, want applying", p)
@@ -510,6 +656,7 @@ func TestRestartFallsBackToSystemdWhenExecFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
+	e.phase(t) // preflight
 	e.phase(t) // applying
 	restart()
 	e.phase(t) // restarting
@@ -517,6 +664,10 @@ func TestRestartFallsBackToSystemdWhenExecFails(t *testing.T) {
 	case <-e.restarts:
 	default:
 		t.Fatal("a failed re-exec under systemd did not fall back to systemctl restart")
+	}
+	// The restarted unit runs the new binary, whose own start decides.
+	if got := e.read(t, e.self); got != newServerBinary {
+		t.Fatalf("aether-server = %q, want the new binary left for systemd to start", got)
 	}
 }
 
@@ -526,7 +677,7 @@ func TestStatusReportsTheWholeState(t *testing.T) {
 		protocol.ServerUpdateParams{Version: "v0.2.0", When: protocol.ServerUpdateIdle}); err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -565,7 +716,7 @@ func TestIncapableServerRefusesAndNamesTheManualCommands(t *testing.T) {
 	if !errors.Is(err, ErrIncapable) {
 		t.Fatalf("Update error = %v, want ErrIncapable", err)
 	}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -649,7 +800,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 		t.Fatalf("schedule: %v", err)
 	}
 	e.busy = domain.ServerBusy{Runs: 2, Paused: 1, Shells: 3}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -662,7 +813,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 
 	// Only paused runs left: nothing is holding it back any more.
 	e.busy = domain.ServerBusy{Paused: 1}
-	if got, err = e.svc.Status(t.Context()); err != nil {
+	if got, err = e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{}); err != nil {
 		t.Fatalf("Status: %v", err)
 	}
 	if got.Waiting != nil {
@@ -675,7 +826,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 func TestStatusReportsNoWaitWithoutAPendingUpdate(t *testing.T) {
 	e := newEnv(t, false)
 	e.busy = domain.ServerBusy{Runs: 5}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -715,5 +866,26 @@ func TestAHeldServerDoesNotApply(t *testing.T) {
 	e.svc.Tick(t.Context())
 	if got := e.read(t, e.self); got != "the old binary" {
 		t.Fatalf("aether-server = %q, want it untouched while held", got)
+	}
+}
+
+// A trial that has not committed owns swap.json until its Commit, which
+// would overwrite a new update's record: no update starts before then.
+func TestAnUncommittedTrialRefusesANewUpdate(t *testing.T) {
+	e := newEnv(t, false)
+	if err := saveRecord(e.state, &swapRecord{Phase: recordVerifying, FromVersion: "v0.1.0", ToVersion: "v0.1.5", Binaries: []string{e.self}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "v0.1.5 is still verifying its first start") {
+		t.Fatalf("Update now = %v, want ErrBusy naming the uncommitted trial", err)
+	}
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatalf("aether-server = %q, want it untouched", got)
+	}
+	rec, err := loadRecord(e.state)
+	if err != nil || rec == nil || rec.ToVersion != "v0.1.5" || rec.Phase != recordVerifying {
+		t.Fatalf("swap record = %+v, %v; want the trial's own", rec, err)
 	}
 }

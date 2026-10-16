@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,6 +71,61 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("status lacks %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// TestEdgeStatusReportsAStaleConnection reads status.json as a server
+// left it: connected is shown only while the heartbeat is fresh and the
+// server process runs.
+func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	tests := []struct {
+		name   string
+		status edgeagent.Status
+		want   []string
+	}{
+		{"fresh", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-5 * time.Second)},
+			[]string{"connection   connected since", "the edge last answered 5s ago"}},
+		{"hung", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-3 * time.Minute)},
+			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}},
+		{"killed", edgeagent.Status{Connected: true, Since: since, PID: gone.Process.Pid, Heartbeat: now},
+			[]string{"stale: reported connected since", fmt.Sprintf("server process %d is not running", gone.Process.Pid)}},
+		{"before heartbeats", edgeagent.Status{Connected: true, Since: since},
+			[]string{"connected since", "unchecked: the running server records no heartbeat", "next         sudo systemctl restart aether-server"}},
+		{"stopped", edgeagent.Status{Error: "server stopped", Since: since},
+			[]string{"disconnected since", "server stopped"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if _, err := serverID(dir); err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(tt.status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(edgeagent.StateDir(dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(edgeagent.StateDir(dir), "status.json"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, now); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range append(tt.want, "measures     the server->edge control connection; it does not prove clients can reach the server") {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("status lacks %q:\n%s", want, out.String())
+				}
+			}
+		})
 	}
 }
 

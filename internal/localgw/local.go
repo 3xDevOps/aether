@@ -128,36 +128,66 @@ func (s *localState) cacheConfig(cfg cli.Config) {
 	s.mtime = info.ModTime()
 }
 
-// snapshot returns the current link config under the lock. The CLI may update
-// its config while the gateway is running, so reload it when its mtime changes.
+// snapshot returns the current link config under the lock, with any change
+// the CLI saved meanwhile that leaves the server alone. followLink moves the
+// gateway onto another server.
 func (s *localState) snapshot() cli.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	path, err := cli.Path()
-	if err == nil {
-		if info, statErr := os.Stat(path); statErr == nil && !info.ModTime().Equal(s.mtime) {
-			if cfg, loadErr := cli.Load(); loadErr == nil {
-				if s.cfg.Active != "" {
-					named, ok := cfg.Named(s.cfg.Active)
-					if !ok {
-						return s.cfg
-					}
-					cfg = named
-				}
-				// Repo and profile metadata do not affect Dial; keep live
-				// streams up when only those fields changed.
-				relink := s.cfg.Addr != cfg.Addr || s.cfg.User != cfg.User ||
-					s.cfg.Key != cfg.Key || s.cfg.KnownHosts != cfg.KnownHosts ||
-					s.cfg.EdgeURL != cfg.EdgeURL || s.cfg.ServerID != cfg.ServerID
-				s.cacheConfig(cfg)
-				if relink && s.backend != nil {
-					s.backend.Relink(cfg, nil)
-				}
-			}
-		}
-	}
+	s.reload()
 	return s.cfg
+}
+
+// reload picks up the link config the CLI saved since it was cached. A
+// change that leaves the dial fields alone is cached; a change of server is
+// returned uncached, with true, for followLink to move onto. The caller
+// holds s.mu.
+func (s *localState) reload() (cli.Config, bool) {
+	path, err := cli.Path()
+	if err != nil {
+		return cli.Config{}, false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.ModTime().Equal(s.mtime) {
+		return cli.Config{}, false
+	}
+	cfg, err := cli.Load()
+	if err != nil {
+		return cli.Config{}, false
+	}
+	if s.cfg.Active != "" {
+		named, ok := cfg.Named(s.cfg.Active)
+		if !ok {
+			return cli.Config{}, false
+		}
+		cfg = named
+	}
+	// Repo and profile metadata do not affect Dial; keep live streams up
+	// when only those fields changed.
+	if s.cfg.Addr != cfg.Addr || s.cfg.User != cfg.User ||
+		s.cfg.Key != cfg.Key || s.cfg.KnownHosts != cfg.KnownHosts ||
+		s.cfg.EdgeURL != cfg.EdgeURL || s.cfg.ServerID != cfg.ServerID {
+		return cfg, true
+	}
+	s.cacheConfig(cfg)
+	return cfg, false
+}
+
+// followLink moves the gateway onto the server a link saved in a terminal
+// names, as link.switch does. A switch, sync start or forward in progress
+// holds switching across backend calls, so a request that finds it held
+// skips the reload rather than wait; a later request picks it up.
+func (g *Gateway) followLink() {
+	if !g.local.switching.TryLock() {
+		return
+	}
+	defer g.local.switching.Unlock()
+	g.local.mu.Lock()
+	target, moved := g.local.reload()
+	g.local.mu.Unlock()
+	if moved {
+		g.moveTo(target, nil)
+	}
 }
 
 // handleLocal serves POST /local/v1/{verb}: the client-machine verbs that
@@ -276,6 +306,9 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	}
 	if perr := g.adoptLink(result, params.Name); perr != nil {
+		return nil, perr
+	}
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
 		return nil, perr
 	}
 	cfg := result.Config
@@ -450,12 +483,14 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 		}
 	}
 	g.local.mu.Lock()
-	defer g.local.mu.Unlock()
 	cfg, url, err := localops.LinkRepo(g.local.cfg, params.Repo, wsID)
+	if err == nil {
+		g.local.cacheConfig(cfg)
+	}
+	g.local.mu.Unlock()
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
 	}
-	g.local.cacheConfig(cfg)
 	origin, perr := g.recordWorkspaceOrigin(r, wsID, cfg.Repo)
 	if perr != nil {
 		return nil, perr

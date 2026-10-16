@@ -3,10 +3,13 @@ package localgw
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -28,12 +31,12 @@ var probeAccess = selfupdate.Probe
 // server's version, so the dashboard can tell the user which half of the
 // pair is behind.
 //
-// A server that does not answer costs the server half only. The CLI half
-// is about a binary on this machine and has nothing to do with the SSH
-// hop, and failing the whole verb would take the CLI banner down with it
-// during exactly the outage the user is most likely to be looking at. A
-// refresh that cannot reach GitHub does fail the whole verb: the click
-// behind it has nothing to install either way.
+// Each half fails alone. A server that does not answer costs the server
+// half only: the CLI half is about a binary on this machine, and failing
+// the whole verb would take the CLI banner down with it during exactly the
+// outage the user is most likely to be looking at. A release lookup that
+// cannot reach GitHub costs the CLI half only, so a server that refuses
+// this client still says so.
 func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Refresh bool `json:"refresh"`
@@ -42,15 +45,19 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		return nil, perr
 	}
 	check, perr := g.checkRelease(r, params.Refresh)
-	if perr != nil {
-		return nil, perr
-	}
 	out := struct {
-		CLI           selfupdate.Check `json:"cli"`
-		ServerVersion string           `json:"server_version"`
-		ServerBehind  bool             `json:"server_behind"`
-		ServerError   string           `json:"server_error,omitempty"`
-		Supervised    bool             `json:"supervised"`
+		CLI selfupdate.Check `json:"cli"`
+		// CLIError is why the release lookup failed; cli then carries
+		// only this build's own fields.
+		CLIError      string `json:"cli_error,omitempty"`
+		ServerVersion string `json:"server_version"`
+		ServerBehind  bool   `json:"server_behind"`
+		ServerError   string `json:"server_error,omitempty"`
+		// ClientUpdateRequired reports that the server refuses this CLI
+		// until it updates to MinClientVersion, which server.info names.
+		ClientUpdateRequired bool   `json:"client_update_required"`
+		MinClientVersion     string `json:"min_client_version"`
+		Supervised           bool   `json:"supervised"`
 		// ShellBuildError is why the last desktop-app rebuild failed. The
 		// gateway that ran it exited so the shell could respawn on the new
 		// CLI, so this gateway reads the record it left behind: without it
@@ -63,27 +70,92 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// the probe itself failed; the click then reports that error.
 		CLIPath       string            `json:"cli_path,omitempty"`
 		InstallMethod selfupdate.Method `json:"install_method,omitempty"`
-	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
+		// TargetVersion is the release this CLI should move to, empty when
+		// there is none or ServerFirst holds. It is set where update.apply
+		// refuses to install it, CanSelfUpdate false: the user then
+		// installs it another way.
+		TargetVersion string `json:"target_version"`
+		// ServerFirst reports that the linked server is behind the target
+		// and this member, an admin, can update it: update.apply refuses
+		// until `aether server update` has run.
+		ServerFirst bool `json:"server_first"`
+		// CanSelfUpdate reports that update.apply can install a release
+		// here: false for a dev build, on Windows, and in a packaged app.
+		CanSelfUpdate bool `json:"can_self_update"`
+	}{
+		CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError(),
+		CanSelfUpdate: check.CanSelfUpdate && !check.Dev && g.cfg.Packaged == "",
+	}
+	if perr != nil {
+		out.CLIError = perr.Message
+	}
 	if access, err := probeAccess(); err == nil {
 		out.CLIPath, out.InstallMethod = access.Path, access.Method
 	}
 
-	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
-	if perr != nil {
-		out.ServerError = perr.Message
-		return out, nil
+	info, err := g.serverInfo(r)
+	out.TargetVersion = updateTarget(check, info.ServerVersion)
+	if g.serverFirst(r, info, out.TargetVersion) {
+		out.TargetVersion, out.ServerFirst = "", true
 	}
-	var info protocol.ServerInfoResult
-	if err := json.Unmarshal(result, &info); err != nil {
-		out.ServerError = "decode server info: " + err.Error()
+	if err != nil {
+		out.ServerError = err.Error()
 		return out, nil
 	}
 	out.ServerVersion = info.ServerVersion
 	out.ServerBehind = selfupdate.Behind(info.ServerVersion, check.Latest)
+	out.MinClientVersion = info.MinClientVersion
+	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
 	return out, nil
 }
 
-// localUpdateApply installs the newest release over this CLI. This
+// serverFirst is cli.ServerFirst for the linked server: server.info
+// supplies its version and this member's role, and server.update_status,
+// asked only when the rest of the rule holds, whether it can update
+// itself. A server that does not answer is not waited for.
+func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
+	admin := info.Member.Role == string(domain.RoleAdmin)
+	if target == "" || !cli.ServerFirst(info.ServerVersion, target, admin, true) {
+		return false
+	}
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerUpdateStatus, nil)
+	if perr != nil {
+		return false
+	}
+	var status protocol.ServerUpdateStatusResult
+	return json.Unmarshal(result, &status) == nil && status.Capable
+}
+
+func (g *Gateway) serverInfo(r *http.Request) (protocol.ServerInfoResult, error) {
+	var info protocol.ServerInfoResult
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
+	if perr != nil {
+		return info, errors.New(perr.Message)
+	}
+	if err := json.Unmarshal(result, &info); err != nil {
+		return info, fmt.Errorf("decode server info: %w", err)
+	}
+	return info, nil
+}
+
+// updateTarget is the release this CLI should move to. A linked server
+// ahead of this CLI decides it: the client matches its server rather than
+// whatever GitHub calls latest, which skips prereleases and can lag a
+// publish. Otherwise it is the newest release when that is newer.
+func updateTarget(check selfupdate.Check, serverVersion string) string {
+	if check.Dev || check.Disabled {
+		return ""
+	}
+	if core := cli.MatchServer(check.Version, serverVersion); core != "" {
+		return core
+	}
+	if check.UpdateAvailable {
+		return check.Latest
+	}
+	return ""
+}
+
+// localUpdateApply installs updateTarget's release over this CLI. This
 // process never gains privileges: on macOS a binary the user cannot write
 // is installed by the system's administrator dialog, one fixed command
 // run by root outside this process; elsewhere it is a refusal that names
@@ -110,11 +182,12 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "a release lookup or install is already running in this gateway"}
 	}
 	defer g.updating.Store(false)
-	check, perr := g.checkRelease(r, true)
-	if perr != nil {
-		return nil, perr
-	}
+	check, lookupErr := g.checkRelease(r, true)
+	info, _ := g.serverInfo(r)
+	target := updateTarget(check, info.ServerVersion)
 	switch {
+	case lookupErr != nil && target == "":
+		return nil, lookupErr
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "this is a dev build with no release to update to; rebuild it with `make build`"}
@@ -123,7 +196,13 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
 	case !check.CanSelfUpdate:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: selfupdate.ErrWindows.Error()}
-	case !check.UpdateAvailable:
+	case g.serverFirst(r, info, target):
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "update the server first: aether server update (the server runs " + info.ServerVersion + " and this installs " + target + ")"}
+	case target == "" && check.Latest == "":
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "no signed release is published yet; this aether stays on " + check.Version}
+	case target == "":
 		// Nothing to install. Downloading the running version over itself
 		// would answer success for work that changed nothing, and on a
 		// supervised gateway it would restart the app for no reason.
@@ -136,15 +215,15 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// cost a download and, on macOS, a second password dialog for the
 	// same bytes, so the answer picks up after the swap instead.
 	var updated []string
-	if done := g.installed.Load(); done != nil && done.tag == check.Latest {
+	if done := g.installed.Load(); done != nil && done.tag == target {
 		updated = done.paths
 	} else {
 		var err error
-		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), check.Latest)
+		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), target)
 		if err != nil {
-			return nil, applyError(err, check.Latest)
+			return nil, applyError(err, target)
 		}
-		g.installed.Store(&installedRelease{tag: check.Latest, paths: updated})
+		g.installed.Store(&installedRelease{tag: target, paths: updated})
 	}
 
 	// The CLI is swapped; the Electron shell around the dashboard is not,
@@ -153,9 +232,9 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// process already finished is not run again for a repeat click: the
 	// app on disk is new, and only the restart is left.
 	outcome := rebuildNone
-	rebuilt := g.rebuild.builtRelease() == check.Latest
+	rebuilt := g.rebuild.builtRelease() == target
 	if len(updated) > 0 && !rebuilt {
-		outcome = g.startAppRebuild(updated[0], check.Latest)
+		outcome = g.startAppRebuild(updated[0], target)
 	}
 	// A build for an earlier release covers nothing here: reporting it as
 	// this release's rebuild would have the dashboard watch it finish and
@@ -199,7 +278,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		Note           string   `json:"note,omitempty"`
 		RestartCommand string   `json:"restart_command,omitempty"`
 	}{
-		Updated: updated, Version: check.Latest, Restarting: g.cfg.Supervised,
+		Updated: updated, Version: target, Restarting: g.cfg.Supervised,
 		Rebuilding: rebuilding, Note: note,
 		RestartCommand: restartCommand(updated),
 	}, nil

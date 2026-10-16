@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -21,17 +19,7 @@ import (
 // GitHub release download layout updateBinaries expects.
 func release(t *testing.T, body []byte) *httptest.Server {
 	t.Helper()
-	asset := "aether-" + runtime.GOOS + "-" + runtime.GOARCH
-	sum := sha256.Sum256(body)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/releases/download/v1.3.0/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), asset)
-	})
-	mux.HandleFunc("/releases/download/v1.3.0/"+asset, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(body)
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-" + runtime.GOOS + "-" + runtime.GOARCH: body})
 	return srv
 }
 

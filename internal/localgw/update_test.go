@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -23,26 +23,14 @@ const (
 	releaseTag = "v1.3.0"
 )
 
-// releaseChecker points the update verbs at a stub that answers the
-// GitHub latest-release redirect, so no test dials the network. The
-// returned setter publishes a different tag mid-test, which is how a
-// release shipping while the app is open is reproduced.
+// releaseChecker points the update verbs at a stub signed release host,
+// so no test dials the network. The returned setter publishes a different
+// tag mid-test, which is how a release shipping while the app is open is
+// reproduced.
 func releaseChecker(t *testing.T) (*selfupdate.Checker, func(string)) {
 	t.Helper()
-	var mu sync.Mutex
-	tag := releaseTag
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		latest := tag
-		mu.Unlock()
-		http.Redirect(w, r, "/releases/tag/"+latest, http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	return selfupdate.NewChecker(srv.URL, time.Hour), func(next string) {
-		mu.Lock()
-		defer mu.Unlock()
-		tag = next
-	}
+	rel := releasetest.Serve(t, releaseTag, map[string][]byte{"aether-linux-amd64": []byte("binary")})
+	return selfupdate.NewChecker(rel.URL, time.Hour), rel.SetLatest
 }
 
 // pinVersion makes this a release build for one test; the check reads the
@@ -241,10 +229,15 @@ func TestUpdateCheckReportsReleaseToPackagedBuild(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		CLI selfupdate.Check `json:"cli"`
+		CLI           selfupdate.Check `json:"cli"`
+		TargetVersion string           `json:"target_version"`
+		CanSelfUpdate bool             `json:"can_self_update"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
+	}
+	if got.TargetVersion != releaseTag || got.CanSelfUpdate {
+		t.Fatalf("target_version = %q can_self_update = %v, want %s from the release page", got.TargetVersion, got.CanSelfUpdate, releaseTag)
 	}
 	cli := got.CLI
 	if cli.Packaged != "Android app" || !cli.UpdateAvailable || cli.Latest != releaseTag ||
@@ -284,5 +277,42 @@ func TestUpdateCheckRefreshBypassesTheCache(t *testing.T) {
 	}
 	if tag := latest(`{"refresh":true}`); tag != "v1.4.0" {
 		t.Fatalf("refreshed latest = %q, want v1.4.0", tag)
+	}
+}
+
+// TestUpdateCheckAnswersWithoutGitHub: a release lookup that fails costs
+// the CLI half only, so a server refusing this client still says so.
+func TestUpdateCheckAnswersWithoutGitHub(t *testing.T) {
+	pinVersion(t)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "rate limited", http.StatusForbidden)
+	}))
+	t.Cleanup(github.Close)
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodServerInfo: json.RawMessage(`{"server_version":"v1.3.0","min_client_version":"v1.3.0"}`),
+	}}}
+	g, err := New(Config{Backend: backend, Update: selfupdate.NewChecker(github.URL, time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(g, http.MethodPost, "/local/v1/update.check", `{"refresh":true}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		CLI                  selfupdate.Check `json:"cli"`
+		CLIError             string           `json:"cli_error"`
+		ClientUpdateRequired bool             `json:"client_update_required"`
+		MinClientVersion     string           `json:"min_client_version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.CLIError, "check for releases: ") || got.CLI.Version != runningTag {
+		t.Fatalf("cli = %+v, cli_error = %q", got.CLI, got.CLIError)
+	}
+	if !got.ClientUpdateRequired || got.MinClientVersion != "v1.3.0" {
+		t.Fatalf("client_update_required = %v, min_client_version = %q", got.ClientUpdateRequired, got.MinClientVersion)
 	}
 }

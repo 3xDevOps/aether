@@ -2,14 +2,15 @@ package server
 
 import (
 	"log/slog"
+	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 )
 
-// Server self-update (): the admin-triggered swap of the server's own
-// binaries. The service answers the two control methods and rides the
+// Server self-update: the admin-triggered swap of the server's own
+// binaries. The service answers the two control methods, rides the
 // scheduler's poll loop, which is what makes a scheduled update land at
-// the first idle moment; it owns no goroutine of its own.
+// the first idle moment, and runs the server's background release check.
 //
 // Config.SelfUpdate.Host is what lets it act on the host, and only
 // cmd/aether-server fills it in. An embedded server - the end-to-end
@@ -20,9 +21,13 @@ func init() {
 		svc, err := serverupdate.New(serverupdate.Config{
 			Store:      d.Store,
 			Bus:        d.Bus,
+			StateDir:   UpdateStateDir(d.DataDir),
+			Database:   StorePath(d.DataDir),
 			Busy:       d.Runs.Busy,
+			Releases:   d.Config.SelfUpdate.Releases,
 			Checker:    d.Config.SelfUpdate.Checker,
 			Host:       d.Config.SelfUpdate.Host,
+			Drain:      d.Config.SelfUpdate.Drain,
 			Executable: d.Config.SelfUpdate.Executable,
 			Now:        d.Config.SelfUpdate.Now,
 			Hold: func() string {
@@ -43,6 +48,11 @@ func init() {
 		}
 		d.SSH.Services.ServerUpdate = svc
 		d.Runs.UseUpdates(svc)
-		return nil, nil
+		return svc, nil
 	})
 }
+
+// UpdateStateDir is where the server keeps its update state under
+// dataDir: the swap record a restart reads before the store opens, the
+// release-check schedule, and the pre-update database snapshot.
+func UpdateStateDir(dataDir string) string { return filepath.Join(dataDir, "server-update") }

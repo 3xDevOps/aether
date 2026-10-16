@@ -443,21 +443,28 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	stderr := &tailBuffer{max: acpStderrTail}
 	go func() { _, _ = io.Copy(stderr, att.Stderr()) }()
 
-	var mcp []acp.McpServer
-	if coordDir != "" {
-		mcp = []acp.McpServer{{Stdio: &acp.McpServerStdio{
-			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp"}, Env: []acp.EnvVariable{},
-		}}}
-	}
 	var titleLookup time.Duration
 	if profile.ACPTitleLookup {
 		titleLookup = acpTitleLookupDelay
 	}
-	prompt, systemPrompt := d.s.withCoAuthorInstruction(task, entry.missionAssigned, oneShot), ""
-	if profile.ACPSystemPrompt {
-		prompt, systemPrompt = task, d.s.runInstructions(entry.missionAssigned, oneShot)
-	}
 	runID := entry.runID
+	instructions := d.s.runInstructions(d.s.runGuide(ctx, runID, entry.missionAssigned, oneShot, true))
+	prompt, systemPrompt := task, instructions
+	if !profile.ACPSystemPrompt {
+		prompt, systemPrompt = withInstructions(task, instructions), ""
+	}
+	var mcp []acp.McpServer
+	if coordDir != "" {
+		// Set either way: a container first launched for Standard has it.
+		card := acp.EnvVariable{Name: coordtransport.RoleCardEnv}
+		if systemPrompt != "" {
+			card.Value = "1"
+		}
+		mcp = []acp.McpServer{{Stdio: &acp.McpServerStdio{
+			Name: "aether", Command: coordtransport.BinaryPath, Args: []string{"mcp"}, Env: []acp.EnvVariable{card},
+		}}}
+	}
+	r := &acpRun{exec: exec, stderr: stderr}
 	sess, err := acphost.Start(ctx, att.Stdout(), att.Stdin(), acphost.Config{
 		LogPath:        d.s.cfg.PTY.ItemLogPath(runID),
 		Cwd:            d.s.cfg.WorktreeMount,
@@ -471,6 +478,12 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		AgentCommand:   adapter[0],
 		TitleLookup:    titleLookup,
 		OnState: func(st acphost.TurnState) {
+			// A turn the driver ends by closing its session reports
+			// interrupted, which would ask the member to continue a run
+			// they closed.
+			if d.stopping(r) {
+				return
+			}
 			if message, ok := acphost.UsageLimit(st.Failed); ok {
 				d.s.mu.Lock()
 				d.s.setUsageLimitLocked(entry, message)
@@ -513,11 +526,11 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			}
 		}
 	}
-	r := &acpRun{session: sess, exec: exec, stderr: stderr}
+	r.session = sess
 	// A session that started anew, here or after a failed restore, or
 	// refused its prompts so far has not had them yet.
 	if task == "" && systemPrompt == "" && (fresh || !acphost.Answered(sess.Log())) {
-		r.instructions = d.s.runInstructions(entry.missionAssigned, oneShot)
+		r.instructions = instructions
 	}
 	if !oneShot {
 		// Before the watch starts, so its first turn state is not
@@ -561,6 +574,12 @@ func (d *acpDriver) reconnected(entry *supervised) {
 	if ended {
 		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
 	}
+}
+
+func (d *acpDriver) stopping(r *acpRun) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return r.stopping
 }
 
 func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {

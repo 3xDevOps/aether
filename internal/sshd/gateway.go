@@ -18,8 +18,9 @@ func init() {
 	registerMethod(protocol.MethodServerDisk, (*Server).serverDisk)
 }
 
-// RunPatcher renders a run checkout's diff: against its recorded fork
-// point, or between two diff-snapshot trees. The git engine implements it.
+// RunPatcher renders a run checkout's diff: against its effective base
+// commit, from a diff-snapshot tree to the current state, or between two
+// diff-snapshot trees. The git engine implements it.
 type RunPatcher interface {
 	RunPatch(ctx context.Context, run domain.RunID, req gitengine.PatchRequest) (gitengine.Patch, error)
 }
@@ -53,15 +54,17 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
-		return nil, invalidParams("run.patch: from and to must both be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit), or both empty")
+		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: retained snapshot history has expired or is unavailable"}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: current diff input exceeds 128 MiB or available disk headroom"}
-	case err != nil:
-		// The wrapped error names checkout paths on the server, so it is
-		// not echoed to the client.
+	case errors.Is(err, gitengine.ErrCheckoutNotFound), errors.Is(err, gitengine.ErrRunMetadataNotFound):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: this run has no checkout to diff"}
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: rendering the diff took longer than 30s: " + err.Error()}
+	case err != nil:
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: " + err.Error()}
 	}
 	return protocol.RunPatchResult{
 		RunID:     string(id),
@@ -69,6 +72,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 		Patch:     p.Text,
 		Truncated: p.Truncated,
 		Recorded:  p.Recorded,
+		ForkTree:  p.ForkTree,
 	}, nil
 }
 

@@ -218,7 +218,12 @@ with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
 as its own request lasts, and a dial gives up after 90 seconds. A dial
 abandoned because the link changed, by `link.apply` or a config reload,
-hands its waiting requests to a dial of the new link. A link (`link.apply`, `edge.link`, `edge.claim`,
+hands its waiting requests to a dial of the new link. The gateway reloads
+`config.json` on every request whose file has changed, so `aether link` in
+a terminal moves the next request onto the server it names, stopping the
+forwards and syncs `link.switch` stops. A request that arrives while a
+switch, a sync start or a forward start is in progress serves the current
+link and leaves the reload to a later request rather than wait. A link (`link.apply`, `edge.link`, `edge.claim`,
 `edge.join`) is bounded the same way, including the `server.info` call that
 completes it.
 
@@ -233,6 +238,49 @@ on purpose, since a refusal or a timeout cannot tell a stopped server from a
 firewall, and a wrong guess sends the user to fix the wrong thing. Dial
 failures are classified inside the shared dial path, so the `/ws/events`
 refusal frame carries the same code and prefix as a `POST /api/v1` error.
+
+A server whose release is newer than the CLI behind `aether gui` refuses
+that CLI with `-32005` (upgrade required). The gateway passes the refusal
+through as HTTP 426, with `data` set to
+`{"client_version":"v0.7.0","server_version":"v0.8.0","min_client_version":"v0.8.0","command":"aether update"}`.
+A WebSocket gets the same code and `data` in its ack frame, then close
+1008. The gateway never redials or retries on `-32005`, because only an
+update fixes it. `server.info` and `server.update_status` still answer,
+and so do the `update.*` verbs, which never call the server. The server
+gateway is never refused, because it runs inside the server. See
+[install.md](install.md#when-the-server-refuses-an-older-client).
+
+A failure on the way through an edge also carries error data naming the
+layer that failed, so the dashboard never reports one layer as another:
+
+```json
+{"refusal":{"kind":"server-not-connected","refusal":"server is not connected to the edge"},
+ "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.onaether.dev",
+                            "account":"github account dana",
+              "online":[{"id":"<other id>","name":"prod","online":true,"role":"admin",
+                         "access_policy":"approved-devices","kind":"self-hosted"}]}}
+```
+
+| `layer` | What failed | Typical cause |
+| --- | --- | --- |
+| `client-edge` | This machine reaching the edge | DNS, TCP, TLS or a proxy failed, the edge speaks another protocol version, or it rate-limited this address |
+| `authorization` | This device's standing | Not signed in to the edge, a revoked token, not a member, a pending or revoked device, an account mismatch |
+| `server-registration` | The server's own connection to the edge | Kinds `server-not-connected` (no live registration), `server-not-claimed` (connected while its claim is still being recorded; retry), `unknown-server`, or a server that did not attach |
+| `end-to-end` | The relayed connection to the server | The SSH handshake, a host key that does not derive the server id, a call with no answer, or a connection the server stopped answering |
+
+`refusal` is present when the server, the edge or this client refused,
+with the refusal's `kind`. `server_id` is the server the gateway dialed and
+`edge` the edge host it dialed through; `account` is the account this
+device is signed in to that edge as. `online`, only for
+`server-registration`, lists the other servers of that account the edge
+sees online, each as the edge's server list reports it: a server
+reinstalled under a new id shows up there while the link still names the
+old one, and the message names `aether link --from-edge <id>`.
+
+A link with an address carries `edge_path` only when a dial fails on both
+paths, with the edge path's layer. A failure on a connection already open
+carries no `edge_path`, since that connection may run over either path; a
+link with an address and no edge never carries one.
 
 The server gateway performs the equivalent identity lookup on each request.
 WhoIs failures are refused before dispatch; a tagged node is denied and an
@@ -450,6 +498,7 @@ Status mapping (the code is the authority; the status is a convenience):
 | local bearer token missing or expired | 401 |
 | `-32001` denied, including a tagged WhoIs node, and a foreign `Origin` header | 403 |
 | `-32004` unavailable, including an unavailable WhoIs identity lookup | 503 |
+| `-32005` upgrade required: the server's release is newer than this CLI | 426 |
 | `-32600` invalid request: body not `application/json` | 415 |
 | `-32000` not found | 404 |
 | `-32002` invalid state, `-32003` conflict | 409 |
@@ -868,7 +917,7 @@ unavailable owned source remains the server's protocol error.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional, `to` only with `from`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
@@ -1207,12 +1256,21 @@ Not an RPC method, because patch text is a read of a working tree rather
 than a control-channel call. `run.diff` events carry per-file stats and the
 tree each snapshot wrote, never patch text, and no patch text is stored
 anywhere in the server, so the diff timeline reads the text here and uses
-those events to know when to ask again and which interval to ask for.
+those events to know when to ask again and which snapshot to ask from.
 
 With no query params the server renders the run checkout's whole diff against
-the fork point its identity record pins (the `aether.base` commit), covering
-committed work, uncommitted edits and untracked files alike - the same set of
-changes a `run.diff` snapshot counts. Rendering leaves the checkout alone: the
+the run's effective base, covering committed work, uncommitted edits and
+untracked files alike - the same set of changes a `run.diff` snapshot counts.
+The effective base is the newest upstream commit the run's `HEAD` contains:
+the merge base of `HEAD` and the checkout's `refs/remotes/origin/<base
+branch>`, which `git fetch` or `git pull` inside the run updates. A run that
+merges or rebases onto newer upstream work is therefore charged only for its
+own changes, as in a GitHub pull request. The base never moves behind the
+fork point (the `aether.base` commit its identity record pins): when the
+tracking ref is missing, unreadable, or not a descendant of the fork point,
+or the checkout predates the recorded base branch, the fork point is the base.
+The server reads the tracking ref as plain data and never runs Git against the
+checkout's own repository. Rendering leaves the checkout alone: the
 worktree is staged into a scratch index with its own scratch object directory,
 so nothing under the checkout's `.git` - not even the loose objects staging
 hashes - is ever written, and the scratch files are deleted once the patch is
@@ -1233,13 +1291,22 @@ untracked content to count lines. Past that the event carries
 `truncated:true`: the files left unread count zero and the totals are a
 floor.
 
-`from` and `to` render one interval instead. Both take a snapshot tree id off
-a `run.diff` event - its `parent_tree` and its `tree` - and the answer is the
-diff between those two trees, which is what the run changed in that interval.
-Passing one without the other is an invalid-params error. An id has to be a
-full object id, has to resolve against that run's own object database and no
-other, and has to name a tree: a commit id would otherwise peel to its tree
-and render a diff the timeline never offered.
+`from` alone renders everything that changed since a recorded snapshot: the
+diff from that snapshot's `tree`, off a `run.diff` event, to the run's current
+state. With a checkout the worktree is staged exactly as for the whole diff,
+so edits made after the snapshot count, committed or not, and the base is the
+`from` tree. After checkout cleanup the diff runs from `from` to the last
+recorded snapshot and carries `recorded:true`. `fork_tree`, on every render
+without `from`, is the tree of the fork-point commit; passing it as `from`
+renders the run's current state against where it started, including upstream
+work merged since.
+
+`from` and `to` together render one interval: the diff between the two trees,
+which is what the run changed in that interval. `to` without `from` is an
+invalid-params error. An id has to be a full object id, has to be recorded in
+that run's own snapshot store and no other, and has to name a tree: a commit
+id would otherwise peel to its tree and render a diff the timeline never
+offered. The fork-point tree counts as recorded.
 
 Snapshot sidecars preserve captured trees until explicit run deletion, even
 after checkout cleanup. Consecutive unchanged trees do not add duplicate refs.
@@ -1249,7 +1316,22 @@ delivered endpoints across ref or event-publication failures.
 Watch snapshots and cumulative-diff staging bound visible input at 128 MiB
 (evidence keeps its 64 MiB input bound); these limits do not evict history.
 A cumulative response after checkout cleanup is the last recorded snapshot,
-not a live filesystem read, and carries `recorded:true`.
+not a live filesystem read, and carries `recorded:true`. It is measured
+against the tree of the effective base that snapshot's stats used, which the
+snapshot store records in the same ref transaction that publishes the
+snapshot, so the pair never splits. Stopping a run's watcher, as run
+completion does, takes one last snapshot first, so the final `run.diff` and
+the recorded diff include changes made in the seconds before the stop.
+
+Each `run.diff` carries `base`, the effective base commit its stats are
+measured against. A fetch that moves `origin/<base branch>` schedules a
+snapshot, and a moved base publishes new stats even when the worktree is
+unchanged, including after a watch restart. `parent_tree` is unchanged: the
+first snapshot's parent is the fork-point tree. It also carries `head`, the
+commit the checkout had checked out, and `head_subject`, that commit's subject
+line cut to 200 bytes. A `head` that differs from the previous snapshot's means
+a commit landed between the two. The subject is read by the server from its
+own object store, never by running Git in the checkout.
 
 `run.diff` may include `history_gap:true` and a bounded, path-free
 `snapshot_error` when an interval could not be recorded. The next successful
@@ -1264,25 +1346,29 @@ Staging refusal returns unavailable with
 claim the checkout was removed, and it never returns a partial complete diff.
 
 ```json
-{"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}
+{"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false,"fork_tree":"4b825d..."}
 ```
 
 - Visibility is `run.get`'s, applied by calling it: a member who could not
   read the run over the control channel gets that method's refusal here,
   unchanged.
-- `base` is what the patch is measured from: the fork-point commit on a
-  cumulative render, the `from` tree on an interval one.
+- `base` is what the patch is measured from: the effective base commit on a
+  live cumulative render, its tree when `recorded` is true, the `from` tree on
+  any render that names one.
+- `fork_tree` is the fork-point commit's tree, present on renders without
+  `from`.
 - `patch` contains the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line. The dashboard
   renders the response inline; it does not serve repositories.
 - `503` with `-32004` when the server has no git engine wired, when the run
-  has no checkout left to diff (it finished and was cleaned up), when a
-  requested tree has expired from retained snapshot history (possibly before
-  checkout cleanup), or when
-  rendering ran past the engine's 30s ceiling - the same bound a diff
-  snapshot's git work gets, because staging re-hashes every untracked file
-  and a worktree holding a large un-ignored tree would otherwise be
-  unbounded.
+  has no checkout to diff (`run.patch: this run has no checkout to diff`),
+  when a requested tree has expired from retained snapshot history (possibly
+  before checkout cleanup), or when rendering ran past the engine's 30s
+  ceiling (`run.patch: rendering the diff took longer than 30s: ...`) - the
+  same bound a diff snapshot's git work gets, because staging re-hashes every
+  untracked file and a worktree holding a large un-ignored tree would
+  otherwise be unbounded. Any other failure returns `run.patch:` followed by
+  the engine's error, including the Git command and its output.
 
 ### `GET /api/v1/disk`
 
@@ -1402,7 +1488,8 @@ exceeds the 64 MiB limit`.
 
 - `run.patch` returns the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line.
-  `from` and `to` select one interval here exactly as they do on the `GET`.
+  `from` and `to` select a starting snapshot or one interval here exactly as
+  they do on the `GET`.
 - The read methods answer `-32004` (unavailable) when the read cannot be
   served: `run.patch` when diff rendering is not enabled (no git engine
   wired), when the run has no checkout left to diff, or when a requested tree
@@ -1501,7 +1588,7 @@ authority.
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
-| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
+| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"cli_error":"...","server_version":"v1.2.9","server_behind":bool,"server_error":"...","client_update_required":bool,"min_client_version":"v1.2.9","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual","target_version":"v1.3.0","server_first":bool,"can_self_update":bool}` (`target_version` empty when there is no release to move to or `server_first` is true; `cli_error` only when the release lookup failed; `server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 | `workspace.selection` | `{}` reads; `{"workspace_id":"..."}` saves; an empty ID clears | `{"workspace_id":"..."}` |
@@ -1820,10 +1907,15 @@ the server snapshot from loading.
   a page load never costs a request to GitHub. `refresh: true` skips the
   cache and dials, and the answer it resolves replaces the cached one; the
   dashboard sets it on the read behind the Update button, which names the
-  release about to be installed. A refresh that cannot reach GitHub is that
-  caller's error - `-32004`, `check for releases: <the lookup's own
-  message>` - rather than the cached answer, and it leaves any cached
-  success in place. A failed lookup is cached for five minutes, so an
+  release about to be installed, and on every **Check for updates…**. A refresh that cannot reach GitHub reports
+  `cli_error`, `check for releases: <the lookup's own message>`, rather
+  than the cached answer, and it leaves any cached success in place. The
+  verb still answers 200, with `cli` holding only this build's own fields,
+  so the server half shows during a GitHub outage.
+  `client_update_required` is true when the server's `min_client_version`
+  is newer than this CLI, which means the server refuses it with `-32005`.
+  It is false when the server does not answer, or when either version is
+  not a release. A failed lookup is cached for five minutes, so an
   offline machine is not re-dialed every time a page loads or a window
   comes back. Lookups are numbered, so one that started earlier never
   replaces the cached answer of one that started later: two straddling a
@@ -1835,7 +1927,20 @@ the server snapshot from loading.
   (`aether gui --json`), which is what decides whether `update.apply` may
   restart it. `shell_build_error`
   is present only when the last in-app desktop rebuild failed, and carries
-  that build's own error.
+  that build's own error. `target_version` is the release this CLI should
+  move to, so the dashboard can name it before the click: the linked
+  server's release (`server_version` without a `git describe` tail) when it
+  is a release tag newer than this CLI, otherwise `latest` when that is
+  newer, otherwise empty. It is empty too for a dev build and with
+  `AETHER_NO_UPDATE_CHECK` set. `can_self_update` is true when
+  `update.apply` can install it here; it is false for a dev build, on
+  Windows, and with `AETHER_PACKAGED` set, where `target_version` is still
+  reported so the client can link its release page. `server_first` is true
+  when the linked server runs a release older than the target, this member
+  is an admin, and `server.update_status` reports the server `capable` of
+  updating itself: `target_version` is then empty and `update.apply`
+  refuses with `-32002` and `update the server first: aether server
+  update`, the rule `aether update` applies.
 - `cli_path` is the binary `update.apply` would replace, symlinks resolved,
   and `install_method` how: `direct` when its directory is writable by this
   user, so the swap just happens; `admin-prompt` when it is not and the
@@ -1871,8 +1976,13 @@ the server snapshot from loading.
 - `update.apply` takes the one-install-at-a-time slot before anything else,
   so a second click pays for no lookup, then resolves the latest release
   fresh - never from the cached answer, so a click installs what is newest
-  at that moment rather than what was newest when the banner was drawn. A
-  lookup that fails is the call's error; no cached tag stands in for it. It
+  at that moment rather than what was newest when the banner was drawn -
+  and asks the linked server for its version. It installs `target_version`
+  as `update.check` defines it: a server ahead of this CLI decides the
+  release, so the client matches its server, as `aether update --version
+  <server release>` would, even when GitHub's latest is older (it skips
+  prereleases and can lag a publish). A failed lookup is the call's error
+  unless the server named the target; no cached tag stands in for it. It
   then runs the swap `aether update` runs, on the `aether` binary this gateway
   is served from - and `aether-server` beside it on a Linux server host, in
   which case `restart_command` carries the `sudo systemctl restart
@@ -1981,9 +2091,12 @@ the server snapshot from loading.
     still reports no session at run time, ``no GUI session to show the
     macOS authorization dialog in: ... (-1713); run `sudo aether update` in
     a terminal on this Mac``. Also a dev build, `AETHER_NO_UPDATE_CHECK`
-    set, Windows, and a running build that is already the newest release
-    (downloading it over itself would report success for work that changed
-    nothing, and restart the app for nothing).
+    set, Windows, and nothing to install: `already on <latest>, the newest
+    release` when neither the server nor the latest release is ahead of
+    this build (downloading it over itself would report success for work
+    that changed nothing, and restart the app for nothing), or `no signed
+    release is published yet; this aether stays on <version>` when no
+    release has a signed manifest and the server names none.
   - `-32003` (conflict, 409): `an update is already running in this
     gateway` - a second click from another tab while the dialog is up.
   - `-32004` (unavailable, 503): everything else, carrying the real

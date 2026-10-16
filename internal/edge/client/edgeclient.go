@@ -135,6 +135,10 @@ type RefusedError struct {
 	// Message is the edge's refusal text, with control characters
 	// replaced so it cannot drive the terminal it is printed to.
 	Message string
+	// FromEdge is whether the answer carried an edge's error body or
+	// protocol version. Without either it came from something in
+	// between, such as a captive portal, a proxy or a firewall.
+	FromEdge bool
 }
 
 func (e *RefusedError) Error() string {
@@ -154,18 +158,20 @@ func (e *RefusedError) Is(target error) bool {
 
 // refusal builds the error for a response from origin that is not a
 // success. body is what could be read of the response.
-func (c *Client) refusal(op, origin string, status int, body []byte) *RefusedError {
+func (c *Client) refusal(op, origin string, resp *http.Response, body []byte) *RefusedError {
 	var eb edgeproto.ErrorBody
+	status := resp.StatusCode
 	msg := http.StatusText(status)
+	fromEdge := resp.Header.Get(edgeproto.HeaderVersion) != ""
 	if json.Unmarshal(body, &eb) == nil && eb.Error != "" {
-		msg = eb.Error
+		msg, fromEdge = eb.Error, true
 	} else if shown := strings.TrimSpace(string(body)); shown != "" {
 		msg += ": " + shown
 	}
 	if len(msg) > maxShownText {
 		msg = msg[:maxShownText] + "..."
 	}
-	return &RefusedError{Edge: HostOf(origin), URL: c.origin, Op: op, Status: status, Message: clean(msg)}
+	return &RefusedError{Edge: HostOf(origin), URL: c.origin, Op: op, Status: status, Message: clean(msg), FromEdge: fromEdge}
 }
 
 // clean replaces control characters and invalid UTF-8 in text the edge
@@ -241,7 +247,7 @@ func (c *Client) call(ctx context.Context, op, method, origin, path, token strin
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return c.refusal(op, origin, resp.StatusCode, raw)
+		return c.refusal(op, origin, resp, raw)
 	}
 	if out == nil {
 		return nil

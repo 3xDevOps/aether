@@ -238,7 +238,7 @@ from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
 30-second interval for the whole app, running only while something
 subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
 board card, a run list row, a feed entry, an approval, the members and
-devices views or the Changes interval menu keeps moving without re-rendering
+devices views or the Changes Compare menu keeps moving without re-rendering
 the row. `compact` renders `compactAge` instead: the same steps as `timeAgo`
 in a few characters ("now" under a minute, then "15m", "3h", "2d", "1w",
 "2mo", "1y"). A sidebar run row reads the clock itself as well, because its
@@ -919,6 +919,27 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
+- **The latest request to the server decides the connection state.** The
+  failure class lives in `unreachable`, which every failed server read sets
+  and a successful hydration clears. A subscription the server acknowledged
+  also clears it, including a replay reconnect that skips hydration, unless
+  a hydration retry is pending: then the retry runs at once and its result
+  decides, because a live stream does not prove reads reach the server. A
+  failure recorded by a connection that was torn down (a retry, or a switch
+  to another server) is dropped. While `unreachable` is set the footer says
+  `Unreachable` rather than `Live`, and the connection line names the layer
+  that failed - client to edge, authorization, server registration, or
+  end-to-end - with the server id and the next command. When the gateway's
+  error carries `data.edge_path`, its `layer`, `server_id` and `edge` are
+  used as given, and its `online` list, sent on a server-registration
+  failure, is named as the servers the edge does see online beside the
+  server id the dashboard is linked to. Each failure is stored with the
+  server id it was measured on. A failure measured on another server than
+  the linked one means the gateway followed a re-link (`aether link
+  --from-edge`): the dashboard re-reads the link status, resets the
+  connection as for any server switch, and shows the failure under the new
+  server's id. An offline computer is the client-to-edge layer on a link
+  through an edge and client-to-server on a direct SSH link.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
@@ -933,7 +954,11 @@ Removal also repairs the selection and open route before any refresh awaits.
   process to blame and no wifi advice to give. A refusal on the edge path
   arrives as `data.refusal` on the gateway's `503`, and `refusalHop` in
   `src/store/sync.ts` maps its `kind` to a class, never its wording:
-  `edge-server` (the server is not connected to the edge), `edge-refused`
+  `edge-server` (the edge holds no live registration for the server id;
+  `aether-server edge status` on that host reports the server's side of the
+  same connection and can disagree), `edge-not-claimed` (the edge
+  recorded the server's owner, and the server has not applied the claim to
+  its live connection yet; says to retry), `edge-refused`
   (the edge's other refusals), `signed-out` (no valid device token; gives
   the `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.
@@ -1192,7 +1217,7 @@ both show:
 | Condition | Action |
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
-| Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
+| Enhanced turn interrupted or stopped short, or a `needs input:` question | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Usage limit with no account to move to | **Open** |
@@ -1362,6 +1387,7 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
+| `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
@@ -2077,7 +2103,7 @@ Transcript rows retain their 736px reading width.
 
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the run's whole
-worktree against its fork point, the Changes view's **Current diff**, so
+worktree against its base, the Changes view's **All changes**, so
 edits made by shell commands count too. Its source is the newest `run.diff`
 stat set. Until the page has received one live, it reads the newest with
 `workspace.timeline` (`types: ["run.diff"]`, `newest: true`, `limit: 1`)
@@ -2086,7 +2112,7 @@ no replay cursor yet; after that, a resumed event stream replays any it
 missed. It starts collapsed and stays expanded per run
 once opened. Expanded, it lists each file with its status letter and
 `+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
-the Changes view at that file; **Review** opens its **Current diff**. A
+the Changes view at that file; **Review** opens its **All changes**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the run is merged or
 abandoned, which removes its checkout; a
@@ -2754,7 +2780,7 @@ re-reads them when the dark class on `<html>` changes.
 both what it renders and the overlap set the conflict chips read.
 
 - **One strip, then the files.** A 32px strip (`strip.tsx`) holds the file
-  count and `+a −d` totals, the interval menu, the conflict chips, and on the
+  count and `+a −d` totals, the Compare menu, the conflict chips, and on the
   right **Wrap lines**, **Refresh**, **More** (**Expand all files**,
   **Collapse all files**, **Review locally…**) and **Publish…**. Below it a
   file list (`file-list.tsx`: status letter, name, folder, `+a −d`) sits
@@ -2766,46 +2792,76 @@ both what it renders and the overlap set the conflict chips read.
   on this machine.
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no patch text, so a snapshot bumps the run's `revision`
-  and the view re-fetches the current diff from `GET /api/v1/run/<id>/patch`
+  and the view re-fetches the chosen comparison from `GET /api/v1/run/<id>/patch`
   (`docs/local-gateway.md`) whenever that has moved past the `fetched`
   revision the stored patch answers for. Counters rather than a stale flag,
   because a snapshot landing *during* a request would write true over true
   and then be cleared by the response: the answer records the revision it was
   issued at, and anything newer asks again. A failure records the revision
-  too, so it cannot spin; the next snapshot or **Refresh** asks again.
-- **An interval is a menu row.** The interval menu lists **Current diff**
-  (against the fork point) and then the `run.diff` snapshots, newest first,
-  as "What changed 5 min ago" with their file count and totals, or the file
-  count alone for a `truncated` snapshot. Choosing one
-  fetches `GET /api/v1/run/<id>/patch?from=<parent_tree>&to=<tree>`, the diff
-  between the two trees, which is what the run changed in that interval. An
-  interval is addressed by two tree ids and so never changes: each fetched
-  one is kept and never asked for again. The selection keys on the snapshot's
-  timestamp, so a new snapshot never retargets it. A snapshot with no tree -
-  from a server that predates them - is a disabled row whose description says
-  why. The list is capped at 40 per run and starts empty on every page load:
-  it holds only the snapshots this page received.
-  `history_gap` marks a missing interval or a successful interval spanning
-  missed snapshots; `snapshot_error` gives its safe cause. Neither is shown
-  as a normal complete interval. Expired snapshot ranges show the server's
-  unavailable error; **Current diff** stays a distinct cumulative choice.
+  too, so it cannot spin, and the patch already on screen stays beside the
+  server's error; the next snapshot or **Refresh** asks again. One fetch per
+  run is in flight at a time, even across a remount of the view. A stored
+  patch over 1 MiB is not re-fetched on a snapshot, so a reader is never
+  frozen or reshuffled mid-read: the strip's button becomes **New changes ·
+  Refresh** and loads them on click. The store keeps one patch per run and
+  records which comparison it answers for (`from`); choosing another
+  comparison shows a loading state and fetches at once, never the previous
+  comparison's text.
+- **Files are split by scanning, then parsed when read.** `parsePatch`
+  (`parse.ts`) finds each `diff --git` boundary and counts a file's
+  additions, deletions and content lines without allocating a row per line,
+  so a 20 MB patch splits in well under a second. A file's `lines` are parsed
+  the first time something reads them, so a closed or off-screen file is never
+  split into lines. A refetch hands the previous files back in, and a file
+  whose text is unchanged is the same object, so its memoised rows and placed
+  review comments are not redone.
+- **Compare is a menu.** The Compare menu chooses what the patch is measured
+  against, and its trigger names the choice. **All changes** (the default)
+  is the cumulative diff against the run's effective base, described as
+  "Against main @ 1a2b3c4" with the base branch and the short sha the patch
+  response names. **Since the run started** appears only when that base
+  differs from the fork point on the run record (`base_commit`), meaning the
+  run merged upstream work: it requests `?from=<fork_tree>`, so it also
+  counts that upstream work. Under **Changes since a checkpoint** every
+  recorded `run.diff` snapshot is a row, newest first, labelled with its local
+  time (with the date when not today) and its age. Its description is the
+  commit subject when `head` moved since the next older checkpoint, otherwise
+  the file count and `+a −d` totals, or the count alone for a `truncated`
+  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
+  since that checkpoint up to now, which grows as the run goes on and
+  re-fetches on each new snapshot like the whole diff. The newest 50
+  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
+  `newest: true`) when the view first opens for a run on this page, live
+  snapshots join them, one row per tree, and **Show older checkpoints** pages
+  back with `before_seq` while the timeline says `more`. A checkpoint keeps
+  only its time, tree, head, subject and counts, never its file list. A
+  snapshot with no tree - from a server that predates them, or one whose
+  capture failed with `snapshot_error` - is a disabled row whose description
+  says why; a `history_gap` before a recorded tree does not disable it. A
+  failed history read shows the server's error with **Retry**. A link
+  with `file` or `diff: 'current'` selects **All changes**.
 - **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
   sticky header with a chevron, its path, a status word and `+a −d`. A file
-  over 500 lines, a binary file and a deleted file start collapsed; the header
-  then also gives the line count. Line counts here leave out hunk headers.
-  An opened file over 500 lines renders its lines through `virtua` in a box
-  of its own. A patch over 1,500 lines in total also mounts only the files
-  near the screen, so a large diff costs the rows on screen rather than one
-  DOM node per line. Lines carry old and new line numbers, which `parse.ts`
+  over 500 lines or 256 KiB of patch text, a binary file and a deleted file
+  start collapsed; the header then also gives the line count, or the size for
+  a file big in bytes but short in lines, such as a minified bundle. Line
+  counts here leave out hunk headers. An opened file over 500 lines renders
+  its lines through `virtua` in a box of its own. A patch over 1,500 lines in
+  total or over 100 files also mounts only the files near the screen, so a
+  large diff costs the rows on screen rather than one DOM node per line. The
+  file list virtualizes past 100 files, and the strip's file menu lists the
+  first 100 and says how many more there are. A line renders at most 3,000
+  characters followed by "… N more characters"; review comments still quote
+  the whole line. Lines carry old and new line numbers, which `parse.ts`
   reads from the hunk headers.
 - **The path opens the file.** Clicking a file's path opens it in the run's
   [Files view](#files-in-a-run) (`openInFiles` in `routes/files/open.ts`),
   without leaving the run. It needs a run that has a Files view. Binary files
   and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
-  `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
+  `view: 'changes'` and `file: <path>` selects **All changes**, expands that
   file and scrolls to it once the diff has it; `diff: 'current'` selects
-  **Current diff** alone. The Session view's changes bar navigates these
+  **All changes** alone. The Session view's changes bar navigates these
   ways. `file` is not written to the
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
@@ -2884,15 +2940,16 @@ both what it renders and the overlap set the conflict chips read.
   store in `review.ts`, keyed by run, for the reason composer drafts do. They
   survive switching views, opening another page and every diff refresh, and
   end with the page, a deleted run or another identity. A comment stores the
-  lines it was written on - kind, text, old and new numbers - and which diff
-  that was, the current one or an interval. `locate` finds those lines in the
+  lines it was written on - kind, text, old and new numbers - and which
+  comparison that was: `''` for All changes, `start` for Since the run
+  started, `since:<tree>` for a checkpoint. `locate` finds those lines in the
   diff on screen: at the same numbers first, otherwise where the same block
   appears exactly once. A comment therefore follows code that moved, and is
   never pinned to one of two identical blocks by guess. A comment whose lines
   the diff no longer shows is kept and marked **Outdated** with its quote, at
   the top of its file, or above the files when the file left the diff; it is
   sent with that quote and a note that the lines changed. A comment written
-  on another interval shows wherever its lines appear and is counted
+  on another comparison shows wherever its lines appear and is counted
   otherwise.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there

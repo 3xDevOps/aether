@@ -2,8 +2,9 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
+	"math/rand/v2"
 	"os"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -24,8 +25,13 @@ const PackagedEnv = "AETHER_PACKAGED"
 // defaultTTL is how long a successful answer is reused.
 const defaultTTL = time.Hour
 
-// failureTTL caches a failed check, far more briefly than a success.
-const failureTTL = 5 * time.Minute
+// A failed check is cached for failureTTL, doubling with each failure in a
+// row up to maxFailureTTL, give or take a tenth so clients that failed
+// together do not retry together.
+const (
+	failureTTL    = 5 * time.Minute
+	maxFailureTTL = time.Hour
+)
 
 // devVersion is what version.Version holds in a build without release
 // ldflags. Such a build has no release to compare against.
@@ -59,8 +65,8 @@ type Check struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// Asset names the release asset for one platform.
-func Asset(goos, goarch string) string { return "aether-" + goos + "-" + goarch }
+// assetName names the release asset for one platform.
+func assetName(goos, goarch string) string { return "aether-" + goos + "-" + goarch }
 
 // Behind reports whether running is an older release than latest, by semver
 // precedence. A version neither side can parse - "dev", a bare commit from
@@ -92,27 +98,6 @@ type semver struct {
 	ahead bool
 }
 
-// describeTail matches what `git describe --tags --always --dirty` appends
-// to the tag it found: the commit count since that tag, the abbreviated
-// commit, and an optional dirty marker. It is not a semver prerelease -
-// reading it as one ranks a source build *below* the tag it descends from,
-// which offers that user a downgrade - so it is stripped and remembered as
-// "past that tag" instead.
-var describeTail = regexp.MustCompile(`-[0-9]+-g[0-9a-f]{4,}(-dirty)?$`)
-
-// trimDescribe removes a describe tail, reporting whether one was there. A
-// bare "-dirty" counts: the tree carries uncommitted changes on top of the
-// tag, so it is not that tag any more.
-func trimDescribe(tag string) (string, bool) {
-	if loc := describeTail.FindStringIndex(tag); loc != nil {
-		return tag[:loc[0]], true
-	}
-	if trimmed := strings.TrimSuffix(tag, "-dirty"); trimmed != tag {
-		return trimmed, true
-	}
-	return tag, false
-}
-
 // parseVersion reads vX.Y.Z with an optional prerelease and an optional
 // `git describe` tail. Build metadata (+something) never affects
 // precedence, so it is discarded.
@@ -122,7 +107,7 @@ func parseVersion(tag string) (semver, bool) {
 	if i := strings.IndexByte(tag, '+'); i >= 0 {
 		tag = tag[:i]
 	}
-	tag, out.ahead = trimDescribe(tag)
+	tag, out.ahead = version.TrimDescribe(tag)
 	core := tag
 	if i := strings.IndexByte(tag, '-'); i >= 0 {
 		core, out.pre = tag[:i], strings.Split(tag[i+1:], ".")
@@ -245,6 +230,8 @@ type Checker struct {
 	// superseded tag cached for a whole period.
 	issued uint64
 	stored uint64
+	// failures counts the failed checks cached in a row.
+	failures int
 }
 
 // NewChecker builds a checker against a GitHub repository base URL such as
@@ -263,7 +250,9 @@ func DefaultChecker() *Checker {
 func (c *Checker) BaseURL() string { return c.baseURL }
 
 // Check reports whether a newer release exists, reusing a cached answer
-// until it expires. A dev build and an opted-out process never dial out.
+// until it expires. Only a release whose signed manifest is published
+// counts; until it is, the check reports no update. A dev build and an
+// opted-out process never dial out.
 // Two callers arriving on an expired cache may both resolve the tag; that
 // costs one extra redirect at worst, where serializing them behind the
 // fetch would make one caller's cancelled context everyone's wait. The
@@ -303,14 +292,18 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 	case os.Getenv(OptOutEnv) != "":
 		out.Disabled = true
 	default:
-		var latest string
-		if latest, err = LatestTag(ctx, c.baseURL+"/releases/latest"); err == nil {
-			out.Latest = latest
-			out.UpdateAvailable = Behind(version.Version, latest)
-			out.ReleaseURL = c.baseURL + "/releases/tag/" + latest
+		var m Manifest
+		m, err = LatestManifestFrom(ctx, c.baseURL)
+		switch {
+		case err == nil:
+			out.Latest = m.Version
+			out.UpdateAvailable = Behind(version.Version, m.Version)
+			out.ReleaseURL = c.baseURL + "/releases/tag/" + m.Version
 			if out.Packaged == "" {
-				out.Asset = Asset(runtime.GOOS, runtime.GOARCH)
+				out.Asset = assetName(runtime.GOOS, runtime.GOARCH)
 			}
+		case errors.Is(err, ErrNoRelease):
+			err = nil
 		}
 	}
 	c.store(id, out, err)
@@ -335,6 +328,15 @@ func (c *Checker) fresh() (Check, error, bool) {
 	return Check{}, nil, false
 }
 
+// Last returns the cached answer and its error without dialing, expired or
+// not: its CheckedAt is when it was produced. ok is false before the first
+// check finishes.
+func (c *Checker) Last() (out Check, err error, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cached, c.err, !c.expires.IsZero()
+}
+
 func (c *Checker) liveLocked() bool {
 	return !c.expires.IsZero() && c.now().Before(c.expires)
 }
@@ -355,7 +357,20 @@ func (c *Checker) store(id uint64, out Check, err error) {
 	}
 	ttl := c.ttl
 	if err != nil {
-		ttl = failureTTL
+		ttl = failureBackoff(c.failures)
+		c.failures++
+	} else {
+		c.failures = 0
 	}
 	c.cached, c.err, c.expires, c.stored = out, err, c.now().Add(ttl), id
+}
+
+// failureBackoff is how long the failures+1th failure in a row is cached.
+func failureBackoff(failures int) time.Duration {
+	d := failureTTL
+	for i := 0; i < failures && d < maxFailureTTL; i++ {
+		d *= 2
+	}
+	d = min(d, maxFailureTTL)
+	return d + time.Duration(rand.Int64N(int64(d)/5+1)) - d/10
 }

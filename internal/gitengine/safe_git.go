@@ -184,21 +184,9 @@ func (e *Engine) resolveCheckoutHEAD(checkout string) (string, error) {
 		if !strings.HasPrefix(ref, "refs/heads/") || !validCheckoutRef(ref) {
 			return "", fmt.Errorf("gitengine: checkout HEAD has invalid ref %q", ref)
 		}
-		loose, looseErr := e.readCheckoutGitFile(checkout, ref, maxCheckoutRefBytes)
-		switch {
-		case looseErr == nil:
-			head = strings.TrimSpace(string(loose))
-		case !errors.Is(looseErr, os.ErrNotExist):
-			return "", fmt.Errorf("gitengine: read checkout HEAD ref %s: %w", ref, looseErr)
-		default:
-			packed, packedErr := e.readCheckoutGitFile(checkout, "packed-refs", maxCheckoutPackedRefsBytes)
-			if packedErr != nil {
-				return "", fmt.Errorf("gitengine: resolve checkout HEAD ref %s: %w", ref, packedErr)
-			}
-			head = packedRefValue(string(packed), ref)
-			if head == "" {
-				return "", fmt.Errorf("gitengine: checkout HEAD ref %s is unavailable", ref)
-			}
+		head, err = e.resolveCheckoutRef(checkout, ref)
+		if err != nil {
+			return "", fmt.Errorf("gitengine: checkout HEAD ref: %w", err)
 		}
 	}
 	if !validObjectID(head) {
@@ -207,11 +195,33 @@ func (e *Engine) resolveCheckoutHEAD(checkout string) (string, error) {
 	return head, nil
 }
 
+// resolveCheckoutRef reads one ref of the checkout as inert data: the loose
+// file first, then packed-refs. ref must satisfy validCheckoutRef. A ref in
+// neither wraps os.ErrNotExist. The value is not validated.
+func (e *Engine) resolveCheckoutRef(checkout, ref string) (string, error) {
+	loose, err := e.readCheckoutGitFile(checkout, ref, maxCheckoutRefBytes)
+	if err == nil {
+		return strings.TrimSpace(string(loose)), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read %s: %w", ref, err)
+	}
+	packed, err := e.readCheckoutGitFile(checkout, "packed-refs", maxCheckoutPackedRefsBytes)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", ref, err)
+	}
+	value := packedRefValue(string(packed), ref)
+	if value == "" {
+		return "", fmt.Errorf("%s is unavailable: %w", ref, os.ErrNotExist)
+	}
+	return value, nil
+}
+
 func validCheckoutRef(ref string) bool {
-	if !strings.HasPrefix(ref, "refs/heads/") || strings.HasSuffix(ref, "/") {
+	if !strings.HasPrefix(ref, "refs/") || strings.HasSuffix(ref, "/") {
 		return false
 	}
-	for _, part := range strings.Split(strings.TrimPrefix(ref, "refs/heads/"), "/") {
+	for _, part := range strings.Split(ref, "/") {
 		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "\x00\\") {
 			return false
 		}

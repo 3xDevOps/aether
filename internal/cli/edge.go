@@ -102,7 +102,8 @@ func dialDirect(ctx context.Context, cfg Config, user string, signer ssh.Signer)
 
 // dialEdge reaches the server through the edge. The SSH user name is
 // the account this device signed in as, which the server checks against
-// the edge's grant.
+// the edge's grant. Every failure after the edge URL parsed is an
+// *EdgePathError naming the layer that failed.
 func dialEdge(ctx context.Context, dir string, cfg Config, signer ssh.Signer) (*ssh.Client, error) {
 	edge, err := edgeclient.New(dir, cfg.EdgeURL)
 	if err != nil {
@@ -110,14 +111,22 @@ func dialEdge(ctx context.Context, dir string, cfg Config, signer ssh.Signer) (*
 	}
 	session, err := edge.Session()
 	if err != nil {
-		return nil, err
+		return nil, edgeFailure(edge, cfg.ServerID, nil, LayerAuthorization, err)
 	}
 	nc, err := edge.Dial(ctx, cfg.ServerID)
 	if err != nil {
-		return nil, err
+		fail := edgeFailure(edge, cfg.ServerID, &session, relayLayer(err), err)
+		if fail.Layer == LayerRegistration {
+			fail.Online = onlineServers(ctx, edge, cfg.ServerID)
+		}
+		return nil, fail
 	}
-	return pinnedHandshake(ctx, nc, EdgeHost(cfg.ServerID), edgeproto.AccountUser(session.Account.Account), signer,
+	client, err := pinnedHandshake(ctx, nc, EdgeHost(cfg.ServerID), edgeproto.AccountUser(session.Account.Account), signer,
 		pinnedHostKey(cfg.ServerID, "the linked server"))
+	if err != nil {
+		return nil, edgeFailure(edge, cfg.ServerID, &session, handshakeLayer(err), err)
+	}
+	return client, nil
 }
 
 // DialClaim claims the server that code, a claim code as aether-server
@@ -141,7 +150,7 @@ func DialClaim(ctx context.Context, cfg Config, code string) (*Conn, error) {
 	}
 	session, err := edge.Session()
 	if err != nil {
-		return nil, fmt.Errorf("cli: claim through %s: %w", edge.Host(), err)
+		return nil, edgeFailure(edge, "", nil, LayerAuthorization, fmt.Errorf("cli: claim through %s: %w", edge.Host(), err))
 	}
 	user, serverID, err := edgeproto.ClaimUser(code, edgeproto.AccountPrincipal(session.Account.Account))
 	if err != nil {
@@ -154,11 +163,11 @@ func DialClaim(ctx context.Context, cfg Config, code string) (*Conn, error) {
 	}
 	nc, err := edge.DialClaim(ctx, serverID)
 	if err != nil {
-		return nil, err
+		return nil, edgeFailure(edge, serverID, &session, relayLayer(err), err)
 	}
 	client, err := pinnedHandshake(ctx, nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the claim code names"))
 	if err != nil {
-		return nil, err
+		return nil, edgeFailure(edge, serverID, &session, handshakeLayer(err), err)
 	}
 	return &Conn{client: client, cfg: cfg}, nil
 }
@@ -183,7 +192,7 @@ func DialJoin(ctx context.Context, cfg Config, link string) (*Conn, error) {
 	}
 	session, err := edge.Session()
 	if err != nil {
-		return nil, fmt.Errorf("cli: join through %s: %w", edge.Host(), err)
+		return nil, edgeFailure(edge, serverID, nil, LayerAuthorization, fmt.Errorf("cli: join through %s: %w", edge.Host(), err))
 	}
 	user, err := edgeproto.JoinUser(invitation, secret, edgeproto.AccountPrincipal(session.Account.Account))
 	if err != nil {
@@ -195,11 +204,11 @@ func DialJoin(ctx context.Context, cfg Config, link string) (*Conn, error) {
 	}
 	nc, err := edge.Dial(ctx, serverID)
 	if err != nil {
-		return nil, err
+		return nil, edgeFailure(edge, serverID, &session, relayLayer(err), err)
 	}
 	client, err := pinnedHandshake(ctx, nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the invitation link names"))
 	if err != nil {
-		return nil, err
+		return nil, edgeFailure(edge, serverID, &session, handshakeLayer(err), err)
 	}
 	cfg.EdgeURL, cfg.ServerID = edge.URL(), serverID
 	return &Conn{client: client, cfg: cfg}, nil
@@ -223,7 +232,7 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 	}
 	nc, err := edge.Dial(ctx, serverID)
 	if err != nil {
-		return "", err
+		return "", edgeFailure(edge, serverID, nil, relayLayer(err), err)
 	}
 	defer func() { _ = nc.Close() }()
 	pin := pinnedHostKey(serverID, "the listed server")
@@ -242,7 +251,7 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 		return "", fmt.Errorf("read host key of server %s: %w", serverID, err)
 	}
 	if _, _, _, err := handshake(ctx, nc, EdgeHost(serverID), conf); !errors.Is(err, errHostKeyRead) {
-		return "", fmt.Errorf("read host key of server %s: %w", serverID, err)
+		return "", edgeFailure(edge, serverID, nil, LayerEndToEnd, fmt.Errorf("read host key of server %s: %w", serverID, err))
 	}
 	return fingerprint, nil
 }

@@ -1636,6 +1636,51 @@ is refused with a conflict error. Only admins can call either Sysbox
 method. An admin can already run arbitrary code on the Docker daemon, so
 this adds root only for this one script.
 
+## Release signing
+
+GitHub release assets are mutable: anyone who can write to the repository's
+releases can replace a binary and the `checksums.txt` beside it. Updaters
+therefore trust a signature, not the release page. Each release carries
+`aether-release.json` (version, commit, store schema, and every asset's
+SHA-256 and size) and `aether-release.json.sig`, an ed25519 signature over
+the file's exact bytes. Every updater (`aether update`, the dashboard's
+**Update now**, `aether server update`) verifies the signature against the
+public keys compiled into `internal/selfupdate/keys.go`, requires the
+manifest's `version` to equal the tag it installs, so an old signed manifest
+cannot be replayed under a new tag, and checks every download's size and
+SHA-256 against it. [install.md](install.md#verified-releases) shows the
+same check done by hand.
+
+The private key is a 32-byte seed, base64-encoded, held only in the
+`AETHER_RELEASE_SIGNING_KEY` Actions secret. Only the final `release` job
+reads it, after the publisher and exact-main-CI gates. The generator refuses
+to write a manifest the tag's own trusted keys would reject, so a wrong
+secret fails the release, not the clients.
+
+**Key rotation.** Clients trust any key in the list, and a client only learns
+a new key by installing a release that carries it. The generator also
+refuses a seed whose public key is not in that release's own list. To
+rotate:
+
+1. Generate the next key pair offline and add its public key to
+   `releaseKeys` in `internal/selfupdate/keys.go`, beside the current one.
+2. Publish that release signed with the current key. It is the bridge:
+   every client accepts it, and it trusts both keys.
+3. Replace the `AETHER_RELEASE_SIGNING_KEY` secret with the new seed and
+   remove the old public key from `releaseKeys`. Every later release is
+   signed with the new key.
+
+A client older than the bridge rejects every later release. Install the
+bridge on it first with `aether update --version <bridge tag>` (or `aether
+server update --version <bridge tag>`), then update normally, or reinstall
+it with the install script.
+
+If the current key leaks, run the same steps at once: the bridge has to be
+signed with the leaked key, because no client trusts anything else, and the
+next release drops it. A key cannot be revoked remotely, so a client that
+has not installed that next release still accepts a manifest signed with
+the leaked key from anyone who can also write to the releases.
+
 ## Server self-update
 
 `aether server update` (see [install.md](install.md#upgrading)) lets an admin
@@ -1649,8 +1694,8 @@ What bounds it: the `version` a client supplies is validated as a release tag
 - `v` plus semver - and only ever names a release in the pinned
 `3xDevOps/Aether` GitHub repository; the client can never supply a URL.
 
-Both binaries are downloaded and verified against that release's
-`checksums.txt` before either is replaced, and each is then renamed into
+Both binaries are downloaded and verified against that release's signed
+manifest ([Release signing](#release-signing)) before either is replaced, and each is then renamed into
 place from a staging file in its own directory. So a bad tag, a network
 error, or a checksum mismatch leaves both binaries exactly as they were.
 Only the renames at the end could leave `aether-server` updated and the

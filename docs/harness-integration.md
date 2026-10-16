@@ -101,6 +101,20 @@ Empty stdout means no added context. Keep errors on stderr or the host's
 error surface, not in model context, and do not turn failures into success
 hints.
 
+The shipped command hooks also act at session start.
+`aether-internal hook <harness> SessionStart` (`sessionStart` for Copilot and
+Cursor) prints the run's [role card](coordination.md#agent-instructions)
+before any notices, unless `AETHER_ROLE_CARD=1` says the launch's system
+prompt already carries it. When the event's `source` is `compact` or `clear`, it
+first resets the record of announced notices in
+`/tmp/aether-hook-<run-id>-<harness>.json`, so every pending notice reaches
+the new context. `generic context` prints neither; an agent launched from a
+custom definition gets the role card after its task prompt instead.
+Coordinated, task-bearing Claude Code Standard runs get the shipped hooks,
+except `Stop`, automatically through
+`--settings /run/aether/claude-settings.json`; see
+[Claude Code inbox integration](harnesses.md#claude-code-inbox-integration).
+
 Integrator swarm-refresh guidance can appear even with an empty inbox. It
 asks an integrator to read durable plan decisions and worker attempts; it
 does not itself schedule an OMP turn. An OMP todo reminder or native retry

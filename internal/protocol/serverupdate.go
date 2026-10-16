@@ -35,17 +35,38 @@ const (
 	// ServerUpdateApplied: the binaries were replaced and the server
 	// re-executed on the new version.
 	ServerUpdateApplied = "applied"
-	// ServerUpdateFailed: nothing was replaced (or the swap could not be
-	// restarted into); Detail carries the real error.
+	// ServerUpdateFailed: nothing was replaced; Detail carries the real
+	// error.
 	ServerUpdateFailed = "failed"
+	// ServerUpdateRolledBack: the new binary did not boot, so the previous
+	// binaries (and database, when a migration ran) were restored; Detail
+	// carries the real error.
+	ServerUpdateRolledBack = "rolled_back"
+)
+
+// Phase values of ServerUpdateStatusResult. Applied, failed, and
+// rolled_back describe the last attempt and stay until the next one.
+const (
+	ServerUpdatePhaseIdle       = "idle"
+	ServerUpdatePhaseScheduled  = "scheduled"
+	ServerUpdatePhasePreflight  = "preflight"
+	ServerUpdatePhaseApplying   = "applying"
+	ServerUpdatePhaseRestarting = "restarting"
+	ServerUpdatePhaseVerifying  = "verifying"
+	ServerUpdatePhaseApplied    = "applied"
+	ServerUpdatePhaseFailed     = "failed"
+	ServerUpdatePhaseRolledBack = "rolled_back"
 )
 
 // ServerUpdateParams are the params of server.update (admin only).
 // Version is a release tag ("v" plus semver); empty means the latest
 // published release. When is one of the ServerUpdate* when constants.
+// AllowDowngrade permits a Version older than the running release; it is
+// refused with When "idle", because a downgrade is applied by hand.
 type ServerUpdateParams struct {
-	Version string `json:"version,omitempty"`
-	When    string `json:"when"`
+	Version        string `json:"version,omitempty"`
+	When           string `json:"when"`
+	AllowDowngrade bool   `json:"allow_downgrade,omitempty"`
 }
 
 // ServerUpdateResult is the result of server.update. Status is
@@ -56,6 +77,13 @@ type ServerUpdateResult struct {
 	Version     string `json:"version,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	RequestedAt string `json:"requested_at,omitempty"`
+}
+
+// ServerUpdateStatusParams are the params of server.update_status.
+// Refresh runs the server's release check before answering instead of
+// reporting the last background check.
+type ServerUpdateStatusParams struct {
+	Refresh bool `json:"refresh,omitempty"`
 }
 
 // PendingServerUpdate is one recorded update waiting for an idle server.
@@ -93,8 +121,21 @@ type ServerUpdateAttempt struct {
 //
 // Waiting is set when a pending update has not applied yet because the
 // server is busy; it names what it is waiting for.
+//
+// LatestVersion, NotesURL, CheckedAt, and CheckError come from the
+// server's own background release check; Latest repeats LatestVersion for
+// older clients. Phase is where the current or last update is; Error,
+// FromVersion, and ToVersion describe that update.
 type ServerUpdateStatusResult struct {
 	ServerVersion   string               `json:"server_version"`
+	LatestVersion   string               `json:"latest_version,omitempty"`
+	NotesURL        string               `json:"notes_url,omitempty"`
+	CheckedAt       string               `json:"checked_at,omitempty"`
+	CheckError      string               `json:"check_error,omitempty"`
+	Phase           string               `json:"phase"`
+	Error           string               `json:"error,omitempty"`
+	FromVersion     string               `json:"from_version,omitempty"`
+	ToVersion       string               `json:"to_version,omitempty"`
 	Latest          string               `json:"latest,omitempty"`
 	UpdateAvailable bool                 `json:"update_available"`
 	Capable         bool                 `json:"capable"`

@@ -54,26 +54,31 @@ func prepareOpenCodeNativeLaunch(dir string, env map[string]string) (NativeLaunc
 			return NativeLaunch{}, fmt.Errorf("managed OpenCode coordination requires a JSON or JSONC object in OPENCODE_CONFIG_CONTENT")
 		}
 	}
-	var plugins []json.RawMessage
-	if input, ok := config["plugin"]; ok {
-		if err := json.Unmarshal(input, &plugins); err != nil || plugins == nil {
-			return NativeLaunch{}, fmt.Errorf("managed OpenCode coordination requires a plugin array in OPENCODE_CONFIG_CONTENT")
-		}
-	}
 	// Keep user entries and every unrelated field. Native OpenCode merges this
 	// overlay with its own files; Aether never edits any of those files.
-	for _, file := range []string{agentstatus.OpenCodePluginName, "opencode-v1.js"} {
-		encoded, err := json.Marshal("file://" + path.Join(dir, file))
+	for key, files := range map[string][]string{
+		"plugin":       {"file://" + path.Join(dir, agentstatus.OpenCodePluginName), "file://" + path.Join(dir, "opencode-v1.js")},
+		"instructions": {path.Join(dir, InstructionsFileName)},
+	} {
+		var entries []json.RawMessage
+		if input, ok := config[key]; ok {
+			if err := json.Unmarshal(input, &entries); err != nil || entries == nil {
+				return NativeLaunch{}, fmt.Errorf("managed OpenCode coordination requires a %s array in OPENCODE_CONFIG_CONTENT", key)
+			}
+		}
+		for _, file := range files {
+			encoded, err := json.Marshal(file)
+			if err != nil {
+				return NativeLaunch{}, err
+			}
+			entries = append(entries, encoded)
+		}
+		encoded, err := json.Marshal(entries)
 		if err != nil {
 			return NativeLaunch{}, err
 		}
-		plugins = append(plugins, encoded)
+		config[key] = encoded
 	}
-	encoded, err := json.Marshal(plugins)
-	if err != nil {
-		return NativeLaunch{}, err
-	}
-	config["plugin"] = encoded
 	configBytes, err := json.Marshal(config)
 	if err != nil {
 		return NativeLaunch{}, err
@@ -100,5 +105,6 @@ func prepareOpenCodeNativeLaunch(dir string, env map[string]string) (NativeLaunc
 			"aether-mailbox": "opencode-v2.js",
 			"aether-status":  agentstatus.OpenCodeV2PluginName,
 		},
+		IdleWake: true,
 	}, nil
 }

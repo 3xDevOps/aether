@@ -5,6 +5,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -149,6 +150,9 @@ const (
 	CodeInvalidState = -32002 // invalid lifecycle transition, conflict-free misuse
 	CodeConflict     = -32003 // store conflict / in-use
 	CodeUnavailable  = -32004 // run has no live PTY session / agent gone
+	// CodeUpgradeRequired refuses a client older than the server's release;
+	// see UpgradeRequired.
+	CodeUpgradeRequired = -32005
 )
 
 // Request is one JSON-RPC 2.0 request. Clients send requests only, every
@@ -179,4 +183,46 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+}
+
+// UpdateCommand updates a CLI to the newest release.
+const UpdateCommand = "aether update"
+
+// UpgradeRequiredData is the Data of a CodeUpgradeRequired error.
+// ClientVersion is empty for a client whose SSH banner names no version.
+type UpgradeRequiredData struct {
+	ClientVersion    string `json:"client_version"`
+	ServerVersion    string `json:"server_version"`
+	MinClientVersion string `json:"min_client_version"`
+	Command          string `json:"command"`
+}
+
+// UpgradeRequired is the refusal of a client older than minClientVersion.
+// Clients from before this code print Message verbatim, so it names the
+// fix on its own.
+func UpgradeRequired(clientVersion, serverVersion, minClientVersion string) *Error {
+	client := clientVersion
+	if client == "" {
+		client = "older than " + minClientVersion
+	}
+	data, _ := json.Marshal(UpgradeRequiredData{
+		ClientVersion:    clientVersion,
+		ServerVersion:    serverVersion,
+		MinClientVersion: minClientVersion,
+		Command:          UpdateCommand,
+	})
+	return &Error{
+		Code: CodeUpgradeRequired,
+		Message: fmt.Sprintf("this aether is %s and the server runs %s; update this client first: run `%s` "+
+			"(desktop: Update in the app; Android: install the latest aether-android.apk), then retry",
+			client, serverVersion, UpdateCommand),
+		Data: data,
+	}
+}
+
+// IsUpgradeRequired reports whether err is a CodeUpgradeRequired refusal,
+// which retrying cannot fix.
+func IsUpgradeRequired(err error) bool {
+	var perr *Error
+	return errors.As(err, &perr) && perr.Code == CodeUpgradeRequired
 }

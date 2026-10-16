@@ -85,7 +85,7 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte(content+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, publish)
+		tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", publish)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,7 +104,7 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("C\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, publish); err == nil {
+	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", publish); err == nil {
 		t.Fatal("published ref lock did not fail the transaction")
 	}
 	for ref, want := range map[string]string{"refs/aether/previous": a, snapshotPublishedRef: b} {
@@ -161,7 +161,7 @@ func TestSnapshotPublishedPairIsAtomicOnRefLockFailure(t *testing.T) {
 	if err := os.Remove(blocker); err != nil {
 		t.Fatal(err)
 	}
-	c, err := e.writeWatchSnapshot(ctx, "run1", checkout, publish)
+	c, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", publish)
 	if err != nil || c != delivered.Tree {
 		t.Fatalf("retry did not acknowledge the protected inflight tree: %s, %v", c, err)
 	}

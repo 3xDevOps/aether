@@ -4,20 +4,30 @@ package io.aether.android
 data class UpdateCheck(val version: String, val latest: String, val updateAvailable: Boolean)
 
 /**
- * What the update notice keeps between starts: when it last ran a check,
- * when one last succeeded and the line it printed, since when this install
- * has been behind a release (0 while current), and the tag the member
- * dismissed.
+ * What the update notice keeps between starts: when it last ran a check and
+ * when the next one is due, when one last succeeded and the line it printed,
+ * what the last one failed with (null when it succeeded), since when this
+ * install has been behind a release (0 while current), the tag the member
+ * dismissed, and when they last dismissed a failure.
  */
 data class StoredUpdate(
     val checkedAt: Long = 0,
+    val nextCheckAt: Long = 0,
     val answeredAt: Long = 0,
     val line: String? = null,
+    val error: String? = null,
     val behindSince: Long = 0,
     val dismissed: String? = null,
+    val failureDismissedAt: Long = 0,
 )
 
 const val CHECK_INTERVAL_MS = 60 * 60 * 1000L
+
+/** How far either side of [CHECK_INTERVAL_MS] the next check lands, so phones do not check in step. */
+const val CHECK_JITTER = 0.1
+
+/** How old the last answer must be before a failed check is shown. */
+const val STALE_ANSWER_MS = 24 * 60 * 60 * 1000L
 
 /**
  * How long a Play install must have been behind a release before it hears
@@ -48,23 +58,36 @@ fun parseUpdateCheck(line: String): UpdateCheck? {
 }
 
 /**
- * Whether to run a check now: an hour after the last one, failed or not,
- * when the clock went back, or once the app was updated after it.
+ * Whether to run a check now: once the next one is due, failed or not, when
+ * the clock went back, or once the app was updated after the last one.
  */
-fun checkDue(now: Long, checkedAt: Long, appUpdatedAt: Long): Boolean =
-    now - checkedAt !in 0L until CHECK_INTERVAL_MS || appUpdatedAt > checkedAt
+fun checkDue(now: Long, stored: StoredUpdate, appUpdatedAt: Long): Boolean =
+    now !in stored.checkedAt until stored.nextCheckAt || appUpdatedAt > stored.checkedAt
 
 /**
- * [stored] after a check at [now] that printed [line], or failed with null.
- * A failed check keeps the last answer and waits for the next interval.
+ * [stored] after a check at [now] that printed [line], or failed with
+ * [error]. A failed check keeps the last answer. The next check is due an
+ * interval later, moved by [jitter], a fraction within [CHECK_JITTER].
  */
-fun afterCheck(stored: StoredUpdate, now: Long, line: String?, appUpdatedAt: Long): StoredUpdate {
-    val check = line?.let(::parseUpdateCheck) ?: return stored.copy(checkedAt = now)
+fun afterCheck(
+    stored: StoredUpdate,
+    now: Long,
+    line: String?,
+    error: String,
+    appUpdatedAt: Long,
+    jitter: Double,
+): StoredUpdate {
+    val next = now + (CHECK_INTERVAL_MS * (1 + jitter.coerceIn(-CHECK_JITTER, CHECK_JITTER))).toLong()
+    val check =
+        line?.let(::parseUpdateCheck)
+            ?: return stored.copy(checkedAt = now, nextCheckAt = next, error = error.ifBlank { "the check printed nothing" })
     val stillBehind = stored.behindSince != 0L && stored.behindSince >= appUpdatedAt
     return stored.copy(
         checkedAt = now,
+        nextCheckAt = next,
         answeredAt = now,
         line = line,
+        error = null,
         behindSince =
             when {
                 !check.updateAvailable -> 0L
@@ -85,4 +108,15 @@ fun noticeFor(stored: StoredUpdate, source: InstallSource, now: Long, appUpdated
     if (!check.updateAvailable || !isReleaseTag(check.latest) || check.latest == stored.dismissed) return null
     if (source == InstallSource.PLAY && now - stored.behindSince < PLAY_DELAY_MS) return null
     return check
+}
+
+/**
+ * What the last check failed with, or null for nothing to show: only once
+ * the last answer is [STALE_ANSWER_MS] old, so one offline hour stays quiet,
+ * and not after the member dismissed it since that answer.
+ */
+fun checkFailure(stored: StoredUpdate, now: Long): String? {
+    val error = stored.error ?: return null
+    if (now - stored.answeredAt < STALE_ANSWER_MS || stored.failureDismissedAt > stored.answeredAt) return null
+    return error
 }

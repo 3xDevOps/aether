@@ -325,7 +325,10 @@ func (e *Engine) lastSnapshotTree(run domain.RunID) string {
 // interval pinned through event publication and ref acknowledgement. A failed
 // acknowledgement retries the same interval before accepting another watch
 // tree; unrelated evidence staging may safely move the generic latest ref.
-func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, checkout string, publish func(string) error) (string, error) {
+// base, when set, is the commit the interval's stats are measured against;
+// its tree is pinned with the interval and becomes refs/aether/upstream in
+// the same transaction that publishes the tree, so the two never split.
+func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, checkout, base string, publish func(string) error) (string, error) {
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()
@@ -339,7 +342,7 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 	if err = os.WriteFile(filepath.Join(store, "history-gap"), []byte("1\n"), 0o600); err != nil {
 		return "", err
 	}
-	var tree, previous string
+	var tree, previous, upstream string
 	if _, err = os.Stat(filepath.Join(store, "HEAD")); err == nil {
 		refs, _, refsErr := e.gitBareBounded(ctx, store, -1, "for-each-ref", "--format=%(refname) %(objectname)", "refs/aether/inflight/")
 		if refsErr != nil {
@@ -355,6 +358,8 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 				previous = fields[1]
 			case snapshotInflightTreeRef:
 				tree = fields[1]
+			case snapshotInflightUpstreamRef:
+				upstream = fields[1]
 			}
 		}
 		if (tree == "") != (previous == "") {
@@ -380,10 +385,21 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 			}
 			previous = strings.TrimSpace(previous)
 		}
-		// Install both pins before Publish so a delivered event followed by
+		if base != "" {
+			upstream, _, err = e.gitBareBounded(ctx, store, 256, "rev-parse", "--verify", base+"^{tree}")
+			if err != nil {
+				return "", err
+			}
+			upstream = strings.TrimSpace(upstream)
+		}
+		// Install the pins before Publish so a delivered event followed by
 		// a ref-lock failure retries exactly the same interval after restart.
 		transaction := "start\nupdate " + snapshotInflightParentRef + " " + previous +
-			"\nupdate " + snapshotInflightTreeRef + " " + tree + "\nprepare\ncommit\n"
+			"\nupdate " + snapshotInflightTreeRef + " " + tree + "\n"
+		if upstream != "" {
+			transaction += "update " + snapshotInflightUpstreamRef + " " + upstream + "\n"
+		}
+		transaction += "prepare\ncommit\n"
 		if _, pinErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); pinErr != nil {
 			return "", pinErr
 		}
@@ -405,6 +421,10 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 			transaction += "update " + snapshotHistoryRoot + endpoint + " " + endpoint + "\n"
 		}
 	}
+	if upstream != "" {
+		transaction += "update " + snapshotUpstreamRef + " " + upstream +
+			"\ndelete " + snapshotInflightUpstreamRef + "\n"
+	}
 	transaction += "update " + snapshotPublishedRef + " " + tree +
 		"\ndelete " + snapshotInflightParentRef + "\ndelete " + snapshotInflightTreeRef + "\nprepare\ncommit\n"
 	if _, acknowledgeErr := e.gitInput(ctx, store, gitEnv(), []byte(transaction), "update-ref", "--stdin"); acknowledgeErr != nil {
@@ -423,7 +443,7 @@ func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
 	if err != nil {
 		return err
 	}
-	e.StopDiffWatch(run)
+	e.stopDiffWatch(run, false)
 	lock := e.snapshotLock(run)
 	lock.Lock()
 	defer lock.Unlock()

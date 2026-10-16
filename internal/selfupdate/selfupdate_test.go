@@ -1,9 +1,6 @@
 package selfupdate
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,40 +48,54 @@ func TestLatestTagRejectsNoRedirect(t *testing.T) {
 	}
 }
 
-// releaseServer serves checksums.txt and one asset the way a GitHub release
-// does, with the checksum optionally poisoned.
-func releaseServer(t *testing.T, asset string, body []byte, poison bool) *httptest.Server {
+// stageFrom stages asset of tag v1.3.0 from srv over a fresh dst holding
+// "old", fetching the manifest the way updateBinaries does.
+func stageFrom(t *testing.T, srv *httptest.Server, asset string) (string, error) {
 	t.Helper()
-	sum := sha256.Sum256(body)
-	digest := hex.EncodeToString(sum[:])
-	if poison {
-		digest = strings.Repeat("0", 64)
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, "%s  %s\n", digest, asset)
-	})
-	mux.HandleFunc("/"+asset, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(body)
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-func TestApplyReplacesBinary(t *testing.T) {
-	body := []byte("new binary contents")
-	srv := releaseServer(t, "aether-linux-amd64", body, false)
-
 	dst := filepath.Join(t.TempDir(), "aether")
 	if err := os.WriteFile(dst, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	m, err := fetchManifest(t.Context(), srv.URL, "v1.3.0")
+	if err != nil {
+		return dst, err
+	}
+	staged, err := Stage(t.Context(), m, asset, dst)
+	if err != nil {
+		return dst, err
+	}
+	defer staged.Discard()
+	return dst, staged.Commit()
+}
 
-	if err := Apply(t.Context(), srv.URL, "aether-linux-amd64", dst); err != nil {
+// assertUntouched fails unless dst still holds "old" and nothing was left
+// staged beside it.
+func assertUntouched(t *testing.T, dst string) {
+	t.Helper()
+	got, err := os.ReadFile(dst)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if string(got) != "old" {
+		t.Fatalf("dst was modified: %q", got)
+	}
+	entries, err := os.ReadDir(filepath.Dir(dst))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("staging leftovers in %s: %v", filepath.Dir(dst), entries)
+	}
+}
 
+func TestStageReplacesBinary(t *testing.T) {
+	body := []byte("new binary contents")
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-linux-amd64": body})
+
+	dst, err := stageFrom(t, srv, "aether-linux-amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatal(err)
@@ -105,57 +116,102 @@ func TestApplyReplacesBinary(t *testing.T) {
 	}
 }
 
-func TestApplyRejectsChecksumMismatch(t *testing.T) {
-	srv := releaseServer(t, "aether-linux-amd64", []byte("tampered"), true)
+func TestStageRejectsChecksumMismatch(t *testing.T) {
+	f, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-linux-amd64": []byte("released")})
+	f.served["aether-linux-amd64"] = []byte("tampered")
 
-	dst := filepath.Join(t.TempDir(), "aether")
-	if err := os.WriteFile(dst, []byte("old"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	err := Apply(t.Context(), srv.URL, "aether-linux-amd64", dst)
+	dst, err := stageFrom(t, srv, "aether-linux-amd64")
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("err = %v, want a checksum mismatch", err)
 	}
-	got, rerr := os.ReadFile(dst)
-	if rerr != nil {
-		t.Fatal(rerr)
-	}
-	if string(got) != "old" {
-		t.Fatalf("dst was modified despite the mismatch: %q", got)
-	}
-	// The staged temp file must not be left behind.
-	entries, rerr := os.ReadDir(filepath.Dir(dst))
-	if rerr != nil {
-		t.Fatal(rerr)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("staging leftovers in %s: %v", filepath.Dir(dst), entries)
-	}
+	assertUntouched(t, dst)
 }
 
-func TestApplyRejectsUnlistedAsset(t *testing.T) {
-	srv := releaseServer(t, "aether-linux-amd64", []byte("x"), false)
+func TestStageRejectsSizeMismatch(t *testing.T) {
+	f, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-linux-amd64": []byte("released")})
+	f.served["aether-linux-amd64"] = []byte("released plus a tail")
 
-	dst := filepath.Join(t.TempDir(), "aether")
-	err := Apply(t.Context(), srv.URL, "aether-darwin-arm64", dst)
-	if err == nil || !strings.Contains(err.Error(), "not listed") {
+	dst, err := stageFrom(t, srv, "aether-linux-amd64")
+	if err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("err = %v, want a size mismatch", err)
+	}
+	assertUntouched(t, dst)
+}
+
+func TestStageRejectsUnlistedAsset(t *testing.T) {
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-linux-amd64": []byte("x")})
+
+	_, err := stageFrom(t, srv, "aether-darwin-arm64")
+	if err == nil || !strings.Contains(err.Error(), "does not publish aether-darwin-arm64") {
 		t.Fatalf("err = %v, want an unlisted-asset error", err)
 	}
 }
 
-func TestApplyRejectsMissingAsset(t *testing.T) {
-	// checksums.txt lists the asset but the download 404s.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, "%s  %s\n", strings.Repeat("0", 64), "aether-linux-amd64")
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
+func TestStageRejectsMissingAsset(t *testing.T) {
+	// The manifest lists the asset; the release serves nothing.
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{})
+	m := manifestFor("v1.3.0", map[string][]byte{"aether-linux-amd64": []byte("x")})
+	m.baseURL = srv.URL
 	dst := filepath.Join(t.TempDir(), "aether")
-	if err := Apply(t.Context(), srv.URL, "aether-linux-amd64", dst); err == nil {
-		t.Fatal("expected an error for a missing asset")
+	_, err := Stage(t.Context(), m, "aether-linux-amd64", dst)
+	if err == nil || !strings.Contains(err.Error(), "404 Not Found") {
+		t.Fatalf("err = %v, want the 404", err)
+	}
+}
+
+func TestUpdateRefusesAReleaseWithoutAManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("UpdateBinaries refuses on Windows before it reaches the release")
+	}
+	f, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-" + runtime.GOOS + "-" + runtime.GOARCH: []byte("new")})
+	f.unsigned = true
+	self := filepath.Join(t.TempDir(), "aether")
+	if err := os.WriteFile(self, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := UpdateBinaries(t.Context(), srv.URL, "v1.3.0", self, "aether")
+	if err == nil || !strings.Contains(err.Error(), "v1.3.0") || !strings.Contains(err.Error(), "predates signed releases") {
+		t.Fatalf("err = %v, want it to name v1.3.0 as predating signed releases", err)
+	}
+	assertUntouched(t, self)
+}
+
+// TestUpdateBinariesStagesEveryAssetFromTheManifest drives the whole path:
+// the manifest is fetched and verified, then every binary is streamed,
+// checked against it, and swapped in.
+func TestUpdateBinariesStagesEveryAssetFromTheManifest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("UpdateBinaries refuses on Windows")
+	}
+	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
+	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{
+		"aether" + suffix:        []byte("new cli"),
+		"aether-server" + suffix: []byte("new server"),
+	})
+	dir := t.TempDir()
+	self := filepath.Join(dir, "aether")
+	for _, name := range []string{"aether", "aether-server"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("old"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	replaced, err := UpdateBinaries(t.Context(), srv.URL, "v1.3.0", self, "aether", "aether-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replaced) != 2 {
+		t.Fatalf("replaced = %v, want both binaries", replaced)
+	}
+	for name, want := range map[string]string{"aether": "new cli", "aether-server": "new server"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
 	}
 }
 

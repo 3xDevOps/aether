@@ -160,23 +160,25 @@ type CoordPeer struct {
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.
 type CoordStatusResult struct {
-	WireVersion      string                  `json:"wire_version"`
-	RunID            string                  `json:"run_id"`
-	WorkspaceID      string                  `json:"workspace_id"`
-	MemberID         string                  `json:"member_id"`
-	Task             string                  `json:"task,omitempty"`
-	TaskBytes        int                     `json:"task_bytes,omitempty"`
-	TaskTruncated    bool                    `json:"task_truncated,omitempty"`
-	Assignment       *CoordMissionAssignment `json:"assignment,omitempty"`
-	Peers            []CoordPeer             `json:"peers"`
-	PeerTotal        int                     `json:"peer_total,omitempty"`
-	PeersTruncated   bool                    `json:"peers_truncated,omitempty"`
-	Unread           int                     `json:"unread"`
-	Capabilities     []string                `json:"capabilities"`
-	WaitSupported    bool                    `json:"wait_supported,omitempty"`
-	UnreadMessageIDs []string                `json:"unread_message_ids,omitempty"`
-	WakeAdmitted     bool                    `json:"wake_admitted,omitempty"`
-	Overlaps         []CoordOverlap          `json:"overlaps,omitempty"`
+	WireVersion    string                  `json:"wire_version"`
+	RunID          string                  `json:"run_id"`
+	WorkspaceID    string                  `json:"workspace_id"`
+	MemberID       string                  `json:"member_id"`
+	Task           string                  `json:"task,omitempty"`
+	TaskBytes      int                     `json:"task_bytes,omitempty"`
+	TaskTruncated  bool                    `json:"task_truncated,omitempty"`
+	Assignment     *CoordMissionAssignment `json:"assignment,omitempty"`
+	Peers          []CoordPeer             `json:"peers"`
+	PeerTotal      int                     `json:"peer_total,omitempty"`
+	PeersTruncated bool                    `json:"peers_truncated,omitempty"`
+	Unread         int                     `json:"unread"`
+	Capabilities   []string                `json:"capabilities"`
+	// Protected runs are never woken when mail arrives while they are idle.
+	Protected        bool           `json:"protected,omitempty"`
+	WaitSupported    bool           `json:"wait_supported,omitempty"`
+	UnreadMessageIDs []string       `json:"unread_message_ids,omitempty"`
+	WakeAdmitted     bool           `json:"wake_admitted,omitempty"`
+	Overlaps         []CoordOverlap `json:"overlaps,omitempty"`
 }
 
 // CoordOverlap is one run whose edits overlap the caller's. Only
@@ -215,9 +217,9 @@ func ValidCoordMessageID(id string) bool {
 // never a parameter. IdempotencyKey makes retries return the original
 // message receipt without creating another row.
 type CoordSendParams struct {
-	ToRunID        string `json:"to_run_id"`
-	Body           string `json:"body"`
-	IdempotencyKey string `json:"idempotency_key"`
+	ToRunID        string `json:"to_run_id" jsonschema:"a peer run_id listed by aether_status"`
+	Body           string `json:"body" jsonschema:"the message: short and specific"`
+	IdempotencyKey string `json:"idempotency_key" jsonschema:"a stable key you choose; a retry with the same key returns the original receipt"`
 }
 
 // CoordSendResult is the result of coord.send. RecipientStatus is the
@@ -229,9 +231,9 @@ type CoordSendResult struct {
 
 // CoordAskParams are the params of coord.ask.
 type CoordAskParams struct {
-	ToRunID        string `json:"to_run_id"`
-	Body           string `json:"body"`
-	IdempotencyKey string `json:"idempotency_key"`
+	ToRunID        string `json:"to_run_id" jsonschema:"a peer run_id listed by aether_status"`
+	Body           string `json:"body" jsonschema:"one specific question for that peer"`
+	IdempotencyKey string `json:"idempotency_key" jsonschema:"a stable key you choose; a retry with the same key returns the original question_id"`
 }
 
 // CoordAskResult is the result of coord.ask. RecipientStatus is the
@@ -244,9 +246,9 @@ type CoordAskResult struct {
 // CoordReplyParams are the params of coord.reply. The question ID identifies
 // both the recipient and the authorization relationship.
 type CoordReplyParams struct {
-	QuestionID     string `json:"question_id"`
-	Body           string `json:"body"`
-	IdempotencyKey string `json:"idempotency_key"`
+	QuestionID     string `json:"question_id" jsonschema:"the question_id of the question you answer"`
+	Body           string `json:"body" jsonschema:"your answer"`
+	IdempotencyKey string `json:"idempotency_key" jsonschema:"a stable key you choose; a retry with the same key returns the original receipt"`
 }
 
 // CoordReplyResult is the result of coord.reply.
@@ -259,8 +261,8 @@ type CoordReplyResult struct {
 // same batch is delivered again. WaitSeconds requests a bounded server-side
 // long poll when no batch is ready.
 type CoordInboxParams struct {
-	AckToken    string `json:"ack_token,omitempty"`
-	WaitSeconds int    `json:"wait_seconds,omitempty"`
+	AckToken    string `json:"ack_token,omitempty" jsonschema:"the ack_token of the batch you handled; it acknowledges exactly that batch"`
+	WaitSeconds int    `json:"wait_seconds,omitempty" jsonschema:"seconds the server waits for new mail when the inbox is empty; 0 returns at once"`
 }
 
 // CoordMessage is one delivered message.
@@ -285,10 +287,10 @@ type CoordInboxResult struct {
 
 // CoordReportParams submits a durable task outcome for the calling run.
 type CoordReportParams struct {
-	Outcome        string   `json:"outcome"`
-	Summary        string   `json:"summary"`
-	EvidenceRefs   []string `json:"evidence_refs,omitempty"`
-	IdempotencyKey string   `json:"idempotency_key"`
+	Outcome        string   `json:"outcome" jsonschema:"success, failure, blocked, needs-input or waiting"`
+	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on"`
+	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input or waiting"`
+	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a stable key you choose per outcome; retry an unchanged report with the same key"`
 }
 
 // CoordReportResult is the complete durable outcome receipt. EvidenceRef is

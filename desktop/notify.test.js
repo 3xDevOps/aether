@@ -139,6 +139,21 @@ test('a paused run and a worker that is not blocked never notify', async () => {
   assert.equal(shown[0].options.body, 'Worker blocked: tests need Docker')
 })
 
+test('an interrupted or stopped turn asks for a message; a cancelled one stays quiet', async () => {
+  const cancelled = lead('r10')
+  await status(cancelled, { status: 'needs-attention', state: 'idle', reason: 'turn cancelled' })
+  assert.equal(shown.length, 0)
+
+  const interrupted = lead('r11')
+  await status(interrupted, { status: 'needs-attention', state: 'needs-you', reason: 'turn interrupted' })
+  const stopped = lead('r12')
+  await status(stopped, { status: 'needs-attention', state: 'needs-you', reason: 'turn ended: max_tokens' })
+  assert.deepEqual(shown.map((n) => n.options.body), [
+    'Turn interrupted, send a message to continue',
+    'Turn ended (max_tokens), send a message to continue',
+  ])
+})
+
 test('an unseen failure needs you until the owner sees it', async () => {
   const run = lead('r5')
   await status(run, { status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
