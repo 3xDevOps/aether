@@ -3,12 +3,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { FailureCallout } from '@/components/ui/failure-callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { money } from '@/lib/format'
 import type { InsightsResult, InsightsRun } from '@/lib/types'
 import { useStore } from '@/store'
-import { agentLabel, duration, outcome, plural, sinceLabel, successRate, versus, type Rate } from '@/routes/insights/model'
+import { agentLabel, duration, type BucketRuns, outcome, plural, sinceLabel, successRate, versus } from '@/routes/insights/model'
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -29,10 +30,6 @@ function Tile({ label, value, children }: { label: string; value: string; childr
   )
 }
 
-function rateWords(rate: Rate): string {
-  return rate.percent === null ? 'No runs ended' : `${rate.percent}% (${rate.finished} of ${rate.ended})`
-}
-
 export function Tiles({ result, before }: { result: InsightsResult; before: string }) {
   const { totals, previous, swarms, pull_requests: prs, coverage } = result
   const rate = successRate(totals)
@@ -45,7 +42,7 @@ export function Tiles({ result, before }: { result: InsightsResult; before: stri
       </Tile>
       <Tile label="Success rate" value={rate.percent === null ? '—' : `${rate.percent}%`}>
         <span>{rate.percent === null ? 'No runs ended' : `${rate.finished} finished of ${plural(rate.ended, 'ended run')}`}</span>
-        <span>{was.percent === null ? `No runs ended ${before}` : `${rateWords(was)} ${before}`}</span>
+        <span>{was.percent === null ? `No runs ended ${before}` : `${was.percent}% (${was.finished} of ${was.ended}) ${before}`}</span>
       </Tile>
       <Tile label="Swarms completed" value={swarms.completed.toLocaleString()}>
         <span>{plural(swarms.launched, 'swarm')} launched</span>
@@ -65,15 +62,11 @@ export function Tiles({ result, before }: { result: InsightsResult; before: stri
   )
 }
 
-function pullRequestName(url: string): string {
-  const number = /\/pull\/(\d+)/.exec(url)?.[1]
-  return number ? `PR #${number}` : 'Pull request'
-}
-
-function FinishedRow({ run, repository, agent }: { run: InsightsRun; repository: string; agent: string }) {
+function FinishedRow({ run, workspace, agent }: { run: InsightsRun; workspace: string; agent: string }) {
   const navigate = useStore((s) => s.navigate)
   const { label, tone } = outcome(run)
   const title = run.title || 'Untitled run'
+  const pr = /\/pull\/(\d+)/.exec(run.pr_url)?.[1]
   return (
     <Card>
       <div className="flex min-w-0 items-start justify-between gap-2">
@@ -82,7 +75,7 @@ function FinishedRow({ run, repository, agent }: { run: InsightsRun; repository:
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-muted">
         <Badge tone={tone}>{label}</Badge>
-        <span>{repository}</span>
+        <span>{workspace}</span>
         <span aria-hidden>·</span>
         <span>{agent}</span>
         <span aria-hidden>·</span>
@@ -90,7 +83,7 @@ function FinishedRow({ run, repository, agent }: { run: InsightsRun; repository:
         {run.pr_url && (
           <CardControls>
             <a href={run.pr_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-              {pullRequestName(run.pr_url)}{run.pr_state && ` (${run.pr_state})`}
+              {pr ? `PR #${pr}` : 'Pull request'}{run.pr_state && ` (${run.pr_state})`}
             </a>
           </CardControls>
         )}
@@ -100,21 +93,22 @@ function FinishedRow({ run, repository, agent }: { run: InsightsRun; repository:
 }
 
 export function FinishedList({
-  runs,
-  capped,
+  list,
   filter,
   onClear,
-  repositoryOf,
+  onRetry,
+  workspaceOf,
   agentNames,
 }: {
-  runs: InsightsRun[]
-  capped: boolean
+  list: BucketRuns
   filter: string | null
   onClear: () => void
-  repositoryOf: (id: string) => string
+  onRetry: () => void
+  workspaceOf: (id: string) => string
   agentNames: Record<string, string>
 }) {
   const [all, setAll] = useState(false)
+  const runs = list.kind === 'ready' ? list.runs : []
   const shown = all ? runs : runs.slice(0, 10)
   return (
     <Section title="Finished work">
@@ -124,13 +118,16 @@ export function FinishedList({
           <Button variant="link" onClick={onClear}>Show every day</Button>
         </p>
       )}
-      {runs.length === 0 ? (
+      {list.kind === 'loading' && <p className="text-ui text-muted">Reading the runs that ended then…</p>}
+      {list.kind === 'failed' && <FailureCallout error={list.message} onRetry={onRetry} />}
+      {list.kind === 'ready' && runs.length === 0 && (
         <p className="text-ui text-muted">{filter ? 'No runs ended then.' : 'No runs ended in this period.'}</p>
-      ) : (
+      )}
+      {runs.length > 0 && (
         <ul className="flex min-w-0 flex-col gap-2">
           {shown.map((run) => (
             <li key={run.run_id}>
-              <FinishedRow run={run} repository={repositoryOf(run.workspace_id)} agent={agentLabel(run.harness, run.model, agentNames)} />
+              <FinishedRow run={run} workspace={workspaceOf(run.workspace_id)} agent={agentLabel(run.harness, run.model, agentNames)} />
             </li>
           ))}
         </ul>
@@ -138,13 +135,13 @@ export function FinishedList({
       {shown.length < runs.length && (
         <Button variant="secondary" className="self-start" onClick={() => setAll(true)}>Show all {runs.length}</Button>
       )}
-      {capped && all && <p className="text-ui-sm text-muted">The 50 most recent runs that ended in this period.</p>}
+      {runs.length >= 50 && <p className="text-ui-sm text-muted">The 50 most recent runs that ended {filter ? 'then' : 'in this period'}.</p>}
     </Section>
   )
 }
 
 function Bars({ rows }: { rows: { key: string; name: string; launched: number; finished: number; failed: number }[] }) {
-  const max = Math.max(1, ...rows.map((r) => r.launched))
+  const max = Math.max(1, ...rows.map((r) => Math.max(r.launched, r.finished)))
   if (rows.length === 0) return <p className="text-ui text-muted">Nothing launched.</p>
   return (
     <ul className="flex min-w-0 flex-col gap-2">
@@ -170,7 +167,7 @@ function Bars({ rows }: { rows: { key: string; name: string; launched: number; f
 export function Breakdown({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
   return (
     <div className="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2">
-      <Section title="By repository">
+      <Section title="By workspace">
         <Bars rows={result.by_workspace.map((w) => ({ ...w, key: w.workspace_id }))} />
       </Section>
       <Section title="By agent">
@@ -231,7 +228,9 @@ export function Usage({ result }: { result: InsightsResult }) {
       <CollapsibleTrigger>Usage</CollapsibleTrigger>
       <CollapsibleContent>
         <div className="flex min-w-0 flex-col gap-2 px-1 pt-2">
-          {cost.metered_runs === 0 ? (
+          {runs === 0 ? (
+            <p className="text-ui text-muted">No runs ended in this period.</p>
+          ) : cost.metered_runs === 0 ? (
             <p className="text-ui text-muted">No cost reported for {plural(runs, 'run')} (headless Claude reports cost; other agents do not).</p>
           ) : (
             <>

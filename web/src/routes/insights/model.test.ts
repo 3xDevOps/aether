@@ -1,10 +1,29 @@
-import { duration, periodRange, versus } from '@/routes/insights/model'
+import { chartSeries, duration, periodRange, successRate, versus } from '@/routes/insights/model'
+import { insights } from '@/test/fixtures'
 
 describe('insights model', () => {
-  test('a period ends at the next local midnight, so today counts', () => {
+  test('a period ends at the next local midnight, and twelve months start on a Monday', () => {
     const now = new Date(2026, 9, 16, 15, 30)
     expect(periodRange('7d', now)).toEqual({ from: new Date(2026, 9, 10), to: new Date(2026, 9, 17) })
-    expect(periodRange('12m', now)).toEqual({ from: new Date(2025, 9, 17), to: new Date(2026, 9, 17) })
+    expect(periodRange('12m', now)).toEqual({ from: new Date(2025, 9, 13), to: new Date(2026, 9, 17) })
+  })
+
+  test('100% means no run failed', () => {
+    const totals = insights().totals
+    expect(successRate({ ...totals, finished: 199, failed: 1, interrupted: 0, abandoned: 0 }).percent).toBe(99)
+  })
+
+  test('a phone folds more than 30 daily bars into Monday weeks', () => {
+    const series = Array.from({ length: 31 }, (_, i) => ({
+      start: new Date(Date.UTC(2026, 8, 16 + i)).toISOString().slice(0, 10),
+      launched: 1, completed: 1, merged: 0, failed: 0, interrupted: 0, abandoned: 0,
+    }))
+    const result = insights({ series })
+    expect(chartSeries(result, false).series).toHaveLength(31)
+    const weekly = chartSeries(result, true)
+    expect(weekly.bucket).toBe('week')
+    expect(weekly.series[0]).toEqual({ start: '2026-09-14', launched: 5, completed: 5, merged: 0, failed: 0, interrupted: 0, abandoned: 0 })
+    expect(weekly.series.reduce((sum, week) => sum + week.launched, 0)).toBe(31)
   })
 
   test('compares in raw numbers', () => {

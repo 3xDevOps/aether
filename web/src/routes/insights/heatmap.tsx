@@ -26,9 +26,7 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
   const width = weeks * (cell + gap)
   const label = (d: { date: string; runs: number }) =>
     `${dayLabel(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}: ${plural(d.runs, 'run')}`
-  const months = days.flatMap((d, i) =>
-    d.date.endsWith('-01') || i === 0 ? [{ col: Math.floor((offset + i) / 7), name: dayLabel(d.date, { month: 'short' }) }] : [],
-  ).filter((m, i, list) => i === 0 || m.col - list[i - 1].col >= 3)
+  const months = days.flatMap((d, i) => (d.date.endsWith('-01') ? [{ col: Math.floor((offset + i) / 7), name: dayLabel(d.date, { month: 'short' }) }] : []))
 
   const move = (index: number) => {
     if (index < 0 || index >= days.length) return
@@ -98,7 +96,8 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 text-ui-sm text-muted">
         <p>A day counts every run that was active at some point that day.</p>
-        <p className="flex items-center gap-1" aria-label="Scale: fewer runs to more runs">
+        <p className="flex items-center gap-1">
+          <span className="sr-only">Scale from fewer runs to more runs</span>
           <span aria-hidden>Fewer</span>
           {levels.map((fill) => <Swatch key={fill} fill={fill} />)}
           <span aria-hidden>More</span>

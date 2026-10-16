@@ -12,11 +12,12 @@ import { useIsMobile } from '@/lib/breakpoints'
 import { canLaunch } from '@/lib/commands'
 import { message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
+import { useConnectionProblem } from '@/components/shell/connection'
 import type { InsightsParams, InsightsResult } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { ActivityChart } from '@/routes/insights/activity-chart'
 import { Heatmap } from '@/routes/insights/heatmap'
-import { bucketSelection, finishedIn, headline, isEmpty, periodRange, periods, plural, rfc3339, type Period } from '@/routes/insights/model'
+import { bucketBounds, bucketSelection, chartSeries, headline, isEmpty, periodRange, periods, plural, rfc3339, type BucketRuns, type Period, type Selection } from '@/routes/insights/model'
 import { Breakdown, FinishedList, Section, Tiles, Time, Usage } from '@/routes/insights/sections'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
@@ -30,10 +31,6 @@ type Load =
   | { kind: 'ready'; result: InsightsResult }
   | { kind: 'failed'; message: string }
   | { kind: 'unsupported' }
-
-function unsupported(error: unknown): boolean {
-  return error instanceof ApiError && (error.status === 404 || error.code === METHOD_NOT_FOUND)
-}
 
 function Controls({
   period,
@@ -110,14 +107,19 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const [picked, setWorkspace] = useState<string | null>(null)
   const workspace = picked ?? activeWorkspace
   const [scope, setScope] = useState<InsightsParams['scope']>('mine')
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Selection | null>(null)
+  const [bucketRuns, setBucketRuns] = useState<BucketRuns>({ kind: 'loading' })
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const requestID = useRef(0)
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const bucketID = useRef(0)
+  const resolvedZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const timeZone = resolvedZone && resolvedZone !== 'Etc/Unknown' ? resolvedZone : ''
+  const problem = useConnectionProblem()
 
   const read = useCallback(async () => {
     const id = ++requestID.current
     const { from, to } = periodRange(period, new Date())
+    bucketID.current++
     setLoad({ kind: 'loading' })
     setSelected(null)
     try {
@@ -125,7 +127,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
       if (id === requestID.current) setLoad({ kind: 'ready', result })
     } catch (error) {
       if (id !== requestID.current) return
-      setLoad(unsupported(error) ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
+      setLoad(error instanceof ApiError && (error.status === 404 || error.code === METHOD_NOT_FOUND) ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
     }
   }, [client, period, workspace, scope, timeZone])
 
@@ -133,7 +135,23 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
     if (connection === 'live') void read()
   }, [connection, read])
 
-  const skeleton = useDelayed(load.kind === 'loading')
+  // `recent` holds only the newest runs, so a chosen bucket is read on its own.
+  const select = useCallback(async (selection: Selection | null, result: InsightsResult) => {
+    const id = ++bucketID.current
+    setSelected(selection)
+    if (!selection) return
+    setBucketRuns({ kind: 'loading' })
+    const { from, to } = bucketBounds(selection, result)
+    try {
+      const bucket = await client.insightsGet({ workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone })
+      if (id === bucketID.current) setBucketRuns({ kind: 'ready', runs: bucket.recent })
+    } catch (error) {
+      if (id === bucketID.current) setBucketRuns({ kind: 'failed', message: message(error) })
+    }
+  }, [client, workspace, scope, timeZone])
+
+  const waiting = load.kind === 'loading' && connection !== 'live'
+  const skeleton = useDelayed(load.kind === 'loading' && !waiting)
   const periodInfo = periods.find((p) => p.value === period)!
   const controls = (
     <Controls period={period} onPeriod={setPeriod} workspace={workspace} onWorkspace={setWorkspace} scope={scope} onScope={setScope} />
@@ -145,7 +163,13 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
           {mobile && <div role="toolbar" aria-label="Insights actions" className="flex flex-wrap items-center gap-2">{controls}</div>}
+          {waiting && (
+            <Callout tone="neutral" role="status">{problem ?? 'Connecting'}. Insights load once the server connection is live.</Callout>
+          )}
           {load.kind === 'loading' && skeleton && <Loading />}
+          {timeZone === '' && load.kind === 'ready' && (
+            <p className="text-ui-sm text-muted">This browser reports no time zone, so days are counted in UTC.</p>
+          )}
           {load.kind === 'unsupported' && (
             <Callout tone="neutral" role="status">This server does not report insights. Update the server to see them.</Callout>
           )}
@@ -157,8 +181,10 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
               before={periodInfo.previous}
               oneWorkspace={workspace !== ''}
               selected={selected}
-              onSelect={setSelected}
-              repositoryOf={(id) => load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id}
+              bucketRuns={bucketRuns}
+              onSelect={(selection) => void select(selection, load.result)}
+              everyone={scope === 'everyone'}
+              workspaceOf={(id) => load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id}
               agentNames={agentNames}
               onBoard={() => navigate('board')}
               emptyAction={(
@@ -182,8 +208,10 @@ function Insights({
   before,
   oneWorkspace,
   selected,
+  bucketRuns,
   onSelect,
-  repositoryOf,
+  everyone,
+  workspaceOf,
   agentNames,
   onBoard,
   emptyAction,
@@ -192,15 +220,17 @@ function Insights({
   periodLabel: string
   before: string
   oneWorkspace: boolean
-  selected: string | null
-  onSelect: (start: string | null) => void
-  repositoryOf: (id: string) => string
+  selected: Selection | null
+  bucketRuns: BucketRuns
+  onSelect: (selection: Selection | null) => void
+  everyone: boolean
+  workspaceOf: (id: string) => string
   agentNames: Record<string, string>
   onBoard: () => void
   emptyAction: ReactNode
 }) {
-  const selection = selected ? bucketSelection(selected, result.bucket) : null
-  const runs = selection ? result.recent.filter((run) => finishedIn(run, selection, result.time_zone)) : result.recent
+  const mobile = useIsMobile()
+  const chart = chartSeries(result, mobile)
   const needsYou = result.needs_you > 0 && (
     <Button variant="link" onClick={onBoard}>{plural(result.needs_you, 'run')} {result.needs_you === 1 ? 'needs' : 'need'} you</Button>
   )
@@ -215,7 +245,9 @@ function Insights({
       <>
         {needsYou && <p className="text-ui">{needsYou}</p>}
         <EmptyState title="No runs in this period." action={emptyAction}>
-          Runs you launch show up here once they start, with what they finished.
+          {everyone
+            ? 'Runs anyone launches show up here once they start, with what they finished.'
+            : 'Runs you launch show up here once they start, with what they finished.'}
         </EmptyState>
         {heatmap}
       </>
@@ -230,14 +262,19 @@ function Insights({
       </p>
       <Tiles result={result} before={before} />
       <Section title="Activity">
-        <ActivityChart series={result.series} bucket={result.bucket} selected={selected} onSelect={onSelect} />
+        <ActivityChart
+          series={chart.series}
+          bucket={chart.bucket}
+          selected={selected?.start ?? null}
+          onSelect={(start) => onSelect(start ? bucketSelection(start, chart.bucket) : null)}
+        />
       </Section>
       <FinishedList
-        runs={runs}
-        capped={!selection && result.recent.length >= 50}
-        filter={selection?.label ?? null}
+        list={selected ? bucketRuns : { kind: 'ready', runs: result.recent }}
+        filter={selected?.label ?? null}
         onClear={() => onSelect(null)}
-        repositoryOf={repositoryOf}
+        onRetry={() => onSelect(selected)}
+        workspaceOf={workspaceOf}
         agentNames={agentNames}
       />
       {heatmap}

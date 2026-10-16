@@ -1,5 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
-import type { InsightsResult, InsightsRun, InsightsTotals } from '@/lib/types'
+import type { InsightsBucket, InsightsResult, InsightsRun, InsightsTotals } from '@/lib/types'
 
 export type Period = '7d' | '30d' | '90d' | '12m'
 
@@ -12,13 +12,13 @@ export const periods: { value: Period; label: string; previous: string }[] = [
 
 const days: Record<Exclude<Period, '12m'>, number> = { '7d': 7, '30d': 30, '90d': 90 }
 
-/** The period ends at the next local midnight, so today counts. */
+/** The period ends at the next local midnight, so today counts. Twelve months
+ * start on a Monday, where the server's weekly buckets start. */
 export function periodRange(period: Period, now: Date): { from: Date; to: Date } {
   const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  const from = period === '12m'
-    ? new Date(to.getFullYear() - 1, to.getMonth(), to.getDate())
-    : new Date(to.getFullYear(), to.getMonth(), to.getDate() - days[period])
-  return { from, to }
+  if (period !== '12m') return { from: new Date(to.getFullYear(), to.getMonth(), to.getDate() - days[period]), to }
+  const year = new Date(to.getFullYear() - 1, to.getMonth(), to.getDate())
+  return { from: new Date(year.getFullYear(), year.getMonth(), year.getDate() - ((year.getDay() + 6) % 7)), to }
 }
 
 export function rfc3339(date: Date): string {
@@ -42,7 +42,7 @@ export interface Rate {
 
 export function successRate(totals: InsightsTotals): Rate {
   const ended = totals.finished + totals.failed + totals.interrupted + totals.abandoned
-  return { finished: totals.finished, ended, percent: ended === 0 ? null : Math.round((totals.finished / ended) * 100) }
+  return { finished: totals.finished, ended, percent: ended === 0 ? null : Math.floor((totals.finished / ended) * 100) }
 }
 
 export function duration(seconds: number): string {
@@ -55,11 +55,6 @@ export function duration(seconds: number): string {
   if (h < 24) return m % 60 ? `${h}h ${m % 60}m` : `${h}h`
   const d = Math.floor(h / 24)
   return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
-}
-
-/** The YYYY-MM-DD the instant falls on in the zone. */
-export function localDate(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 }
 
 /** Dates on the wire are local calendar days; reading them as UTC keeps the day. */
@@ -77,6 +72,8 @@ export function addDays(date: string, n: number): string {
   return day.toISOString().slice(0, 10)
 }
 
+export type BucketRuns = { kind: 'loading' } | { kind: 'ready'; runs: InsightsRun[] } | { kind: 'failed'; message: string }
+
 export interface Selection {
   start: string
   end: string
@@ -88,9 +85,37 @@ export function bucketSelection(start: string, bucket: InsightsResult['bucket'])
   return { start, end: addDays(start, 7), label: `the week of ${dayLabel(start)}` }
 }
 
-export function finishedIn(run: InsightsRun, selection: Selection, timeZone: string): boolean {
-  const day = localDate(run.finished_at, timeZone)
-  return day >= selection.start && day < selection.end
+/** A selection's instants, held inside the period: a phone's weekly bars can start before it. */
+export function bucketBounds(selection: Selection, result: Pick<InsightsResult, 'from' | 'to' | 'time_zone'>): { from: Date; to: Date } {
+  const utc = result.time_zone === '' || result.time_zone === 'UTC'
+  const midnight = (date: string) => {
+    const [y, m, d] = date.split('-').map(Number)
+    return utc ? new Date(Date.UTC(y, m - 1, d)) : new Date(y, m - 1, d)
+  }
+  return {
+    from: new Date(Math.max(midnight(selection.start).getTime(), Date.parse(result.from))),
+    to: new Date(Math.min(midnight(selection.end).getTime(), Date.parse(result.to))),
+  }
+}
+
+/** On a phone, more than 30 daily bars become weekly ones so each stays a usable target. */
+export function chartSeries(result: InsightsResult, mobile: boolean): { series: InsightsBucket[]; bucket: InsightsResult['bucket'] } {
+  if (!mobile || result.bucket !== 'day' || result.series.length <= 30) return { series: result.series, bucket: result.bucket }
+  const weeks = new Map<string, InsightsBucket>()
+  for (const day of result.series) {
+    const start = addDays(day.start, -((calendarDay(day.start).getUTCDay() + 6) % 7))
+    const week = weeks.get(start) ?? { start, launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0 }
+    weeks.set(start, {
+      start,
+      launched: week.launched + day.launched,
+      completed: week.completed + day.completed,
+      merged: week.merged + day.merged,
+      failed: week.failed + day.failed,
+      interrupted: week.interrupted + day.interrupted,
+      abandoned: week.abandoned + day.abandoned,
+    })
+  }
+  return { series: [...weeks.values()], bucket: 'week' }
 }
 
 export function outcome(run: Pick<InsightsRun, 'status' | 'reason'>): { label: string; tone: Tone } {
@@ -117,8 +142,8 @@ export function agentLabel(harness: string, model: string, names: Record<string,
 export function headline(result: InsightsResult, period: string, oneWorkspace: boolean): string {
   const parts = [`${plural(result.totals.finished, 'run')} finished`]
   if (result.swarms.completed > 0) parts.push(`${plural(result.swarms.completed, 'swarm')} completed`)
-  const repositories = result.by_workspace.filter((w) => w.launched > 0 || w.finished > 0).length
-  const across = !oneWorkspace && repositories > 1 ? ` across ${plural(repositories, 'repository', 'repositories')}` : ''
+  const workspaces = result.by_workspace.filter((w) => w.launched > 0 || w.finished > 0).length
+  const across = !oneWorkspace && workspaces > 1 ? ` across ${plural(workspaces, 'workspace')}` : ''
   return `${period}: ${parts.join(' and ')}${across}.`
 }
 

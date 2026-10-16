@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
+import type { InsightsParams } from '@/lib/types'
 import { InsightsRoute } from '@/routes/insights'
+import { rfc3339 } from '@/routes/insights/model'
 import { useStore } from '@/store'
-import { alice, fakeApi, insights, otherWorkspace, serverInfo, workspace } from '@/test/fixtures'
+import { alice, fakeApi, insights, insightsRun, otherWorkspace, serverInfo, workspace } from '@/test/fixtures'
 
 function seed() {
   useStore.setState({
@@ -23,7 +25,7 @@ describe('insights page', () => {
     const client = fakeApi()
     render(<InsightsRoute params={{}} client={client} />)
 
-    expect(await screen.findByText(/^Last 7 days: 7 runs finished and 1 swarm completed across 2 repositories\./)).toBeDefined()
+    expect(await screen.findByText(/^Last 7 days: 7 runs finished and 1 swarm completed across 2 workspaces\./)).toBeDefined()
     expect(client.insightsGet).toHaveBeenCalledWith(expect.objectContaining({
       workspace_id: '',
       scope: 'mine',
@@ -32,9 +34,9 @@ describe('insights page', () => {
     const finished = screen.getByRole('article', { name: 'Runs finished' })
     expect(within(finished).getByText('Up from 4 the 7 days before')).toBeDefined()
     const rate = screen.getByRole('article', { name: 'Success rate' })
-    expect(within(rate).getByText('78%')).toBeDefined()
+    expect(within(rate).getByText('77%')).toBeDefined()
     expect(within(rate).getByText('7 finished of 9 ended runs')).toBeDefined()
-    expect(within(rate).getByText('67% (4 of 6) the 7 days before')).toBeDefined()
+    expect(within(rate).getByText('66% (4 of 6) the 7 days before')).toBeDefined()
     expect(within(screen.getByRole('article', { name: 'Pull requests opened' })).getByText('1 merged')).toBeDefined()
 
     fireEvent.click(screen.getByRole('button', { name: 'Everyone' }))
@@ -57,27 +59,39 @@ describe('insights page', () => {
     expect(screen.getByText(/Working and waiting time is not recorded yet/)).toBeDefined()
   })
 
-  it('filters the finished list to the chosen bar and clears it', async () => {
+  it('reads the chosen bar on its own and clears it', async () => {
     seed()
-    render(<InsightsRoute params={{}} client={fakeApi()} />)
+    const older = insightsRun({ run_id: 'run_9', title: 'Older run past the newest 50', finished_at: '2026-10-14T03:00:00Z' })
+    const insightsGet = vi.fn(async (params: InsightsParams) => params.from === rfc3339(new Date(2026, 9, 14)) ? insights({ recent: [older] }) : insights())
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet })} />)
     const list = await screen.findByRole('region', { name: 'Finished work' })
     expect(within(list).getAllByRole('article')).toHaveLength(3)
 
     const bar = screen.getByRole('button', { name: /^Wed, Oct 14: 6 runs launched, 5 done, 1 failed, 0 abandoned$/ })
     fireEvent.click(bar)
     expect(bar.getAttribute('aria-pressed')).toBe('true')
+    expect(await within(list).findByRole('button', { name: 'Older run past the newest 50' })).toBeDefined()
     expect(within(list).getAllByRole('article')).toHaveLength(1)
-    expect(within(list).getByRole('button', { name: 'Fix the checkout flow' })).toBeDefined()
     expect(within(list).getByText('Showing runs that ended on Wed, Oct 14.')).toBeDefined()
+    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(2026, 9, 14)), to: rfc3339(new Date(2026, 9, 15)), scope: 'mine' }))
 
     fireEvent.keyDown(bar, { key: 'ArrowRight' })
     const next = screen.getByRole('button', { name: /^Thu, Oct 15:/ })
     expect(document.activeElement).toBe(next)
     fireEvent.keyDown(next, { key: 'Enter' })
-    expect(within(list).getAllByRole('article')).toHaveLength(2)
+    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(2026, 9, 15)), to: rfc3339(new Date(2026, 9, 16)) }))
 
     fireEvent.click(within(list).getByRole('button', { name: 'Show every day' }))
     expect(within(list).getAllByRole('article')).toHaveLength(3)
+  })
+
+  it('waits for the connection instead of loading forever', () => {
+    seed()
+    useStore.setState({ connection: 'reconnecting' })
+    const client = fakeApi()
+    render(<InsightsRoute params={{}} client={client} />)
+    expect(screen.getByRole('status').textContent).toBe('Reconnecting. Insights load once the server connection is live.')
+    expect(client.insightsGet).not.toHaveBeenCalled()
   })
 
   it('opens a finished run and names its outcome, agent and pull request', async () => {

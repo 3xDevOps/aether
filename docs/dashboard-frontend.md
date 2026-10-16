@@ -3756,51 +3756,59 @@ questions and queued messages stay contextual to their run, in its Details
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
 agents finished over a period. It is in the header navigation after
 **Activity** when the gateway offers `insights.get`, and reads that one
-method, and the server computes every number. The page re-reads when its controls change and
+method, and the server computes every number. The page re-reads when its
+controls change and
 when the event stream comes back live, dropping answers to an older request.
 
 - **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
   months), **Workspace** (All workspaces or one; shown with more than one
   workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
-  period ends at the next local midnight, so today counts, and the request
-  carries the browser's IANA time zone for day buckets. The choices last
-  while the page is open; they are not in the address. On a phone the
-  controls wrap above the content instead of sitting in the header.
+  period ends at the next local midnight, so today counts; 12 months starts
+  on the Monday on or before, where weekly buckets start. The request
+  carries the browser's IANA time zone for day buckets, or "" (UTC) when the
+  browser reports none, which the page then says. The choices last while the
+  page is open; they are not in the address. On a phone the controls wrap
+  above the content instead of sitting in the header.
 - **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
-  completed across 3 repositories." Runs in **Needs you** follow as a link to
+  completed across 3 workspaces." Runs in **Needs you** follow as a link to
   the Board.
 - **Tiles.** Runs finished, success rate (finished of runs that ended, with
-  both counts), swarms completed (with agents and tasks accepted) and pull
-  requests Aether opened. Runs finished and success rate compare with the
-  period before in raw numbers ("Up from 8 the 7 days before"). Pull
-  requests show a dash and say none are recorded until the server reports
-  `coverage.pull_requests_since`.
+  both counts, rounded down so 100% means nothing failed), swarms completed
+  (with agents and tasks accepted) and pull requests Aether opened. Runs
+  finished and success rate compare with the period before in raw numbers
+  ("Up from 8 the 7 days before"). Pull requests show a dash and say none
+  are recorded until the server reports `coverage.pull_requests_since`.
 - **Activity chart.** Per day (per week past 92 days): launched runs as the
-  outlined left bar, runs that ended as the right bar stacked Done, Failed (failed and
-  interrupted) and Abandoned, with a text legend. The chart is one tab stop;
-  arrow keys, **Home** and **End** move between bars, and **Enter**, **Space**
-  or a click selects one, which narrows **Finished work** to runs that ended
-  then. "Show every day" clears it.
-- **Finished work.** The server's 50 most recent runs that ended: title,
-  outcome badge, repository, agent and model ("default model" when the run
-  used the agent's own), duration, pull request link and relative end time.
-  A row opens the run.
-- **Last 26 weeks.** A calendar heatmap of runs active each day in one accent
-  hue, with a Fewer to More scale. It is one tab stop; arrow keys move by day
-  and week, and each day is labelled with its date and count.
-- **Breakdown.** By repository and by agent: launched, finished and failed as
+  outlined left bar, runs that ended as the right bar stacked Done, Failed
+  (failed and interrupted) and Abandoned, with a text legend. The chart is
+  one tab stop; arrow keys, **Home** and **End** move between bars, and
+  **Enter**, **Space** or a click selects one, and **Finished work** reads
+  `insights.get` again for that bucket alone, since the period's list holds
+  only its newest 50 runs. "Show every day" clears it. On a phone more than
+  30 daily bars fold into weeks, and on a coarse pointer each bar is at
+  least 44px wide, the chart scrolling sideways from the newest end.
+- **Finished work.** The server's 50 most recent runs that ended, ten shown
+  until **Show all**: title, outcome badge, workspace, agent and model
+  ("default model" when the run used the agent's own), duration, pull
+  request link and relative end time. A row opens the run.
+- **Last 26 weeks.** A calendar heatmap of runs active each day in one
+  accent hue, with a Fewer to More scale. It is one tab stop; arrow keys
+  move by day and week, and each day is labelled with its date and count.
+- **Breakdown.** By workspace and by agent: launched, finished and failed as
   numbers beside a bar.
 - **Time.** Median and slowest-10% run time, and, from the server's state
   record, median time working, waiting on you and your response time. When
   fewer runs have state times than run times it says "measured for N of M
   runs; Aether records this from <date> on."
-- **Usage**, collapsed: cost as a floor ("at least $4.12") with how many runs
-  reported it, tokens, and a link to **Settings › Usage** for subscription
-  quota. Cost never stops a run.
+- **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
+  runs reported it, tokens, and a link to **Settings › Usage** for
+  subscription quota. Cost never stops a run.
 
 A failed read shows the server's error with **Retry**; a server without
-`insights.get` gets a neutral line asking for an update. An empty period
-offers **New run**, the last 12 months, and everyone's runs from **Mine**.
+`insights.get` gets a neutral line asking for an update. Until the event
+stream is live the page names the connection problem instead of loading. An
+empty period offers **New run**, the last 12 months, and everyone's runs
+from **Mine**.
 
 ## Files
 
