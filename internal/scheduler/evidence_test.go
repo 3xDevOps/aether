@@ -586,7 +586,7 @@ func TestAutomaticCheckoutCleanupCapturesBeforeRemoval(t *testing.T) {
 	if err = e.db.UpdateRun(t.Context(), row); err != nil {
 		t.Fatal(err)
 	}
-	e.sched.sweepCheckouts(t.Context())
+	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 	if capture.beforeCalls != 1 || !capture.cleanupObserved {
 		t.Fatalf("before-cleanup capture = calls %d durable=%v", capture.beforeCalls, capture.cleanupObserved)
 	}
@@ -632,7 +632,7 @@ func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
 	e.git.mu.Lock()
 	e.git.publishErr = errors.New("repository unavailable")
 	e.git.mu.Unlock()
-	e.sched.sweepCheckouts(t.Context())
+	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 	if _, statErr := os.Stat(row.Worktree); statErr != nil || worktree() == "" {
 		t.Fatalf("unpublished checkout was removed without evidence: %v", statErr)
 	}
@@ -640,7 +640,7 @@ func TestCheckoutOverEvidenceLimitIsRemovedOnlyOncePublished(t *testing.T) {
 	e.git.mu.Lock()
 	e.git.publishErr = nil
 	e.git.mu.Unlock()
-	e.sched.sweepCheckouts(t.Context())
+	e.sched.sweepCheckouts(t.Context(), time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 	if _, statErr := os.Stat(row.Worktree); !os.IsNotExist(statErr) || worktree() != "" {
 		t.Fatalf("published checkout over the evidence limit was kept: %v", statErr)
 	}

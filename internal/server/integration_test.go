@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 
@@ -343,10 +344,24 @@ func dockerRuntime(t *testing.T) (rt *runtime.Docker, verifyNoLeaks func(*testin
 	t.Cleanup(func() { removeLabeledContainers(t, cli, label) })
 	return docker, func(t *testing.T) {
 		t.Helper()
-		if leaked := labeledContainers(t, cli, label); len(leaked) > 0 {
+		if leaked := leakedContainers(t, cli, label); len(leaked) > 0 {
 			t.Errorf("containers leaked after clean shutdown: %v", leaked)
 		}
 	}, true
+}
+
+// leakedContainers is labeledContainers minus stopped environment terminals,
+// which the server keeps across stops and shutdowns so saves do not stack.
+func leakedContainers(t *testing.T, cli *client.Client, label string) []string {
+	t.Helper()
+	var ids []string
+	for _, c := range listLabeled(t, cli, label) {
+		if strings.HasPrefix(c.Labels["aether.creation-key"], "terminal:") && c.State != "running" {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // dockerReachable probes the daemon and registers no cleanup, so a caller
@@ -376,6 +391,16 @@ func newDockerCLI(t *testing.T) *client.Client {
 
 func labeledContainers(t *testing.T, cli *client.Client, label string) []string {
 	t.Helper()
+	list := listLabeled(t, cli, label)
+	ids := make([]string, 0, len(list))
+	for _, c := range list {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+func listLabeled(t *testing.T, cli *client.Client, label string) []container.Summary {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	list, err := cli.ContainerList(ctx, client.ContainerListOptions{
@@ -385,11 +410,7 @@ func labeledContainers(t *testing.T, cli *client.Client, label string) []string 
 	if err != nil {
 		t.Fatalf("list containers by label %q: %v", label, err)
 	}
-	ids := make([]string, 0, len(list.Items))
-	for _, c := range list.Items {
-		ids = append(ids, c.ID)
-	}
-	return ids
+	return list.Items
 }
 
 func removeLabeledContainers(t *testing.T, cli *client.Client, label string) {

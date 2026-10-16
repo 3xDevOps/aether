@@ -8,7 +8,10 @@ import (
 	"log/slog"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
+
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -50,7 +53,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 	return tag, nil
 }
 
-// ResetEnvironment stops the environment terminal and returns the member to the standard image.
+// ResetEnvironment destroys the environment terminal's container, unsaved changes included, and returns the member to the standard image.
 func (s *Scheduler) ResetEnvironment(ctx context.Context, member domain.MemberID) error {
 	lock := s.terminalLock(member)
 	lock.Lock()
@@ -67,6 +70,9 @@ func (s *Scheduler) ResetEnvironment(ctx context.Context, member domain.MemberID
 		return fmt.Errorf("scheduler: get member to reset environment: %w", err)
 	}
 	if err := s.stopTerminalLocked(ctx, member); err != nil {
+		return fmt.Errorf("scheduler: reset environment: %w", err)
+	}
+	if _, err := s.destroyKeptTerminalLocked(ctx, member, false); err != nil {
 		return fmt.Errorf("scheduler: reset environment: %w", err)
 	}
 	if s.cfg.Homes != nil {
@@ -111,6 +117,17 @@ func (s *Scheduler) currentImageReferences(ctx context.Context) (map[string]bool
 	}
 	for _, member := range members {
 		refs[member.Image] = true
+		// A kept container pins the tag it was created from; Docker refuses to
+		// remove that tag while the container exists.
+		if cid, err := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member.ID)); err == nil {
+			info, inspectErr := s.cfg.Runtime.Inspect(ctx, cid)
+			if inspectErr != nil && !errors.Is(inspectErr, runtime.ErrNotFound) {
+				return nil, inspectErr
+			}
+			refs[info.Image] = true
+		} else if !errors.Is(err, runtime.ErrNotFound) {
+			return nil, err
+		}
 		terminal, err := s.cfg.Store.GetTerminal(ctx, member.ID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return nil, err
@@ -143,4 +160,44 @@ func (s *Scheduler) removeObsoleteMemberImages(ctx context.Context, member domai
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// sweepStandardImages untags every tag of Aether's standard image repository
+// that nothing references, so the images a server upgrade replaced do not stay
+// on disk. Only the default repository is swept: a custom --standard-image may
+// share its repository with images Aether does not own. Docker refuses to
+// remove an image a container uses; that tag is kept until a later sweep.
+func (s *Scheduler) sweepStandardImages(ctx context.Context) {
+	repo := imageRepo(s.cfg.DefaultStandardImage)
+	if repo == "" {
+		return
+	}
+	refs, err := s.currentImageReferences(ctx)
+	if err != nil {
+		slog.Warn("scheduler: list standard image references", "error", err)
+		return
+	}
+	tags, err := s.cfg.Runtime.ListImageTags(ctx, repo)
+	if err != nil {
+		slog.Warn("scheduler: list standard image tags", "repo", repo, "error", err)
+		return
+	}
+	for _, tag := range tags {
+		if refs[tag] {
+			continue
+		}
+		if err := s.cfg.Runtime.RemoveImage(ctx, tag); err != nil && !cerrdefs.IsConflict(err) {
+			slog.Warn("scheduler: remove unused standard image", "tag", tag, "error", err)
+		}
+	}
+}
+
+// imageRepo returns the repository of a tagged image reference, or "" for a
+// reference with no tag or a digest.
+func imageRepo(ref string) string {
+	i := strings.LastIndex(ref, ":")
+	if i < 0 || strings.ContainsAny(ref[i:], "/@") || strings.Contains(ref, "@") {
+		return ""
+	}
+	return ref[:i]
 }

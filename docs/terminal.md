@@ -727,15 +727,16 @@ aether env reset
 
 Saving pauses the terminal for the few seconds Docker needs to commit it.
 New runs and workspace shells use the saved image; `aether env reset` stops
-the environment, removes that image, and makes the next open use the
-standard image. See [environments.md](environments.md) for image selection
-and persistence.
+the environment, destroys its container, removes that image, and makes the
+next open use the standard image. See [environments.md](environments.md) for
+image selection and persistence.
 
 Stopping and resetting are separate, each behind its own confirmation.
 **Stop environment…** does what `aether terminal stop` does: the container
-stops and both your home files and your saved image remain, so a later open
-starts it again. **Reset to standard…** does what `aether env reset` does,
-and is offered only once you have a saved image to discard. A failure is
+stops and your home files, your saved image, and the container's unsaved
+changes remain, so a later open starts it again. **Reset to standard…** does
+what `aether env reset` does, and is offered only once you have a saved image
+to discard. A failure is
 reported in the dialog that caused it.
 
 ## Keys
@@ -1064,11 +1065,15 @@ writable terminal.
 There is one environment container per member. `main` is its login shell.
 Other tabs run another login shell in the same container and use names such
 as `t2`. A member may have at most six tabs. A shell that exits closes its
-tab; opening the environment again recreates the container if it stopped.
+tab; when the `main` shell exits, the container stops. Opening the
+environment again starts the same container.
 
 Stopping the environment stops its container and all tab processes. The
-member home is not deleted. The next CLI or dashboard open starts a new
-container with the same home.
+container and the member home are not deleted, and the container keeps its
+unsaved changes across stops and server restarts. The next CLI or dashboard
+open starts it again. It is recreated only when its settings changed (see
+[environments.md](environments.md#save-the-environment)) or after
+`aether env reset`.
 
 Uploaded images are kept in the persistent member home the target container
 mounts (your own for your environment, the launcher's for a run) under

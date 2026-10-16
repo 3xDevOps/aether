@@ -68,16 +68,17 @@ func (d *Docker) RemoveImage(ctx context.Context, tag string) error {
 	return nil
 }
 
-// ImageCacheEnvironment returns only the five tool-cache settings whose image
-// defaults must survive managed-cache defaults. It never exports unrelated
-// image environment (which may contain credentials). ImageUser has already
-// ensured the image is local before the scheduler assembles its plan.
+// ImageCacheEnvironment returns only the tool-cache and global-install
+// settings whose image defaults must survive Aether's defaults. It never
+// exports unrelated image environment (which may contain credentials).
+// ImageUser has already ensured the image is local before the scheduler
+// assembles its plan.
 func (d *Docker) ImageCacheEnvironment(ctx context.Context, ref string) (map[string]string, error) {
 	info, err := d.cli.ImageInspect(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: inspect image cache environment: %w", err)
 	}
-	env := make(map[string]string, 5)
+	env := make(map[string]string)
 	if info.Config != nil {
 		for _, pair := range info.Config.Env {
 			key, value, ok := strings.Cut(pair, "=")
@@ -85,7 +86,8 @@ func (d *Docker) ImageCacheEnvironment(ctx context.Context, ref string) (map[str
 				continue
 			}
 			switch key {
-			case "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE":
+			case "npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "GOCACHE", "GOMODCACHE", "BUN_INSTALL_CACHE_DIR", "YARN_CACHE_FOLDER", "npm_config_store_dir",
+				"NPM_CONFIG_PREFIX", "npm_config_prefix", "CARGO_INSTALL_ROOT":
 				env[key] = value
 			}
 		}

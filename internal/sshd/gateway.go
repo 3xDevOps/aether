@@ -98,6 +98,7 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 		HomeBytes:       usage.HomeBytes,
 		CacheBytes:      usage.CacheBytes,
 		EvidenceBytes:   usage.EvidenceBytes,
+		ScratchBytes:    usage.ScratchBytes,
 		OtherBytes:      usage.OtherBytes,
 		SnapshotBytes:   usage.SnapshotBytes,
 		Warnings:        usage.Warnings,

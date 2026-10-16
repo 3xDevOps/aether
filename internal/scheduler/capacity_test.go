@@ -106,7 +106,7 @@ func TestCapacityDiskAdmissionBoundaries(t *testing.T) {
 						host.Filesystems = append(host.Filesystems, runtime.FilesystemCapacity{Name: resource, TotalBytes: tc.total, FreeBytes: free})
 					}
 					s := &Scheduler{cfg: Config{Runtime: &admissionRuntime{host: host}, MinFreeBytes: tc.override, filesystemCapacity: measure}, capacityGate: make(chan struct{}, 1)}
-					release, err := s.reserveCapacity(t.Context())
+					release, err := s.tryReserveCapacity(t.Context())
 					if delta != 0 {
 						if !errors.Is(err, ErrDiskFull) || !strings.Contains(err.Error(), resource) {
 							t.Fatalf("one byte below headroom: %v", err)
@@ -183,7 +183,7 @@ func TestCapacityRuntimeWithoutProbeStillChecksData(t *testing.T) {
 		}
 		return healthyAdmissionData(path)
 	}}, capacityGate: make(chan struct{}, 1)}
-	if _, err := s.reserveCapacity(t.Context()); !errors.Is(err, ErrDiskFull) {
+	if _, err := s.tryReserveCapacity(t.Context()); !errors.Is(err, ErrDiskFull) {
 		t.Fatalf("data guard bypassed by custom runtime: %v", err)
 	}
 	s.cfg.MinFreeBytes = -1

@@ -1397,7 +1397,7 @@ attribution, shown in **Settings > Server**:
 {"used_bytes":21474836480,"total_bytes":107374182400,"free_bytes":85899345920,
  "worktree_bytes":3221225472,"transcript_bytes":104857600,"database_bytes":52428800,
  "repo_bytes":8589934592,"home_bytes":1073741824,"evidence_bytes":20971520,
- "cache_bytes":1073741824,"other_bytes":1048576,"snapshot_bytes":104857600}
+ "scratch_bytes":0,"cache_bytes":1073741824,"other_bytes":1048576,"snapshot_bytes":104857600}
 ```
 
 `used_bytes` and `total_bytes` describe the whole filesystem - the gauge

@@ -53,6 +53,7 @@ type ServerDiskResult struct {
 	HomeBytes       uint64            `json:"home_bytes"`
 	CacheBytes      uint64            `json:"cache_bytes"`
 	EvidenceBytes   uint64            `json:"evidence_bytes"`
+	ScratchBytes    uint64            `json:"scratch_bytes"`
 	OtherBytes      uint64            `json:"other_bytes"`
 	SnapshotBytes   uint64            `json:"snapshot_bytes"`
 	Warnings        []string          `json:"warnings,omitempty"`

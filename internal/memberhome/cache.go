@@ -58,7 +58,7 @@ type cacheMetadata struct {
 	RuntimeCleanupError string    `json:"runtime_cleanup_error,omitempty"`
 	LegacyCleanupError  string    `json:"legacy_cleanup_error,omitempty"`
 	Owners              []string  `json:"owners,omitempty"`
-	LegacyProtected     uint8     `json:"legacy_protected,omitempty"`
+	LegacyProtected     uint16    `json:"legacy_protected,omitempty"`
 }
 
 // LockCaches serializes ownership publication and cache maintenance for one

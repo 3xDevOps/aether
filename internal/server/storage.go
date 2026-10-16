@@ -141,7 +141,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		e := &u.Entries[i]
 		switch e.Kind {
 		case "database":
-			e.Reason = "Persistent database and event history; no automatic expiry"
+			e.Reason = "Persistent database and event history; a run's events go when the run is deleted"
 		case "other":
 			e.Reason = "Other server state, profiles and caches; no general deletion policy"
 		case "cache":
@@ -162,6 +162,19 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			}
 			e.OwnerKind, e.OwnerID = "member", string(member.ID)
 			e.Reason = "Persistent member environment and credentials; no automatic expiry"
+		case "scratch":
+			if member, ok := strings.CutPrefix(e.Key, "terminal-"); ok {
+				e.OwnerKind, e.OwnerID = "member", member
+				e.Reason = "Environment /tmp; emptied each time the environment starts"
+				continue
+			}
+			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
+			if err != nil {
+				unknownStorageOwner(e, err)
+				continue
+			}
+			e.OwnerKind, e.OwnerID = "run", string(run.ID)
+			e.Reason = "Run /tmp; removed when the run's container is removed"
 		case "repo":
 			workspace, err := d.Store.GetWorkspace(ctx, domain.WorkspaceID(e.Key))
 			if err != nil {

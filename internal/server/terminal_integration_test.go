@@ -128,7 +128,7 @@ func TestIntegrationMasterTerminal(t *testing.T) {
 	reattached.waitOutput(t, "back-again")
 	reattached.close()
 
-	// terminal.stop tears the container down; status reports not running.
+	// terminal.stop stops the container and keeps it; status reports not running.
 	if err := ctrl.Call(protocol.MethodTerminalStop, struct{}{}, nil); err != nil {
 		t.Fatalf("terminal.stop: %v", err)
 	}

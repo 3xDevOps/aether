@@ -24,6 +24,7 @@ type Usage struct {
 	HomeBytes       uint64
 	CacheBytes      uint64
 	EvidenceBytes   uint64
+	ScratchBytes    uint64
 	OtherBytes      uint64
 	SnapshotBytes   uint64
 	Warnings        []string
@@ -159,6 +160,8 @@ func componentTreeOwners(tree fs.FS, counted seen, owner func(string) (string, s
 						u.CacheBytes += n
 					case "evidence":
 						u.EvidenceBytes += n
+					case "scratch":
+						u.ScratchBytes += n
 					default:
 						u.OtherBytes += n
 					}
@@ -219,6 +222,8 @@ func componentOwner(name string) (kind, key string) {
 		return "evidence", strings.TrimSuffix(strings.TrimSuffix(key, ".captures"), ".transcript")
 	case "coord":
 		return "coord", key
+	case "scratch":
+		return "scratch", key
 	case databaseFile, databaseFile + "-wal", databaseFile + "-shm":
 		return "database", ""
 	default:

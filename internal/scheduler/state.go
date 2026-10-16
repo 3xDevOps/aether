@@ -639,4 +639,5 @@ func (s *Scheduler) removeSidecar(run domain.RunID) {
 		slog.Warn("scheduler: remove sidecar failed", "run", run, "error", err)
 	}
 	s.releaseCoordination(run)
+	s.removeScratch(string(run))
 }

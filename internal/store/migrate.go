@@ -1798,6 +1798,10 @@ ALTER TABLE assistant_settings ADD COLUMN suggest_off INTEGER NOT NULL DEFAULT 0
 ALTER TABLE runs ADD COLUMN review TEXT NOT NULL DEFAULT '';
 ALTER TABLE runs ADD COLUMN review_changed_at INTEGER;
 `,
+	// v73: deleting a run deletes its events, which needs a run_id index.
+	`
+CREATE INDEX idx_events_run ON events (run_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

@@ -234,8 +234,11 @@ func TestContainerConfigPlumbing(t *testing.T) {
 	if hostCfg.Memory != 64<<20 {
 		t.Errorf("Memory = %d, want %d", hostCfg.Memory, 64<<20)
 	}
-	if hostCfg.MemorySwap != spec.MemoryLimitBytes || hostCfg.PidsLimit == nil || *hostCfg.PidsLimit != spec.PidsLimit {
+	if hostCfg.MemorySwap != spec.MemoryLimitBytes+spec.MemoryLimitBytes/4 || hostCfg.PidsLimit == nil || *hostCfg.PidsLimit != spec.PidsLimit {
 		t.Errorf("memory+swap/PID limits = %+v", hostCfg.Resources)
+	}
+	if hostCfg.OomScoreAdj != 500 {
+		t.Errorf("OomScoreAdj = %d, want 500", hostCfg.OomScoreAdj)
 	}
 	if hostCfg.LogConfig.Type != "local" || hostCfg.LogConfig.Config["max-size"] != "10m" || hostCfg.LogConfig.Config["max-file"] != "3" {
 		t.Errorf("unbounded logs: %+v", hostCfg.LogConfig)
@@ -532,7 +535,11 @@ func TestContainerConfigUserAndCreationKey(t *testing.T) {
 	spec := validSpec()
 	spec.User = "1000:1000"
 	spec.CreationKey = "run_42"
+	spec.Fingerprint = "abc123"
 	cfg, _ := d.containerConfig(spec, "")
+	if cfg.Labels[labelFingerprint] != "abc123" {
+		t.Errorf("fingerprint label = %q, want abc123", cfg.Labels[labelFingerprint])
+	}
 	if cfg.User != "1000:1000" {
 		t.Errorf("User = %q, want 1000:1000", cfg.User)
 	}
@@ -546,6 +553,9 @@ func TestContainerConfigUserAndCreationKey(t *testing.T) {
 	}
 	if _, ok := cfg.Labels[labelCreationKey]; ok {
 		t.Error("creation-key label present without Spec.CreationKey")
+	}
+	if cfg.Labels[labelFingerprint] != "" {
+		t.Errorf("fingerprint label = %q without Spec.Fingerprint, want empty", cfg.Labels[labelFingerprint])
 	}
 }
 

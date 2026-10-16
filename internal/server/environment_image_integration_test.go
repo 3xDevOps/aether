@@ -182,7 +182,8 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 		t.Fatalf("other member's run saw %q, want absent", got)
 	}
 
-	// A fresh terminal starts from the saved image too.
+	// Reopening starts the same kept container, which still holds the
+	// installed files and still reports the image it was created from.
 	term.close()
 	if err := ctrlA.Call(protocol.MethodTerminalStop, struct{}{}, nil); err != nil {
 		t.Fatalf("terminal.stop: %v", err)
@@ -194,8 +195,8 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 	if err := ctrlA.Call(protocol.MethodTerminalStatus, struct{}{}, &status); err != nil {
 		t.Fatalf("terminal.status after reopen: %v", err)
 	}
-	if status.Image != saved.Image {
-		t.Fatalf("reopened terminal image = %q, want %q", status.Image, saved.Image)
+	if status.Image != image {
+		t.Fatalf("reopened terminal image = %q, want the kept container's %q", status.Image, image)
 	}
 
 	// Reset stops the terminal, forgets the image, and runs return to the

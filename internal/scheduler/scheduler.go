@@ -73,8 +73,11 @@ type Config struct {
 	StateDir string
 	// DataDir is the data filesystem protected by admission. Direct scheduler
 	// callers may omit it to use StateDir.
-	DataDir                     string
-	Homes                       *memberhome.Manager
+	DataDir string
+	Homes   *memberhome.Manager
+	// RemoveAll deletes a directory container processes wrote into; nil
+	// uses os.RemoveAll.
+	RemoveAll                   func(ctx context.Context, path string) error
 	Profiles                    profileService
 	ReposDir                    string
 	WorktreeMount               string
@@ -161,6 +164,9 @@ type Scheduler struct {
 	cfg       Config
 	harnesses map[string]HarnessSpec
 
+	// oom is touched only by the sweep loop in Start.
+	oom oomWatcher
+
 	// recoveryReady closes after startup reconciliation; room delivery waits
 	// for it so overdue steers cannot claim before recovered PTYs are injectable.
 	recoveryReady     chan struct{}
@@ -173,6 +179,7 @@ type Scheduler struct {
 
 	// capacityGate protects admission probes/accounting, never lifecycle state.
 	capacityGate         chan struct{}
+	reclaimMu            sync.Mutex
 	capacityReservations uint64
 
 	mu   sync.Mutex
@@ -488,6 +495,9 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, err
 	}
 	resolveRunBudgets(&cfg)
+	if cfg.RemoveAll == nil {
+		cfg.RemoveAll = func(_ context.Context, path string) error { return os.RemoveAll(path) }
+	}
 	switch {
 	case cfg.Store == nil:
 		return nil, errors.New("scheduler: config requires a Store")
@@ -644,7 +654,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	sweep := time.NewTicker(interval)
 	defer sweep.Stop()
 	if s.cfg.CheckoutTTL > 0 {
-		s.sweepCheckouts(ctx)
+		s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 	}
 	s.sweepCaches(ctx, false)
 	gc := time.NewTicker(time.Hour)
@@ -671,11 +681,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)
 			s.tickUpdates(ctx)
+			s.checkOOMKills(ctx)
+			if s.reclaimMu.TryLock() {
+				s.reclaimDiskLocked(ctx, "")
+				s.reclaimMu.Unlock()
+			}
 		case <-gc.C:
 			if s.cfg.CheckoutTTL > 0 {
-				s.sweepCheckouts(ctx)
+				s.sweepCheckouts(ctx, time.Now().UTC().Add(-s.cfg.CheckoutTTL))
 			}
 			s.cleanupTerminalSidecars(ctx)
+			s.sweepScratch(ctx)
 			s.sweepCaches(ctx, false)
 		}
 	}

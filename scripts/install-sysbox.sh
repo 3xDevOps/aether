@@ -28,6 +28,7 @@ SHA256_ARM64="04ca894ae0b53f0fa54eaacc173ce40363c9a95ea5450f773716a84ef650a69b"
 # Test seams for install-sysbox-test.sh. They are not documented options.
 BASE_URL="${AETHER_SYSBOX_BASE_URL:-https://github.com/nestybox/sysbox/releases/download/v${VERSION}}"
 DAEMON_JSON="${AETHER_SYSBOX_DAEMON_JSON:-/etc/docker/daemon.json}"
+MGR_DROPIN="${AETHER_SYSBOX_MGR_DROPIN:-/etc/systemd/system/sysbox-mgr.service.d/aether.conf}"
 
 die() {
 	echo "install-sysbox: $*" >&2
@@ -102,9 +103,36 @@ broken() {
 	exit 4
 }
 
+# By default sysbox-mgr copies a container's inner /var/lib/docker into its
+# writable layer each time the container stops, which costs gigabytes of disk
+# and seconds per stop. Aether never starts from preloaded inner images. The
+# packaged unit's ExecStart is /usr/bin/sysbox-mgr (sysbox-pkgr
+# systemd/sysbox-mgr.service, unchanged since 2021). Restarting Sysbox breaks
+# running containers, so it restarts only when none run; otherwise the flag
+# applies at the next restart.
+disable_inner_image_preload() {
+	want="[Service]
+ExecStart=
+ExecStart=/usr/bin/sysbox-mgr --disable-inner-image-preload"
+	if [ "$(cat "$MGR_DROPIN" 2>/dev/null || true)" = "$want" ]; then
+		return 0
+	fi
+	mkdir -p "$(dirname "$MGR_DROPIN")"
+	printf '%s\n' "$want" >"$MGR_DROPIN"
+	systemctl daemon-reload || die "systemctl daemon-reload failed; its output is above"
+	running="$(docker ps -q 2>&1)" || die "docker ps failed: ${running}"
+	if [ -n "$running" ]; then
+		say "containers are running, so sysbox-mgr keeps its old flags until: sudo systemctl restart sysbox"
+		return 0
+	fi
+	systemctl restart sysbox || die "systemctl restart sysbox failed; its output is above"
+	say "sysbox-mgr now runs with --disable-inner-image-preload"
+}
+
 # Already installed: the probe still decides, so a retry cannot report success
 # for a Sysbox that failed it.
 already_installed() {
+	disable_inner_image_preload
 	run_probe || broken "$probe_reason"
 	say "Sysbox ${VERSION} is installed and Docker lists sysbox-runc; nothing to do"
 	exit 0
@@ -288,10 +316,13 @@ done
 
 say "Docker lists sysbox-runc"
 
+disable_inner_image_preload
 if ! run_probe; then
 	echo "install-sysbox: ${probe_reason}" >&2
 	say "removing Sysbox again: apt-get purge -y sysbox-ce"
 	apt-get -o DPkg::Lock::Timeout=300 purge -y sysbox-ce || broken "${probe_reason}; apt-get purge -y sysbox-ce also failed"
+	rm -f "$MGR_DROPIN"
+	systemctl daemon-reload || true
 	tries=0
 	while runtimes | grep -q '"sysbox-runc"'; do
 		tries=$((tries + 1))

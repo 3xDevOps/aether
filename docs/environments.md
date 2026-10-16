@@ -106,8 +106,13 @@ docker pull ghcr.io/3xdevops/aether-standard:latest
 ```
 
 A container keeps the image it started from, and nothing recreates it
-while it runs, so a refreshed standard image reaches a member only when
-they stop their environment and open it again.
+while it exists. Stopping the environment keeps its container, so a
+refreshed standard image reaches a member only after `aether env reset` or
+when Aether recreates the container (see [Save the environment](#save-the-environment)).
+
+Hourly, the server untags every tag of the default `aether-standard`
+repository that no member image, terminal or setting references. An image a
+container still uses is kept until a later pass.
 
 Workspace creation does not choose an image. The command needs only the
 workspace name and, optionally, its base branch:
@@ -140,6 +145,12 @@ its exact container for **seven days** by default (`--run-container-ttl=168h`).
 The clock starts at close or worker completion, not at server restart. A
 positive override changes that grace; zero selects the default, and a
 negative duration requests immediate release.
+
+When free disk falls near the `--min-free-disk` floor, Aether removes closed
+runs' containers before the grace ends, oldest expiry first, and adds a
+timeline note to each run. Such a run can no longer be reopened; its branch,
+evidence and history are kept. See [install.md](install.md) for the full
+reclaim order.
 
 A paused container still holds its process memory: pausing stops execution,
 not RAM ownership. The grace is for recovering the same live processes, not
@@ -196,10 +207,11 @@ Docker must report support for CPU quotas, memory and swap limits, and PID
 limits. Missing controller support refuses new provisioning instead of letting
 Docker silently drop a ceiling; this check also applies when host swap is off.
 The memory limit is a **ceiling, not a reservation or guarantee**: idle agents
-do not reserve 8 GiB each. Docker gets no extra swap allowance beyond that
-memory ceiling. Container stdout/stderr uses Docker's rotating `local` log
-driver (`max-size=10m`, `max-file=3`); this does not cap Aether's transcripts,
-agent caches or files in the checkout/home.
+do not reserve 8 GiB each. Each container also gets a swap allowance of a
+quarter of its memory limit (an 8 GiB limit allows 2 GiB of swap), which
+systemd keeps across `systemctl daemon-reload`. Container stdout/stderr uses
+Docker's rotating `local` log driver (`max-size=10m`, `max-file=3`); this does
+not cap Aether's transcripts, agent caches or files in the checkout/home.
 
 Before provisioning a new run, member environment, browser or agent updater
 container, Aether checks capacity with a five-second probe deadline.
@@ -270,7 +282,9 @@ when `/bin/bash` is executable; otherwise it starts `/bin/sh -l`.
 
 Until the environment is saved, only the member home is shared with runs. The
 container layer outside `$HOME` belongs to that terminal container and is not
-available to runs or a replacement terminal.
+available to runs or a replacement terminal. `/tmp` is a disk-backed scratch
+directory that **Save environment** never captures; see
+[environment-home.md](environment-home.md#what-persists).
 
 The workspace's setup script and variables still apply to runs; see
 [Workspace environment](#workspace-environment).
@@ -415,6 +429,20 @@ older `aether/member-<member-id>` tag is removed. A tag a run container still
 uses stays until the next save or reset. The command prints `saved <tag>`,
 then `new runs and terminals start from this environment`.
 
+The environment terminal's container survives a stop, a shell exit, and a
+server restart; opening the environment starts the same container. Files
+changed outside the home therefore stay until you reset, saved or not. A
+save commits the image the container was created from plus one layer of
+everything changed since, so each save replaces the previous save's layer
+instead of adding another, and deleted files free their space.
+
+Aether recreates the container from the saved image, and unsaved changes
+are lost, when the next open finds different settings from the ones the
+container was created with: the standard image, environment variables,
+mounts, user, or resource limits. Save before changing them. Aether also
+recreates a kept container that fails to start, and logs the start error on
+the server.
+
 Runs that are already running keep their existing containers. New runs the
 member launches, their workspace shells, and the next environment open use
 the saved image.
@@ -433,9 +461,10 @@ Reset from the **Environment actions** menu > **Reset to standard…** on the
 aether env reset
 ```
 
-Reset stops the terminal, forgets the member's saved image, and removes the
-member's saved tags from the server's Docker daemon. The next terminal open
-and all new runs use the standard image. The command prints
+Reset destroys the terminal's container, forgets the member's saved image,
+and removes the member's saved tags from the server's Docker daemon. Unsaved
+changes outside the home are lost. The next terminal open and all new runs
+use the standard image. The command prints
 `environment reset to the standard image`.
 
 There is no save history or other undo. To fix a bad save, repair the

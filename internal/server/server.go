@@ -359,6 +359,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
 		DataDir:       cfg.DataDir,
 		Homes:         homes,
+		RemoveAll:     removeAgentFiles,
 		Secrets:       secrets,
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
 		Profiles:      prof,

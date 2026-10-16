@@ -21,6 +21,9 @@ var legacyCachePaths = [...]string{
 	".cache/uv",
 	".cache/go-build",
 	"go/pkg/mod",
+	".bun/install/cache",
+	".cache/yarn",
+	".local/share/pnpm/store",
 }
 
 // ProtectLegacyCaches remembers explicit home-relative cache choices, including
@@ -38,7 +41,7 @@ func (m *Manager) ProtectLegacyCaches(member domain.MemberID, paths []string) er
 	if home != nil {
 		defer func() { _ = home.Close() }()
 	}
-	var mask uint8
+	var mask uint16
 	for _, rel := range paths {
 		if rel != "." && !fs.ValidPath(rel) {
 			return fmt.Errorf("memberhome: invalid explicit cache path")

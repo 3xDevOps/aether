@@ -714,8 +714,9 @@ func (e *supervised) unparks(activity time.Time, tail time.Duration) bool {
 	return activity.After(e.postParkActivity)
 }
 
-// sweepCheckouts never removes the branch or transcript.
-func (s *Scheduler) sweepCheckouts(ctx context.Context) {
+// sweepCheckouts never removes the branch or transcript. It removes checkouts
+// of runs that finished at or before cutoff.
+func (s *Scheduler) sweepCheckouts(ctx context.Context, cutoff time.Time) {
 	workspaces, err := s.cfg.Store.ListWorkspaces(ctx)
 	if err != nil {
 		slog.Warn("scheduler: checkout gc: list workspaces", "error", err)
@@ -735,7 +736,6 @@ func (s *Scheduler) sweepCheckouts(ctx context.Context) {
 			inUse[a.Worktree] = true
 		}
 	}
-	cutoff := time.Now().UTC().Add(-s.cfg.CheckoutTTL)
 	for _, ws := range workspaces {
 		runs, err := s.cfg.Store.ListRunsByWorkspace(ctx, ws.ID)
 		if err != nil {

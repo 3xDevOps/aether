@@ -18,7 +18,7 @@ func TestImageCacheEnvironmentKeepsOnlyExplicitToolSettings(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"Config":{"Env":["npm_config_cache=/custom/npm","PIP_CACHE_DIR=","UV_CACHE_DIR=/custom/uv","GOCACHE=/custom/go-build","GOMODCACHE=/custom/modules","HOME=/custom/home","SECRET_TOKEN=do-not-propagate"]}}`))
+		_, _ = w.Write([]byte(`{"Config":{"Env":["npm_config_cache=/custom/npm","PIP_CACHE_DIR=","UV_CACHE_DIR=/custom/uv","GOCACHE=/custom/go-build","GOMODCACHE=/custom/modules","NPM_CONFIG_PREFIX=/opt/npm","CARGO_INSTALL_ROOT=/opt/cargo","HOME=/custom/home","SECRET_TOKEN=do-not-propagate"]}}`))
 	}))
 	defer api.Close()
 	cli, err := client.New(client.WithHost("tcp://"+api.Listener.Addr().String()), client.WithAPIVersion("1.51"))
@@ -31,7 +31,7 @@ func TestImageCacheEnvironmentKeepsOnlyExplicitToolSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"npm_config_cache": "/custom/npm", "PIP_CACHE_DIR": "", "UV_CACHE_DIR": "/custom/uv", "GOCACHE": "/custom/go-build", "GOMODCACHE": "/custom/modules"}
+	want := map[string]string{"npm_config_cache": "/custom/npm", "PIP_CACHE_DIR": "", "UV_CACHE_DIR": "/custom/uv", "GOCACHE": "/custom/go-build", "GOMODCACHE": "/custom/modules", "NPM_CONFIG_PREFIX": "/opt/npm", "CARGO_INSTALL_ROOT": "/opt/cargo"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("image cache settings = %#v, want only explicit tool settings", got)
 	}

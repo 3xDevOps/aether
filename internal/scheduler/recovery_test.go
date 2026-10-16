@@ -786,7 +786,7 @@ func TestCheckoutGC(t *testing.T) {
 		}
 	}
 
-	e.sched.sweepCheckouts(ctx)
+	e.sched.sweepCheckouts(ctx, time.Now().UTC().Add(-e.sched.cfg.CheckoutTTL))
 
 	if _, err := os.Stat(e.git.checkoutPath(expired.ID)); !os.IsNotExist(err) {
 		t.Fatalf("expired checkout not removed: %v", err)

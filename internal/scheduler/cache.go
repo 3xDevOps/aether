@@ -212,6 +212,7 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 	if s.cfg.Homes == nil || ctx.Err() != nil {
 		return
 	}
+	s.sweepStandardImages(ctx)
 	owners, err := s.cacheOwnershipSnapshot(ctx)
 	if err != nil {
 		slog.Warn("scheduler: cache cleanup ownership unavailable", "error", err)
@@ -296,6 +297,7 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 			if readErr != nil || latest.MetadataError != "" {
 				return
 			}
+			poolOwned := false
 			for _, pool := range []string{memberhome.CachePoolRuns, memberhome.CachePoolTerminal} {
 				poolInfo, err := s.cfg.Homes.ReadCache(info.Member, pool)
 				if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -306,6 +308,7 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 				}
 				if len(poolInfo.Owners) != 0 {
 					owners.legacy[info.Member] = true
+					poolOwned = true
 				}
 			}
 			s.addLiveCacheOwners(&owners)
@@ -337,7 +340,17 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 				return
 			}
 			// Legacy caches share HOME, so both pools' owners must be absent.
-			if !owners.legacy[info.Member] && len(latest.Owners) == 0 {
+			// Under pressure open runs, retained containers and terminals do
+			// not block removal: applyCacheEnvironment sends every container's
+			// npm, pip, uv, Go, bun, yarn and pnpm caches to /aether-cache, so
+			// they do not use these paths. Removal renames first, and a tool
+			// that still uses one only misses its cache. Durable pool owners
+			// (updaters, verification) still protect.
+			legacyBusy := owners.legacy[info.Member]
+			if pressure {
+				legacyBusy = poolOwned
+			}
+			if !legacyBusy && len(latest.Owners) == 0 {
 				if current[info.Member] {
 					if err := s.protectConfiguredLegacyCaches(ctx, info.Member); err != nil {
 						_ = s.cfg.Homes.SetCacheLegacyCleanupError(info.Member, "Legacy cache configuration unavailable; cleanup deferred")
@@ -368,8 +381,15 @@ func (s *Scheduler) sweepCaches(ctx context.Context, pressure bool) {
 // never stopped. The durable key is removed only after confirmed destruction.
 func (s *Scheduler) resolveCacheRuntimeOwners(ctx context.Context, info *memberhome.CacheInfo, owners *cacheOwnership) error {
 	member := info.Member
-	if _, err := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member)); err == nil {
-		owners.terminal[member], owners.legacy[member] = true, true
+	// A stopped kept terminal does not own the pool; only a running one does.
+	if cid, err := s.cfg.Runtime.FindByCreationKey(ctx, terminalCreationKey(member)); err == nil {
+		running, probeErr := s.terminalContainerRunning(ctx, cid, 50*time.Millisecond)
+		if probeErr != nil {
+			return probeErr
+		}
+		if running {
+			owners.terminal[member], owners.legacy[member] = true, true
+		}
 	} else if !errors.Is(err, runtime.ErrNotFound) {
 		return err
 	}

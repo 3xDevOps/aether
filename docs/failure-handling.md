@@ -339,13 +339,12 @@ already polling keeps polling until it is reopened.
 ### Environment exit
 
 When the main shell of a member's environment exits, Aether stops its
-terminal PTY sessions, destroys the exited container, and removes the
-matching durable terminal row before a replacement is created. If container
-destruction or durable-row handling fails during that sequence, the
-supervision entry stays marked for cleanup; the next terminal ensure retries
-cleanup before it can replace the terminal. A retry only removes a durable
-row that still names that same container, so a newer terminal cannot be
-deleted by an older cleanup.
+terminal PTY sessions and removes the matching durable terminal row. The
+stopped container stays; the next open starts it again. If durable-row
+handling fails, the supervision entry stays marked for cleanup; the next
+terminal ensure retries cleanup before it can start the terminal. A retry
+only removes a durable row that still names that same container, so a newer
+terminal cannot be deleted by an older cleanup.
 
 ### Database startup contention
 
@@ -723,19 +722,27 @@ twice.
 Run CPU, memory and PID limits contain the container's workload; they do not
 split the native agent from its tools. CPU saturation throttles that workload,
 the task limit can prevent new processes/threads, and a memory limit can
-trigger a container-cgroup OOM kill. No extra swap allowance is added to the
-configured memory ceiling. The OOM victim might be a tool, the agent or a
-process needed by the whole container. Host-wide exhaustion is still possible
-if running workloads grow after admission; limits and launch headroom are not
-a promise of continuous host or agent uptime.
+trigger a container-cgroup OOM kill. The swap allowance is a quarter of the
+memory limit, kept across `systemctl daemon-reload`. The OOM victim might be a
+tool, the agent or a process needed by the whole container. Host-wide
+exhaustion is still possible if running workloads grow after admission;
+limits and launch headroom are not a promise of continuous host or agent
+uptime. The server unit sets `OOMScoreAdjust=-500` and containers run with
+`oom_score_adj` 500, so a host-wide OOM kills an agent process before
+`aether-server`.
 
 A surviving supervisor may offer a shell after the agent dies; a surviving
 shell does not mean the conversation is still running. An Enhanced adapter
 failure is surfaced with its real error and can be retried explicitly.
 Container loss follows the interrupted/failed lifecycle above. Aether does
 not generally restart an OOM-killed native agent automatically, and an exit
-code alone does not establish that OOM was the cause. Inspect Docker state,
-kernel logs and the run's error before drawing that conclusion.
+code alone does not establish that OOM was the cause.
+
+On cgroup v2 hosts the scheduler reads each live container's `memory.events`
+on its sweep. When `oom_kill` rises after the first reading, the run timeline
+gets a note such as `Out of memory: the kernel killed a process in this run at
+its 8.0 GiB memory limit (peak 8.0 GiB)`. A cgroup v1 host posts no note;
+check Docker state and kernel logs there.
 
 Completed writes in the host-mounted checkout and member home are distinct
 from in-memory context, in-flight writes and the disposable container layer.
@@ -760,7 +767,7 @@ History and durable workspace data can grow without bound. Settings >
 | --- | --- |
 | `checkouts/` worktrees | Checkout TTL GC or explicit deletion. The `.diffsnap/` sidecars remain until explicit run deletion. |
 | `transcripts/` | Explicit run or terminal-session deletion, including run removal through workspace/swarm deletion. |
-| `aether.db` (and its WAL) | Explicit deletion of dependent records; the event log remains. |
+| `aether.db` (and its WAL) | Explicit run or workspace deletion removes the run's rows and events. |
 | `repos/` | Nothing - every push, run branch and reflog entry stays. |
 
 The GC sweeps on boot and hourly. It only reclaims worktrees of runs that
@@ -784,10 +791,13 @@ longer apply, including to already-archived records. Data already deleted by
 an older server cannot be recovered by this change; existing history gaps
 remain visible rather than being presented as complete recordings.
 
-Below `--min-free-disk`, `run.launch` is refused with `-32004` (unavailable)
-and a message naming the numbers. Reopening an eligible retained TUI run
-does not perform a new launch or disk-floor admission, so it can reopen its
-exact retained container and checkout below that floor. Everything else -
+Below `--min-free-disk`, `run.launch` first triggers a reclaim pass (see
+[install.md](install.md)). It is refused with `-32004` (unavailable) and a
+message naming the numbers only if that pass could not restore the floor.
+Reopening an eligible retained TUI run does not perform a new launch or
+disk-floor admission, so it can reopen its exact retained container and
+checkout below that floor, unless the reclaim pass already removed that
+container. Everything else -
 attaching, messaging, pulling, closing, killing and deleting runs - keeps
 working, which is what you need to actually clear space.
 

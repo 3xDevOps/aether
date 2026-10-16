@@ -48,7 +48,7 @@ func TestCreateResourceLimitsSDK(t *testing.T) {
 				t.Fatal(err)
 			}
 			h := request.HostConfig
-			if h.NanoCPUs != int64(tc.cpu*1e9) || h.Memory != tc.memory || h.MemorySwap != tc.memory {
+			if h.NanoCPUs != int64(tc.cpu*1e9) || h.Memory != tc.memory || h.MemorySwap != tc.memory+tc.memory/4 {
 				t.Fatalf("effective CPU/memory/swap = %+v", h.Resources)
 			}
 			if tc.pids == 0 {
