@@ -223,7 +223,16 @@ aether: update the server first: aether server update (the server runs v0.8.0 an
 
 A member who is not an admin is told to ask one, and the install goes ahead.
 So does an install with no linked server, an unreachable one, or one already
-on the release. `--force` skips the check.
+on the release.
+
+Without `--version`, a client behind its linked server installs the server's
+release rather than the latest one, so it never moves ahead of the server:
+
+```
+installing v0.9.0 to match the server
+```
+
+`--force` skips asking the server: no refusal, and no matching.
 
 With nothing to install, it prints the path of the binary it checked,
 because `sudo` and `PATH` order can each pick a different `aether` than the

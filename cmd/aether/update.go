@@ -72,7 +72,14 @@ func runUpdate(args []string) error {
 		return selfupdate.ErrWindows
 	}
 	base := "https://github.com/" + selfupdate.Repo
-	if *tag == "" {
+	var server linkedServer
+	if !*force {
+		server = probeLinkedServer(ctx)
+	}
+	if match := matchServer(server); *tag == "" && match != "" {
+		*tag = match
+		fmt.Printf("installing %s to match the server\n", *tag)
+	} else if *tag == "" {
 		got, err := selfupdate.DefaultChecker().CheckFresh(ctx)
 		if err != nil {
 			return err
@@ -87,10 +94,8 @@ func runUpdate(args []string) error {
 		return reportBinary()
 	}
 
-	if !*force {
-		if err := serverFirst(os.Stdout, *tag, probeLinkedServer(ctx)); err != nil {
-			return err
-		}
+	if err := serverFirst(os.Stdout, *tag, server); err != nil {
+		return err
 	}
 
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
@@ -160,6 +165,18 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 		out.capable, out.manual = status.Capable, status.ManualCommands
 	}
 	return out
+}
+
+// matchServer is the release to install with no --version when the linked
+// server runs a newer release than this client: exactly the server's, so
+// the client catches up without moving ahead of it. Empty means the latest
+// release.
+func matchServer(server linkedServer) string {
+	core := version.ReleaseCore(server.version)
+	if server.reachable && selfupdate.Behind(version.Version, core) {
+		return core
+	}
+	return ""
 }
 
 // serverFirst refuses to move this client past a linked server that its

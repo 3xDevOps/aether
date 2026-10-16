@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 func TestWarnShadowedNamesADifferentAetherInPath(t *testing.T) {
@@ -123,6 +124,28 @@ func TestServerFirstProceeds(t *testing.T) {
 		var out bytes.Buffer
 		if err := serverFirst(&out, "v0.9.0", server); err != nil {
 			t.Errorf("%s: err = %v, want the install to proceed", name, err)
+		}
+	}
+}
+
+func TestMatchServerInstallsTheServersRelease(t *testing.T) {
+	old := version.Version
+	version.Version = "v0.8.0"
+	t.Cleanup(func() { version.Version = old })
+	for _, tc := range []struct {
+		name   string
+		server linkedServer
+		want   string
+	}{
+		{"ahead", linkedServer{reachable: true, version: "v0.9.0"}, "v0.9.0"},
+		{"ahead from source", linkedServer{reachable: true, version: "v0.9.0-3-gabc1234"}, "v0.9.0"},
+		{"same", linkedServer{reachable: true, version: "v0.8.0"}, ""},
+		{"behind", linkedServer{reachable: true, version: "v0.7.0"}, ""},
+		{"dev server", linkedServer{reachable: true, version: "dev"}, ""},
+		{"unreachable", linkedServer{}, ""},
+	} {
+		if got := matchServer(tc.server); got != tc.want {
+			t.Errorf("%s: matchServer = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }
