@@ -49,6 +49,7 @@ func TestRefusalStatus(t *testing.T) {
 		{RefusalClaimExpired, "claim code expired", http.StatusForbidden},
 		{RefusalClaimExhausted, "claim code has no attempts left", http.StatusForbidden},
 		{RefusalClaimed, "server is already claimed", http.StatusConflict},
+		{RefusalNotClaimed, "server is connected to the edge but not claimed", http.StatusConflict},
 		{RefusalServerBlocked, "server is blocked by this edge's operator", http.StatusForbidden},
 		{RefusalAccountBlocked, "account is blocked by this edge's operator", http.StatusForbidden},
 		{Refusal("device is pending approval"), "device is pending approval", http.StatusForbidden},
