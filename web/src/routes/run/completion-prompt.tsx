@@ -15,7 +15,7 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
-  if (run.review !== 'ready') return null
+  if (run.review !== 'ready' || run.member_id !== self.id) return null
   const commands = runCommands({ run, paused, cap, members, self, steerOthers })
   const complete = commands.find((command) => command.id === 'complete')
   const later = commands.find((command) => command.id === 'not-yet')

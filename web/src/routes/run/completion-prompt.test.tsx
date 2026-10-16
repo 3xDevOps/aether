@@ -58,7 +58,7 @@ describe('CompletionPrompt', () => {
     expect(screen.getByRole('button', { name: 'Not yet' })).toBeDefined()
   })
 
-  it('stays away after Not yet, and for a run that is not ready or not the viewer’s to answer', () => {
+  it('stays away after Not yet, and for a run that is not ready or not the viewer’s own', () => {
     seed({ review: 'later' })
     const { rerender } = render(<Prompt />)
     expect(banner()).toBeNull()
@@ -66,7 +66,6 @@ describe('CompletionPrompt', () => {
     rerender(<Prompt />)
     expect(banner()).toBeNull()
     seed({ member_id: bob.id })
-    useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } } })
     rerender(<Prompt />)
     expect(banner()).toBeNull()
   })
