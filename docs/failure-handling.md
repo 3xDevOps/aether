@@ -890,9 +890,9 @@ When several apply, the order is disconnected, needs-you, failed, finished,
 waiting-agents, waiting-tools, idle; a turn in progress is `working` unless a
 human request is open.
 
-One rule decides whether a run needs you. **Needs you** on the board,
-`aether runs --needs-you`, push notifications and assistant notices all
-apply it:
+One rule on the run state decides whether a run needs you. **Needs you** on
+the board, `aether runs --needs-you`, push notifications and assistant
+notices all apply it:
 
 | Run | Needs you | Notifies |
 | --- | --- | --- |
