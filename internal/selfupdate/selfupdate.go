@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -29,7 +30,8 @@ var httpClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: HTTPSOnly
 // LatestTag resolves the newest release tag from a GitHub /releases/latest
 // URL, which redirects - possibly through more than one hop - to
 // /releases/tag/<tag>. No API token, no rate limit. A repository without a
-// release is ErrNoRelease.
+// release redirects to its release list instead, which is ErrNoRelease;
+// any other non-200 answer is returned as the error it is.
 func LatestTag(ctx context.Context, latestURL string) (string, error) {
 	var tag string
 	client := &http.Client{
@@ -64,10 +66,10 @@ func LatestTag(ctx context.Context, latestURL string) (string, error) {
 			tag = t
 			return false, nil
 		}
-		if code >= 500 || code == http.StatusTooManyRequests {
-			return true, fmt.Errorf("resolve latest release: GET %s: %s", latestURL, resp.Status)
+		if code == http.StatusOK {
+			return false, fmt.Errorf("%w: %s led to %s, not a release tag; pass --version <tag>", ErrNoRelease, latestURL, resp.Request.URL.Redacted())
 		}
-		return false, fmt.Errorf("%w: %s led to %s (%s), not a release tag; pass --version <tag>", ErrNoRelease, latestURL, resp.Request.URL.Redacted(), resp.Status)
+		return code >= 500 || code == http.StatusTooManyRequests, fmt.Errorf("resolve latest release: GET %s: %s", latestURL, resp.Status)
 	})
 	if err != nil {
 		return "", err
@@ -135,6 +137,10 @@ func stageIn(ctx context.Context, m Manifest, asset, dst, dir string) (*Staged, 
 		staged.close(tmp)
 		return nil, fmt.Errorf("chmod staged binary: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		staged.close(tmp)
+		return nil, fmt.Errorf("sync staged binary: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		staged.Discard()
 		return nil, fmt.Errorf("close staged binary: %w", err)
@@ -148,12 +154,27 @@ func (s *Staged) close(f *os.File) {
 	s.Discard()
 }
 
-// Commit renames the staged file over its destination.
+// Commit renames the staged file over its destination and syncs the
+// directory so a crash cannot undo the rename. Windows cannot sync a
+// directory handle.
 func (s *Staged) Commit() error {
 	if err := os.Rename(s.tmp, s.dst); err != nil {
 		return fmt.Errorf("replace %s: %w", s.dst, err)
 	}
 	s.committed = true
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(filepath.Dir(s.dst))
+	if err == nil {
+		err = dir.Sync()
+		if cerr := dir.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("replaced %s but did not sync its directory: %w", s.dst, err)
+	}
 	return nil
 }
 

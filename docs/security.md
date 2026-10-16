@@ -1658,20 +1658,28 @@ to write a manifest the tag's own trusted keys would reject, so a wrong
 secret fails the release, not the clients.
 
 **Key rotation.** Clients trust any key in the list, and a client only learns
-a new key by installing a release that carries it. To rotate:
+a new key by installing a release that carries it. The generator also
+refuses a seed whose public key is not in that release's own list. To
+rotate:
 
 1. Generate the next key pair offline and add its public key to
    `releaseKeys` in `internal/selfupdate/keys.go`, beside the current one.
-2. Publish at least one release still signed with the current key, so
-   clients install the build that trusts both.
-3. Replace the `AETHER_RELEASE_SIGNING_KEY` secret with the new seed.
-4. Once no supported client predates step 2, remove the old public key.
+2. Publish that release signed with the current key. It is the bridge:
+   every client accepts it, and it trusts both keys.
+3. Replace the `AETHER_RELEASE_SIGNING_KEY` secret with the new seed and
+   remove the old public key from `releaseKeys`. Every later release is
+   signed with the new key.
 
-A client older than step 2 rejects releases signed with the new key and must
-be reinstalled with the install script. If the current key leaks, publish
-one release, still signed with it, whose list holds only the new key, then
-sign with the new key from then on. A client that has not installed that
-release still trusts the leaked key.
+A client older than the bridge rejects every later release. Install the
+bridge on it first with `aether update --version <bridge tag>` (or `aether
+server update --version <bridge tag>`), then update normally, or reinstall
+it with the install script.
+
+If the current key leaks, run the same steps at once: the bridge has to be
+signed with the leaked key, because no client trusts anything else, and the
+next release drops it. A key cannot be revoked remotely, so a client that
+has not installed that next release still accepts a manifest signed with
+the leaked key from anyone who can also write to the releases.
 
 ## Server self-update
 

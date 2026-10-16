@@ -37,8 +37,10 @@ fi
 
 # A published manifest has signed the assets beside it; replacing them
 # under it would break every updater, so a signed release is never redone.
+# A signature without its manifest is left by an interrupted run and is
+# replaced below.
 if names=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null); then
-	if printf '%s\n' "$names" | grep -qx 'aether-release\.json\(\.sig\)\{0,1\}'; then
+	if printf '%s\n' "$names" | grep -qx 'aether-release\.json'; then
 		echo "publish-release: $tag already has a signed manifest; publish a new tag instead of re-uploading" >&2
 		exit 1
 	fi
@@ -69,4 +71,7 @@ while read -r name sum size; do
 	echo "verified $url"
 done <"$tmp/assets"
 
-gh release upload "$tag" "$manifest" "$signature"
+# Clients treat a release missing either file as unsigned, so the manifest
+# goes up last and a failure before it leaves the release retryable.
+gh release upload "$tag" --clobber "$signature"
+gh release upload "$tag" "$manifest"

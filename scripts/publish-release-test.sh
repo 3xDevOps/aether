@@ -58,7 +58,8 @@ printf '%s\n' \
 	"release view $tag --json assets --jq .assets[].name" \
 	"release create $tag --title $tag --generate-notes $dist/aether-linux-amd64 $dist/checksums.txt" \
 	"curl $url" \
-	"release upload $tag $dist/aether-release.json $dist/aether-release.json.sig" \
+	"release upload $tag --clobber $dist/aether-release.json.sig" \
+	"release upload $tag $dist/aether-release.json" \
 	>"$expected"
 diff -u "$expected" "$log"
 
@@ -69,7 +70,8 @@ printf '%s\n' \
 	"release view $tag --json assets --jq .assets[].name" \
 	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
 	"curl $url" \
-	"release upload $tag $dist/aether-release.json $dist/aether-release.json.sig" \
+	"release upload $tag --clobber $dist/aether-release.json.sig" \
+	"release upload $tag $dist/aether-release.json" \
 	>"$expected"
 diff -u "$expected" "$log"
 
@@ -84,6 +86,19 @@ if grep -q "aether-release.json" "$log"; then
 	echo "publish-release uploaded the manifest after a failed verification" >&2
 	exit 1
 fi
+
+# A signature left without its manifest by an interrupted run is replaced.
+: >"$log"
+export GH_ASSETS="aether-linux-amd64 checksums.txt aether-release.json.sig"
+sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null
+printf '%s\n' \
+	"release view $tag --json assets --jq .assets[].name" \
+	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
+	"curl $url" \
+	"release upload $tag --clobber $dist/aether-release.json.sig" \
+	"release upload $tag $dist/aether-release.json" \
+	>"$expected"
+diff -u "$expected" "$log"
 
 # A release that already has a manifest is never re-uploaded.
 : >"$log"
