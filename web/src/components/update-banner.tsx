@@ -142,13 +142,17 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const setOpen = useStore((s) => s.setUpdatesOpen)
   const anything = useUpdateNotice() !== null
   const packaged = serves ? update?.cli.packaged : undefined
+  const packagedLatest = packaged && update?.cli.update_available ? update.cli.latest : undefined
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Updates</DialogTitle>
           {packaged ? (
-            <DialogDescription>{packagedLine(packaged)}</DialogDescription>
+            <DialogDescription>
+              {packagedLine(packaged)}
+              {packagedLatest && ` Aether ${packagedLatest} is released; the app's banner says when and where to update.`}
+            </DialogDescription>
           ) : (
             !anything && <DialogDescription>Nothing to update.</DialogDescription>
           )}
@@ -177,7 +181,8 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   const cliVersion = useStore((s) => s.capabilities?.version)
   const serves = caps.hasLocal('update.check')
   const latest = update?.cli.latest ?? ''
-  if (serves && update?.cli.update_available && latest && dismissed.cli !== latest) {
+  // A packaged CLI's notice is its app's own, outside the dashboard.
+  if (serves && update?.cli.update_available && !update.cli.packaged && latest && dismissed.cli !== latest) {
     return { text: `Aether ${bareVersion(latest)} is available`, action: true }
   }
   const flow = serverFlow(status, progress)

@@ -1792,9 +1792,15 @@ the server snapshot from loading.
   `pull.switch`, `repo.fast-forward`, `repo.push`, `sync.start`,
   `sync.status` and `sync.stop` from `local`, and `forward.start`,
   `forward.status` and `forward.stop` too: a forward listens on `127.0.0.1`,
-  which every app on a phone can reach. It never checks GitHub for releases,
-  and `aether update` refuses with `this aether is part of the Android app,
-  which installs its updates; update the Android app instead`.
+  which every app on a phone can reach. `update.check` still reports the
+  newest release, with `packaged` set, `can_self_update` false and no
+  `asset`, so the dashboard can say an update exists, and `aether update
+  --check --json` prints the same check for the app's own banner.
+  `update.apply` refuses from the configuration, before any lookup, and
+  `aether update` without `--check` refuses likewise, both with `this aether
+  is part of the Android app, which installs its updates; update the Android
+  app instead`: the APK is the update unit, and the sidecar never replaces
+  its own binary.
 - On Android the CLI reads `AETHER_RESOLV_CONF`, a resolv.conf path, only when
   `/etc/resolv.conf` is absent; the app writes the phone's DNS servers there
   ([networking.md](networking.md#android-dns)).
@@ -1808,7 +1814,7 @@ the server snapshot from loading.
 - `update.check` answers the release check `aether update --check --json`
   prints, under `cli`, beside the linked server's version. Its fields are
   `version`, `commit`, `latest`, `update_available`, `asset`, `release_url`,
-  `dev`, `disabled`, `can_self_update` and `checked_at`
+  `dev`, `disabled`, `can_self_update`, `packaged` and `checked_at`
   ([install.md](install.md#upgrading)). The gateway resolves the latest
   release at most once an hour and serves the cached answer in between, so
   a page load never costs a request to GitHub. `refresh: true` skips the

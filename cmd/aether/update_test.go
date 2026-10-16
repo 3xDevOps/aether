@@ -5,10 +5,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 func TestWarnShadowedNamesADifferentAetherInPath(t *testing.T) {
@@ -74,5 +78,27 @@ func TestOfferSysbox(t *testing.T) {
 				t.Errorf("offerSysbox = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestUpdatePackagedChecksButNeverApplies covers the Android app, which runs
+// `update --check --json` for its notice and installs updates itself.
+func TestUpdatePackagedChecksButNeverApplies(t *testing.T) {
+	t.Setenv(selfupdate.PackagedEnv, "Android app")
+	out, err := captureStdout(t, func() error { return runUpdate([]string{"--check", "--json"}) })
+	if err != nil {
+		t.Fatalf("packaged check: %v", err)
+	}
+	var got selfupdate.Check
+	if err = json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("check output %q: %v", out, err)
+	}
+	if got.Packaged != "Android app" || got.CanSelfUpdate {
+		t.Fatalf("check = %+v, want packaged with no self-update", got)
+	}
+
+	err = runUpdate(nil)
+	if err == nil || !strings.Contains(err.Error(), "update the Android app instead") {
+		t.Fatalf("packaged apply = %v, want the refusal", err)
 	}
 }

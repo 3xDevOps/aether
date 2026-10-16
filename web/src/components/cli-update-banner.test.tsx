@@ -85,6 +85,25 @@ test('a packaged CLI offers nothing and names the app that updates it', async ()
   expect(screen.queryByText('Nothing to update.')).toBeNull()
 })
 
+// The Android app shows its own notice, so a newer release is information
+// here: no button, no release link, and no sidebar row.
+test('a packaged CLI behind a release names it without offering an update', async () => {
+  const status = updateStatus()
+  const packaged = { ...status, cli: { ...status.cli, packaged: 'Android app', asset: undefined, can_self_update: false } }
+  const client = fakeApi({ localUpdateCheck: vi.fn(async () => packaged) })
+  seed()
+  render(<UpdateCenter client={client} />)
+
+  expect(
+    await screen.findByText(
+      'Updates come from the Android app: install its new version to update Aether. Aether v1.3.0 is released; the app\'s banner says when and where to update.',
+    ),
+  ).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Release notes' })).toBeNull()
+  expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
+})
+
 test('the Update button applies and the banner says it is restarting', async () => {
   const client = fakeApi()
   seed()

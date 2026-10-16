@@ -917,13 +917,47 @@ gateway exits, until the restarted gateway prints its new URL. Pages the
 dashboard opens in a new window, such as the sign-in verification page, open
 in the phone's browser.
 
-The bundled CLI never checks GitHub for releases (`AETHER_PACKAGED` is set to
-`Android app`): it updates when the app does. The dashboard's update notice
-says `Updates come from the Android app: install its new version to update
-Aether.`, and `aether update` refuses with `this aether is part of the Android
-app, which installs its updates; update the Android app instead`. The gateway
-also omits the verbs that need a git checkout, a service manager or local
-agents ([local-gateway.md](local-gateway.md#get-apiv1capabilities)).
+**Updates.** The app never downloads or installs an update itself; you do,
+from the page it opens. In both modes, when the app comes to the front and
+its last check is an hour old or more, it runs the bundled CLI's `aether
+update --check --json` in the background, so the release lookup and version
+order are the desktop's. A check that fails, offline for example, shows
+nothing and runs again an hour later. When a newer release is out, a banner
+over the top of the dashboard names the new version and the one you run,
+with one button. Which button depends on who signed the app and which
+installer Android recorded (`getInstallSourceInfo` on Android 11 and newer,
+`getInstallerPackageName` before):
+
+- Installed by Google Play, or signed with any key but the release key:
+  **Open Google Play** opens the app's listing in the Play app
+  (`market://details?id=io.aether.android`), or in the browser when Play is
+  missing. **Release notes** opens the GitHub release. Play App Signing
+  re-signs what Play serves, so a Play build installed through another store
+  or as sideloaded split APKs still updates from Play. GitHub publishes a
+  release before Play has reviewed and rolled it out, so this banner shows
+  only once the app has been behind a release for 7 days; newer releases in
+  that week do not restart the wait.
+- Installed any other way and signed with the release key, such as the APK
+  from a release page: **Open release page** opens that release in the
+  browser. Download `aether-android.apk` and open it; it installs over the
+  app and keeps its data. The release key's certificate SHA-256 is
+  `2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a`, as
+  `apksigner verify --print-certs aether-android.apk` prints it. A `make
+  android-debug` build is signed with another key, so Android will not
+  install the release APK over it, and its banner points at Google Play.
+
+If the page does not open, the banner shows Android's own error. Dismissing
+the banner silences that version only, on this phone; the next release shows
+it again. In Edge mode the dashboard's Updates dialog also names the newer
+version, with no button.
+
+The app does not hold `REQUEST_INSTALL_PACKAGES`, and the CLI never replaces
+itself (`AETHER_PACKAGED` is set to `Android app`): `aether update` without
+`--check` and the gateway's `update.apply` refuse with `this aether is part
+of the Android app, which installs its updates; update the Android app
+instead`. The gateway also omits the verbs that need a git checkout, a
+service manager or local agents
+([local-gateway.md](local-gateway.md#get-apiv1capabilities)).
 
 If the gateway exits, the app restarts it after 1 s, 2 s and 4 s. After three
 failed restarts it shows a native screen with the exit code and the CLI's

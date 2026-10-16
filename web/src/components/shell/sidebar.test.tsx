@@ -533,6 +533,14 @@ describe('update notice and footer', () => {
     expect(await screen.findByRole('heading', { name: 'Updates' })).toBeDefined()
   })
 
+  it('leaves a packaged CLI to its app, with no row', () => {
+    const update = updateStatus()
+    useStore.setState({ update: { ...update, cli: { ...update.cli, packaged: 'Android app' } } })
+    render(<AppShell />)
+
+    expect(nav().queryByText(/is available/)).toBeNull()
+  })
+
   it('brings a dismissed update back from the footer menu', async () => {
     const update = updateStatus()
     useStore.setState({ update, dismissedUpdates: { cli: update.cli.latest ?? '', server: '', shell: '' } })

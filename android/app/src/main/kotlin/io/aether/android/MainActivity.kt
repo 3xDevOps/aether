@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
 
     private var mode = ConnectionMode.TAILSCALE
     private var gateway: Gateway? = null
+    private var updates: UpdateNotice? = null
 
     /** The running gateway's address, once it has printed it. */
     private var gatewayUrl: String? = null
@@ -164,6 +165,7 @@ class MainActivity : ComponentActivity() {
             if (rendererLost) connect(null) else startGateway()
         }
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
+        updates = UpdateNotice(this, findViewById(R.id.update_notice))
 
         pickFiles =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -220,6 +222,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        updates?.resume()
         if (mode == ConnectionMode.EDGE && gateway?.isActive != true &&
             gatewayError.visibility != View.VISIBLE
         ) {
@@ -228,6 +231,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        updates?.destroy()
         stopGateway()
         super.onDestroy()
     }
@@ -269,6 +273,8 @@ class MainActivity : ComponentActivity() {
     private fun applyInsets() {
         val root = findViewById<View>(R.id.root)
         val margin = resources.getDimensionPixelSize(R.dimen.edge_margin)
+        val notice = findViewById<View>(R.id.update_notice)
+        val noticeMargin = resources.getDimensionPixelSize(R.dimen.update_notice_margin)
         val pageHandlesSafeAreas =
             forwardsSafeAreaInsets(WebView.getCurrentWebViewPackage()?.versionName)
         val imeType = WindowInsetsCompat.Type.ime()
@@ -289,6 +295,14 @@ class MainActivity : ComponentActivity() {
             val params = connection.layoutParams as ViewGroup.MarginLayoutParams
             params.bottomMargin = margin + if (pageHandlesSafeAreas) bars.bottom else 0
             connection.requestLayout()
+            val noticeParams = notice.layoutParams as ViewGroup.MarginLayoutParams
+            noticeParams.topMargin = noticeMargin + if (pageHandlesSafeAreas) bars.top else 0
+            if (pageHandlesSafeAreas) {
+                val rtl = notice.layoutDirection == View.LAYOUT_DIRECTION_RTL
+                noticeParams.marginStart = noticeMargin + if (rtl) bars.right else bars.left
+                noticeParams.marginEnd = noticeMargin + if (rtl) bars.left else bars.right
+            }
+            notice.requestLayout()
             val panel = gatewayError
             panel.setPadding(
                 margin,

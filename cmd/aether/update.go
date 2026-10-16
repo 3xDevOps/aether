@@ -50,13 +50,13 @@ func runUpdate(args []string) error {
 		return errors.New("--no-app skips part of an install and --check installs nothing; pick one")
 	}
 
-	if app := os.Getenv(selfupdate.PackagedEnv); app != "" {
-		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if *check {
 		return reportCheck(ctx, *jsonOut)
+	}
+	if app := os.Getenv(selfupdate.PackagedEnv); app != "" {
+		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
 	}
 
 	if runtime.GOOS == "windows" {
@@ -185,6 +185,8 @@ func printCheck(got selfupdate.Check) {
 		fmt.Printf("release checks are off: %s is set (running %s)\n", selfupdate.OptOutEnv, version.String())
 	case got.Dev:
 		fmt.Printf("dev build (%s); releases are not checked\n", version.String())
+	case got.UpdateAvailable && got.Packaged != "":
+		fmt.Printf("update available: %s (running %s); update the %s\n", got.Latest, version.String(), got.Packaged)
 	case got.UpdateAvailable:
 		fmt.Printf("update available: %s (running %s); run: aether update\n", got.Latest, version.String())
 	case got.Latest == version.Version:

@@ -17,8 +17,8 @@ import (
 const OptOutEnv = "AETHER_NO_UPDATE_CHECK"
 
 // PackagedEnv names the app that installs and updates this binary, such as
-// "Android app". Only that app sets it; the binary then never checks for or
-// installs a release itself.
+// "Android app". Only that app sets it; the binary then still reports the
+// newest release but never installs one itself: the app is the update unit.
 const PackagedEnv = "AETHER_PACKAGED"
 
 // defaultTTL is how long a successful answer is reused.
@@ -50,7 +50,7 @@ type Check struct {
 	// Disabled reports that OptOutEnv is set and no network was touched.
 	Disabled bool `json:"disabled"`
 	// Packaged is the app that installs this binary's updates, empty when
-	// the binary updates itself. No network was touched when it is set.
+	// the binary updates itself. Asset is empty when it is set.
 	Packaged string `json:"packaged,omitempty"`
 	// CanSelfUpdate is false on Windows, which cannot rename over a
 	// running executable.
@@ -293,11 +293,11 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		CanSelfUpdate: runtime.GOOS != "windows",
 		CheckedAt:     c.now(),
 	}
-	var err error
-	switch packaged := os.Getenv(PackagedEnv); {
-	case packaged != "":
+	if packaged := os.Getenv(PackagedEnv); packaged != "" {
 		out.Packaged, out.CanSelfUpdate = packaged, false
-		out.Dev = version.Version == devVersion
+	}
+	var err error
+	switch {
 	case version.Version == devVersion:
 		out.Dev = true
 	case os.Getenv(OptOutEnv) != "":
@@ -307,8 +307,10 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 		if latest, err = LatestTag(ctx, c.baseURL+"/releases/latest"); err == nil {
 			out.Latest = latest
 			out.UpdateAvailable = Behind(version.Version, latest)
-			out.Asset = Asset(runtime.GOOS, runtime.GOARCH)
 			out.ReleaseURL = c.baseURL + "/releases/tag/" + latest
+			if out.Packaged == "" {
+				out.Asset = Asset(runtime.GOOS, runtime.GOARCH)
+			}
 		}
 	}
 	c.store(id, out, err)
