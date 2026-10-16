@@ -83,8 +83,11 @@ class MainActivity : ComponentActivity() {
     private var pendingSuffix = ""
     private var fileChooser: ValueCallback<Array<Uri>>? = null
 
-    /** Set when the dashboard's renderer was reclaimed, until it is reloaded. */
-    private var reloadOnStart = false
+    /**
+     * The page a reclaimed renderer had open, empty when it had none, until
+     * the dashboard is reloaded at it.
+     */
+    private var reclaimedPage: String? = null
 
     /** Set while the failure panel shows a lost renderer rather than the gateway. */
     private var rendererLost = false
@@ -210,9 +213,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (!reloadOnStart) return
-        reloadOnStart = false
-        loaded?.let(web::loadUrl)
+        val page = reclaimedPage ?: return
+        reclaimedPage = null
+        loaded?.let { web.loadUrl(recoveryUrl(it, page)) }
     }
 
     override fun onResume() {
@@ -443,6 +446,7 @@ class MainActivity : ComponentActivity() {
                     val parent = view.parent as ViewGroup
                     val index = parent.indexOfChild(view)
                     val params = view.layoutParams
+                    val page = view.url
                     parent.removeView(view)
                     view.destroy()
                     web = WebView(this@MainActivity).apply { id = R.id.web }
@@ -462,7 +466,7 @@ class MainActivity : ComponentActivity() {
                     val message =
                         when (loss) {
                             RendererLoss.RELOAD -> {
-                                reloadOnStart = true
+                                reclaimedPage = page ?: ""
                                 return true
                             }
                             RendererLoss.KILLED -> R.string.renderer_killed

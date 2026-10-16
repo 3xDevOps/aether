@@ -935,7 +935,8 @@ restarts it on resume if it died.
 
 Android may reclaim the dashboard's renderer process while the app is in the
 background, for example while you confirm a sign-in code in the browser. The
-app reloads the dashboard when you return to it. Any other renderer loss shows
+app reloads the dashboard, on the page you had open, when you return to it.
+Any other renderer loss shows
 a screen with **Retry** and **Connection** instead of reloading into the same
 failure: `Android stopped the dashboard's renderer` for one killed while on
 screen, `The dashboard's renderer crashed` for a crash. On Android 10 and
