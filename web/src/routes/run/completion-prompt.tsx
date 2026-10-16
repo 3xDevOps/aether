@@ -41,7 +41,7 @@ function Ask({ run, complete, later, className }: { run: RunRecord; complete: Co
           </>
         }
       >
-        {summary && <p className="text-ui-sm text-muted">{summary}</p>}
+        {summary && <p className="max-h-32 overflow-y-auto text-ui-sm text-muted">{summary}</p>}
       </Callout>
     </div>
   )
