@@ -38,22 +38,32 @@ type Conn struct {
 // was found; one that does gets an error saying what was tried. A link
 // with a server id goes through DialLinked instead.
 func Dial(cfg Config) (*Conn, error) {
-	return dial(cfg, cfg.user(), false)
+	return DialContext(context.Background(), cfg)
+}
+
+// DialContext is Dial ended by ctx: cancelling it closes the connection
+// mid-handshake.
+func DialContext(ctx context.Context, cfg Config) (*Conn, error) {
+	return dial(ctx, cfg, cfg.user(), false)
 }
 
 // DialInvite connects using SSH user invite:<code> (optionally with a
 // display name) so an unknown key can join via a one-time invite.
 func DialInvite(cfg Config, code, display string) (*Conn, error) {
+	return dialInvite(context.Background(), cfg, code, display)
+}
+
+func dialInvite(ctx context.Context, cfg Config, code, display string) (*Conn, error) {
 	user := "invite:" + code
 	if display != "" {
 		user += ":" + display
 	}
-	return dial(cfg, user, true)
+	return dial(ctx, cfg, user, true)
 }
 
-func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
+func dial(ctx context.Context, cfg Config, user string, requireAuth bool) (*Conn, error) {
 	if cfg.ServerID != "" {
-		client, err := DialLinked(context.Background(), cfg, user)
+		client, err := DialLinked(ctx, cfg, user)
 		if err != nil {
 			return nil, err
 		}
@@ -82,16 +92,46 @@ func dial(cfg Config, user string, requireAuth bool) (*Conn, error) {
 		BannerCallback: auth.Banner,
 		Timeout:        dialTimeout,
 	}
-	nc, err := (&net.Dialer{Timeout: dialTimeout}).Dial("tcp", cfg.Addr)
+	nc, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", cfg.Addr)
 	if err != nil {
 		return nil, fmt.Errorf("cli: dial %s: %w", cfg.Addr, err)
 	}
-	cc, chans, reqs, err := ssh.NewClientConn(nc, cfg.Addr, conf)
+	cc, chans, reqs, err := handshake(ctx, nc, cfg.Addr, conf)
 	if err != nil {
 		_ = nc.Close()
 		return nil, auth.Explain(fmt.Errorf("cli: ssh handshake with %s: %w", cfg.Addr, err))
 	}
 	return &Conn{client: ssh.NewClient(cc, chans, reqs), cfg: cfg, hostKey: hostKey}, nil
+}
+
+// handshake runs the SSH handshake over nc until ctx ends, which closes nc.
+func handshake(ctx context.Context, nc net.Conn, addr string, conf *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
+	cc, chans, reqs, err := ssh.NewClientConn(nc, addr, conf)
+	if !stop() {
+		if err == nil {
+			_ = cc.Close()
+		}
+		return nil, nil, nil, ctx.Err()
+	}
+	return cc, chans, reqs, err
+}
+
+// Ping waits for the server to answer a keepalive until ctx ends. A
+// connection whose network went away without a reset never answers, and
+// every channel opened on it waits as long; the caller closes it.
+func (c *Conn) Ping(ctx context.Context) error {
+	answered := make(chan error, 1)
+	go func() {
+		_, _, err := c.client.SendRequest("keepalive@openssh.com", true, nil)
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("cli: keepalive unanswered: %w", ctx.Err())
+	}
 }
 
 // Close tears down the SSH connection.

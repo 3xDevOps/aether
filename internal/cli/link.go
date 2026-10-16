@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -137,8 +139,8 @@ func namedLink(name string, cfg Config) NamedLink {
 // With a server id the link goes through DialLinked: no SSH key is
 // resolved or generated, and Addr, when set, is the direct address tried
 // before the edge. A claim goes through DialClaim, a join through
-// DialJoin.
-func Link(opts LinkOptions, prev Config) (LinkResult, error) {
+// DialJoin. ctx ends the dial and the server.info call that follows it.
+func Link(ctx context.Context, opts LinkOptions, prev Config) (LinkResult, error) {
 	cfg := Config{Addr: normalizeAddr(opts.Addr), User: "aether", EdgeURL: opts.EdgeURL, ServerID: opts.ServerID}
 	var (
 		conn         *Conn
@@ -165,31 +167,25 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 	}
 	switch {
 	case opts.Claim != "":
-		conn, err = DialClaim(cfg, opts.Claim)
+		conn, err = DialClaim(ctx, cfg, opts.Claim)
 		if err == nil {
 			cfg.ServerID = conn.cfg.ServerID
 		}
 	case opts.Join != "":
-		conn, err = DialJoin(cfg, opts.Join)
+		conn, err = DialJoin(ctx, cfg, opts.Join)
 		if err == nil {
 			cfg.EdgeURL, cfg.ServerID = conn.cfg.EdgeURL, conn.cfg.ServerID
 		}
 	case cfg.ServerID != "":
-		conn, err = Dial(cfg)
+		conn, err = DialContext(ctx, cfg)
 	default:
-		conn, keyGenerated, err = linkDial(opts, prev, &cfg)
+		conn, keyGenerated, err = linkDial(ctx, opts, prev, &cfg)
 	}
 	if err != nil {
 		return LinkResult{}, err
 	}
-	control, err := conn.Control()
+	info, err := serverInfo(ctx, conn)
 	if err != nil {
-		_ = conn.Close()
-		return LinkResult{}, err
-	}
-	defer func() { _ = control.Close() }()
-	var info protocol.ServerInfoResult
-	if err := control.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
 		_ = conn.Close()
 		return LinkResult{}, err
 	}
@@ -201,6 +197,29 @@ func Link(opts LinkOptions, prev Config) (LinkResult, error) {
 		prev.ServerID = cfg.ServerID
 	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
+}
+
+// serverInfoTimeout bounds the server.info call that ends a link. Past
+// the handshake, nothing else ends a call on a connection whose network
+// went away.
+const serverInfoTimeout = 30 * time.Second
+
+// serverInfo calls server.info on conn, closing conn when ctx ends or the
+// server takes longer than serverInfoTimeout to answer.
+func serverInfo(ctx context.Context, conn *Conn) (protocol.ServerInfoResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, serverInfoTimeout)
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	var info protocol.ServerInfoResult
+	control, err := conn.Control()
+	if err == nil {
+		err = control.Call(protocol.MethodServerInfo, struct{}{}, &info)
+		_ = control.Close()
+	}
+	if !stop() {
+		return info, fmt.Errorf("cli: %s: %w", protocol.MethodServerInfo, ctx.Err())
+	}
+	return info, err
 }
 
 // pins reports whether the direct dial to the address of c would accept
@@ -250,7 +269,7 @@ func (c Config) pins(serverID string) (bool, error) {
 
 // linkDial dials a server linked by address, choosing its key and
 // generating ~/.ssh/id_ed25519 when nothing else can authenticate.
-func linkDial(opts LinkOptions, prev Config, cfg *Config) (*Conn, string, error) {
+func linkDial(ctx context.Context, opts LinkOptions, prev Config, cfg *Config) (*Conn, string, error) {
 	key, err := linkKey(opts.Key, prev, opts.Name)
 	if err != nil {
 		return nil, "", err
@@ -283,15 +302,15 @@ func linkDial(opts LinkOptions, prev Config, cfg *Config) (*Conn, string, error)
 	}
 	var conn *Conn
 	if opts.Invite != "" {
-		conn, err = DialInvite(*cfg, opts.Invite, opts.Name)
+		conn, err = dialInvite(ctx, *cfg, opts.Invite, opts.Name)
 	} else {
-		conn, err = Dial(*cfg)
+		conn, err = DialContext(ctx, *cfg)
 	}
 	if err != nil && opts.Invite == "" && generate && isAuthFailure(err) {
 		if err = ensure(); err != nil {
 			return nil, "", err
 		}
-		conn, err = Dial(*cfg)
+		conn, err = DialContext(ctx, *cfg)
 	}
 	return conn, keyGenerated, err
 }

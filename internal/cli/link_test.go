@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -185,7 +188,7 @@ func TestClaimFailsOnUnreadableKnownHostsBeforeTheCodeIsSpent(t *testing.T) {
 	}
 	prev := Config{Addr: "srv:2222", User: "aether", KnownHosts: knownHosts}
 
-	res, err := Link(LinkOptions{Claim: code, EdgeURL: r.URL}, prev)
+	res, err := Link(context.Background(), LinkOptions{Claim: code, EdgeURL: r.URL}, prev)
 	if err == nil {
 		_ = res.Conn.Close()
 		t.Fatal("Link claimed past a known_hosts it could not read")
@@ -216,5 +219,59 @@ func TestClaimOfTheCurrentServerMovesItsGitRemote(t *testing.T) {
 	}
 	if moved, ok := got.MovedGitURL(got, want); ok {
 		t.Fatalf("a remote already on the edge host moved to %q", moved)
+	}
+}
+
+// A server that completes the handshake and never answers server.info,
+// as one whose network went away just then does, must not hold the link
+// past its context.
+func TestLinkEndsWhenServerInfoIsNeverAnswered(t *testing.T) {
+	testhome.Isolate(t)
+	disableAgent(t)
+	signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		raw, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		t.Cleanup(func() { _ = raw.Close() })
+		cfg := &ssh.ServerConfig{NoClientAuth: true}
+		cfg.AddHostKey(signer)
+		_, channels, requests, handshakeErr := ssh.NewServerConn(raw, cfg)
+		if handshakeErr != nil {
+			return
+		}
+		go ssh.DiscardRequests(requests)
+		for incoming := range channels {
+			channel, requests, acceptErr := incoming.Accept()
+			if acceptErr != nil {
+				return
+			}
+			t.Cleanup(func() { _ = channel.Close() })
+			go func() {
+				for request := range requests {
+					_ = request.Reply(true, nil)
+				}
+			}()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = Link(ctx, LinkOptions{Addr: listener.Addr().String()}, Config{})
+	if err == nil || !strings.Contains(err.Error(), "server.info: context deadline exceeded") {
+		t.Fatalf("Link = %v, want server.info ended by the context", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("Link took %v", elapsed)
 	}
 }

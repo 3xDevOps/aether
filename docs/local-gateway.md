@@ -202,6 +202,16 @@ automatic replay. Streams have a separate guard: a channel that fails to open
 triggers a redial only when a keepalive shows the connection is actually gone,
 because tearing down a healthy connection would kill its other live streams.
 
+A network that goes away without a reset, as when a phone sleeps or moves
+between Wi-Fi and mobile data, leaves the connection open and silent. The
+gateway sends an SSH keepalive every 15 seconds and drops the connection when
+one goes unanswered for 10 seconds; every call and stream waiting on it then
+fails or redials. Requests that arrive while a dial is in progress wait for
+that one dial, each only as long as its own request lasts, and a dial gives up
+after 90 seconds. A link (`link.apply`, `edge.link`, `edge.claim`,
+`edge.join`) is bounded the same way, including the `server.info` call that
+completes it.
+
 Every `-32004` carries a message prefix that says who has to fix it, and both
 map to HTTP 503 as before. `network unreachable: ` means this machine could
 not even attempt the connection (DNS resolution failed, or the kernel

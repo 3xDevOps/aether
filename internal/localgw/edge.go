@@ -379,7 +379,9 @@ func (g *Gateway) localEdgeJoin(_ *http.Request, body []byte) (any, *protocol.Er
 // later request onto it, as link.apply does for an address.
 func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) {
 	prev := g.local.snapshot()
-	result, err := cli.Link(opts, prev)
+	ctx, cancel := context.WithTimeout(g.ctx, dialTimeout)
+	defer cancel()
+	result, err := cli.Link(ctx, opts, prev)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error(), Data: refusalData(err)}
 	}
