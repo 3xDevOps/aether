@@ -132,6 +132,16 @@ func TestServerFirstProceeds(t *testing.T) {
 	}
 }
 
+func TestServerFirstNeutralizesTheServersVersion(t *testing.T) {
+	var out bytes.Buffer
+	if err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0-rc\x1b[2J"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "the server runs v0.8.0-rc [2J") {
+		t.Fatalf("output = %q, want control characters neutralized", out.String())
+	}
+}
+
 func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 	old := version.Version
 	version.Version = "v0.8.0"
@@ -146,6 +156,7 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 		{"same", linkedServer{reachable: true, version: "v0.8.0"}, ""},
 		{"behind", linkedServer{reachable: true, version: "v0.7.0"}, ""},
 		{"dev server", linkedServer{reachable: true, version: "dev"}, ""},
+		{"not a tag", linkedServer{reachable: true, version: "0.9.0"}, ""},
 		{"unreachable", linkedServer{}, ""},
 	} {
 		if got := matchServer(tc.server); got != tc.want {

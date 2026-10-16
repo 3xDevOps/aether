@@ -206,11 +206,10 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 // the client catches up without moving ahead of it. Empty means the latest
 // release.
 func matchServer(server linkedServer) string {
-	core := version.ReleaseCore(server.version)
-	if server.reachable && selfupdate.Behind(version.Version, core) {
-		return core
+	if !server.reachable {
+		return ""
 	}
-	return ""
+	return cli.MatchServer(version.Version, server.version)
 }
 
 // serverFirst refuses to move this client past a linked server that its
@@ -222,14 +221,15 @@ func serverFirst(w io.Writer, target string, server linkedServer) error {
 	if !server.reachable || !selfupdate.Behind(server.version, target) {
 		return nil
 	}
+	running := printable(server.version)
 	switch {
-	case server.admin && server.capable:
+	case cli.ServerFirst(server.version, target, server.admin, server.capable):
 		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
-			server.version, target)
+			running, target)
 	case server.admin:
-		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", server.version, strings.Join(server.manual, ", then "))
+		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", running, printable(strings.Join(server.manual, ", then ")))
 	default:
-		_, _ = fmt.Fprintf(w, "the server runs %s; ask a server admin to run: aether server update\n", server.version)
+		_, _ = fmt.Fprintf(w, "the server runs %s; ask a server admin to run: aether server update\n", running)
 	}
 	return nil
 }
