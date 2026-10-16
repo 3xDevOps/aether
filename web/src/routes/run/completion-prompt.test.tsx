@@ -43,11 +43,13 @@ beforeEach(() => {
 describe('CompletionPrompt', () => {
   it('asks while the reported success is ready, with the agent’s summary', async () => {
     seed()
-    vi.mocked(api.coordMessagesList).mockResolvedValueOnce({
-      messages: [{
-        id: 'msg_report', workspace_id: 'wsp_1', from_run_id: 'run_1', to_run_id: '', kind: 'report',
-        body: 'Outcome: success', outcome: 'success', summary: 'checkout rewritten and tested', created_at: '2026-08-14T10:10:00Z',
-      }],
+    vi.mocked(api.workspaceTimeline).mockResolvedValueOnce({
+      events: [
+        { id: 'ev_1', seq: 1, time: '2026-08-14T10:00:00Z', workspace_id: 'wsp_1', run_id: 'run_1', actor_id: '', type: 'workspace.timeline', payload: { kind: 'report', outcome: 'success', summary: 'first pass' } },
+        { id: 'ev_2', seq: 2, time: '2026-08-14T10:10:00Z', workspace_id: 'wsp_1', run_id: 'run_1', actor_id: '', type: 'workspace.timeline', payload: { kind: 'report', outcome: 'success', summary: 'checkout rewritten and tested' } },
+      ],
+      next_seq: 3,
+      more: false,
     })
     render(<Prompt />)
     await waitFor(() => expect(banner()?.textContent).toContain('checkout rewritten and tested'))

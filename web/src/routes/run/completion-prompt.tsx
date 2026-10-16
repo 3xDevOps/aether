@@ -1,11 +1,12 @@
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { api } from '@/lib/api'
 import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import { messageScopeKey, useMessageList } from '@/store/messages'
 import type { RunRecord } from '@/store/runs'
+import type { TimelinePayload } from '@/store/sessions'
 
 /** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
 export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
@@ -24,16 +25,7 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
 
 function Ask({ run, complete, later, className }: { run: RunRecord; complete: Command; later: Command; className?: string }) {
   const perform = useCommandRunner()
-  const scope = { kind: 'run', workspaceID: run.workspace_id, runID: run.id } as const
-  useMessageList(useStore, api, scope)
-  const summary = useStore((s) => {
-    const ids = s.messageLists[messageScopeKey(scope)]?.ids ?? []
-    for (let i = ids.length - 1; i >= 0; i--) {
-      const message = s.runMessages[ids[i]]
-      if (message?.kind === 'report' && message.from_run_id === run.id && message.outcome === 'success') return message.summary || message.body
-    }
-    return undefined
-  })
+  const summary = useReportedSummary(run)
   return (
     <div className={className}>
       <Callout
@@ -52,4 +44,23 @@ function Ask({ run, complete, later, className }: { run: RunRecord; complete: Co
       </Callout>
     </div>
   )
+}
+
+/** The summary of the run's latest success report, which the server records on the workspace timeline. */
+function useReportedSummary(run: RunRecord): string | undefined {
+  const [summary, setSummary] = useState<string>()
+  useEffect(() => {
+    let live = true
+    api
+      .workspaceTimeline({ workspace_id: run.workspace_id, run_id: run.id, types: ['workspace.timeline'], newest: true })
+      .then((page) => {
+        const reports = page.events.map((e) => (e.payload ?? {}) as TimelinePayload).filter((p) => p.kind === 'report' && p.outcome === 'success')
+        if (live) setSummary(reports.at(-1)?.summary)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [run.workspace_id, run.id, run.review_changed_at])
+  return summary
 }
