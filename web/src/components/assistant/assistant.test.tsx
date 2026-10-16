@@ -136,10 +136,14 @@ describe('opening the assistant', () => {
     expect(useStore.getState().assistantOpen).toBe(true)
   })
 
-  it('opens from the keyboard shortcut', async () => {
+  it('opens from the keyboard shortcut and keeps the chord from a focused terminal or page', async () => {
     render(<AppShell />)
+    const forwarded = vi.fn((event: KeyboardEvent) => event.key === ' ' && event.ctrlKey)
+    document.body.addEventListener('keydown', forwarded)
     await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
+    document.body.removeEventListener('keydown', forwarded)
     expect(await panel()).toBeDefined()
+    expect(forwarded.mock.results.some((result) => result.value)).toBe(false)
   })
 
   it('closes from the keyboard shortcut while its own composer has focus', async () => {

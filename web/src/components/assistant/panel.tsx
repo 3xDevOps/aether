@@ -312,7 +312,9 @@ export function AssistantPanel() {
 
   useKeybindings('global', supported ? {
     assistant: (event) => {
+      // Stopped as well, so a focused terminal or Browser page is not sent the chord.
       event.preventDefault()
+      event.stopPropagation()
       if (useStore.getState().assistantOpen) close()
       else setOpen(true)
     },
