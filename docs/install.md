@@ -200,7 +200,7 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
-`checksums.txt`. On Linux, an `aether-server` beside the CLI is updated too;
+signed manifest ([Verified releases](#verified-releases)). On Linux, an `aether-server` beside the CLI is updated too;
 restart it with `sudo systemctl restart aether-server`. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
@@ -236,6 +236,55 @@ The server's default standard image follows the server build, so a server
 update brings that release's environment image with it - though not into a
 member environment that is already open
 ([environments.md](environments.md#the-standard-image)).
+
+### Verified releases
+
+Each release since signing began publishes `aether-release.json`, listing
+every asset's SHA-256 and size, and `aether-release.json.sig`, a base64
+ed25519 signature over the file's exact bytes. The release workflow uploads
+these two last, after downloading every other asset back anonymously and
+matching it against the manifest. An updater - `aether update`, the
+dashboard's **Update now**, `aether server update` - installs a release only
+when:
+
+- the signature verifies against a public key built into the running binary
+  (`internal/selfupdate/keys.go`),
+- the manifest's `version` is the tag being installed, and
+- each downloaded binary has the manifest's size and SHA-256.
+
+Downloads stream to disk, never read past the manifest's size, never follow
+a redirect off https, and retry network and server errors three times with
+backoff. A failure shows the real error and leaves every binary as it was. A
+release without a manifest, which is every release from before signing, is
+refused by name:
+
+```
+aether: release v0.7.0 has no signed aether-release.json (GET https://github.com/3xDevOps/Aether/releases/download/v0.7.0/aether-release.json: 404 Not Found): it predates signed releases or is still being published, and no updater installs it
+```
+
+Install such a release with the install script or by hand
+([Manual install](#manual-install)). `checksums.txt` is still published for
+those and for older clients.
+
+**Verify a release by hand.** With `openssl` 3 and `jq`, in a directory
+holding the downloaded asset, `aether-release.json` and
+`aether-release.json.sig` from the same release:
+
+```sh
+cat > aether-release.pub <<'EOF'
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAJ+AIq6GUVbRtEQ1ORqKJe3uh9JhvZkEQJQtYpxKbxD8=
+-----END PUBLIC KEY-----
+EOF
+base64 -d aether-release.json.sig > aether-release.sig.bin
+openssl pkeyutl -verify -pubin -inkey aether-release.pub -rawin \
+  -in aether-release.json -sigfile aether-release.sig.bin
+jq -r '.assets["aether-linux-amd64"].sha256' aether-release.json
+sha256sum aether-linux-amd64
+```
+
+`openssl` prints `Signature Verified Successfully`, and the two digests must
+match. On macOS use `shasum -a 256` in place of `sha256sum`.
 
 ### Environment image migration
 
@@ -317,7 +366,12 @@ and exits 0 either way; `--check --json` prints one JSON object for a script:
 ```
 
 It resolves the tag from the GitHub releases redirect, with no token and no
-rate limit. A build whose version is `dev` never reports an update. Set
+rate limit, and counts a release only once its signed manifest is published.
+Until then it reports no update and prints `running <version>; no signed
+release is published yet`.
+An answer is reused for an hour. A failed check is reused for five minutes,
+doubling with each failure in a row up to an hour, give or take a tenth. A
+build whose version is `dev` never reports an update. Set
 `AETHER_NO_UPDATE_CHECK` to any non-empty value to stop every release check on
 an air-gapped machine: the CLI's, the `aether gui` startup line, and the
 dashboard's update prompt all answer `disabled` without touching the network.
@@ -377,7 +431,7 @@ aether server update --status
 ```
 
 `--when now` (the default) downloads both binaries and verifies them
-against `checksums.txt` before replacing either, then renames
+against the release's signed manifest before replacing either, then renames
 `aether-server` and the `aether` beside it into place. It restarts by
 re-executing the new binary with the same argv and environment, keeping the
 same PID: the shipped unit is `Restart=on-failure`, so a clean exit would
@@ -1820,14 +1874,37 @@ aether-android.apk        aether-android.aab
 ```
 
 Missing or unexpected files, including unsigned Android names, stop the upload.
-The job writes and verifies `checksums.txt` with SHA-256, then uploads all twelve
-assets plus the checksum file. Only after that succeeds do `standard-latest`
+The job writes and verifies `checksums.txt` with SHA-256, then signs the
+release manifest ([Verified releases](#verified-releases)) with
+
+```sh
+go run ./internal/selfupdate/cmd/release-manifest \
+  -version <tag> -commit <full-sha> -store-schema <n> -out dist dist/<asset>...
+```
+
+An earlier step, run without the secret, prints `<n>` with
+`go run ./internal/store/cmd/schema-version`, so the signing process does
+not link the store. The generator reads the ed25519 seed from the
+`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
+`store_schema`, and checks its own
+output against the keys the tag's code trusts, so a seed that does not match
+fails here. `release-policy` fails the whole release before any build when
+that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
+then uploads the twelve assets and `checksums.txt`, downloads each asset
+anonymously from
+`https://github.com/<repository>/releases/download/<tag>/<name>`, compares
+its SHA-256 and size with the manifest, and only then uploads
+`aether-release.json.sig`, then `aether-release.json`. Updaters treat a
+release missing either file as unsigned, so a run that fails between the two
+can be rerun; it replaces the lone signature. It refuses a release that
+already has `aether-release.json` rather than replace assets that manifest
+signed; publish a new tag instead. Only after that succeeds do `standard-latest`
 and `edge-latest` move their respective `latest` tags to the verified images;
 each checks that `latest` carries the expected architecture digests. Releases
 share one workflow-wide concurrency group. The GitHub release itself is
 already published when the workflow starts, so a failed run can still leave
-`/releases/latest` pointing at a release without assets; image `latest` is not
-moved by a failed pre-upload run.
+`/releases/latest` pointing at a release without a manifest. Updaters treat
+that as no update. Image `latest` is not moved by a failed pre-upload run.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from

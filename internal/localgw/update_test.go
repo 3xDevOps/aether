@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -23,26 +23,14 @@ const (
 	releaseTag = "v1.3.0"
 )
 
-// releaseChecker points the update verbs at a stub that answers the
-// GitHub latest-release redirect, so no test dials the network. The
-// returned setter publishes a different tag mid-test, which is how a
-// release shipping while the app is open is reproduced.
+// releaseChecker points the update verbs at a stub signed release host,
+// so no test dials the network. The returned setter publishes a different
+// tag mid-test, which is how a release shipping while the app is open is
+// reproduced.
 func releaseChecker(t *testing.T) (*selfupdate.Checker, func(string)) {
 	t.Helper()
-	var mu sync.Mutex
-	tag := releaseTag
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		latest := tag
-		mu.Unlock()
-		http.Redirect(w, r, "/releases/tag/"+latest, http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	return selfupdate.NewChecker(srv.URL, time.Hour), func(next string) {
-		mu.Lock()
-		defer mu.Unlock()
-		tag = next
-	}
+	rel := releasetest.Serve(t, releaseTag, map[string][]byte{"aether-linux-amd64": []byte("binary")})
+	return selfupdate.NewChecker(rel.URL, time.Hour), rel.SetLatest
 }
 
 // pinVersion makes this a release build for one test; the check reads the

@@ -13,31 +13,14 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
-// tagServer answers /releases/latest with the redirect GitHub sends,
-// counting how many times it was dialed.
-// The returned setter publishes a different tag mid-test; the empty string
-// breaks the endpoint, which is how a failed lookup is driven.
+// tagServer publishes tag as the latest signed release, counting how
+// many times /releases/latest was dialed. The returned setter publishes a
+// different tag mid-test; the empty string breaks the endpoint, which is
+// how a failed lookup is driven.
 func tagServer(t *testing.T, tag string) (*httptest.Server, *atomic.Int64, func(string)) {
 	t.Helper()
-	var hits atomic.Int64
-	var mu sync.Mutex
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		mu.Lock()
-		latest := tag
-		mu.Unlock()
-		if latest == "" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		http.Redirect(w, r, "/releases/tag/"+latest, http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	return srv, &hits, func(next string) {
-		mu.Lock()
-		defer mu.Unlock()
-		tag = next
-	}
+	f, srv := newFakeRelease(t, tag, map[string][]byte{"aether-linux-amd64": []byte("binary")})
+	return srv, &f.hits, f.setLatest
 }
 
 // fakeClock is a hand-wound clock, so a test can expire a cache without
@@ -131,8 +114,8 @@ func TestBehind(t *testing.T) {
 }
 
 func TestAssetName(t *testing.T) {
-	if got := Asset("linux", "arm64"); got != "aether-linux-arm64" {
-		t.Fatalf("Asset = %q, want aether-linux-arm64", got)
+	if got := assetName("linux", "arm64"); got != "aether-linux-arm64" {
+		t.Fatalf("assetName = %q, want aether-linux-arm64", got)
 	}
 }
 
@@ -151,7 +134,7 @@ func TestCheckReportsUpdate(t *testing.T) {
 	if got.Version != "v1.2.3" || got.Commit != "abc1234" {
 		t.Errorf("build metadata = %q/%q", got.Version, got.Commit)
 	}
-	if got.Asset != Asset(runtime.GOOS, runtime.GOARCH) {
+	if got.Asset != assetName(runtime.GOOS, runtime.GOARCH) {
 		t.Errorf("asset = %q", got.Asset)
 	}
 	if got.ReleaseURL != srv.URL+"/releases/tag/v1.3.0" {
@@ -218,17 +201,12 @@ func TestCheckCacheExpires(t *testing.T) {
 
 func TestCheckCachesFailures(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
-	var hits atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+	srv, hits, _ := tagServer(t, "")
 
 	clock := newClock()
 	c := withClock(NewChecker(srv.URL, time.Hour), clock)
 	if _, err := c.Check(t.Context()); err == nil {
-		t.Fatal("expected an error when the endpoint does not redirect")
+		t.Fatal("expected an error when the endpoint fails")
 	}
 	if _, err := c.Check(t.Context()); err == nil {
 		t.Fatal("expected the cached error")
@@ -239,7 +217,7 @@ func TestCheckCachesFailures(t *testing.T) {
 
 	// A failure is cached far more briefly than a success, so an offline
 	// machine retries within the hour rather than at the end of it.
-	clock.advance(failureTTL + time.Minute)
+	clock.advance(failureTTL + failureTTL/10 + time.Second)
 	if _, err := c.Check(t.Context()); err == nil {
 		t.Fatal("expected another error after the failure cache expired")
 	}
@@ -372,11 +350,16 @@ func TestCheckPrefersASuccessResolvedWhileItDialed(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
 	arrived, release := make(chan struct{}), make(chan struct{})
 	var slow atomic.Bool
+	f := &fakeRelease{assets: testAssets}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/releases/latest" {
+			f.ServeHTTP(w, r)
+			return
+		}
 		if slow.CompareAndSwap(false, true) {
 			close(arrived)
 			<-release
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		http.Redirect(w, r, "/releases/tag/v1.3.0", http.StatusFound)
@@ -459,7 +442,12 @@ func TestCheckFreshDoesNotRegressTheCacheToAnOlderLookup(t *testing.T) {
 	setVersion(t, "v1.2.3", "abc1234")
 	arrived, release := make(chan struct{}), make(chan struct{})
 	var slow atomic.Bool
+	f := &fakeRelease{assets: testAssets}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/releases/latest" {
+			f.ServeHTTP(w, r)
+			return
+		}
 		if slow.CompareAndSwap(false, true) {
 			close(arrived)
 			<-release
