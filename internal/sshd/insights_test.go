@@ -341,7 +341,8 @@ func TestInsightsGet(t *testing.T) {
 		t.Errorf("previous of a non-aligned range = %+v, %+v; want none", shifted.Previous, perr)
 	}
 
-	// top2 opened a PR that merged after its container was gone; top3,
+	// top2 opened a PR, closed it, and it was reopened and merged after its
+	// container was gone; top3,
 	// publishing the same branch, recorded the same PR, and a stale open
 	// observation of top1's must not undo its merge.
 	// top2 ran on bob's shared agent login in alice's home, so gh there used
@@ -351,6 +352,7 @@ func TestInsightsGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	pr("top2", 4, "open", "2026-03-09T00:00:00-07:00", nil, true)
+	pr("top2", 4, "closed", "2026-03-09T00:20:00-07:00", nil, false)
 	pr("top3", 4, "open", "2026-03-09T09:30:00-07:00", nil, true)
 	pr("top1", 1, "open", "2026-03-09T14:00:00-07:00", nil, false)
 	status := func(runID string) (protocol.RunPRStatusResult, *protocol.Error) {

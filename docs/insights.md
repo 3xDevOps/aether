@@ -109,7 +109,8 @@ it does not poll GitHub, and `insights.get` never calls it. While the run's
 container is up, the call runs `gh` in it, as before. Once the run has
 finished (completed, merged, failed or abandoned) and its container is
 gone, `run.pr.status {"run_id":"<run-id>"}` answers from the recorded
-pull requests instead: each one last seen open is read again from
+pull requests instead: each one not yet seen merged, open or closed, since
+a closed pull request can be reopened and merged, is read again from
 `GET /repos/<owner>/<name>/pulls/<number>` with the `gh` login the
 container used (`~/.config/gh/hosts.yml` in the home it mounted, which is
 the launching member's even on a shared agent login), and the new state is

@@ -303,7 +303,7 @@ func (s *Server) recordPR(ctx context.Context, run string, pr *runrepo.PullReque
 
 // recordedPRStatus answers run.pr.status for a finished run whose container
 // is gone from the pull requests it opened through run.pr.create. Each one
-// last seen open is looked up again with the gh login in the home the run's container
+// not yet seen merged is looked up again with the gh login in the home the run's container
 // mounted, the one gh used there, so a merge after the run finished is still
 // recorded. A run with none recorded keeps the error that it has no live
 // environment.
@@ -319,7 +319,7 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 	}
 	result := protocol.RunPRStatusResult{AccountMemberID: string(call.account)}
 	for _, pr := range prs {
-		if pr.State != "open" || s.cfg.Services.GitHub == nil {
+		if pr.State == "merged" || s.cfg.Services.GitHub == nil {
 			continue
 		}
 		identity, observed, lookupErr := s.cfg.Services.GitHub.PullRequest(ctx, call.home, pr.Repository, pr.Number)
