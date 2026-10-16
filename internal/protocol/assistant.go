@@ -21,6 +21,11 @@ const (
 	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
+	// MethodAssistantView replaces the caller's latest view context, or
+	// clears it when none is sent.
+	MethodAssistantView = "assistant.view"
+	// MethodAssistantViewContext is served only on the assistant tool socket.
+	MethodAssistantViewContext = "assistant.view_context"
 )
 
 const (
@@ -75,8 +80,64 @@ type AssistantStartParams struct {
 }
 
 type AssistantPromptParams struct {
-	Text           string `json:"text"`
-	IdempotencyKey string `json:"idempotency_key"`
+	Text           string                `json:"text"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	ViewContext    *AssistantViewContext `json:"view_context,omitempty"`
+}
+
+type AssistantViewParams struct {
+	ViewContext *AssistantViewContext `json:"view_context,omitempty"`
+}
+
+// AssistantViewContext is what the member's dashboard shows: ids and view
+// names only, never titles, file contents, drafts or terminal text. Its ids
+// are hints for the assistant's member-scoped tools, never permissions.
+type AssistantViewContext struct {
+	Version    int                   `json:"version"`
+	CapturedAt time.Time             `json:"captured_at"`
+	Route      AssistantViewEntry    `json:"route"`
+	OpenFile   *AssistantViewFile    `json:"open_file,omitempty"`
+	Layout     map[string]bool       `json:"layout,omitempty"`
+	Recent     []AssistantViewEntry  `json:"recent,omitempty"`
+	Pending    *AssistantViewPending `json:"pending,omitempty"`
+}
+
+type AssistantViewEntry struct {
+	Name        string    `json:"name"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	RunID       string    `json:"run_id,omitempty"`
+	MissionID   string    `json:"mission_id,omitempty"`
+	Subagent    string    `json:"subagent,omitempty"`
+	View        string    `json:"view,omitempty"`
+	Path        string    `json:"path,omitempty"`
+	At          time.Time `json:"at,omitzero"`
+}
+
+type AssistantViewFile struct {
+	Kind        string `json:"kind"`
+	Path        string `json:"path"`
+	RunID       string `json:"run_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+type AssistantViewPending struct {
+	Approvals        int                     `json:"approvals"`
+	AssistantNotices int                     `json:"assistant_notices"`
+	NeedsYou         []AssistantViewNeedsYou `json:"needs_you,omitempty"`
+}
+
+type AssistantViewNeedsYou struct {
+	RunID  string `json:"run_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// AssistantViewContextResult is the member's latest view context. Several
+// dashboards share one: the latest navigation wins.
+type AssistantViewContextResult struct {
+	ViewContext *AssistantViewContext `json:"view_context"`
+	AgeSeconds  int64                 `json:"age_seconds,omitempty"`
+	// Connected is true while a dashboard streams the member's assistant.
+	Connected bool `json:"connected"`
 }
 
 type AssistantAnswerParams struct {

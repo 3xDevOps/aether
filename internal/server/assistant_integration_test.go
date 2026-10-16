@@ -339,7 +339,31 @@ func TestIntegrationAssistant(t *testing.T) {
 	if first := frames.until(t, "the first status", func(f protocol.AssistantFrame) bool { return f.Status != nil }); first.Status.State != protocol.AssistantStateIdle {
 		t.Fatalf("first status frame = %+v, want idle", first.Status)
 	}
-	prompt := protocol.AssistantPromptParams{Text: "what is running?", IdempotencyKey: "k1"}
+	view := &protocol.AssistantViewContext{
+		Version: 1, CapturedAt: time.Now().Add(-time.Second),
+		Route:  protocol.AssistantViewEntry{Name: "run", RunID: "run-abc", View: "changes", WorkspaceID: "bad id"},
+		Recent: []protocol.AssistantViewEntry{{Name: "run", RunID: "run-abc"}, {Name: "board"}},
+	}
+	tooBig := *view
+	tooBig.Layout = map[string]bool{}
+	tooBig.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("a/", 250)}
+	for range 50 {
+		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 100)})
+	}
+	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{ViewContext: &tooBig}, nil); perr != nil {
+		t.Fatalf("assistant.view over the recent cap: %v, want it cut to fit", perr)
+	}
+	tooBig.Recent, tooBig.Pending = nil, &protocol.AssistantViewPending{}
+	for range 5 {
+		tooBig.Pending.NeedsYou = append(tooBig.Pending.NeedsYou, protocol.AssistantViewNeedsYou{RunID: strings.Repeat("n", 128)})
+	}
+	for i := range 8 {
+		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), Path: strings.Repeat(string(rune('a'+i)), 300)})
+	}
+	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "hi", IdempotencyKey: "k-big", ViewContext: &tooBig}, nil); perr == nil || perr.Code != protocol.CodeInvalidParams || !strings.Contains(perr.Message, "limit is 4096") {
+		t.Fatalf("assistant.prompt with a view context over 4 KiB = %v, want invalid params", perr)
+	}
+	prompt := protocol.AssistantPromptParams{Text: "what is running?", IdempotencyKey: "k1", ViewContext: view}
 	for range 2 {
 		if perr := env.call(protocol.MethodAssistantPrompt, prompt, nil); perr != nil {
 			t.Fatalf("assistant.prompt: %v", perr)
@@ -362,6 +386,29 @@ func TestIntegrationAssistant(t *testing.T) {
 	}
 	if turns != 1 {
 		t.Fatalf("history holds %d turns after a duplicated prompt key, want 1", turns)
+	}
+	sent := execs[0].agent.Prompts()
+	var blocks []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Resource struct {
+			URI      string `json:"uri"`
+			MimeType string `json:"mimeType"`
+			Text     string `json:"text"`
+		} `json:"resource"`
+	}
+	if len(sent) != 1 || json.Unmarshal(sent[0], &blocks) != nil || len(blocks) != 2 || blocks[0].Text != "what is running?" ||
+		blocks[1].Type != "resource" || blocks[1].Resource.URI != assistant.ViewContextURI || blocks[1].Resource.MimeType != "application/json" {
+		t.Fatalf("prompts the agent received = %s, want the text and the view context resource", sent)
+	}
+	var got protocol.AssistantViewContext
+	if err := json.Unmarshal([]byte(blocks[1].Resource.Text), &got); err != nil || got.Route.RunID != "run-abc" || got.Route.WorkspaceID != "" || len(got.Recent) != 2 {
+		t.Fatalf("view context the agent received = %s, %v, want the run kept and the malformed workspace id dropped", blocks[1].Resource.Text, err)
+	}
+	for _, f := range history.Frames {
+		if strings.Contains(string(f.Item), `"role":"user"`) && (!strings.Contains(string(f.Item), assistant.ViewContextURI) || strings.Contains(string(f.Item), "run-abc")) {
+			t.Fatalf("user message item = %s, want the view context as a bare attachment", f.Item)
+		}
 	}
 
 	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: acpmock.PromptWait, IdempotencyKey: "k-wait"}, nil); perr != nil {
@@ -421,6 +468,25 @@ func TestIntegrationAssistant(t *testing.T) {
 	}
 	if perr := env.call(protocol.MethodAssistantConfirm, protocol.AssistantConfirmParams{ConfirmationID: "gone", Approve: true}, nil); perr == nil || perr.Code != protocol.CodeNotFound {
 		t.Fatalf("assistant.confirm of an unknown id = %v, want not found", perr)
+	}
+	readView := func() protocol.AssistantViewContextResult {
+		perr, line := env.toolCall(conn, toolReader, protocol.MethodAssistantViewContext)
+		var resp struct {
+			Result protocol.AssistantViewContextResult `json:"result"`
+		}
+		if perr != nil || json.Unmarshal([]byte(line), &resp) != nil {
+			t.Fatalf("assistant.view_context = %s, %v", line, perr)
+		}
+		return resp.Result
+	}
+	if got := readView(); got.ViewContext == nil || got.ViewContext.Route.RunID != "run-abc" || !got.Connected {
+		t.Fatalf("assistant.view_context = %+v, want the prompt's view context and a connected dashboard", got)
+	}
+	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{}, nil); perr != nil {
+		t.Fatalf("assistant.view clearing the context: %v", perr)
+	}
+	if got := readView(); got.ViewContext != nil {
+		t.Fatalf("assistant.view_context after sharing was turned off = %+v, want none", got.ViewContext)
 	}
 	_ = conn.Close()
 
@@ -639,11 +705,11 @@ func TestIntegrationAssistantKeyKept(t *testing.T) {
 	defer env.stop()
 	callerCtx, leave := context.WithCancel(ctx)
 	time.AfterFunc(300*time.Millisecond, leave)
-	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone")
+	err := env.srv.assistant.Prompt(callerCtx, env.member.ID, acpmock.PromptWait, "gone", nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("prompt of a caller that left = %v, want the cancellation", err)
 	}
-	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone"); err != nil {
+	if err := env.srv.assistant.Prompt(ctx, env.member.ID, acpmock.PromptWait, "gone", nil); err != nil {
 		t.Fatalf("retry of a dispatched prompt = %v, want it ignored", err)
 	}
 	var history protocol.RunACPHistoryResult

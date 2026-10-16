@@ -22,7 +22,8 @@ import (
 type AssistantService interface {
 	Status(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	Start(ctx context.Context, member domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error)
-	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string) error
+	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext) error
+	SetView(member domain.MemberID, view *protocol.AssistantViewContext)
 	Cancel(ctx context.Context, member domain.MemberID) error
 	Answer(member domain.MemberID, requestID, optionID string, values map[string]any) error
 	Confirm(member domain.MemberID, confirmationID string, approve bool) error
@@ -49,6 +50,7 @@ func init() {
 	registerMethod(protocol.MethodAssistantHistory, (*Server).assistantHistory)
 	registerMethod(protocol.MethodAssistantItem, (*Server).assistantItem)
 	registerMethod(protocol.MethodAssistantSettings, (*Server).assistantSettings)
+	registerMethod(protocol.MethodAssistantView, (*Server).assistantView)
 }
 
 var errAssistantUnavailable = &protocol.Error{Code: protocol.CodeUnavailable, Message: "the assistant is not configured on this server"}
@@ -93,9 +95,32 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 	if strings.TrimSpace(p.Text) == "" || p.IdempotencyKey == "" {
 		return nil, invalidParams("text and idempotency_key are required")
 	}
-	if err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey); err != nil {
+	view, err := assistant.CleanViewContext(p.ViewContext, time.Now())
+	if err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	if err := svc.Prompt(ctx, member, p.Text, p.IdempotencyKey, view); err != nil {
 		return nil, assistantError(err)
 	}
+	return struct{}{}, nil
+}
+
+// assistantView replaces the caller's latest view context, which the
+// assistant reads with its view context tool, or clears it.
+func (s *Server) assistantView(_ context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	p, perr := decodeParams[protocol.AssistantViewParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	view, err := assistant.CleanViewContext(p.ViewContext, time.Now())
+	if err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	svc.SetView(member, view)
 	return struct{}{}, nil
 }
 
