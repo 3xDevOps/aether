@@ -45,9 +45,9 @@ class UpdateTargetTest {
     }
 
     @Test
-    fun aReleaseInstallOpensThatReleasePage() {
+    fun aReleaseInstallDownloadsThatReleasesApk() {
         assertEquals(
-            listOf(UpdateTarget("https://github.com/3xDevOps/Aether/releases/tag/v0.7.0-alpha.11")),
+            listOf(UpdateTarget("https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.11/aether-android.apk")),
             updateTargets(InstallSource.RELEASE, PACKAGE, "v0.7.0-alpha.11"),
         )
         assertEquals(

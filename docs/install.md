@@ -1142,39 +1142,77 @@ gateway exits, until the restarted gateway prints its new URL. Pages the
 dashboard opens in a new window, such as the sign-in verification page, open
 in the phone's browser.
 
-**Updates.** The app never downloads or installs an update itself; you do,
-from the page it opens. In both modes, when the app comes to the front and
-its last check is an hour old or more, it runs the bundled CLI's `aether
-update --check --json` in the background, so the release lookup and version
-order are the desktop's. A check that fails, offline for example, shows
-nothing and runs again an hour later. When a newer release is out, a banner
-over the top of the dashboard names the new version and the one you run,
-with one button. Which button depends on who signed the app and which
-installer Android recorded (`getInstallSourceInfo` on Android 11 and newer,
-`getInstallerPackageName` before):
+**Updates.** The app never installs an update silently: you open the APK
+it links to, or update it in Google Play, and Android's installer asks you to
+confirm. In both modes, when the app comes to the front and its next check is
+due, about an hour after the last one (±10%, so phones do not check in step),
+it runs the bundled CLI's `aether update --check --json` in the background,
+so the release lookup and version order are the desktop's. **Check for
+updates** on the Connection screen (long-press the launcher icon, or
+**Connection** on a failed load) runs one now and always answers: `You're up
+to date (v0.8.0). Checked 14:05.`, the newer version with its button, or the
+CLI's error verbatim; a result saved before the app was last installed or
+updated is not shown. A background check that fails stays quiet until the
+last answer is 24 hours old; from then on the banner shows `Could not check
+for updates: <error>` as one muted line until a check succeeds or you dismiss
+it.
+
+When a newer release is out, a banner over the top of the dashboard names the
+new version and the one you run. Its buttons depend on who signed the app and
+which installer Android recorded (`getInstallSourceInfo` on Android 11 and
+newer, `getInstallerPackageName` before):
 
 - Installed by Google Play, or signed with any key but the release key:
   **Open Google Play** opens the app's listing in the Play app
   (`market://details?id=io.aether.android`), or in the browser when Play is
-  missing. **Release notes** opens the GitHub release. Play App Signing
-  re-signs what Play serves, so a Play build installed through another store
-  or as sideloaded split APKs still updates from Play. GitHub publishes a
-  release before Play has reviewed and rolled it out, so this banner shows
-  only once the app has been behind a release for 7 days; newer releases in
-  that week do not restart the wait.
+  missing. Play App Signing re-signs what Play serves, so a Play build
+  installed through another store or as sideloaded split APKs still updates
+  from Play. GitHub publishes a release before Play has reviewed and rolled
+  it out, so this banner shows only once the app has been behind a release
+  for 7 days; newer releases in that week do not restart the wait.
 - Installed any other way and signed with the release key, such as the APK
-  from a release page: **Open release page** opens that release in the
-  browser. Download `aether-android.apk` and open it; it installs over the
-  app and keeps its data. The release key's certificate SHA-256 is
+  from a release page: **Download update** opens
+  `https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`
+  in the browser. Open the download; Android asks to confirm, checks that it
+  is signed with the same key as the installed app, and installs it over the
+  app with its data. The release key's certificate SHA-256 is
   `2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a`, as
   `apksigner verify --print-certs aether-android.apk` prints it. A `make
   android-debug` build is signed with another key, so Android will not
   install the release APK over it, and its banner points at Google Play.
 
-If the page does not open, the banner shows Android's own error. Dismissing
-the banner silences that version only, on this phone; the next release shows
-it again. In Edge mode the dashboard's Updates dialog also names the newer
-version, with no button.
+Both carry **Release notes**, which opens the GitHub release. If a page does
+not open, the banner shows Android's own error. Dismissing the banner
+silences that version only, on this phone; the next release shows it again.
+
+**Update gate (Edge mode).** The server refuses a client older than its own
+release (`-32005`, HTTP 426 through the gateway). In Edge mode the bundled
+CLI is that client, so the app asks the gateway's `update.check`
+(`POST /local/v1/update.check`) when the gateway starts, on every resume,
+whenever a dashboard page finishes loading (a refused WebSocket reports no
+HTTP status), and whenever the dashboard gets an HTTP 426; the first check
+after a 426 passes `refresh` so the gateway looks past its cached release
+lookup. When it reports `client_update_required`, a native screen replaces
+the dashboard and cannot be dismissed: `This app (v0.7.0) is too old for the
+server (v0.8.0 needs v0.8.0 or newer).` **Download update** opens
+`https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`,
+or the Play listing for a Play install, with no 7-day wait. The tag is the
+gateway's `target_version` (the server's release), else
+`min_client_version`, and never one older than `min_client_version`, which
+Android would refuse as a downgrade. GitHub's latest release is not used: it
+can be newer than the server, which refuses a newer client too. The URL is
+printed on the screen to copy. While the screen is up the dashboard is
+unloaded, so it stops calling the server. Installing the update restarts the
+app, whose new gateway answers that no update is required, so the dashboard
+comes back. A check whose answer has no `server_version` (the gateway could
+not reach the server; `server_error` says why) leaves the screen as it was
+and shows the error under it. **Check for updates** asks again, with
+`refresh`; **Connection** opens the Connection screen, which switches between
+Aether Edge and Tailscale (choosing another Edge server happens in the
+dashboard, after updating); **Copy details** puts the versions and the
+download URL on the clipboard. A dev build or a version that is not a release tag is never
+gated. Tailscale mode has no gate: the server hosts that dashboard, so it is
+always the server's own version, and only the banner applies to the app.
 
 The app does not hold `REQUEST_INSTALL_PACKAGES`, and the CLI never replaces
 itself (`AETHER_PACKAGED` is set to `Android app`): `aether update` without

@@ -7,6 +7,9 @@ private const val DASHBOARD_URL = "dashboard_url"
 private const val MODE = "connection_mode"
 private const val GATEWAY_PORT = "gateway_port"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
+private const val UPDATE_NEXT_CHECK_AT = "update_next_check_at"
+private const val UPDATE_ERROR = "update_error"
+private const val UPDATE_FAILURE_DISMISSED_AT = "update_failure_dismissed_at"
 private const val UPDATE_ANSWERED_AT = "update_answered_at"
 private const val UPDATE_CHECK = "update_check"
 private const val UPDATE_BEHIND_SINCE = "update_behind_since"
@@ -72,10 +75,13 @@ fun Context.storedUpdate(): StoredUpdate {
     val prefs = prefs()
     return StoredUpdate(
         checkedAt = prefs.getLong(UPDATE_CHECKED_AT, 0),
+        nextCheckAt = prefs.getLong(UPDATE_NEXT_CHECK_AT, 0),
         answeredAt = prefs.getLong(UPDATE_ANSWERED_AT, 0),
         line = prefs.getString(UPDATE_CHECK, null),
+        error = prefs.getString(UPDATE_ERROR, null),
         behindSince = prefs.getLong(UPDATE_BEHIND_SINCE, 0),
         dismissed = prefs.getString(UPDATE_DISMISSED, null),
+        failureDismissedAt = prefs.getLong(UPDATE_FAILURE_DISMISSED_AT, 0),
     )
 }
 
@@ -83,10 +89,13 @@ fun Context.storeUpdate(update: StoredUpdate) {
     prefs()
         .edit()
         .putLong(UPDATE_CHECKED_AT, update.checkedAt)
+        .putLong(UPDATE_NEXT_CHECK_AT, update.nextCheckAt)
         .putLong(UPDATE_ANSWERED_AT, update.answeredAt)
         .putString(UPDATE_CHECK, update.line)
+        .putString(UPDATE_ERROR, update.error)
         .putLong(UPDATE_BEHIND_SINCE, update.behindSince)
         .putString(UPDATE_DISMISSED, update.dismissed)
+        .putLong(UPDATE_FAILURE_DISMISSED_AT, update.failureDismissedAt)
         .apply()
 }
 
