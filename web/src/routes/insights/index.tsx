@@ -107,7 +107,8 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const { agents } = useAgentList(client)
   const agentNames = useMemo(() => agentDisplayNames(agents), [agents])
   const [period, setPeriod] = useState<Period>('7d')
-  const [workspace, setWorkspace] = useState(activeWorkspace)
+  const [picked, setWorkspace] = useState<string | null>(null)
+  const workspace = picked ?? activeWorkspace
   const [scope, setScope] = useState<InsightsParams['scope']>('mine')
   const [selected, setSelected] = useState<string | null>(null)
   const [load, setLoad] = useState<Load>({ kind: 'loading' })

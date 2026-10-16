@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardControls, CardTitle } from '@/components/ui/card'
@@ -114,6 +114,8 @@ export function FinishedList({
   repositoryOf: (id: string) => string
   agentNames: Record<string, string>
 }) {
+  const [all, setAll] = useState(false)
+  const shown = all ? runs : runs.slice(0, 10)
   return (
     <Section title="Finished work">
       {filter && (
@@ -126,14 +128,17 @@ export function FinishedList({
         <p className="text-ui text-muted">{filter ? 'No runs ended then.' : 'No runs ended in this period.'}</p>
       ) : (
         <ul className="flex min-w-0 flex-col gap-2">
-          {runs.map((run) => (
+          {shown.map((run) => (
             <li key={run.run_id}>
               <FinishedRow run={run} repository={repositoryOf(run.workspace_id)} agent={agentLabel(run.harness, run.model, agentNames)} />
             </li>
           ))}
         </ul>
       )}
-      {capped && <p className="text-ui-sm text-muted">The 50 most recent runs that ended in this period.</p>}
+      {shown.length < runs.length && (
+        <Button variant="secondary" className="self-start" onClick={() => setAll(true)}>Show all {runs.length}</Button>
+      )}
+      {capped && all && <p className="text-ui-sm text-muted">The 50 most recent runs that ended in this period.</p>}
     </Section>
   )
 }

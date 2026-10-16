@@ -153,13 +153,14 @@ on any button.
 Charts are hand-drawn SVG; the dashboard has no chart library. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
 colours. Outcomes use the run state tokens (`state-done`, `state-failed`,
-`state-paused`); a neutral count such as runs launched uses `icon-faint`; a
-sequential scale steps one hue, `fill-accent` at 25%, 50%, 75% and 100% over
-`fill-chrome` for zero. Every colour has a text legend, and every mark is
-named by its own label or a summary, so nothing depends on colour alone.
-Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in `text-muted`;
-bars carry no gradients, shadows or animation. A chart scaled with
-`preserveAspectRatio="none"` draws strokes with
+`state-paused`). A neutral count such as runs launched is outlined in
+`stroke-icon-faint` on `fill-chrome`, so it never reads as the solid paused
+grey. A sequential scale steps one hue: `fill-accent` at 25%, 50%, 75% and
+100% over `fill-chrome` for zero. Every colour has a text legend, and every
+mark is named by its own label or a summary, so nothing depends on colour
+alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in
+`text-muted`; bars carry no gradients, shadows or animation. A chart scaled
+with `preserveAspectRatio="none"` draws strokes with
 `vector-effect: non-scaling-stroke`.
 
 ## Enforcement

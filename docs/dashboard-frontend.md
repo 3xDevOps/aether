@@ -3776,7 +3776,7 @@ when the event stream comes back live, dropping answers to an older request.
   requests show a dash and say none are recorded until the server reports
   `coverage.pull_requests_since`.
 - **Activity chart.** Per day (per week past 92 days): launched runs as the
-  left bar, runs that ended as the right bar stacked Done, Failed (failed and
+  outlined left bar, runs that ended as the right bar stacked Done, Failed (failed and
   interrupted) and Abandoned, with a text legend. The chart is one tab stop;
   arrow keys, **Home** and **End** move between bars, and **Enter**, **Space**
   or a click selects one, which narrows **Finished work** to runs that ended

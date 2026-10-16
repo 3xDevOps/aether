@@ -1,11 +1,12 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { useIsMobile } from '@/lib/breakpoints'
 import { cn } from '@/lib/utils'
 import { calendarDay, dayLabel, plural } from '@/routes/insights/model'
 import { Swatch } from '@/routes/insights/activity-chart'
 
 const levels = ['fill-chrome', 'fill-accent/25', 'fill-accent/50', 'fill-accent/75', 'fill-accent']
-const cell = 10
 const gap = 2
+const gutter = 30
 const rows = ['Mon', '', 'Wed', '', 'Fri', '', '']
 
 function level(runs: number, max: number): number {
@@ -15,6 +16,7 @@ function level(runs: number, max: number): number {
 export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
   const [focus, setFocus] = useState(() => days.length - 1)
   const refs = useRef<(SVGRectElement | null)[]>([])
+  const cell = useIsMobile() ? 10 : 14
   if (days.length === 0) return null
   // Weeks run Monday to Sunday, so the first column is padded to the first day's weekday.
   const offset = (calendarDay(days[0].date).getUTCDay() + 6) % 7
@@ -53,9 +55,9 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
         <svg
           role="group"
           aria-label={`Runs per day for 26 weeks: ${plural(active, 'active day')}, at most ${plural(max, 'run')} on one day. Use the arrow keys to read each day.`}
-          width={width + 26}
+          width={width + gutter}
           height={7 * (cell + gap) + 14}
-          viewBox={`-26 -14 ${width + 26} ${7 * (cell + gap) + 14}`}
+          viewBox={`-${gutter} -14 ${width + gutter} ${7 * (cell + gap) + 14}`}
           className="block"
         >
           {months.map((m) => (
@@ -64,7 +66,7 @@ export function Heatmap({ days }: { days: { date: string; runs: number }[] }) {
             </text>
           ))}
           {rows.map((name, row) => name && (
-            <text key={name} x={-4} y={row * (cell + gap) + cell - 1} textAnchor="end" aria-hidden className="fill-current text-ui-xs text-muted">
+            <text key={name} x={-4} y={row * (cell + gap) + cell / 2 + 4} textAnchor="end" aria-hidden className="fill-current text-ui-xs text-muted">
               {name}
             </text>
           ))}

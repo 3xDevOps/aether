@@ -9,6 +9,7 @@ const segments = [
   { key: 'abandoned', label: 'Abandoned', fill: 'fill-state-paused', of: (b: InsightsBucket) => b.abandoned },
 ] as const
 
+const launchedMark = 'fill-chrome stroke-icon-faint'
 const slot = 10
 const height = 100
 
@@ -24,7 +25,7 @@ function bucketWords(bucket: InsightsBucket, unit: InsightsResult['bucket']): st
 export function Swatch({ fill }: { fill: string }) {
   return (
     <svg viewBox="0 0 10 10" aria-hidden className="size-2.5 shrink-0">
-      <rect width="10" height="10" rx="2" className={fill} />
+      <rect x="0.5" y="0.5" width="9" height="9" rx="2" className={fill} />
     </svg>
   )
 }
@@ -114,7 +115,9 @@ export function ActivityChart({
                     isSelected ? 'fill-selection' : 'fill-transparent group-hover/bar:fill-hover',
                   )}
                 />
-                <rect x={x + 1} y={height - scale(b.launched)} width={3.5} height={scale(b.launched)} className="fill-icon-faint" />
+                {b.launched > 0 && (
+                  <rect x={x + 1} y={height - scale(b.launched)} width={3.5} height={scale(b.launched)} vectorEffect="non-scaling-stroke" className={launchedMark} />
+                )}
                 {segments.map((segment) => {
                   const h = scale(segment.of(b))
                   top -= h
@@ -131,7 +134,7 @@ export function ActivityChart({
         <span>{dayLabel(series[series.length - 1].start)}</span>
       </div>
       <ul aria-label="Legend" className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-ui-sm text-muted">
-        <li className="flex items-center gap-1.5"><Swatch fill="fill-icon-faint" />Launched (left bar)</li>
+        <li className="flex items-center gap-1.5"><Swatch fill={launchedMark} />Launched (outlined, left)</li>
         {segments.map((segment) => (
           <li key={segment.key} className="flex items-center gap-1.5"><Swatch fill={segment.fill} />{segment.label}</li>
         ))}
