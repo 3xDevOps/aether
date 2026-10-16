@@ -192,28 +192,28 @@ func TestRollbackRestoresTheDatabaseOnlyWhenTheSchemaMoved(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(e.state, 0o700); err != nil {
+		if err = os.MkdirAll(e.state, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		snap := snapshotPath(e.state)
-		if err := db.Snapshot(ctx, snap); err != nil {
+		if err = db.Snapshot(ctx, snap); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.Close(); err != nil {
+		if err = db.Close(); err != nil {
 			t.Fatal(err)
 		}
 		if migrated {
-			raw, err := sql.Open("sqlite", dbPath)
-			if err != nil {
-				t.Fatal(err)
+			raw, oerr := sql.Open("sqlite", dbPath)
+			if oerr != nil {
+				t.Fatal(oerr)
 			}
-			if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, before+1); err != nil {
-				t.Fatal(err)
+			if _, oerr = raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, before+1); oerr != nil {
+				t.Fatal(oerr)
 			}
 			_ = raw.Close()
 		}
 		e.write(t, swapRecord{Boots: maxTrialBoots, Database: dbPath, Snapshot: snap, SchemaBefore: before})
-		if _, err := Boot(e.state, e.host); err == nil {
+		if _, err = Boot(e.state, e.host); err == nil {
 			t.Fatal("expected a rollback")
 		}
 		got, err := store.ReadSchemaVersion(dbPath)
@@ -237,7 +237,7 @@ func TestCommitRecordsAppliedOnceFromTheNewProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := trial.Commit(t.Context(), db, bus); err != nil {
+	if err = trial.Commit(t.Context(), db, bus); err != nil {
 		t.Fatal(err)
 	}
 	if !trial.Deadline().IsZero() {
@@ -270,7 +270,7 @@ func TestBootOfAnotherBinaryRecordsARollbackByHand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := trial.Commit(t.Context(), db, bus); err != nil {
+	if err = trial.Commit(t.Context(), db, bus); err != nil {
 		t.Fatal(err)
 	}
 	state, err := db.GetServerUpdate(t.Context())

@@ -87,8 +87,8 @@ type Config struct {
 	// Database is the store's file, snapshotted before a release that
 	// migrates it. Empty skips the snapshot.
 	Database string
-	// Releases is the signed release feed. Nil is the pinned GitHub
-	// repository.
+	// Releases is the signed release feed. Nil reads the repository
+	// Checker names, by default the pinned GitHub repository.
 	Releases Releases
 	Checker  *selfupdate.Checker
 	// Host carries the process-replacing side effects. A zero Host leaves

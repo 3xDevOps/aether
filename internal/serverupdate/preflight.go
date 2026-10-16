@@ -29,44 +29,33 @@ var clientAssets = []string{
 }
 
 // Releases is the signed release feed: the newest release's manifest, and
-// one tag's.
+// one tag's. The default is the repository Config.Checker reads.
 type Releases interface {
 	Latest(ctx context.Context) (selfupdate.Manifest, error)
 	Fetch(ctx context.Context, tag string) (selfupdate.Manifest, error)
 }
 
-// githubReleases is the pinned GitHub repository.
-type githubReleases struct{}
+// repository is the release feed of the repository the checker reads.
+type repository string
 
-func (githubReleases) Latest(ctx context.Context) (selfupdate.Manifest, error) {
-	return selfupdate.LatestManifest(ctx)
+func (r repository) Latest(ctx context.Context) (selfupdate.Manifest, error) {
+	return selfupdate.LatestManifestFrom(ctx, string(r))
 }
 
-func (githubReleases) Fetch(ctx context.Context, tag string) (selfupdate.Manifest, error) {
-	return selfupdate.FetchManifest(ctx, tag)
+func (r repository) Fetch(ctx context.Context, tag string) (selfupdate.Manifest, error) {
+	return selfupdate.FetchManifestFrom(ctx, string(r), tag)
 }
 
 func (s *Service) releases() Releases {
 	if s.cfg.Releases != nil {
 		return s.cfg.Releases
 	}
-	return githubReleases{}
+	return repository(s.cfg.Checker.BaseURL())
 }
 
 // anonymous asks for release assets the way a client without credentials
-// does. A redirect may not leave https once it is on it.
-var anonymous = &http.Client{
-	Timeout: 30 * time.Second,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
-		}
-		if via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
-			return fmt.Errorf("refusing a redirect from https to %s", req.URL)
-		}
-		return nil
-	},
-}
+// does.
+var anonymous = &http.Client{Timeout: 30 * time.Second, CheckRedirect: selfupdate.HTTPSOnly}
 
 // preflight decides whether this server may move to tag, before anything
 // is downloaded: the release's signed manifest, the direction, the

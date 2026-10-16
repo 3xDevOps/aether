@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,9 +24,14 @@ type stubUpdates struct {
 	err     error
 	restart func()
 	calls   chan protocol.ServerUpdateParams
+	refresh chan bool
 }
 
-func (s *stubUpdates) Status(context.Context) (protocol.ServerUpdateStatusResult, error) {
+func (s *stubUpdates) Status(_ context.Context, p protocol.ServerUpdateStatusParams) (protocol.ServerUpdateStatusResult, error) {
+	select {
+	case s.refresh <- p.Refresh:
+	default:
+	}
 	return s.status, nil
 }
 
@@ -158,6 +164,41 @@ func TestServerUpdateBadTagIsInvalidParams(t *testing.T) {
 	var pe *protocol.Error
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
 		t.Fatalf("server.update with a bad tag = %v, want CodeInvalidParams", err)
+	}
+}
+
+func TestServerUpdateRefusalsMapToCodes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		code int
+	}{
+		{fmt.Errorf("%w: v0.1.0 is older than the running v0.2.0", serverupdate.ErrDowngrade), protocol.CodeInvalidParams},
+		{serverupdate.ErrIdleDowngrade, protocol.CodeInvalidParams},
+		{fmt.Errorf("%w: aether-android.apk (https://example.invalid/a): HEAD answered 404 Not Found", serverupdate.ErrPreflight), protocol.CodeInvalidState},
+	} {
+		e := updateEnv(t, &stubUpdates{err: tc.err})
+		err := controlClient(t, e).Call(protocol.MethodServerUpdate,
+			protocol.ServerUpdateParams{Version: "v0.1.0", When: protocol.ServerUpdateNow}, nil)
+		var pe *protocol.Error
+		if !errors.As(err, &pe) || pe.Code != tc.code || pe.Message != tc.err.Error() {
+			t.Fatalf("server.update refused with %v = %v, want code %d and the message verbatim", tc.err, err, tc.code)
+		}
+	}
+}
+
+// Any member may ask for a fresh release check.
+func TestServerUpdateStatusPassesRefresh(t *testing.T) {
+	t.Parallel()
+	svc := &stubUpdates{refresh: make(chan bool, 1)}
+	e := updateEnv(t, svc)
+	bob, _ := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	if err := controlAs(t, e, bob).Call(protocol.MethodServerUpdateStatus,
+		protocol.ServerUpdateStatusParams{Refresh: true}, nil); err != nil {
+		t.Fatalf("server.update_status: %v", err)
+	}
+	if !<-svc.refresh {
+		t.Fatal("refresh did not reach the service")
 	}
 }
 
