@@ -176,6 +176,8 @@ export function run(over: Partial<Run> = {}): Run {
     harness: 'claude',
     mode: 'tui',
     status: 'running',
+    state: 'working',
+    status_seq: 0,
     branch: 'aether/run-1-checkout',
     created_at: '2026-08-14T10:01:00Z',
     started_at: '2026-08-14T10:02:00Z',

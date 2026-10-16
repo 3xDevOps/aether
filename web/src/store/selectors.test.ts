@@ -34,12 +34,12 @@ const ids = (trees: { run: { id: string } }[]) => trees.map((tree) => tree.run.i
 
 const working = record({ id: 'working', status: 'running', started_at: '2026-08-14T10:02:00Z' })
 const newer = record({ id: 'newer', status: 'running', started_at: '2026-08-14T10:09:00Z' })
-const stopped = record({ id: 'stopped', status: 'needs-attention', activity: 'needs-you', started_at: '2026-08-14T10:05:00Z' })
+const stopped = record({ id: 'stopped', status: 'needs-attention', state: 'needs-you', started_at: '2026-08-14T10:05:00Z' })
 const elsewhere = record({
   id: 'elsewhere',
   workspace_id: otherWorkspace.id,
   status: 'needs-attention',
-  activity: 'needs-you',
+  state: 'needs-you',
   started_at: '2026-08-14T10:03:00Z',
 })
 const done = record({ id: 'done', status: 'merged', finished_at: '2026-08-14T10:30:00Z' })
@@ -78,7 +78,7 @@ describe('runGroups', () => {
 
   it('narrows Working and Finished to the viewer under Mine, never Needs you', () => {
     const theirs = record({ id: 'theirs', member_id: bob.id })
-    const theirsStopped = record({ id: 'theirs-stopped', member_id: bob.id, status: 'needs-attention', activity: 'needs-you' })
+    const theirsStopped = record({ id: 'theirs-stopped', member_id: bob.id, status: 'needs-attention', state: 'needs-you' })
     const groups = runGroups(
       input([working, theirs, theirsStopped], { mineOnly: true }, { viewerID: bob.id, viewerRole: bob.role }),
     )
@@ -110,7 +110,7 @@ describe('swarms', () => {
 
   it('folds a swarm into one collapsed entry with its counts', () => {
     const groups = runGroups(
-      input([integrator, worker('w1'), worker('w2', { status: 'needs-attention', activity: 'needs-you' }), worker('w3', { status: 'completed' })]),
+      input([integrator, worker('w1'), worker('w2', { status: 'needs-attention', state: 'needs-you' }), worker('w3', { status: 'completed' })]),
     )
     expect(ids(groups.working)).toEqual(['run_integrator'])
     const [swarm] = groups.working
@@ -121,7 +121,7 @@ describe('swarms', () => {
 
   it('lists the swarm in Needs you with only the members that need the viewer', () => {
     const blocked = worker('blocked', {
-      status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access', started_at: '2026-08-14T09:30:00Z',
+      status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access', started_at: '2026-08-14T09:30:00Z',
     })
     const groups = runGroups(input([integrator, worker('w1'), blocked], {}, { missions: { mission_1: mission() } }))
     expect(ids(groups['needs-you'])).toEqual(['run_integrator'])
@@ -164,7 +164,7 @@ describe('sidebarGroups', () => {
       swarmRun('old', { mission_role: 'integrator', status: 'failed' }),
       swarmRun('run_integrator', { mission_role: 'integrator' }),
       swarmRun('working'),
-      swarmRun('blocked', { status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access' }),
+      swarmRun('blocked', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
       swarmRun('done', { status: 'merged' }),
       swarmRun('archived', { status: 'merged', archived_at: '2026-08-15T00:00:00Z' }),
     ], {}, { missions: { mission_1: mission() } }))
@@ -182,7 +182,7 @@ describe('sidebarGroups', () => {
     expect(ids(sidebarGroups(scope)[0].runs[0].children)).toEqual(['mine', 'theirs'])
     expect(ids(sidebarGroups({ ...scope, mineOnly: true })[0].runs[0].children)).toEqual(['mine'])
 
-    scope.ctx.runs.theirs = { ...theirs, status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access' }
+    scope.ctx.runs.theirs = { ...theirs, status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }
     const [waiting] = sidebarGroups({ ...scope, mineOnly: true })
     expect(waiting.key).toBe('needs-you')
     expect(waiting.count).toBe(1)
@@ -196,7 +196,7 @@ describe('sidebarGroups', () => {
     const groups = sidebarGroups(input([
       worker('root', { created_at: '2026-08-14T09:00:00Z' }),
       worker('working'),
-      worker('blocked', { status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access' }),
+      worker('blocked', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
     ], { mineOnly: true }))
 
     expect(ids(groups[0].runs)).toEqual(['root'])
@@ -213,7 +213,7 @@ describe('sidebarGroups', () => {
 
 describe('needsYouByWorkspace', () => {
   it('counts runs needing the viewer per workspace', () => {
-    const theirs = record({ id: 'theirs', member_id: bob.id, status: 'needs-attention', activity: 'needs-you' })
+    const theirs = record({ id: 'theirs', member_id: bob.id, status: 'needs-attention', state: 'needs-you' })
     expect(needsYouByWorkspace(input([working, stopped, elsewhere, theirs]).ctx)).toEqual({
       [workspace.id]: 1,
       [otherWorkspace.id]: 1,

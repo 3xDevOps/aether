@@ -228,7 +228,7 @@ describe('swarm detail', () => {
   })
 
   it('keeps a broken integrator in view while a question is open', async () => {
-    seed({ runs: { run_integrator: toRecord(integrator({ status: 'needs-attention', activity: 'disconnected', reason: 'enhanced session failed: start claude-agent-acp: not found' })) } })
+    seed({ runs: { run_integrator: toRecord(integrator({ status: 'needs-attention', state: 'disconnected', reason: 'enhanced session failed: start claude-agent-acp: not found' })) } })
     await mount(showing({ phase: 'planning', open_questions: 1 }, { questions: [missionQuestion()] }))
     const problem = 'Enhanced could not start: start claude-agent-acp: not found'
     expect(screen.getAllByText(`${problem} · 1 question for you · Claude Code · Standard · created`, { exact: false }).length).toBeGreaterThan(0)
@@ -335,7 +335,7 @@ describe('swarm detail', () => {
     seed({
       runs: Object.fromEntries([
         integrator(),
-        worker('run_ask', { status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access' }),
+        worker('run_ask', { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
         worker('run_busy'),
       ].map((r) => [r.id, toRecord(r)])),
     })

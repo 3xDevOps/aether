@@ -6,14 +6,14 @@ import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { resolveMember } from '@/lib/member-name'
-import { runLabel, stateTone } from '@/lib/status'
+import { liveStateOf, runLabel, stateTone } from '@/lib/status'
 import type { CoordMessageAckedPayload, CoordMessagePayload, Event, RunStatusPayload } from '@/lib/types'
 import type { Visit } from '@/routes/activity/visits'
 import { useStore } from '@/store'
 
-function statusTone({ to, activity }: Partial<RunStatusPayload>): Tone | undefined {
+function statusTone({ to, state }: Partial<RunStatusPayload>): Tone | undefined {
   if (!to) return undefined
-  if (to === 'running' || to === 'needs-attention') return stateTone[activity || 'working']
+  if (to === 'running' || to === 'needs-attention') return stateTone[liveStateOf(to, state)]
   return to === 'failed' || to === 'interrupted' ? 'failed' : to === 'queued' || to === 'provisioning' ? 'working' : 'done'
 }
 

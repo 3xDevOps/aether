@@ -4,7 +4,7 @@ import type { EventType } from '@/lib/events'
 import { budgetStateLabel, money } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { plainReason } from '@/lib/reasons'
-import { stateLabel } from '@/lib/status'
+import { liveStateOf, stateLabel } from '@/lib/status'
 import type { BudgetState, Event, RoomMessageKind, RoomMessageState, RunActivity, RunStatus } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
@@ -64,7 +64,7 @@ function statusLine(p: Payload): string {
   const reason = text(p.reason)
   if (to === 'abandoned' && reason === 'killed') return 'Stopped'
   const live = to === 'running' || to === 'needs-attention'
-  const word = live ? stateLabel[(text(p.activity) || 'working') as RunActivity] : statusWords[to] ?? 'Run changed state'
+  const word = live ? stateLabel[liveStateOf(to, text(p.state) as RunActivity)] : statusWords[to] ?? 'Run changed state'
   if (!reason || (to === 'running' && reason === 'agent resumed')) return word
   const plain = plainReason(reason)
   return `${word}: ${live ? plain.charAt(0).toLowerCase() + plain.slice(1) : plain}`

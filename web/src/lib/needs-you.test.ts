@@ -20,7 +20,7 @@ const record = (over: Parameters<typeof run>[0] = {}): RunRecord => toRecord(run
 
 it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s outcome', (mode) => {
   const parked = record({
-    mode, acp: mode === 'acp', status: 'needs-attention', activity: 'failed',
+    mode, acp: mode === 'acp', status: 'needs-attention', state: 'failed',
     reason: 'agent reported failure', outcome_unseen: true,
   })
   expect(needsYou(parked, stateContext())?.id).toBe('failed')
@@ -30,7 +30,7 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
   expect(needsYou({
     ...parked, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }],
   }, stateContext())?.id).toBe('question')
-  const success = { ...parked, activity: 'finished' as const, reason: 'agent reported success' }
+  const success = { ...parked, state: 'finished' as const, reason: 'agent reported success' }
   expect(needsYou(success, stateContext())).toBeUndefined()
   expect(presentRun(success, stateContext())).toEqual({ state: 'finished', reason: 'Agent reported success. Run remains open for follow-up.' })
 })
@@ -147,34 +147,31 @@ const rows: {
   },
   {
     id: 'disconnected',
-    run: record({ status: 'needs-attention', activity: 'disconnected', reason: 'enhanced session failed: acphost: initialize: EOF' }),
+    run: record({ status: 'needs-attention', state: 'disconnected', reason: 'enhanced session failed: acphost: initialize: EOF' }),
     ctx: {},
     reason: 'Enhanced could not start: acphost: initialize: EOF',
     state: 'disconnected',
   },
   {
     id: 'blocked',
-    run: record({ ...worker, status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access' }),
+    run: record({ ...worker, status: 'needs-attention', state: 'needs-you', reason: 'blocked: no database access' }),
     ctx: { runs: runRecords(integrator), missions: { mission_1: mission() } },
     reason: 'Worker blocked: no database access',
   },
   {
     id: 'needs-input',
-    run: record({ mode: 'acp', acp: true, status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' }),
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' }),
     ctx: {},
     reason: 'Agent asks: Which database?',
   },
   {
-    id: 'usage-limit',
-    run: record({ mode: 'acp', acp: true, status: 'needs-attention', reason: "Usage limit reached on Alice's account; no fallback has usage left" }),
-    ctx: {},
-    reason: "Usage limit reached on Alice's account; no fallback has usage left",
-  },
-  {
     id: 'failed',
-    run: record({ status: 'failed', outcome_unseen: true, finished_at: '2026-08-14T10:10:00Z' }),
+    run: record({
+      mode: 'acp', acp: true, status: 'needs-attention', state: 'failed',
+      reason: 'enhanced turn failed: acphost: session/prompt: EOF', outcome_unseen: true,
+    }),
     ctx: {},
-    reason: 'Failed, review the result',
+    reason: 'Turn failed: acphost: session/prompt: EOF',
     state: 'failed',
   },
 ]
@@ -198,11 +195,33 @@ describe('needs you conditions', () => {
   })
 
   it("needs the owner for a standalone run's blocked report", () => {
-    const blocked = record({ status: 'needs-attention', activity: 'needs-you', reason: 'blocked: need database credentials' })
+    const blocked = record({ status: 'needs-attention', state: 'needs-you', reason: 'blocked: need database credentials' })
     expect(presentRun(blocked, stateContext())).toMatchObject({
       state: 'needs-you',
       reason: 'Blocked: need database credentials',
     })
+  })
+
+  // The same cases as the attention table in docs/failure-handling.md.
+  it.each([
+    ['a request', { state: 'needs-you' }, 'needs-input'],
+    ['a disconnected agent', { state: 'disconnected' }, 'disconnected'],
+    ['an unseen failure', { state: 'failed', outcome_unseen: true }, 'failed'],
+    ['a seen failure', { state: 'failed' }, undefined],
+    ['an unseen success', { state: 'finished', outcome_unseen: true }, undefined],
+    ['a working run', { status: 'running', state: 'working' }, undefined],
+    ['an idle run', { state: 'idle' }, undefined],
+    ['a run waiting on its agents', { state: 'waiting-agents' }, undefined],
+    ['a run waiting on a tool', { state: 'waiting-tools' }, undefined],
+    ['a paused request', { state: 'needs-you', paused: true }, undefined],
+    ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
+    ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
+    ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
+    ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
+    ['a finished run with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
+    ['a live run with no state', { state: '' }, undefined],
+  ] satisfies [string, Partial<Run>, NeedsYouID | undefined][])('attention for %s: %s', (_, fields, want) => {
+    expect(needsYou(record({ status: 'needs-attention', ...fields }), stateContext())?.id).toBe(want)
   })
 
   it.each([
@@ -213,22 +232,17 @@ describe('needs you conditions', () => {
     ['waiting-agents', 'waiting on 3 workers', 'waiting on 3 workers'],
     ['waiting-agents', 'working in background: 2 tasks', 'Working in background: 2 tasks'],
     ['waiting-tools', '', 'Waiting on a tool'],
-  ] as const)('never needs anyone for a %s run parked with %j', (activity, reason, shown) => {
+  ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shown) => {
     for (const acp of [false, true]) {
-      const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', activity, reason: reason || undefined })
+      const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', state, reason: reason || undefined })
       expect(needsYou(parked, stateContext())).toBeUndefined()
       expect(waitingOn(parked, stateContext())).toBeUndefined()
-      expect(presentRun(parked, stateContext())).toEqual({ state: activity, reason: shown })
+      expect(presentRun(parked, stateContext())).toEqual({ state, reason: shown })
     }
   })
 
-  it('labels a failed turn Failed with its reason', () => {
-    const failed = record({ mode: 'acp', acp: true, status: 'needs-attention', activity: 'failed', reason: 'enhanced turn failed: acphost: session/prompt: EOF' })
-    expect(presentRun(failed, stateContext())).toMatchObject({ state: 'failed', reason: 'Turn failed: acphost: session/prompt: EOF', needsYou: { id: 'failed' } })
-  })
-
   it("labels a disconnected agent with the server's reason", () => {
-    const parked = record({ status: 'needs-attention', activity: 'disconnected', reason: "enhanced session ended: the agent's ACP server exited with code 1" })
+    const parked = record({ status: 'needs-attention', state: 'disconnected', reason: "enhanced session ended: the agent's ACP server exited with code 1" })
     expect(presentRun(parked, stateContext())).toMatchObject({ state: 'disconnected', reason: "Agent disconnected: the agent's ACP server exited with code 1" })
     expect(presentRun({ ...parked, reason: 'agent exited 1' }, stateContext()).reason).toBe('Agent exited with code 1')
   })
@@ -236,21 +250,21 @@ describe('needs you conditions', () => {
   it.each(['agent idle', 'turn cancelled', 'turn interrupted', 'turn ended: refusal', 'needs input: Which database?'])(
     'does not need anyone while an Enhanced run is running after %s',
     (reason) => {
-      const running = record({ mode: 'acp', acp: true, status: 'running', activity: 'working', reason })
+      const running = record({ mode: 'acp', acp: true, status: 'running', state: 'working', reason })
       expect(needsYou(running, stateContext())).toBeUndefined()
       expect(presentRun(running, stateContext()).state).toBe('working')
     },
   )
 
   it("does not need a member other than the owner for the agent's question", () => {
-    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' })
+    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' })
     const ctx = stateContext({ viewerID: bob.id, viewerRole: bob.role })
     expect(needsYou(asking, ctx)).toBeUndefined()
     expect(presentRun(asking, ctx)).toEqual({ state: 'idle', reason: 'Waiting for Alice' })
   })
 
   it("shows a paused run as Paused, not the agent's question", () => {
-    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' })
+    const asking = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' })
     expect(presentRun(asking, stateContext({ pausedRuns: { [asking.id]: true } }))).toEqual({ state: 'paused', reason: 'Paused' })
   })
 
@@ -272,8 +286,9 @@ describe('needs you conditions', () => {
   it.each([
     [{ pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Open terminal'],
     [{ acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Answer'],
-    [{ status: 'needs-attention', activity: 'needs-you' }, 'Reply'],
-    [{ status: 'failed', outcome_unseen: true }, 'Review'],
+    [{ status: 'needs-attention', state: 'needs-you' }, 'Reply'],
+    [{ mode: 'headless', status: 'needs-attention', state: 'needs-you' }, 'Open'],
+    [{ status: 'needs-attention', state: 'failed', outcome_unseen: true }, 'Review'],
   ] satisfies [Partial<Run>, string][])('gives %o the primary action %s', (fields, label) => {
     const shown = record(fields)
     expect(needsYou(shown, stateContext())?.action(shown, undefined).label).toBe(label)
@@ -284,7 +299,7 @@ describe('viewer scoping', () => {
   const bobViewing = { viewerID: bob.id, viewerRole: bob.role }
 
   it("shows another member's waiting run as Idle, waiting for its owner", () => {
-    const stopped = record({ status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which port?' })
+    const stopped = record({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
     const ctx = stateContext(bobViewing)
     expect(needsYou(stopped, ctx)).toBeUndefined()
     expect(waitingOn(stopped, ctx)).toBe(alice.id)
@@ -292,7 +307,7 @@ describe('viewer scoping', () => {
   })
 
   it('names a waiting run by the member its owner was merged into', () => {
-    const stopped = record({ status: 'needs-attention', activity: 'needs-you', member_id: 'mem_old' })
+    const stopped = record({ status: 'needs-attention', state: 'needs-you', member_id: 'mem_old' })
     const ctx = stateContext({ ...bobViewing, mergedInto: { mem_old: alice.id } })
     expect(presentRun(stopped, ctx).reason).toBe('Waiting for Alice (merged)')
   })
@@ -359,7 +374,7 @@ describe('viewer scoping', () => {
     { asker: 'the owner', actor: alice.id, count: 0, want: undefined },
     { asker: 'a teammate', actor: bob.id, count: 1, want: 'room-question' },
   ])('agrees between card and header on a question from $asker', ({ actor, count, want }) => {
-    const parked = { status: 'needs-attention' as const, activity: 'idle' as const, reason: 'stalled: no output or file changes for 10m4s' }
+    const parked = { status: 'needs-attention' as const, state: 'idle' as const, reason: 'stalled: no output or file changes for 10m4s' }
     const card = needsYou(record({ ...parked, unanswered_questions: count }), stateContext())
     const header = needsYou(
       record({ ...parked, unanswered_questions: count }),
@@ -379,14 +394,14 @@ describe('viewer scoping', () => {
   })
 
   it('needs nobody before the viewer is known', () => {
-    const stopped = record({ status: 'needs-attention', activity: 'needs-you' })
+    const stopped = record({ status: 'needs-attention', state: 'needs-you' })
     expect(needsYou(stopped, stateContext({ viewerID: null, viewerRole: null }))).toBeUndefined()
     expect(presentRun(stopped, stateContext({ viewerID: null, viewerRole: null })).reason).not.toMatch(/^Waiting for/)
   })
 })
 
 describe('swarm workers', () => {
-  const stoppedWorker = record({ ...worker, mode: 'tui', status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which port?' })
+  const stoppedWorker = record({ ...worker, mode: 'tui', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
 
   it('leaves a worker to its live integrator', () => {
     const ctx = stateContext({ runs: runRecords(integrator) })
@@ -428,16 +443,9 @@ describe('background runs', () => {
     expect(needsYou(record({ mode: 'headless' }), ctx)?.id).toBe('permission')
   })
 
-  it("show a usage-limit failure with the server's reason", () => {
-    const reason = "Usage limit reached on Alice's account; continuing on Bob's account failed: docker: no space left on device"
-    const failed = record({ mode: 'headless', status: 'failed', reason, finish_unopened: true })
-    expect(presentRun(failed, stateContext())).toMatchObject({ state: 'needs-you', reason })
-    expect(needsYou({ ...failed, reason: 'exit status 1' }, stateContext())).toBeUndefined()
-  })
-
-  it('list an unreviewed failure as Failed, and leave an unreviewed success in Finished', () => {
-    const failed = record({ mode: 'headless', status: 'failed', outcome_unseen: true })
-    expect(presentRun(failed, stateContext())).toMatchObject({ state: 'failed', reason: 'Failed, review the result', needsYou: { id: 'failed' } })
+  it('leave an unreviewed finished run in its group, labelled by its outcome', () => {
+    const failed = record({ mode: 'headless', status: 'failed', state: '', reason: 'exit status 1', outcome_unseen: true })
+    expect(presentRun(failed, stateContext())).toEqual({ state: 'failed', reason: 'Failed: exit status 1' })
     expect(presentRun({ ...failed, status: 'completed' }, stateContext())).toEqual({ state: 'finished', reason: 'Finished' })
   })
 })

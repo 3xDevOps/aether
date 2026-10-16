@@ -15,12 +15,20 @@ export type RunRecord = Omit<Run, 'status_changed_at'> & {
   toolActivity?: ToolActivity
 }
 
-const seqOf = (run: Pick<Run, 'status_seq'>) => run.status_seq ?? 0
-
 export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
-  // A snapshot read before an applied status event must not undo it.
-  const run: Run = previous && seqOf(snapshot) < seqOf(previous)
-    ? { ...snapshot, status: previous.status, reason: previous.reason, activity: previous.activity, status_seq: previous.status_seq, status_changed_at: undefined }
+  // A snapshot read before an applied status event must not undo what that event set.
+  const run: Run = previous && snapshot.status_seq < previous.status_seq
+    ? {
+        ...snapshot,
+        status: previous.status,
+        reason: previous.reason,
+        state: previous.state,
+        status_seq: previous.status_seq,
+        outcome_unseen: previous.outcome_unseen,
+        finish_unopened: previous.finish_unopened,
+        finished_at: previous.finished_at,
+        status_changed_at: undefined,
+      }
     : snapshot
   const { status_changed_at: snapshotAt, ...wire } = run
   const carry = previous && previous.status === run.status
@@ -143,10 +151,10 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       if (pending) return { predicting: { ...s.predicting, [runID]: marker } }
       return s.predicting[runID] === marker ? { predicting: pruneRuns(s.predicting, (id) => id !== runID) } : {}
     }),
-  applyRunStatus: (runID, { to, reason, activity, status_seq, outcome_unseen = false, finish_unopened = false }, time) =>
+  applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false }, time) =>
     set((s) => {
       const current = s.runs[runID]
-      if (!current || status_seq <= seqOf(current)) return {}
+      if (!current || status_seq <= current.status_seq) return {}
       // The server moves `status_changed_at` on the same changes and no others.
       const changed = to !== current.status || (to === 'needs-attention' && reason !== current.reason)
       const timed = changed || current.stateChangedAtPredicted
@@ -154,7 +162,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         ...current,
         status: to,
         reason,
-        activity,
+        state,
         status_seq,
         stateChangedAt: timed ? time : current.stateChangedAt,
         stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,

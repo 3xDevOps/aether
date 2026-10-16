@@ -88,7 +88,7 @@ function cardOf(task: string) {
   return within(title.closest('article')!)
 }
 
-const stopped = run({ id: 'run_stopped', task: 'waiting on you', status: 'needs-attention', activity: 'needs-you' })
+const stopped = run({ id: 'run_stopped', task: 'waiting on you', status: 'needs-attention', state: 'needs-you' })
 const working = run({ id: 'run_working', task: 'still going', status: 'running' })
 const queued = run({
   id: 'run_queued',
@@ -207,7 +207,7 @@ describe('board columns', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     seed([
       run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', reason: 'working in background: 2 tasks' }),
-      run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' }),
+      run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' }),
     ])
     renderBoard()
 
@@ -397,10 +397,10 @@ describe('Needs you actions', () => {
   })
 
   it('opens the changes of an unreviewed failure', () => {
-    seed([run({ ...merged, status: 'failed', outcome_unseen: true })])
+    seed([run({ ...merged, status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true, finished_at: null })])
     renderBoard()
 
-    expect(column('Needs you').getByText('Failed, review the result')).toBeDefined()
+    expect(column('Needs you').getByText('Agent reported failure; review the result. Run remains open for follow-up.')).toBeDefined()
     expect(cardOf('landed already').getByRole('img', { name: 'Failed' })).toBeDefined()
     fireEvent.click(cardOf('landed already').getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: merged.id, view: 'changes' } })

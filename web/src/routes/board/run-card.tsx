@@ -45,7 +45,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
     <Popover open={replying} onOpenChange={setReplying}>
       <PopoverAnchor asChild>
         <Card ref={cardRef} data-run-id={run.id} selected={replying} style={variant === 'map' ? { height: '100%' } : undefined}>
-          <StateLine tone={stateTone[state]} label={stateLabel[state]} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
+          <StateLine tone={stateTone[state]} label={stateLabel[state]} strong={needsYou} trailing={<RelativeTime at={needsYou ? card.waitingSince : run.stateChangedAt} />}>
             {reason}
           </StateLine>
           <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>

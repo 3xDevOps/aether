@@ -373,7 +373,7 @@ describe('the header primary action', () => {
   })
 
   it('reviews an unseen failure on Changes', () => {
-    open({ status: 'failed', outcome_unseen: true })
+    open({ status: 'needs-attention', state: 'failed', outcome_unseen: true })
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     expect(useStore.getState().route.params.view).toBe('changes')
   })
@@ -439,7 +439,7 @@ describe('run details', () => {
 
   it('shows a needs-you condition without a request as one card with its action', async () => {
     vi.mocked(api.runRoomList).mockResolvedValue({ messages: [] })
-    open({ status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which port?' }, 'terminal')
+    open({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' }, 'terminal')
     const panel = await details()
     const section = within(panel.getByRole('region', { name: 'Needs you' }))
     expect(section.queryByText('Nothing is waiting on you.')).toBeNull()

@@ -53,9 +53,9 @@ export interface Run {
   acp?: boolean
   switching?: 'tui' | 'acp'
   status: RunStatus
-  activity?: RunActivity | ''
-  /** Increments on every change of status, activity or reason. */
-  status_seq?: number
+  state?: RunActivity | ''
+  /** Increments on every change of status, state, reason or outcome flags. */
+  status_seq: number
   branch: string
   last_commit?: string
   last_commit_at?: string | null
@@ -804,7 +804,7 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
-  activity?: RunActivity | ''
+  state?: RunActivity | ''
   status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean

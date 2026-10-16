@@ -15,8 +15,11 @@ import type { BackgroundTask } from '@/lib/session-types'
 import type { RunActivity } from '@/lib/types'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** A live run's activity, a finished run's outcome, or Paused. */
-export type PresentationState = RunActivity | 'paused'
+/** A live run's state; one without a state is shown by its status. */
+type LiveState = RunActivity | 'running' | 'needs-attention'
+
+/** A live run's state, a finished run's outcome, or Paused. */
+export type PresentationState = LiveState | 'paused'
 
 export type RunGroup = 'needs-you' | 'working' | 'finished'
 
@@ -32,7 +35,12 @@ export function backgroundReason(tasks: BackgroundTask[]): string {
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-const activityReasons: Record<RunActivity, string> = {
+/** The server sends no state for a run, or a stored event, from before it derived one. */
+export function liveStateOf(status: 'running' | 'needs-attention', state: RunActivity | '' | undefined): LiveState {
+  return state || status
+}
+
+const stateReasons: Record<LiveState, string> = {
   working: 'Agent working',
   'waiting-agents': 'Waiting on its agents',
   'waiting-tools': 'Waiting on a tool',
@@ -41,19 +49,21 @@ const activityReasons: Record<RunActivity, string> = {
   finished: 'Agent reported success',
   failed: 'Agent reported failure',
   disconnected: 'Agent disconnected',
+  running: 'Running',
+  'needs-attention': 'Parked',
 }
 
-function liveState(run: RunRecord, ctx: StateContext): { state: RunActivity; reason: string } {
+function liveState(run: RunRecord, ctx: StateContext): { state: PresentationState; reason: string } {
   if (run.status === 'queued') return { state: 'working', reason: 'Queued' }
   if (run.status === 'provisioning') return { state: 'working', reason: 'Starting' }
-  const state = run.activity || 'working'
+  const state = liveStateOf(run.status as 'running' | 'needs-attention', run.state)
   const waiter = waitingOn(run, ctx)
   if (waiter !== undefined) return { state: state === 'needs-you' ? 'idle' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
   if (state === 'needs-you' && supervised(run, ctx)) return { state: 'waiting-agents', reason: 'Waiting for the integrator' }
   if (state === 'working' && run.toolActivity) {
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }
-  const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : activityReasons[state]
+  const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (state === 'finished' || state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
   return { state, reason }
 }
@@ -128,6 +138,8 @@ export const stateLabel: Record<PresentationState, string> = {
   failed: 'Failed',
   disconnected: 'Disconnected',
   paused: 'Paused',
+  running: 'Running',
+  'needs-attention': 'Parked',
 }
 
 /** Each state's dot: the tone picks both its colour and its shape. */
@@ -141,6 +153,8 @@ export const stateTone: Record<PresentationState, Tone> = {
   failed: 'failed',
   disconnected: 'disconnected',
   paused: 'paused',
+  running: 'neutral',
+  'needs-attention': 'neutral',
 }
 
 export const groupLabel: Record<RunGroup, string> = {

@@ -2,6 +2,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { inputTitle } from '@/lib/run-requests'
 import { needsInputPrefix, plainReason, stalledPrefix } from '@/lib/reasons'
+import { liveStateOf, stateLabel } from '@/lib/status'
 import type { StreamState } from '@/lib/acp-stream'
 import type { BackgroundTask, SessionFrame, SessionItem, SessionRequest, SessionState, SessionStreamAck } from '@/lib/session-types'
 import type { Event, RoomMessage, RoomMessageState } from '@/lib/types'
@@ -469,7 +470,9 @@ function sameSteer(row: SessionRow, steer: RoomMessage): boolean {
 function liveRows(run: RunRecord, paused: boolean): SessionRow[] {
   if (run.status !== 'running' || paused || run.pending_inputs?.length) return []
   const at = run.toolActivity?.at ?? run.stateChangedAt
-  const label = run.toolActivity?.running ? `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() : 'Working'
+  const label = run.toolActivity?.running
+    ? `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd()
+    : stateLabel[liveStateOf(run.status, run.state)]
   return [
     { kind: 'live', id: 'live', at, label },
     { kind: 'terminal-note', id: 'terminal-note', at },

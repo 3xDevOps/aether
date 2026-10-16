@@ -28,7 +28,7 @@ import { requestCardID } from '@/routes/run/requests'
 import { runViewLabel, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
-import { useHeaderPrimary, useRunPresentation } from '@/store/hooks'
+import { useHeaderPrimary, useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
 
@@ -98,6 +98,7 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
 
 function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const presented = useRunPresentation(run)
+  const asks = useNeedsYouRuns([run.id]).has(run.id)
   const { state, reason } = run.switching
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
@@ -109,7 +110,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
     <div className="@container/state w-full min-w-0">
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted">
         <StatusDot tone={stateTone[state]} pulse={state === 'working'} label={stateLabel[state]} />
-        <span className={state === 'needs-you' ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
+        <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{reason}</span>
         <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden>·</span>
           <AgentGlyph agent={run.harness} />

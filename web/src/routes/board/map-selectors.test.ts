@@ -22,7 +22,7 @@ it('keeps Needs you global while workspace and Mine filter individual working an
     run({ id: 'mine' }),
     run({ id: 'teammate', member_id: bob.id }),
     run({ id: 'elsewhere', workspace_id: otherWorkspace.id }),
-    run({ id: 'needs-you-elsewhere', status: 'needs-attention', activity: 'needs-you', workspace_id: otherWorkspace.id }),
+    run({ id: 'needs-you-elsewhere', status: 'needs-attention', state: 'needs-you', workspace_id: otherWorkspace.id }),
     run({ id: 'archived', status: 'merged', archived_at: '2026-10-01T00:00:00Z' }),
     run({ id: 'archived-teammate', member_id: bob.id, status: 'merged', archived_at: '2026-10-01T00:00:00Z' }),
     run({ id: 'live-with-archive', archived_at: '2026-10-01T00:00:00Z' }),

@@ -532,7 +532,7 @@ test('an open More menu offers predicted verbs again once the pending one is ans
 test('a status event keeps the estimated change time of a run no verb predicted', () => {
   const record = seed({ run: { status: 'running', status_changed_at: undefined } })
   expect(record.stateChangedAtEstimated).toBe(true)
-  act(() => useStore.getState().applyRunStatus('run_1', { to: 'running', activity: 'working', status_seq: 1 }, '2030-01-01T00:00:00Z'))
+  act(() => useStore.getState().applyRunStatus('run_1', { to: 'running', state: 'working', status_seq: 1 }, '2030-01-01T00:00:00Z'))
   expect(runOne(useStore.getState()).stateChangedAt).toBe(record.stateChangedAt)
 })
 

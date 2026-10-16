@@ -96,6 +96,7 @@ export function StateLine({
   children,
   trailing,
   pulse,
+  strong = tone === 'needs-you',
   className,
 }: {
   tone: Tone
@@ -103,12 +104,14 @@ export function StateLine({
   children: React.ReactNode
   trailing?: React.ReactNode
   pulse?: boolean
+  /** Full-contrast text, for a row that asks the viewer to act. */
+  strong?: boolean
   className?: string
 }) {
   return (
     <span data-slot="state-line" className={cn('flex min-w-0 items-center gap-1.5 text-ui-sm', className)}>
       <StatusDot tone={tone} pulse={pulse} label={label} />
-      <span className={cn('min-w-0 truncate', tone === 'needs-you' ? 'text-text' : 'text-muted')}>{children}</span>
+      <span className={cn('min-w-0 truncate', strong ? 'text-text' : 'text-muted')}>{children}</span>
       {trailing !== undefined && <span className="ml-auto shrink-0 text-muted tabular-nums">{trailing}</span>}
     </span>
   )

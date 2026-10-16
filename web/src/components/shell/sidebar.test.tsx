@@ -11,8 +11,8 @@ Element.prototype.scrollIntoView = vi.fn()
 
 const runs = [
   run(),
-  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention', activity: 'needs-you' }),
-  run({ id: 'run_3', task: 'ship the invoice export', status: 'failed', outcome_unseen: true, workspace_id: otherWorkspace.id }),
+  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention', state: 'needs-you' }),
+  run({ id: 'run_3', task: 'ship the invoice export', status: 'needs-attention', state: 'failed', outcome_unseen: true, workspace_id: otherWorkspace.id }),
   run({ id: 'run_4', task: 'tidy the readme', status: 'merged' }),
 ]
 
@@ -89,7 +89,7 @@ describe('shell landmarks', () => {
 describe('run rows', () => {
   it('lists every Needs you row', () => {
     const waiting = Array.from({ length: 7 }, (_, i) =>
-      run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention', activity: 'needs-you' }))
+      run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention', state: 'needs-you' }))
     useStore.setState({ runs: Object.fromEntries(waiting.map((r) => [r.id, toRecord(r)])) })
     render(<AppShell />)
 
@@ -100,8 +100,8 @@ describe('run rows', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     useStore.setState({
       runs: Object.fromEntries([
-        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', activity: 'waiting-agents', reason: 'working in background: 2 tasks' }),
-        run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' }),
+        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', state: 'waiting-agents', reason: 'working in background: 2 tasks' }),
+        run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which database?' }),
       ].map((r) => [r.id, toRecord(r)])),
     })
     render(<AppShell />)

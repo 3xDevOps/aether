@@ -990,7 +990,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   `finish_unopened`.
   A `server.update` event lands in the `server` slice, which feeds the update
   prompts.
-- **`run.agent` events set a run's `activity`** (`{verb, target, at}` on
+- **`run.agent` events set a run's `toolActivity`** (`{verb, target, at}` on
   the run record, `src/store/activity.ts`), so a state line can say
   "Reading src/auth.ts" without opening a socket to the run. A tool call
   sets the present tense with the call's detail (file, command, task) or the
@@ -999,7 +999,7 @@ Removal also repairs the selection and open route before any refresh awaits.
   Enhanced run's event carries `verb`, which the line shows as is.
   Calls in flight are kept by `tool_use_id`, so a result ends the call it
   names: while another call still runs, the line shows the newest one. Only
-  runs whose agent has an adapter emit these events, so `activity` is
+  runs whose agent has an adapter emit these events, so `toolActivity` is
   optional everywhere. An event about a run the client has not loaded is
   dropped rather than fetched. A status change - a turn ending or
   starting, a reopen - clears the activity, so an earlier action never
@@ -1267,8 +1267,10 @@ are instant, like other workbench panels.
 
 A run shows one state and one plain-words reason line, derived in
 `src/lib/status.ts` (`presentRun`). A live run's state is the server's
-`activity`: the scheduler derives it, so the dashboard never infers a wait
-from a reason string. The reason line is the server's `status_reason`
+`state` field: the scheduler derives it, so the dashboard never infers a wait
+from a reason string. A live run or stored `run.status` event from before the
+server derived one has no `state`; it reads **Running** or **Parked** from its
+wire status, with a neutral dot, never Working. The reason line is the server's `status_reason`
 (`reason` on the wire) in plain words, such as "waiting on 3 workers".
 Details lists the raw `reason` as **Last reason**.
 
@@ -1280,28 +1282,35 @@ colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
 
 | State | Comes from | Group |
 | --- | --- | --- |
-| Working | `activity` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
+| Working | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
 | Waiting on agents | `waiting-agents`: held background subagents or workflows, an integrator with live workers or unread worker mail, or a `waiting` report | Working |
 | Waiting on tools | `waiting-tools`: a tool the agent waits on, such as Claude's Monitor | Working |
 | Needs you | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Idle | `idle`: the turn ended with nothing open, a stall included | Working |
 | Finished | `finished` (an interactive success parked for review), or `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
-| Failed | `failed` (an interactive failure parked for review, or an Enhanced turn that failed), or `failed`, `interrupted` | Needs you for its owner while live or unreviewed, else Finished, sorted first |
+| Failed | `failed` (an interactive failure parked for review, or a turn that failed), or `failed`, `interrupted` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Disconnected | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
 | Paused | a live run paused by a member | Working |
 
 Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
 
-**`status_seq`** increments on every change of a run's status, activity or
-reason. `applyRunStatus` in `src/store/runs.ts` drops a `run.status` event
-whose `status_seq` is not greater than the one it holds, and `toRecord`
-keeps the held status, reason and activity when a snapshot is older, so an
-out-of-order event or a late `run.get` never moves a run back.
+**`status_seq`** increments on every change of a run's status, state,
+reason or outcome flags. `applyRunStatus` in `src/store/runs.ts` drops a
+`run.status` event whose `status_seq` is not greater than the one it holds,
+and `toRecord` keeps every field such an event set (status, reason, state,
+`status_seq`, `outcome_unseen`, `finish_unopened`, `finished_at`) when a
+snapshot is older, so an out-of-order event or a late `run.get` never moves a
+run back. A kill's prediction clears `state` with the status.
 
-The Needs you group, its counts and badges list only the rows below: Needs
-you requests, and Failed and Disconnected runs, labelled as such. Idle,
-Waiting and Working never count. Needs you means the viewer can resolve it.
+The Needs you group, its counts and badges follow the attention rule push
+notifications, assistant follow and `aether runs --needs-you` share
+([failure-handling.md](failure-handling.md)): a live run (`running` or
+`needs-attention`) that is not paused, with `state` `needs-you`,
+`disconnected`, or `failed` while `outcome_unseen`. Finished, Idle, Waiting
+and Working never count. The request rows below need a live, unpaused run
+too; only the two swarm rows, an open swarm question and a stopped
+integrator, hold whatever the integrator run's status. Needs you means the viewer can resolve it.
 `src/lib/needs-you.ts` holds the conditions as one table, checked in order;
 `needsYou(run, ctx)` returns the first that applies:
 
@@ -1314,11 +1323,13 @@ Waiting and Working never count. Needs you means the viewer can resolve it.
 | Open swarm question | accountable human or an admin | The integrator asks: … |
 | Integrator exited or failed to launch | accountable human or an admin | Integrator stopped, replace it to continue / Integrator failed to launch, replace it to continue |
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
-| `activity` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
-| `activity` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
-| `activity` `needs-you`, any other reason | owner | the reason: Agent asks: … |
-| Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
-| `activity` `failed`, or a `failed` run with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … / Failed, review the result |
+| `state` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
+| `state` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
+| `state` `needs-you`, any other reason, a usage limit Aether will not resume included | owner | the reason: Agent asks: … / Usage limit reached on … |
+| `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
+
+Failed and Disconnected rows show their reason in full-contrast text, as a
+Needs you row does.
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -1354,8 +1365,8 @@ reads Waiting on agents, "Waiting for the integrator". A stopped integrator coun
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
 Background (`headless`) run reaches Needs you only through a pending Aether
-approval, the swarm rows, its `needs-you`, `failed` or `disconnected`
-activity, or a usage limit. A Working run's reason is what its agent is
+approval, the swarm rows, or its `needs-you`, `failed` or `disconnected`
+state; it takes no input, so its row offers **Open**, not **Reply**. A Working run's reason is what its agent is
 doing ("Reading src/auth.ts", from `run.agent`), else "Agent working". A
 reported success, unreviewed or not, is Finished and never lists in Needs
 you.
@@ -1414,8 +1425,9 @@ An answer is not ordered against the event stream, so one that a newer
 again.
 
 A reported success presents **Finished** in Finished whether or not the
-flag is set; a reported failure stays a **Failed** row in Needs you until the
-next turn or Close.
+flag is set; a reported failure stays a **Failed** row in Needs you until its
+owner opens the run, the next turn or Close. A run that has ended is never in
+Needs you: an unreviewed one keeps its unopened marker in Finished.
 An interactive run still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
 to Working. Archive eligibility and input gates use the wire status, not
@@ -1453,7 +1465,7 @@ room question remains the card's actionable summary.
 **Needs you is an activity, not a new lifecycle.** The persisted/wire
 status remains `needs-attention`. Turn completion, silence and prose such as
 the legacy `waiting for your input` reason are not evidence of a request;
-only the server's `needs-you` activity and the request rows above are.
+only the server's `needs-you` state and the request rows above are.
 
 **Requests are independent of execution.** A run snapshot's `pending_inputs`
 contains native request identities (`id`, `session_id`, and `kind`: `question`,
@@ -1997,7 +2009,8 @@ the terminal." with **Open terminal**, or "Answer it from the agent's
 session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
 `finished`, and while the run works with no pending input a `live` row (the
-run's `activity`, "Reading src/billing.js", else "Working") and a
+run's `toolActivity`, "Reading src/billing.js", else its state label such as
+"Working" or "Waiting on agents") and a
 `terminal-note` row, **Live detail is in the Terminal.** with **Open
 terminal**. An "Agent report" event is dropped while the report's agent
 message is shown. Request titles and that copy live in `lib/run-requests.ts`, shared

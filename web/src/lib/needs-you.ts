@@ -44,7 +44,6 @@ export type NeedsYouID =
   | 'disconnected'
   | 'blocked'
   | 'needs-input'
-  | 'usage-limit'
   | 'failed'
 
 export interface PrimaryAction {
@@ -76,14 +75,20 @@ interface Spec {
   admins?: boolean
   background?: boolean
   supervised?: boolean
+  /** A swarm's row, which holds whatever the run's own status. */
+  swarm?: boolean
   reason: (run: RunRecord, ctx: StateContext) => string
   since?: (run: RunRecord, ctx: StateContext) => string | undefined
   target: NeedsYouTarget
   action: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
 }
 
+const isLive = (run: Pick<Run, 'status'>) => run.status === 'running' || run.status === 'needs-attention'
+
 function condition(spec: Spec): NeedsYouCondition {
   const holds = (run: RunRecord, ctx: StateContext) =>
+    (spec.swarm || isLive(run)) &&
+    !isPaused(run, ctx) &&
     (spec.background || run.mode !== 'headless') &&
     (spec.supervised || !supervised(run, ctx)) &&
     spec.holds(run, ctx)
@@ -114,9 +119,9 @@ const answerIn = (run: RunRecord, enhancedLabel: string): PrimaryAction =>
   isEnhanced(run) ? { kind: 'open', label: enhancedLabel } : terminalAction
 
 // `outcome_unseen` is owner-scoped on the server.
-export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen' | 'activity'>): boolean {
+export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen' | 'state'>): boolean {
   return run.outcome_unseen === true &&
-    (run.status === 'completed' || run.status === 'failed' || run.activity === 'finished' || run.activity === 'failed')
+    (run.status === 'completed' || run.status === 'failed' || run.state === 'finished' || run.state === 'failed')
 }
 
 export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
@@ -220,10 +225,6 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
-// Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
-const usageLimitPrefix = 'Usage limit reached on '
-
-const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
 
 const reasonOf = (run: RunRecord, fallback: string) => (run.reason ? plainReason(run.reason) : fallback)
 
@@ -291,6 +292,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'swarm-question',
     target: 'swarm',
     background: true,
+    swarm: true,
     holds: (run, ctx) =>
       openSwarmQuestions(run, ctx).length > 0 || (currentIntegrator(run, ctx)?.open_questions ?? 0) > 0,
     resolvers: (run, ctx) => [currentIntegrator(run, ctx)?.accountable_human_id],
@@ -306,6 +308,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'integrator-down',
     target: 'swarm',
     background: true,
+    swarm: true,
     holds: (run, ctx) => {
       const mission = currentIntegrator(run, ctx)
       return mission !== undefined && (Boolean(mission.integrator_launch_error) || isTerminal(run.status))
@@ -334,7 +337,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     state: 'disconnected',
     target: 'terminal',
     background: true,
-    holds: (run) => run.activity === 'disconnected',
+    holds: (run) => run.state === 'disconnected',
     resolvers: (run) => [run.member_id],
     reason: (run) => reasonOf(run, 'Agent disconnected'),
     action: () => terminalAction,
@@ -344,7 +347,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'terminal',
     background: true,
     supervised: true,
-    holds: (run) => run.activity === 'needs-you' && run.reason?.startsWith(blockedPrefix) === true,
+    holds: (run) => run.state === 'needs-you' && run.reason?.startsWith(blockedPrefix) === true,
     resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
     reason: (run) =>
       `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
@@ -354,34 +357,24 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'needs-input',
     target: 'run',
     background: true,
-    holds: (run, ctx) => run.activity === 'needs-you' && !isPaused(run, ctx),
+    holds: (run) => run.state === 'needs-you',
     resolvers: (run) => [run.member_id],
     reason: (run) => reasonOf(run, 'The agent needs you'),
-    action: () => ({ kind: 'reply', label: 'Reply' }),
-  }),
-  condition({
-    id: 'usage-limit',
-    target: 'run',
-    background: true,
-    holds: (run) =>
-      usageLimited(run) && (run.status === 'needs-attention' || (run.status === 'failed' && run.finish_unopened === true)),
-    resolvers: (run) => [run.member_id],
-    reason: (run) => run.reason!,
-    action: () => openAction,
+    // A Background run takes no input.
+    action: (run) => (run.mode === 'headless' ? openAction : { kind: 'reply', label: 'Reply' }),
   }),
   condition({
     id: 'failed',
     state: 'failed',
     target: 'changes',
     background: true,
-    holds: (run) => run.activity === 'failed' || (run.status === 'failed' && awaitingReview(run)),
+    holds: (run) => run.state === 'failed' && run.outcome_unseen === true,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
-    reason: (run) => {
-      if (run.activity !== 'failed') return 'Failed, review the result'
-      if (run.reason && run.reason !== 'agent reported failure') return plainReason(run.reason)
-      return 'Agent reported failure; review the result. Run remains open for follow-up.'
-    },
+    reason: (run) =>
+      run.reason && run.reason !== 'agent reported failure'
+        ? plainReason(run.reason)
+        : 'Agent reported failure; review the result. Run remains open for follow-up.',
   }),
 ]
 
