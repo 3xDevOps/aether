@@ -181,6 +181,22 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 	}
 }
 
+// TestAcceptRefusesAReopenedRun: a run reopened between complete's close and
+// its acceptance stays unaccepted, so complete can close it again.
+func TestAcceptRefusesAReopenedRun(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "reopened before acceptance")
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if _, err := e.sched.setReview(ctx, run.ID, e.member.ID, domain.ReviewAccepted, "", domain.ReviewReady, domain.ReviewLater); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("accept on a running run = %v, want ErrInvalidTransition", err)
+	}
+	if row, err := e.db.GetRun(ctx, run.ID); err != nil || row.Review != "" {
+		t.Fatalf("running run review = %q, %v; want none", row.Review, err)
+	}
+}
+
 // TestFailedRelaunchKeepsTheReview:a relaunch that fails puts the retained
 // row back with the review it had, so a success still awaits its owner.
 func TestFailedRelaunchKeepsTheReview(t *testing.T) {
