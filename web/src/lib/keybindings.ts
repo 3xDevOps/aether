@@ -41,8 +41,8 @@ export const keybindings = [
     keys: '$mod+Shift+Space',
     scope: 'global',
     label: 'Open or close the assistant',
-    // A terminal and an editor keep their keys.
-    when: (event) => !keyboardBusy(event) && !inModal(event.target),
+    // Taken from a terminal and an editor too: neither gives the chord a meaning of its own.
+    when: (event) => !inModal(event.target),
   },
   { id: 'shortcuts', keys: '[Shift]+?', scope: 'global', label: 'Open this reference' },
   { id: 'launch', keys: 'n', scope: 'global', label: 'New run' },

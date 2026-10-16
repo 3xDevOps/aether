@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { MissingRun } from '@/components/missing-run'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
-import { useIsMobile } from '@/lib/breakpoints'
-import { useElementSize, useMediaQuery } from '@/lib/hooks'
+import { minReadableWidth, useIsMobile } from '@/lib/breakpoints'
+import { useElementSize } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { memberName } from '@/lib/member-name'
 import { redirectRoute } from '@/lib/url-state'
@@ -38,7 +38,9 @@ import type { RunRecord } from '@/store/runs'
  * display:none measures zero and would resize the shared PTY. */
 const panel = 'absolute inset-0 outline-none'
 
-const inlineDetails = '(min-width: 1280px)'
+/** The inline inspectors' widths: `w-80` and `w-[28rem]`. */
+const detailsWidth = 320
+const agentWidth = 448
 
 function RunRoute({ params }: RouteProps) {
   const run = useStore((s) => s.runs[params.runId])
@@ -57,7 +59,10 @@ function useVisited(view: RunView) {
 function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'] }) {
   const cap = useCapability()
   const mobile = useIsMobile()
-  const inline = useMediaQuery(inlineDetails)
+  // Measured with the inspectors inside it, so opening one never changes the answer.
+  const [rowRef, row] = useElementSize<HTMLDivElement>()
+  const inline = row.width >= detailsWidth + minReadableWidth
+  const agentInline = row.width >= agentWidth + minReadableWidth
   const navigate = useStore((s) => s.navigate)
   const remembered = useStore((s) => s.runViewMemory[run.id])
   const detailsPreference = useStore((s) => s.detailsOpen)
@@ -95,9 +100,15 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
 
   const agentID = defaultView(run) === 'session' ? params.agent : undefined
   const agentOpener = useRef<HTMLElement | null>(null)
-  const inlineNow = useRef(inline)
-  inlineNow.current = inline
+  const inlineNow = useRef(agentInline)
+  inlineNow.current = agentInline
   const closeAgent = useCallback(() => redirectRoute(useStore, { name: 'run', params: { runId: run.id, view } }), [run.id, view])
+  // An inline inspector squeezed out closes rather than reopening as a modal over whatever took the room.
+  const agentWasInline = useRef(agentInline)
+  useEffect(() => {
+    if (agentWasInline.current && !agentInline && agentID) closeAgent()
+    agentWasInline.current = agentInline
+  }, [agentInline, agentID, closeAgent])
 
   const detailsOpen = inline ? detailsPreference && !agentID : overlayDetails
   const setDetails = useCallback((open: boolean) => {
@@ -194,7 +205,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
 
   return (
     <Tabs value={view} onValueChange={(next) => isRunView(next) && go(next)} asChild>
-    <div className="flex h-full min-w-0">
+    <div ref={rowRef} className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         <RunHeader
           run={run}
@@ -258,7 +269,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           {docked && <BrowserDock available={frame.width}>{browserView}</BrowserDock>}
         </div>
       </div>
-      {inline && agentID && (
+      {agentInline && agentID && (
         <aside aria-label="Subagent" className="flex w-[28rem] shrink-0 flex-col border-l border-seam bg-canvas">
           <SubagentInspector key={agentID} run={run} agentID={agentID} agent={agent} nav={nav} onClose={closeAgent} />
         </aside>
@@ -292,7 +303,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           </DialogContent>
         </Dialog>
       )}
-      {!inline && (
+      {!agentInline && (
         <Dialog open={Boolean(agentID)} onOpenChange={(open) => !open && closeAgent()}>
           <DialogContent
             variant={mobile ? 'bottom' : 'side'}

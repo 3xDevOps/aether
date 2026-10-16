@@ -48,6 +48,8 @@ export function useElementSize<T extends HTMLElement>(): [(node: T | null) => vo
   const [size, setSize] = useState({ width: 0, height: 0 })
   useLayoutEffect(() => {
     if (!node) return
+    // The observer's first report lands after a paint; a layout chosen from the size must not flash.
+    setSize((previous) => (previous.width === node.clientWidth && previous.height === node.clientHeight ? previous : { width: node.clientWidth, height: node.clientHeight }))
     const observer = new ResizeObserver(([entry]) => {
       const width = Math.floor(entry.contentRect.width)
       const height = Math.floor(entry.contentRect.height)

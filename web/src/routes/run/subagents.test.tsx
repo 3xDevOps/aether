@@ -9,7 +9,6 @@ import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
 import { alice, run, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
-import { atViewport } from '@/test/viewport'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof apiModule>()
@@ -34,11 +33,14 @@ function acpSocket(): ScriptedSession {
 }
 
 class SizedObserver {
+  /** What every observed element measures, the run's row included. */
+  static width = 736
   constructor(private readonly callback: ResizeObserverCallback) {}
   observe(target: Element) {
     const height = (target as HTMLElement).style.overflowY ? 4000 : 24
-    const box = [{ blockSize: height, inlineSize: 736 }]
-    this.callback([{ target, contentRect: { height, width: 736 }, borderBoxSize: box, contentBoxSize: box } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+    const width = SizedObserver.width
+    const box = [{ blockSize: height, inlineSize: width }]
+    this.callback([{ target, contentRect: { height, width }, borderBoxSize: box, contentBoxSize: box } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
   }
   unobserve() {}
   disconnect() {}
@@ -53,6 +55,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  SizedObserver.width = 736
   vi.stubGlobal('ResizeObserver', SizedObserver)
   StubSocket.install()
   resetItems()
@@ -291,13 +294,21 @@ describe('subagents in the session view', () => {
   })
 
   it('closes an inline inspector when Details opens', async () => {
-    atViewport(1440, { height: 900 })
+    SizedObserver.width = 1180
     open('a1')
     acpSocket().open({}, transcript())
     expect(await screen.findByRole('complementary', { name: 'Subagent' })).toBeDefined()
     await userEvent.click(screen.getByRole('button', { name: 'Show details' }))
     expect(useStore.getState().route.params.agent).toBeUndefined()
     expect(await screen.findByRole('complementary', { name: 'Run details' })).toBeDefined()
+  })
+
+  it('opens the inspector over the run where inline it would leave the run too narrow to read', async () => {
+    SizedObserver.width = 1000
+    open('a1')
+    acpSocket().open({}, transcript())
+    expect(await screen.findByRole('dialog', { name: 'Subagent' })).toBeDefined()
+    expect(screen.queryByRole('complementary', { name: 'Subagent' })).toBeNull()
   })
 
   it('reads a background Agent as launched in the background, not done', async () => {

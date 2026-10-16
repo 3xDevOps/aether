@@ -16,7 +16,7 @@ import { StateLine } from '@/components/ui/status-dot'
 import type { Tone } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantState } from '@/lib/assistant-types'
-import { useIsMobile } from '@/lib/breakpoints'
+import { minReadableWidth, useIsMobile } from '@/lib/breakpoints'
 import { useDrag } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
@@ -156,10 +156,13 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   const announcement = useAnnouncement()
   const agent = status?.agents.find((item) => item.name === status.agent)?.display_name ?? status?.agent
   const ready = status !== null && status.state !== 'setup' && status.state !== 'needs_restart'
+  const onRun = useStore((s) => s.route.name === 'run')
   return (
     <>
       <PaneHeader
         title="Assistant"
+        level={2}
+        size={onRun ? 'run' : 'view'}
         stateLine={status && (
           <StateLine tone={waiting ? 'needs-you' : stateTone[status.state]} pulse={status.state === 'running' && !waiting}>
             {[agent, waiting ? 'Waiting for you' : stateWord[status.state]].filter(Boolean).join(' · ')}
@@ -199,8 +202,8 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   )
 }
 
-/** What `main` keeps beside the assistant. */
-const minMainWidth = 400
+/** What `main` keeps beside the docked assistant. */
+const minMainWidth = minReadableWidth
 
 function subscribeResize(notify: () => void) {
   window.addEventListener('resize', notify)
@@ -262,11 +265,31 @@ function DesktopAside({ children, room }: { children: React.ReactNode; room: num
   )
 }
 
+/** Over the right of `main` when docking would squeeze it, and without a backdrop, so the run behind stays live. */
+function FloatingAside({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  const width = useStore((s) => clampAssistantWidth(s.assistantWidth))
+  return (
+    <aside
+      id="assistant"
+      aria-label="Assistant"
+      tabIndex={-1}
+      style={{ width }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        event.preventDefault()
+        onClose()
+      }}
+      className="absolute inset-y-0 right-0 z-30 flex max-w-full flex-col border-l border-seam bg-canvas pr-[env(safe-area-inset-right)] shadow-overlay outline-none animate-sheet-right motion-reduce:animate-none"
+    >
+      {children}
+    </aside>
+  )
+}
+
 export function AssistantPanel() {
   const phone = useIsMobile()
   const room = useRoom()
-  // Too narrow for the sidebar, a usable main and the smallest panel: the sheet takes over.
-  const mobile = phone || room < minAssistantWidth
+  const floating = room < minAssistantWidth
   const open = useStore((s) => s.assistantOpen)
   const setOpen = useStore((s) => s.setAssistantOpen)
   const generation = useStore((s) => s.assistantGeneration)
@@ -298,17 +321,17 @@ export function AssistantPanel() {
   useEffect(() => {
     const was = opened.current
     opened.current = shown
-    if (shown && !was && !mobile) (textarea.current ?? document.getElementById('assistant'))?.focus()
-  }, [shown, mobile])
+    if (shown && !was && !phone) (textarea.current ?? document.getElementById('assistant'))?.focus()
+  }, [shown, phone])
 
   const close = () => {
     setOpen(false)
-    if (!mobile) queueMicrotask(() => document.getElementById(assistantTriggerID)?.focus())
+    if (!phone) queueMicrotask(() => document.getElementById(assistantTriggerID)?.focus())
   }
 
   if (!shown) return null
   const content = <Content textarea={textarea} onClose={close} />
-  if (mobile) {
+  if (phone) {
     return (
       <Dialog open onOpenChange={setOpen}>
         <DialogContent
@@ -330,7 +353,6 @@ export function AssistantPanel() {
       </Dialog>
     )
   }
-  return (
-    <DesktopAside room={room}>{content}</DesktopAside>
-  )
+  if (floating) return <FloatingAside onClose={close}>{content}</FloatingAside>
+  return <DesktopAside room={room}>{content}</DesktopAside>
 }

@@ -142,6 +142,19 @@ describe('opening the assistant', () => {
     expect(await panel()).toBeDefined()
   })
 
+  it('closes from the keyboard shortcut while its own composer has focus', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    await userEvent.click(await within(aside).findByRole('textbox', { name: 'Message the assistant' }))
+    await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+  })
+
+  it('titles itself below the page heading', async () => {
+    const aside = await openPanel()
+    expect(within(aside).getByRole('heading', { level: 2, name: 'Assistant' })).toBeDefined()
+  })
+
   it('is absent for a viewer, who cannot launch, on every surface', async () => {
     useStore.setState({ info: { ...serverInfo, member: { ...alice, role: 'viewer' } }, members: { [alice.id]: { ...alice, role: 'viewer' } } })
     render(<AppShell />)
@@ -595,23 +608,37 @@ describe('width', () => {
 
   it('clamps to the room beside the sidebar and re-clamps on resize', async () => {
     useStore.setState({ assistantWidth: 640, sidebarWidth: 260, sidebarCollapsed: false })
-    const resize = atViewport(1400)
+    const resize = atViewport(1500)
     const aside = await openPanel()
     expect(aside.style.width).toBe('640px')
-    resize(1000)
-    await waitFor(() => expect(aside.style.width).toBe('340px'))
+    resize(1200)
+    await waitFor(() => expect(aside.style.width).toBe('380px'))
     expect(useStore.getState().assistantWidth).toBe(640)
-    resize(1400)
+    resize(1500)
     await waitFor(() => expect(aside.style.width).toBe('640px'))
   })
 
-  it('becomes a sheet when even the smallest panel does not fit', async () => {
+  it('floats over main without a backdrop when docking would squeeze it, and closes on Escape', async () => {
     useStore.setState({ assistantWidth: 400, sidebarWidth: 260, sidebarCollapsed: false })
-    atViewport(768)
+    atViewport(1000)
     render(<AppShell />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(await screen.findByRole('dialog', { name: 'Assistant' })).toBeDefined()
+    const button = screen.getByRole('button', { name: 'Assistant' })
+    await userEvent.click(button)
+    const aside = await panel()
+    expect(screen.queryByRole('dialog', { name: 'Assistant' })).toBeNull()
+    expect(aside.style.width).toBe('400px')
+    expect(within(aside).queryByRole('separator', { name: 'Resize assistant' })).toBeNull()
+    expect(document.getElementById('main')?.closest('[inert], [aria-hidden="true"]')).toBeNull()
+
+    useStore.getState().setAssistantDraft('keep this')
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await panel()).toBe(aside)
+    within(aside).getByRole('button', { name: 'Close assistant' }).focus()
+    await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(button))
+    expect(useStore.getState().assistantDraft).toBe('keep this')
   })
 
   it('restores a stored width within its bounds', () => {
