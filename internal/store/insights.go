@@ -153,7 +153,6 @@ const (
 	insightsFinishedIn = insightsFinished + ` AND r.status IN ` + insightsTerminal
 )
 
-// ownerScope filters runs r by owner and workspace.
 func (q InsightsQuery) ownerScope() string {
 	where := "1"
 	if q.Member != "" {
@@ -165,7 +164,6 @@ func (q InsightsQuery) ownerScope() string {
 	return where
 }
 
-// runScope filters runs r to the top-level runs in scope.
 func (q InsightsQuery) runScope() string {
 	return "r.swarm_run = 0 AND " + q.ownerScope()
 }
@@ -179,7 +177,7 @@ func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 		`INSERT INTO run_pull_requests (run_id, workspace_id, repo, number, url, state, created_at, merged_at, checked_at)
 		 SELECT id, workspace_id, ?, ?, ?, ?, ?, ?, ? FROM runs WHERE id = ?
 		 ON CONFLICT (run_id, repo, number) DO UPDATE SET
-		     url = excluded.url, state = excluded.state,
+		     url = excluded.url, state = CASE WHEN state = 'merged' THEN state ELSE excluded.state END,
 		     merged_at = COALESCE(excluded.merged_at, merged_at), checked_at = excluded.checked_at`,
 		pr.Repository, pr.Number, pr.URL, pr.State, at, merged, at, pr.RunID)
 	if err = notFoundOnZeroRows(res, err); err != nil {
@@ -194,7 +192,7 @@ func (d *DB) ObserveRunPullRequest(ctx context.Context, pr *RunPullRequest) erro
 		return fmt.Errorf("store: observe run pull request: %w", err)
 	}
 	if _, err := d.db.ExecContext(ctx,
-		`UPDATE run_pull_requests SET url = ?, state = ?, merged_at = COALESCE(?, merged_at), checked_at = ?
+		`UPDATE run_pull_requests SET url = ?, state = CASE WHEN state = 'merged' THEN state ELSE ? END, merged_at = COALESCE(?, merged_at), checked_at = ?
 		 WHERE run_id = ? AND repo = ? AND number = ?`,
 		pr.URL, pr.State, merged, at, pr.RunID, pr.Repository, pr.Number); err != nil {
 		return fmt.Errorf("store: observe run pull request: %w", err)
@@ -474,7 +472,9 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 // time in running. A session runs from the run leaving queued, or from a
 // relaunch out of a terminal status, to its next terminal status, so a
 // relaunch rolled back before it ran leaves the session before it measured.
-// A run whose record starts mid-session is not measured. Working and waiting
+// A transition out of a status other than the one the session was in, such
+// as a rolled-back relaunch's, drops the session. A run whose record starts
+// mid-session is not measured. Working and waiting
 // are per-run totals; a response is each stretch of needs-attention that
 // ended in running.
 func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
@@ -518,6 +518,8 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		if id != run {
 			flush()
 			run, current, last = id, nil, nil
+		} else if current != nil && from != prevTo {
+			current = nil
 		} else if current != nil {
 			switch prevTo {
 			case domain.RunRunning:
@@ -630,11 +632,12 @@ func insightsSwarms(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 }
 
 // insightsPullRequests counts recorded PRs of every run in scope, swarm
-// runs included: a PR is one outcome however many agents worked on it.
+// runs included: a PR is one outcome however many agents or runs recorded
+// it.
 func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FILTER (WHERE p.created_at >= :from AND p.created_at < :to),
-			COUNT(*) FILTER (WHERE p.state = 'merged' AND p.merged_at >= :from AND p.merged_at < :to)
+		SELECT COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.created_at >= :from AND p.created_at < :to),
+			COUNT(DISTINCT p.repo || '#' || p.number) FILTER (WHERE p.state = 'merged' AND p.merged_at >= :from AND p.merged_at < :to)
 		FROM run_pull_requests p JOIN runs r ON r.id = p.run_id
 		WHERE `+q.ownerScope(), args...,
 	).Scan(&out.PullRequests.Opened, &out.PullRequests.Merged)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 	_ "time/tzdata" // a server without system zoneinfo still buckets in the member's time zone
 
@@ -85,6 +86,14 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		heatmap[i].Date = day.Format(time.DateOnly)
 	}
 
+	earliest := q.Previous.Start
+	if q.Days[0].Start.Before(earliest) {
+		earliest = q.Days[0].Start
+	}
+	if earliest.Before(time.Unix(0, math.MinInt64)) || q.To.After(time.Unix(0, math.MaxInt64)) {
+		return nil, invalidParams(fmt.Sprintf("range with its comparison and heatmap must lie within %s and %s",
+			time.Unix(0, math.MinInt64).UTC().Format(time.RFC3339), time.Unix(0, math.MaxInt64).UTC().Format(time.RFC3339)))
+	}
 	got, err := s.cfg.Store.Insights(ctx, q)
 	if err != nil {
 		return nil, rpcError(err)
@@ -162,7 +171,6 @@ func insightsTotals(c store.InsightsCounts) protocol.InsightsTotals {
 	}
 }
 
-// localDay is the local midnight starting t's date in loc.
 func localDay(t time.Time, loc *time.Location) time.Time {
 	y, m, d := t.In(loc).Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, loc)

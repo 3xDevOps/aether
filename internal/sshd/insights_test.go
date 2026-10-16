@@ -147,6 +147,7 @@ func TestInsightsGet(t *testing.T) {
 	// session before it measured.
 	transition("top1", "merged", "running", "2026-03-07T12:30:00-08:00")
 	transition("top1", "running", "merged", "2026-03-07T12:01:00-08:00")
+	transition("top1", "merged", "merged", "2026-03-07T13:00:00-08:00")
 	// Relaunched after completing: only the last session is measured.
 	transition("top4", "queued", "provisioning", "2026-03-06T11:59:00-08:00")
 	transition("top4", "provisioning", "running", "2026-03-06T12:00:00-08:00")
@@ -313,6 +314,9 @@ func TestInsightsGet(t *testing.T) {
 		"local time zone":   with(func(p *protocol.InsightsParams) { p.TimeZone = "Local" }),
 		"bad scope":         with(func(p *protocol.InsightsParams) { p.Scope = "all" }),
 		"bad from":          with(func(p *protocol.InsightsParams) { p.From = "2026-03-07" }),
+		"unstorable dates": with(func(p *protocol.InsightsParams) {
+			p.From, p.To = "2263-01-01T00:00:00Z", "2263-01-02T00:00:00Z"
+		}),
 	} {
 		if _, bad := get(alice, params); bad == nil || bad.Code != protocol.CodeInvalidParams {
 			t.Errorf("%s: error = %+v, want invalid params", name, bad)
@@ -337,8 +341,18 @@ func TestInsightsGet(t *testing.T) {
 		t.Errorf("previous of a non-aligned range = %+v, %+v; want none", shifted.Previous, perr)
 	}
 
-	// top2 opened a PR that merged after its container was gone.
+	// top2 opened a PR that merged after its container was gone; top3,
+	// publishing the same branch, recorded the same PR, and a stale open
+	// observation of top1's must not undo its merge.
+	// top2 ran on bob's shared agent login in alice's home, so gh there used
+	// alice's GitHub login.
+	exec(`UPDATE runs SET account_member_id = ? WHERE id = 'top2'`, bob)
+	if err := db.ShareAccount(ctx, bob, alice); err != nil {
+		t.Fatal(err)
+	}
 	pr("top2", 4, "open", "2026-03-09T00:00:00-07:00", nil, true)
+	pr("top3", 4, "open", "2026-03-09T09:30:00-07:00", nil, true)
+	pr("top1", 1, "open", "2026-03-09T14:00:00-07:00", nil, false)
 	status := func(runID string) (protocol.RunPRStatusResult, *protocol.Error) {
 		t.Helper()
 		out, statusErr := e.srv.dispatch(ctx, alice, protocol.MethodRunPRStatus, repoParams(t, protocol.RunPRStatusParams{RunID: runID}))
@@ -352,8 +366,8 @@ func TestInsightsGet(t *testing.T) {
 	}
 	lookup := []string{string(alice) + " acme/app#4"}
 	observed, perr := status("top2")
-	if perr != nil || observed.PullRequest == nil || observed.PullRequest.State != "merged" || observed.Identity != "octocat" || !reflect.DeepEqual(gh.lookups, lookup) {
-		t.Errorf("run.pr.status of a finished run = %+v, %+v, lookups %v; want the merge observed with the run account", observed, perr, gh.lookups)
+	if perr != nil || observed.PullRequest == nil || observed.PullRequest.State != "merged" || observed.Identity != "octocat" || observed.AccountMemberID != string(bob) || !reflect.DeepEqual(gh.lookups, lookup) {
+		t.Errorf("run.pr.status of a finished run = %+v, %+v, lookups %v; want the merge observed with the run home's GitHub login", observed, perr, gh.lookups)
 	}
 	again, perr := status("top2")
 	if perr != nil || again.PullRequest.State != "merged" || !reflect.DeepEqual(gh.lookups, lookup) {

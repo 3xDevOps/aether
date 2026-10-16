@@ -58,6 +58,7 @@ type runRepoCall struct {
 	native      *runrepo.Service
 	execution   runrepo.Execution
 	account     domain.MemberID
+	home        domain.MemberID
 	accountName string
 }
 
@@ -116,7 +117,7 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	}
 	execution, executionErr := s.cfg.Services.RunRepo.Execution(ctx, *run)
 	if executionErr != nil {
-		call.account = account
+		call.account, call.home = account, run.HomeMember()
 		return call, executionErr
 	}
 	liveAuthorize := execution.Authorize
@@ -242,7 +243,7 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 	}
 	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
 	if errors.Is(err, scheduler.ErrNoLiveEnvironment) {
-		return s.recordedPRStatus(ctx, call.account, p, err)
+		return s.recordedPRStatus(ctx, call, p, err)
 	}
 	if err != nil {
 		return nil, rpcError(err)
@@ -296,10 +297,11 @@ func (s *Server) recordPR(ctx context.Context, run string, pr *runrepo.PullReque
 
 // recordedPRStatus answers run.pr.status for a run whose container is gone
 // from the pull requests it opened through run.pr.create. Each one last seen
-// open is looked up again with the run account's native gh login, so a merge
-// after the run finished is still recorded. A run with none recorded keeps
-// the error that it has no live environment.
-func (s *Server) recordedPRStatus(ctx context.Context, account domain.MemberID, p protocol.RunPRStatusParams, liveErr error) (any, *protocol.Error) {
+// open is looked up again with the gh login in the home the run's container
+// mounted, the one gh used there, so a merge after the run finished is still
+// recorded. A run with none recorded keeps the error that it has no live
+// environment.
+func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p protocol.RunPRStatusParams, liveErr error) (any, *protocol.Error) {
 	prs, err := s.cfg.Store.RunPullRequests(ctx, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
@@ -309,12 +311,12 @@ func (s *Server) recordedPRStatus(ctx context.Context, account domain.MemberID, 
 	if len(prs) == 0 {
 		return nil, rpcError(liveErr)
 	}
-	result := protocol.RunPRStatusResult{AccountMemberID: string(account)}
+	result := protocol.RunPRStatusResult{AccountMemberID: string(call.account)}
 	for _, pr := range prs {
 		if pr.State != "open" || s.cfg.Services.GitHub == nil {
 			continue
 		}
-		identity, observed, lookupErr := s.cfg.Services.GitHub.PullRequest(ctx, account, pr.Repository, pr.Number)
+		identity, observed, lookupErr := s.cfg.Services.GitHub.PullRequest(ctx, call.home, pr.Repository, pr.Number)
 		if lookupErr != nil {
 			result.Error = repoError(lookupErr)
 			continue

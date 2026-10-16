@@ -28,7 +28,9 @@ Authorization: Bearer <local-gateway-token>
 | `time_zone` | IANA name, such as `Europe/Berlin`, that days are counted in, DST included. `""` is UTC; `Local` and unknown names are rejected. The server binary carries its own zone database, so a host without system tzdata resolves every name. |
 
 A bad param is error `-32602` with the reason, for example
-`range spans 401 days; the limit is 400`.
+`range spans 401 days; the limit is 400`. The range, its comparison period
+and the heatmap must fall between 1677 and 2262, the times the database can
+store.
 
 The [local gateway](local-gateway.md#post-apiv1method) lists the result
 shape. The rest of this guide says what each number means.
@@ -97,7 +99,8 @@ floor.
 ## Pull requests
 
 `pull_requests.opened` counts pull requests opened through `run.pr.create`
-in the range. `merged` counts those whose last observed state is merged and
+in the range, each repository and number once however many runs recorded
+it. `merged` counts those whose last observed state is merged and
 whose GitHub merge time is in the range. A pull request an agent opened
 with `gh` directly is not counted.
 
@@ -106,9 +109,10 @@ it does not poll GitHub, and `insights.get` never calls it. While the run's
 container is up, the call runs `gh` in it, as before. After the container
 is gone, `run.pr.status {"run_id":"<run-id>"}` answers from the recorded
 pull requests instead: each one last seen open is read again from
-`GET /repos/<owner>/<name>/pulls/<number>` with the run account's own `gh`
-login (`~/.config/gh/hosts.yml` in that member's home), and the new state is
-recorded. `target.repository` narrows it to one repository; `expected` is
+`GET /repos/<owner>/<name>/pulls/<number>` with the `gh` login the
+container used (`~/.config/gh/hosts.yml` in the home it mounted, which is
+the launching member's even on a shared agent login), and the new state is
+recorded. A recorded merge is never set back to open. `target.repository` narrows it to one repository; `expected` is
 not checked. A run with nothing recorded still fails with `-32002` because
 it has no live environment. The dashboard's publish dialog calls
 `run.pr.status` only for a live run, so a pull request merged after its run
