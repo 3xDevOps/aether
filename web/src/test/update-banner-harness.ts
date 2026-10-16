@@ -37,6 +37,7 @@ export function seed(
     serverUpdateProgress: null,
     members: { [alice.id]: alice, [bob.id]: bob },
     hydrated: true,
+    connection: 'live',
     gatewayRestarting: false,
     serverUpdateError: null,
     serverUpdateProgressAt: 0,

@@ -135,10 +135,13 @@ test('a server that refuses this client gates the dashboard until it updates', a
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
 
+  // Flipped once update.apply answers: from then on this client runs the
+  // server's release, so the server accepts it and update.check says so.
+  let upgraded = false
   const refusal = 'this aether is v0.7.0 and the server runs v0.8.0; update this client first: run `aether update`, then retry'
   const refuse = (route: Route) => {
     const method = new URL(route.request().url()).pathname.split('/').pop()
-    if (method === 'server.info' || method === 'capabilities' || method === 'server.update_status') {
+    if (upgraded || method === 'server.info' || method === 'capabilities' || method === 'server.update_status') {
       return route.fallback()
     }
     return json(route, {
@@ -150,7 +153,11 @@ test('a server that refuses this client gates the dashboard until it updates', a
     }, 426)
   }
   await page.route('**/api/v1/**', refuse)
-  await routeUpdateCheck(page, () => clientStatus('v0.8.0'))
+  const checks = await routeUpdateCheck(page, () =>
+    upgraded
+      ? clientStatus('v0.8.0', { version: 'v0.8.0' }, { target_version: 'v0.8.0' })
+      : clientStatus('v0.8.0', {}, { client_update_required: true, min_client_version: 'v0.8.0', target_version: 'v0.8.0' }),
+  )
   await routeServerStatus(page, serverCurrent)
 
   let release: () => void = () => {}
@@ -158,14 +165,16 @@ test('a server that refuses this client gates the dashboard until it updates', a
   const installed: UpdateApplyResult = { updated: ['/x/aether'], version: 'v0.8.0', restarting: false, rebuilding: false }
   await page.route('**/local/v1/update.apply', async (route) => {
     await held
+    upgraded = true
     await json(route, installed)
   })
 
+  await page.clock.install()
   await page.goto(alice.url)
 
-  const gate = page.getByRole('alert', { name: 'Update Aether to keep using this server' })
-  await expect(gate.getByRole('heading', { name: 'Update Aether to keep using this server' })).toBeVisible()
-  await expect(gate).toContainText(`The server said: ${refusal}`)
+  const gate = page.getByRole('region', { name: 'Update Aether to keep using this server' })
+  await expect(gate.getByRole('heading', { name: 'Update Aether to keep using this server' })).toBeFocused()
+  await expect(gate).toContainText(`The server said: ${refusal}. It accepts clients from v0.8.0.`)
   await expect(gate.getByText('aether update', { exact: true })).toBeVisible()
   await expect(gate.getByRole('button', { name: 'Copy details' })).toBeVisible()
   await expect(gate.getByRole('button', { name: 'Reload' })).toBeVisible()
@@ -175,8 +184,12 @@ test('a server that refuses this client gates the dashboard until it updates', a
   release()
   await expect(gate.getByText('Aether v0.8.0 is installed.')).toBeVisible()
 
-  await page.unroute('**/api/v1/**', refuse)
-  await gate.getByRole('button', { name: 'Reload' }).first().click()
+  // The next check after a minute finds the client accepted, which ends
+  // the gate with one reload.
+  const before = checks.length
+  await page.clock.fastForward('01:01')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => checks.length).toBeGreaterThan(before)
   await expect(footer(page)).toHaveAccessibleName(/, Live$/)
   await expect(page.getByRole('heading', { name: 'Update Aether to keep using this server' })).toHaveCount(0)
 })

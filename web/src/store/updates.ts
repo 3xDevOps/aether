@@ -14,7 +14,8 @@ export type UpdateTarget =
   | { state: 'unknown' }
   | { state: 'up_to_date'; version: string; checkedAt?: string }
   | { state: 'checking'; version?: string }
-  | { state: 'check_failed'; error: string; checkedAt?: string; version?: string }
+  // `unread`: the status read itself failed, not the release check behind it.
+  | { state: 'check_failed'; error: string; checkedAt?: string; version?: string; unread?: boolean }
   | { state: 'available'; version: string; latest: string; notesUrl?: string }
   | ({ state: 'required' } & UpgradeRequired)
   | { state: 'scheduled'; latest: string; by: string }
@@ -28,10 +29,12 @@ export type ClientApply =
   | { name: 'idle' }
   | { name: 'applying' }
   | { name: 'done'; result: UpdateApplyResult }
-  | { name: 'failed'; detail: string }
+  // `version` is the release the click was for; a check naming another
+  // one starts over.
+  | { name: 'failed'; detail: string; version: string }
   // The member closed the administrator dialog, or macOS refused the
   // password: nothing was downloaded into place.
-  | { name: 'cancelled'; detail: string }
+  | { name: 'cancelled'; detail: string; version: string }
   // The click's fresh check found this machine already on the newest
   // release; the version it was made about.
   | { name: 'current'; version: string }
@@ -66,16 +69,27 @@ export const createUpdatesSlice: SliceCreator<UpdatesSlice> = (set) => ({
   setNotifiedUpdate: (notifiedUpdate) => set({ notifiedUpdate }),
 })
 
+function gatedBy(s: Pick<RootState, 'updateRequired'>, update: UpdateStatus | null): boolean {
+  return s.updateRequired !== null || update?.client_update_required === true
+}
+
+/** The release update.apply would install: a gated gateway names the server's. */
+function installTarget(update: UpdateStatus | null, gated: boolean): string {
+  return (gated && update?.target_version) || update?.cli.latest || ''
+}
+
 type Store = {
   getState: () => RootState
   setState: (partial: Partial<RootState>) => void
 }
 
-// Only the newest client check writes, so a click supersedes reads in
+// Only the newest read of each kind writes, so a click supersedes reads in
 // flight; `pending` counts because reads overlap.
-const reads = new WeakMap<Store, { issued: number; pending: number }>()
+type Reads = WeakMap<Store, { issued: number; pending: number }>
+const clientReads: Reads = new WeakMap()
+const statusReads: Reads = new WeakMap()
 
-function counter(store: Store) {
+function counter(reads: Reads, store: Store) {
   let c = reads.get(store)
   if (!c) {
     c = { issued: 0, pending: 0 }
@@ -85,12 +99,16 @@ function counter(store: Store) {
 }
 
 export function clientCheckPending(store: Store): boolean {
-  return counter(store).pending > 0
+  return counter(clientReads, store).pending > 0
+}
+
+export function serverStatusPending(store: Store): boolean {
+  return counter(statusReads, store).pending > 0
 }
 
 /** update.check; `refresh` skips the gateway's cached answer. */
 export async function checkClient(store: Store, client: Api, refresh = false): Promise<UpdateStatus> {
-  const c = counter(store)
+  const c = counter(clientReads, store)
   const id = ++c.issued
   c.pending += 1
   if (refresh) store.setState({ clientChecking: true })
@@ -99,8 +117,15 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
     if (id === c.issued) {
       // A failed lookup keeps the last release it found; the server half is fresh.
       const previous = store.getState().update
-      store.getState().setUpdate(status.cli_error && previous ? { ...status, cli: previous.cli } : status)
+      const next = status.cli_error && previous ? { ...status, cli: previous.cli } : status
+      store.getState().setUpdate(next)
       store.setState({ clientCheckError: status.cli_error || null })
+      const s = store.getState()
+      const apply = s.clientApply
+      const target = installTarget(next, gatedBy(s, next))
+      if ((apply.name === 'failed' || apply.name === 'cancelled') && target && target !== apply.version) {
+        store.setState({ clientApply: { name: 'idle' } })
+      }
     }
     return status
   } catch (err) {
@@ -113,13 +138,18 @@ export async function checkClient(store: Store, client: Api, refresh = false): P
 }
 
 export async function readServerStatus(store: Store, client: Api, refresh = false): Promise<void> {
+  const c = counter(statusReads, store)
+  const id = ++c.issued
+  c.pending += 1
   if (refresh) store.setState({ serverChecking: true })
   try {
-    store.getState().setServerUpdate(await client.serverUpdateStatus(refresh))
+    const status = await client.serverUpdateStatus(refresh)
+    if (id === c.issued) store.getState().setServerUpdate(status)
   } catch (err) {
-    store.getState().setServerUpdateFailed(message(err))
+    if (id === c.issued) store.getState().setServerUpdateFailed(message(err))
   } finally {
-    if (refresh) store.setState({ serverChecking: false })
+    c.pending -= 1
+    if (id === c.issued && store.getState().serverChecking) store.setState({ serverChecking: false })
   }
 }
 
@@ -142,15 +172,32 @@ export async function checkForUpdates(
 export async function applyClientUpdate(store: Store, client: Api): Promise<void> {
   store.setState({ clientApply: { name: 'applying' }, clientBuild: null })
   let result: UpdateApplyResult
+  let version = ''
   try {
     const fresh = await checkClient(store, client, true)
+    const required = store.getState().updateRequired
+    const gated = gatedBy(store.getState(), fresh)
+    version = installTarget(fresh, gated)
     if (fresh.cli_error) {
-      store.setState({ clientApply: { name: 'failed', detail: fresh.cli_error } })
+      store.setState({ clientApply: { name: 'failed', detail: fresh.cli_error, version } })
       return
     }
-    // A gated client applies regardless: the server, not the release list,
-    // is what says it is behind.
-    if (!fresh.cli.update_available && !store.getState().updateRequired && !fresh.client_update_required) {
+    // A gated gateway installs the server's release, not the latest, and
+    // says which in target_version; an older gateway omits the field.
+    if (gated) {
+      if (fresh.target_version === '') {
+        const serverVersion = fresh.server_version || required?.server_version || ''
+        const minimum = fresh.min_client_version || required?.min_client_version || serverVersion
+        store.setState({
+          clientApply: {
+            name: 'failed',
+            version,
+            detail: `update.check: no published release matches the server: it runs ${serverVersion} and accepts clients from ${minimum}, and target_version is empty`,
+          },
+        })
+        return
+      }
+    } else if (!fresh.cli.update_available) {
       store.setState({ clientApply: { name: 'current', version: fresh.cli.version } })
       return
     }
@@ -166,7 +213,9 @@ export async function applyClientUpdate(store: Store, client: Api): Promise<void
     const detail = message(err)
     store.setState({
       clientApply:
-        err instanceof ApiError && err.status === 403 ? { name: 'cancelled', detail } : { name: 'failed', detail },
+        err instanceof ApiError && err.status === 403
+          ? { name: 'cancelled', detail, version }
+          : { name: 'failed', detail, version },
     })
     return
   } finally {
@@ -193,7 +242,7 @@ export function manualCommand(update: UpdateStatus | null, required?: UpgradeReq
 export function clientTarget(s: RootState): UpdateTarget {
   const update = s.update
   const apply = s.clientApply
-  const latest = (apply.name === 'done' && apply.result.version) || update?.cli.latest || ''
+  const latest = (apply.name === 'done' && apply.result.version) || installTarget(update, gatedBy(s, update))
   if (apply.name === 'applying') return { state: 'applying', latest }
   if (apply.name === 'failed') return { state: 'failed', latest, error: apply.detail }
   if (apply.name === 'done') {
@@ -263,15 +312,21 @@ export function serverTarget(s: RootState, now: number): UpdateTarget {
     case 'rolled_back':
       return { state: 'rolled_back', latest: target, error: progress.detail || lastError(s) }
   }
-  if (status?.pending) return { state: 'scheduled', latest: status.pending.version, by: status.pending.requested_by }
-  if (isBehind && status?.phase === 'failed') return { state: 'failed', latest: target, error: status.error ?? '' }
-  if (isBehind && status?.phase === 'rolled_back') return { state: 'rolled_back', latest: target, error: status.error ?? '' }
+  // A cancel's own answer outranks the snapshot read before it.
+  if (status?.pending && progress?.phase !== 'cancelled') {
+    return { state: 'scheduled', latest: status.pending.version, by: status.pending.requested_by }
+  }
+  if (isBehind && status?.phase === 'failed') return { state: 'failed', latest: target, error: lastError(s) }
+  if (isBehind && status?.phase === 'rolled_back') return { state: 'rolled_back', latest: target, error: lastError(s) }
   if (s.serverChecking) return { state: 'checking', version: running }
   if (isBehind && latest) return { state: 'available', version: running, latest, notesUrl: status?.notes_url }
+  if (s.serverUpdateError) {
+    return { state: 'check_failed', error: s.serverUpdateError, checkedAt: status?.checked_at, version: running, unread: true }
+  }
   if (status?.check_error) {
     return { state: 'check_failed', error: status.check_error, checkedAt: status.checked_at, version: running }
   }
-  if (!status && s.serverUpdateError) return { state: 'check_failed', error: s.serverUpdateError, version: running }
-  if (status) return { state: 'up_to_date', version: running, checkedAt: status.checked_at }
+  // Only a release check that answered can say there is nothing newer.
+  if (status && (status.latest_version || status.latest)) return { state: 'up_to_date', version: running, checkedAt: status.checked_at }
   return { state: 'unknown' }
 }

@@ -96,9 +96,11 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const setOpen = useStore((s) => s.setUpdatesOpen)
   const check = useCheckForUpdates(client)
   const { server, client: cli } = useUpdateTargets()
+  const cliVersion = useStore((s) => s.capabilities?.version)
   const packaged = serves ? update?.cli.packaged : undefined
   const packagedLatest = packaged && update?.cli.update_available ? update.cli.latest : undefined
-  const line = summary(server, packaged ? { state: 'unknown' } : cli)
+  // A stale desktop app is out of date too, whatever the two release checks say.
+  const line = serves && shellIsStale(cliVersion) ? '' : summary(server, packaged ? { state: 'unknown' } : cli)
   const checking = server.state === 'checking' || cli.state === 'checking'
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -186,6 +188,9 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
     return { text: isAdmin ? text : `${text}, ask an admin`, action: true }
   }
   // A packaged CLI's notice is its app's own, outside the dashboard.
+  if (serves && !update?.cli.packaged && client.state === 'failed') {
+    return { text: `Update to Aether ${bareVersion(client.latest)} failed`, action: true }
+  }
   if (serves && !update?.cli.packaged && client.state === 'available' && dismissed.cli !== client.latest) {
     return { text: `Aether ${bareVersion(client.latest)} is available`, action: true }
   }
@@ -312,6 +317,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const statusError = useStore((s) => s.serverUpdateError)
   const running = useStore((s) => s.serverUpdate?.server_version || s.info?.server_version || s.update?.server_version || '')
   const applyProgress = useStore((s) => s.applyServerUpdate)
+  const clearSettled = useStore((s) => s.clearSettledServerUpdate)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const runs = useStore((s) => s.runs)
@@ -342,7 +348,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
     return (
       <StatusRow
         Icon={CircleAlert}
-        headline={status ? 'The server could not check for a new release.' : "Could not read the server's update status."}
+        headline={target.unread ? "Could not read the server's update status." : 'The server could not check for a new release.'}
         detail={at ? `Last check ${at}.` : undefined}
         error={target.error}
       />
@@ -384,6 +390,7 @@ function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const act = async (when: ServerUpdateWhen) => {
     setError(null)
     setBusy(true)
+    if (when !== 'cancel') clearSettled()
     try {
       const result = await client.serverUpdate(when)
       // The feed reaches workspace timelines only, so a server with no workspaces sends nothing else.

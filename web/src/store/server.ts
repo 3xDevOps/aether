@@ -94,6 +94,17 @@ function stalePhase(
 }
 
 /**
+ * Whether a frame arrives after its own update settled. The server.update
+ * result can land after the failed or rolled_back that attempt already
+ * published; a new attempt starts at scheduled or preflight, and a click
+ * clears the settled progress before it asks.
+ */
+function settledAlready(current: ServerUpdatePayload | null, next: ServerUpdatePayload): boolean {
+  if (!current || phaseOrder[current.phase] !== 0 || current.version !== next.version) return false
+  return next.phase === 'applying' || next.phase === 'restarting' || next.phase === 'verifying'
+}
+
+/**
  * The status is re-read on every reconnect, which is how an update ends. A
  * server that records phases is the authority on its own update; an older
  * one has finished once it runs the version the phases were about.
@@ -181,6 +192,8 @@ export interface ServerSlice {
   setServerUpdateFailed: (detail: string) => void
   /** Applies one update phase, from an event or from an RPC result. */
   applyServerUpdate: (payload: ServerUpdatePayload) => void
+  /** Forgets a settled update before a new attempt is asked for. */
+  clearSettledServerUpdate: () => void
   resetConnection: () => void
   reconnect: () => void
 }
@@ -240,13 +253,19 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     setServerUpdateFailed: (serverUpdateError) => set({ serverUpdateError }),
     applyServerUpdate: (payload) =>
       set((s) =>
-        stalePhase(s.serverUpdateProgress, payload)
+        stalePhase(s.serverUpdateProgress, payload) || settledAlready(s.serverUpdateProgress, payload)
           ? {}
           : {
               serverUpdateProgress: payload,
               serverUpdateProgressAt:
                 s.serverUpdateProgress?.phase === payload.phase ? s.serverUpdateProgressAt : Date.now(),
             },
+      ),
+    clearSettledServerUpdate: () =>
+      set((s) =>
+        s.serverUpdateProgress && phaseOrder[s.serverUpdateProgress.phase] === 0
+          ? { serverUpdateProgress: null, serverUpdateProgressAt: 0 }
+          : {},
       ),
     resetConnection,
     reconnect: () => {

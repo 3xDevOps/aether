@@ -5285,25 +5285,33 @@ that runs a newer release than a client refuses that client
   - on mount;
   - on a timer of 30 minutes ±10%, so dashboards opened together do not
     check together;
-  - on window `focus` and `visibilitychange`.
+  - on window `focus` and `visibilitychange`, at most once a minute.
 
   `server.update_status` is read again after every reconnect, and whenever
-  `server.info` names a different version. Nothing is read while the window
-  is hidden, except in a desktop shell that can notify: there the reads run
-  in the background too.
+  `server.info` names a different version. A reconnect that finds an update
+  in flight (`preflight`, `applying`, `restarting`, `verifying`) re-reads
+  the status every 3 seconds, up to 20 times, so a server that came back
+  verifying is seen to reach `applied` instead of timing out. The timer and
+  focus reads skip the status while the stream is not live, or while a
+  status read is already out. Nothing is read while the window is hidden,
+  except in a desktop shell that can notify: there the reads run in the
+  background too.
 
   The CLI and shell rows come from `update.check`, because the dashboard can
   update only the machine running `aether gui`. The server row comes from
   the server's own background release check. Any member may read the
   server's status.
 
-  Reads are numbered, and only the newest one's answer is written, so a
-  click supersedes reads already out. The periodic read stands down while
+  Reads of each kind are numbered, and only the newest one's answer is
+  written, so a click supersedes reads already out and an older status
+  cannot overwrite a newer one. The periodic read stands down while
   an install runs, so it cannot rename the release the row names.
 
   A failed read is recorded, not swallowed. The last good answer stays on
   the store, so an offer already on screen does not vanish. The error shows
-  wherever the target has nothing better to say. When the gateway's release
+  wherever the target has nothing better to say, even over an older status.
+  The server counts as up to date only when its status names a latest
+  release. When the gateway's release
   lookup fails, `update.check` answers with `cli_error`; that is a failed
   check too.
 - **Check for updates.** **Check for updates…** is always in the sidebar
@@ -5317,7 +5325,7 @@ that runs a newer release than a client refuses that client
   The server runs its release check there and then, and the gateway skips
   its cache. The check always answers. With nothing to update, the dialog
   says *You're up to date (vX). Checked HH:MM.*, and each row says the same
-  for its target. A check that failed shows the error verbatim:
+  for its target; an out-of-date desktop app withholds that line. A check that failed shows the error verbatim:
   - *Could not check for a new Aether release.*
   - *The server could not check for a new release.*
   - *Could not read the server's update status.* when the status read
@@ -5332,7 +5340,7 @@ that runs a newer release than a client refuses that client
      rolled back*;
   3. *Server X is available* (members: *Server X is available, ask an
      admin*);
-  4. *Aether X is available*;
+  4. *Update to Aether X failed* or *Aether X is available*;
   5. *The desktop app is out of date*.
 - **The dialog lists the server first.**
   - **Admins** get the server's version, the latest release and the
@@ -5371,6 +5379,12 @@ that runs a newer release than a client refuses that client
   - *failed*: the server's error verbatim, then the manual commands;
   - *rolled_back*: *The server update was rolled back; it runs Y again.*,
     with the error.
+
+  Once one update is `applied`, `failed` or `rolled_back`, a late
+  `applying`, `restarting` or `verifying` frame for the same version is
+  ignored; **Update now** and **Update when idle** clear the settled phase
+  before they ask. A **Cancel** result ends a schedule at once, ahead of
+  the status read before it that still lists `pending`.
 
   `server.update_status` carries the same `phase`, `error`, `from_version`
   and `to_version`. A status still in flight seeds the progress after a
@@ -5417,8 +5431,10 @@ that runs a newer release than a client refuses that client
   - a rebuild still running, or its real error with `aether gui build`.
 
   A `403` answer means the macOS dialog was cancelled or the password
-  refused: *Update cancelled, nothing was changed.*, muted, and the button
-  comes back. Any other refusal is rendered verbatim.
+  refused: *Update cancelled, nothing was changed.*, muted, with the
+  gateway's words, and the button comes back. Any other refusal is
+  rendered verbatim. A failure or cancel is about one release: a later
+  check that names another one clears it and offers the new release.
 
   When the gateway reports the CLI as `packaged` (the Android app), the
   client row and its notice are gone. The dialog says *Updates come from
@@ -5439,16 +5455,34 @@ that runs a newer release than a client refuses that client
   The hydration retry and the event stream stop for good, since every
   retry would be refused the same way.
 
-  The gate cannot be dismissed. It shows the server's version, the
-  `min_client_version` it accepts, this client's version and the server's
-  own message. **Update now** runs `applyClientUpdate` with progress,
-  shows the real error on failure, and offers the manual command (`aether
-  update`, or `sudo aether update` for a *manual* install). What follows a
-  finished update depends on the gateway:
+  The gate cannot be dismissed. It is a region labelled by its heading,
+  which takes focus when the gate appears. It shows the server's own
+  message once, which names both versions, and the `min_client_version`
+  the server accepts. **Update now** runs `applyClientUpdate`. While gated,
+  `update.apply` installs the server's release, named by `update.check`'s
+  `target_version`, not the latest one. An empty `target_version` means no
+  published release matches the server; the click then installs nothing
+  and shows that error. Progress, the real error and a cancelled
+  administrator prompt share one status live region. The manual command
+  (`aether update`, or `sudo aether update` for a *manual* install) is
+  followed by what makes it take effect: *Then restart `aether gui` and
+  reload this page.*, or in the desktop shell *Then quit and reopen the
+  desktop app.*, because the running gateway keeps the binary it started
+  with. A *packaged* client (the Android app) gets neither button nor
+  command, only *Updates come from the Android app: install its new
+  version to update Aether.* What follows a finished update depends on
+  the gateway:
   - under the desktop shell, the gateway relaunches and the page comes
     back on the new version;
   - in a browser tab, the gate says *Aether X is installed.*, says to
     restart `aether gui`, and offers **Reload**.
+
+  A later `update.check` that reached the server (`server_version` set, no
+  `server_error`) and reports `client_update_required: false` ends the
+  gate with one reload, since the stopped stream restarts only on a
+  reload. It reloads once per client version per tab session
+  (`aether.update-gate-reloaded` in `sessionStorage`), so a server that
+  keeps refusing leaves the gate up rather than looping.
 
   The way out is always there:
   - **Copy details** copies the versions, the message, the manual command

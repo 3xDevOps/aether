@@ -3,8 +3,10 @@ import { ApiError, onUpgradeRequired, upgradeRequired } from '@/lib/api'
 import { createRootStore } from '@/store'
 import {
   applyClientUpdate,
+  checkClient,
   checkForUpdates,
   clientTarget,
+  readServerStatus,
   SERVER_UPDATE_TIMEOUT_MS,
   serverTarget,
 } from '@/store/updates'
@@ -144,6 +146,35 @@ describe('serverTarget', () => {
     })
   })
 
+  it('keeps a settled update when its own late result lands, and lets a cancel end a schedule', () => {
+    const s = store()
+    s.getState().setServerUpdate(serverUpdateStatus({ update_available: true }))
+    s.getState().applyServerUpdate({ phase: 'preflight', version: 'v1.3.0' })
+    s.getState().applyServerUpdate({ phase: 'failed', version: 'v1.3.0', detail: 'preflight: aether-darwin-arm64 is not published' })
+    s.getState().applyServerUpdate({ phase: 'applying', version: 'v1.3.0' })
+    expect(serverTarget(s.getState(), Date.now())).toMatchObject({ state: 'failed', error: 'preflight: aether-darwin-arm64 is not published' })
+
+    s.getState().setServerUpdate(
+      serverUpdateStatus({ update_available: true, pending: { version: 'v1.3.0', requested_by: 'mem_1', requested_at: '2026-08-14T10:00:00Z' } }),
+    )
+    s.getState().applyServerUpdate({ phase: 'cancelled' })
+    expect(serverTarget(s.getState(), Date.now())).toMatchObject({ state: 'available', latest: 'v1.3.0' })
+  })
+
+  it('says up to date only after a release check, and shows a failed read over an older answer', () => {
+    const s = store()
+    s.getState().setServerUpdate(serverUpdateStatus({ latest: undefined, update_available: false }))
+    expect(serverTarget(s.getState(), Date.now())).toEqual({ state: 'unknown' })
+
+    s.getState().setServerUpdate(serverUpdateStatus({ latest: 'v1.2.3', update_available: false }))
+    s.getState().setServerUpdateFailed('server.update_status: server unreachable: connection refused')
+    expect(serverTarget(s.getState(), Date.now())).toMatchObject({
+      state: 'check_failed',
+      error: 'server.update_status: server unreachable: connection refused',
+      unread: true,
+    })
+  })
+
   it('reads a status in flight as progress the timeout can end', () => {
     const s = store()
     s.getState().setServerUpdate(serverUpdateStatus({ update_available: true, phase: 'verifying', to_version: 'v1.3.0' }))
@@ -188,10 +219,14 @@ describe('checkClient', () => {
 })
 
 describe('applyClientUpdate', () => {
-  it('applies on a gated client even when the release list has nothing newer', async () => {
+  it("installs the server's release on a gated client even when the release list has nothing newer", async () => {
     const s = store()
     s.getState().setUpdateRequired(upgradeRequired(refusal()))
-    const current = updateStatus({ cli: { ...updateStatus().cli, update_available: false } })
+    const current = updateStatus({
+      cli: { ...updateStatus().cli, latest: 'v1.2.3', update_available: false },
+      client_update_required: true,
+      target_version: 'v1.3.0',
+    })
     const client = fakeApi({
       localUpdateCheck: vi.fn(async () => current),
       localUpdateApply: vi.fn(async () => ({ updated: ['/usr/local/bin/aether'], version: 'v1.3.0', restarting: false, rebuilding: false })),
@@ -199,6 +234,41 @@ describe('applyClientUpdate', () => {
     await applyClientUpdate(s, client)
     expect(client.localUpdateApply).toHaveBeenCalled()
     expect(clientTarget(s.getState())).toEqual({ state: 'ready_to_restart', latest: 'v1.3.0' })
+  })
+
+  it('says no release matches a gated client instead of installing the wrong one', async () => {
+    const s = store()
+    s.getState().setUpdateRequired(upgradeRequired(refusal()))
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ client_update_required: true, min_client_version: 'v1.3.0', target_version: '' })),
+    })
+    await applyClientUpdate(s, client)
+    expect(client.localUpdateApply).not.toHaveBeenCalled()
+    expect(clientTarget(s.getState())).toMatchObject({
+      state: 'failed',
+      error:
+        'update.check: no published release matches the server: it runs v1.3.0 and accepts clients from v1.3.0, and target_version is empty',
+    })
+  })
+
+  it('starts over when a later check names another release than the one that failed', async () => {
+    const s = store()
+    const client = fakeApi({
+      localUpdateApply: vi.fn(async () => {
+        throw new ApiError(500, 'update.apply: aether-linux-amd64: sha256 mismatch')
+      }),
+    })
+    await applyClientUpdate(s, client)
+    expect(clientTarget(s.getState()).state).toBe('failed')
+
+    vi.mocked(client.localUpdateCheck).mockResolvedValue(updateStatus())
+    await checkClient(s, client)
+    expect(clientTarget(s.getState()).state).toBe('failed')
+
+    const next = updateStatus({ cli: { ...updateStatus().cli, latest: 'v1.3.1' } })
+    vi.mocked(client.localUpdateCheck).mockResolvedValue(next)
+    await checkClient(s, client)
+    expect(clientTarget(s.getState())).toMatchObject({ state: 'available', latest: 'v1.3.1' })
   })
 
   it('keeps the real error', async () => {
@@ -213,5 +283,24 @@ describe('applyClientUpdate', () => {
       state: 'failed',
       error: 'update.apply: aether-release.json: no signed manifest for v1.3.0; the tag predates signed releases',
     })
+  })
+})
+
+describe('readServerStatus', () => {
+  it('writes only the newest answer', async () => {
+    const s = store()
+    let answerOld: (status: ReturnType<typeof serverUpdateStatus>) => void = () => {}
+    const client = fakeApi({
+      serverUpdateStatus: vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => (answerOld = resolve)))
+        .mockResolvedValueOnce(serverUpdateStatus({ update_available: true, phase: 'applied' })),
+    })
+    const older = readServerStatus(s, client)
+    await readServerStatus(s, client, true)
+    answerOld(serverUpdateStatus({ update_available: true, phase: 'verifying', to_version: 'v1.3.0' }))
+    await older
+    expect(s.getState().serverUpdate?.phase).toBe('applied')
+    expect(s.getState().serverChecking).toBe(false)
   })
 })

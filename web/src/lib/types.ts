@@ -1730,6 +1730,11 @@ export interface UpdateStatus {
    * gateways; false when the server did not answer. */
   client_update_required?: boolean
   min_client_version?: string
+  /** The release update.apply would install: the server's own release
+   * while client_update_required, otherwise the latest. Empty while gated
+   * means no installable release matches the server; absent on older
+   * gateways. */
+  target_version?: string
   /** The release lookup failed, verbatim. `cli` then carries only what the
    * binary knows about itself: no latest, no asset. */
   cli_error?: string

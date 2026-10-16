@@ -1,8 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { CopyableCommand } from '@/components/copyable-command'
 import { ArrowUpCircle, CircleAlert, LoaderCircle } from '@/components/icons'
+import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
+import { packagedLine } from '@/components/update-banner'
 import { verbatim } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
@@ -32,8 +34,11 @@ export function UpdateGate({ client = api }: { client?: Api }) {
   const build = useStore((s) => s.clientBuild)
   const link = useStore((s) => s.linkStatus)
   const target = useStore(useShallow(clientTarget))
+  const cancelled = useStore((s) => (s.clientApply.name === 'cancelled' ? s.clientApply.detail : ''))
   const [switchError, setSwitchError] = useState<string | null>(null)
   const detailsRef = useRef<HTMLPreElement>(null)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => headingRef.current?.focus(), [])
 
   const clientVersion = required?.client_version || update?.cli.version || ''
   const serverVersion = required?.server_version || update?.server_version || ''
@@ -41,9 +46,22 @@ export function UpdateGate({ client = api }: { client?: Api }) {
   const reason =
     required?.message ||
     `this aether is ${clientVersion} and the server runs ${serverVersion}; update this client first, then retry`
+  const packaged = update?.cli.packaged
   const command = manualCommand(update, required)
   const canApply =
-    caps.hasLocal('update.apply') && update?.cli.can_self_update !== false && update?.install_method !== 'manual'
+    !packaged &&
+    caps.hasLocal('update.apply') &&
+    update?.cli.can_self_update !== false &&
+    update?.install_method !== 'manual'
+  // The running gateway keeps the binary it started with until it restarts.
+  const desktop = desktopBridge() !== undefined
+  const afterTerminal: ReactNode = desktop ? (
+    'Then quit and reopen the desktop app.'
+  ) : (
+    <>
+      Then restart <code className="font-code">aether gui</code> and reload this page.
+    </>
+  )
   const busy = target.state === 'applying' || target.state === 'restarting'
   const error = target.state === 'failed' ? target.error : ''
   const others = [
@@ -58,8 +76,9 @@ export function UpdateGate({ client = api }: { client?: Api }) {
     `This client: ${clientVersion}`,
     `Server version: ${serverVersion}`,
     `Minimum client: ${minimum}`,
-    `Manual command: ${command}`,
+    packaged ? packagedLine(packaged) : `Manual command: ${command}`,
     ...(error ? [`Update error: ${error}`] : []),
+    ...(cancelled ? [`Update cancelled: ${cancelled}`] : []),
   ].join('\n')
 
   const switchTo = async (name: string) => {
@@ -75,9 +94,7 @@ export function UpdateGate({ client = api }: { client?: Api }) {
   return (
     <main className="flex h-full min-h-0 min-w-0 overflow-y-auto bg-canvas p-3 sm:p-4">
       <section
-        role="alert"
         aria-labelledby="update-gate-title"
-        aria-describedby="update-gate-reason"
         className="m-auto grid min-w-0 w-full max-w-[720px] overflow-hidden border border-seam bg-canvas"
       >
         <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-seam bg-chrome px-3 py-3 sm:px-4">
@@ -86,27 +103,35 @@ export function UpdateGate({ client = api }: { client?: Api }) {
           </div>
           <div className="min-w-0">
             <p className="mb-0.5 text-ui-sm font-medium text-muted">Update required</p>
-            <h1 id="update-gate-title" className="text-title leading-5">
+            <h1 id="update-gate-title" ref={headingRef} tabIndex={-1} className="text-title leading-5 outline-none">
               Update Aether to keep using this server
             </h1>
           </div>
         </header>
 
         <div className="min-w-0 space-y-3 px-3 py-3 sm:px-4">
-          <p id="update-gate-reason" className="max-w-[68ch] text-ui leading-5 text-muted">
-            The server runs {serverVersion} and accepts clients from {minimum}; this client is {clientVersion}.
-            Updating changes only this computer. The server said: <span className="text-text">{reason}</span>
+          <p className="max-w-[68ch] text-ui leading-5 text-muted">
+            The server said: <span className="text-text">{reason}</span>. It accepts clients from {minimum}.
+            Updating changes only this computer.
           </p>
 
           {target.state === 'ready_to_restart' ? (
             <div className="space-y-2">
               <p className="font-medium">Aether {target.latest} is installed.</p>
-              <p className="text-ui-sm text-muted">
-                This dashboard is still served by the old <code className="font-code">aether gui</code>. Stop it,
-                start it again, then reload.
-              </p>
-              <Button size="sm" onClick={() => window.location.reload()}>Reload</Button>
+              {desktop ? (
+                <p className="text-ui-sm text-muted">Quit and reopen the desktop app to use it.</p>
+              ) : (
+                <>
+                  <p className="text-ui-sm text-muted">
+                    This dashboard is still served by the old <code className="font-code">aether gui</code>. Stop it,
+                    start it again, then reload.
+                  </p>
+                  <Button size="sm" onClick={() => window.location.reload()}>Reload</Button>
+                </>
+              )}
             </div>
+          ) : packaged ? (
+            <p className="text-ui-sm text-muted">{packagedLine(packaged)}</p>
           ) : (
             <div className="space-y-2">
               {canApply && (
@@ -115,29 +140,38 @@ export function UpdateGate({ client = api }: { client?: Api }) {
                   {target.state === 'applying' ? 'Updating…' : target.state === 'restarting' ? 'Relaunching…' : 'Update now'}
                 </Button>
               )}
-              {target.state === 'applying' && (
-                <p role="status" className="text-ui-sm text-muted">
-                  {build?.phase && buildStep[build.phase]
-                    ? buildStep[build.phase]
-                    : `Downloading and verifying ${target.latest || 'the release'}…`}
-                </p>
-              )}
-              {target.state === 'restarting' && (
-                <p role="status" className="text-ui-sm text-muted">Restarting the dashboard on the new version…</p>
-              )}
-              {error && (
-                <div className="space-y-1">
-                  <p className="flex items-center gap-1.5 text-ui-sm font-medium text-state-failed">
-                    <CircleAlert className="size-3.5" aria-hidden />
-                    The update failed. Nothing on the server changed.
+              <div role="status" className="space-y-1 text-ui-sm">
+                {target.state === 'applying' && (
+                  <p className="text-muted">
+                    {build?.phase && buildStep[build.phase]
+                      ? buildStep[build.phase]
+                      : `Downloading and verifying ${target.latest || 'the release'}…`}
                   </p>
-                  <p className={cn(verbatim, 'text-state-failed')}>{error}</p>
-                </div>
-              )}
+                )}
+                {target.state === 'restarting' && (
+                  <p className="text-muted">Restarting the dashboard on the new version…</p>
+                )}
+                {error && (
+                  <>
+                    <p className="flex items-center gap-1.5 font-medium text-state-failed">
+                      <CircleAlert className="size-3.5" aria-hidden />
+                      The update failed. Nothing on the server changed.
+                    </p>
+                    <p className={cn(verbatim, 'text-state-failed')}>{error}</p>
+                  </>
+                )}
+                {cancelled && (
+                  <>
+                    <p className="text-muted">Update cancelled, nothing was changed.</p>
+                    <p className="whitespace-pre-wrap break-words font-code text-muted">{cancelled}</p>
+                  </>
+                )}
+              </div>
               <p className="text-ui-sm text-muted">
                 {canApply ? 'Or update from a terminal on this computer:' : 'Update from a terminal on this computer:'}
               </p>
               <CopyableCommand command={command} />
+              <p className="text-ui-sm text-muted">{afterTerminal}</p>
             </div>
           )}
 

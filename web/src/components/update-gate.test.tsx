@@ -20,15 +20,25 @@ const required = upgradeRequired(
 beforeEach(() => {
   vi.clearAllMocks()
   seed({ capabilities: caps({ local: ['link.status', 'update.check', 'update.apply', 'link.switch'] }) })
-  useStore.setState({ updateRequired: required, update: updateStatus() })
+  useStore.setState({
+    updateRequired: required,
+    update: updateStatus({ client_update_required: true, target_version: 'v1.3.0' }),
+    clientApply: { name: 'idle' },
+  })
 })
 
-test('names both versions, the server words and the manual command', () => {
+test('says the server words once, the minimum and the manual command, and takes focus', () => {
   render(<UpdateGate client={fakeApi()} />)
-  expect(screen.getByRole('heading', { name: 'Update Aether to keep using this server' })).toBeTruthy()
-  const reason = within(screen.getByRole('alert')).getByText(/The server runs v1\.3\.0 and accepts clients from v1\.3\.0; this client is v1\.2\.3\./)
-  expect(within(reason).getByText(/update this client first: run `aether update`, then retry/)).toBeTruthy()
+  const heading = screen.getByRole('heading', { name: 'Update Aether to keep using this server' })
+  expect(document.activeElement).toBe(heading)
+  const region = screen.getByRole('region', { name: 'Update Aether to keep using this server' })
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(
+    within(region).getAllByText(/this aether is v1\.2\.3 and the server runs v1\.3\.0/, { ignore: 'pre' }),
+  ).toHaveLength(1)
+  expect(within(region).getByText(/It accepts clients from v1\.3\.0\./)).toBeTruthy()
   expect(screen.getByText('aether update')).toBeTruthy()
+  expect(screen.getByText(/and reload this page\./).textContent).toBe('Then restart aether gui and reload this page.')
   expect(screen.getByRole('button', { name: 'Copy details' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy()
   // Never dismissible.
@@ -60,8 +70,30 @@ test('a failed update shows the real error and keeps the button', async () => {
   expect(screen.getByRole('button', { name: 'Update now' }).hasAttribute('disabled')).toBe(false)
 })
 
+test('a packaged client is told which app updates it, with no button or command', () => {
+  useStore.setState({ update: updateStatus({ client_update_required: true, cli: { ...updateStatus().cli, packaged: 'Android app' } }) })
+  render(<UpdateGate client={fakeApi()} />)
+  expect(screen.getByText('Updates come from the Android app: install its new version to update Aether.')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  expect(screen.queryByText('aether update')).toBeNull()
+})
+
+test('a cancelled administrator prompt says so with its detail, and the button comes back', async () => {
+  const client = fakeApi({
+    localUpdateApply: vi.fn(async () => {
+      throw new ApiError(403, 'update.apply: administrator access was not granted: User canceled. (-128)')
+    }),
+  })
+  render(<UpdateGate client={client} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
+  const status = await screen.findByRole('status')
+  expect(await within(status).findByText('Update cancelled, nothing was changed.')).toBeTruthy()
+  expect(within(status).getByText('update.apply: administrator access was not granted: User canceled. (-128)')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Update now' }).hasAttribute('disabled')).toBe(false)
+})
+
 test('a binary this account cannot write gets sudo and no button', () => {
-  useStore.setState({ update: updateStatus({ install_method: 'manual' }) })
+  useStore.setState({ update: updateStatus({ client_update_required: true, install_method: 'manual' }) })
   render(<UpdateGate client={fakeApi()} />)
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.getByText('sudo aether update')).toBeTruthy()

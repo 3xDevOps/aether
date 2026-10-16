@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { UpdateHost } from '@/test/update-host'
+import { FOCUS_READ_MS, IN_FLIGHT_REREAD_MS } from '@/components/update-checks'
 import type { Api } from '@/lib/api'
 import type { AetherDesktop } from '@/components/shell/window-bar'
 import type {
@@ -273,6 +274,35 @@ describe('the server update banner', () => {
     expect(screen.getByText('Scheduled by Alice, applies when no run is active.')).toBeTruthy()
     expect(screen.getByText('Waiting for 2 runs and 1 open shell.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+  })
+
+  // A server back on the new release publishes applied while this tab may
+  // still be resubscribing; without the re-read it would time out instead.
+  test('re-reads a status still verifying until the server says it applied', async () => {
+    vi.useFakeTimers()
+    seed({ capabilities: caps({ local: ['link.status'] }) })
+    let phase: 'verifying' | 'applied' = 'verifying'
+    const client = fakeApi({
+      serverUpdateStatus: vi.fn(async () =>
+        phase === 'verifying'
+          ? serverUpdateStatus({ update_available: true, phase, to_version: 'v1.3.0' })
+          : serverUpdateStatus({ server_version: 'v1.3.0', latest_version: 'v1.3.0', update_available: false, phase }),
+      ),
+    })
+    render(<UpdateHost client={client} />)
+    await settle()
+    expect(useStore.getState().serverUpdateProgress).toEqual({ phase: 'verifying', version: 'v1.3.0' })
+
+    phase = 'applied'
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IN_FLIGHT_REREAD_MS)
+    })
+    expect(useStore.getState().serverUpdateProgress).toBeNull()
+    const reads = vi.mocked(client.serverUpdateStatus).mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IN_FLIGHT_REREAD_MS * 3)
+    })
+    expect(vi.mocked(client.serverUpdateStatus).mock.calls.length).toBe(reads)
   })
 
   test('renders every phase the server.update feed carries', async () => {
@@ -619,7 +649,15 @@ describe('the CLI release re-check', () => {
     render(<UpdateHost client={client} />)
     await settle()
 
+    // Within a minute of the last read, coming back reads nothing.
     await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+      await vi.advanceTimersByTimeAsync(FOCUS_READ_MS - 1000)
+    })
+    expect(reads).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
       document.dispatchEvent(new Event('visibilitychange'))
       window.dispatchEvent(new Event('focus'))
       await vi.advanceTimersByTimeAsync(200)

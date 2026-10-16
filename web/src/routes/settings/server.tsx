@@ -41,6 +41,7 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const { server, client: cli } = useUpdateTargets()
   const packaged = useStore((s) => s.update?.cli.packaged)
   const openUpdates = useStore((s) => s.setUpdatesOpen)
+  const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const checkForUpdates = useCheckForUpdates(client)
   const disk = info?.disk
   if (!info) return null
@@ -62,7 +63,13 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
         control={
           <div className="flex flex-wrap gap-1">
             {update?.action && (
-              <Button size="sm" onClick={() => openUpdates(true)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  clearDismissed()
+                  openUpdates(true)
+                }}
+              >
                 Update…
               </Button>
             )}
@@ -75,7 +82,11 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
         {failed?.state === 'check_failed' && (
           <div className="space-y-1">
             <p className="text-ui-sm text-muted">
-              {failed === server ? 'The server could not check for a new release:' : 'This computer could not check for a new release:'}
+              {failed !== server
+                ? 'This computer could not check for a new release:'
+                : failed.unread
+                  ? "Could not read the server's update status:"
+                  : 'The server could not check for a new release:'}
             </p>
             <p className={cn(verbatim, 'text-state-failed')}>{failed.error}</p>
           </div>
