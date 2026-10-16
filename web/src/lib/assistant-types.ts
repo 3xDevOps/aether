@@ -19,7 +19,8 @@ export interface AssistantConfirmation {
   params: unknown
   created_at: string
   expires_at: string
-  /** The owner of the run the call acts on, when another member: such a call asks even with auto-approval on. */
+  /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
+  other_member?: boolean
   other_owner?: string
 }
 
@@ -38,6 +39,8 @@ export interface AssistantStatus {
 export interface AssistantSettings {
   auto_approve: boolean
   suggest_auto_approve: boolean
+  /** The suggestion will not show again. */
+  suggestion_off: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */

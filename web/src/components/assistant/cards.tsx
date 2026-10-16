@@ -139,7 +139,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             </Button>
           </div>
           {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
-          {confirmation.other_owner ? (
+          {confirmation.other_member ? (
             <p className="text-ui-sm text-muted">{confirmation.other_owner} owns this run, so this asks even with auto-approval on.</p>
           ) : !autoApprove && (
             <p className="text-ui-sm"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>

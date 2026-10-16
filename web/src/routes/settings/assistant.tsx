@@ -18,7 +18,7 @@ const sectionID = 'settings-assistant'
 
 const scope: [string, string][] = [
   ['Without a card', 'Launching runs, messaging and stopping your own runs, saving your environment. Each is noted in the assistant’s conversation before it runs.'],
-  ['Always asks', 'Anything that touches another member’s run, and any other action that asks.'],
+  ['Always asks', 'Messaging or stopping another member’s run.'],
   ['Not affected', 'The assistant’s own shell and file tools, which run without asking either way.'],
 ]
 

@@ -9,7 +9,7 @@ test('auto-approval is turned on only after the warning and is stored on the ser
   const alice = await aether.member('alice')
   await alice.api.local('link.apply', { addr: aether.server.addr, name: alice.name })
   const settings = (params?: Record<string, unknown>) =>
-    alice.api.rpc<{ auto_approve: boolean; suggest_auto_approve: boolean }>('assistant.settings', params)
+    alice.api.rpc<{ auto_approve: boolean; suggest_auto_approve: boolean; suggestion_off: boolean }>('assistant.settings', params)
 
   await page.goto(alice.url)
   await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
@@ -18,9 +18,9 @@ test('auto-approval is turned on only after the warning and is stored on the ser
   await expect(toggle).not.toBeChecked()
   const scope = page.getByLabel('What auto-approval covers')
   await expect(scope).toContainText('Launching runs, messaging and stopping your own runs, saving your environment')
-  await expect(scope).toContainText('Anything that touches another member’s run')
+  await expect(scope).toContainText('Messaging or stopping another member’s run.')
   await expect(scope).toContainText('The assistant’s own shell and file tools')
-  expect(await settings({ suggestion: 'later' })).toEqual({ auto_approve: false, suggest_auto_approve: false })
+  expect(await settings({ suggestion: 'later' })).toEqual({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
 
   await toggle.click()
   const dialog = page.getByRole('alertdialog', { name: 'Let the assistant act without asking?' })

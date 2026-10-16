@@ -5,7 +5,7 @@ import { assistantTriggerID, useAssistantAvailable } from '@/components/assistan
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
-import { AutoApproveSuggestion } from '@/components/assistant/suggestion'
+import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
 import { Button } from '@/components/ui/button'
@@ -327,7 +327,7 @@ export function AssistantPanel() {
           }}
         >
           <DialogTitle className="sr-only">Assistant</DialogTitle>
-          {content}
+          <AssistantSheet.Provider value>{content}</AssistantSheet.Provider>
         </DialogContent>
       </Dialog>
     )

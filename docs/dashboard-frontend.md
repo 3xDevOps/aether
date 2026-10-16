@@ -530,21 +530,26 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   **Approve** and **Decline** (`assistant.confirm`). A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
-  `other_owner` says that member owns the run, so it asks even with
-  auto-approval on.
+  `other_member` says that member (`other_owner`) owns the run, so it asks
+  even with auto-approval on.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
   notice between the transcript and the composer asks **Skip approval cards
   for the assistant?** It says what auto-approval passes, that each action is
-  still noted, that read text could steer the assistant, and that anything
-  touching another member's run still asks. Its three equal buttons call
+  still noted, that read text could steer the assistant, and that messaging
+  or stopping another member's run still asks. It scrolls past 40% of the
+  viewport height, so the composer stays visible. Its three equal buttons call
   `assistant.settings`: **Turn on auto-approval** (`auto_approve: true`, no
   second dialog: the notice is the warning), **Not now** (`suggestion:
   "later"`) and **Don't suggest again** (`suggestion: "never"`). Each leaves a
-  one-line answer with a **Settings → Assistant** link that clears at the next
-  turn; a refusal stays in the notice. The server decides when the
-  suggestion is due; see [assistant.md](assistant.md#the-suggestion).
+  one-line answer, focused, with a **Settings → Assistant** link; a **Not
+  now** answered with `suggestion_off` says it won't be suggested again. The
+  line clears at the next turn or a new conversation, and is dropped if
+  another member signed in before the answer arrived. A refusal stays in the
+  notice, focused. The server decides when the suggestion is due; see
+  [assistant.md](assistant.md#the-suggestion). Both Settings links close the
+  panel when it is a sheet, and leave a docked panel open.
 
 State lives in `store/assistant.ts`. The transcript is the `AcpSession` under
 `acpSessions.assistant`, built by the run reducers and kept out of `runs`, so
