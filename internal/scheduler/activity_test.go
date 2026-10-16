@@ -213,7 +213,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
 			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpCancelledReason})
-		}, domain.RunNeedsAttention, domain.ActivityIdle, acpCancelledReason},
+		}, domain.RunNeedsAttention, domain.ActivityWaiting, acpCancelledReason},
 		{"the agent's turn failed", func() {
 			report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonFailed})
 		}, domain.RunNeedsAttention, domain.ActivityFailed, agentstatus.ReasonFailed},
