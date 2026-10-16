@@ -461,10 +461,11 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 	}
 }
 
-// Every launch that does not speak ACP carries the role card: in the
-// system prompt where the agent takes one, else after the task.
+// Every launch that does not speak ACP carries the role card: in context
+// the agent keeps through compaction where it has a place for it, else
+// after the task.
 func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
-	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "fake"} {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot", "gemini", "cursor", "fake"} {
 		for _, tc := range []struct {
 			mode domain.LaunchMode
 			task string
@@ -505,8 +506,8 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					t.Fatalf("%s = %q in a %s launch", coordtransport.BackgroundEnv, env[coordtransport.BackgroundEnv], tc.mode)
 				}
 				g.Wake = env[coordtransport.WakeEnv] == "1"
-				// Codex loads its inbox hooks too, but none of them wakes an idle session.
-				if native := profile.NativeCoordination && name != "codex" && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
+				// Codex and Copilot load inbox hooks too, but none of them wakes an idle session.
+				if native := profile.NativeCoordination && name != "codex" && name != "copilot" && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
 					t.Fatalf("%s = %q, want it only on a native launch (%v)", coordtransport.WakeEnv, env[coordtransport.WakeEnv], native)
 				}
 				if !profile.CarriesInstructions() {
@@ -537,10 +538,18 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 				if strings.Contains(command, "\x00"+tc.task+"\n\n") {
 					t.Fatalf("command %q repeats the instructions after the task", command)
 				}
-				if file := coord.file(run.ID, harness.InstructionsFileName); file != nil {
-					if string(file) != card+"\n" {
-						t.Fatalf("instructions file = %q, want the role card", file)
+				if profile.InstructionsFile != "" {
+					if file := coord.file(run.ID, profile.InstructionsFile); string(file) != card+"\n" {
+						t.Fatalf("instructions file %s = %q, want the role card", profile.InstructionsFile, file)
 					}
+				}
+				switch name {
+				case "copilot":
+					if env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] != coordtransport.MountDir {
+						t.Fatalf("COPILOT_CUSTOM_INSTRUCTIONS_DIRS = %q, want %s", env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"], coordtransport.MountDir)
+					}
+					return
+				case "opencode":
 					var config struct {
 						Instructions []string `json:"instructions"`
 					}

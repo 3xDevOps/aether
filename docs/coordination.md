@@ -518,24 +518,26 @@ capabilities lack `coord.report`, else the assignment's role, else
 else `interactive`. `AETHER_BACKGROUND=1` also drops needs-input and waiting
 for a mission role. The waiting line needs `AETHER_ENHANCED=1` or
 `AETHER_IDLE_WAKE=1`, which Aether sets on a Standard launch that loads a
-native integration file (Claude Code, pi, OMP and OpenCode; Codex's hooks
-cannot wake it), and a status without `protected: true`. `AETHER_ROLE_CARD=1` marks a launch whose system prompt
-already carries the card, so hooks and the bridge do not repeat it.
+native integration file (Claude Code, pi, OMP and OpenCode; Codex's and
+Copilot CLI's hooks cannot wake it), and a status without `protected: true`.
+`AETHER_ROLE_CARD=1` marks a launch that already carries the card in its
+system prompt or startup context, so hooks and the bridge do not repeat it.
 
 Where the instructions go:
 
 - Standard and non-ACP Background launches of a shipped agent, with or
-  without a task, carry them in the agent's system prompt, so they survive compaction; see
-  [harnesses.md](harnesses.md#how-aether-launches-them). Custom definitions
-  and admin overrides have no such mechanism and get them appended to the
-  task prompt; a taskless launch of one gets none.
+  without a task, carry them in the agent's system prompt (Gemini CLI: its
+  session context), so they survive compaction; see
+  [harnesses.md](harnesses.md#how-aether-launches-them). Cursor CLI, custom
+  definitions and admin overrides have no such mechanism and get them
+  appended to the task prompt; a taskless launch of one gets none.
 - Enhanced runs get them as described in
   [enhanced-runs.md](enhanced-runs.md#run-instructions).
-- The `SessionStart` hook prints the role card only when the launch's
-  system prompt lacks it; at compaction and clear it re-announces the
+- The `SessionStart` hook prints the role card only when the launch does
+  not carry it; at compaction and clear it re-announces the
   pending notices the context lost; see [Native hook files and handler](#native-hook-files-and-handler).
 - The MCP bridge sends the role card as its MCP `instructions`, or only a
-  short brief when the system prompt carries the card; see
+  short brief when the launch carries the card; see
   [mcp-bridge.md](mcp-bridge.md#registration).
 
 `skill` prints the same report decision table as the card, followed by
@@ -636,7 +638,7 @@ Extension hooks use event `context` and receive plain trusted context text.
 With no pending mail or applicable overlap/swarm guidance, stdout is empty.
 `SessionStart` (`sessionStart` for Copilot and Cursor) also prints the run's
 [role card](#agent-instructions) before any notices, unless
-`AETHER_ROLE_CARD=1` says the system prompt already carries it. Command hooks announce each notice
+`AETHER_ROLE_CARD=1` says the launch already carries it. Command hooks announce each notice
 once and remember it in `/tmp/aether-hook-<run-id>-<harness>.json`; a
 `SessionStart` whose `source` is `compact` or `clear` resets that record, so
 every pending notice is announced again into the new context. Claude

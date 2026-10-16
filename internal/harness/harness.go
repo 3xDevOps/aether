@@ -29,8 +29,7 @@ const ModelPlaceholder = "{model}"
 const (
 	InstructionsPlaceholder       = "{instructions}"
 	QuotedInstructionsPlaceholder = "{instructions_quoted}"
-	// InstructionsFileName holds the run's instructions in the coordination
-	// directory for a harness that reads them from a file.
+	// InstructionsFileName is OpenCode's InstructionsFile.
 	InstructionsFileName = "instructions.md"
 )
 
@@ -336,8 +335,12 @@ type Profile struct {
 	// prompt, so they survive compaction and need no prompt of their own.
 	InstructionArgs []string
 	// InstructionEnv is InstructionArgs for a harness with no startup flag
-	// for it; it points at InstructionsFileName.
+	// for it.
 	InstructionEnv map[string]string
+	// InstructionsFile is the coordination-directory file a launch writes
+	// the instructions to, for a harness whose InstructionArgs or
+	// InstructionEnv load them from a file.
+	InstructionsFile string
 	// InstructionsConfig is the home-relative TOML file whose top-level
 	// developer_instructions InstructionArgs would replace; a launch carries
 	// that value ahead of the run's instructions.
@@ -559,7 +562,8 @@ var profiles = map[string]Profile{
 		InstructionEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + InstructionsFileName + `"]}`,
 		},
-		InstallScript: "curl -fsSL https://opencode.ai/install | bash",
+		InstructionsFile: InstructionsFileName,
+		InstallScript:    "curl -fsSL https://opencode.ai/install | bash",
 		// No UpdateScript: an upgrade can cross a major version that the
 		// managed OpenCode launch wrapper refuses.
 	},
@@ -575,7 +579,11 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
 		// here trusts the working directory as well.
-		Env:                map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		Env: map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		// Copilot puts every *.instructions.md in these directories into its
+		// system prompt, after the repository's own instructions.
+		InstructionEnv:     map[string]string{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": CoordPlaceholder},
+		InstructionsFile:   "aether.instructions.md",
 		NativeCoordination: true,
 		EnvPassthrough:     []string{"COPILOT_GITHUB_TOKEN"},
 		// With no system keychain, as in a run container, copilot login keeps
@@ -597,9 +605,14 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// In a folder it does not trust, Gemini drops yolo to default and
 		// skips ~/.gemini/.env.
-		Env:             map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
-		EnvPassthrough:  []string{"GEMINI_API_KEY"},
-		CredentialPaths: []string{".gemini/oauth_creds.json", ".gemini/.env"},
+		Env: map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
+		// Only ~/.gemini/GEMINI.md reaches Gemini's system prompt, and
+		// GEMINI_SYSTEM_MD replaces it. An included directory's GEMINI.md
+		// goes into the session context, which compression keeps.
+		InstructionArgs:  []string{"--include-directories=" + CoordPlaceholder},
+		InstructionsFile: "GEMINI.md",
+		EnvPassthrough:   []string{"GEMINI_API_KEY"},
+		CredentialPaths:  []string{".gemini/oauth_creds.json", ".gemini/.env"},
 		// Gemini writes oauth_creds.json to a temporary file and renames it
 		// over the old one, and rewrites it in place when that rename fails.
 		PinnedLogins:  []string{".gemini/oauth_creds.json"},
@@ -746,7 +759,8 @@ func (p Profile) InstructionLaunchEnv(dir string) map[string]string {
 }
 
 // CarriesInstructions reports whether a launch of p delivers run
-// instructions through its system prompt rather than its first prompt.
+// instructions in context it keeps through compaction rather than in its
+// first prompt.
 func (p Profile) CarriesInstructions() bool {
 	return len(p.InstructionArgs) > 0 || len(p.InstructionEnv) > 0
 }

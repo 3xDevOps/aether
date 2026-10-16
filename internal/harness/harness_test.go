@@ -219,11 +219,12 @@ func TestStatusReporters(t *testing.T) {
 	}
 }
 
-// Every shipped CLI carries run instructions in its system prompt through a
-// per-launch mechanism, never a member-home or repository instruction file.
+// Every shipped CLI but Cursor carries run instructions in context it keeps
+// through compaction, through a per-launch mechanism, never a member-home or
+// repository instruction file.
 func TestInstructionMechanisms(t *testing.T) {
 	const text = "line one\nsay \"<hi>\""
-	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode"} {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot", "gemini"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
@@ -238,10 +239,8 @@ func TestInstructionMechanisms(t *testing.T) {
 				t.Errorf("%s instruction args kept a placeholder: %v", name, args)
 			}
 		}
-		for key, value := range env {
-			if !strings.Contains(value, "/run/aether/"+InstructionsFileName) {
-				t.Errorf("%s instruction env %s = %q, want the instructions file", name, key, value)
-			}
+		if (len(env) > 0 || name == "gemini") != (p.InstructionsFile != "") {
+			t.Errorf("%s loads instructions from a file %v, but writes InstructionsFile %q", name, len(env) > 0, p.InstructionsFile)
 		}
 		switch name {
 		case "codex":
@@ -252,8 +251,16 @@ func TestInstructionMechanisms(t *testing.T) {
 				t.Errorf("codex instruction args %q do not decode to the text", args)
 			}
 		case "opencode":
-			if len(env) == 0 {
-				t.Errorf("opencode has no instruction env")
+			if !strings.Contains(env["OPENCODE_CONFIG_CONTENT"], `"/run/aether/`+p.InstructionsFile+`"`) {
+				t.Errorf("opencode instruction env %v does not load %s", env, p.InstructionsFile)
+			}
+		case "copilot":
+			if env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] != "/run/aether" || !strings.HasSuffix(p.InstructionsFile, ".instructions.md") {
+				t.Errorf("copilot instruction env %v does not load %s", env, p.InstructionsFile)
+			}
+		case "gemini":
+			if !slices.Equal(args, []string{"--include-directories=/run/aether"}) || p.InstructionsFile != "GEMINI.md" {
+				t.Errorf("gemini instruction args = %q with file %q", args, p.InstructionsFile)
 			}
 		default:
 			if !slices.Equal(args, []string{"--append-system-prompt", text}) {
@@ -261,9 +268,10 @@ func TestInstructionMechanisms(t *testing.T) {
 			}
 		}
 	}
-	custom, _ := Lookup("custom")
-	if custom.CarriesInstructions() {
-		t.Fatalf("custom profile must not carry instruction wiring: %+v", custom)
+	for _, name := range []string{"cursor", "custom"} {
+		if p, _ := Lookup(name); p.CarriesInstructions() {
+			t.Fatalf("%s profile must not carry instruction wiring: %+v", name, p)
+		}
 	}
 }
 

@@ -78,7 +78,7 @@ func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, pro
 	if !profile.CarriesInstructions() {
 		return "", nil
 	}
-	text := s.runInstructions(s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, len(native.Files) > 0))
+	text := s.runInstructions(s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake))
 	if text == "" || profile.InstructionsConfig == "" || s.cfg.Homes == nil {
 		return text, nil
 	}

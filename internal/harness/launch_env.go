@@ -12,20 +12,30 @@ import (
 // so a later overlay adds its keys instead of replacing the whole value.
 var configVariables = map[string]bool{"OPENCODE_CONFIG_CONTENT": true}
 
+// listVariables hold a comma-separated list, so an overlay appends its
+// entries to the member's.
+var listVariables = map[string]bool{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": true}
+
 // listKeys are config arrays an overlay extends rather than replaces, so a
 // member's own instructions and plugins stay loaded.
 var listKeys = map[string]bool{"instructions": true, "plugin": true}
 
 // MergeEnv copies overlay into dst; overlay's keys win, also inside a
-// config variable both set, except that its listKeys arrays are appended.
+// config variable both set, except that its listKeys arrays and
+// listVariables are appended.
 func MergeEnv(dst, overlay map[string]string) error {
 	for key, value := range overlay {
-		if base := dst[key]; base != "" && configVariables[key] {
+		base := dst[key]
+		switch {
+		case base == "":
+		case configVariables[key]:
 			merged, err := mergeConfig(base, value)
 			if err != nil {
 				return fmt.Errorf("harness: merge %s: %w", key, err)
 			}
 			value = merged
+		case listVariables[key]:
+			value = base + "," + value
 		}
 		dst[key] = value
 	}

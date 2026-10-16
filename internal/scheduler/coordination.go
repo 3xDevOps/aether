@@ -466,7 +466,8 @@ type coordinationLaunch struct {
 }
 
 // newCoordinationLaunch wires lifecycle reporting and, for a launch that
-// does not speak ACP, instructions into the agent's system prompt.
+// does not speak ACP, instructions into context the agent keeps through
+// compaction.
 func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, instructions string) (coordinationLaunch, error) {
 	l := coordinationLaunch{files: make(map[string][]byte), reporter: harness.ReporterNone}
 	maps.Copy(l.files, native.Files)
@@ -481,7 +482,7 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 	if native.ReplacesStatus {
 		l.reporter = native.Reporter
 	}
-	if len(native.Files) > 0 {
+	if native.IdleWake {
 		if l.env == nil {
 			l.env = make(map[string]string, 1)
 		}
@@ -489,11 +490,11 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 	}
 	if !run.ACP && instructions != "" {
 		l.args = append(l.args, profile.InstructionLaunchArgs(coordtransport.MountDir, instructions)...)
-		env := map[string]string{coordtransport.RoleCardEnv: "1"}
-		if overlay := profile.InstructionLaunchEnv(coordtransport.MountDir); len(overlay) > 0 {
-			l.files[harness.InstructionsFileName] = []byte(instructions + "\n")
-			maps.Copy(env, overlay)
+		if profile.InstructionsFile != "" {
+			l.files[profile.InstructionsFile] = []byte(instructions + "\n")
 		}
+		env := map[string]string{coordtransport.RoleCardEnv: "1"}
+		maps.Copy(env, profile.InstructionLaunchEnv(coordtransport.MountDir))
 		if l.env == nil {
 			l.env = make(map[string]string, len(env))
 		}

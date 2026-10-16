@@ -33,7 +33,8 @@ const (
 	// WakeEnv is "1" in a Standard run whose loaded native integration
 	// resumes the idle agent when mail arrives.
 	WakeEnv = "AETHER_IDLE_WAKE"
-	// RoleCardEnv is "1" where the agent's system prompt carries its role
-	// card, so hooks and the MCP bridge do not repeat it.
+	// RoleCardEnv is "1" where the launch carries the agent's role card in
+	// context it keeps through compaction, so hooks and the MCP bridge do
+	// not repeat it.
 	RoleCardEnv = "AETHER_ROLE_CARD"
 )
