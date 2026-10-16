@@ -68,6 +68,19 @@ export function unreachableSentence(
   const edge = at?.edge || (link?.edge_url ? edgeHost(link.edge_url) : null)
   const id = at?.server_id || link?.server_id || link?.addr
   const server = id ? `server ${id}` : 'the server'
+  const sentence = kindSentence(kind, edge, server, link, approvalCode)
+  if (!at?.online?.length) return sentence
+  const online = at.online.map((s) => (s.name ? `${s.name} (${s.id})` : s.id)).join(', ')
+  return `${sentence}; ${edge ?? 'the edge'} sees ${online} online, and this dashboard is linked to ${server}`
+}
+
+function kindSentence(
+  kind: UnreachableKind,
+  edge: string | null,
+  server: string,
+  link: Pick<LinkStatus, 'edge_url'> | null,
+  approvalCode: string | null,
+): string {
   switch (kind) {
     case 'network':
       return 'this computer is offline - reconnect to wifi or your VPN'

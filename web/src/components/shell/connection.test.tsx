@@ -72,3 +72,20 @@ describe('where the gateway says the failure happened', () => {
     expect(renderHook(useConnectionWord).result.current).toBe('Live')
   })
 })
+
+it('names the servers the edge does see online when the linked one is not', () => {
+  useStore.setState({
+    connection: 'reconnecting',
+    linkStatus: { ...linkStatus, addr: '', edge_url: 'https://edge.example.test', server_id: 'srv123' },
+    unreachable: 'edge-server',
+    unreachableAt: {
+      layer: 'server-registration',
+      server_id: 'srv123',
+      edge: 'edge.example.test',
+      online: [{ id: 'srv456', name: 'workstation', online: true, role: 'admin', access_policy: 'account', kind: 'self-hosted' }],
+    },
+  })
+  expect(renderHook(useConnectionProblem).result.current).toBe(
+    'Server registration failed · edge.example.test has no live registration for server srv123 - compare with sudo aether-server edge status on that host; edge.example.test sees workstation (srv456) online, and this dashboard is linked to server srv123',
+  )
+})

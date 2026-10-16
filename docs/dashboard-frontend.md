@@ -927,7 +927,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   names the layer that failed - client to edge, authorization, server
   registration, or end-to-end - with the server id and the next command.
   When the gateway's error carries `data.edge_path`, its `layer`,
-  `server_id` and `edge` are used as given. Each failure is stored with the
+  `server_id` and `edge` are used as given, and its `online` list, sent on
+  a server-registration failure, is named as the servers the edge does see
+  online beside the server id the dashboard is linked to. Each failure is stored with the
   server id it was measured on, and is not shown once the link points at
   another server.
 - **A total failure replaces the shell with one error page.** When nothing has
