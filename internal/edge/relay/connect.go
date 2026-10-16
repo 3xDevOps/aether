@@ -318,21 +318,12 @@ func (r *Relay) admitLocked(c *relayConn) (*registration, error) {
 	return reg, nil
 }
 
-// await sends msg on reg once reg is ready and waits for c's data socket.
-// It fails with errReplaced when the server enrolled again before or
-// after the send, and otherwise drops reg when the open cannot be written
-// to it: a control channel that takes no writes is dead, whatever its
-// idle timer says.
+// await sends msg on reg and waits for c's data socket. It fails with
+// errReplaced when the server enrolled again before or after the send,
+// and otherwise drops reg when the open cannot be written to it: a
+// control channel that takes no writes is dead, whatever its idle timer
+// says.
 func (r *Relay) await(ctx context.Context, reg *registration, c *relayConn, msg edgeproto.Open) (net.Conn, error) {
-	select {
-	case <-reg.ready:
-	case <-reg.ctx.Done():
-		return nil, ended(reg)
-	case <-c.ctx.Done():
-		return nil, context.Cause(c.ctx)
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 	if err := reg.send(msg); err != nil {
 		if errors.Is(ended(reg), errReplaced) {
 			return nil, errReplaced

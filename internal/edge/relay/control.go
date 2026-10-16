@@ -39,7 +39,8 @@ type registration struct {
 	// have waiting.
 	turn chan struct{}
 	// ready is closed once Ready is sent: the server takes no other
-	// message before it, and opens can find reg in Relay.servers sooner.
+	// message before it, and reg is in Relay.servers sooner, so send
+	// waits for it.
 	ready chan struct{}
 	// claimed, directory and hasDirectory are guarded by Relay.mu.
 	// directory is the latest directory an unclaimed server pushed: it
@@ -50,10 +51,20 @@ type registration struct {
 	hasDirectory bool
 }
 
-// send writes m. The write is not bound to g.ctx: cancelling the context
+// send writes m once Ready is sent, or fails when g ends first.
+func (g *registration) send(m edgeproto.Message) error {
+	select {
+	case <-g.ready:
+	case <-g.ctx.Done():
+		return fmt.Errorf("relay: send to server %s: %w", g.id, context.Cause(g.ctx))
+	}
+	return g.write(m)
+}
+
+// write writes m. The write is not bound to g.ctx: cancelling the context
 // of a write in progress drops the socket without the close frame that
 // gives the server the cause.
-func (g *registration) send(m edgeproto.Message) error {
+func (g *registration) write(m edgeproto.Message) error {
 	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 	defer cancel()
 	if err := writeControl(ctx, g.ws, m); err != nil {
@@ -188,7 +199,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if claimed {
 		state = edgeproto.StateClaimed
 	}
-	if err := reg.send(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub}); err != nil {
+	if err := reg.write(edgeproto.Ready{ServerID: id, State: state, EdgeKey: r.pub}); err != nil {
 		r.unregister(reg, err)
 		return nil, err
 	}

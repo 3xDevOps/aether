@@ -205,6 +205,41 @@ func TestOpenFollowsARegistrationReplacedBeforeTheSend(t *testing.T) {
 	}
 }
 
+// unready publishes a twin of serverID's registration that has not sent
+// Ready yet, and returns the channel that marks Ready sent.
+func unready(e *env, serverID string) chan struct{} {
+	e.r.mu.Lock()
+	defer e.r.mu.Unlock()
+	twin := *e.r.servers[serverID]
+	twin.ready = make(chan struct{})
+	e.r.servers[serverID] = &twin
+	return twin.ready
+}
+
+// TestUnenrollWaitsForReady unenrolls a server the relay published but
+// has not sent Ready to yet: Unenroll follows Ready.
+func TestUnenrollWaitsForReady(t *testing.T) {
+	e := newEnv(t)
+	a := claimedAgent(t, e)
+	ready := unready(e, a.id)
+
+	done := make(chan struct{})
+	go func() {
+		e.r.Unenroll(a.id)
+		close(done)
+	}()
+	select {
+	case m := <-a.msgs:
+		t.Fatalf("server got %T before Ready", m)
+	case <-done:
+		t.Fatal("Unenroll finished before Ready")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(ready)
+	next[edgeproto.Unenroll](t, a)
+	<-done
+}
+
 // TestOpenWaitsForReady opens a connection on a registration the relay
 // published but has not sent Ready on yet: the open follows Ready, which
 // the server expects first.
@@ -214,10 +249,7 @@ func TestOpenWaitsForReady(t *testing.T) {
 	acct := account("1")
 	e.dir.addMember(a.id, acct)
 	_, token := e.addDevice(t, acct, "dev-1")
-	ready := make(chan struct{})
-	e.r.mu.Lock()
-	e.r.servers[a.id].ready = ready
-	e.r.mu.Unlock()
+	ready := unready(e, a.id)
 
 	dialed := make(chan error, 1)
 	go func() {
