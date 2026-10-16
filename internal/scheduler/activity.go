@@ -10,24 +10,35 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // waitingReasonPrefix marks a waiting outcome in the idle reason the sidecar
-// keeps. The run shows the summary alone.
+// keeps. The run shows the summary alone (publicRunStatusReason).
 const waitingReasonPrefix = "waiting: "
 
-// waitedFactor is how many stall thresholds a waiting outcome holds a run in
-// waiting-agents with no activity before it shows idle.
+// stalledReasonPrefix starts the reason checkStalls parks a quiet run with.
+const stalledReasonPrefix = "stalled: "
+
+// waitedReasonPrefix starts the reason of a run that waited on its agents for
+// waitedFactor stall thresholds with no activity. It shows idle until the
+// reason changes.
+const waitedReasonPrefix = "waited "
+
+// waitedFactor is how many stall thresholds a run waits on its own agents
+// with no activity before it shows idle.
 const waitedFactor = 3
 
 // activityFacts are what a live run's activity is derived from.
 type activityFacts struct {
 	status domain.RunStatus
-	reason string
-	// human is an open request for a human: a pending permission or
-	// question, or a shown needs-input or blocked outcome.
+	// human is an open request for a human: a pending permission, question
+	// or approval, a shown needs-input or blocked outcome, or a usage limit
+	// Aether will not resume from.
 	human        bool
 	disconnected bool
+	failed       bool
+	finished     bool
 	// turn is a turn in progress.
 	turn          bool
 	waitingAgents bool
@@ -47,9 +58,9 @@ func deriveActivity(f activityFacts) domain.RunActivity {
 		return domain.ActivityNeedsYou
 	case f.turn:
 		return domain.ActivityWorking
-	case f.reason == reportedFailureReason:
+	case f.failed:
 		return domain.ActivityFailed
-	case f.reason == reportedSuccessReason:
+	case f.finished:
 		return domain.ActivityFinished
 	case f.waitingAgents:
 		return domain.ActivityWaitingAgents
@@ -64,12 +75,14 @@ func disconnectedReason(reason string) bool {
 }
 
 func humanReason(reason string) bool {
-	return strings.HasPrefix(reason, needsInputReasonPrefix) || strings.HasPrefix(reason, blockedReasonPrefix)
+	return strings.HasPrefix(reason, needsInputReasonPrefix) || strings.HasPrefix(reason, blockedReasonPrefix) ||
+		strings.HasPrefix(reason, usageLimitReason)
 }
 
-// shownIdleReason is the run status reason an idle outcome shows.
-func shownIdleReason(reason string) string {
-	return strings.TrimPrefix(reason, waitingReasonPrefix)
+// failedReason reports a turn the agent could not finish, or its reported
+// failure.
+func failedReason(reason string) bool {
+	return reason == reportedFailureReason || reason == agentstatus.ReasonFailed || strings.HasPrefix(reason, acpTurnFailedReason)
 }
 
 // waits reports whether the run's outcome is a waiting report. The caller
@@ -78,32 +91,50 @@ func (e *supervised) waits() bool {
 	return strings.HasPrefix(e.idleReason, waitingReasonPrefix)
 }
 
-// activityLocked derives the activity of run moving to status to with
-// reason. entry is the run's supervised state, nil when it has none. Caller
-// holds s.mu.
-func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry *supervised, to domain.RunStatus, reason string) domain.RunActivity {
-	f := activityFacts{status: to, reason: reason}
+// activityLocked derives the activity of run moving to status to with the
+// public reason. entry is the run's supervised state, nil when it has none.
+// Caller holds s.mu.
+func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, entry *supervised, to domain.RunStatus, reason string) (domain.RunActivity, error) {
 	if !to.Live() {
-		return ""
+		return "", nil
 	}
-	f.disconnected = disconnectedReason(reason)
-	f.human = to == domain.RunNeedsAttention && humanReason(reason)
+	parked := to == domain.RunNeedsAttention
+	stalled := strings.HasPrefix(reason, stalledReasonPrefix)
+	waitedOut := strings.HasPrefix(reason, waitedReasonPrefix)
+	f := activityFacts{
+		status:       to,
+		disconnected: disconnectedReason(reason),
+		human:        parked && humanReason(reason),
+		failed:       parked && failedReason(reason),
+		finished:     parked && reason == reportedSuccessReason,
+	}
 	if entry != nil {
-		held := heldByTasks(entry.agentReport) && (!entry.acp || entry.betweenTurns)
+		held := !stalled && heldByTasks(entry.agentReport) && (!entry.acp || entry.betweenTurns)
 		f.disconnected = f.disconnected || (entry.agentReport.State == agentstatus.Idle && disconnectedReason(entry.agentReport.Reason))
-		f.human = f.human || entry.atPrompt() || (entry.idleShown && humanReason(entry.idleReason))
-		f.waitingAgents = (entry.waits() && reason == shownIdleReason(entry.idleReason)) || (held && !entry.heldTools)
-		f.waitingTools = held && entry.heldTools
+		f.human = f.human || entry.atPrompt() || (entry.idleShown && humanReason(entry.idleReason)) ||
+			(parked && entry.agentReport.State == agentstatus.Idle && entry.agentReport.UsageLimit)
+		f.waitingAgents = !waitedOut && ((entry.waits() && reason == publicRunStatusReason(entry.idleReason)) ||
+			(held && !entry.agentReport.Tools))
+		f.waitingTools = held && entry.agentReport.Tools
+	}
+	if !f.human {
+		approvals, err := s.cfg.Store.ListApprovals(ctx, workspace, store.ApprovalRequested)
+		if err != nil {
+			return "", fmt.Errorf("scheduler: read the run's approvals: %w", err)
+		}
+		for _, a := range approvals {
+			f.human = f.human || a.RunID == run
+		}
 	}
 	f.turn = to == domain.RunRunning && !f.waitingAgents && !f.waitingTools
-	if to == domain.RunNeedsAttention && !f.disconnected && !f.human && !f.waitingAgents {
-		waiting, err := s.cfg.Store.IntegratorWaiting(ctx, run)
+	if parked && entry != nil && !stalled && !waitedOut && !f.disconnected && !f.human && !f.failed && !f.finished && !f.waitingAgents {
+		waiting, err := s.cfg.Store.IntegratorWaiting(ctx, run, entry.turnStartedAt)
 		if err != nil {
-			slog.Warn("scheduler: read the integrator's workers", "run", run, "error", err)
+			return "", fmt.Errorf("scheduler: read the integrator's workers: %w", err)
 		}
 		f.waitingAgents = waiting
 	}
-	return deriveActivity(f)
+	return deriveActivity(f), nil
 }
 
 // refreshActivityLocked rewrites a live run's activity when the facts it is
@@ -112,10 +143,23 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 	if s.runs[entry.runID] != entry || !entry.status.Live() || entry.finalizing || entry.exitObserved {
 		return nil
 	}
-	if s.activityLocked(ctx, entry.runID, entry, entry.status, entry.reason) == entry.activity {
-		return nil
+	activity, err := s.activityLocked(ctx, entry.runID, entry.workspaceID, entry, entry.status, entry.reason)
+	if err != nil || activity == entry.activity {
+		return err
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, entry.reason, "")
+}
+
+// refreshRunActivity recomputes run's activity after a fact outside the
+// scheduler changed, such as an approval request raised or decided.
+func (s *Scheduler) refreshRunActivity(ctx context.Context, run domain.RunID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	if entry == nil {
+		return nil
+	}
+	return s.refreshActivityLocked(ctx, entry)
 }
 
 // refreshActivities recomputes every live run's activity: after recovery,
@@ -131,17 +175,20 @@ func (s *Scheduler) refreshActivities(ctx context.Context) {
 	}
 }
 
-// expireWaitLocked shows a shown waiting outcome as idle, once nothing
-// happened for waitedFactor stall thresholds (checkStalls). Caller holds s.mu.
+// expireWaitLocked shows a run that waited on its own agents as idle, once
+// nothing happened for waitedFactor stall thresholds (checkStalls), and
+// drops a waiting outcome it showed. Caller holds s.mu.
 func (s *Scheduler) expireWaitLocked(ctx context.Context, entry *supervised, quiet time.Duration) error {
 	old := entry.sidecar()
-	entry.idleReason, entry.idleShown = "", false
-	if err := s.writeSidecar(entry.sidecar()); err != nil {
-		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
-		return fmt.Errorf("scheduler: persist the expired wait: %w", err)
+	if entry.waits() {
+		entry.idleReason, entry.idleShown = "", false
+		if err := s.writeSidecar(entry.sidecar()); err != nil {
+			entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
+			return fmt.Errorf("scheduler: persist the expired wait: %w", err)
+		}
 	}
 	if err := s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status,
-		fmt.Sprintf("waited %s with no activity", quiet.Truncate(time.Second)), ""); err != nil {
+		fmt.Sprintf("%s%s with no activity", waitedReasonPrefix, quiet.Truncate(time.Second)), ""); err != nil {
 		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
 		return errors.Join(err, s.writeSidecar(old))
 	}

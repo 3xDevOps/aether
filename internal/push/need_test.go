@@ -32,6 +32,7 @@ func TestNeedOf(t *testing.T) {
 		run      *domain.Run
 		approval *store.Approval
 		inputs   []domain.RunInputRequest
+		paused   bool
 		want     string
 	}{
 		{name: "working", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunRunning, Activity: domain.ActivityWorking}},
@@ -46,7 +47,11 @@ func TestNeedOf(t *testing.T) {
 		{name: "idle", run: parked(idle, "agent idle")},
 		{name: "enhanced turn ended", run: parked(idle, "agent idle", enhanced)},
 		{name: "stalled", run: parked(idle, "stalled: no output for 10m0s", enhanced)},
-		{name: "turn failed", run: parked(idle, "enhanced turn failed: overloaded", enhanced)},
+		{name: "turn failed", run: parked(domain.ActivityFailed, "enhanced turn failed: overloaded", enhanced, unseen), want: "Turn failed: overloaded"},
+		{name: "agent failed", run: parked(domain.ActivityFailed, "agent failed", unseen), want: "Agent failed"},
+		{name: "failure seen", run: parked(domain.ActivityFailed, "agent failed")},
+		{name: "usage limit", run: parked(needsYou, "Usage limit reached on Ada's account; no fallback has usage left"), want: "Usage limit reached on Ada's account; no fallback has usage left"},
+		{name: "paused", run: parked(needsYou, "blocked: need the staging API key"), approval: approval, paused: true},
 		{name: "integrator waiting on workers", run: parked(domain.ActivityWaitingAgents, "agent idle", integrator)},
 		{name: "reported waiting", run: parked(domain.ActivityWaitingAgents, "waiting on 3 workers", enhanced)},
 		{name: "waiting on a tool", run: &domain.Run{Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning, Activity: domain.ActivityWaitingTools}},
@@ -66,7 +71,7 @@ func TestNeedOf(t *testing.T) {
 		{name: "closed by a member", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunAbandoned}},
 		{name: "worker finished", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, MissionRole: "worker"}},
 	} {
-		got := needOf(tc.run, tc.approval, tc.inputs)
+		got := needOf(tc.run, tc.approval, tc.inputs, tc.paused)
 		switch {
 		case got == nil && tc.want != "":
 			t.Errorf("%s: no need, want %q", tc.name, tc.want)
@@ -90,20 +95,20 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 	first := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	second := []domain.RunInputRequest{{ID: "q2", SessionID: "s1", Kind: "question"}}
 
-	same := needOf(blocked, nil, nil).key
+	same := needOf(blocked, nil, nil, false).key
 	for name, other := range map[string]*need{
-		"blocked again after working": needOf(&again, nil, nil),
-		"a question":                  needOf(&asked, nil, nil),
-		"a native question":           needOf(blocked, nil, first),
+		"blocked again after working": needOf(&again, nil, nil, false),
+		"a question":                  needOf(&asked, nil, nil, false),
+		"a native question":           needOf(blocked, nil, first, false),
 	} {
 		if other.key == same {
 			t.Errorf("%s has the key of the first block, %q", name, same)
 		}
 	}
-	if repeat := needOf(blocked, nil, nil).key; repeat != same {
+	if repeat := needOf(blocked, nil, nil, false).key; repeat != same {
 		t.Errorf("the same block has keys %q and %q", same, repeat)
 	}
-	if needOf(blocked, nil, first).key == needOf(blocked, nil, second).key {
+	if needOf(blocked, nil, first, false).key == needOf(blocked, nil, second, false).key {
 		t.Error("two different questions share a key")
 	}
 }

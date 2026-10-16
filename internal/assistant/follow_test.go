@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -117,10 +118,12 @@ func (f *fakeFollows) ListApprovals(context.Context, domain.WorkspaceID, string)
 type fakeRunState struct {
 	inputs  []domain.RunInputRequest
 	pending []acphost.Request
+	paused  bool
 }
 
 func (f *fakeRunState) PendingInputs(domain.RunID) []domain.RunInputRequest { return f.inputs }
 func (f *fakeRunState) ACPPending(domain.RunID) []acphost.Request           { return f.pending }
+func (f *fakeRunState) Paused(domain.RunID) bool                            { return f.paused }
 
 // newRun is a run as the scheduler leaves it: a live run's activity follows
 // its reason, a request for a human or an idle turn end.
@@ -143,6 +146,11 @@ func withActivity(run *domain.Run, activity domain.RunActivity) *domain.Run {
 	return run
 }
 
+func unseen(run *domain.Run) *domain.Run {
+	run.OutcomeUnseen = true
+	return run
+}
+
 func TestClassify(t *testing.T) {
 	t.Parallel()
 	input := domain.RunInputRequest{ID: "req-1", SessionID: "s1", Kind: "question"}
@@ -152,6 +160,7 @@ func TestClassify(t *testing.T) {
 		inputs   []domain.RunInputRequest
 		pending  []acphost.Request
 		approval *store.Approval
+		paused   bool
 		kind     string
 		severity string
 		title    string
@@ -196,9 +205,11 @@ func TestClassify(t *testing.T) {
 			kind: "finished", severity: "info", title: `Run "Fix login" finished`, body: "agent reported success",
 		},
 		{
-			name: "reported failure", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported failure"), domain.ActivityFailed),
-			kind: "needs_attention", severity: "warning", title: `Run "Fix login" failed`, body: "agent reported failure",
+			name: "reported failure", run: unseen(withActivity(newRun(domain.RunNeedsAttention, "agent reported failure"), domain.ActivityFailed)),
+			kind: "needs_attention", severity: "warning", title: `Run "Fix login" failed`, body: "Agent reported failure, review the result",
 		},
+		{name: "seen failure", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported failure"), domain.ActivityFailed)},
+		{name: "paused", run: newRun(domain.RunNeedsAttention, "blocked: no credentials"), paused: true},
 		{
 			name: "disconnected", run: withActivity(newRun(domain.RunNeedsAttention, "enhanced session ended: exit code 1"), domain.ActivityDisconnected),
 			kind: "needs_attention", severity: "warning", title: `Run "Fix login" disconnected`, body: "Agent disconnected: exit code 1",
@@ -209,7 +220,7 @@ func TestClassify(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		got := classify(tc.run, tc.inputs, tc.pending, tc.approval)
+		got := classify(tc.run, tc.inputs, tc.pending, tc.approval, tc.paused)
 		if tc.kind == "" {
 			if got != nil {
 				t.Errorf("%s: classified as %+v, want nothing", tc.name, got)
@@ -274,17 +285,30 @@ func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 		t.Fatalf("a recorded follow announced a non-final state: %+v", got[4:])
 	}
 
+	// A parked result is no end: the run can still ask, fail or finish.
+	fs.run = withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished)
+	f.check(ctx, "run-1", false)
+	if len(got) != 6 || got[4].kind != "finished" || len(fs.follows) != 2 {
+		t.Fatalf("a parked success announced %+v with follows %+v, want a notice each and both follows kept", got[4:], fs.follows)
+	}
+	fs.run = newRun(domain.RunNeedsAttention, "needs input: which region?")
+	fs.run.StatusSeq = 2
+	f.check(ctx, "run-1", false)
+	if len(got) != 8 || got[6].kind != "needs_attention" {
+		t.Fatalf("a question after a parked success announced %+v", got[6:])
+	}
+
 	fs.run = newRun(domain.RunCompleted, "")
 	f.check(ctx, "run-1", true)
-	if len(got) != 6 || got[4].kind != "finished" {
-		t.Fatalf("finish announced %+v", got[4:])
+	if len(got) != 10 || got[8].kind != "finished" {
+		t.Fatalf("finish announced %+v", got[8:])
 	}
 	if len(fs.follows) != 0 {
 		t.Fatalf("follows after the run finished: %+v", fs.follows)
 	}
 	f.check(ctx, "run-1", false)
-	if len(got) != 6 {
-		t.Fatalf("a finished run announced again: %+v", got[6:])
+	if len(got) != 10 {
+		t.Fatalf("a finished run announced again: %+v", got[10:])
 	}
 }
 
@@ -415,7 +439,7 @@ func TestNoNoticeIsWrittenForAMemberBeingRemoved(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	x := newServiceFixture(t, newRun(domain.RunCompleted, ""))
-	n := classify(x.fs.run, nil, nil, nil)
+	n := classify(x.fs.run, nil, nil, nil, false)
 	n.member = "gone"
 	x.fs.gone = true
 	if x.svc.deliver(*n) {
@@ -468,12 +492,13 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 		calls = append(calls, call{member, current != nil})
 		return nil
 	})
-	needs := classify(x.fs.run, nil, nil, nil)
-	finished := classify(newRun(domain.RunCompleted, ""), nil, nil, nil)
+	needs := classify(x.fs.run, nil, nil, nil, false)
+	finished := classify(newRun(domain.RunCompleted, ""), nil, nil, nil, false)
+	parked := classify(unseen(withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished)), nil, nil, nil, false)
 	for _, c := range []struct {
 		n      *notice
 		member domain.MemberID
-	}{{needs, "m1"}, {needs, "m2"}, {finished, "m1"}} {
+	}{{needs, "m1"}, {needs, "m2"}, {finished, "m1"}, {parked, "m1"}, {parked, "m2"}} {
 		n := *c.n
 		n.member = c.member
 		if !x.svc.deliver(n) {
@@ -481,11 +506,13 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 		}
 	}
 	x.svc.wg.Wait()
-	want := []call{{"m2", true}, {"m1", false}}
-	slices.SortFunc(calls, func(a, b call) int { return strings.Compare(string(a.member), string(b.member)) })
-	slices.SortFunc(want, func(a, b call) int { return strings.Compare(string(a.member), string(b.member)) })
+	// The owner's push service announces a parked result itself.
+	want := []call{{"m2", true}, {"m1", false}, {"m2", false}}
+	byMember := func(a, b call) int { return strings.Compare(fmt.Sprint(a), fmt.Sprint(b)) }
+	slices.SortFunc(calls, byMember)
+	slices.SortFunc(want, byMember)
 	if !slices.Equal(calls, want) {
-		t.Fatalf("pushes = %+v, want the owner's finish and the other member's need only: %+v", calls, want)
+		t.Fatalf("pushes = %+v, want the owner's finish and the other member's notices only: %+v", calls, want)
 	}
 }
 
@@ -532,7 +559,7 @@ func TestANoticeReachesTheTranscriptWhetherOrNotTheSessionTakesIt(t *testing.T) 
 	m.sess = &session{acp: sess, ended: make(chan struct{})}
 	m.mu.Unlock()
 
-	n := *classify(x.fs.run, nil, nil, nil)
+	n := *classify(x.fs.run, nil, nil, nil, false)
 	n.member = "m1"
 	if err := x.svc.transcribe(m, n); err != nil {
 		t.Fatalf("a live session: %v", err)

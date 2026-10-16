@@ -189,7 +189,6 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	runningRow.Status = domain.RunRunning
 	runningRow.Reason = ""
 	runningRow.Activity = domain.ActivityWorking
-	runningRow.StatusSeq++
 	runningRow.StartedAt = &now
 	runningRow.FinishedAt = nil
 	runningRow.StatusChangedAt = &now
@@ -317,7 +316,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		// and a finish a member had opened is still opened.
 		var unseenErr, unopenedErr error
 		if terminalRow.OutcomeUnseen {
-			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, "", nil, nil); flagErr != nil {
+			if _, flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, "", nil, nil); flagErr != nil {
 				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
 			}
 		}
@@ -1729,12 +1728,15 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 			reportedAt = reportedAt.Add(-reportFinishDeadline)
 		}
 	}
-	var relaunched, idleAt time.Time
+	var relaunched, idleAt, turnStarted time.Time
 	if sc.RelaunchedAt != nil {
 		relaunched = *sc.RelaunchedAt
 	}
 	if sc.IdleReportAt != nil {
 		idleAt = *sc.IdleReportAt
+	}
+	if sc.TurnStartedAt != nil {
+		turnStarted = *sc.TurnStartedAt
 	}
 	mode := sc.Mode
 	if mode == "" {
@@ -1757,7 +1759,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	}
 	// A crash can leave the shown sidecar durable before the parked row.
 	// Reapply that pending outcome, but never mark an already reviewed one unseen.
-	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != shownIdleReason(sc.IdleReason)) {
+	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != publicRunStatusReason(sc.IdleReason)) {
 		sc.IdleShown = false
 	}
 	return &supervised{
@@ -1789,6 +1791,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		activity:            r.Activity,
 		startedAt:           started,
 		relaunchedAt:        relaunched,
+		turnStartedAt:       turnStarted,
 		paused:              sc.Paused,
 		killRequested:       sc.KillRequested,
 		retained:            sc.Retained,

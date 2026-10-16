@@ -301,7 +301,7 @@ func TestTimedTakeoverPermissionAndRunInvalidation(t *testing.T) {
 				if err := controlClient(t, e).Call(protocol.MethodMemberRole, protocol.MemberRoleParams{MemberID: string(member.ID), Role: string(domain.RoleViewer)}, &result); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
+			} else if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			clock.Advance(takeoverReview)

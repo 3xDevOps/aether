@@ -344,10 +344,10 @@ closed reads `not_sent`.
 The session reports **working** when a turn starts and **idle** when it ends
 and no background work is left, so an idle enhanced run parks exactly like a
 Standard run whose agent reports its turns. The reason on the parked run says
-how the turn ended, and its [activity](failure-handling.md#run-activity)
+how the turn ended, and its [state](failure-handling.md#run-activity)
 whether anyone is needed:
 
-| Reason | Activity | Cause |
+| Reason | State | Cause |
 | --- | --- | --- |
 | `agent idle` | `idle` | The turn ended normally (`end_turn`). |
 | `needs input: <question>` | `needs-you` | The agent asked you with `aether-internal report --outcome needs-input` ([coordination.md](coordination.md)) and ended its turn. |
@@ -356,8 +356,8 @@ whether anyone is needed:
 | `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. |
 | `turn interrupted` | `idle` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. |
 | `turn ended: <stop reason>` | `idle` | Any other ACP stop reason, such as `max_tokens` or `refusal`. |
-| `enhanced turn failed: <error>` | `idle` | The agent failed the prompt while staying connected. |
-| `enhanced session ended: <cause>` | `disconnected` | The adapter exited or closed its output. |
+| `enhanced turn failed: <error>` | `failed` | The agent failed the prompt while staying connected. |
+| `enhanced session ended: <cause>` | `disconnected` | The adapter exited or closed its output. Reopening the session clears it. |
 | `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session. |
 
 Only `agent idle` is a turn end that settles a reported success or failure,
@@ -381,8 +381,8 @@ While a Claude agent works with no prompt open
 reason says so: `working in background` during a turn the agent runs on its
 own, `working in background: 1 task` or `working in background: <n> tasks`
 while it waits for background tasks. Waiting for tasks between turns is
-`waiting-agents` when one of them is a subagent or workflow, else
-`waiting-tools`; an autonomous turn is `working`. The next prompt changes the
+`waiting-agents` when one of them is a subagent, workflow or teammate, else
+`waiting-tools`, such as for a monitor; an autonomous turn is `working`. The next prompt changes the
 reason back to `agent resumed`.
 
 ### Background work

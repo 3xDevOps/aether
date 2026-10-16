@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 )
 
 // autonomousQuiet ends an autonomous turn whose agent reports no result for
@@ -58,11 +59,11 @@ type liveTask struct {
 	dismissed bool
 }
 
-// holds reports whether the run waits for the task: a subagent, workflow or
-// any other task but a shell. A shell, such as a dev server, may never end,
-// and Claude Code is idle while one runs.
+// holds reports whether the run waits for the task (agentstatus.HeldTask).
+// Claude Code is idle while only a shell runs.
 func (t *liveTask) holds() bool {
-	return !t.ambient && !t.dismissed && t.typ != "local_bash"
+	held, _ := agentstatus.HeldTask(t.typ)
+	return !t.ambient && !t.dismissed && held
 }
 
 type sdkMessage struct {
@@ -222,12 +223,12 @@ func (s *Session) tasksLocked() []Task {
 
 func (s *Session) heldLocked() int { return len(s.heldTasksLocked()) }
 
-// heldAgentsLocked counts the held tasks that are subagents or workflows;
-// the rest are tools the agent waits on, such as a monitor.
+// heldAgentsLocked counts the held tasks that are the agent's own subagents
+// or workflows; the rest are tools it waits on, such as a monitor.
 func (s *Session) heldAgentsLocked() int {
 	n := 0
 	for _, id := range s.heldTasksLocked() {
-		if typ := s.tasks[id].typ; strings.Contains(typ, "agent") || strings.Contains(typ, "workflow") {
+		if _, agent := agentstatus.HeldTask(s.tasks[id].typ); agent {
 			n++
 		}
 	}

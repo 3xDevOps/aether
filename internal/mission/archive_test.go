@@ -38,7 +38,8 @@ func (r *storeRetirer) CloseRun(ctx context.Context, run domain.RunID, _ domain.
 		return err
 	}
 	r.closed[run] = outcome
-	return r.db.UpdateRunStatus(ctx, run, outcome, "closed", "", nil, nil)
+	_, err := r.db.UpdateRunStatus(ctx, run, outcome, "closed", "", nil, nil)
+	return err
 }
 
 func (r *storeRetirer) SetMissionArchived(ctx context.Context, mission domain.MissionID, runs []domain.RunID, _ domain.MemberID, at *time.Time) (bool, error) {
@@ -87,7 +88,7 @@ func newArchiveFixture(t *testing.T) *archiveFixture {
 func (f *archiveFixture) runsAre(t *testing.T, status domain.RunStatus) {
 	t.Helper()
 	for _, run := range []domain.RunID{f.mission.CurrentIntegratorRunID, f.worker} {
-		if err := f.db.UpdateRunStatus(context.Background(), run, status, "", "", nil, nil); err != nil {
+		if _, err := f.db.UpdateRunStatus(context.Background(), run, status, "", "", nil, nil); err != nil {
 			t.Fatalf("set run %s %s: %v", run, status, err)
 		}
 	}

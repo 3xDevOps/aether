@@ -35,7 +35,7 @@ func mergeEnv(t *testing.T, mod func(*Config)) (*testEnv, *fakeWhoIs) {
 			mod(c)
 		}
 	})
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	return e, whois
@@ -268,7 +268,7 @@ func TestMergeRefusals(t *testing.T) {
 	}
 	code := mergeStart(t, vi)
 	wantRefusal(t, tc.Call(protocol.MethodMemberMergePreview, protocol.MemberMergePreviewParams{Code: code}, nil), string(run.ID))
-	if err := e.store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	until := time.Now().Add(time.Hour)

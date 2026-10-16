@@ -500,7 +500,7 @@ func (e *testEnv) retainLegacyReportedRun(t *testing.T, run domain.RunID) {
 	if err := e.sched.CloseRun(t.Context(), run, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.FinishRunReported(t.Context(), run, domain.RunCompleted, reportedSuccessRetainedReason, "", nil, nil); err != nil {
+	if _, err := e.db.FinishRunReported(t.Context(), run, domain.RunCompleted, reportedSuccessRetainedReason, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.mu.Lock()
@@ -1008,9 +1008,9 @@ type failingReportedFinishStore struct {
 	fail atomic.Int32
 }
 
-func (s *failingReportedFinishStore) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) error {
+func (s *failingReportedFinishStore) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (store.RunStatusStamp, error) {
 	if s.fail.Add(-1) >= 0 {
-		return errors.New("test: reported finish row write failed")
+		return store.RunStatusStamp{}, errors.New("test: reported finish row write failed")
 	}
 	return s.Store.FinishRunReported(ctx, id, status, reason, activity, startedAt, finishedAt)
 }

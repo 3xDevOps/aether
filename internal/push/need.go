@@ -10,7 +10,9 @@ import (
 
 // These mirror the scheduler's reasons: acp*Reason in
 // internal/scheduler/acp_turn.go, reported*Reason in
-// internal/scheduler/reported.go, and the blocked and needs-input prefixes.
+// internal/scheduler/reported.go, usageLimitReason in
+// internal/scheduler/usage_fallback.go, and the blocked and needs-input
+// prefixes.
 // The labels are the dashboard's (web/src/lib/needs-you.ts).
 var disconnects = []struct{ prefix, label string }{
 	{"enhanced session failed: ", "Enhanced could not start: "},
@@ -20,7 +22,10 @@ var disconnects = []struct{ prefix, label string }{
 const (
 	blockedPrefix    = "blocked: "
 	needsInputPrefix = "needs input: "
+	usageLimitPrefix = "Usage limit reached on "
+	turnFailedPrefix = "enhanced turn failed: "
 	reportedPrefix   = "agent reported "
+	reportedFailure  = reportedPrefix + "failure"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -40,7 +45,10 @@ type need struct {
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
 // the run alone. A swarm worker's integrator answers for it, so a worker
 // counts only when it reports itself blocked.
-func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest) *need {
+func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest, paused bool) *need {
+	if paused {
+		return nil
+	}
 	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
 	if !worker {
@@ -76,12 +84,15 @@ func AttentionBody(run *domain.Run) string {
 	return clip(statusBody(run, run.MissionRole == "worker", false), maxBodyRunes)
 }
 
-// statusBody announces a live run only for the activities that need a
-// member: needs-you, failed, disconnected and finished. Idle, waiting and
-// working never do.
+// statusBody announces a live run only when it needs a member
+// (domain.RunActivity.NeedsAttention) or finished with a result nobody has
+// seen. Idle, waiting and working never do.
 func statusBody(run *domain.Run, worker, background bool) string {
 	switch run.Status {
 	case domain.RunRunning, domain.RunNeedsAttention:
+		if !run.Activity.NeedsAttention(run.OutcomeUnseen, false) && run.Activity != domain.ActivityFinished {
+			return ""
+		}
 		switch run.Activity {
 		case domain.ActivityNeedsYou:
 			if rest, ok := strings.CutPrefix(run.Reason, blockedPrefix); ok {
@@ -95,6 +106,9 @@ func statusBody(run *domain.Run, worker, background bool) string {
 			}
 			if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {
 				return rest
+			}
+			if strings.HasPrefix(run.Reason, usageLimitPrefix) {
+				return run.Reason
 			}
 			if background {
 				return ""
@@ -113,6 +127,12 @@ func statusBody(run *domain.Run, worker, background bool) string {
 		case domain.ActivityFailed, domain.ActivityFinished:
 			if worker || background || !run.OutcomeUnseen {
 				return ""
+			}
+			if rest, ok := strings.CutPrefix(run.Reason, turnFailedPrefix); ok {
+				return "Turn failed: " + rest
+			}
+			if run.Activity == domain.ActivityFailed && run.Reason != reportedFailure {
+				return "Agent failed"
 			}
 			return "Agent reported " + strings.TrimPrefix(run.Reason, reportedPrefix) + ", review the result"
 		}

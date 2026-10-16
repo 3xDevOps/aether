@@ -33,6 +33,7 @@ func ParseState(s string) (State, bool) {
 const (
 	ReasonIdle    = "agent idle"
 	ReasonResumed = "agent resumed"
+	ReasonFailed  = "agent failed"
 	// ReasonBackground is a working run's reason while its agent works with
 	// no prompt open (web/src/lib/status.ts).
 	ReasonBackground = "working in background"
@@ -50,6 +51,17 @@ func BackgroundReason(tasks int) string {
 	return fmt.Sprintf("%s: %d tasks", ReasonBackground, tasks)
 }
 
+// HeldTask classifies a Claude Code background task by its type: held says
+// the agent waits for it, agent that it is one of the agent's own subagents,
+// workflows or teammates rather than a tool such as a monitor. A shell, such
+// as a dev server, may never end, so nothing waits for it.
+func HeldTask(typ string) (held, agent bool) {
+	if typ == "local_bash" {
+		return false, false
+	}
+	return true, strings.Contains(typ, "agent") || strings.Contains(typ, "workflow") || strings.Contains(typ, "teammate")
+}
+
 // An input-only report preserves the last execution state. SessionID is the
 // agent's top-level session, not a subagent's. UsageLimit marks a turn that
 // stopped on the account's subscription usage limit; Reason is then the
@@ -60,6 +72,12 @@ type Report struct {
 	InputUpdates []domain.RunInputUpdate `json:"input_updates,omitempty"`
 	SessionID    string                  `json:"session_id,omitempty"`
 	UsageLimit   bool                    `json:"usage_limit,omitempty"`
+	// Tools says the background tasks a Working report waits for are all
+	// tools, none of them the agent's own subagents or workflows.
+	Tools bool `json:"tools,omitempty"`
+	// Subagent marks a subagent's activity: it keeps the run from stalling
+	// and says nothing about the main agent's turn.
+	Subagent bool `json:"subagent,omitempty"`
 }
 
 const ReporterCommand = coordtransport.BinaryPath
@@ -79,14 +97,16 @@ const OpenCodeV2PluginName = "opencode-status-v2.js"
 var OpenCodeV2Plugin []byte
 
 type claudeHook struct {
-	Event           string     `json:"hook_event_name"`
-	SessionID       string     `json:"session_id"`
-	AgentID         string     `json:"agent_id"`
-	Tool            string     `json:"tool_name"`
-	ToolUseID       string     `json:"tool_use_id"`
-	ElicitationID   string     `json:"elicitation_id"`
-	IsInterrupt     bool       `json:"is_interrupt"`
-	BackgroundTasks []struct{} `json:"background_tasks"`
+	Event           string `json:"hook_event_name"`
+	SessionID       string `json:"session_id"`
+	AgentID         string `json:"agent_id"`
+	Tool            string `json:"tool_name"`
+	ToolUseID       string `json:"tool_use_id"`
+	ElicitationID   string `json:"elicitation_id"`
+	IsInterrupt     bool   `json:"is_interrupt"`
+	BackgroundTasks []struct {
+		Type string `json:"type"`
+	} `json:"background_tasks"`
 	// Error and LastAssistantMessage are StopFailure's; the message is the
 	// API error Claude Code showed, read only for a usage limit.
 	Error                string `json:"error"`
@@ -128,16 +148,18 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 	// runs in the background works on after the turn that started it ended.
 	working := Report{State: Working}
 	if hook.AgentID != "" {
-		working = Report{}
+		working = Report{Subagent: true}
 	}
 	switch hook.Event {
 	case "UserPromptSubmit":
 		return Report{State: Working}, true
+	case "SubagentStart":
+		return Report{Subagent: true}, true
 	case "PreToolUse":
 		if hook.Tool == "AskUserQuestion" {
 			return input("open", "question", hook.ToolUseID)
 		}
-		return working, working.State != ""
+		return working, true
 	case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
 		report := working
 		if hook.IsInterrupt {
@@ -147,7 +169,7 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 			closed, _ := input("close", "question", hook.ToolUseID)
 			report.InputUpdates = closed.InputUpdates
 		}
-		return report, report.State != "" || len(report.InputUpdates) != 0
+		return report, report.State != "" || report.Subagent || len(report.InputUpdates) != 0
 	case "Elicitation":
 		return input("open", "form", hook.ElicitationID)
 	case "ElicitationResult":
@@ -156,8 +178,18 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 		if hook.AgentID != "" || hook.Event == "SubagentStop" {
 			return Report{}, false
 		}
-		if len(hook.BackgroundTasks) > 0 {
-			return Report{State: Working, Reason: BackgroundReason(len(hook.BackgroundTasks))}, true
+		held, agents := 0, 0
+		for _, task := range hook.BackgroundTasks {
+			h, agent := HeldTask(task.Type)
+			if h {
+				held++
+			}
+			if agent {
+				agents++
+			}
+		}
+		if held > 0 {
+			return Report{State: Working, Reason: BackgroundReason(held), Tools: agents == 0}, true
 		}
 		if hook.Event == "Stop" {
 			return Report{State: Idle, Reason: ReasonIdle}, true
@@ -167,7 +199,7 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 		if hook.Error == "rate_limit" && IsUsageLimitMessage(hook.LastAssistantMessage) {
 			return Report{State: Idle, Reason: hook.LastAssistantMessage, UsageLimit: true}, true
 		}
-		return Report{State: Idle, Reason: "agent failed"}, true
+		return Report{State: Idle, Reason: ReasonFailed}, true
 	case "SessionEnd":
 		if hook.SessionID == "" {
 			return Report{}, false

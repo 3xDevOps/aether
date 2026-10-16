@@ -675,17 +675,26 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	return &domain.Acceptance{SubmissionID: id, MissionID: missionID, TaskID: taskID, TaskRevision: taskRevision, AcceptedSetVersion: newVersion, IntegratorGeneration: generation, AcceptedByRunID: acceptedBy, ScopeDisposition: scopeDisposition, AcceptedAt: now}, nil
 }
 
-func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID) (bool, error) {
+func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (bool, error) {
+	var after int64
+	if !since.IsZero() {
+		var err error
+		if after, err = encodeTime(since); err != nil {
+			return false, fmt.Errorf("store: integrator waiting: %w", err)
+		}
+	}
 	var waiting bool
 	err := d.db.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
-		WHERE m.current_integrator_run_id = ?1 AND a.state IN ('reserved', 'launching', 'running', 'unknown')
+		WHERE m.current_integrator_run_id = ?1 AND m.phase NOT IN ('completed', 'cancelled')
+		  AND a.state IN ('reserved', 'launching', 'running', 'unknown')
 	) OR EXISTS (
 		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
 		JOIN run_messages ON run_messages.from_run = a.run_id
-		WHERE m.current_integrator_run_id = ?1 AND run_messages.to_run = ?1
+		WHERE m.current_integrator_run_id = ?1 AND m.phase NOT IN ('completed', 'cancelled')
+		  AND run_messages.to_run = ?1 AND run_messages.created_at > ?2
 		  AND run_messages.acked_at IS NULL AND run_messages.retired_at IS NULL
-	)`, run).Scan(&waiting)
+	)`, run, after).Scan(&waiting)
 	if err != nil {
 		return false, fmt.Errorf("store: integrator waiting: %w", err)
 	}

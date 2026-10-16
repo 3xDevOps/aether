@@ -119,6 +119,21 @@ const (
 	ActivityDisconnected  RunActivity = "disconnected"
 )
 
+// NeedsAttention is the one rule for whether a live run with this activity
+// needs a member, which push notifications, assistant follow notices,
+// aether runs --needs-you and the dashboard's Needs you list share: an open
+// human request, a disconnected agent, or a failure nobody has seen. A
+// paused run never does.
+func (a RunActivity) NeedsAttention(outcomeUnseen, paused bool) bool {
+	switch {
+	case paused:
+		return false
+	case a == ActivityNeedsYou, a == ActivityDisconnected:
+		return true
+	}
+	return a == ActivityFailed && outcomeUnseen
+}
+
 // LaunchMode is how the agent process is hosted inside a run.
 type LaunchMode string
 

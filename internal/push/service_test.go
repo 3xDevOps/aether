@@ -27,6 +27,7 @@ const testQuiet = 300 * time.Millisecond
 type fakeRuns struct {
 	mu     sync.Mutex
 	inputs map[domain.RunID][]domain.RunInputRequest
+	paused atomic.Bool
 }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
@@ -34,6 +35,8 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	defer f.mu.Unlock()
 	return f.inputs[run]
 }
+
+func (f *fakeRuns) Paused(domain.RunID) bool { return f.paused.Load() }
 
 func (f *fakeRuns) set(run domain.RunID, inputs ...domain.RunInputRequest) {
 	f.mu.Lock()
@@ -170,7 +173,7 @@ func (h *harness) run(owner *domain.Member, task string, mode domain.LaunchMode)
 // status moves the run the way the scheduler does: the row, then the event.
 func (h *harness) status(run *domain.Run, to domain.RunStatus, activity domain.RunActivity, reason string) {
 	h.t.Helper()
-	if err := h.db.UpdateRunStatus(h.ctx, run.ID, to, reason, activity, nil, nil); err != nil {
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, to, reason, activity, nil, nil); err != nil {
 		h.t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{To: to, Reason: reason, Activity: activity})
@@ -277,7 +280,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	finished := time.Now().UTC()
-	if err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &finished); err != nil {
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &finished); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, OutcomeUnseen: true})
@@ -285,7 +288,7 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 
 	// A member closing a run of their own is not news to them.
 	closed := h.run(h.ada, "Try the other approach", domain.LaunchTUI)
-	if err := h.db.FinishRunByMember(h.ctx, closed.ID, domain.RunAbandoned, "", "", nil, &finished); err != nil {
+	if _, err := h.db.FinishRunByMember(h.ctx, closed.ID, domain.RunAbandoned, "", "", nil, &finished); err != nil {
 		t.Fatalf("FinishRunByMember: %v", err)
 	}
 	h.publish(closed, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunAbandoned})
@@ -399,6 +402,22 @@ func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
 	phone.expect(t, idle)
 	phone.expectNone(t, testQuiet)
 	slow.expectNone(t, testQuiet)
+}
+
+// A paused run needs nobody, even with a question open; resumed, it needs
+// its owner again.
+func TestAResumedRunIsAnnounced(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
+
+	h.runs.paused.Store(true)
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	phone.expectNone(t, testQuiet)
+	h.runs.paused.Store(false)
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineResume})
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Blocked: need the staging API key", Run: string(run.ID)})
 }
 
 func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {

@@ -155,7 +155,7 @@ func TestCleanupRefreshPreservesOutcomeAndFollowsDurableMarker(t *testing.T) {
 	}
 	finished := time.Now().UTC()
 	const reason = "agent reported success; retained container"
-	if err := e.db.FinishRunReported(ctx, run.ID, domain.RunCompleted, reason, "", nil, &finished); err != nil {
+	if _, err := e.db.FinishRunReported(ctx, run.ID, domain.RunCompleted, reason, "", nil, &finished); err != nil {
 		t.Fatal(err)
 	}
 	deadline := finished.Add(time.Hour)

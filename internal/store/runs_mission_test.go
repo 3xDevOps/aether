@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -184,8 +185,9 @@ func TestRunSnapshotSharedAttempts(t *testing.T) {
 	assertSnapshots("", "")
 }
 
-// An integrator waits on its swarm while a worker attempt is live or a
-// worker's mail to it is unacknowledged; other mail does not count.
+// An integrator of an open mission waits on its swarm while a worker attempt
+// is live or a worker's mail to it since its turn started is unacknowledged;
+// other mail does not count.
 func TestIntegratorWaitingOnWorkers(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -207,9 +209,10 @@ func TestIntegratorWaitingOnWorkers(t *testing.T) {
 	}
 	integrator := createRun(mission.CurrentIntegratorRunID)
 	ordinary := createRun("")
+	var since time.Time
 	waiting := func(want bool, what string) {
 		t.Helper()
-		got, err := db.IntegratorWaiting(ctx, integrator.ID)
+		got, err := db.IntegratorWaiting(ctx, integrator.ID, since)
 		if err != nil || got != want {
 			t.Fatalf("%s: IntegratorWaiting = %v, %v; want %v", what, got, err, want)
 		}
@@ -240,4 +243,15 @@ func TestIntegratorWaitingOnWorkers(t *testing.T) {
 		t.Fatalf("acknowledge: %v", err)
 	}
 	waiting(false, "worker mail acknowledged")
+	if err = db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: workspace.ID, FromRun: worker.ID, ToRun: integrator.ID, Body: "again"}, 10); err != nil {
+		t.Fatalf("append worker mail: %v", err)
+	}
+	waiting(true, "new worker mail")
+	since = time.Now()
+	waiting(false, "worker mail from before the turn")
+	since = time.Time{}
+	if _, err = db.db.ExecContext(ctx, `UPDATE missions SET phase = 'completed' WHERE id = ?`, mission.ID); err != nil {
+		t.Fatal(err)
+	}
+	waiting(false, "the mission completed")
 }

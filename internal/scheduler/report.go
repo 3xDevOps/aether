@@ -50,7 +50,7 @@ func (s *Scheduler) recordAgentSession(ctx context.Context, entry *supervised) {
 // session, for the caller to record outside the scheduler lock.
 func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, report agentstatus.Report) (*supervised, error) {
 	if report.State != agentstatus.Working && report.State != agentstatus.Idle &&
-		(report.State != "" || len(report.InputUpdates) == 0) {
+		(report.State != "" || (len(report.InputUpdates) == 0 && !report.Subagent)) {
 		return nil, fmt.Errorf("scheduler: invalid agent execution state %q", report.State)
 	}
 	if err := domain.ValidateRunInputUpdates(report.InputUpdates); err != nil {
@@ -66,6 +66,10 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		entry.exitObserved || entry.finalizing || entry.retained || entry.destroyPending {
 		return nil, fmt.Errorf("scheduler: agent status report for %s: the run is no longer active (%s)", run, entry.status)
 	}
+	if report.Subagent && report.State == "" && len(report.InputUpdates) == 0 {
+		entry.lastWorking = time.Now().UTC()
+		return nil, nil
+	}
 	pending, err := reduceRunInputs(entry.pendingInputs, report.InputUpdates)
 	if err != nil {
 		return nil, err
@@ -73,9 +77,10 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	inputsChanged := len(report.InputUpdates) != 0 && !slices.Equal(pending, entry.pendingInputs)
 	execution := entry.agentReport
 	if report.State != "" {
-		execution = agentstatus.Report{State: report.State, Reason: report.Reason}
+		execution = agentstatus.Report{State: report.State, Reason: report.Reason, Tools: report.Tools, UsageLimit: report.UsageLimit}
 	}
-	reportChanged := execution.State != entry.agentReport.State || execution.Reason != entry.agentReport.Reason
+	reportChanged := execution.State != entry.agentReport.State || execution.Reason != entry.agentReport.Reason ||
+		execution.Tools != entry.agentReport.Tools || execution.UsageLimit != entry.agentReport.UsageLimit
 	finishes := entry.reported != "" && turnEnd(execution) && len(pending) == 0
 	reason := report.Reason
 	showsIdle, clearsIdle := false, false
@@ -97,12 +102,18 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	// next settled turn end.
 	unshows := parks && !showsIdle && reason != entry.idleReason &&
 		entry.idleShown && entry.asks() && entry.launchMode == domain.LaunchACP
+	now := time.Now().UTC()
+	turnStarts := execution.State == agentstatus.Working && entry.agentReport.State != agentstatus.Working
 	var oldSidecar sidecar
 	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows
 	if persist {
 		oldSidecar = entry.sidecar()
 		next := oldSidecar
 		next.AgentState, next.AgentReason = execution.State, execution.Reason
+		next.AgentTools, next.AgentUsageLimit = execution.Tools, execution.UsageLimit
+		if turnStarts {
+			next.TurnStartedAt = &now
+		}
 		next.PendingInputs = pending
 		next.InputPublishPending = entry.inputPublishPending || inputsChanged
 		next.InputStartedAt = nil
@@ -125,9 +136,12 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	}
 
 	// The transition derives the run's activity from the state it applies.
-	priorReport, priorPending := entry.agentReport, entry.pendingInputs
+	priorReport, priorPending, priorTurn := entry.agentReport, entry.pendingInputs, entry.turnStartedAt
 	priorIdle, priorShown := entry.idleReason, entry.idleShown
 	entry.agentReport, entry.pendingInputs = execution, pending
+	if turnStarts {
+		entry.turnStartedAt = now
+	}
 	switch {
 	case showsIdle:
 		entry.idleShown = true
@@ -141,13 +155,12 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	case report.State == agentstatus.Idle || showsIdle:
 		if parks {
 			cause := causeUnattended
-			shown := reason
-			if showsIdle {
+			if showsIdle || failedReason(reason) {
+				// A failed turn is an outcome to review, like a reported one.
 				cause = idleCause(reason)
-				shown = shownIdleReason(reason)
 			}
 			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunNeedsAttention, shown, "", cause)
+				domain.RunNeedsAttention, reason, "", cause)
 		}
 	case report.State == agentstatus.Working && !held:
 		// A run working in the background says so in its reason, so the
@@ -157,13 +170,13 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			resumed = execution.Reason
 		}
 		if entry.status == domain.RunNeedsAttention ||
-			(reportChanged && (backgroundWork(execution) || backgroundWork(entry.agentReport))) {
+			(reportChanged && (backgroundWork(execution) || backgroundWork(priorReport))) {
 			transitionErr = s.transitionLocked(ctx, run, entry.workspaceID, entry.status,
 				domain.RunRunning, resumed, "")
 		}
 	}
 	if transitionErr != nil {
-		entry.agentReport, entry.pendingInputs = priorReport, priorPending
+		entry.agentReport, entry.pendingInputs, entry.turnStartedAt = priorReport, priorPending, priorTurn
 		entry.idleReason, entry.idleShown = priorIdle, priorShown
 		if showsIdle {
 			// The native boundary is still true when parking its outcome
@@ -172,7 +185,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			entry.agentReport = execution
 			entry.pendingInputs = pending
 			entry.inputPublishPending = entry.inputPublishPending || inputsChanged
-			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
+			entry.parkedAt, entry.postParkActivity = now, time.Time{}
 			return nil, errors.Join(transitionErr, s.writeSidecar(entry.sidecar()), s.publishPendingInputLocked(ctx, entry))
 		}
 		if persist {
@@ -204,14 +217,12 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	if finishes {
 		s.startReportedFinishLocked(entry)
 	}
-	if err := s.refreshActivityLocked(ctx, entry); err != nil {
-		slog.Warn("scheduler: refresh run activity", "run", run, "error", err)
-	}
+	refreshErr := s.refreshActivityLocked(ctx, entry)
 	var newSession *supervised
 	if s.recordReportedSessionLocked(entry, report.SessionID) {
 		newSession = entry
 	}
-	return newSession, s.publishPendingInputLocked(ctx, entry)
+	return newSession, errors.Join(refreshErr, s.publishPendingInputLocked(ctx, entry))
 }
 
 // recordReportedSessionLocked keeps the latest session a Standard run's agent

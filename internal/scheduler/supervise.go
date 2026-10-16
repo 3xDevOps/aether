@@ -641,7 +641,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > limit:
-				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
+				reason := fmt.Sprintf("%sno output or file changes for %s", stalledReasonPrefix, idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the
 				// idle outcome waits for its turn-end report.
@@ -651,7 +651,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				} else {
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
-			case e.status == domain.RunNeedsAttention && e.idleShown && e.waits() && idle > waitedFactor*s.cfg.StallThreshold:
+			case e.status == domain.RunNeedsAttention && e.activity == domain.ActivityWaitingAgents && idle > waitedFactor*s.cfg.StallThreshold:
 				err = s.expireWaitLocked(ctx, e, idle)
 			case released:
 				// The run goes back to being judged on silence alone, so

@@ -105,6 +105,8 @@ func report(args []string) {
 		InputUpdates: rep.InputUpdates,
 		SessionID:    rep.SessionID,
 		UsageLimit:   rep.UsageLimit,
+		Tools:        rep.Tools,
+		Subagent:     rep.Subagent,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)

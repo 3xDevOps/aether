@@ -23,14 +23,10 @@ func init() {
 	})
 }
 
-// needsYou selects the runs whose activity needs a member: an open request
-// for a human, a reported failure, or a disconnected agent.
+// needsYou selects the runs that need a member, by the rule push
+// notifications and the dashboard share (domain.RunActivity.NeedsAttention).
 func needsYou(r protocol.Run) bool {
-	switch domain.RunActivity(r.Activity) {
-	case domain.ActivityNeedsYou, domain.ActivityFailed, domain.ActivityDisconnected:
-		return true
-	}
-	return false
+	return domain.RunActivity(r.Activity).NeedsAttention(r.OutcomeUnseen, r.Paused)
 }
 
 // plural renders a count with its noun, so the notice reads as a sentence
@@ -73,7 +69,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 	return tw.Flush()
 }
 
-// displayStatus is a live run's activity, else its status.
+// displayStatus is a live run's state, else its status.
 func displayStatus(r protocol.Run) string {
 	if r.Activity != "" {
 		return r.Activity
@@ -83,7 +79,7 @@ func displayStatus(r protocol.Run) string {
 
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (activity needs-you, failed or disconnected)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, or an unseen failure; never paused)")
 	archived := fs.Bool("archived", false, "list only archived runs")
 	if err := fs.Parse(args); err != nil {
 		return err

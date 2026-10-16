@@ -25,7 +25,7 @@ func (l *confirmedWorkerLauncher) LaunchMission(ctx context.Context, req Mission
 	if err != nil {
 		return nil, err
 	}
-	if err := l.db.UpdateRunStatus(ctx, run.ID, l.status, "", "", nil, nil); err != nil {
+	if _, err := l.db.UpdateRunStatus(ctx, run.ID, l.status, "", "", nil, nil); err != nil {
 		return nil, err
 	}
 	run.Status = l.status
@@ -111,7 +111,7 @@ func TestReconcilePromotesOnlyConfirmedLiveWorkers(t *testing.T) {
 				t.Fatalf("reserved attempts = %v, %v", attempts, err)
 			}
 			attempt := attempts[0]
-			if err := f.db.UpdateRunStatus(t.Context(), attempt.RunID, tc.status, "", "", nil, nil); err != nil {
+			if _, err := f.db.UpdateRunStatus(t.Context(), attempt.RunID, tc.status, "", "", nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			f.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {

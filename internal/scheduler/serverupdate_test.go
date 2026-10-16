@@ -34,7 +34,7 @@ func TestBusyCountsAWorkingRun(t *testing.T) {
 		t.Fatalf("busy with a live run = %+v, want 1 working run", got)
 	}
 
-	if err := e.db.UpdateRunStatus(t.Context(), run.ID, domain.RunNeedsAttention, "stalled: no output", "", nil, nil); err != nil {
+	if _, err := e.db.UpdateRunStatus(t.Context(), run.ID, domain.RunNeedsAttention, "stalled: no output", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	if got = e.sched.Busy(t.Context()); got.Idle() || got.Runs != 1 {

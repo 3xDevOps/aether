@@ -137,7 +137,8 @@ func TestRetainedCaptureSurvivesTransientCleanupAndDatabaseRestart(t *testing.T)
 		if err := os.RemoveAll(f.source.dir); err != nil {
 			return err
 		}
-		return f.db.UpdateRunStatus(ctx, f.run.ID, domain.RunCompleted, "", "", nil, &f.now)
+		_, err := f.db.UpdateRunStatus(ctx, f.run.ID, domain.RunCompleted, "", "", nil, &f.now)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)

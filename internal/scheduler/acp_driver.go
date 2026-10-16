@@ -521,6 +521,9 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
+	if !oneShot {
+		d.reconnected(entry)
+	}
 	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
 		c.svc.EnhancedSessionOpened(ctx, runID)
 	}
@@ -544,6 +547,18 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		d.wakeIdle(runID)
 	}
 	return nil
+}
+
+// reconnected clears the disconnect the run's previous session reported, so
+// the run is not shown disconnected until the reopened session's first turn
+// state.
+func (d *acpDriver) reconnected(entry *supervised) {
+	d.s.mu.Lock()
+	ended := entry.agentReport.State == agentstatus.Idle && disconnectedReason(entry.agentReport.Reason)
+	d.s.mu.Unlock()
+	if ended {
+		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+	}
 }
 
 func (d *acpDriver) setRun(run domain.RunID, r *acpRun) {

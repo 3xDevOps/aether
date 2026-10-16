@@ -62,7 +62,7 @@ func legalTransition(from, to domain.RunStatus) bool {
 const maxPublicRunStatusReason = 256
 
 func publicRunStatusReason(reason string) string {
-	reason = strings.TrimSpace(reason)
+	reason = strings.TrimPrefix(strings.TrimSpace(reason), waitingReasonPrefix)
 	if strings.HasPrefix(reason, needsInputReasonPrefix) {
 		// The agent's question, already bounded by its summary limit,
 		// shows whole.
@@ -299,7 +299,10 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
-	activity := s.activityLocked(ctx, run, s.runs[run], to, public)
+	activity, err := s.activityLocked(ctx, run, workspace, s.runs[run], to, public)
+	if err != nil {
+		return err
+	}
 	write := s.cfg.Store.UpdateRunStatus
 	switch cause {
 	case causeReported:
@@ -307,19 +310,13 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	case causeMember:
 		write = s.cfg.Store.FinishRunByMember
 	}
-	if err := write(ctx, run, to, public, activity, startedAt, finishedAt); err != nil {
+	stamp, err := write(ctx, run, to, public, activity, startedAt, finishedAt)
+	if err != nil {
 		return err
 	}
 	payload := events.RunStatusPayload{
-		From: from, To: to, Reason: public, Activity: activity,
-		OutcomeUnseen:  cause == causeReported,
-		FinishUnopened: cause == causeReported || (cause == causeUnattended && to.Terminal()),
-	}
-	if row, err := s.cfg.Store.GetRun(ctx, run); err == nil {
-		payload.StatusSeq = row.StatusSeq
-		payload.OutcomeUnseen, payload.FinishUnopened = row.OutcomeUnseen, row.FinishUnopened
-	} else {
-		slog.Warn("scheduler: read the run's status sequence", "run", run, "error", err)
+		From: from, To: to, Reason: public, Activity: activity, StatusSeq: stamp.StatusSeq,
+		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
 	}
 	if e := s.runs[run]; e != nil {
 		e.status, e.reason, e.activity = to, public, activity
@@ -399,6 +396,9 @@ type sidecar struct {
 	Reporter            harness.Reporter         `json:"reporter,omitempty"`
 	AgentState          agentstatus.State        `json:"agent_state,omitempty"`
 	AgentReason         string                   `json:"agent_reason,omitempty"`
+	AgentTools          bool                     `json:"agent_tools,omitempty"`
+	AgentUsageLimit     bool                     `json:"agent_usage_limit,omitempty"`
+	TurnStartedAt       *time.Time               `json:"turn_started_at,omitempty"`
 	PendingInputs       []domain.RunInputRequest `json:"pending_inputs,omitempty"`
 	InputStartedAt      *time.Time               `json:"input_started_at,omitempty"`
 	InputPublishPending bool                     `json:"input_publish_pending,omitempty"`
@@ -443,9 +443,12 @@ func (e *supervised) sidecar() sidecar {
 		copied := *e.accountSwap
 		swap = &copied
 	}
-	var relaunchedAt, idleReportAt *time.Time
+	var relaunchedAt, idleReportAt, turnStartedAt *time.Time
 	if t := e.relaunchedAt; !t.IsZero() {
 		relaunchedAt = &t
+	}
+	if t := e.turnStartedAt; !t.IsZero() {
+		turnStartedAt = &t
 	}
 	if t := e.idleReportAt; !t.IsZero() {
 		idleReportAt = &t
@@ -469,6 +472,9 @@ func (e *supervised) sidecar() sidecar {
 		Reporter:            e.reporter,
 		AgentState:          e.agentReport.State,
 		AgentReason:         e.agentReport.Reason,
+		AgentTools:          e.agentReport.Tools,
+		AgentUsageLimit:     e.agentReport.UsageLimit,
+		TurnStartedAt:       turnStartedAt,
 		PendingInputs:       pendingInputs,
 		InputStartedAt:      inputStartedAt,
 		InputPublishPending: inputPublishPending,
@@ -500,7 +506,7 @@ func (sc sidecar) agentReport() agentstatus.Report {
 	if !ok {
 		return agentstatus.Report{}
 	}
-	return agentstatus.Report{State: state, Reason: sc.AgentReason}
+	return agentstatus.Report{State: state, Reason: sc.AgentReason, Tools: sc.AgentTools, UsageLimit: sc.AgentUsageLimit}
 }
 
 func (s *Scheduler) sidecarPath(run domain.RunID) string {

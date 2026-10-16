@@ -45,7 +45,7 @@ func TestMissionArchiveMovesTheSwarmAndItsRunsTogether(t *testing.T) {
 	if m, r := archivedAt(); m != nil || r != nil {
 		t.Fatalf("a refused archive left mission %v and run %v archived", m, r)
 	}
-	if err := db.UpdateRunStatus(ctx, run, domain.RunAbandoned, "closed", "", nil, nil); err != nil {
+	if _, err := db.UpdateRunStatus(ctx, run, domain.RunAbandoned, "closed", "", nil, nil); err != nil {
 		t.Fatalf("close run: %v", err)
 	}
 	for _, at := range []*time.Time{&now, nil} {

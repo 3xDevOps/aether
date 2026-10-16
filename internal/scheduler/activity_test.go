@@ -19,8 +19,23 @@ type integratorStore struct {
 	workers atomic.Bool
 }
 
-func (s *integratorStore) IntegratorWaiting(context.Context, domain.RunID) (bool, error) {
+func (s *integratorStore) IntegratorWaiting(context.Context, domain.RunID, time.Time) (bool, error) {
 	return s.workers.Load(), nil
+}
+
+// quietFor makes checkStalls see run as quiet for longer than limit: the
+// stall threshold becomes a fraction of the time since its last activity.
+func quietFor(t *testing.T, e *testEnv, limit time.Duration) {
+	t.Helper()
+	time.Sleep(6 * limit)
+	e.sched.mu.Lock()
+	saved := e.sched.cfg.StallThreshold
+	e.sched.cfg.StallThreshold = limit
+	e.sched.mu.Unlock()
+	e.sched.checkStalls(t.Context())
+	e.sched.mu.Lock()
+	e.sched.cfg.StallThreshold = saved
+	e.sched.mu.Unlock()
 }
 
 // nextActivity is the next run.status event for run, which must carry a
@@ -91,19 +106,12 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"permission mid-turn", func() { report(permissionInput("open")) }, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
 		{"permission answered", func() { report(permissionInput("close")) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"integrator turn end with a live worker", func() {
-			// An integrator is launched for its mission like a worker.
-			e.sched.mu.Lock()
-			e.sched.runs[run.ID].missionAssigned = true
-			e.sched.mu.Unlock()
 			integrator.workers.Store(true)
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, agentstatus.ReasonIdle},
 		{"the last worker finished", func() {
 			integrator.workers.Store(false)
 			e.sched.refreshActivities(ctx)
-			e.sched.mu.Lock()
-			e.sched.runs[run.ID].missionAssigned = false
-			e.sched.mu.Unlock()
 		}, domain.RunNeedsAttention, domain.ActivityIdle, agentstatus.ReasonIdle},
 		{"needs-input asked at the turn end", func() {
 			report(working)
@@ -122,16 +130,60 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 3 workers"},
 		{"the wait outlived three stall thresholds", func() {
+			// A live worker would hold the run in waiting-agents again.
+			integrator.workers.Store(true)
+			quietFor(t, e, 20*time.Millisecond)
+		}, domain.RunNeedsAttention, domain.ActivityIdle, waitedReasonPrefix},
+		{"a waiting outcome shown without a turn end", func() {
+			e.sched.refreshActivities(ctx)
+			expectNoStatusEvent(t, sub, run.ID, "a refresh after the wait expired")
+			integrator.workers.Store(false)
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "waiting on 2 workers", time.Now()); err != nil {
+				t.Fatal(err)
+			}
 			e.sched.mu.Lock()
-			err := e.sched.expireWaitLocked(ctx, e.sched.runs[run.ID], 3*time.Hour+time.Second)
+			err := e.sched.parkIdleReportLocked(ctx, e.sched.runs[run.ID])
 			e.sched.mu.Unlock()
 			if err != nil {
 				t.Fatal(err)
 			}
-		}, domain.RunNeedsAttention, domain.ActivityIdle, "waited 3h0m1s with no activity"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 2 workers"},
 		{"background subagents held after the turn", func() {
 			report(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(2)})
 		}, domain.RunRunning, domain.ActivityWaitingAgents, agentstatus.BackgroundReason(2)},
+		{"only a monitor held after the turn", func() {
+			report(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(1), Tools: true})
+		}, domain.RunRunning, domain.ActivityWaitingTools, agentstatus.BackgroundReason(1)},
+		{"the held run stalled", func() {
+			quietFor(t, e, 20*time.Millisecond)
+		}, domain.RunNeedsAttention, domain.ActivityIdle, stalledReasonPrefix},
+		{"an approval requested mid-turn", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			if err := e.db.CreateApproval(ctx, &store.Approval{WorkspaceID: e.ws.ID, RunID: run.ID, SourceID: "tool-1", Action: "ExitPlanMode"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.sched.refreshRunActivity(ctx, run.ID); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
+		{"the approval decided", func() {
+			requested, err := e.db.ListApprovals(ctx, e.ws.ID, store.ApprovalRequested)
+			if err != nil || len(requested) != 1 {
+				t.Fatalf("approvals = %v, %v", requested, err)
+			}
+			if err := e.db.DecideApproval(ctx, requested[0].ID, "approved", e.member.ID, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.sched.refreshRunActivity(ctx, run.ID); err != nil {
+				t.Fatal(err)
+			}
+		}, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
+		{"the agent's turn failed", func() {
+			report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonFailed})
+		}, domain.RunNeedsAttention, domain.ActivityFailed, agentstatus.ReasonFailed},
 		{"reported success parks for review", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
@@ -148,21 +200,36 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	} {
 		step.act()
 		p := nextActivity(t, sub, run.ID, &seq)
-		if p.To != step.status || p.Activity != step.activity || p.Reason != step.reason {
+		if p.To != step.status || p.Activity != step.activity || !strings.HasPrefix(p.Reason, step.reason) {
 			t.Fatalf("%s: published %s/%s %q, want %s/%s %q", step.name, p.To, p.Activity, p.Reason, step.status, step.activity, step.reason)
 		}
 		row, err := e.db.GetRun(ctx, run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if row.Status != p.To || row.Activity != p.Activity || row.StatusSeq != p.StatusSeq {
-			t.Fatalf("%s: stored %s/%s seq %d, published %s/%s seq %d", step.name, row.Status, row.Activity, row.StatusSeq, p.To, p.Activity, p.StatusSeq)
+		if row.Status != p.To || row.Activity != p.Activity || row.StatusSeq != p.StatusSeq || row.OutcomeUnseen != p.OutcomeUnseen {
+			t.Fatalf("%s: stored %s/%s seq %d unseen %v, published %s/%s seq %d unseen %v", step.name,
+				row.Status, row.Activity, row.StatusSeq, row.OutcomeUnseen, p.To, p.Activity, p.StatusSeq, p.OutcomeUnseen)
+		}
+		if (p.Activity == domain.ActivityFailed || p.Activity == domain.ActivityFinished) != p.OutcomeUnseen {
+			t.Fatalf("%s: outcome_unseen = %v on a %s run", step.name, p.OutcomeUnseen, p.Activity)
 		}
 	}
 	// Nothing changed: no event, and no new sequence for a client to apply.
+	// A subagent's activity only keeps the run from stalling.
 	report(agentstatus.Report{State: agentstatus.Idle, Reason: acpEndedReason + "exit code 1"})
+	e.sched.mu.Lock()
+	before := e.sched.runs[run.ID].lastWorking
+	e.sched.mu.Unlock()
+	report(agentstatus.Report{Subagent: true})
 	e.sched.refreshActivities(ctx)
-	expectNoStatusEvent(t, sub, run.ID, "a repeated disconnect")
+	expectNoStatusEvent(t, sub, run.ID, "a repeated disconnect and a subagent's activity")
+	e.sched.mu.Lock()
+	refreshed := e.sched.runs[run.ID].lastWorking.After(before)
+	e.sched.mu.Unlock()
+	if !refreshed {
+		t.Fatal("a subagent's activity did not count as the run's")
+	}
 }
 
 // TestAStallIsIdleNotNeedsYou: a stall parks the run, but nobody is asked

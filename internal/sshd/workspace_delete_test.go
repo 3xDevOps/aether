@@ -79,7 +79,7 @@ func deletionOtherWorkspace(t *testing.T, e *testEnv) *domain.Workspace {
 func finishDeletionRun(t *testing.T, e *testEnv) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := e.store.UpdateRunStatus(t.Context(), e.run.ID, domain.RunMerged, "", "", nil, &now); err != nil {
+	if _, err := e.store.UpdateRunStatus(t.Context(), e.run.ID, domain.RunMerged, "", "", nil, &now); err != nil {
 		t.Fatal(err)
 	}
 }

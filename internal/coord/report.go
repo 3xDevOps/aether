@@ -152,19 +152,19 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 		return protocol.RunReportResult{}, invalidParams(method, err.Error())
 	}
 	var state agentstatus.State
-	if p.State != "" || len(p.InputUpdates) == 0 {
+	if p.State != "" || (len(p.InputUpdates) == 0 && !p.Subagent) {
 		var ok bool
 		state, ok = agentstatus.ParseState(p.State)
 		if !ok {
 			return protocol.RunReportResult{}, invalidParams(method,
-				"state must be \""+string(agentstatus.Working)+"\" or \""+string(agentstatus.Idle)+"\", or omitted with input_updates")
+				"state must be \""+string(agentstatus.Working)+"\" or \""+string(agentstatus.Idle)+"\", or omitted with input_updates or subagent")
 		}
 	}
 	if s.cfg.Reports == nil {
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, ErrNoReportSink)
 	}
 	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason), InputUpdates: p.InputUpdates, SessionID: p.SessionID,
-		UsageLimit: p.UsageLimit && state == agentstatus.Idle}
+		UsageLimit: p.UsageLimit && state == agentstatus.Idle, Tools: p.Tools && state == agentstatus.Working, Subagent: p.Subagent}
 	if report.SessionID != "" && !domain.ValidAgentSessionID(report.SessionID) {
 		slog.Warn("coord: run.report carries an unusable session id; ignoring it", "run", run, "bytes", len(report.SessionID))
 		report.SessionID = ""

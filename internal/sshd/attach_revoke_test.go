@@ -575,7 +575,7 @@ func TestAttachControlLeasesAcrossSSHClients(t *testing.T) {
 		}
 		defer func() { _ = first.ch.Close() }()
 
-		if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
+		if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 			t.Fatalf("complete run: %v", err)
 		}
 		e.pty.setTranscript(e.run.ID, []byte("finished transcript must not be replayed"))

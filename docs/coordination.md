@@ -1358,13 +1358,14 @@ What a report does depends on the run:
   The question shows whole, up to the 4 KiB summary limit.
 - **Waiting report.** `--outcome waiting` says the turn ends waiting on the
   run's own agents, for example `--summary 'waiting on 3 workers'`. At turn
-  end the run shows the summary as its reason with activity
+  end the run shows the summary as its reason with state
   `waiting-agents` instead of `idle`, so it is not **Needs you**; the next
   turn clears it, and with no activity for three times the stall threshold
   it becomes `idle`. Every role may report it. Like needs-input it is
   nonterminal and not durable, and takes no `--evidence-ref`. An integrator
-  with live worker attempts or unacknowledged worker mail shows
-  `waiting-agents` at turn end without reporting it
+  of an open mission with a live worker attempt, or worker mail since its
+  last turn started that it has not acknowledged, shows `waiting-agents` at
+  turn end without reporting it
   ([run activity](failure-handling.md#run-activity)).
 
 - **Swarm worker.** Success submits the attempt and the server then pauses

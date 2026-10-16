@@ -51,12 +51,11 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	}
 	d.s.mu.Lock()
 	entry.betweenTurns = st.Working && st.Reason == "background" && !st.Autonomous
-	entry.heldTools = st.Working && st.Reason == "background" && st.Tasks > 0 && st.Agents == 0
 	d.s.mu.Unlock()
 	report := agentstatus.Report{State: agentstatus.Working}
 	switch {
 	case st.Working && st.Reason == "background":
-		report.Reason = agentstatus.BackgroundReason(st.Tasks)
+		report.Reason, report.Tools = agentstatus.BackgroundReason(st.Tasks), st.Tasks > 0 && st.Agents == 0
 	case st.Working:
 	case st.Failed != nil:
 		// Not a turn end: a waiting outcome report must not finish the run

@@ -14,7 +14,7 @@ for `--run-container-ttl`, negative means no retention and immediate cleanup.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention with activity `idle`. A run already parked because its agent said it is waiting keeps that reason. A run whose agent reported `waiting` shows `idle` after three times this. |
+| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention with state `idle`. A run already parked because its agent said it is waiting keeps that reason. A run waiting on its own agents shows `idle` after three times this. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | When a finished run's worktree becomes eligible for cleanup, subject to evidence and execution ownership protection. Negative disables this GC. |
 | `--run-container-ttl` | `168h` (7 days) | Grace for an explicitly closed Standard or Enhanced run, or completed swarm worker's exact container. `0` uses the default; a positive duration overrides it, and negative requests immediate release. Active/waiting runs and services are not expired. |
@@ -37,7 +37,7 @@ cannot report their own state.
 Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
 [harnesses.md](harnesses.md)), a turn that ends can park the run at `needs-attention`
 immediately. This does not mean the agent needs an answer: the run's
-[activity](#run-activity) says whether anyone is needed. The threshold
+[state](#run-activity) says whether anyone is needed. The threshold
 still catches an agent that hangs mid-turn with a `stalled:` reason. Where
 the agent does not report, silence is all the server has, and the threshold
 is a bet about the longest legitimate silence: an agent thinking, compiling,
@@ -869,35 +869,52 @@ for schedule administration.
 
 #### Run activity
 
-A live run (`running` or `needs-attention`) carries an `activity` that the
-scheduler derives on every status change; `status_reason` stays the
-human-readable reason. Every change of status, reason or activity increases
-the run's `status_seq`, which its `run.status` event carries.
+A live run (`running` or `needs-attention`) carries a state, wire field
+`state`, that the scheduler derives on every status change; the reason stays
+the human-readable detail. `status_seq` starts at 1 and increases on every
+published change of the run's status, reason, state or outcome flags; each
+`run.status` event carries the run's `state` and `status_seq` after it.
 
-| Activity | Meaning |
+| State | Meaning |
 | --- | --- |
 | `working` | A turn is in progress. |
-| `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or unacknowledged worker mail, or a `waiting` report this turn. |
-| `waiting-tools` | No turn runs, and the agent waits on a background tool it holds for, such as a monitor. A backgrounded shell such as a dev server does not count. |
-| `needs-you` | A human request is open: a `needs-input` or `blocked` report, or a pending permission or question. |
+| `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting` report this turn. |
+| `waiting-tools` | No turn runs, and the agent waits on a background tool, such as a Claude monitor. A backgrounded shell such as a dev server does not count. |
+| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, or a usage limit Aether will not continue from on another account. |
 | `idle` | The turn ended with none of the above, including a stall. |
-| `finished` / `failed` | An interactive run reported `success` / `failure` and is parked for review. |
-| `disconnected` | The Enhanced session failed or ended while the run is open. |
+| `finished` | An interactive run reported `success` and is parked for review. |
+| `failed` | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
+| `disconnected` | The Enhanced session failed or ended while the run is open. Reopening the session clears it. |
 
 When several apply, the order is disconnected, needs-you, failed, finished,
 waiting-agents, waiting-tools, idle; a turn in progress is `working` unless a
-human request is open. **Needs you** on the board, `aether runs --needs-you`,
-push notifications and assistant notices cover `needs-you`, `failed` and
-`disconnected`; `finished` sends a non-urgent notice. `idle`, `waiting-*` and
-`working` never notify. A notification fires once per transition into one of
-those activities.
+human request is open.
+
+One rule decides whether a run needs you. **Needs you** on the board,
+`aether runs --needs-you`, push notifications and assistant notices all
+apply it:
+
+| Run | Needs you | Notifies |
+| --- | --- | --- |
+| `needs-you` | yes | once, on the transition |
+| `disconnected` | yes | once, on the transition |
+| `failed`, result not yet seen by the owner | yes | once, on the transition |
+| `failed`, result seen | no | no |
+| `finished` | no; the board lists it under Finished until seen | a non-urgent notice once |
+| `working`, `waiting-agents`, `waiting-tools`, `idle` | no | no |
+| any state while paused | no | no |
+
+A swarm worker's requests go to its integrator, so only its `blocked`
+report reaches its owner.
 
 A `waiting` report (`aether-internal report --outcome waiting --summary
 'waiting on 3 workers'`) shows `waiting-agents` with the summary as its
-reason at turn end, until the next turn starts. With no activity for three
-times `--stall-threshold` the run shows `idle` with `waited <duration> with
-no activity`. An integrator's `waiting-agents` from live workers has no such
-limit: the scheduler rechecks it every poll and after a restart.
+reason at turn end, until the next turn starts. An integrator shows
+`waiting-agents` at turn end without reporting it while its mission is open
+and a worker attempt is live or a worker's mail since its last turn started
+is unacknowledged; the scheduler rechecks this every poll and after a
+restart. Either way, with no activity for three times `--stall-threshold`
+the run shows `idle` with `waited <duration> with no activity`.
 
 #### Parked runs
 
@@ -941,7 +958,7 @@ than `agent idle` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at
-`needs-attention` with a reason that leads with `stalled:` and activity
+`needs-attention` with a reason that leads with `stalled:` and state
 `idle`, so it does not show as **Needs you**. This is the hang
 detector: it catches an agent that said it was working and then wedged, and
 it is the only signal at all for an agent that cannot report. An Enhanced

@@ -234,7 +234,7 @@ func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	// A row that failed while provisioning keeps the cause a human still
 	// needs, and still counts as launched.
 	now := time.Now()
-	if err := db.UpdateRunStatus(ctx, m.CurrentIntegratorRunID, domain.RunFailed, "container start failed", "", nil, &now); err != nil {
+	if _, err := db.UpdateRunStatus(ctx, m.CurrentIntegratorRunID, domain.RunFailed, "container start failed", "", nil, &now); err != nil {
 		t.Fatalf("mark integrator run failed: %v", err)
 	}
 	if _, err := db.RecordIntegratorLaunch(ctx, id, m.CurrentIntegratorRunID, "container start failed", true, now); err != nil {

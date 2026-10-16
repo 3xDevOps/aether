@@ -29,6 +29,7 @@ type FollowStore interface {
 type RunState interface {
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
 	ACPPending(run domain.RunID) []acphost.Request
+	Paused(run domain.RunID) bool
 }
 
 type Notifier func(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, flush <-chan struct{}, current func(context.Context) bool) error
@@ -77,7 +78,7 @@ func (f *follower) read(ctx context.Context, id domain.RunID) (*notice, error) {
 			break
 		}
 	}
-	return classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), approval), nil
+	return classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), approval, f.runs.Paused(id)), nil
 }
 
 func (f *follower) check(ctx context.Context, id domain.RunID, finishedOnly bool) {
@@ -122,8 +123,10 @@ func (f *follower) due(ctx context.Context, id domain.RunID, finishedOnly bool) 
 	return due
 }
 
+// end stops following a run that ended. A parked result is no end: the run
+// can still ask, fail or finish.
 func (f *follower) end(ctx context.Context, n *notice, member domain.MemberID) {
-	if n.kind != events.AssistantNoticeFinished {
+	if !n.run.Status.Terminal() {
 		return
 	}
 	if err := f.store.DeleteAssistantFollow(ctx, member, n.run.ID); err != nil {
@@ -149,10 +152,12 @@ func (f *follower) finish(n notice, announced bool) {
 	f.mu.Unlock()
 }
 
-func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphost.Request, approval *store.Approval) *notice {
+func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphost.Request, approval *store.Approval, paused bool) *notice {
 	n := &notice{run: run, severity: "warning"}
 	label := fmt.Sprintf("Run %q", push.RunTitle(run))
 	switch {
+	case paused && !run.Status.Terminal():
+		return nil
 	case run.Status.Terminal():
 		n.kind, n.severity, n.key = events.AssistantNoticeFinished, "info", "finished:"+string(run.Status)
 		n.title = label + map[domain.RunStatus]string{
@@ -168,9 +173,14 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 		n.kind, n.title = events.AssistantNoticeNeedsApproval, label+" needs your approval"
 		n.key, n.body = "approval:"+approval.ID, approval.Action
 	case run.Activity == domain.ActivityFinished:
+		// Keyed by the park, not status_seq: opening the run changes that.
+		changed := ""
+		if run.StatusChangedAt != nil {
+			changed = strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
+		}
 		n.kind, n.severity, n.title = events.AssistantNoticeFinished, "info", label+" finished"
-		n.key, n.body = "finished:parked|"+strconv.FormatInt(run.StatusSeq, 10), run.Reason
-	case run.Activity == domain.ActivityNeedsYou, run.Activity == domain.ActivityFailed, run.Activity == domain.ActivityDisconnected:
+		n.key, n.body = "finished:parked|"+changed, run.Reason
+	case run.Activity.NeedsAttention(run.OutcomeUnseen, false):
 		n.kind, n.title = events.AssistantNoticeNeedsAttention, label+map[domain.RunActivity]string{
 			domain.ActivityNeedsYou: " needs your attention", domain.ActivityFailed: " failed",
 			domain.ActivityDisconnected: " disconnected",
@@ -325,8 +335,9 @@ func (s *Service) deliver(n notice) bool {
 	}); err != nil {
 		slog.Warn("assistant: publish the notice", "member", n.member, "run", n.run.ID, "error", err)
 	}
-	// The owner of a run is already pushed what it needs; only its end is new.
-	if s.notify != nil && (n.kind == events.AssistantNoticeFinished || n.run.MemberID != n.member) {
+	// The owner of a run is already pushed what it needs, a parked result
+	// included; only its end is new.
+	if s.notify != nil && ((n.kind == events.AssistantNoticeFinished && n.run.Status.Terminal()) || n.run.MemberID != n.member) {
 		s.dmu.Lock()
 		s.pushing++
 		s.dmu.Unlock()

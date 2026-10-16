@@ -527,7 +527,7 @@ func TestRecoveryFindsContainerByCreationKey(t *testing.T) {
 	if err := e.db.CreateRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
+	if _, err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	cid, err := e.rt.Create(ctx, runtime.Spec{
@@ -557,7 +557,7 @@ func TestRecoveryUnstartedDestroyFailureRetainsPendingOwner(t *testing.T) {
 	if err := e.db.CreateRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
+	if _, err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	cid, err := e.rt.Create(ctx, runtime.Spec{
@@ -634,7 +634,7 @@ func TestRecoveryUnstartedLookupFailureKeepsSyntheticOwner(t *testing.T) {
 	if err := e.db.CreateRun(ctx, r); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
+	if _, err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	cid, err := e.rt.Create(ctx, runtime.Spec{
@@ -761,7 +761,7 @@ func TestCheckoutGC(t *testing.T) {
 		if err := e.db.UpdateRun(ctx, r); err != nil {
 			t.Fatalf("UpdateRun: %v", err)
 		}
-		if err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunAbandoned, "", "", nil, &finished); err != nil {
+		if _, err := e.db.UpdateRunStatus(ctx, r.ID, domain.RunAbandoned, "", "", nil, &finished); err != nil {
 			t.Fatalf("UpdateRunStatus: %v", err)
 		}
 		return r
@@ -1062,7 +1062,7 @@ func TestCrashExitAfterStatusBeforeDestroy(t *testing.T) {
 		t.Fatalf("write sidecar: %v", err)
 	}
 	now := time.Now().UTC()
-	if err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", "", nil, &now); err != nil {
+	if _, err = e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", "", nil, &now); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	c.exitNow(0)
@@ -1114,7 +1114,7 @@ func TestReleaseBeforeRecoveryRejectsInterruptedTerminalCleanup(t *testing.T) {
 		t.Fatalf("writeSidecar: %v", err)
 	}
 	finished := time.Now().UTC()
-	if err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent exited; results committed", "", nil, &finished); err != nil {
+	if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent exited; results committed", "", nil, &finished); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -1630,7 +1630,7 @@ func TestFailedTerminalDestroyRebootsWithRetryOwnership(t *testing.T) {
 		t.Fatalf("write failed-destroy sidecar: %v", err)
 	}
 	finished := time.Now().UTC()
-	if err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted,
+	if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted,
 		"agent exited; results committed", "",
 		nil, &finished); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
@@ -2420,7 +2420,7 @@ func TestRecoveryMigratesClosedComputeDeadlineFromDurableFinish(t *testing.T) {
 				t.Fatal(err)
 			}
 			finished := time.Now().UTC().Add(-tc.age)
-			if err = e.db.UpdateRunStatus(ctx, row.ID, row.Status, row.Reason, "", nil, &finished); err != nil {
+			if _, err = e.db.UpdateRunStatus(ctx, row.ID, row.Status, row.Reason, "", nil, &finished); err != nil {
 				t.Fatal(err)
 			}
 			row, err = e.db.GetRun(ctx, run.ID)
@@ -2480,7 +2480,7 @@ func TestRecoveryRetentionPolicyDoesNotExpireActiveOrReopenedRuns(t *testing.T) 
 			run, container := e.launchFake(t, mode)
 			switch mode {
 			case "waiting":
-				if err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "waiting", "", nil, nil); err != nil {
+				if _, err := e.db.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "waiting", "", nil, nil); err != nil {
 					t.Fatal(err)
 				}
 			case "paused active":
@@ -2546,7 +2546,7 @@ func TestMigratedExpiryRetriesEvidenceBeforeDestroyAndKeepsFailureVisible(t *tes
 		t.Fatal(err)
 	}
 	finished := time.Now().UTC().Add(-2 * time.Hour)
-	if err = e.db.UpdateRunStatus(ctx, run.ID, row.Status, row.Reason, "", nil, &finished); err != nil {
+	if _, err = e.db.UpdateRunStatus(ctx, run.ID, row.Status, row.Reason, "", nil, &finished); err != nil {
 		t.Fatal(err)
 	}
 	row, err = e.db.GetRun(ctx, run.ID)
