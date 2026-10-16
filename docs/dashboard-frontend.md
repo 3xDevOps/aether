@@ -5186,10 +5186,11 @@ asks the linked server about itself and appears wherever the member is an
 admin. When the gateway reports the CLI as `packaged` (the Android app), the
 CLI prompt and its sidebar row are gone and the dialog says `Updates come
 from the Android app: install its new version to update Aether.`, followed,
-when the check found a newer release, by `Aether <tag> is available from
-Google Play or the release page.` with no button: the app's own native
-banner is the notice ([install.md](install.md#android-app)). The workspace
-repository panel hides **Local clone** because the gateway has no
+when the check found a newer release, by `Aether <tag> is released; the
+app's banner says when and where to update.` with no button: the app's own
+native banner is the notice, and for a Google Play install it waits 7
+days so Play has the release ([install.md](install.md#android-app)). The
+workspace repository panel hides **Local clone** because the gateway has no
 `link.repo`.
 
 - **Two reads.** The host reads `update.check` on mount, again every half

@@ -96,7 +96,7 @@ test('a packaged CLI behind a release names it without offering an update', asyn
 
   expect(
     await screen.findByText(
-      'Updates come from the Android app: install its new version to update Aether. Aether v1.3.0 is available from Google Play or the release page.',
+      'Updates come from the Android app: install its new version to update Aether. Aether v1.3.0 is released; the app\'s banner says when and where to update.',
     ),
   ).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()

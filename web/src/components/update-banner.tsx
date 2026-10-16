@@ -151,7 +151,7 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
           {packaged ? (
             <DialogDescription>
               {packagedLine(packaged)}
-              {packagedLatest && ` Aether ${packagedLatest} is available from Google Play or the release page.`}
+              {packagedLatest && ` Aether ${packagedLatest} is released; the app's banner says when and where to update.`}
             </DialogDescription>
           ) : (
             !anything && <DialogDescription>Nothing to update.</DialogDescription>
