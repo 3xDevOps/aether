@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
+import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
 import { Button } from '@/components/ui/button'
@@ -78,10 +79,15 @@ function useAnnouncement(): string {
 
 function AutoApproveLine() {
   const navigate = useStore((s) => s.navigate)
+  const sheet = useContext(AssistantSheet)
+  const open = () => {
+    navigate('settings', {})
+    if (sheet) useStore.getState().setAssistantOpen(false)
+  }
   return (
     <p className="mx-3 mt-3 flex shrink-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
-      <span>Acts without asking: launches, messages, stops and saves need no card.</span>
-      <Button variant="link" size="sm" onClick={() => navigate('settings', {})}>Change in Settings</Button>
+      <span>Acts without asking: launches, saves, and messages or stops your own runs with no card.</span>
+      <Button variant="link" size="sm" onClick={open}>Change in Settings</Button>
     </p>
   )
 }
@@ -135,6 +141,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       {connection && session?.stream !== 'refused' && hasRows && (
         <p role="status" className="shrink-0 px-3 pb-1 text-ui-sm text-muted">{connection}</p>
       )}
+      <AutoApproveSuggestion busy={running || confirmations.length > 0 || (session?.pending.length ?? 0) > 0} hasRows={hasRows} />
       {!failed && (
         <AssistantComposer
           textarea={textarea}
@@ -357,7 +364,7 @@ export function AssistantPanel() {
           }}
         >
           <DialogTitle className="sr-only">Assistant</DialogTitle>
-          {content}
+          <AssistantSheet.Provider value>{content}</AssistantSheet.Provider>
         </DialogContent>
       </Dialog>
     )

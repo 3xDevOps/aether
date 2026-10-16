@@ -198,14 +198,11 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 	case req.Method == protocol.MethodAssistantViewContext:
 		return s.serveView()
 	case tier == tierConfirmed:
-		summary, rpcErr := s.summarize(ctx, req)
-		if rpcErr != nil {
+		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC()}
+		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
 			return nil, rpcErr
 		}
-		now := time.Now().UTC()
-		if err := s.Confirm(ctx, protocol.AssistantConfirmation{
-			Method: req.Method, Summary: summary, Params: req.Params, CreatedAt: now,
-		}); err != nil {
+		if err := s.Confirm(ctx, c); err != nil {
 			var pe *protocol.Error
 			if errors.As(err, &pe) {
 				return nil, pe
@@ -241,24 +238,30 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	return ""
 }
 
-func (s *Server) summarize(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) (rpcErr *protocol.Error) {
 	switch req.Method {
 	case protocol.MethodEnvSave:
-		return "Save your environment as a new image; new runs and terminals start from it", nil
+		c.Summary = "Save your environment as a new image; new runs and terminals start from it"
+		return nil
 	case protocol.MethodRunLaunch:
-		return s.summarizeLaunch(ctx, req)
+		c.Summary, rpcErr = s.summarizeLaunch(ctx, req)
+		return rpcErr
 	case protocol.MethodRunInject:
-		return s.summarizeInject(ctx, req)
+		return s.summarizeInject(ctx, req, c)
 	}
 	p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
 	if err != nil || p.RunID == "" {
-		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
 	}
 	run, rpcErr := s.getRun(ctx, req.Params)
 	if rpcErr != nil {
-		return "", rpcErr
+		return rpcErr
 	}
-	return fmt.Sprintf("Stop run %s (%q)", p.RunID, runLabel(run)), nil
+	if rpcErr = s.owner(ctx, run, c); rpcErr != nil {
+		return rpcErr
+	}
+	c.Summary = fmt.Sprintf("Stop run %s (%q)%s", p.RunID, runLabel(run), ownedBy(c))
+	return nil
 }
 
 func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
@@ -282,34 +285,52 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request) (str
 	return fmt.Sprintf("Launch %s (%s) in %s: %q", p.Harness, mode, ws.Workspace.Name, truncate(p.Task)), nil
 }
 
-func (s *Server) summarizeInject(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	p, err := protocol.DecodeParams[protocol.RunInjectParams](req.Params)
 	if err != nil || p.RunID == "" {
-		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
 	}
 	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
 	run, rpcErr := s.getRun(ctx, params)
 	if rpcErr != nil {
-		return "", rpcErr
+		return rpcErr
 	}
-	owner := ""
-	if run.MemberID != s.Member {
-		raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
-		if rpcErr != nil {
-			return "", rpcErr
-		}
-		var members protocol.MemberListResult
-		if err := json.Unmarshal(raw, &members); err != nil {
-			return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
-		}
-		owner = ", owned by " + run.MemberID
-		for _, m := range members.Members {
-			if m.ID == run.MemberID {
-				owner = ", owned by " + m.DisplayName
-			}
+	if rpcErr = s.owner(ctx, run, c); rpcErr != nil {
+		return rpcErr
+	}
+	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message))
+	return nil
+}
+
+// owner marks c as acting on another member's run when the run is not the
+// socket's member's, and names that member: their display name, else their
+// id.
+func (s *Server) owner(ctx context.Context, run protocol.Run, c *protocol.AssistantConfirmation) *protocol.Error {
+	if run.MemberID == s.Member {
+		return nil
+	}
+	c.OtherMember, c.OtherOwner = true, run.MemberID
+	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	var members protocol.MemberListResult
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
+	}
+	for _, m := range members.Members {
+		if m.ID == run.MemberID && m.DisplayName != "" {
+			c.OtherOwner = m.DisplayName
 		}
 	}
-	return fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), owner, truncate(p.Message)), nil
+	return nil
+}
+
+func ownedBy(c *protocol.AssistantConfirmation) string {
+	if !c.OtherMember {
+		return ""
+	}
+	return ", owned by " + c.OtherOwner
 }
 
 func (s *Server) getRun(ctx context.Context, params json.RawMessage) (protocol.Run, *protocol.Error) {

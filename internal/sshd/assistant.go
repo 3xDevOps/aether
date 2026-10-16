@@ -36,7 +36,7 @@ type AssistantService interface {
 	Fence(ctx context.Context, member domain.MemberID) error
 	Unfence(member domain.MemberID)
 	Settings(ctx context.Context, member domain.MemberID) (protocol.AssistantSettings, error)
-	SetAutoApprove(ctx context.Context, member domain.MemberID, on bool) (protocol.AssistantSettings, error)
+	SetSettings(ctx context.Context, member domain.MemberID, p protocol.AssistantSettingsParams) (protocol.AssistantSettings, error)
 	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
 }
 
@@ -189,17 +189,23 @@ func (s *Server) assistantSettings(ctx context.Context, member domain.MemberID, 
 	if perr != nil {
 		return nil, perr
 	}
-	if p.AutoApprove != nil {
-		if _, err := svc.SetAutoApprove(ctx, member, *p.AutoApprove); err != nil {
-			return nil, assistantError(err)
-		}
+	switch p.Suggestion {
+	case "", protocol.AssistantSuggestionLater, protocol.AssistantSuggestionNever:
+	default:
+		return nil, invalidParams(fmt.Sprintf("suggestion %q: want %q or %q", p.Suggestion, protocol.AssistantSuggestionLater, protocol.AssistantSuggestionNever))
 	}
 	if p.ShareView != nil {
 		if err := svc.SetShareView(ctx, member, *p.ShareView); err != nil {
 			return nil, assistantError(err)
 		}
 	}
-	settings, err := svc.Settings(ctx, member)
+	var settings protocol.AssistantSettings
+	var err error
+	if p.AutoApprove != nil || p.Suggestion != "" {
+		settings, err = svc.SetSettings(ctx, member, p)
+	} else {
+		settings, err = svc.Settings(ctx, member)
+	}
 	if err != nil {
 		return nil, assistantError(err)
 	}

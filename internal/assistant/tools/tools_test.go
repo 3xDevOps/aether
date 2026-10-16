@@ -122,7 +122,7 @@ func TestReadPassesThrough(t *testing.T) {
 func TestConfirmedApproveAndDecline(t *testing.T) {
 	var got protocol.AssistantConfirmation
 	var verdict error
-	sock, fc := start(t, func(_ context.Context, c protocol.AssistantConfirmation) error {
+	sock, fc := startAs(t, "m2", func(_ context.Context, c protocol.AssistantConfirmation) error {
 		got = c
 		return verdict
 	})
@@ -196,7 +196,7 @@ func TestRunListFilters(t *testing.T) {
 	}
 }
 
-func TestLaunchAndInjectAreConfirmed(t *testing.T) {
+func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 	var got protocol.AssistantConfirmation
 	sock, fc := start(t, func(_ context.Context, c protocol.AssistantConfirmation) error {
 		got = c
@@ -214,8 +214,15 @@ func TestLaunchAndInjectAreConfirmed(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("inject: %v", err)
 	}
-	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want {
-		t.Fatalf("inject summary %q, want %q", got.Summary, want)
+	if want := `Send to run run-1 ("Fix login"), owned by Grace: "hi"`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+		t.Fatalf("inject summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
+	}
+	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunKill, protocol.RunIDParams{RunID: "run-1"}, nil)
+	if rpcCode(t, err) != protocol.CodeDenied {
+		t.Fatalf("kill: %v", err)
+	}
+	if want := `Stop run run-1 ("Fix login"), owned by Grace`; got.Summary != want || !got.OtherMember || got.OtherOwner != "Grace" {
+		t.Fatalf("kill summary %q, owner %q, want %q by Grace", got.Summary, got.OtherOwner, want)
 	}
 	for _, m := range fc.called() {
 		if m == protocol.MethodRunLaunch || m == protocol.MethodRunInject {
@@ -227,8 +234,8 @@ func TestLaunchAndInjectAreConfirmed(t *testing.T) {
 		return errors.New("no")
 	})
 	_ = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)
-	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want {
-		t.Fatalf("own run summary %q, want %q", got.Summary, want)
+	if want := `Send to run run-1 ("Fix login"): "hi"`; got.Summary != want || got.OtherMember || got.OtherOwner != "" {
+		t.Fatalf("own run summary %q, owner %q, want %q and no other owner", got.Summary, got.OtherOwner, want)
 	}
 }
 

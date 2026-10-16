@@ -74,7 +74,7 @@ describe('saving the sharing choice', () => {
     const store = createRootStore()
     let fail!: (err: unknown) => void
     const assistantSettings = vi.fn((params?: { share_view?: boolean }) =>
-      params?.share_view ? new Promise<never>((_, reject) => { fail = reject }) : Promise.resolve({ auto_approve: false, share_view: false }))
+      params?.share_view ? new Promise<never>((_, reject) => { fail = reject }) : Promise.resolve({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: false }))
     saveShareView(store, { assistantSettings }, true, () => {})
     await vi.advanceTimersByTimeAsync(0)
     saveShareView(store, { assistantSettings }, false, () => {})

@@ -1,10 +1,10 @@
 import { type ReactNode, useId } from 'react'
 import { SectionLabel } from '@/components/ui/section-label'
 
-export function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+export function SettingsSection({ title, id: sectionID, children }: { title: string; id?: string; children: ReactNode }) {
   const id = useId()
   return (
-    <section aria-labelledby={id} className="flex min-w-0 flex-col gap-2">
+    <section id={sectionID} aria-labelledby={id} className="flex min-w-0 flex-col gap-2">
       <SectionLabel as="h2" id={id}>{title}</SectionLabel>
       <div className="flex min-w-0 flex-col divide-y divide-seam rounded-panel border border-seam">{children}</div>
     </section>

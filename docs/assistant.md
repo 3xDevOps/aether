@@ -108,7 +108,7 @@ documentation of the server you run.
 
 Read tools, pause and resume run immediately; the events name you as the actor.
 Confirmed tools wait for your approval, including launching a run and
-messaging one, unless auto-approval is on.
+messaging one, unless auto-approval is on and the run, if any, is yours.
 
 Environment changes, such as installing a toolchain, are not an Aether tool.
 The assistant runs them in its own shell in your environment container, then
@@ -173,11 +173,11 @@ with your member id, the method, the summary and `auto=false`.
 ## Auto-approval
 
 **Settings > Assistant > Let the assistant act without asking** lets the
-confirmed tools run at once, as if you had approved their card. It is off by
-default, and it is yours alone: it applies only to your assistant. Turning it
-on in the dashboard asks first, with a warning that the assistant will launch,
-message and stop runs and save your environment on its own. The CLI does not
-ask:
+assistant launch runs, message and stop your own runs and save your
+environment at once, as if you had approved their card. It is off by default,
+and it is yours alone: it applies only to your assistant. Turning it on in the
+dashboard asks first, with a warning that the assistant will do those things
+on its own. The CLI does not ask, and prints what the setting covers:
 
 ```sh
 aether member assistant                     # show the setting
@@ -185,10 +185,23 @@ aether member assistant --auto-approve on
 aether member assistant --auto-approve off
 ```
 
+```
+auto-approve  off: each action below waits for your approval on a card
+covers        launching runs, messaging and stopping your own runs, saving your environment
+always asks   messaging or stopping another member's run
+not covered   the assistant's own shell and file tools, which never ask
+```
+
 Over the API it is `assistant.settings` (`{"auto_approve":true}`), and
 `assistant.status` reports it as `auto_approve`. While it is on, the panel
 says **Acts without asking** under its header.
 
+- **It covers a fixed list.** Only `run.launch`, `run.inject`, `run.kill` and
+  `env.save` can pass without a card. A confirmed tool added later asks until
+  it is added to that list.
+- **Messaging or stopping another member's run always asks.** It shows a
+  card even with auto-approval on. The card says who owns the run (`other_member` and `other_owner` in the confirmation, `owned by
+  <name>` in the summary).
 - **The server decides.** It reads the setting on every confirmed call, so a
   change applies to the live session at once, with no restart. A call and a
   change of the setting never overlap: each call sees the setting from before
@@ -206,12 +219,34 @@ says **Acts without asking** under its header.
 - **Notifications are unchanged.** Runs the assistant launches or messages
   are [followed](#notifications) the same way.
 
-With auto-approval on, nothing checks a launch, message, stop or save before
-it happens. Text the assistant reads from runs, files and web pages can carry
-injected instructions; the assistant is told to treat it as data, but that is
-an instruction, not a control. Any program in your environment can also call
-the tool socket directly, and gets the same pass. See
-[security.md](security.md#the-assistant).
+With auto-approval on, nothing checks a launch, a message to or stop of your
+own run, or a save before it happens. Text the assistant reads from runs,
+files and web pages can carry injected instructions; the assistant is told to
+treat it as data, but that is an instruction, not a control. Any program in
+your environment can also call the tool socket directly, and gets the same
+pass. See [security.md](security.md#the-assistant).
+
+### The suggestion
+
+After you approve three cards in a row that auto-approval would have passed,
+with auto-approval off, `assistant.status` reports `suggest_auto_approve:
+true`. The panel then shows **Skip approval cards for the assistant?** below
+the conversation, once the assistant is idle with nothing waiting on you. It
+never appears mid-turn or in an empty conversation. Approving a card on
+another member's run does not add to the count; declining, not answering or
+having any card withdrawn (the turn stopped or the session ended) starts it
+over.
+
+| Button | `assistant.settings` | Effect |
+| --- | --- | --- |
+| **Turn on auto-approval** | `{"auto_approve":true}` | Turns it on at once; the notice is the warning |
+| **Not now** | `{"suggestion":"later"}` | Starts the count over and waits 7 days, 30 the second time; the third time counts as never and returns `suggestion_off: true` |
+| **Don't suggest again** | `{"suggestion":"never"}` | Stops the suggestion; the setting stays in Settings |
+
+Turning auto-approval off after it was on also stops the suggestion. Once it
+is stopped, `assistant.settings` returns `suggestion_off: true`. The
+assistant's tool socket cannot answer it. The count and the answers are
+stored per member on the server.
 
 ## Shell and file tools
 
@@ -219,9 +254,10 @@ The assistant's own shell and file tools are the agent's, and they run without
 asking. The session starts in the same mode Enhanced runs use: Claude Code
 `bypassPermissions` (the ACP form of `--dangerously-skip-permissions`), Codex
 `agent-full-access`. Installing a tool, editing a file or running a command in
-your environment therefore needs no click. Only the Aether actions above
-(launch, message, stop, save the environment) wait for a card, and with
-auto-approval on not even those. If the mode
+your environment therefore needs no click, and auto-approval does not change
+that. Only the Aether actions above (launch, message, stop, save the
+environment) wait for a card, and with auto-approval on only a message to or
+stop of another member's run does. If the mode
 cannot be set, the start fails with `assistant: set the "<mode>" mode: <error>`.
 A question the agent asks you still appears as a card.
 
@@ -305,6 +341,8 @@ The panel and the API show these as written.
 | `the member did not answer within 10m0s` | A confirmation timed out |
 | `<method> was not approved: record the approval: <error>` | The approval could not be noted in the transcript, so the call did not run |
 | `<method> was not approved: read the auto-approval setting: <error>` | The server could not read the setting, so the call did not run |
+| `<method> was not approved: count the approval: <error>` | The server could not store the count of approved cards, so the approved call did not run |
+| `suggestion "<value>": want "later" or "never"` | `assistant.settings` got an unknown answer to the suggestion (code `-32602`) |
 | `the assistant session ended before the member answered` | The session stopped while a card was open |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |

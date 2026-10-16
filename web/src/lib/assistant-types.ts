@@ -19,6 +19,9 @@ export interface AssistantConfirmation {
   params: unknown
   created_at: string
   expires_at: string
+  /** The call acts on another member's run, owned by `other_owner`: it asks even with auto-approval on. */
+  other_member?: boolean
+  other_owner?: string
 }
 
 export interface AssistantStatus {
@@ -29,18 +32,25 @@ export interface AssistantStatus {
   confirmations: AssistantConfirmation[]
   /** Confirmed tools run without a card, as if approved. */
   auto_approve: boolean
+  /** The member approved enough cards by hand that the panel may suggest auto-approval. */
+  suggest_auto_approve: boolean
   /** Prompts carry the member's view context. */
   share_view: boolean
 }
 
 export interface AssistantSettings {
   auto_approve: boolean
+  suggest_auto_approve: boolean
+  /** The suggestion will not show again. */
+  suggestion_off: boolean
   share_view: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
 export interface AssistantSettingsParams {
   auto_approve?: boolean
+  /** Answers the suggestion: `later` snoozes it, `never` stops it. */
+  suggestion?: 'later' | 'never'
   share_view?: boolean
 }
 

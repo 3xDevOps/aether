@@ -17,44 +17,35 @@ import (
 )
 
 type memStore struct {
-	mu   sync.Mutex
-	rows map[domain.MemberID]*store.AssistantSession
-	keys map[string]bool
-	auto map[domain.MemberID]bool
-	// hidden holds the members who turned view sharing off.
-	hidden map[domain.MemberID]bool
-	// autoReads counts AssistantAutoApprove calls.
-	autoReads int
+	mu       sync.Mutex
+	rows     map[domain.MemberID]*store.AssistantSession
+	keys     map[string]bool
+	settings map[domain.MemberID]store.AssistantSettings
+	// settingsReads counts AssistantSettings calls.
+	settingsReads int
 }
 
 func newMemStore() *memStore {
-	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, auto: map[domain.MemberID]bool{}, hidden: map[domain.MemberID]bool{}}
+	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, settings: map[domain.MemberID]store.AssistantSettings{}}
 }
 
-func (m *memStore) AssistantAutoApprove(_ context.Context, id domain.MemberID) (bool, error) {
+func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (store.AssistantSettings, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.autoReads++
-	return m.auto[id], nil
+	m.settingsReads++
+	if st, ok := m.settings[id]; ok {
+		return st, nil
+	}
+	return store.AssistantSettings{ShareView: true}, nil
 }
 
-func (m *memStore) SetAssistantAutoApprove(_ context.Context, id domain.MemberID, on bool) error {
+func (m *memStore) PutAssistantSettings(ctx context.Context, id domain.MemberID, settings store.AssistantSettings) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.auto[id] = on
-	return nil
-}
-
-func (m *memStore) AssistantShareView(_ context.Context, id domain.MemberID) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return !m.hidden[id], nil
-}
-
-func (m *memStore) SetAssistantShareView(_ context.Context, id domain.MemberID, on bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.hidden[id] = !on
+	m.settings[id] = settings
 	return nil
 }
 

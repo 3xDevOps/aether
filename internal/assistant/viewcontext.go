@@ -138,13 +138,13 @@ func (s *Service) keepView(ctx context.Context, m *member, v *protocol.Assistant
 	if v == nil {
 		return nil, nil
 	}
-	on, err := s.cfg.Store.AssistantShareView(ctx, m.id)
+	st, err := s.cfg.Store.AssistantSettings(ctx, m.id)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: read the view sharing setting: %w", err)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !on || m.removing {
+	if !st.ShareView || m.removing {
 		return nil, nil
 	}
 	if replace || m.view == nil {
@@ -165,13 +165,21 @@ func (s *Service) SetView(ctx context.Context, id domain.MemberID, v *protocol.A
 
 // SetShareView stores whether the member shares their view context; off
 // forgets the one held. It holds m.share, so neither an update already on
-// its way nor a prompt being sent can carry the view past it.
+// its way nor a prompt being sent can carry the view past it, and
+// m.settings, so it does not race the other writes of the settings row.
 func (s *Service) SetShareView(ctx context.Context, id domain.MemberID, on bool) error {
 	m := s.member(id)
 	defer m.notify()
 	m.share.Lock()
 	defer m.share.Unlock()
-	if err := s.cfg.Store.SetAssistantShareView(ctx, id, on); err != nil {
+	m.settings.Lock()
+	defer m.settings.Unlock()
+	st, err := s.cfg.Store.AssistantSettings(ctx, id)
+	if err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
+	st.ShareView = on
+	if err = s.cfg.Store.PutAssistantSettings(ctx, id, st); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
 	if !on {

@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react'
+import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { Button } from '@/components/ui/button'
 import { Code, CodeBlock } from '@/components/ui/code'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -10,6 +11,7 @@ import { useKeybindings } from '@/lib/keybindings'
 import type { SessionOption, SessionRequest } from '@/lib/session-types'
 import { FormFields, missingRequired } from '@/routes/run/session-form'
 import { optionVariant, orderedOptions, requestTitle, useToolCall } from '@/routes/run/session-requests'
+import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 
 function useAction() {
@@ -106,6 +108,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { busy, error, run } = useAction()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
   const params = paramRows(confirmation.params)
+  const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   return (
     <RequestCard
       title="Approve this action?"
@@ -136,6 +139,11 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             </Button>
           </div>
           {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
+          {confirmation.other_member ? (
+            <p className="text-ui-sm text-muted">{confirmation.other_owner} owns this run, so this asks even with auto-approval on.</p>
+          ) : !autoApprove && (
+            <p className="text-ui-sm"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>
+          )}
         </div>
       }
     >

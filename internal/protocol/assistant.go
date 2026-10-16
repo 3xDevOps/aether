@@ -52,6 +52,11 @@ type AssistantConfirmation struct {
 	Params    json.RawMessage `json:"params"`
 	CreatedAt time.Time       `json:"created_at"`
 	ExpiresAt time.Time       `json:"expires_at"`
+	// OtherMember means the run the call acts on belongs to another
+	// member, named by OtherOwner. Such a call shows a card even with
+	// auto-approval on.
+	OtherMember bool   `json:"other_member,omitempty"`
+	OtherOwner  string `json:"other_owner,omitempty"`
 }
 
 type AssistantStatus struct {
@@ -62,17 +67,33 @@ type AssistantStatus struct {
 	Confirmations []AssistantConfirmation `json:"confirmations"`
 	AutoApprove   bool                    `json:"auto_approve"`
 	ShareView     bool                    `json:"share_view"`
+	// SuggestAutoApprove means the member approved enough cards by hand
+	// that the dashboard may suggest turning auto-approval on.
+	SuggestAutoApprove bool `json:"suggest_auto_approve"`
 }
+
+// Answers to the suggestion to turn auto-approval on.
+const (
+	// AssistantSuggestionLater snoozes it: 7 days the first time, 30 the
+	// second; the third counts as never.
+	AssistantSuggestionLater = "later"
+	AssistantSuggestionNever = "never"
+)
 
 // AssistantSettingsParams changes each field that is set; none reads.
 type AssistantSettingsParams struct {
 	AutoApprove *bool `json:"auto_approve,omitempty"`
 	ShareView   *bool `json:"share_view,omitempty"`
+	// Suggestion answers the suggestion to turn auto-approval on.
+	Suggestion string `json:"suggestion,omitempty"`
 }
 
 type AssistantSettings struct {
 	// AutoApprove runs confirmed tools without a card, as if approved.
-	AutoApprove bool `json:"auto_approve"`
+	AutoApprove        bool `json:"auto_approve"`
+	SuggestAutoApprove bool `json:"suggest_auto_approve"`
+	// SuggestionOff means the suggestion will not show again.
+	SuggestionOff bool `json:"suggestion_off"`
 	// ShareView sends the assistant the member's dashboard view context.
 	ShareView bool `json:"share_view"`
 }
