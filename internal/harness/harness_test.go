@@ -405,15 +405,30 @@ func TestDefinitionValidation(t *testing.T) {
 		"argv mismatch":              validWith(valid, func(d *Definition) { d.HeadlessArgs = []string{"other", "{task}"} }),
 		// The name becomes a host path segment under <homes>/<member>;
 		// a traversal name would address another member's credentials.
-		"traversal name": validWith(valid, func(d *Definition) { d.Name = "../victim/claude" }),
-		"path name":      validWith(valid, func(d *Definition) { d.Name = "a/b" }),
-		"spaced name":    validWith(valid, func(d *Definition) { d.Name = "a b" }),
+		"traversal name":            validWith(valid, func(d *Definition) { d.Name = "../victim/claude" }),
+		"path name":                 validWith(valid, func(d *Definition) { d.Name = "a/b" }),
+		"spaced name":               validWith(valid, func(d *Definition) { d.Name = "a b" }),
+		"acp mode without acp args": validWith(valid, func(d *Definition) { d.ACPMode = "yolo" }),
+		"spaced acp mode": validWith(valid, func(d *Definition) {
+			d.ACPArgs, d.ACPMode = []string{"omp", "acp"}, "a b"
+		}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := def.Validate(); err == nil {
 				t.Fatal("definition accepted")
 			}
 		})
+	}
+}
+
+func TestDefinitionACPModeBeatsTheRegisteredProfile(t *testing.T) {
+	def := Definition{Name: "claude", ACPArgs: []string{"claude-agent-acp"}, ACPMode: "plan"}
+	if got := def.Profile().ACPMode; got != "plan" {
+		t.Errorf("ACPMode = %q, want the definition's plan", got)
+	}
+	def.ACPMode = ""
+	if got := def.Profile().ACPMode; got != "bypassPermissions" {
+		t.Errorf("ACPMode = %q, want the registered bypassPermissions", got)
 	}
 }
 

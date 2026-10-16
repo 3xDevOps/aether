@@ -468,6 +468,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,
 		ClaudeCode:     profile.ACPClaudeCode,
+		AgentCommand:   adapter[0],
 		TitleLookup:    titleLookup,
 		OnState: func(st acphost.TurnState) {
 			if message, ok := acphost.UsageLimit(st.Failed); ok {

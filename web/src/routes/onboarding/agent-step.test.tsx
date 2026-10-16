@@ -161,6 +161,35 @@ describe('the agent the step set up', () => {
   })
 })
 
+describe('add agent form', () => {
+  it('registers an agent whose command differs from its name, with its mode and login', async () => {
+    const client = fakeApi()
+    renderStep(client)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add agent…' }))
+    vi.mocked(client.agentList).mockResolvedValue([
+      agentInfo({ name: 'mycursor', display_name: 'mycursor', source: 'member', glyph: 'custom', executable: 'agent' }),
+    ])
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mycursor' } })
+    fireEvent.change(screen.getByLabelText('Standard command'), { target: { value: 'agent {task}' } })
+    expect((screen.getByLabelText('Background command') as HTMLInputElement).value).toBe('agent -p {task}')
+    fireEvent.change(screen.getByLabelText('Enhanced command'), { target: { value: 'agent acp' } })
+    fireEvent.change(screen.getByLabelText('Enhanced start mode'), { target: { value: 'agent' } })
+    fireEvent.change(screen.getByLabelText('Login file'), { target: { value: '~/.cursor/auth.json' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+
+    expect(await screen.findByRole('heading', { name: 'Set up mycursor' })).toBeDefined()
+    expect(client.agentRegister).toHaveBeenCalledWith({
+      name: 'mycursor',
+      executable: 'agent',
+      tui_args: ['agent', '{task}'],
+      headless_args: ['agent', '-p', '{task}'],
+      acp_args: ['agent', 'acp'],
+      acp_mode: 'agent',
+      credential_paths: ['~/.cursor/auth.json'],
+    })
+  })
+})
+
 describe('first run', () => {
   it('points back to the Agent step when no agent is installed', async () => {
     seed()

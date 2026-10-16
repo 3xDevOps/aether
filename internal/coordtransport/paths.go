@@ -24,4 +24,7 @@ const (
 	// EnhancedEnv is "1" in an enhanced run's container. The server wakes
 	// such an agent itself, so inbox hooks the agent loads stay silent.
 	EnhancedEnv = "AETHER_ENHANCED"
+	// ManagedHooksEnv is "1" when the run's launch loads Aether's inbox
+	// integration itself, so the agent must not install a manual copy.
+	ManagedHooksEnv = "AETHER_MANAGED_HOOKS"
 )

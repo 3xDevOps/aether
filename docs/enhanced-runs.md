@@ -18,7 +18,7 @@ run.
 | `pi` | adapter `pi-acp` | nothing: pi never asks |
 | `omp` | `omp acp --auto-approve` | the `--auto-approve` flag |
 | `opencode` | `opencode acp` | `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT` |
-| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | whatever the definition passes |
+| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | the session mode in `ACPMode` / `acp_mode` / `--acp-mode`, else whatever the definition passes |
 
 Like Standard, an Enhanced run acts without asking by default. The session
 mode stays yours to change in the run.
@@ -78,7 +78,7 @@ An agent with no ACP command is refused:
 scheduler: harness "custom" has no command for mode "acp"
 ```
 
-`--model` is set over ACP after the session opens, through the agent's
+`--model` is set over ACP after the session opens, for a custom agent too, through the agent's
 native `model` config option when it advertises one, else
 `session/set_model` ([per-agent flags](harnesses.md#launch-argv)). If the
 agent rejects it, the Session view shows a **Model not set** error notice
@@ -299,6 +299,14 @@ also updates the run's recorded `model`. Agents that advertise
 separate ACP `models` or `modes` instead of config selectors get the same
 controls: Aether routes those selections to `session/set_model` or
 `session/set_mode`. Native config selectors take precedence.
+
+A subagent's `session/request_permission` or
+`elicitation/create` names its child session and is the run's request like
+the main agent's: pending input on the run, answered and cancelled the same
+way, and a permission's tool call snapshot carries the subagent's parent
+link. A request from a session not yet announced waits up to 5 seconds for
+its announcement, then gets `-32602`; cancelling the turn while it waits
+answers it cancelled, and it never becomes pending input.
 
 Answering, cancelling and changing options need **Steer** and the run's
 **control lease**, the same authority as typing into a terminal. A dashboard
@@ -783,21 +791,93 @@ and history pages limit each read, not the stored conversation.
 Anything an agent or a tool prints, a secret included, can be in it;
 [privacy.md](privacy.md#remote-development-data) covers who can read it.
 
-Items carry the subagent tree that Claude's adapter reports. A subagent is
-the agent that Claude Code's `Agent` or `Task` tool launches; its
-messages, thoughts, tool calls and plans arrive in the same session as the
-main agent's. Claude's adapter forwards a subagent's text and thinking only
-to a session opened with `_meta.claudeCode.options.forwardSubagentText`,
-which a Claude Enhanced run sets on `session/new`, `session/resume` and
-`session/load`.
+Items carry the subagent tree, from two sources. A subagent is an agent
+another agent launches; its messages, thoughts, tool calls and plans land in
+the log with a parent link.
+
+- **Claude's adapter** reports a subagent through the `Agent` or `Task` tool
+  call and `_meta.claudeCode.parentToolUseId`; the subagent's items arrive
+  in the same session as the main agent's. The adapter forwards a
+  subagent's text and thinking only to a session opened with
+  `_meta.claudeCode.options.forwardSubagentText`, which a Claude Enhanced
+  run sets on `session/new`, `session/resume` and `session/load`.
+- **Every other agent** can open a child ACP session per subagent. In
+  `initialize` Aether declares the `subagents` client capability as
+  `clientCapabilities.subagents: {}` and as
+  `clientCapabilities._meta.subagents: {}`. An agent that supports it
+  announces each child on the parent's session with `subagent_spawned`,
+  then `subagent_state_update`, or with the draft `subagent_update`. The
+  child's messages, thoughts, tool calls and plans arrive on the child
+  session, and Aether records them in the run's one log with the parent
+  link set to the child's launch id. A child can announce its own
+  children.
+
+The launch id is `subagent:<child session id>`, or for Cursor its own task
+tool call id from `_meta.cursor.toolCallId`. For a `subagent:` id Aether
+writes a `tool_call` item for the announcement: `tool_kind` `think`,
+`title` the announced name (`subagent_spawned`) or title
+(`subagent_update`), `raw_input` with `description` and `prompt` (the
+announcement's `prompt`, else its `task`), `subagent.description` the
+title, and `parent_id` the parent's launch id. For Cursor, the announcement
+adds `subagent.type` (Cursor's subagent type, which it sends as the name)
+to Cursor's own task tool call.
+
+Claude does not get the capability. With it, Claude's adapter withholds the
+`Agent` and `Task` tool calls and moves the subagent to a child session, so
+the launch input, the report and the background task result
+(`tool_call.task`) that [background work](#background-work) tracking reads
+would be lost. Cursor's `agent acp` sends child sessions: its ACP SDK drops
+the top-level field and reads `_meta.subagents`. codex-acp has the code, but
+every release up to 2.2.3-preview.11 drops `clientCapabilities.subagents`
+while parsing `initialize`, so Codex subagents do not nest yet.
+
+A `subagent:` launch call takes its `status` from the announcement. In
+`subagent_update`, an omitted field keeps its value and `null` clears a
+title or description.
+
+| Announcement | Launch call `status` |
+|---|---|
+| `subagent_spawned`; state `running`, `requires_action` or `unknown` | `in_progress` |
+| state `completed`; `idle` with `end_turn`, another stop reason or none | `completed` |
+| state `failed`; `idle` with `error`, `refusal`, `max_tokens` or `max_turn_requests` | `failed` |
+| state `cancelled` or `disconnected`; `idle` with `cancelled`; `"state": null` | unchanged: the call stays `in_progress`, and the dashboard shows it stopped once its turn ends |
+
+From a child session Aether drops `usage_update`, `session_info_update`,
+`current_mode_update`, `config_option_update` and
+`available_commands_update`; the run's usage, title, mode, options and
+commands stay the main session's.
+
+Limits:
+
+- One agent connection tracks at most 1024 child sessions and drops later
+  announcements, logging a warning. An announcement whose launch id is
+  over 128 bytes is kept as an `unknown` item and its child is not tracked.
+- Updates from a session never announced are dropped, and a known child
+  never moves to another parent. A state change for a child whose
+  announcement this connection did not record is ignored.
+- On restart the children are forgotten. After `session/load` Aether
+  relearns them, with their labels and status, from the replayed
+  announcements, which, like the rest of the replayed history, add no
+  items; a later state change writes the launch call again. After
+  `session/resume` it does not, so updates from a child that outlived the
+  restart are dropped.
+
+An agent with no child sessions is covered by a fallback: a tool call is
+also a launch when its `raw_input` has a non-empty `subagent_type`,
+`agent` or `agent_type` and a non-empty `description`, `prompt` or `task`,
+such as opencode's and omp's `task` tool or Copilot's. `subagent.type` comes
+from the first of those three type fields that is set. The subagent's own
+work carries no link, so its card shows no nested items. GitHub Copilot's
+subagent tool calls are not nested: its agent id has no link to the task
+call.
 
 | Field | Set on |
 |---|---|
-| `tool_call.parent_id` | A subagent's tool call: the `id` of the `Agent` or `Task` tool call that launched the subagent. Nested subagents chain through it. |
+| `tool_call.parent_id` | A subagent's tool call: the id of the call that launched the subagent: Claude's `Agent` or `Task` call, or the launch id above. Nested subagents chain through it. |
 | `message.parent_id` | A subagent's message or thought segment. A change of parent starts a new segment. |
 | `plan_parent_id` | The agent that published the plan. Each agent keeps its own plan, apart from the main agent's. With Claude's `Task*` tools the published list is the session-wide task list, not a per-subagent plan. |
 | `tool_call.tool_name` | A tool call whose agent sends `_meta.claudeCode.toolName`: Claude Code's tool name, such as `Bash` or `Agent`. The first name sent is kept. |
-| `tool_call.subagent` | An `Agent` or `Task` tool call: `description` and `type` (the input's `subagent_type`), each at most 128 bytes. The full prompt stays in `raw_input`. |
+| `tool_call.subagent` | A launching call: Claude's `Agent` or `Task`, a fallback launch, or an announcement. `description` and `type`, each at most 128 bytes. The full prompt stays in `raw_input`. |
 | `tool_call.task` | A tool call that started a Claude Code background task: `{"id", "type", "status"}`. `id` is the result's `backgroundTaskId`, or its `taskId` or `agentId` with `"status":"async_launched"`; `type` is the task type once the adapter reported it; `status` is `running`, then `completed`, `failed` or `stopped` in a new snapshot of the same call when the task ends, or `stopped` when the agent connection closes first. |
 
 These fields are kept when an item is cut to fit a size limit, so a
@@ -805,8 +885,8 @@ dashboard can place and label every item. A later update that omits the
 parent keeps the one already recorded, and an update that arrives after its
 turn ended merges into the last snapshot of a call that was still in progress.
 The server forgets finished calls at each turn end and, past 256 in-progress
-calls, the least recently updated; it also forgets all of them on restart. Codex, pi, omp and
-opencode send no parent or tool name, so these fields stay empty for them.
+calls, the least recently updated; it also forgets all of them on restart.
+`tool_call.tool_name` comes only from Claude; other agents leave it empty.
 
 Turns and Claude's [background work](#background-work) are recorded as:
 

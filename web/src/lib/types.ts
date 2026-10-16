@@ -1002,7 +1002,9 @@ export interface AgentInfo {
   enhanced?: 'native' | 'adapter' | 'none'
   /** Whether the adapter, or the native CLI, resolves for this launch. */
   enhanced_installed?: boolean
-  /** Whether a login file exists in the home the launch signs in with. */
+  /** The command the agent runs; a member's agent may name it differently from the agent. */
+  executable?: string
+  /** Whether a login file exists in the home the launch signs in with. Absent when the agent declares none. */
   login_found?: boolean
   /** The launch mode the agent starts in unless asked otherwise. */
   default_mode?: 'tui' | 'acp'
@@ -1054,6 +1056,8 @@ export interface AgentDefinition {
   tui_args?: string[]
   headless_args?: string[]
   acp_args?: string[]
+  /** The ACP session mode an Enhanced run starts in. */
+  acp_mode?: string
   profile_root?: string
   credential_paths?: string[]
   deny_names?: string[]

@@ -28,22 +28,9 @@ func hookWake(ctx context.Context, cfg Config) (int, error) {
 	if err != nil {
 		return ExitUsage, fmt.Errorf("hook wake: %w", err)
 	}
-	var status protocol.CoordStatusResult
-	// Unlike lifecycle hooks, this call must outlive the requested server wait.
-	// The transport supplies the bounded wait plus framing margin, while the
-	// caller's context can cancel it immediately on native session teardown.
-	if err := coordtransport.Call(ctx, cfg.Socket, protocol.MethodCoordHookStatus, params, &status); err != nil {
-		switch code := coordtransport.ErrorCode(err); code {
-		case protocol.CodeMethodNotFound, protocol.CodeInvalidParams:
-			return unsupportedHookWake(err)
-		case protocol.CodeUnavailable:
-			return ExitFailure, fmt.Errorf("hook wake: %w", err)
-		default:
-			return exitFor(code), fmt.Errorf("hook wake: %w", err)
-		}
-	}
-	if !status.WaitSupported {
-		return unsupportedHookWake(nil)
+	status, code, err := requestHookWake(ctx, cfg.Socket, params)
+	if err != nil {
+		return code, fmt.Errorf("hook wake: %w", err)
 	}
 	ids := status.UnreadMessageIDs
 	if ids == nil {
@@ -59,13 +46,30 @@ func hookWake(ctx context.Context, cfg Config) (int, error) {
 	return ExitOK, nil
 }
 
-func unsupportedHookWake(cause error) (int, error) {
-	message := "hook wake: server does not support native inbox waits; stop this receiver, upgrade Aether and relaunch the run; use aether-internal inbox meanwhile"
-	if cause != nil {
-		return ExitUsage, fmt.Errorf("%s: %w", message, cause)
+// requestHookWake makes one server wait and returns the exit code its
+// failure maps to: ExitFailure is transient, ExitUsage an unsupported server.
+func requestHookWake(ctx context.Context, socket string, params protocol.CoordHookStatusParams) (protocol.CoordStatusResult, int, error) {
+	var status protocol.CoordStatusResult
+	// Unlike lifecycle hooks, this call must outlive the requested server wait.
+	// The transport supplies the bounded wait plus framing margin, while the
+	// caller's context can cancel it immediately on native session teardown.
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordHookStatus, params, &status); err != nil {
+		switch code := coordtransport.ErrorCode(err); code {
+		case protocol.CodeMethodNotFound, protocol.CodeInvalidParams:
+			return status, ExitUsage, fmt.Errorf("%s: %w", unsupportedHookWake, err)
+		case protocol.CodeUnavailable:
+			return status, ExitFailure, err
+		default:
+			return status, exitFor(code), err
+		}
 	}
-	return ExitUsage, errors.New(message)
+	if !status.WaitSupported {
+		return status, ExitUsage, errors.New(unsupportedHookWake)
+	}
+	return status, ExitOK, nil
 }
+
+const unsupportedHookWake = "server does not support native inbox waits; stop this receiver, upgrade Aether and relaunch the run; use aether-internal inbox meanwhile"
 
 func readHookWakeParams(in io.Reader) (protocol.CoordHookStatusParams, error) {
 	params := protocol.CoordHookStatusParams{WaitSeconds: protocol.CoordMaxInboxWaitSeconds}

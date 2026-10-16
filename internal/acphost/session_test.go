@@ -743,6 +743,7 @@ func TestCancelRightAfterATurnStartsReachesTheAgentAfterItsPrompt(t *testing.T) 
 }
 
 func TestElicitations(t *testing.T) {
+	shortenAnnounceWait(t)
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	got := make(chan string, 2)
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {
@@ -1439,5 +1440,90 @@ func TestPromptIdleOnAClosedSessionIsUnsent(t *testing.T) {
 	started, err := s.PromptIdle(context.Background(), textPrompt("hello"), nil)
 	if started || !errors.Is(err, ErrPromptUnsent) || !errors.Is(err, ErrClosed) {
 		t.Fatalf("PromptIdle after Close = %v, %v; want unsent, which is also ErrClosed", started, err)
+	}
+}
+
+func TestInitializeDeclaresSubagentSessions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"default", Config{}, true},
+		{"claude", Config{ClaudeCode: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMockAgent(t, loadFixture(t, "codex"))
+			startMock(t, m, tc.cfg)
+			m.mu.Lock()
+			raw := m.received[acp.AgentMethodInitialize]
+			m.mu.Unlock()
+			var req struct {
+				ClientCapabilities map[string]json.RawMessage `json:"clientCapabilities"`
+			}
+			if err := json.Unmarshal(raw, &req); err != nil {
+				t.Fatal(err)
+			}
+			caps := req.ClientCapabilities
+			for _, key := range []string{"auth", "elicitation", "_meta"} {
+				if _, ok := caps[key]; !ok {
+					t.Fatalf("clientCapabilities lacks %q: %s", key, raw)
+				}
+			}
+			sub, ok := caps["subagents"]
+			if ok != tc.want || (ok && string(sub) != "{}") {
+				t.Fatalf("subagents = %s (present %v), want present %v", sub, ok, tc.want)
+			}
+			var meta map[string]json.RawMessage
+			if err := json.Unmarshal(caps["_meta"], &meta); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := meta["terminal_output"]; !ok {
+				t.Fatalf("_meta lacks terminal_output: %s", caps["_meta"])
+			}
+			if _, ok := meta["subagents"]; ok != tc.want {
+				t.Fatalf("_meta subagents present %v, want %v: %s", ok, tc.want, caps["_meta"])
+			}
+		})
+	}
+}
+
+func TestDelegationInputLabelsALaunch(t *testing.T) {
+	m := newMockAgent(t, loadFixture(t, "codex"))
+	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
+		for _, c := range []struct {
+			id string
+			in map[string]any
+		}{
+			{"t1", map[string]any{"subagent_type": "reviewer", "description": "Review the diff"}},
+			{"t2", map[string]any{"agent": "explore", "prompt": "Find the callers"}},
+			{"t3", map[string]any{"description": "Run the tests"}},
+			{"t4", map[string]any{"agent": "explore", "task": "Map the billing module"}},
+			{"t5", map[string]any{"agent_type": "general-purpose", "description": "Fix the flaky test", "prompt": "..."}},
+		} {
+			m.update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": c.id, "title": "x", "kind": "other", "status": "completed", "rawInput": c.in})
+		}
+		return map[string]any{"stopReason": "end_turn"}, nil
+	}
+	s, rec := startMock(t, m, Config{})
+	if _, err := s.Prompt(context.Background(), textPrompt("go"), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	rec.waitIdle(t)
+	got := map[string]*Subagent{}
+	for _, it := range ofKind(items(t, s), KindToolCall) {
+		got[it.ToolCall.ID] = it.ToolCall.Subagent
+	}
+	want := map[string]*Subagent{
+		"t1": {Description: "Review the diff", Type: "reviewer"},
+		"t2": {Type: "explore"},
+		"t3": nil,
+		"t4": {Type: "explore"},
+		"t5": {Description: "Fix the flaky test", Type: "general-purpose"},
+	}
+	for id, w := range want {
+		if !reflect.DeepEqual(got[id], w) {
+			t.Fatalf("%s subagent = %+v, want %+v", id, got[id], w)
+		}
 	}
 }

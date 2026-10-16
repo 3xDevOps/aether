@@ -185,3 +185,44 @@ func TestHookSummaryReportsOnlyTheRunHarness(t *testing.T) {
 		t.Fatalf("opencode summary = %q, %v", opencode.String(), err)
 	}
 }
+
+func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
+	const managed = "Inbox hooks (opencode): loaded by this run's launch; do not install a manual copy.\n"
+	for _, tt := range []struct {
+		name    string
+		env     map[string]string
+		managed bool
+	}{
+		{"managed", map[string]string{"AETHER_MANAGED_HOOKS": "1"}, true},
+		{"managed enhanced", map[string]string{"AETHER_MANAGED_HOOKS": "1", "AETHER_ENHANCED": "1"}, false},
+		{"unmanaged", map[string]string{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := tt.env
+			env["AETHER_HARNESS"] = "opencode"
+			in := hookInstallInputs{home: t.TempDir(), cwd: t.TempDir(), env: func(key string) string { return env[key] }}
+			var summary, full strings.Builder
+			if err := writeHookSummaryWithInputs(&summary, "opencode", in); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeHookInstallationWithInputs(&full, in); err != nil {
+				t.Fatal(err)
+			}
+			if tt.managed {
+				if summary.String() != managed {
+					t.Fatalf("summary = %q, want %q", summary.String(), managed)
+				}
+				if !strings.HasPrefix(full.String(), managed+"\nHook installation (read-only)") {
+					t.Fatalf("installation = %q", full.String())
+				}
+				return
+			}
+			if !strings.Contains(summary.String(), "Install or inspect: aether-internal skill --hooks") || strings.Contains(summary.String(), "loaded by this run's launch") {
+				t.Fatalf("summary = %q", summary.String())
+			}
+			if !strings.HasPrefix(full.String(), "\nHook installation (read-only)") {
+				t.Fatalf("installation = %q", full.String())
+			}
+		})
+	}
+}
