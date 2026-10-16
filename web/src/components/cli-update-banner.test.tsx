@@ -6,7 +6,7 @@ import { useStore } from '@/store'
 import { bob, fakeApi, serverUpdateStatus, updateStatus } from '@/test/fixtures'
 import {
   cachedUntilRefreshed,
-  RECHECK_PERIOD,
+  refocus,
   seed,
   settle,
   withLatest,
@@ -432,10 +432,7 @@ describe('what the banner keeps after the install', () => {
     await settle()
     expect(screen.getByText(/Updated to v1\.3\.0/)).toBeTruthy()
 
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
-    })
+    await refocus()
     expect(screen.getByText(/Updated to v1\.3\.0/)).toBeTruthy()
     expect(screen.getByText('sudo systemctl restart aether-server')).toBeTruthy()
     // The offer it replaced is gone: this machine is no longer behind.
@@ -465,10 +462,7 @@ describe('what the banner keeps after the install', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     await settle()
 
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
-    })
+    await refocus()
     expect(screen.getByText(/Rebuilding the app/)).toBeTruthy()
     // The rebuild states have no Applied block, so the lead is what names
     // the release the app is being rebuilt for.
@@ -722,9 +716,7 @@ describe('the release the Update button installs', () => {
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
 
     released = true
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
-    })
+    await refocus()
     expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
   })
@@ -780,10 +772,8 @@ describe('the release the Update button installs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     await settle()
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 2)
-    })
+    await refocus()
+    await refocus()
 
     expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
   })

@@ -2,7 +2,7 @@
 // CLI and server banner suites so neither carries its own copy.
 
 import { act } from '@testing-library/react'
-import { RECHECK_MS } from '@/components/update-checks'
+import { FOCUS_READ_MS, RECHECK_MS } from '@/components/update-checks'
 import type { GatewayCapabilities, Member, UpdateStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
@@ -57,6 +57,17 @@ export const RECHECK_PERIOD = Math.ceil(RECHECK_MS * 1.1)
 /** Lets the pending update.check promises settle. Needs fake timers. */
 export async function settle() {
   await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+}
+
+/** A re-check through the focus read. Waiting out the periodic one would
+ * also run every 30s clock tick and 1s rebuild poll in between, which is
+ * slow enough under CI load to time the test out. Needs fake timers. */
+export async function refocus() {
+  await act(async () => {
+    vi.setSystemTime(Date.now() + FOCUS_READ_MS)
+    window.dispatchEvent(new Event('focus'))
     await vi.advanceTimersByTimeAsync(0)
   })
 }
