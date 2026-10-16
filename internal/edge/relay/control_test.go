@@ -115,6 +115,44 @@ func TestNewerRegistrationReplacesOlder(t *testing.T) {
 	}
 }
 
+// TestOpenFollowsAReplacedRegistration opens a connection while the
+// server enrolls again: the open the old control channel took is sent on
+// the new one, and the client is never told the server is not connected.
+func TestOpenFollowsAReplacedRegistration(t *testing.T) {
+	e := newEnv(t)
+	signer := newSigner(t)
+	id := edgeproto.ServerID(signer.PublicKey())
+	e.dir.mu.Lock()
+	e.dir.owners[id] = true
+	e.dir.mu.Unlock()
+	old := enroll(t, e, signer)
+	go old.run()
+	acct := account("1")
+	e.dir.addMember(id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+
+	dialed := make(chan error, 1)
+	go func() {
+		ws, _, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.ConnectPath(id), &websocket.DialOptions{
+			HTTPHeader: bearerHeader(token),
+		})
+		if err == nil {
+			_ = ws.CloseNow()
+		}
+		dialed <- err
+	}()
+	next[edgeproto.Open](t, old)
+	fresh := enroll(t, e, signer)
+	fresh.attach = true
+	go fresh.run()
+	if err := <-dialed; err != nil {
+		t.Fatalf("connection opened across the replacement: %v", err)
+	}
+	if err := old.closedWith(t); !strings.Contains(err.Error(), errReplaced.Error()) {
+		t.Fatalf("old control channel closed with %v", err)
+	}
+}
+
 func TestUnclaimedServerIsNotRelayed(t *testing.T) {
 	e := newEnv(t)
 	a := enroll(t, e, newSigner(t))
@@ -124,7 +162,7 @@ func TestUnclaimedServerIsNotRelayed(t *testing.T) {
 	_, token := e.addDevice(t, acct, "dev-1")
 
 	status, text := e.get(t, a.id, bearerHeader(token))
-	if status != http.StatusServiceUnavailable || text != string(edgeproto.RefusalNotConnected) {
+	if status != http.StatusConflict || text != string(edgeproto.RefusalNotClaimed) {
 		t.Fatalf("ssh connection to an unclaimed server: %d %q", status, text)
 	}
 	// A server asserting its own owner, with no claim connection behind

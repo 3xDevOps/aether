@@ -1728,7 +1728,9 @@ legitimate.
 | --- | --- |
 | Edge down | [During an edge outage](#during-an-edge-outage) |
 | Edge restart | Relayed connections drop; servers and clients reconnect; runs are unaffected |
-| Server offline | `503 server is not connected to the edge` |
+| Server offline | `503 server is not connected to the edge`. The edge drops a control connection when its socket closes, when a write to it fails, or after 60 seconds without a message from the server |
+| Server reconnecting while a client connects | The edge sends the connection to the server's new control connection, once |
+| Claim recorded, not yet applied to the live control connection | `409 server is connected to the edge but not claimed`; retry |
 | Server with members never claimed | The edge relays nothing for it; invitations and account links are refused until an admin runs **Connect my GitHub account** ([Server id and claiming](#server-id-and-claiming)) |
 | Claim or ownerless report refused | The edge closes the control connection with `ownership report refused: <reason>`; the server reconnects and learns whether the edge holds it as claimed |
 | Transfer refused | The edge answers with the reason; `aether member transfer` fails with `ownership report refused: <reason>` and the server keeps its previous owner |
