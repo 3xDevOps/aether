@@ -11,12 +11,13 @@ import type { TimelinePayload } from '@/store/sessions'
 /** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
 export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
+  const predicting = useStore((s) => Boolean(s.predicting[run.id]))
   const members = useStore((s) => s.members)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
   if (run.review !== 'ready' || run.member_id !== self.id) return null
-  const commands = runCommands({ run, paused, cap, members, self, steerOthers })
+  const commands = runCommands({ run, paused, cap, members, self, steerOthers, predicting })
   const complete = commands.find((command) => command.id === 'complete')
   const later = commands.find((command) => command.id === 'not-yet')
   if (!complete || !later) return null

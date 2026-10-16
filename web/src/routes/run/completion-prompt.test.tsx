@@ -58,7 +58,7 @@ describe('CompletionPrompt', () => {
     expect(screen.getByRole('button', { name: 'Not yet' })).toBeDefined()
   })
 
-  it('stays away after Not yet, and for a run that is not ready or not the viewer’s own', () => {
+  it('stays away after Not yet, for a run that is not ready or not the viewer’s own, and while a verb is pending', () => {
     seed({ review: 'later' })
     const { rerender } = render(<Prompt />)
     expect(banner()).toBeNull()
@@ -66,6 +66,10 @@ describe('CompletionPrompt', () => {
     rerender(<Prompt />)
     expect(banner()).toBeNull()
     seed({ member_id: bob.id })
+    rerender(<Prompt />)
+    expect(banner()).toBeNull()
+    seed()
+    useStore.setState({ predicting: { run_1: {} } })
     rerender(<Prompt />)
     expect(banner()).toBeNull()
   })
