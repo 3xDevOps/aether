@@ -47,10 +47,20 @@ func (s *Scheduler) Review(ctx context.Context, run domain.RunID, actor domain.M
 }
 
 // setReview moves the run's review and announces it. s.mu orders the write
-// and its event against the run.status events that also carry the review.
+// and its event against the run.status events that also carry the review,
+// and against a Relaunch that reopens the run between its close and here.
 func (s *Scheduler) setReview(ctx context.Context, run domain.RunID, actor domain.MemberID, review domain.RunReview, from ...domain.RunReview) (*domain.Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if review == domain.ReviewAccepted {
+		current, err := s.cfg.Store.GetRun(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		if current.Status != domain.RunCompleted {
+			return nil, fmt.Errorf("%w: run %s is %s, not completed", ErrInvalidTransition, run, current.Status)
+		}
+	}
 	stamp, changed, err := s.cfg.Store.SetRunReview(ctx, run, review, from...)
 	if err != nil {
 		return nil, err
