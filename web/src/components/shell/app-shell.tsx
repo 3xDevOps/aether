@@ -30,7 +30,7 @@ export function AppShell() {
         Skip to content
       </a>
       <TopBar />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main
           id="main"

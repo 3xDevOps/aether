@@ -402,17 +402,21 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 		t.Fatalf("pi linked outside the borrowed directories is listed as installed: %+v", agents["pi"])
 	}
 	for name, want := range map[string]protocol.AgentInfo{
-		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true,
+		"claude": {Name: "claude", DisplayName: "Claude Code", Glyph: "claude", Source: "shipped", Installed: true, Executable: "claude",
 			Enhanced: "adapter", Switchable: true, DefaultMode: "tui", LoginMissing: true},
-		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true,
+		"codex": {Name: "codex", DisplayName: "Codex", Glyph: "codex", Source: "shipped", Installed: true, Executable: "codex",
 			Enhanced: "adapter", DefaultMode: "tui", EnhancedDefault: true},
-		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true,
+		"ownbot": {Name: "ownbot", DisplayName: "ownbot", Glyph: "custom", Source: "member", Installed: true, Executable: "ownbot",
 			Enhanced: "none", DefaultMode: "tui", OwnAccountOnly: true},
-		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false,
+		"omp": {Name: "omp", DisplayName: "oh-my-pi", Glyph: "omp", Source: "shipped", Installed: false, Executable: "omp",
 			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal},
 	} {
 		got := agents[name]
 		got.InstallScript, got.EnhancedInstallScript = "", ""
+		if (got.LoginFound != nil) != (want.Source == "shipped") || got.LoginFound != nil && *got.LoginFound {
+			t.Fatalf("shared %s login_found = %v, want false for a shipped agent and none for a member's", name, got.LoginFound)
+		}
+		got.LoginFound = nil
 		if got != want {
 			t.Fatalf("shared %s = %+v, want %+v", name, got, want)
 		}
@@ -456,5 +460,119 @@ func TestAgentModelsRoutesToRuns(t *testing.T) {
 	runs.setErr(errors.New("not logged in"))
 	if _, perr = call(protocol.AgentModelsParams{Name: "claude"}); perr == nil || !strings.Contains(perr.Message, "not logged in") {
 		t.Fatalf("runs error: %+v", perr)
+	}
+}
+
+func TestAgentListCustomAgentNamedApartFromItsCommand(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "agent"), []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	def := protocol.AgentDefinition{
+		Name:         "mycursor",
+		Executable:   "agent",
+		TUIArgs:      []string{"agent", harness.TaskPlaceholder},
+		HeadlessArgs: []string{"agent", "-p", harness.TaskPlaceholder},
+		ACPArgs:      []string{"agent", "acp"},
+		ACPMode:      "agent",
+	}
+	login := protocol.AgentDefinition{
+		Name: "withlogin", Executable: "agent", TUIArgs: def.TUIArgs, HeadlessArgs: def.HeadlessArgs,
+		CredentialPaths: []string{"~/.cursor/auth.json"},
+	}
+	for _, d := range []protocol.AgentDefinition{def, login} {
+		if _, rpcErr := callAgentRegister(t, s, member.ID, d); rpcErr != nil {
+			t.Fatalf("register %s: %+v", d.Name, rpcErr)
+		}
+	}
+	list := func() map[string]protocol.AgentInfo {
+		result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+		if rpcErr != nil {
+			t.Fatalf("agentList: %+v", rpcErr)
+		}
+		agents := map[string]protocol.AgentInfo{}
+		for _, a := range result.(protocol.AgentListResult).Agents {
+			agents[a.Name] = a
+		}
+		return agents
+	}
+	agents := list()
+	if a := agents["mycursor"]; !a.Installed || a.Executable != "agent" || a.LoginFound != nil {
+		t.Errorf("mycursor = %+v, want installed, executable agent, no login_found", a)
+	}
+	if a := agents["withlogin"]; a.LoginFound == nil || *a.LoginFound {
+		t.Errorf("withlogin before the login file = %+v, want login_found false", a)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".cursor", "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if a := list()["withlogin"]; a.LoginFound == nil || !*a.LoginFound {
+		t.Errorf("withlogin with the login file = %+v, want login_found true", a)
+	}
+}
+
+// Cursor's CLI runs as agent, so the shipped cursor agent is installed, and
+// Enhanced with it, once ~/.local/bin/agent is.
+func TestAgentListFindsCursorAsAgent(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := func() protocol.AgentInfo {
+		result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+		if rpcErr != nil {
+			t.Fatalf("agentList: %+v", rpcErr)
+		}
+		for _, a := range result.(protocol.AgentListResult).Agents {
+			if a.Name == "cursor" {
+				return a
+			}
+		}
+		t.Fatal("agent.list does not list cursor")
+		return protocol.AgentInfo{}
+	}
+	if a := cursor(); a.Installed || a.Executable != "agent" || a.DisplayName != "Cursor CLI" {
+		t.Fatalf("cursor before install = %+v, want not installed, executable agent", a)
+	}
+	write := func(rel string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, rel)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, rel), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".local/bin/agent")
+	a := cursor()
+	if !a.Installed || !a.EnhancedInstalled || a.Enhanced != "native" || a.DefaultMode != "acp" || a.LoginFound == nil || *a.LoginFound {
+		t.Fatalf("cursor with ~/.local/bin/agent = %+v, want installed, enhanced by default, no login found", a)
+	}
+	write(".config/cursor/auth.json")
+	if a := cursor(); a.LoginFound == nil || !*a.LoginFound {
+		t.Fatalf("cursor with ~/.config/cursor/auth.json = %+v, want login found", a)
 	}
 }

@@ -68,6 +68,9 @@ var liveAgents = map[string]liveAgent{
 			return ompPrint(ctx, dir, "-p", "--mode", "json", "--resume="+session, prompt)
 		},
 	},
+	"copilot": {acp: profiles["copilot"].ACPArgs},
+	"gemini":  {acp: profiles["gemini"].ACPArgs},
+	"cursor":  {acp: profiles["cursor"].ACPArgs},
 }
 
 // TestLiveSwitch is the check behind Profile.SwitchVerified: a session

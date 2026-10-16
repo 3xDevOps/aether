@@ -100,7 +100,7 @@ export interface Turn {
 }
 
 const inboxWake = /^Aether has \d+ unacknowledged inbox item\(s\)\./
-const missionWake = /^Mission update: run \/usr\/local\/bin\/aether-internal mission plan show/
+const missionWake = /^Mission update(?: \([^)]*\))?: run \/usr\/local\/bin\/aether-internal mission plan show/
 
 const launchTools = ['Agent', 'Task', 'Workflow']
 

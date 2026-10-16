@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 export function PaneHeader({
   title,
   size = 'view',
+  level = 1,
   stateLine,
   viewSwitch,
   actions,
@@ -16,6 +17,8 @@ export function PaneHeader({
 }: {
   title: React.ReactNode
   size?: 'view' | 'run'
+  /** A pane beside the page's own header titles itself one level below it. */
+  level?: 1 | 2
   stateLine?: React.ReactNode
   viewSwitch?: React.ReactNode
   actions?: React.ReactNode
@@ -24,6 +27,7 @@ export function PaneHeader({
   titleRef?: React.Ref<HTMLHeadingElement>
   className?: string
 }) {
+  const Heading = level === 1 ? 'h1' : 'h2'
   return (
     <header
       data-slot="pane-header"
@@ -39,9 +43,9 @@ export function PaneHeader({
         </Button>
       )}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
-        <h1 ref={titleRef} tabIndex={-1} className="truncate text-title outline-none">
+        <Heading ref={titleRef} tabIndex={-1} className="truncate text-title outline-none">
           {title}
-        </h1>
+        </Heading>
         {stateLine}
       </div>
       {viewSwitch}

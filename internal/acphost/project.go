@@ -42,9 +42,14 @@ type projector struct {
 	// plans holds the last plan of the main agent ("") and of each subagent,
 	// by the ID of the tool call that launched it.
 	plans map[string][]PlanEntry
-	usage Usage
-	title string
+	// labels holds what the announcements of each child session said, by
+	// the launch id Aether made up for it.
+	labels map[string]subagentLabels
+	usage  Usage
+	title  string
 }
+
+type subagentLabels struct{ title, description, prompt, status string }
 
 type openText struct {
 	kind   Kind
@@ -68,14 +73,17 @@ type toolState struct {
 }
 
 func newProjector(emit func(Item), arm func(), activity func(kind, target string)) *projector {
-	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState), plans: make(map[string][]PlanEntry)}
+	return &projector{emit: emit, arm: arm, activity: activity, tools: make(map[string]*toolState), plans: make(map[string][]PlanEntry),
+		labels: make(map[string]subagentLabels)}
 }
 
-func (p *projector) update(raw json.RawMessage) {
+// update projects an update of the main agent's session, or with parent set
+// of the subagent session that parent launched.
+func (p *projector) update(parent string, raw json.RawMessage) {
 	var head struct {
 		Kind string `json:"sessionUpdate"`
 	}
-	if json.Unmarshal(raw, &head) != nil || !p.project(head.Kind, raw) {
+	if json.Unmarshal(raw, &head) != nil || !p.project(head.Kind, parent, raw) {
 		r, trunc := capRaw(raw, maxContentBytes)
 		p.emit(Item{Kind: KindUnknown, Raw: r, Truncated: trunc})
 	}
@@ -83,7 +91,15 @@ func (p *projector) update(raw json.RawMessage) {
 
 // project handles one known update kind and reports false for an unknown
 // kind or a payload that does not decode.
-func (p *projector) project(kind string, raw json.RawMessage) bool {
+func (p *projector) project(kind, parent string, raw json.RawMessage) bool {
+	if parent != "" {
+		switch kind {
+		case "usage_update", "session_info_update", "current_mode_update", "config_option_update", "available_commands_update":
+			// The run's usage, title, mode, options and commands are the
+			// main agent's.
+			return true
+		}
+	}
 	switch kind {
 	case "user_message_chunk":
 		// Live chunks echo the prompt the host already recorded at turn
@@ -99,14 +115,14 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 			k = KindThought
 			p.activity("think", "")
 		}
-		parent, _ := claudeMeta(u.Meta)
-		p.chunk(k, "assistant", deref(u.MessageId), parent, u.Content)
+		claude, _ := claudeMeta(u.Meta)
+		p.chunk(k, "assistant", deref(u.MessageId), cmp.Or(parent, claude), u.Content)
 	case "tool_call":
 		var u acp.SessionUpdateToolCall
 		if json.Unmarshal(raw, &u) != nil {
 			return false
 		}
-		patch := toolPatch{opens: true, title: &u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
+		patch := toolPatch{opens: true, parent: parent, title: &u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
 		if u.Kind != "" {
 			k := string(u.Kind)
 			patch.kind = &k
@@ -121,7 +137,7 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 		if json.Unmarshal(raw, &u) != nil {
 			return false
 		}
-		patch := toolPatch{title: u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
+		patch := toolPatch{parent: parent, title: u.Title, content: u.Content, locations: u.Locations, rawInput: u.RawInput, rawOutput: u.RawOutput, meta: u.Meta}
 		if u.Kind != nil {
 			k := string(*u.Kind)
 			patch.kind = &k
@@ -140,10 +156,11 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 		for i, e := range u.Entries {
 			plan[i] = PlanEntry{Content: e.Content, Priority: string(e.Priority), Status: string(e.Status)}
 		}
-		parent, _ := claudeMeta(u.Meta)
-		if !slices.Equal(plan, p.plans[parent]) {
-			p.plans[parent] = plan
-			p.emit(Item{Kind: KindPlan, Plan: plan, PlanParentID: parent})
+		claude, _ := claudeMeta(u.Meta)
+		owner := cmp.Or(parent, claude)
+		if !slices.Equal(plan, p.plans[owner]) {
+			p.plans[owner] = plan
+			p.emit(Item{Kind: KindPlan, Plan: plan, PlanParentID: owner})
 		}
 	case "current_mode_update":
 		var u acp.SessionCurrentModeUpdate
@@ -189,10 +206,65 @@ func (p *projector) project(kind string, raw json.RawMessage) bool {
 			p.title = *u.Title
 			p.emit(Item{Kind: KindSessionInfo, Title: p.title})
 		}
+	case "subagent_spawned", "subagent_state_update", "subagent_update":
+		c, ok := parseSubagent(raw)
+		if !ok {
+			return false
+		}
+		p.subagent(parent, c)
 	default:
 		return false
 	}
 	return true
+}
+
+// subagent records a child session's announcement or state change on the
+// tool call that launched it. Cursor's own task call only gets its label;
+// for a launch id Aether made up, the announcements are the whole call.
+func (p *projector) subagent(parent string, c subagentChild) {
+	if c.ToolCall {
+		if c.Announces {
+			kind, _ := cutTail(deref(c.Type), maxLinkBytes)
+			p.tool(c.Launch, toolPatch{parent: parent, subagent: &Subagent{Type: kind}})
+		}
+		return
+	}
+	l, ok := p.label(c)
+	if !ok {
+		return
+	}
+	in := map[string]any{}
+	if l.description != "" {
+		in["description"] = l.description
+	}
+	if l.prompt != "" {
+		in["prompt"] = l.prompt
+	}
+	label, _ := cutTail(l.title, maxLinkBytes)
+	kind := string(acp.ToolKindThink)
+	p.tool(c.Launch, toolPatch{parent: parent, title: &l.title, kind: &kind, status: &l.status, rawInput: in, subagent: &Subagent{Description: label}})
+}
+
+// label merges what an update says about a child with a launch id Aether
+// made up into the child's labels. It reports false for the agent's own
+// launch call and for a child no announcement introduced.
+func (p *projector) label(c subagentChild) (subagentLabels, bool) {
+	l, known := p.labels[c.Launch]
+	if c.ToolCall || !known && !c.Announces {
+		return l, false
+	}
+	if c.Title != nil {
+		l.title, _ = cutTail(*c.Title, maxShrunkString)
+	}
+	if c.Description != nil {
+		l.description, _ = cutTail(*c.Description, maxShrunkString)
+	}
+	if c.Prompt != nil {
+		l.prompt, _ = cutTail(*c.Prompt, maxRawBytes)
+	}
+	l.status = cmp.Or(c.Status, l.status)
+	p.labels[c.Launch] = l
+	return l, true
 }
 
 func deref(s *string) string {
@@ -310,7 +382,9 @@ func (p *projector) closeText() {
 type toolPatch struct {
 	// opens is set for a tool_call, which starts over an ID an earlier turn
 	// used.
-	opens     bool
+	opens bool
+	// parent is the launch id of the subagent session the update came from.
+	parent    string
 	title     *string
 	kind      *string
 	status    *string
@@ -319,6 +393,7 @@ type toolPatch struct {
 	rawInput  any
 	rawOutput any
 	meta      map[string]any
+	subagent  *Subagent
 }
 
 // tool merges an update into the tool call's state; absent fields keep
@@ -337,9 +412,9 @@ func (p *projector) tool(id string, patch toolPatch) {
 	p.clock++
 	st.updated = p.clock
 	c := &st.call
+	claude, toolName := claudeMeta(patch.meta)
 	// A later update of a subagent's tool call can omit the link.
-	parent, toolName := claudeMeta(patch.meta)
-	if parent != "" && parent != id {
+	if parent := cmp.Or(patch.parent, claude); parent != "" && parent != id {
 		c.ParentID = parent
 	}
 	if toolName != "" && c.ToolName == "" {
@@ -375,15 +450,30 @@ func (p *projector) tool(id string, patch toolPatch) {
 		c.RawInput, cut = capRaw(patch.rawInput, maxRawBytes)
 		st.truncated = st.truncated || cut
 	}
-	if in, ok := patch.rawInput.(map[string]any); ok && (c.ToolName == "Agent" || c.ToolName == "Task") {
+	sub := c.Subagent
+	if in, ok := patch.rawInput.(map[string]any); ok {
 		description, _ := in["description"].(string)
 		kind, _ := in["subagent_type"].(string)
-		if description != "" || kind != "" {
+		for _, key := range []string{"agent", "agent_type"} {
+			if kind == "" {
+				kind, _ = in[key].(string)
+			}
+		}
+		prompt, _ := in["prompt"].(string)
+		if prompt == "" {
+			prompt, _ = in["task"].(string)
+		}
+		named := c.ToolName == "Agent" || c.ToolName == "Task"
+		if (named && (description != "" || kind != "")) || (kind != "" && (description != "" || prompt != "")) {
 			description, _ = cutTail(description, maxLinkBytes)
 			kind, _ = cutTail(kind, maxLinkBytes)
 			c.Subagent = &Subagent{Description: description, Type: kind}
 		}
 	}
+	if patch.subagent != nil {
+		c.Subagent = patch.subagent
+	}
+	relabelled := (sub == nil) != (c.Subagent == nil) || sub != nil && *sub != *c.Subagent
 	if patch.rawOutput != nil {
 		var cut bool
 		c.RawOutput, cut = capRaw(patch.rawOutput, maxRawBytes)
@@ -406,7 +496,7 @@ func (p *projector) tool(id string, patch toolPatch) {
 
 	final := c.Status == string(acp.ToolCallStatusCompleted) || c.Status == string(acp.ToolCallStatusFailed)
 	// No later endTurn writes what a call that outlived its turn holds back.
-	if !known || final || st.ended || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
+	if !known || final || st.ended || relabelled || c.Status != st.emittedStatus || c.Title != st.emittedTitle ||
 		len(st.output) >= toolOutputGrowth || st.skipped+1 >= toolSkipLimit {
 		p.emitTool(st)
 		if !final {

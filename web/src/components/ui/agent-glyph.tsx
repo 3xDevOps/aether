@@ -1,4 +1,4 @@
-import { Bot, Boxes, Claude, type LucideIcon, Pi, SquarePi, SquareTerminal, Wrench } from '@/components/icons'
+import { Bot, Boxes, Claude, Github, type LucideIcon, MousePointer2, Pi, Sparkle, SquarePi, SquareTerminal, Wrench } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
 // Keys are internal/harness registry names.
@@ -8,6 +8,9 @@ const agents: Record<string, { icon: LucideIcon; colour: string }> = {
   pi: { icon: Pi, colour: 'text-agent-pi' },
   omp: { icon: SquarePi, colour: 'text-agent-omp' },
   opencode: { icon: Boxes, colour: 'text-agent-opencode' },
+  copilot: { icon: Github, colour: 'text-agent-copilot' },
+  gemini: { icon: Sparkle, colour: 'text-agent-gemini' },
+  cursor: { icon: MousePointer2, colour: 'text-agent-cursor' },
   custom: { icon: Wrench, colour: 'text-muted' },
 }
 

@@ -84,14 +84,16 @@ func (m *mockAgent) called(method string) bool {
 	return slices.Contains(m.methods, method)
 }
 
-func (m *mockAgent) update(u any) {
+func (m *mockAgent) update(u any) { m.updateOn(m.sessionID(), u) }
+
+func (m *mockAgent) updateOn(sessionID string, u any) {
 	b, err := json.Marshal(u)
 	if err != nil {
 		m.t.Error(err)
 		return
 	}
 	if err := m.conn.SendNotification(context.Background(), acp.ClientMethodSessionUpdate, map[string]any{
-		"sessionId": m.sessionID(), "update": json.RawMessage(b),
+		"sessionId": sessionID, "update": json.RawMessage(b),
 	}); err != nil {
 		m.t.Error(err)
 	}

@@ -12,7 +12,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-const claudeLogin = ".claude/.credentials.json"
+const (
+	claudeLogin = ".claude/.credentials.json"
+	geminiLogin = ".gemini/oauth_creds.json"
+)
 
 // newSharerEnv is a shareEnv where the launcher (Ada) has shared their own
 // account with the owner (Grace).
@@ -44,8 +47,13 @@ func (e *shareEnv) terminal(t *testing.T) runtime.Spec {
 	return e.rt.byName(terminalContainerName(e.member.ID)).spec
 }
 
-func (e *shareEnv) pin() runtime.Mount {
-	return runtime.Mount{HostPath: e.adaHome, Subpath: claudeLogin, ContainerPath: "/root/" + claudeLogin}
+func (e *shareEnv) pin(login string) runtime.Mount {
+	return runtime.Mount{HostPath: e.adaHome, Subpath: login, ContainerPath: "/root/" + login}
+}
+
+// pins are the sharer's own logins that their CLIs replace by rename.
+func (e *shareEnv) pins() []runtime.Mount {
+	return []runtime.Mount{e.pin(claudeLogin), e.pin(geminiLogin)}
 }
 
 func subpathMounts(spec runtime.Spec) []runtime.Mount {
@@ -92,21 +100,23 @@ func (e *shareEnv) assertLoginMounts(t *testing.T, spec runtime.Spec, pool strin
 	}
 }
 
-// A member who shares their account gets their own Claude login mounted in
-// place in their own run and environment terminal, created empty when it is
-// missing, and nothing else beyond what a non-sharer gets.
+// A member who shares their account gets their own Claude and Gemini logins
+// mounted in place in their own run and environment terminal, created empty
+// when missing, and nothing else beyond what a non-sharer gets.
 func TestSharerContainersPinTheirOwnLogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
 	spec := e.ownRun(t)
-	e.assertLoginMounts(t, spec, "runs", e.pin())
-	info, err := os.Lstat(filepath.Join(e.adaHome, claudeLogin))
-	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 || info.Mode().Perm() != 0o600 {
-		t.Fatalf("login stub = %v, %v; want an empty 0600 file", info, err)
+	e.assertLoginMounts(t, spec, "runs", e.pins()...)
+	for _, login := range []string{claudeLogin, geminiLogin} {
+		info, err := os.Lstat(filepath.Join(e.adaHome, login))
+		if err != nil || !info.Mode().IsRegular() || info.Size() != 0 || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s stub = %v, %v; want an empty 0600 file", login, info, err)
+		}
 	}
 
 	terminal := e.terminal(t)
-	e.assertLoginMounts(t, terminal, "terminal", e.pin())
+	e.assertLoginMounts(t, terminal, "terminal", e.pins()...)
 }
 
 // An existing login is pinned as it is: content and mode unchanged.
@@ -119,8 +129,8 @@ func TestSharerPinLeavesExistingLoginUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := e.ownRun(t)
-	if got := subpathMounts(spec); !slices.Equal(got, []runtime.Mount{e.pin()}) {
-		t.Fatalf("subpath mounts = %+v, want %+v", got, e.pin())
+	if got := subpathMounts(spec); !slices.Equal(got, e.pins()) {
+		t.Fatalf("subpath mounts = %+v, want %+v", got, e.pins())
 	}
 	data, err := os.ReadFile(name)
 	if err != nil || string(data) != "secret of "+claudeLogin {
@@ -148,8 +158,8 @@ func TestNonSharerContainersAreUnchanged(t *testing.T) {
 }
 
 // A sharer's run on another member's account mounts that member's login where
-// it overlaps their own pin, and still pins their own Claude login under
-// another harness.
+// it overlaps their own pin, and still pins their own logins under another
+// harness.
 func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
@@ -160,18 +170,18 @@ func TestSharerOnAnotherAccountPrefersForeignLogin(t *testing.T) {
 		t.Fatalf("claude Launch: %v", err)
 	}
 	foreign := runtime.Mount{HostPath: e.ownerHome, Subpath: claudeLogin, ContainerPath: "/root/" + claudeLogin}
-	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign)
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", foreign, e.pin(geminiLogin))
 
 	run, err = e.launch(t, "codex")
 	if err != nil {
 		t.Fatalf("codex Launch: %v", err)
 	}
 	codex := runtime.Mount{HostPath: e.ownerHome, Subpath: ".codex/auth.json", ContainerPath: "/root/.codex/auth.json"}
-	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", codex, e.pin())
+	e.assertLoginMounts(t, e.rt.byName(string(run.ID)).spec, "runs", append([]runtime.Mount{codex}, e.pins()...)...)
 }
 
-// A sharer's own login path that cannot be shared is left unpinned, and the
-// run and terminal still start.
+// A sharer's own Claude login path that cannot be shared is left unpinned,
+// and the run and terminal still start.
 func TestSharerUnshareableLoginIsNotPinned(t *testing.T) {
 	t.Parallel()
 	for name, plant := range map[string]func(t *testing.T, home string){
@@ -196,11 +206,12 @@ func TestSharerUnshareableLoginIsNotPinned(t *testing.T) {
 			t.Parallel()
 			e := newSharerEnv(t)
 			plant(t, e.adaHome)
-			if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
-				t.Fatalf("run subpath mounts = %+v, want none", got)
+			gemini := []runtime.Mount{e.pin(geminiLogin)}
+			if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, gemini) {
+				t.Fatalf("run subpath mounts = %+v, want only %+v", got, gemini)
 			}
-			if got := subpathMounts(e.terminal(t)); len(got) != 0 {
-				t.Fatalf("terminal subpath mounts = %+v, want none", got)
+			if got := subpathMounts(e.terminal(t)); !slices.Equal(got, gemini) {
+				t.Fatalf("terminal subpath mounts = %+v, want only %+v", got, gemini)
 			}
 		})
 	}
@@ -210,8 +221,8 @@ func TestSharerUnshareableLoginIsNotPinned(t *testing.T) {
 func TestRevokedShareDropsThePin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
-	if got := subpathMounts(e.ownRun(t)); len(got) != 1 {
-		t.Fatalf("shared run subpath mounts = %+v, want the pin", got)
+	if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, e.pins()) {
+		t.Fatalf("shared run subpath mounts = %+v, want the pins", got)
 	}
 	if err := e.db.RevokeAccountShare(t.Context(), e.member.ID, e.owner.ID); err != nil {
 		t.Fatal(err)
@@ -293,8 +304,8 @@ func TestCheckSharedLaunchMatchesLaunch(t *testing.T) {
 func TestSharerPlaceholderIsNotALogin(t *testing.T) {
 	t.Parallel()
 	e := newSharerEnv(t)
-	if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
-		t.Fatalf("sharer run subpath mounts = %+v, want the pin", got)
+	if got := subpathMounts(e.ownRun(t)); !slices.Equal(got, e.pins()) {
+		t.Fatalf("sharer run subpath mounts = %+v, want the pins", got)
 	}
 	_, err := e.sched.Launch(t.Context(), e.ws.ID, e.owner.ID, e.member.ID, "on placeholder", "claude", domain.LaunchTUI)
 	if err == nil || !strings.Contains(err.Error(), "is not logged in to claude") {
@@ -303,8 +314,8 @@ func TestSharerPlaceholderIsNotALogin(t *testing.T) {
 	if got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginMissing || refusal != "" {
 		t.Fatalf("CheckSharedLaunch on the placeholder = %v, %q, %v; want SharedLoginMissing", got, refusal, err)
 	}
-	if got := subpathMounts(e.terminal(t)); !slices.Equal(got, []runtime.Mount{e.pin()}) {
-		t.Fatalf("sharer terminal subpath mounts = %+v, want the pin", got)
+	if got := subpathMounts(e.terminal(t)); !slices.Equal(got, e.pins()) {
+		t.Fatalf("sharer terminal subpath mounts = %+v, want the pins", got)
 	}
 }
 
@@ -327,7 +338,7 @@ func TestSharerHardLinkedLoginIsRefused(t *testing.T) {
 	if got, refusal, err := e.sched.CheckSharedLaunch(t.Context(), e.owner.ID, e.member.ID, "claude"); err != nil || got != SharedLoginUnavailable || !strings.Contains(refusal, "has another hard link and cannot be shared") {
 		t.Fatalf("CheckSharedLaunch on a hard-linked login = %v, %q, %v; want SharedLoginUnavailable with the hard-link refusal", got, refusal, err)
 	}
-	if got := subpathMounts(e.ownRun(t)); len(got) != 0 {
-		t.Fatalf("sharer run subpath mounts = %+v, want none", got)
+	if got, gemini := subpathMounts(e.ownRun(t)), []runtime.Mount{e.pin(geminiLogin)}; !slices.Equal(got, gemini) {
+		t.Fatalf("sharer run subpath mounts = %+v, want only %+v", got, gemini)
 	}
 }

@@ -155,11 +155,14 @@ func TestHookLeavesMailUntilAgentAcknowledges(t *testing.T) {
 func TestEnhancedRunHooksStaySilent(t *testing.T) {
 	_, _, socket, _ := hookMailbox(t)
 	t.Setenv(coordtransport.EnhancedEnv, "1")
-	for _, tc := range []struct{ harness, event string }{{"claude", "Stop"}, {"claude", "PostToolBatch"}, {"codex", "PostToolUse"}, {"pi", "context"}} {
-		var out bytes.Buffer
-		code, err := Run(t.Context(), []string{"hook", tc.harness, tc.event}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out})
-		if err != nil || code != ExitOK || out.Len() != 0 {
-			t.Fatalf("%s %s in an enhanced run = %d, %v, %q; want silent success", tc.harness, tc.event, code, err, out.String())
+	for _, tc := range []struct{ harness, event, input string }{
+		{"claude", "Stop", "{}"}, {"claude", "PostToolBatch", "{}"}, {"codex", "PostToolUse", "{}"}, {"pi", "context", "{}"},
+		{"claude", "wake", `{"hook_event_name":"SessionStart"}`},
+	} {
+		var out, errOut bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", tc.harness, tc.event}, Config{Socket: socket, In: strings.NewReader(tc.input), Out: &out, ErrOut: &errOut})
+		if err != nil || code != ExitOK || out.Len() != 0 || errOut.Len() != 0 {
+			t.Fatalf("%s %s in an enhanced run = %d, %v, %q, %q; want silent success", tc.harness, tc.event, code, err, out.String(), errOut.String())
 		}
 	}
 	var out bytes.Buffer

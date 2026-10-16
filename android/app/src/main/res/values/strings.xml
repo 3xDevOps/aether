@@ -30,6 +30,9 @@
 
     <string name="gateway_stopped">The local gateway stopped</string>
     <string name="gateway_retry">Retry</string>
+    <string name="renderer_killed">Android stopped the dashboard\'s renderer</string>
+    <string name="renderer_crashed">The dashboard\'s renderer crashed</string>
+    <string name="renderer_unresponsive">The dashboard\'s renderer stopped responding and was ended</string>
     <string name="update_title">Aether %1$s is available.</string>
     <string name="update_running">You are running %1$s.</string>
     <string name="update_play_detail">Google Play installs it. Nothing downloads until you update there.</string>

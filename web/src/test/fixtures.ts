@@ -9,6 +9,8 @@ import type {
   DevTerminal,
   DevTerminalTarget,
   EvidencePacket,
+  InsightsResult,
+  InsightsRun,
   Member,
   Mission,
   MissionQuestion,
@@ -351,6 +353,83 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 }
 
 
+export function insightsRun(over: Partial<InsightsRun> = {}): InsightsRun {
+  return {
+    run_id: 'run_1',
+    title: 'Fix the checkout flow',
+    workspace_id: workspace.id,
+    status: 'completed',
+    reason: '',
+    harness: 'claude',
+    model: '',
+    created_at: '2026-10-14T09:00:00Z',
+    finished_at: '2026-10-14T09:21:00Z',
+    duration_seconds: 1260,
+    mission_id: '',
+    pr_url: '',
+    pr_state: '',
+    ...over,
+  }
+}
+
+const insightsTotals = { launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0, killed: 0, active: 0, finished: 0 }
+
+/** insights.get for 2026-10-09 to 2026-10-16 in UTC. */
+export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
+  const series = Array.from({ length: 7 }, (_, i) => ({
+    start: `2026-10-${String(9 + i).padStart(2, '0')}`,
+    launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0,
+  }))
+  series[5] = { ...series[5], launched: 6, completed: 4, merged: 1, failed: 1 }
+  series[6] = { ...series[6], launched: 4, completed: 2, interrupted: 1 }
+  const end = Date.UTC(2026, 9, 15)
+  const heatmap = Array.from({ length: 182 }, (_, i) => ({
+    date: new Date(end - (181 - i) * 86_400_000).toISOString().slice(0, 10),
+    runs: 0,
+  }))
+  heatmap[181] = { ...heatmap[181], runs: 3 }
+  heatmap[180] = { ...heatmap[180], runs: 6 }
+  return {
+    generated_at: '2026-10-15T18:00:00Z',
+    from: '2026-10-09T00:00:00Z',
+    to: '2026-10-16T00:00:00Z',
+    time_zone: 'UTC',
+    bucket: 'day',
+    totals: { ...insightsTotals, launched: 10, completed: 6, merged: 1, failed: 1, interrupted: 1, finished: 7, active: 1 },
+    previous: { ...insightsTotals, launched: 8, completed: 4, failed: 2, finished: 4 },
+    series,
+    heatmap,
+    by_workspace: [
+      { workspace_id: workspace.id, name: workspace.name, launched: 7, finished: 5, failed: 1 },
+      { workspace_id: otherWorkspace.id, name: otherWorkspace.name, launched: 3, finished: 2, failed: 1 },
+    ],
+    by_agent: [
+      { harness: 'claude', model: '', launched: 7, finished: 5, failed: 1 },
+      { harness: 'codex', model: 'gpt-5.5', launched: 3, finished: 2, failed: 1 },
+    ],
+    swarms: { launched: 1, completed: 1, cancelled: 0, agents: 5, tasks_accepted: 4 },
+    durations: {
+      runs_measured: 9,
+      median_run_seconds: 1260,
+      p90_run_seconds: 4100,
+      state_runs_measured: 6,
+      median_working_seconds: 900,
+      median_waiting_seconds: 240,
+      median_response_seconds: 75,
+    },
+    cost: { metered_runs: 3, unmetered_runs: 6, cost_usd: 4.12, input_tokens: 120000, output_tokens: 9000 },
+    pull_requests: { opened: 2, merged: 1 },
+    recent: [
+      insightsRun({ run_id: 'run_3', title: 'Retry flaky upload', status: 'interrupted', harness: 'codex', model: 'gpt-5.5', workspace_id: otherWorkspace.id, finished_at: '2026-10-15T11:00:00Z' }),
+      insightsRun({ run_id: 'run_2', title: 'Add the export button', status: 'merged', finished_at: '2026-10-15T10:00:00Z', pr_url: 'https://github.com/acme/app/pull/42', pr_state: 'merged' }),
+      insightsRun(),
+    ],
+    needs_you: 2,
+    coverage: { state_times_since: '2026-10-12T12:00:00Z', pull_requests_since: '2026-10-12T12:00:00Z' },
+    ...over,
+  }
+}
+
 export function fakeApi(over: Partial<Api> = {}): Api {
   const terminals = new Map<string, Map<string, DevTerminal>>()
   const controllers = new Map<string, DevController>()
@@ -394,6 +473,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       providers: [],
     })),
     accountList: vi.fn(async () => ({ accounts: [alice], shared_with: [] })),
+    insightsGet: vi.fn(async () => insights()),
     accountShare: vi.fn(async () => ({})),
     accountRevoke: vi.fn(async () => ({})),
     runList: vi.fn(async () => [run()]),
@@ -541,12 +621,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantStatus: vi.fn(async () => needsOverride('assistantStatus')),
     assistantStart: vi.fn(async () => needsOverride('assistantStart')),
     assistantPrompt: vi.fn(async () => needsOverride('assistantPrompt')),
+    assistantView: vi.fn(async () => ({})),
     assistantCancel: vi.fn(async () => needsOverride('assistantCancel')),
     assistantAnswer: vi.fn(async () => needsOverride('assistantAnswer')),
     assistantConfirm: vi.fn(async () => needsOverride('assistantConfirm')),
     assistantItem: vi.fn(async () => needsOverride('assistantItem')),
     assistantReset: vi.fn(async () => needsOverride('assistantReset')),
-    assistantSettings: vi.fn(async () => ({ auto_approve: false })),
+    assistantSettings: vi.fn(async () => ({ auto_approve: false, share_view: true })),
     assistantHistory: vi.fn(async () => needsOverride('assistantHistory')),
     runInputAnswer: vi.fn(async () => needsOverride('runInputAnswer')),
     runACPCancel: vi.fn(async () => needsOverride('runACPCancel')),

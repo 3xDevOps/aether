@@ -1,0 +1,9 @@
+# synthesized fixture: draft subagent_update stream built from the unstable ACP schema (@agentclientprotocol/sdk 1.8.0 schema/schema.json SubagentUpdate and StateUpdate); no agent sends it yet.
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01a10f44-babd-7b33-acc2-f76b86997d09","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-1","title":"Review the diff","description":"Reviews the auth changes","state":{"state":"running"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"rfd-child-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Looking at auth.go."}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"rfd-child-1","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-2","title":"Check tests","state":{"state":"running"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"rfd-child-2","update":{"sessionUpdate":"tool_call","toolCallId":"r2-test","title":"go test ./auth","kind":"execute","status":"completed"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"rfd-child-1","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-2","state":{"state":"idle","stopReason":"error"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01a10f44-babd-7b33-acc2-f76b86997d09","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-1","state":{"state":"idle","stopReason":"end_turn"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01a10f44-babd-7b33-acc2-f76b86997d09","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-3","title":"Draft notes","state":{"state":"requires_action"}}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01a10f44-babd-7b33-acc2-f76b86997d09","update":{"sessionUpdate":"subagent_update","sessionId":"rfd-child-3","title":null,"state":null}}}

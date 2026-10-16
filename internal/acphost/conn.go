@@ -50,6 +50,13 @@ const answeredMarker = "_aether/prompt-answered"
 
 var answeredLine = []byte(`{"jsonrpc":"2.0","method":"` + answeredMarker + `"}` + "\n")
 
+// maxChildren bounds the subagent sessions one connection tracks.
+const maxChildren = 1024
+
+// childAnnounceWait bounds how long a request naming an unknown session
+// waits for the update that announces it as a subagent session.
+var childAnnounceWait = 5 * time.Second
+
 // AgentInfo is what the agent advertised in initialize that the host acts on.
 type AgentInfo struct {
 	Name            string
@@ -60,6 +67,7 @@ type AgentInfo struct {
 	List            bool
 	Steering        bool
 	PromptImages    bool
+	PromptEmbedded  bool
 	AuthMethods     json.RawMessage
 }
 
@@ -68,7 +76,8 @@ type initializeResult struct {
 	AgentCapabilities struct {
 		LoadSession        bool `json:"loadSession"`
 		PromptCapabilities struct {
-			Image bool `json:"image"`
+			Image           bool `json:"image"`
+			EmbeddedContext bool `json:"embeddedContext"`
 		} `json:"promptCapabilities"`
 		SessionCapabilities struct {
 			Resume json.RawMessage `json:"resume"`
@@ -99,9 +108,12 @@ type sessionResult struct {
 
 // connEvents receives what the agent sends. Calls for session/update,
 // _auth/status_update, _claude/sdkMessage and promptAnswered arrive in wire
-// order; request calls may interleave.
+// order; request calls may interleave. update's parent is empty for the
+// agent's session and the launch id for a subagent session's.
+// replayedSubagent gets the subagent updates session/load replays.
 type connEvents interface {
-	update(raw json.RawMessage)
+	update(parent string, raw json.RawMessage)
+	replayedSubagent(c subagentChild)
 	authStatus(raw json.RawMessage)
 	sdkMessage(raw json.RawMessage)
 	promptAnswered()
@@ -138,6 +150,8 @@ type Conn struct {
 	// order with requests.
 	answers   atomic.Int64
 	autoAllow bool
+	// childSessions declares the ACP subagents client capability.
+	childSessions bool
 	// sessionMeta is the _meta of session/new, session/resume and
 	// session/load.
 	sessionMeta map[string]any
@@ -148,7 +162,18 @@ type Conn struct {
 	opened   uint64
 	pending  map[string]*pendingRequest
 	resolved map[string]bool
+	// children holds the subagent sessions announced on this connection;
+	// announced is closed and replaced at each new one.
+	children  map[string]childLink
+	announced chan struct{}
+	// cancelled is closed and replaced each time pending requests are
+	// cancelled.
+	cancelled chan struct{}
 }
+
+// childLink is a subagent session's launch id and the launch id of the
+// session that announced it, empty for the agent's own.
+type childLink struct{ launch, parent string }
 
 // agentInput ends the connection on a failed write: the agent takes no more
 // input, and its output may stay open long after. It also reports when a
@@ -253,6 +278,9 @@ func newConn(r io.Reader, w io.WriteCloser, events connEvents, logger *slog.Logg
 		inboundSet: make(chan struct{}),
 		pending:    make(map[string]*pendingRequest),
 		resolved:   make(map[string]bool),
+		children:   make(map[string]childLink),
+		announced:  make(chan struct{}),
+		cancelled:  make(chan struct{}),
 	}
 	c.idle = sync.NewCond(&c.mu)
 	go c.relay(outW, r)
@@ -346,17 +374,21 @@ func call[T any](c *Conn, ctx context.Context, method string, params any) (T, er
 }
 
 func (c *Conn) initialize(ctx context.Context) error {
-	res, err := call[initializeResult](c, ctx, acp.AgentMethodInitialize, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Auth: acp.AuthCapabilities{Terminal: true},
-			Elicitation: &acp.ElicitationCapabilities{
-				Form: &acp.ElicitationFormCapabilities{},
-				Url:  &acp.ElicitationUrlCapabilities{},
-			},
-			Meta: map[string]any{"terminal_output": true},
-		},
-		ClientInfo: &acp.Implementation{Name: "aether", Version: version.Version},
+	meta := map[string]any{"terminal_output": true}
+	clientCaps := map[string]any{
+		"auth":        acp.AuthCapabilities{Terminal: true},
+		"elicitation": acp.ElicitationCapabilities{Form: &acp.ElicitationFormCapabilities{}, Url: &acp.ElicitationUrlCapabilities{}},
+		"_meta":       meta,
+	}
+	if c.childSessions {
+		clientCaps["subagents"] = map[string]any{}
+		// Cursor's ACP SDK drops the field above and reads this one.
+		meta["subagents"] = map[string]any{}
+	}
+	res, err := call[initializeResult](c, ctx, acp.AgentMethodInitialize, map[string]any{
+		"protocolVersion":    acp.ProtocolVersionNumber,
+		"clientCapabilities": clientCaps,
+		"clientInfo":         acp.Implementation{Name: "aether", Version: version.Version},
 	})
 	if err != nil {
 		return err
@@ -372,6 +404,7 @@ func (c *Conn) initialize(ctx context.Context) error {
 		List:            present(caps.SessionCapabilities.List),
 		Steering:        res.Meta.Steering.Supported,
 		PromptImages:    caps.PromptCapabilities.Image,
+		PromptEmbedded:  caps.PromptCapabilities.EmbeddedContext,
 		AuthMethods:     res.AuthMethods,
 	}
 	if res.AgentInfo != nil {
@@ -544,16 +577,22 @@ func (c *Conn) handle(ctx context.Context, method string, params json.RawMessage
 		if err := json.Unmarshal(params, &n); err != nil {
 			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 		}
-		// Before session/new answers, the session id is not known yet and
-		// the agent may already announce commands for it.
-		if sid := c.SessionID(); sid != "" && n.SessionID != sid {
+		parent, ok := c.parentOf(n.SessionID)
+		if !ok {
 			c.logger.Debug("acphost: update for another session", "session", n.SessionID)
 			return nil, nil
 		}
-		if c.replaying.Load() && replayedKind(n.Update) {
+		child, isChild := parseSubagent(n.Update)
+		if isChild && !c.adopt(n.SessionID, parent, child) {
 			return nil, nil
 		}
-		c.events.update(n.Update)
+		if c.replaying.Load() && replayedKind(n.Update) {
+			if isChild {
+				c.events.replayedSubagent(child)
+			}
+			return nil, nil
+		}
+		c.events.update(parent, n.Update)
 		return nil, nil
 	case "_claude/sdkMessage":
 		var n struct {
@@ -600,10 +639,93 @@ func replayedKind(raw json.RawMessage) bool {
 	}
 	_ = json.Unmarshal(raw, &u)
 	switch u.Kind {
-	case "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan":
+	case "user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan",
+		"subagent_spawned", "subagent_state_update", "subagent_update":
 		return true
 	}
 	return false
+}
+
+// parentOf returns the launch id of a session's updates: empty for the
+// agent's session, and for any session before session/new answers, when the
+// agent may already announce commands. ok is false for an unknown session.
+func (c *Conn) parentOf(sid string) (string, bool) {
+	if root := c.SessionID(); root == "" || sid == root {
+		return "", true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	l, ok := c.children[sid]
+	return l.launch, ok
+}
+
+// adopt registers the subagent session an update from session from
+// announces, and reports whether to record the update: a new child, or one
+// announced from the same session under the same launch id. A known child
+// keeps its parent and no session becomes its own ancestor.
+func (c *Conn) adopt(from, parent string, child subagentChild) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if l, ok := c.children[child.ID]; ok {
+		return l == childLink{child.Launch, parent}
+	}
+	if !child.Announces || child.ID == from || child.ID == c.SessionID() {
+		return false
+	}
+	for _, l := range c.children {
+		if l.launch == child.Launch {
+			return false
+		}
+	}
+	if len(c.children) >= maxChildren {
+		c.logger.Warn("acphost: too many subagent sessions; dropping the announcement", "session", child.ID, "limit", maxChildren)
+		return false
+	}
+	c.children[child.ID] = childLink{child.Launch, parent}
+	close(c.announced)
+	c.announced = make(chan struct{})
+	return true
+}
+
+var errRequestCancelled = errors.New("acphost: the turn was cancelled")
+
+// nextCancel returns a channel closed when pending requests are next
+// cancelled, which a request that arrives now must count as.
+func (c *Conn) nextCancel() <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cancelled
+}
+
+// awaitSession returns the launch id of the session a request names, empty
+// for the agent's own. The SDK runs each request on its own goroutine while
+// notifications queue in order, so a subagent's request can arrive before
+// the update announcing its session has been handled. It returns
+// errRequestCancelled once cancelled is closed.
+func (c *Conn) awaitSession(ctx context.Context, sid string, cancelled <-chan struct{}) (string, error) {
+	if sid == c.SessionID() {
+		return "", nil
+	}
+	deadline := time.NewTimer(childAnnounceWait)
+	defer deadline.Stop()
+	for {
+		c.mu.Lock()
+		l, ok := c.children[sid]
+		announced := c.announced
+		c.mu.Unlock()
+		if ok {
+			return l.launch, nil
+		}
+		select {
+		case <-announced:
+		case <-cancelled:
+			return "", errRequestCancelled
+		case <-deadline.C:
+			return "", fmt.Errorf("unknown session %q", sid)
+		case <-ctx.Done():
+			return "", fmt.Errorf("unknown session %q", sid)
+		}
+	}
 }
 
 func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *acp.RequestError) {
@@ -615,8 +737,13 @@ func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *ac
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
-	if sid := c.SessionID(); p.SessionID != sid {
-		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unknown session %q", p.SessionID)})
+	cancelled := c.nextCancel()
+	parent, err := c.awaitSession(ctx, p.SessionID, cancelled)
+	switch {
+	case errors.Is(err, errRequestCancelled):
+		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
+	case err != nil:
+		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
 	var tc struct {
 		ToolCallID string `json:"toolCallId"`
@@ -624,7 +751,7 @@ func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *ac
 	}
 	_ = json.Unmarshal(p.ToolCall, &tc)
 	if u := toolCallUpdateFrom(p.ToolCall); u != nil {
-		c.events.update(u)
+		c.events.update(parent, u)
 	}
 	req := Request{Kind: RequestPermission, Title: tc.Title, ToolCallID: tc.ToolCallID}
 	if req.Title == "" {
@@ -643,7 +770,7 @@ func (c *Conn) permission(ctx context.Context, params json.RawMessage) (any, *ac
 		c.events.requestClosed(req)
 		return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": req.Answer}}, nil
 	}
-	a, ok := c.wait(ctx, req)
+	a, ok := c.wait(ctx, req, cancelled)
 	if !ok {
 		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
 	}
@@ -676,10 +803,17 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
+	cancelled := c.nextCancel()
 	// A request-scoped elicitation carries no sessionId; a session-scoped
-	// one must name this connection's session.
-	if p.SessionID != nil && *p.SessionID != c.SessionID() {
-		return nil, acp.NewInvalidParams(map[string]any{"error": fmt.Sprintf("unknown session %q", *p.SessionID)})
+	// one must name this connection's session or a subagent session.
+	if p.SessionID != nil {
+		_, err := c.awaitSession(ctx, *p.SessionID, cancelled)
+		switch {
+		case errors.Is(err, errRequestCancelled):
+			return map[string]any{"action": "cancel"}, nil
+		case err != nil:
+			return nil, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+		}
 	}
 	req := Request{Title: p.Message, ToolCallID: p.ToolCallID, Options: elicitationOptions}
 	switch p.Mode {
@@ -690,7 +824,7 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 	default:
 		return map[string]any{"action": "decline"}, nil
 	}
-	a, ok := c.wait(ctx, req)
+	a, ok := c.wait(ctx, req, cancelled)
 	if !ok {
 		return map[string]any{"action": "cancel"}, nil
 	}
@@ -702,12 +836,19 @@ func (c *Conn) elicitation(ctx context.Context, params json.RawMessage) (any, *a
 }
 
 // wait registers a pending request and blocks until it is answered, the
-// turn is cancelled, or the agent withdraws it. ok is false when cancelled.
-func (c *Conn) wait(ctx context.Context, req Request) (answer, bool) {
+// turn is cancelled, or the agent withdraws it. ok is false when cancelled,
+// also when cancelled closed before the request was registered.
+func (c *Conn) wait(ctx context.Context, req Request, cancelled <-chan struct{}) (answer, bool) {
 	req.ID = rand.Text()
 	req.Status = RequestPending
 	p := &pendingRequest{req: req, answer: make(chan answer, 1)}
 	c.mu.Lock()
+	select {
+	case <-cancelled:
+		c.mu.Unlock()
+		return answer{}, false
+	default:
+	}
 	c.opened++
 	c.waiting++
 	p.order = c.opened
@@ -777,6 +918,8 @@ func (c *Conn) cancelPending() {
 		c.resolved[id] = true
 		close(p.answer)
 	}
+	close(c.cancelled)
+	c.cancelled = make(chan struct{})
 }
 
 // drain cancels every pending request and returns once each one has been

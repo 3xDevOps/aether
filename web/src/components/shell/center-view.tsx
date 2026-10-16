@@ -4,10 +4,19 @@ import { redirectRoute } from '@/lib/url-state'
 import { lookupRoute } from '@/routes'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
+import type { Route } from '@/store/ui'
 
 export function focusView() {
   const main = document.getElementById('main')
   ;(main?.querySelector<HTMLElement>('h1[tabindex]') ?? main)?.focus({ preventScroll: true })
+}
+
+let quietRoute: Route | null = null
+
+/** Replaces the route without moving focus to the new view's heading. */
+export function replaceRouteKeepingFocus(route: Route) {
+  quietRoute = route
+  redirectRoute(useStore, route)
 }
 
 export function CenterView() {
@@ -35,6 +44,7 @@ export function CenterView() {
     const key = JSON.stringify(route)
     if (shown.current === key) return
     shown.current = key
+    if (route === quietRoute) return
     if (document.getElementById('main')?.contains(document.activeElement)) return
     focusView()
   }, [route])

@@ -110,7 +110,9 @@ a final prose response is not a durable swarm-state transition.
 
 A boundary hook **cannot wake a later-idle agent**. It runs only when the
 host calls it. Do not put `generic.sh` on a timer or wrap it in a background
-polling loop and claim native support.
+polling loop and claim native support. A host wake API is the exception:
+Claude Code's `asyncRewake` runs a command hook in the background and starts
+a turn in the live session when it exits 2, which is a native wake.
 
 ## Optional native idle wake
 

@@ -97,7 +97,7 @@ func dialDirect(ctx context.Context, cfg Config, user string, signer ssh.Signer)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", cfg.Addr, err)
 	}
-	return pinnedHandshake(nc, cfg.Addr, user, signer, pinnedHostKey(cfg.ServerID, "the linked server"))
+	return pinnedHandshake(ctx, nc, cfg.Addr, user, signer, pinnedHostKey(cfg.ServerID, "the linked server"))
 }
 
 // dialEdge reaches the server through the edge. The SSH user name is
@@ -116,7 +116,7 @@ func dialEdge(ctx context.Context, dir string, cfg Config, signer ssh.Signer) (*
 	if err != nil {
 		return nil, err
 	}
-	return pinnedHandshake(nc, EdgeHost(cfg.ServerID), edgeproto.AccountUser(session.Account.Account), signer,
+	return pinnedHandshake(ctx, nc, EdgeHost(cfg.ServerID), edgeproto.AccountUser(session.Account.Account), signer,
 		pinnedHostKey(cfg.ServerID, "the linked server"))
 }
 
@@ -130,7 +130,7 @@ func dialEdge(ctx context.Context, dir string, cfg Config, signer ssh.Signer) (*
 // in as, and the server refuses a claim whose grant names another. A
 // claim never uses cfg.Addr: only the edge vouches for the account a
 // claim makes the owner.
-func DialClaim(cfg Config, code string) (*Conn, error) {
+func DialClaim(ctx context.Context, cfg Config, code string) (*Conn, error) {
 	dir, err := Dir()
 	if err != nil {
 		return nil, err
@@ -152,11 +152,11 @@ func DialClaim(cfg Config, code string) (*Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cli: %w", err)
 	}
-	nc, err := edge.DialClaim(context.Background(), serverID)
+	nc, err := edge.DialClaim(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
-	client, err := pinnedHandshake(nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the claim code names"))
+	client, err := pinnedHandshake(ctx, nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the claim code names"))
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func DialClaim(cfg Config, code string) (*Conn, error) {
 // with another id receives it. A server that admits approved devices only
 // refuses the joining device with edgeproto.RefusedDevicePending until an
 // admin approves it.
-func DialJoin(cfg Config, link string) (*Conn, error) {
+func DialJoin(ctx context.Context, cfg Config, link string) (*Conn, error) {
 	edgeURL, serverID, invitation, secret, err := edgeproto.ParseJoinLink(link)
 	if err != nil {
 		return nil, fmt.Errorf("cli: %w", err)
@@ -193,11 +193,11 @@ func DialJoin(cfg Config, link string) (*Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cli: %w", err)
 	}
-	nc, err := edge.Dial(context.Background(), serverID)
+	nc, err := edge.Dial(ctx, serverID)
 	if err != nil {
 		return nil, err
 	}
-	client, err := pinnedHandshake(nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the invitation link names"))
+	client, err := pinnedHandshake(ctx, nc, EdgeHost(serverID), user, signer, pinnedHostKey(serverID, "the server the invitation link names"))
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 	if err := nc.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		return "", fmt.Errorf("read host key of server %s: %w", serverID, err)
 	}
-	if _, _, _, err := ssh.NewClientConn(nc, EdgeHost(serverID), conf); !errors.Is(err, errHostKeyRead) {
+	if _, _, _, err := handshake(ctx, nc, EdgeHost(serverID), conf); !errors.Is(err, errHostKeyRead) {
 		return "", fmt.Errorf("read host key of server %s: %w", serverID, err)
 	}
 	return fingerprint, nil
@@ -252,7 +252,7 @@ func HostKeyFingerprint(ctx context.Context, edgeURL, serverID string) (string, 
 // authentication banner is the error itself, an *edgeproto.Refused. An
 // older server's prose banner is part of the error, line by line, because
 // it holds the commands that fix a refusal, such as approving a device.
-func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh.HostKeyCallback) (*ssh.Client, error) {
+func pinnedHandshake(ctx context.Context, nc net.Conn, where, user string, signer ssh.Signer, pin ssh.HostKeyCallback) (*ssh.Client, error) {
 	var (
 		said    []string
 		refused *edgeproto.Refused
@@ -274,7 +274,7 @@ func pinnedHandshake(nc net.Conn, where, user string, signer ssh.Signer, pin ssh
 		_ = nc.Close()
 		return nil, fmt.Errorf("ssh handshake with %s: %w", where, err)
 	}
-	cc, chans, reqs, err := ssh.NewClientConn(nc, where, conf)
+	cc, chans, reqs, err := handshake(ctx, nc, where, conf)
 	if err != nil {
 		_ = nc.Close()
 		if refused != nil {

@@ -143,4 +143,17 @@ func TestAssistantAutoApprove(t *testing.T) {
 	if err := db.SetAssistantAutoApprove(ctx, "mem-missing", true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("setting an unknown member's auto-approval = %v, want ErrNotFound", err)
 	}
+
+	if on, err := db.AssistantShareView(ctx, ada); err != nil || !on {
+		t.Fatalf("view sharing before it was set = %v, %v, want on", on, err)
+	}
+	if err := db.SetAssistantShareView(ctx, ada, false); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := db.AssistantShareView(ctx, ada); err != nil || on {
+		t.Fatalf("view sharing after turning it off = %v, %v", on, err)
+	}
+	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || on {
+		t.Fatalf("auto-approval after view sharing changed = %v, %v, want it untouched", on, err)
+	}
 }

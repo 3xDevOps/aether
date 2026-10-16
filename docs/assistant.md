@@ -21,13 +21,22 @@ Every entry point is offered only when the server supports the assistant.
 - The **Assistant** button in the sidebar beside **New run**, or in the top bar while the sidebar is hidden, or in the phone toolbar. Every entry point is hidden from members who cannot launch runs, because the assistant needs that capability. A dot on it means an action waits
   for your approval.
 - The command palette entry **Ask Aether**.
-- `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel. It is
-  inactive while a text field, an editor or a terminal has focus.
+- `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel,
+  including while a text field, an editor or a terminal has focus. A
+  terminal loses nothing to it: `Ctrl+Space` without Shift still sends NUL.
+  It is inactive while a dialog or menu is open.
 - **Ask Aether** on the board when it is empty, and **Stuck? Ask Aether** in
   the onboarding steps.
 
-On desktop the panel sits to the right of the board and can be resized; on a
-phone it is a side sheet.
+On desktop the panel docks to the right of the page and can be resized, as
+long as the page keeps 560px beside it. A run's Details panel hides to make
+that room and returns when the assistant closes; an open Subagent panel
+closes. In a window too narrow for that, the panel floats over the right of
+the page instead, without dimming it and leaving at least 240px of the page
+uncovered: the run underneath keeps its size, the part you can see stays
+usable, and `Esc` inside the panel or the shortcut closes it. On a phone it is a side
+sheet. Closing the panel keeps your unsent message and your place in the
+conversation.
 
 ## First use
 
@@ -89,6 +98,7 @@ documentation of the server you run.
 | Read | `aether_usage` | `account.usage` | Remaining agent quota |
 | Read | `aether_environment_status` | `terminal.status` | Your environment's state and saved image |
 | Read | `aether_docs` | `assistant.docs` | Aether's own guides |
+| Read | `aether_view_context` | `assistant.view_context` | What your dashboard shows now; see [What it sees](#what-it-sees) |
 | Reversible | `aether_pause_run` | `run.pause` | Pauses a run |
 | Reversible | `aether_resume_run` | `run.resume` | Resumes a run |
 | Confirmed | `aether_launch_run` | `run.launch` | Starts a run, naming the agent, workspace and task |
@@ -103,6 +113,38 @@ messaging one, unless auto-approval is on.
 Environment changes, such as installing a toolchain, are not an Aether tool.
 The assistant runs them in its own shell in your environment container, then
 offers `aether_save_environment`.
+
+## What it sees
+
+Each message you send carries a **view context**: what your dashboard shows,
+so "why is this stuck?" or "go back to that run I was looking at" needs no
+ids. It holds:
+
+- the page you are on, with its workspace, run, mission and subagent ids and
+  the run view it shows (Session, Terminal, Changes, Files, Browser)
+- the open file's kind and path while the page shows it, never its contents
+- the last 8 pages you visited this session, newest first, one per run or
+  page
+
+It never holds titles, file contents, drafts, terminal text or secrets. The
+page history is recorded only while sharing is on and is gone on reload. The server cuts it to 4 KiB, dropping the
+oldest pages and then the file path. The agent gets it as an
+`aether://view-context` resource, or for an agent without embedded-resource
+support as text between `<aether-view-context>` tags; either way only your
+own text is saved in the transcript. While the panel is open, navigating also
+sends it, at most once a second, so the assistant reads the current page
+mid-turn with `aether_view_context`. The server keeps only the latest one per
+member, in memory; with several tabs or devices the one it received last
+wins. A retried message still carries the context it was first sent with,
+but does not replace a newer one the server holds. The ids are hints: the assistant looks everything up with the tools
+above, as you.
+
+The line above the message box, **Sharing: run run-8x2 · Changes**, expands
+to the exact JSON the next message sends; when it retries a failed message,
+the JSON that message carried. Clear **Share the page I am on with the
+assistant** to stop: the server saves the choice for you on every device,
+forgets its copy, and drops any context still on its way. Over the API it is
+`assistant.settings` (`{"share_view":false}`).
 
 ## Confirmations
 
@@ -284,6 +326,6 @@ You:       Launch a run in api to fix the flaky login test.
            [card] Approve this action?
            Launch claude (acp) in api: "Fix the flaky login test"   [Approve] [Decline]
 You:       Install Rust in my environment.
-           [card] Run `curl ... | sh -s -- -y`?   [Allow] [Reject]
-Assistant: rustc 1.xx installed. Save the environment so new runs have it?
+Assistant: (runs `curl ... | sh -s -- -y` without asking)
+           rustc 1.xx installed. Save the environment so new runs have it?
 ```

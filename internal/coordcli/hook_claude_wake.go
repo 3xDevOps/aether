@@ -1,0 +1,173 @@
+package coordcli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/protocol"
+)
+
+// claudeWakeExit is the only exit code with which Claude Code's asyncRewake
+// starts a turn, so the waiter uses it for a wake and for nothing else.
+const claudeWakeExit = 2
+
+// The waiter ends before Claude Code's hook timeout kills it.
+const claudeWakeLifetime = time.Duration(coordhooks.ClaudeWakeTimeout)*time.Second - time.Minute
+
+// The inbox Stop hook runs beside the waiter, and when it announces mail it
+// blocks the stop, so that mail must not wake the session again. Its record
+// of what it announced is written well within this grace.
+const claudeStopGrace = time.Second
+
+var claudeWakeBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
+
+func claudeWakePath(run string) string {
+	return filepath.Join(os.TempDir(), "aether-hook-"+run+"-claude-wake")
+}
+
+// claudeWake waits, for one idle Claude Code session, until the server admits
+// a wake for mail its hooks have not announced.
+func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			code, err = ExitFailure, fmt.Errorf("hook claude wake: %v", r)
+		}
+	}()
+	if input.AgentID != "" || (input.Name != "SessionStart" && input.Name != "Stop") {
+		return ExitOK, nil
+	}
+	statusCtx, cancelStatus := context.WithTimeout(ctx, 3*time.Second)
+	var status protocol.CoordStatusResult
+	err = coordtransport.Call(statusCtx, cfg.Socket, protocol.MethodCoordHookStatus, nil, &status)
+	cancelStatus()
+	if err != nil {
+		return ExitFailure, fmt.Errorf("hook claude wake: %w", err)
+	}
+	record := hookNoticePath(status.RunID, "claude")
+	claim := claudeWakePath(status.RunID)
+	pid := strconv.Itoa(os.Getpid())
+	if err := claimClaudeWake(claim, pid); err != nil {
+		return ExitFailure, fmt.Errorf("hook claude wake: claim the session: %w", err)
+	}
+	owns := func() bool {
+		data, err := os.ReadFile(claim)
+		return err == nil && string(data) == pid
+	}
+	// On SessionStart all unread mail is unannounced, so a resumed idle
+	// session with mail waiting wakes at once.
+	var notified []string
+
+	ctx, cancel := context.WithTimeout(ctx, claudeWakeLifetime)
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if !owns() || hungUp(cfg.ErrOut) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	if input.Name == "Stop" {
+		select {
+		case <-ctx.Done():
+			return ExitOK, nil
+		case <-time.After(claudeStopGrace):
+		}
+	}
+	var seen []string
+	failures := 0
+	for {
+		wake, failure, err := requestHookWake(ctx, cfg.Socket, protocol.CoordHookStatusParams{
+			SeenMessageIDs: seen, WaitSeconds: protocol.CoordMaxInboxWaitSeconds,
+		})
+		if ctx.Err() != nil {
+			return ExitOK, nil
+		}
+		if err != nil {
+			if failure != ExitFailure || failures == len(claudeWakeBackoff) {
+				return ExitFailure, fmt.Errorf("hook claude wake: %w", err)
+			}
+			select {
+			case <-ctx.Done():
+				return ExitOK, nil
+			case <-time.After(claudeWakeBackoff[failures]):
+			}
+			failures++
+			continue
+		}
+		failures = 0
+		ids := wake.UnreadMessageIDs
+		if input.Name == "Stop" {
+			notified = readHookNotices(record).Mail
+		}
+		if wake.WakeAdmitted && hasNewMail(hookNotices{Unread: len(ids), Mail: ids}, notified) && owns() {
+			notices := readHookNotices(record)
+			notices.Mail = ids
+			writeHookNotices(record, notices)
+			if _, err := io.WriteString(cfg.ErrOut, protocol.CoordInboxContext(len(ids))); err != nil {
+				return ExitFailure, fmt.Errorf("hook claude wake: write the inbox instruction: %w", err)
+			}
+			return claudeWakeExit, nil
+		}
+		seen = ids
+	}
+}
+
+func claimClaudeWake(path, pid string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.WriteString(pid); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// hungUp reports that nothing reads w any more. Claude Code runs the hook
+// under a shell that outlives a killed Claude Code, so the parent PID cannot
+// tell; the closed peer of the hook's stderr can.
+func hungUp(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	conn, err := f.SyscallConn()
+	if err != nil {
+		return false
+	}
+	gone := false
+	_ = conn.Control(func(fd uintptr) {
+		fds := []unix.PollFd{{Fd: int32(fd)}}
+		n, err := unix.Poll(fds, 0)
+		gone = err == nil && n > 0 && fds[0].Revents&(unix.POLLHUP|unix.POLLERR) != 0
+	})
+	return gone
+}

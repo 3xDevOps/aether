@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -17,65 +18,207 @@ import (
 )
 
 // sshBackend proxies the Backend surface onto one lazily dialed SSH connection.
-// Each call and stream opens its own channel; mu guards only (re)dialing.
+// Each call and stream opens its own channel. mu guards the fields and is
+// never held across network I/O: a dial through an edge can take most of a
+// minute, and every request, Relink and Close would queue behind it.
 type sshBackend struct {
-	cfg cli.Config
-
 	mu   sync.Mutex
+	cfg  cli.Config
 	conn *cli.Conn
+	// dialing is the dial every caller without a connection waits on.
+	dialing *dialAttempt
+	closed  bool
+	// silent is the last connection the keepalive dropped, so a call that
+	// failed on it says why.
+	silent *cli.Conn
+	// The keepalive's own copy, taken at construction, so a goroutine of
+	// a closed backend never reads a setting a test changes.
+	keepaliveInterval time.Duration
+	keepaliveTimeout  time.Duration
 }
+
+// dialAttempt is one dial of cfg; conn and err are set before done closes.
+type dialAttempt struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+	conn   *cli.Conn
+	err    error
+}
+
+// dialTimeout bounds one dial, a link's server.info call included. The
+// edge path's own steps add up to under a minute; a plain address's
+// handshake has no deadline of its own.
+const dialTimeout = 90 * time.Second
+
+// keepaliveInterval bounds how long a connection whose network went away
+// without a reset stays cached: a phone that slept or changed networks
+// leaves one, and every call and stream opened on it waits for an answer
+// that never comes. The connection is dropped once keepaliveCount
+// intervals pass without a byte from the server; a keepalive is sent only
+// after an interval without one, so an idle phone's radio can sleep.
+// keepaliveTimeout bounds the probe of a connection a stream failed to
+// open on. Variables so a test can shorten them.
+var (
+	keepaliveInterval = 30 * time.Second
+	keepaliveTimeout  = 10 * time.Second
+)
+
+const keepaliveCount = 3
+
+var (
+	errClosed   = errors.New("the gateway is closing")
+	errRelinked = errors.New("the gateway moved to another server while connecting")
+	errSilent   = errors.New("the server stopped answering keepalives")
+)
 
 // NewSSHBackend returns a Backend that redials once when the connection drops
 // under a replay-safe call.
 func NewSSHBackend(cfg cli.Config) Backend {
-	return &sshBackend{cfg: cfg}
+	return &sshBackend{cfg: cfg, keepaliveInterval: keepaliveInterval, keepaliveTimeout: keepaliveTimeout}
 }
 
 func (b *sshBackend) Close() error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.conn == nil {
+	b.closed = true
+	conn := b.swap(nil)
+	b.mu.Unlock()
+	if conn == nil {
 		return nil
 	}
-	conn := b.conn
-	b.conn = nil
 	return conn.Close()
 }
 
+// Relink closes the previous connection before it returns, so a stream
+// blocked on it ends.
 func (b *sshBackend) Relink(cfg cli.Config, conn *cli.Conn) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.conn != nil {
-		_ = b.conn.Close()
-	}
 	b.cfg = cfg
-	b.conn = conn
+	old := b.swap(conn)
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
 }
 
-// live returns the shared connection, dialing if needed. Dial errors come back
-// classified so every surface reports them identically.
-func (b *sshBackend) live() (*cli.Conn, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.conn != nil {
-		return b.conn, nil
+// swap caches conn, abandoning any dial in progress, and returns the
+// connection it replaced. The caller holds mu.
+func (b *sshBackend) swap(conn *cli.Conn) *cli.Conn {
+	if b.dialing != nil {
+		b.dialing.cancel()
+		b.dialing = nil
 	}
-	conn, err := cli.Dial(b.cfg)
-	if err != nil {
-		return nil, unreachableError(err)
-	}
+	old := b.conn
 	b.conn = conn
-	return conn, nil
+	if conn != nil {
+		go b.keepalive(conn)
+	}
+	return old
+}
+
+// live returns the shared connection, dialing if needed. Concurrent callers
+// share one dial, and each stops waiting when its own ctx ends. Dial errors
+// come back classified so every surface reports them identically.
+// A dial that Relink abandoned sends its callers back for the new config.
+func (b *sshBackend) live(ctx context.Context) (*cli.Conn, error) {
+	for {
+		b.mu.Lock()
+		if b.conn != nil {
+			conn := b.conn
+			b.mu.Unlock()
+			return conn, nil
+		}
+		if b.closed {
+			b.mu.Unlock()
+			return nil, unreachableError(errClosed)
+		}
+		d := b.dialing
+		if d == nil {
+			dialCtx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+			d = &dialAttempt{done: make(chan struct{}), cancel: cancel}
+			b.dialing = d
+			go b.dial(dialCtx, d, b.cfg)
+		}
+		b.mu.Unlock()
+		select {
+		case <-d.done:
+			if errors.Is(d.err, errRelinked) {
+				continue
+			}
+			if d.err != nil {
+				return nil, unreachableError(d.err)
+			}
+			return d.conn, nil
+		case <-ctx.Done():
+			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "request cancelled"}
+		}
+	}
+}
+
+func (b *sshBackend) dial(ctx context.Context, d *dialAttempt, cfg cli.Config) {
+	defer d.cancel()
+	conn, err := dialLink(ctx, cfg)
+	var stale *cli.Conn
+	b.mu.Lock()
+	if b.dialing == d {
+		b.dialing = nil
+		if err == nil {
+			b.swap(conn)
+		}
+	} else {
+		// Relink or Close abandoned this dial: its config is no longer
+		// the one served.
+		stale, conn, err = conn, nil, errRelinked
+		if b.closed {
+			err = errClosed
+		}
+	}
+	d.conn, d.err = conn, err
+	b.mu.Unlock()
+	close(d.done)
+	if stale != nil {
+		_ = stale.Close()
+	}
+}
+
+// keepalive watches conn while it is the cached connection and drops it
+// once the server has been silent too long, which ends every call and
+// stream waiting on it. The reply to a keepalive is the only traffic an
+// idle connection gets.
+func (b *sshBackend) keepalive(conn *cli.Conn) {
+	tick := time.NewTicker(b.keepaliveInterval)
+	defer tick.Stop()
+	for range tick.C {
+		b.mu.Lock()
+		cached := b.conn == conn
+		b.mu.Unlock()
+		if !cached {
+			return
+		}
+		idle := time.Since(conn.LastRead())
+		if idle >= keepaliveCount*b.keepaliveInterval {
+			b.mu.Lock()
+			b.silent = conn
+			b.mu.Unlock()
+			b.invalidate(conn)
+			return
+		}
+		if idle >= b.keepaliveInterval {
+			go func() { _ = conn.Ping(context.Background()) }()
+		}
+	}
 }
 
 // invalidate closes conn only if it is still the cached one: a replaced
 // connection may carry other live streams.
 func (b *sshBackend) invalidate(conn *cli.Conn) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.conn == conn {
-		_ = conn.Close()
+	cached := b.conn == conn
+	if cached {
 		b.conn = nil
+	}
+	b.mu.Unlock()
+	if cached {
+		_ = conn.Close()
 	}
 }
 
@@ -154,7 +297,7 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 // callOnce drops the connection on transport failures and wedges so the next
 // attempt redials; server refusals and cancellations leave it alone.
 func (b *sshBackend) callOnce(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
-	conn, err := b.live()
+	conn, err := b.live(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -172,12 +315,94 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 		return nil, err
 	}
 	b.invalidate(conn)
-	if errors.Is(err, errWedged) {
+	b.mu.Lock()
+	silent := b.silent == conn
+	b.mu.Unlock()
+	switch {
+	case errors.Is(err, errWedged):
 		// Coded so Call does not retry: a second wait on a wedged path
 		// doubles the worst case.
 		return nil, unreachableError(err)
+	case silent:
+		return nil, fmt.Errorf("%w: %w", errSilent, err)
 	}
 	return nil, err
+}
+
+// noReplay holds the methods unsafe to run twice: a second run creates a
+// duplicate, repeats an external side effect, or answers with an error such
+// as not found where the first succeeded. Prefixes in Call cover dev.*,
+// run.git.* and run.pr.*.
+var noReplay = map[string]bool{
+	protocol.MethodRunLaunch:      true,
+	protocol.MethodRunDelete:      true,
+	protocol.MethodRunPause:       true,
+	protocol.MethodRunResume:      true,
+	protocol.MethodRunRelaunch:    true,
+	protocol.MethodRunHandoff:     true,
+	protocol.MethodRunModeSwitch:  true,
+	protocol.MethodRunInputAnswer: true,
+	protocol.MethodRunACPCancel:   true,
+	protocol.MethodTemplateLaunch: true,
+	protocol.MethodTemplateDelete: true,
+	protocol.MethodScheduleDelete: true,
+	protocol.MethodMissionDelete:  true,
+
+	protocol.MethodMissionWorkerRelease: true,
+
+	protocol.MethodWorkspaceAdd:             true,
+	protocol.MethodWorkspaceDelete:          true,
+	protocol.MethodWorkspaceImport:          true,
+	protocol.MethodWorkspaceMirrorConfigure: true,
+	protocol.MethodWorkspaceMirrorRefresh:   true,
+	protocol.MethodWorkspaceMirrorAdopt:     true,
+	protocol.MethodWorkspaceMirrorDisable:   true,
+
+	protocol.MethodMemberInvite:           true,
+	protocol.MethodMemberRemove:           true,
+	protocol.MethodMemberDeviceApprove:    true,
+	protocol.MethodMemberDeviceRevoke:     true,
+	protocol.MethodMemberInvitationCreate: true,
+	protocol.MethodMemberInvitationRevoke: true,
+	protocol.MethodMemberIdentityLink:     true,
+	protocol.MethodMemberIdentityRemove:   true,
+	protocol.MethodMemberMergeStart:       true,
+	protocol.MethodMemberMergePropose:     true,
+	protocol.MethodMemberMergeAccept:      true,
+
+	protocol.MethodServerUpdate:        true,
+	protocol.MethodServerOwnerTransfer: true,
+	protocol.MethodServerSysboxInstall: true,
+
+	protocol.MethodHomeWrite:    true,
+	protocol.MethodHomeMkdir:    true,
+	protocol.MethodHomeRename:   true,
+	protocol.MethodHomeRemove:   true,
+	protocol.MethodHomeUpload:   true,
+	protocol.MethodConfigWrite:  true,
+	protocol.MethodConfigImport: true,
+	protocol.MethodFilesWrite:   true,
+
+	protocol.MethodTerminalExec:  true,
+	protocol.MethodTerminalImage: true,
+	protocol.MethodTerminalFile:  true,
+	protocol.MethodEnvSave:       true,
+
+	protocol.MethodAssistantStart:   true,
+	protocol.MethodAssistantPrompt:  true,
+	protocol.MethodAssistantAnswer:  true,
+	protocol.MethodAssistantConfirm: true,
+	protocol.MethodAssistantReset:   true,
+
+	protocol.MethodApprovalDecide:    true,
+	protocol.MethodPushUnsubscribe:   true,
+	protocol.MethodPushTest:          true,
+	protocol.MethodGitHubConnect:     true,
+	protocol.MethodGitHubOAuthStart:  true,
+	protocol.MethodGitHubOAuthCancel: true,
+	protocol.MethodAgentInstall:      true,
+	protocol.MethodProfilePush:       true,
+	protocol.MethodSyncConflict:      true,
 }
 
 // Call redials and retries once on a transport failure, except for methods
@@ -191,19 +416,7 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 	if errors.As(err, &perr) {
 		return nil, perr
 	}
-	if method == protocol.MethodConfigImport || method == protocol.MethodWorkspaceImport || method == protocol.MethodAgentInstall ||
-		method == protocol.MethodHomeMkdir || method == protocol.MethodHomeRename ||
-		method == protocol.MethodHomeRemove || method == protocol.MethodHomeUpload ||
-		method == protocol.MethodTerminalExec ||
-		method == protocol.MethodAssistantPrompt || method == protocol.MethodAssistantAnswer ||
-		method == protocol.MethodAssistantConfirm || method == protocol.MethodAssistantStart ||
-		method == protocol.MethodAssistantReset || method == protocol.MethodServerSysboxInstall ||
-		method == protocol.MethodGitHubOAuthStart || method == protocol.MethodGitHubOAuthCancel ||
-		method == protocol.MethodWorkspaceMirrorConfigure || method == protocol.MethodWorkspaceMirrorRefresh ||
-		method == protocol.MethodWorkspaceMirrorAdopt || method == protocol.MethodWorkspaceMirrorDisable ||
-		strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
-		// A mutation may have committed before the response was lost;
-		// do not replay it.
+	if noReplay[method] || strings.HasPrefix(method, "dev.") || strings.HasPrefix(method, "run.git.") || strings.HasPrefix(method, "run.pr.") {
 		return nil, unreachableError(err)
 	}
 	result, err = b.callOnce(ctx, method, params)
@@ -218,27 +431,29 @@ func (b *sshBackend) Call(ctx context.Context, method string, params json.RawMes
 
 // alive tells a refusal on a healthy connection from a dead one; tearing down
 // a healthy connection would kill every stream riding on it.
-func alive(conn *cli.Conn) bool {
-	_, _, err := conn.SSH().SendRequest("keepalive@openssh.com", true, nil)
-	return err == nil
+func (b *sshBackend) alive(conn *cli.Conn) bool {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), b.keepaliveTimeout)
+	defer cancel()
+	return conn.Ping(ctx) == nil || conn.LastRead().After(start)
 }
 
 // stream opens one subsystem channel. Errors the server answered pass through
 // (attach/sync ack refusals are untyped, hence the keepalive probe); only a
 // dead connection is invalidated, redialed and retried once.
-func stream[T any](b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
-	conn, err := b.live()
+func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
+	conn, err := b.live(ctx)
 	if err != nil {
 		var zero T
 		return zero, err
 	}
 	out, oerr := open(conn)
 	var perr *protocol.Error
-	if oerr == nil || errors.As(oerr, &perr) || alive(conn) {
+	if oerr == nil || errors.As(oerr, &perr) || b.alive(conn) {
 		return out, oerr
 	}
 	b.invalidate(conn)
-	conn, err = b.live()
+	conn, err = b.live(ctx)
 	if err != nil {
 		var zero T
 		return zero, err
@@ -246,16 +461,16 @@ func stream[T any](b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
 	return open(conn)
 }
 
-func (b *sshBackend) Events(_ context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
-	return stream(b, func(c *cli.Conn) (io.ReadCloser, error) { return c.EventsStream(req) })
+func (b *sshBackend) Events(ctx context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
+	return stream(ctx, b, func(c *cli.Conn) (io.ReadCloser, error) { return c.EventsStream(req) })
 }
 
-func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
+func (b *sshBackend) Attach(ctx context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
 	type attachResult struct {
 		term webgate.Terminal
 		ack  protocol.AttachResponse
 	}
-	out, err := stream(b, func(c *cli.Conn) (attachResult, error) {
+	out, err := stream(ctx, b, func(c *cli.Conn) (attachResult, error) {
 		term, ack, err := c.AttachStream(req)
 		if term == nil {
 			return attachResult{ack: ack}, err
@@ -265,12 +480,12 @@ func (b *sshBackend) Attach(_ context.Context, req protocol.AttachRequest) (webg
 	return out.term, out.ack, err
 }
 
-func (b *sshBackend) ACP(_ context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
+func (b *sshBackend) ACP(ctx context.Context, req protocol.ACPStreamRequest) (io.ReadWriteCloser, protocol.ACPStreamResponse, error) {
 	type acpResult struct {
 		stream io.ReadWriteCloser
 		ack    protocol.ACPStreamResponse
 	}
-	out, err := stream(b, func(c *cli.Conn) (acpResult, error) {
+	out, err := stream(ctx, b, func(c *cli.Conn) (acpResult, error) {
 		s, ack, err := c.ACPStream(req)
 		if s == nil {
 			return acpResult{ack: ack}, err
@@ -280,12 +495,12 @@ func (b *sshBackend) ACP(_ context.Context, req protocol.ACPStreamRequest) (io.R
 	return out.stream, out.ack, err
 }
 
-func (b *sshBackend) Assistant(_ context.Context, req protocol.AssistantStreamRequest) (io.ReadCloser, protocol.ACPStreamResponse, error) {
+func (b *sshBackend) Assistant(ctx context.Context, req protocol.AssistantStreamRequest) (io.ReadCloser, protocol.ACPStreamResponse, error) {
 	type assistantResult struct {
 		stream io.ReadCloser
 		ack    protocol.ACPStreamResponse
 	}
-	out, err := stream(b, func(c *cli.Conn) (assistantResult, error) {
+	out, err := stream(ctx, b, func(c *cli.Conn) (assistantResult, error) {
 		s, ack, err := c.AssistantStream(req)
 		if s == nil {
 			return assistantResult{ack: ack}, err
@@ -295,12 +510,12 @@ func (b *sshBackend) Assistant(_ context.Context, req protocol.AssistantStreamRe
 	return out.stream, out.ack, err
 }
 
-func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
+func (b *sshBackend) Terminal(ctx context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
 	type terminalResult struct {
 		term webgate.Terminal
 		ack  protocol.TerminalResponse
 	}
-	out, err := stream(b, func(c *cli.Conn) (terminalResult, error) {
+	out, err := stream(ctx, b, func(c *cli.Conn) (terminalResult, error) {
 		term, ack, err := c.TerminalStream(req)
 		if term == nil {
 			return terminalResult{ack: ack}, err
@@ -311,17 +526,17 @@ func (b *sshBackend) Terminal(_ context.Context, req protocol.TerminalRequest) (
 }
 
 func (b *sshBackend) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
-	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) { return c.Sync(runID, force) })
+	return stream(context.Background(), b, func(c *cli.Conn) (io.ReadWriteCloser, error) { return c.Sync(runID, force) })
 }
 
 func (b *sshBackend) Forward(target string, port uint32) (io.ReadWriteCloser, error) {
-	return stream(b, func(c *cli.Conn) (io.ReadWriteCloser, error) {
+	return stream(context.Background(), b, func(c *cli.Conn) (io.ReadWriteCloser, error) {
 		return c.Forward(target, port)
 	})
 }
 
 func (b *sshBackend) BrowserFrames(ctx context.Context, req protocol.DevBrowserStreamRequest) (io.ReadCloser, error) {
-	return stream(b, func(c *cli.Conn) (io.ReadCloser, error) { return c.BrowserFrames(ctx, req) })
+	return stream(ctx, b, func(c *cli.Conn) (io.ReadCloser, error) { return c.BrowserFrames(ctx, req) })
 }
 
 func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownloadRequest) (io.ReadCloser, protocol.DevArtifact, error) {
@@ -329,7 +544,7 @@ func (b *sshBackend) Artifact(ctx context.Context, req protocol.DevArtifactDownl
 		stream   io.ReadCloser
 		artifact protocol.DevArtifact
 	}
-	out, err := stream(b, func(c *cli.Conn) (capture, error) {
+	out, err := stream(ctx, b, func(c *cli.Conn) (capture, error) {
 		source, artifact, err := c.Artifact(ctx, req)
 		return capture{stream: source, artifact: artifact}, err
 	})

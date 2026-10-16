@@ -78,7 +78,7 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		t.Helper()
 		for name, w := range want {
 			got := agents[name]
-			if got.EnhancedInstalled != w.enhancedInstalled || got.LoginFound != w.loginFound || got.DefaultMode != w.defaultMode ||
+			if got.EnhancedInstalled != w.enhancedInstalled || (got.LoginFound == nil || *got.LoginFound != w.loginFound) || got.DefaultMode != w.defaultMode ||
 				got.EnhancedDefault != w.enhancedDefault {
 				t.Errorf("%s = enhanced_installed %v, login_found %v, default_mode %q, enhanced_default %v; want %+v",
 					name, got.EnhancedInstalled, got.LoginFound, got.DefaultMode, got.EnhancedDefault, w)
@@ -175,10 +175,10 @@ func TestAgentListLeavesHomesAloneAndSurvivesAnUnreadableLogin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
 	agents := list(grantee.ID)
-	if agents["codex"].LoginFound || !agents["codex"].Installed {
+	if *agents["codex"].LoginFound || !agents["codex"].Installed {
 		t.Errorf("codex with an unreadable login = %+v, want installed with no login found", agents["codex"])
 	}
-	if !agents["claude"].LoginFound {
+	if !*agents["claude"].LoginFound {
 		t.Errorf("claude = %+v, want its readable login found", agents["claude"])
 	}
 }

@@ -99,7 +99,10 @@ type Definition struct {
 	HeadlessArgs []string
 	// ACPArgs optionally serves the Agent Client Protocol; its first value
 	// may name a separate adapter executable.
-	ACPArgs         []string
+	ACPArgs []string
+	// ACPMode is the session mode a new enhanced session starts in; empty
+	// keeps the agent's default.
+	ACPMode         string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -127,6 +130,14 @@ func (d Definition) Validate() error {
 		}
 		if err := validateArgv(d.ACPArgs, d.ACPArgs[0]); err != nil {
 			return fmt.Errorf("harness: acp argv: %w", err)
+		}
+	}
+	if d.ACPMode != "" {
+		if len(d.ACPArgs) == 0 {
+			return fmt.Errorf("harness: acp mode %q needs acp args", d.ACPMode)
+		}
+		if strings.ContainsAny(d.ACPMode, " \t\r\n") {
+			return fmt.Errorf("harness: acp mode %q must not contain whitespace", d.ACPMode)
 		}
 	}
 	if d.ProfileRoot != "" {
@@ -226,12 +237,15 @@ func (d Definition) Profile() Profile {
 		CredentialPaths: append([]string(nil), d.CredentialPaths...),
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
+		ACPMode:         d.ACPMode,
 	}
 	if registered, ok := profiles[d.Name]; ok {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
-		p.ACPMode = registered.ACPMode
+		if p.ACPMode == "" {
+			p.ACPMode = registered.ACPMode
+		}
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}
@@ -302,10 +316,10 @@ type Profile struct {
 	// sets in the launcher's copy when absent, so the CLI starts signed in
 	// instead of running first-time setup.
 	BorrowedState map[string]map[string]any
-	// PinLogin means the CLI replaces its login file by rename, so the file is
-	// mounted in place in the owner's own containers too; the rename then fails
-	// with EBUSY and the CLI falls back to rewriting the shared inode.
-	PinLogin bool
+	// PinnedLogins are the login files the CLI replaces by rename. Each is
+	// mounted in place in the owner's own containers too; the rename then
+	// fails with EBUSY and the CLI falls back to rewriting the shared inode.
+	PinnedLogins []string
 	// LocalRoot is the home-relative profile directory (e.g. ".claude");
 	// empty means no profile sync.
 	LocalRoot string
@@ -387,9 +401,10 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 // deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:        "claude",
-		DisplayName: "Claude Code",
-		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:               "claude",
+		DisplayName:        "Claude Code",
+		NativeCoordination: true,
+		TUIArgs:            []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
 		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:         []string{claudeACP.Binary},
@@ -418,7 +433,7 @@ var profiles = map[string]Profile{
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.
-		PinLogin:      true,
+		PinnedLogins:  []string{".claude/.credentials.json"},
 		LocalRoot:     ".claude",
 		DenyNames:     []string{".credentials.json", "credentials", ".claude.json"},
 		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
@@ -431,21 +446,22 @@ var profiles = map[string]Profile{
 		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
-		Name:            "codex",
-		DisplayName:     "Codex",
-		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		ACPArgs:         []string{codexACP.Binary},
-		ACPInstall:      codexACP,
-		ACPMode:         "agent-full-access",
-		ACPDefault:      true,
-		ModelArgs:       []string{"--model", ModelPlaceholder},
-		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
-		EnvPassthrough:  []string{"OPENAI_API_KEY"},
-		CredentialPaths: []string{".codex/auth.json"},
-		LocalRoot:       ".codex",
-		DenyNames:       []string{"auth.json", "keychain", "token.json"},
-		DiscoveryArgs:   []string{"-c", codexDiscoverySetting},
+		Name:               "codex",
+		DisplayName:        "Codex",
+		NativeCoordination: true,
+		TUIArgs:            []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		HeadlessArgs:       []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:            []string{codexACP.Binary},
+		ACPInstall:         codexACP,
+		ACPMode:            "agent-full-access",
+		ACPDefault:         true,
+		ModelArgs:          []string{"--model", ModelPlaceholder},
+		ResumeArgs:         []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
+		EnvPassthrough:     []string{"OPENAI_API_KEY"},
+		CredentialPaths:    []string{".codex/auth.json"},
+		LocalRoot:          ".codex",
+		DenyNames:          []string{"auth.json", "keychain", "token.json"},
+		DiscoveryArgs:      []string{"-c", codexDiscoverySetting},
 		// Codex notifies only when a turn completes, so the run comes back on
 		// the agent's own output.
 		Reporter:   ReporterTurnEnd,
@@ -547,6 +563,67 @@ var profiles = map[string]Profile{
 		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",
 		// No UpdateScript: an upgrade can cross a major version that the
 		// managed OpenCode launch wrapper refuses.
+	},
+	// Copilot and Gemini take the task as --flag={task}, so the model flag,
+	// which goes before the task, cannot become a prompt flag's value.
+	"copilot": {
+		Name:         "copilot",
+		DisplayName:  "GitHub Copilot CLI",
+		TUIArgs:      []string{"copilot", "--allow-all", "--interactive=" + TaskPlaceholder},
+		HeadlessArgs: []string{"copilot", "--allow-all", "--prompt=" + TaskPlaceholder},
+		ACPArgs:      []string{"copilot", "--acp", "--allow-all"},
+		ACPDefault:   true,
+		ModelArgs:    []string{"--model", ModelPlaceholder},
+		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
+		// here trusts the working directory as well.
+		Env:                map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		NativeCoordination: true,
+		EnvPassthrough:     []string{"COPILOT_GITHUB_TOKEN"},
+		// With no system keychain, as in a run container, copilot login keeps
+		// the token in config.json. Copilot replaces it by rename, but it is
+		// not pinned: whether Copilot can write it as a mount is unverified.
+		CredentialPaths: []string{".copilot/config.json"},
+		DenyNames:       []string{"config.json"},
+		InstallScript:   "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @github/copilot; else echo \"npm is not in this environment's PATH, and copilot installs through npm\" >&2; false; fi",
+		UpdateScript:    npmUpdateScript("@github/copilot", "copilot", `*" $latest."*`),
+	},
+	"gemini": {
+		Name:         "gemini",
+		DisplayName:  "Gemini CLI",
+		TUIArgs:      []string{"gemini", "--approval-mode=yolo", "--prompt-interactive=" + TaskPlaceholder},
+		HeadlessArgs: []string{"gemini", "--approval-mode=yolo", "--prompt=" + TaskPlaceholder},
+		ACPArgs:      []string{"gemini", "--acp"},
+		ACPMode:      "yolo",
+		ACPDefault:   true,
+		ModelArgs:    []string{"--model", ModelPlaceholder},
+		// In a folder it does not trust, Gemini drops yolo to default and
+		// skips ~/.gemini/.env.
+		Env:             map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
+		EnvPassthrough:  []string{"GEMINI_API_KEY"},
+		CredentialPaths: []string{".gemini/oauth_creds.json", ".gemini/.env"},
+		// Gemini writes oauth_creds.json to a temporary file and renames it
+		// over the old one, and rewrites it in place when that rename fails.
+		PinnedLogins:  []string{".gemini/oauth_creds.json"},
+		DenyNames:     []string{"oauth_creds.json"},
+		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @google/gemini-cli; else echo \"npm is not in this environment's PATH, and gemini installs through npm\" >&2; false; fi",
+		UpdateScript:  npmUpdateScript("@google/gemini-cli", "gemini", `"$latest"`),
+	},
+	// Cursor's CLI runs as agent.
+	"cursor": {
+		Name:            "cursor",
+		DisplayName:     "Cursor CLI",
+		TUIArgs:         []string{"agent", "--force", "--trust", TaskPlaceholder},
+		HeadlessArgs:    []string{"agent", "-p", "--force", "--trust", TaskPlaceholder},
+		ACPArgs:         []string{"agent", "--force", "acp"},
+		ACPDefault:      true,
+		ModelArgs:       []string{"--model", ModelPlaceholder},
+		EnvPassthrough:  []string{"CURSOR_API_KEY"},
+		CredentialPaths: []string{".config/cursor/auth.json"},
+		// The installer links ~/.local/bin/agent, by absolute path, to
+		// ~/.local/share/cursor-agent/versions/<version>.
+		InstallPaths:  []string{".local/share/cursor-agent"},
+		InstallScript: "curl -fsS https://cursor.com/install | bash",
+		UpdateScript:  "agent update",
 	},
 	"custom": {Name: "custom"},
 }

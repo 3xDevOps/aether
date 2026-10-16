@@ -27,11 +27,11 @@ Two rules shape everything below:
    the browser or a run.
 
 The quota reader supports native OAuth subscription logins for Claude Code and
-Codex only. API-key logins, `pi`, `omp`, `opencode`, `fake`, and deployment
-custom agents are not quota sources. The dashboard explains an unsupported
-source rather than treating missing usage as zero. Native vendor
-reauthentication remains a member action in the Environment; Aether
-does not refresh or rewrite OAuth files.
+Codex only. API-key logins, `pi`, `omp`, `opencode`, `copilot`, `gemini`,
+`cursor`, `fake`, and deployment custom agents are not quota sources. The
+dashboard explains an unsupported source rather than treating missing usage
+as zero. Native vendor reauthentication remains a member action in the
+Environment; Aether does not refresh or rewrite OAuth files.
 
 ### Subscription quota
 
@@ -79,11 +79,12 @@ your", ...; the full list is in `internal/acphost/usagelimit.go`).
 | `opencode` | V1, any mode | a generic error after retries | no |
 | `pi` | any | text headless; over ACP the error is dropped | no |
 | `omp` | any | text | no: its sessions live in the shared `~/.omp/agent`, so none can resume on another account |
+| `copilot`, `gemini`, `cursor` | any | none matched | no |
 
 Transient 429s share Claude's `rate_limit` kind ("Server is temporarily
 limiting requests (not your usage limit)") and are not matched, nor is
-opencode's `provider.rate-limit`. A Background `codex`, `omp` or `opencode`
-run uses ACP when its server is installed
+opencode's `provider.rate-limit`. A Background `codex`, `omp`, `opencode`,
+`copilot`, `gemini` or `cursor` run uses ACP when its server is installed
 ([enhanced-runs.md](enhanced-runs.md#background-runs)). A signal a vendor
 changes falls back to the behaviour without fallback: the run fails or ends
 its turn with the vendor's error.
@@ -97,6 +98,9 @@ its turn with the vendor's error.
 | `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, npm | adapter `pi-acp@0.0.34` | no |
 | `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, vendor script | native (`omp acp`) | yes |
 | `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | yes, vendor script | native (`opencode acp`) | no |
+| `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | plugin (`--plugin-dir`) | PTY | yes, npm | native (`copilot --acp`) | no |
+| `gemini` | Gemini CLI | `~/.gemini/oauth_creds.json`, `~/.gemini/.env` | - | `GEMINI_API_KEY` | `GEMINI_CLI_TRUST_WORKSPACE=true` | - | PTY | yes, npm | native (`gemini --acp`) | no |
+| `cursor` | Cursor CLI (runs as `agent`) | `~/.config/cursor/auth.json` | - | `CURSOR_API_KEY` | - | - | PTY | yes, vendor script | native (`agent acp`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` | no |
 
@@ -110,7 +114,8 @@ and `~/.local/lib` mounted read-only at `~/.aether/account/bin` and
 `~/.aether/account/lib`, last on `PATH`, and each directory in
 `harness.Profile.InstallPaths` read-only at its own path (`claude`:
 `~/.local/share/claude`, where the native installer keeps the versions
-`~/.local/bin/claude` links to). A borrowed `claude` login also marks setup
+`~/.local/bin/claude` links to; `cursor`: `~/.local/share/cursor-agent`, for
+`~/.local/bin/agent`). A borrowed `claude` login also marks setup
 complete in the launcher's own `~/.claude.json` (`hasCompletedOnboarding`),
 because Claude Code's setup wizard asks to sign in even when a login is
 present; Claude Code then records the owner's account email there itself.
@@ -153,14 +158,18 @@ between Standard and Enhanced (`agent.list` `switchable`); see
 
 ### Enhanced mode adapters
 
-A **native** agent serves ACP from its own CLI (`omp acp`, `opencode acp`), so
-installing the agent installs it. An **adapter** agent needs a separate npm
+A **native** agent serves ACP from its own CLI (`omp acp`, `opencode acp`,
+`copilot --acp`, `gemini --acp`, `agent acp`), so installing the agent
+installs it. An **adapter** agent needs a separate npm
 package that drives the CLI. Aether pins one version of each, taken from the
 [ACP registry](https://agentclientprotocol.com) and recorded in
 `internal/harness/acpregistry.json`, a snapshot of only the entries Aether
 uses. A custom definition is enhanced only when it names its ACP server's
 argv: `ACPArgs` in `--agent-definitions`, `acp_args` in `agent.register`, or
-`--acp` on `aether agent add`.
+`--acp` on `aether agent add`. `ACPMode` / `acp_mode` / `--acp-mode` names the
+session mode a new Enhanced session starts in. Set the mode that acts without
+asking: an agent left in its default mode asks before every tool, and a swarm
+worker waits on that prompt. It needs `ACPArgs` and holds no whitespace.
 
 An adapter installs into the member home like an npm agent:
 
@@ -199,9 +208,9 @@ owner's installation borrows the owner's adapter with it, read-only.
 launch from the same `~/.local` as the CLI), `login_found` (a non-empty
 **Login state** file or directory exists in the home the launch signs in
 with: the owner's on a shared account; it checks for the path, not for a
-working session), `default_mode`: `acp` for `codex`, `omp`, and
-`opencode` once their ACP server is installed, `tui` for everything else, and
-`enhanced_default`: true for those three whether installed or not.
+working session), `default_mode`: `acp` for `codex`, `omp`, `opencode`,
+`copilot`, `gemini` and `cursor` once their ACP server is installed, `tui` for everything else, and `enhanced_default`: true for those
+six whether installed or not.
 Claude Code stays on its terminal by default because its adapter runs on the
 Claude Agent SDK, whose terms favour API keys.
 
@@ -223,9 +232,12 @@ The startup switches follow the vendor references: [Claude CLI
 reference](https://code.claude.com/docs/en/cli-reference),
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
 [pi CLI reference](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md),
-[omp CLI reference](https://omp.sh/docs/cli), and
-[OpenCode configuration](https://opencode.ai/docs/config/). Aether passes these
-only for the one launch that owns the coordination socket.
+[omp CLI reference](https://omp.sh/docs/cli),
+[OpenCode configuration](https://opencode.ai/docs/config/),
+[Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference),
+[Gemini CLI configuration](https://geminicli.com/docs/reference/configuration/),
+and [Cursor CLI parameters](https://cursor.com/docs/cli/reference/parameters).
+Aether passes these only for the one launch that owns the coordination socket.
 
 The **Status** column is how the agent itself tells Aether it is waiting for
 you, rather than leaving the server to guess from silence. See "Status
@@ -234,9 +246,10 @@ reporting" below.
 The **Launch env** column is what the server sets in the run container
 because the CLI will not start without it. It is applied after the
 workspace's own variables, so a workspace cannot leave the agent unable to
-run. See the launch table below for why `claude` needs one. Optional reporter
-environment (OpenCode V1's `OPENCODE_CONFIG_CONTENT`) is not a required
-**Launch env** value; see "Status reporting" for its Standard-only scope.
+run. See [Launch argv](#launch-argv) for why `claude`, `copilot` and `gemini`
+each need one. Optional reporter environment (OpenCode V1's
+`OPENCODE_CONFIG_CONTENT`) is not a required **Launch env** value; see
+"Status reporting" for its Standard-only scope.
 
 Fixed launch values replace workspace values of the same name;
 `OPENCODE_CONFIG_CONTENT` is merged key by key instead. Native
@@ -252,9 +265,9 @@ described under [managed loading](#managed-native-loading).
 - **Background (`headless`).** The agent is the container's main process. When it exits,
   Aether commits and publishes the branch, records `completed` or `failed`,
   and destroys the container immediately. It never opens a replacement shell
-  and can never be reopened. `codex`, `omp` and `opencode` run their
-  background task over ACP instead when their ACP server is installed, and
-  finish the same way after its one turn; Claude keeps `claude -p` because
+  and can never be reopened. `codex`, `omp`, `opencode`, `copilot`, `gemini`
+  and `cursor` run their background task over ACP instead when their ACP
+  server is installed, and finish the same way after its one turn; Claude keeps `claude -p` because
   its adapter runs on the Claude Agent SDK
   ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
@@ -293,15 +306,15 @@ through the same native extension/plugin mechanism.
 
 | Agent CLI | `--agent` | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | yes | no | yes | `claude.json` |
-| Codex | `codex` | yes | no | yes | `codex.json` |
+| Claude Code | `claude` | yes | yes, managed Standard launches | yes | `claude.json` |
+| Codex | `codex` | yes, managed Standard launches, after you trust the hooks once | no | yes | `codex.json` |
 | Native pi | `pi` | yes | yes, owning session only | yes | `pi.ts` |
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
 | OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
 | OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | yes | `opencode-v2.js` |
-| Copilot CLI | custom definition required | yes | no | with `ACPArgs` | `copilot.json` |
-| Gemini CLI | custom definition required | yes | no | with `ACPArgs` | `gemini.json` |
-| Cursor CLI | custom definition required | yes | no | with `ACPArgs` | `cursor.json` |
+| Copilot CLI | `copilot` | yes, managed Standard launches | no | yes | `copilot.json` |
+| Gemini CLI | `gemini` | yes, once installed by hand | no | yes | `gemini.json` |
+| Cursor CLI | `cursor` | yes, once installed by hand | no | yes | `cursor.json` |
 | Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
 | Other/custom | deployment or member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
 
@@ -352,6 +365,12 @@ test ! -e "$HOME/.omp/agent/extensions/aether.ts" &&
   aether-internal hook file omp.ts > "$HOME/.omp/agent/extensions/aether.ts"
 ```
 
+When the launch loaded the hooks ([managed loading](#managed-native-loading)),
+`aether-internal skill` prints `Inbox hooks (<agent>): loaded by this run's
+launch; do not install a manual copy.` instead of the file check, and
+`skill --hooks` prints that line first. Its file checks cover manual copies
+only.
+
 Do not add a manual copy merely because a managed run-scoped extension is
 absent from the checker’s fixed paths. `skill` is read-only: **configured
 means present on disk, not loaded, trusted, or executed**. It checks standard
@@ -372,12 +391,48 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `pi`, `omp`, and `opencode` agents, Aether stages native
-mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `codex`, `copilot`, `pi`, `omp`, and `opencode`
+agents, Aether loads native mailbox hooks for **coordinated, task-bearing
+Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
 not grant it idle wake.
+
+Claude Code accepts one `--settings` value, so the server writes one
+document, `/run/aether/claude-settings.json`, and adds
+`--settings /run/aether/claude-settings.json`. It merges the
+[status reporter](#status-reporting) hooks, the `claude.json` inbox hooks and
+the [idle-wake waiter](#claude-code-inbox-integration). No user or project
+settings file changes. Claude Code runs an identical command hook from several
+settings sources once, so an unmodified manual `claude.json` does not double
+the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
+too. Taskless launches keep the status-only document; Background and Enhanced
+launches load neither.
+
+Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
+`hooks.UserPromptSubmit`, `hooks.PostToolUse` and `hooks.Stop`, each a TOML
+inline table passed as one argv element. They are active only after the user
+trusts them once; see [Codex inbox integration](#codex-inbox-integration).
+
+Copilot CLI loads hooks from a plugin directory, so the server stages
+`/run/aether/plugin.json` (a manifest named `aether-inbox`) beside
+`/run/aether/copilot-hooks.json`, the `copilot.json` hooks, and adds
+`--plugin-dir /run/aether`. No user or
+project file changes. Copilot reads the hooks only in a trusted folder; the
+profile's `COPILOT_ALLOW_ALL=true` trusts the working directory, so no
+trust dialog appears.
+
+Gemini CLI and Cursor CLI stay manual. Gemini has no per-launch path:
+`GEMINI_CLI_SYSTEM_DEFAULTS_PATH` replaces the image's system-defaults
+file, Gemini skips system files not owned by root, and extensions load
+only from `~/.gemini/extensions`. Cursor's `--plugin-dir` loads only when
+logged in and needs a path at least three directories deep; it is not
+verified live, so it stays manual for now.
+
+Every managed launch, whether it loads a file or arguments, sets
+`AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
+output described above.
 
 For pi, the server stages `/run/aether/aether.ts` and adds
 `-e /run/aether/aether.ts`. For OMP it stages that same filename but adds
@@ -436,23 +491,96 @@ member configuration and does not mount over an existing user plugin path.
 
 ### Claude Code inbox integration
 
-Export `claude.json`; merge into `~/.claude/settings.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`claude` loads the inbox hooks and the idle-wake waiter through
+`/run/aether/claude-settings.json` ([managed loading](#managed-native-loading)).
+Nothing needs installing. A taskless launch's status-only document is not an
+inbox installation.
+
+**Manual.** Export `claude.json`; merge into `~/.claude/settings.json` (or
 `$CLAUDE_CONFIG_DIR/settings.json`). Project alternatives are
 `.claude/settings.json` and `.claude/settings.local.json`.
 Restart Claude Code and review `/hooks` in its normal workspace-trust UI.
 Honor `disableAllHooks`, `allowManagedHooksOnly`, and managed settings such
-as `/etc/claude-code/managed-settings.json`.
+as `/etc/claude-code/managed-settings.json`. `claude.json` has no waiter, so a
+manual copy announces mail at boundaries only: under `claude -p` an
+`asyncRewake` hook runs in the foreground and would block a Background run.
 
 The supported events are `SessionStart`, `UserPromptSubmit`, `PostToolBatch`,
 and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
 Older releases may lack these events or context outputs. Child-agent events
 do not take ownership of the run mailbox. Stop may request one continuation
-for pending mail or an integrator refresh; it is not an idle watcher. The
-built-in `--settings` status reporter alone is not this inbox installation.
+for pending mail or an integrator refresh.
+
+**Idle wake.** The managed document adds this `asyncRewake` hook to
+`SessionStart` and `Stop`:
+
+```json
+{"type":"command","command":"/usr/local/bin/aether-internal hook claude wake","async":true,"asyncRewake":true,"timeout":604800}
+```
+
+- The waiter claims the session by writing its PID to
+  `$TMPDIR/aether-hook-<run>-claude-wake`, then repeats bounded 30-second
+  server waits. A newer waiter (the next `Stop`, `/clear`, a resume)
+  replaces it. The inbox `UserPromptSubmit` and `PostToolBatch` hooks delete
+  the file, so a busy session has none; a replaced waiter exits within a
+  second. Esc fires no `Stop`, so after an interrupt wake pauses until a turn
+  completes.
+- When the server admits a wake for mail the hooks have not announced, the
+  waiter writes the trusted inbox instruction (never peer text) to stderr,
+  adds the IDs to `$TMPDIR/aether-hook-<run>-claude.json`, and exits 2.
+  Claude Code then starts a turn with no human input. The terminal shows
+  **Stop hook feedback**; the model receives the instruction inside a
+  background task notification as `Stop hook blocking error from command
+  "Stop": ...`. That wording is Claude Code's framing, not an error.
+- On `SessionStart` all unread mail counts as unannounced, so a resumed idle
+  session with mail waiting wakes at once. On `Stop` the waiter first gives
+  the inbox `Stop` hook beside it a second to record what it announced, then
+  wakes only for mail missing from that record: mail the hook announced
+  already blocked the stop, and mail that arrived after the hook's check
+  still wakes the session. A wake admitted while a turn runs joins that turn
+  as one more pointer.
+- Nothing else exits 2. Errors exit 1, after up to five retries with 1 to 16
+  second backoff for transport errors; Claude Code shows them only in
+  `claude --debug`. The next completed turn starts a new waiter.
+- The hook timeout is 604800 seconds (7 days); the waiter exits a minute
+  before it. A session idle longer is not woken until a turn completes.
+- `/exit` and SIGTERM stop the waiters. If Claude Code is killed, the waiter
+  sees its stderr hang up and exits within a second. Subagent events, an
+  Enhanced run, and a missing coordination socket make it exit 0 at once.
+- Protection, human takeover, and swarm authority suppress the wake; the
+  server rechecks them on every 30-second wait.
 
 ### Codex inbox integration
 
-Export `codex.json`; merge into `~/.codex/hooks.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`codex` loads the `codex.json` hooks through one `-c hooks.<Event>=[...]`
+argument per event, next to the `-c notify=[...]` status reporter. Codex has
+no hooks flag; a `-c` override is read as a session-flags source, which
+Codex lists but does not treat as managed.
+
+**Trust once.** Codex runs a hook only after you trust it. The first Standard
+run opens **Hooks need review**: choose **Trust all and continue**, or open
+`/hooks` and press `t`. Codex stores the approval in
+`$CODEX_HOME/config.toml` (`~/.codex/config.toml`) under
+`[hooks.state."<key>"]`. The key names the session-flags source, not a path,
+and the stored hash covers the event and handler, so one approval covers
+every workspace and worktree until Aether's hook definitions change. Choosing
+**Continue without trusting** asks again at the next start. A swarm worker can
+be the first Standard Codex run; open its terminal to answer. If the list shows
+hooks you don't recognize, choose **Review hooks**. Inside the run,
+`aether-internal skill` says whether a hook has run yet.
+
+Aether does not bypass or pre-write this trust: `--dangerously-bypass-hook-trust`
+also skips review of your own hooks, `/etc/codex` managed hooks cannot be
+disabled and apply to the whole container, and writing `hooks.state` would
+approve on your behalf.
+
+A manual copy in `~/.codex/hooks.json` has a different key and would run
+every hook twice in a managed run. Remove it.
+
+**Manual.** For other launches (Background, taskless, or an overridden
+argv), export `codex.json`; merge into `~/.codex/hooks.json` (or
 `$CODEX_HOME/hooks.json`), alternatively `.codex/hooks.json`.
 Restart Codex, then use `/hooks` to review and trust the **exact hook
 definitions**; repeat after changing them. Project trust is not hook trust.
@@ -462,7 +590,9 @@ in the applicable `config.toml`.
 Supported events are `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and
 `Stop`, filtered against child-agent events. The built-in `notify` reporter
 only reports turn completion: it neither installs these hooks nor wakes
-later-idle Codex. Use a version implementing the current
+later-idle Codex. No idle wake exists for Codex: no supported mechanism could
+be verified, so mail waits for the next hook boundary or an explicit inbox
+read. Use a version implementing the current
 [Codex hook contract](https://learn.chatgpt.com/docs/hooks).
 
 ### Native pi inbox integration
@@ -601,8 +731,11 @@ session event.
 
 ### Copilot CLI inbox integration
 
-Copilot CLI is not a shipped agent; only its inbox hooks ship. Export
-`copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`copilot` loads the inbox hooks through `--plugin-dir /run/aether`
+([managed loading](#managed-native-loading)). Nothing needs installing.
+
+**Manual.** Export `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
 `$COPILOT_HOME/hooks/aether.json`), alternatively
 `.github/hooks/aether.json`. Quit and restart in the intended trusted
 repository. Honor `disableAllHooks`, `allowManagedHooksOnly`, enterprise
@@ -615,7 +748,8 @@ There is no later-idle wake.
 
 ### Gemini CLI inbox integration
 
-Gemini CLI is not a shipped agent. Export `gemini.json`; merge into
+`gemini` does not load this file on its own in Standard mode; install it
+by hand. Export `gemini.json`; merge into
 `~/.gemini/settings.json`, or `.gemini/settings.json` for the project.
 `GEMINI_CLI_HOME` is the **parent** of `.gemini`, not that directory itself.
 Fully exit and restart Gemini, then inspect `/hooks list`.
@@ -629,7 +763,8 @@ boundary hooks, not an idle receiver.
 
 ### Cursor CLI inbox integration
 
-Cursor CLI is not a shipped agent. Export `cursor.json`; merge into
+`cursor` does not load this file on its own in Standard mode; install it by
+hand. Export `cursor.json`; merge into
 `~/.cursor/hooks.json` or `.cursor/hooks.json`. Use `/quit` or `/exit`,
 restart in the intended workspace, respect workspace trust, and inspect
 `/logs` while exercising an interactive boundary. `CURSOR_CONFIG_DIR` and
@@ -682,7 +817,8 @@ Native receiver errors appear in the agent's own warning UI or stderr. Only
 recoverable helper/transport failures get bounded backoff; unsupported
 protocols and nonretryable helper errors stop observation rather than spinning.
 After exhausting helper retries, pi/OMP require a reload/restart; OpenCode
-pauses until another explicit same-root prompt. Native synchronous send
+pauses until another explicit same-root prompt; Claude Code's waiter exits
+and the next completed turn starts a new one. Native synchronous send
 rejection instead permits [lifecycle-driven recovery with fresh admission](harness-integration.md#keep-observation-and-notification-separate),
 without marking the rejected IDs notified or blindly resending. Fix the
 underlying error first; reloading never erases or acknowledges durable mail.
@@ -711,14 +847,18 @@ container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
 coordination directory. The status-only argument additions are shown below;
-task-bearing native launches also use [managed loading](#managed-native-loading):
+task-bearing native launches also use [managed loading](#managed-native-loading),
+which for `claude` adds the inbox hooks and idle-wake waiter to the same
+`claude-settings.json`:
 
 ```
 claude --dangerously-skip-permissions "<task>" \
   --settings /run/aether/claude-settings.json
 
 codex --dangerously-bypass-approvals-and-sandbox "<task>" \
-  -c 'notify=["/opt/aether/aether-server","report","codex"]'
+  -c 'notify=["/opt/aether/aether-server","report","codex"]' \
+  -c 'hooks.SessionStart=[{hooks=[{type="command",command="/usr/local/bin/aether-internal hook codex SessionStart",timeout=5}]}]'
+  # ...and the same -c for UserPromptSubmit, PostToolUse and Stop
 
 pi "<task>" -e /run/aether/status.ts
 omp --auto-approve "<task>" -e /run/aether/status.ts
@@ -850,6 +990,8 @@ both survive an Aether server restart for a still-live run. The server emits
 deltas as new opens. Actual run termination or reopen clears the old
 lifetime's requests. See [failure-handling.md](failure-handling.md).
 
+`copilot`, `gemini` and `cursor` have no reporter in Standard mode.
+
 For an agent with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` (Needs you) after `--stall-threshold`
 with a reason that leads with `stalled:`. See
@@ -929,9 +1071,9 @@ replacement shell.
 machine-readable mode as a one-shot:
 on exit Aether commits and publishes the branch, records `completed` or
 `failed`, and destroys the container immediately. Background runs never open a
-replacement shell and cannot be reopened. For `codex`, `omp` and
-`opencode` with their ACP server installed, the one-shot is a single ACP
-turn instead ([enhanced-runs.md](enhanced-runs.md#background-runs)).
+replacement shell and cannot be reopened. For `codex`, `omp`, `opencode`,
+`copilot`, `gemini` and `cursor` with their ACP server installed, the one-shot
+is a single ACP turn instead ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 Full-permission flags are applied by default in both - the agent is in a
 container, and the container is the boundary ([security.md](security.md)).
 
@@ -964,6 +1106,7 @@ vendor-native startup mechanism, without inventing an initial user prompt:
 | `codex` | one-launch `-c developer_instructions="..."` |
 | `pi`, `omp` | `--append-system-prompt` |
 | `opencode` | ephemeral `instructions` file in `OPENCODE_CONFIG_CONTENT` |
+| `copilot`, `gemini`, `cursor` | none: a taskless Standard launch gets no hint, and a task-bearing launch carries the instruction in its prompt |
 
 The instruction is short and runtime-scoped. The `skill` command loads the
 version-matched assignment, role guidance, and workflow from the staged CLI.
@@ -1060,6 +1203,9 @@ boundaries instead of automatically merging. See [native Git guidance](coordinat
 | `pi` | `pi {task}` | `pi -p {task}` |
 | `omp` | `omp --auto-approve {task}` | `omp -p --auto-approve {task}` |
 | `opencode` | `opencode --prompt={task}` | `opencode run {task}` |
+| `copilot` | `copilot --allow-all --interactive={task}` | `copilot --allow-all --prompt={task}` |
+| `gemini` | `gemini --approval-mode=yolo --prompt-interactive={task}` | `gemini --approval-mode=yolo --prompt={task}` |
+| `cursor` | `agent --force --trust {task}` | `agent -p --force --trust {task}` |
 
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
@@ -1068,10 +1214,18 @@ vendor's own answer is to run the container as a non-root user. It is a
 stopgap until the standard image ships one. The Environment launches no
 agent, so it gets none of this.
 
+A managed `copilot` Standard launch appends `--plugin-dir /run/aether` to
+that argv. Every `copilot` run gets `COPILOT_ALLOW_ALL=true` and every `gemini` run
+`GEMINI_CLI_TRUST_WORKSPACE=true`. `--allow-all` leaves Copilot's "Confirm
+folder trust" dialog up; the variable, set to exactly `true`, also trusts the
+working directory. Gemini in a folder it does not trust silently drops
+`--approval-mode=yolo` to `default` and ignores `~/.gemini/.env`.
+
 No shipped agent asks for permission by default, in any mode. Enhanced runs
 start Claude Code in session mode `bypassPermissions` and Codex in
-`agent-full-access`, and run `omp acp --auto-approve`. OpenCode has no flag
-for it, so every `opencode` launch - Standard, Background, Enhanced and
+`agent-full-access`, and run `omp acp --auto-approve`. Copilot runs with
+`--allow-all`, Gemini in approval mode and session mode `yolo`, and Cursor
+with `--force`. OpenCode has no flag for it, so every `opencode` launch - Standard, Background, Enhanced and
 resume - gets `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. The
 workspace's own value of that variable is merged over it key by key, so a
 workspace that sets `permission` keeps its rules; Aether's plugin and
@@ -1081,7 +1235,8 @@ names each agent's setting.
 
 A **model** chosen at launch (`aether run --model <model>`, the **Model**
 field in the dashboard) is passed to the agent as is; empty keeps the agent's
-default. Each agent's flags, read from its CLI help on 2026-10-11:
+default. Each agent's flags, read from its CLI help on 2026-10-11 (`copilot`,
+`gemini` and `cursor` on 2026-10-16):
 
 | `--agent` | Standard, Background, resume | Enhanced |
 | --- | --- | --- |
@@ -1090,7 +1245,11 @@ default. Each agent's flags, read from its CLI help on 2026-10-11:
 | `pi` | `--model <pattern>` (`provider/id`, optional `:<thinking>`) | `model` option, else `session/set_model` |
 | `omp` | `--model=<value>` (fuzzy: `opus`, `gpt-5.2`, `openai/gpt-5.2`) | `omp acp` has no model flag; `model` option, else `session/set_model` |
 | `opencode` | `-m, --model provider/model` on `opencode` and `opencode run`, plus `model` in `OPENCODE_CONFIG_CONTENT` | `model` in `OPENCODE_CONFIG_CONTENT`, then the session option |
-| custom definition, `fake` | refused | refused |
+| `copilot` | `--model <model>` | `model` option, else `session/set_model` |
+| `gemini` | `--model <model>` | `model` option, else `session/set_model` |
+| `cursor` | `--model <model>` | `model` option, else `session/set_model` |
+| custom definition | refused | `model` option, else `session/set_model` |
+| `fake` | refused | refused |
 
 The flag goes into argv before the task, so a CLI that stops parsing options
 at the prompt still reads it; a resume command has no task, so the flag is
@@ -1098,8 +1257,9 @@ appended. `opencode acp` has no model flag, so every `opencode` launch also
 gets `model` in `OPENCODE_CONFIG_CONTENT`, merged after the workspace's
 variables: a per-run model beats a workspace default. An Enhanced run sets
 the model over ACP after the session opens; see
-[Enhanced runs](enhanced-runs.md#launch-one). A custom definition or `fake`
-has no model flag, and a launch with a model is refused:
+[Enhanced runs](enhanced-runs.md#launch-one), for a custom definition too.
+A Standard or Background launch of a custom definition or `fake` has no model
+flag, and a launch with a model is refused:
 
 ```text
 scheduler: agent "custom" has no model flag; launch it without a model
@@ -1189,10 +1349,13 @@ chosen for it, else Enhanced when `enhanced_default` is set, else
 when Enhanced is chosen, then shows the command's output, and on failure
 **Install failed** with the exit status. Once the agent is installed the
 Environment terminal opens with its login command typed (`claude` then
-`/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`).
+`/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`,
+`copilot login --device-code`, `NO_BROWSER=true gemini`,
+`NO_OPEN_BROWSER=1 agent login`).
 **Check** reads `agent.list` again and shows **Installed**, **Enhanced
 installed** and **Login found** or **No login found**, from `installed`,
-`enhanced_installed` and `login_found`. A gateway without `agent.install`
+`enhanced_installed` and `login_found`; a custom agent with no login path
+shows only **Installed**. A gateway without `agent.install`
 types the install command into the terminal instead. In the CLI, run:
 
 ```sh
@@ -1203,7 +1366,8 @@ Install the executable into `~/.local/bin`, complete the vendor login in that
 terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member; **Add agent…**
-registers one with a Standard, a Background and an optional Enhanced command.
+registers one with a Standard, a Background and an optional Enhanced command,
+an optional Enhanced start mode and an optional login file.
 
 The Agents page shows **Installed** or **Not installed** and **Login found**
 or **No login found** for your account. These checks look for the executable
@@ -1288,6 +1452,10 @@ device-code option. Codex writes `auth.json` under `~/.codex`, which remains
 in your member home. `aether config push` never uploads known credential
 names.
 
+Your first Standard run opens Codex's **Hooks need review** screen for
+Aether's inbox hooks: choose **Trust all and continue**. See
+[Codex inbox integration](#codex-inbox-integration).
+
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### pi
@@ -1309,10 +1477,9 @@ or `OPENAI_API_KEY` in the server environment is the API-key alternative.
 `omp` is a shipped name, and a shipped name always wins over a member's own
 definition of the same name. If you ran `aether agent add omp` before Aether
 shipped it, your stored definition is ignored from now on and runs use the
-launch template in the table above. The row stays where it is - there is no
-command that removes one, and `aether agent list` keeps printing it as
-`agent omp member` next to `agent omp shipped`. To launch your own build,
-register it under a name Aether does not ship.
+launch template in the table above. `aether agent list` skips the stored row,
+which stays in the server's database - there is no command that removes one.
+To launch your own build, register it under a name Aether does not ship.
 
 ### opencode
 
@@ -1334,6 +1501,115 @@ configuration again with `aether config push opencode <path>...`. This writes
 `~/.config/opencode` without moving or deleting old files. Do not copy the
 data directory wholesale or move/delete `~/.local/share/opencode/auth.json`;
 native login and account sharing still use that file.
+
+### Copilot, Gemini and Cursor
+
+`copilot`, `gemini` and `cursor` are Enhanced by default (`enhanced_default`),
+and a Background run of each uses ACP once its server is installed. In
+Standard mode they lose three things:
+
+- **No status reporter.** A run's working or waiting state is inferred from
+  silence alone ([Status reporting](#status-reporting)).
+- **No automatic inbox hooks.** Mail arrives only through explicit
+  `aether-internal inbox` reads, unless you install the exported hook file by
+  hand: [Copilot](#copilot-cli-inbox-integration),
+  [Gemini](#gemini-cli-inbox-integration) or
+  [Cursor](#cursor-cli-inbox-integration).
+- **No discovery hint on a taskless launch.** A task-bearing launch carries
+  the run instructions in its prompt.
+
+An Enhanced run has full state and the server's mail wake
+([enhanced-runs.md](enhanced-runs.md#mail)). The three are shipped names, so a
+definition you stored with `aether agent add` under the same name is ignored,
+as described under [omp](#omp). None has a configuration root, so
+`aether config push` has nothing to upload for them.
+
+### GitHub Copilot CLI
+
+Install it into `~/.local` from `aether terminal`; it needs `npm` in the
+Environment:
+
+```sh
+npm install -g --prefix "$HOME/.local" @github/copilot
+```
+
+Log in with `copilot login --device-code`, open the printed URL in your own
+browser and enter the code. A container has no system keychain, so Copilot
+asks `Store token in plaintext config file? (y/N)`; answer `y`, and the token
+lands in `~/.copilot/config.json`. Copilot also writes that file on its first
+start, before any login, so **Login found** for `copilot` only means Copilot
+has started once.
+
+Copilot replaces `config.json` by rename, like Claude Code its login, but
+Aether does not pin it the way it pins Claude's
+([security.md](security.md#account-sharing)): whether Copilot can write the
+file when it is a mount is unverified. A recipient's run on a shared account
+keeps the copy of the owner's file it started with.
+
+`COPILOT_GITHUB_TOKEN` in the server environment is the API-key alternative,
+and takes precedence over a stored login. Copilot accepts fine-grained
+personal access tokens with the "Copilot Requests" permission, not classic
+`ghp_` tokens.
+
+Runs set `COPILOT_ALLOW_ALL=true`, which trusts the working directory, so
+Copilot loads that directory's skills, plugins, MCP servers and hooks. Enhanced
+runs start `copilot --acp --allow-all`; Copilot's changelog says a baseline
+granted by `--allow-all` launch flags stays even when an ACP client turns
+allow-all off, so a run cannot take those permissions back.
+
+### Gemini CLI
+
+Since 2026-06-18 Gemini CLI serves only paid Gemini API keys and Gemini Code
+Assist Standard or Enterprise. Google moved Google AI Pro, Ultra and free
+personal accounts to Antigravity CLI
+([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)).
+
+Install it from `aether terminal`; it needs `npm` in the Environment:
+
+```sh
+npm install -g --prefix "$HOME/.local" @google/gemini-cli
+```
+
+With an API key, put `GEMINI_API_KEY=<key>` in `~/.gemini/.env` from
+`aether terminal`, or set `GEMINI_API_KEY` in the server environment. Gemini
+reads only the first `.env` it finds walking up from the run's directory, so a
+`.env` in the checkout or above it is read instead of `~/.gemini/.env`.
+
+With Code Assist Standard or Enterprise, run `NO_BROWSER=true gemini`, choose
+Sign in with Google, open the printed URL and paste the code back. Also put
+`GOOGLE_CLOUD_PROJECT=<project>` in `~/.gemini/.env`. The login lands in
+`~/.gemini/oauth_creds.json`. Gemini replaces that file by rename, so once you
+share your account Aether mounts it in place in your own containers
+([security.md](security.md#account-sharing)).
+
+Runs set `GEMINI_CLI_TRUST_WORKSPACE=true`; see [Launch argv](#launch-argv).
+Gemini's ACP session modes are `default`, `autoEdit`, `yolo` and `plan`. An
+Enhanced run starts in `yolo`, and the mode stays switchable in the run.
+
+### Cursor CLI
+
+Cursor's CLI runs as `agent` (also linked as `cursor-agent`). Its name in
+Aether is `cursor`: pick that at launch. `AETHER_HARNESS` and the inbox hooks
+key on it too.
+
+Install it from `aether terminal`:
+
+```sh
+curl -fsS https://cursor.com/install | bash
+```
+
+The installer links `~/.local/bin/agent` by absolute path to
+`~/.local/share/cursor-agent/versions/<version>`, so a shared account borrows
+that directory read-only along with the executable.
+
+Log in with `NO_OPEN_BROWSER=1 agent login` and open the printed URL; it
+writes `~/.config/cursor/auth.json` in place. `CURSOR_API_KEY` in the server
+environment is the API-key alternative.
+
+Cursor needs no launch env: `--force` approves everything in `agent` mode.
+Its ACP modes are `agent`, `plan` and `ask`, and Aether sets none. In an
+Enhanced run, a Cursor team whose admin enables auto-run controls without
+"Run Everything" overrides `--force`, and the agent asks again.
 
 ### `fake`
 
@@ -1364,7 +1640,9 @@ Custom launch definitions come from two places, resolved in this order:
    scoped to the registering member, over the normal control channel; no
    server restart. A member's definition shapes argv only inside that
    member's own containers and never affects anyone else. Shipped names and
-   the reserved names `custom` and `fake` cannot be registered.
+   the reserved names `custom` and `fake` cannot be registered. If a stored
+   row later shares a name with a shipped agent, `agent.list` skips the row
+   and a launch uses the shipped agent.
 
 A member's own definition runs only on that member's own account. On a
 shared account, only a shipped agent or a server-wide definition is
@@ -1372,6 +1650,20 @@ launched, and its `CredentialPaths` are the login paths the share mounts from
 the owner's home. A launch is refused when a credential path is the home
 itself. A definition declares no install directories, so a recipient without
 its executable borrows only the owner's `~/.local/bin` and `~/.local/lib`.
+
+The name need not equal the command. `aether agent add mycursor --standard
+"agent {task}"` registers `mycursor` with executable `agent`, the first word of
+the Standard command, and a Background default of `agent -p {task}`. The name
+is what you choose at launch and what coordination (`AETHER_HARNESS`, inbox
+hooks, swarm choices) keys on; the executable is what runs. Inbox hooks ship
+for a fixed set of names, so a differently named agent gets none and
+`aether-internal skill` says `no packaged integration`.
+
+`aether agent add` also takes `--acp-mode <id>` and a repeatable
+`--login <path>`, such as `--login ~/.cursor/auth.json`. A `~/` path is stored
+as `/root/...`; when your shell expands `~` first, the CLI turns a path under
+your local home back into `~/`. With a login path, `agent.list` reports
+`login_found`; without one, setup never shows the agent as logged in.
 
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by agent name. Each definition must
@@ -1381,7 +1673,8 @@ is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only. A definition under a name Aether
-does not ship has no model flag, so a launch of it with a model is refused.
+does not ship has no model flag, so a Standard or Background launch of it with
+a model is refused; an Enhanced launch sets the model over ACP.
 
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,
@@ -1430,13 +1723,16 @@ update.
 | `codex` | reads the latest version with `npm view @openai/codex version`; when `codex --version` differs, runs `npm install -g --prefix <stage> "@openai/codex@<version>"` |
 | `pi` | reads the latest version with `npm view @earendil-works/pi-coding-agent version`; when `pi --version` differs, runs `npm install -g --prefix <stage> --ignore-scripts "@earendil-works/pi-coding-agent@<version>"` |
 | `omp` | `omp update` |
+| `copilot` | reads the latest version with `npm view @github/copilot version`; when `copilot --version` differs, runs `npm install -g --prefix <stage> "@github/copilot@<version>"` |
+| `gemini` | reads the latest version with `npm view @google/gemini-cli version`; when `gemini --version` differs, runs `npm install -g --prefix <stage> "@google/gemini-cli@<version>"` |
+| `cursor` | `agent update`, which installs the new version under `~/.local/share/cursor-agent/versions` and prints `Already up to date` when current |
 
 For `claude`, `codex`, and `pi`, an installed
 [enhanced-mode adapter](#enhanced-mode-adapters) is then brought to its pinned
 version when `~/.local/lib/node_modules/<package>/package.json` names another.
 
-For `codex` and `pi`, npm installs the new version into a stage directory
-beside the old one in `~/.local/lib`. Aether resolves its server executable
+For `codex`, `pi`, `copilot` and `gemini`, npm installs the new version into
+a stage directory beside the old one in `~/.local/lib`. Aether resolves its server executable
 path before passing the read-only mount to Docker, so `/proc/self/exe`
 cannot select Docker's executable. That helper exchanges the installed and
 staged package directories with Linux's atomic directory-exchange operation:
@@ -1445,8 +1741,8 @@ the update reports that error and leaves the installed package in place.
 
 Their own updaters are not used: `codex update`
 installs into the image's global npm prefix, outside the member home, and
-`pi update --self` replaces files in place. A `codex` or `pi` in
-`~/.local/bin` that npm did not install is not updated, and the update
+`pi update --self` replaces files in place. A `codex`, `pi`, `copilot` or
+`gemini` in `~/.local/bin` that npm did not install is not updated, and the update
 reports, for example, `codex in ~/.local/bin was not installed with npm, so
 Aether cannot update it`.
 

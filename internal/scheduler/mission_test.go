@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -341,5 +343,64 @@ func TestWorkerReportLeavesCompletionToTheMission(t *testing.T) {
 	row := e.waitStoreStatus(t, run.ID, domain.RunCompleted)
 	if row.Reason != retainedCompletionReason || row.OutcomeUnseen || !row.FinishUnopened {
 		t.Fatalf("completed worker = %q, unseen %v, unopened %v; want %q, seen and unopened", row.Reason, row.OutcomeUnseen, row.FinishUnopened, retainedCompletionReason)
+	}
+}
+
+// A worker's AETHER_HARNESS is its agent's name, which coordination keys on;
+// the command it launches is the agent's executable.
+func TestMissionWorkerOfAnAgentNamedApartFromItsCommand(t *testing.T) {
+	e := newTestEnv(t, nil)
+	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
+		Name:         "mycursor",
+		Executable:   "agent",
+		TUIArgs:      []string{"agent", "{task}"},
+		HeadlessArgs: []string{"agent", "-p", "{task}"},
+	})
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "named-apart-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+		Harness: "mycursor", Mode: domain.LaunchTUI,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := e.rt.byName(string(run.ID))
+	if container == nil {
+		t.Fatal("worker container not created")
+	}
+	if got := container.spec.Env["AETHER_HARNESS"]; got != "mycursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want the agent's name mycursor", got)
+	}
+	if !slices.Contains(container.spec.Command, "agent") || !slices.Contains(container.spec.Command, "do the work") {
+		t.Fatalf("worker command = %q, want the agent executable with the task", container.spec.Command)
+	}
+}
+
+// The shipped cursor agent runs as agent, and its worker's AETHER_HARNESS is
+// still cursor, the name coordination keys on.
+func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
+	e := newTestEnv(t, nil)
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchTUI, "gpt-5"); err != nil {
+		t.Fatalf("ValidateMissionLaunch of a Standard cursor worker with a model: %v", err)
+	}
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "cursor-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+		Harness: "cursor", Mode: domain.LaunchTUI, Model: "gpt-5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := e.rt.byName(string(run.ID))
+	if container == nil {
+		t.Fatal("worker container not created")
+	}
+	if got := container.spec.Env["AETHER_HARNESS"]; got != "cursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want cursor", got)
+	}
+	// The run supervisor's sh -c script comes first.
+	want := []string{"aether-run-supervisor", "agent", "--force", "--trust", "--model", "gpt-5", "do the work"}
+	if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
+		t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
 	}
 }

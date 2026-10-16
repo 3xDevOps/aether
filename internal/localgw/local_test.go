@@ -564,7 +564,7 @@ func stubDialLink(t *testing.T, fn func(cli.Config) (*cli.Conn, error)) {
 	t.Helper()
 	old := dialLink
 	t.Cleanup(func() { dialLink = old })
-	dialLink = fn
+	dialLink = func(_ context.Context, cfg cli.Config) (*cli.Conn, error) { return fn(cfg) }
 }
 
 func TestLocalLinkSwitch(t *testing.T) {

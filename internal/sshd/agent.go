@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -51,9 +52,10 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		TUIArgs:         p.Definition.TUIArgs,
 		HeadlessArgs:    p.Definition.HeadlessArgs,
 		ACPArgs:         p.Definition.ACPArgs,
+		ACPMode:         p.Definition.ACPMode,
 		Executable:      p.Definition.Executable,
 		ProfileRoot:     p.Definition.ProfileRoot,
-		CredentialPaths: p.Definition.CredentialPaths,
+		CredentialPaths: expandHome(p.Definition.CredentialPaths),
 		DenyNames:       p.Definition.DenyNames,
 	}
 	if verr := harness.ValidateMemberDefinition(def); verr != nil {
@@ -68,6 +70,19 @@ func (s *Server) agentRegister(ctx context.Context, member domain.MemberID, raw 
 		return nil, rpcError(serr)
 	}
 	return protocol.AgentRegisterResult(p), nil
+}
+
+// expandHome turns a "~/" path into the absolute container path a
+// definition stores; harness.HomeRelative maps it back for either home.
+func expandHome(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = p
+		if rest, ok := strings.CutPrefix(p, "~/"); ok {
+			out[i] = "/root/" + rest
+		}
+	}
+	return out
 }
 
 func (s *Server) agentModels(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -141,6 +156,9 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		return nil, rpcError(serr)
 	}
 	for _, row := range rows {
+		if _, shipped := harness.Lookup(row.Name); shipped {
+			continue
+		}
 		var def harness.Definition
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
 			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
@@ -164,6 +182,7 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		Name:            profile.Name,
 		DisplayName:     profile.Label(),
 		Glyph:           profile.Name,
+		Executable:      executable,
 		Source:          source,
 		Enhanced:        string(profile.EnhancedSupport()),
 		Switchable:      profile.Switchable(),
@@ -188,15 +207,14 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	}
 	// A definition whose login path is the whole home has no login file to
 	// look for; a launch on a shared account refuses it with that reason.
-	if logins, pathErr := profile.LoginPaths(); s.cfg.Homes != nil && pathErr == nil {
+	if logins, pathErr := profile.LoginPaths(); s.cfg.Homes != nil && pathErr == nil && len(logins) > 0 {
 		// A launch on another member's account signs in with the owner's
 		// login, so that is the home to look in.
 		found, loginErr := s.cfg.Homes.LoginFound(account, logins)
 		if loginErr != nil {
 			slog.Warn("sshd: agent.list cannot check the login", "agent", profile.Name, "account", account, "error", loginErr)
-		} else {
-			info.LoginFound = found
 		}
+		info.LoginFound = &found
 	}
 	return info, nil
 }

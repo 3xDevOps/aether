@@ -462,7 +462,7 @@ that omit the fields get a flat list.
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
 Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
-**Swarms**, **Activity**, **Files**, **Environment**, **Agents** and
+**Swarms**, **Activity**, **Insights**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
@@ -504,14 +504,27 @@ after `main`, so it is available on every route, onboarding included. It
 renders nothing unless the server lists `assistant.status` and the member can
 launch runs (`useAssistantAvailable`); the same check gates every entry point.
 
-- **Desktop:** an `aside` named "Assistant", 400px by default and resizable
-  from 320px to 640px by a `separator` on its left edge (same keys as the
-  sidebar's, mirrored: Left grows). **Close assistant** returns focus to the
-  Assistant button. The saved width is a preference: the rendered width is capped
-  to what the window leaves after the sidebar and 400px of `main`, and below
-  320px of room the sheet is used instead.
+- **Desktop, docked:** an `aside` named "Assistant", 400px by default and
+  resizable from 320px to 640px by a `separator` on its left edge (same keys
+  as the sidebar's, mirrored: Left grows). **Close assistant** returns focus
+  to the Assistant button. The saved width is a preference: the rendered width
+  is capped to what the window leaves after the sidebar and
+  `minReadableWidth` (560px, `lib/breakpoints.ts`) of `main`.
+- **Desktop, floating:** below 320px of that room, the same `aside` floats
+  over the right edge of `main`, raised by a shadow. Its width is the saved
+  width, capped so at least 240px of `main` (`uncoveredWidth`) stays
+  uncovered on its left, but never below 320px. It has no backdrop, no focus
+  trap and no resize handle, so the run keeps its full width, and the part
+  the panel does not cover stays interactive. `Esc` inside it, outside an IME
+  composition, closes it and returns focus to the Assistant button, unless
+  something inside it, such as the **New conversation** confirmation, handled
+  the key first; so does `Mod+Shift+Space` from anywhere. Crossing between
+  docked and floating restyles the one `aside` rather than remounting it, so
+  the draft, the focused composer and the transcript's scroll survive.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
-- **Header:** the agent and state, **New conversation** (confirms, then
+- **Header:** an `h2`, because the view beside it owns the page's `h1`. It
+  takes the run header's height on a run and the view header's elsewhere, so
+  the two seams line up. It holds the agent and state, **New conversation** (confirms, then
   `assistant.reset`) and **Close assistant**. While `auto_approve` is on, a
   line under it says the assistant acts without asking, with **Change in
   Settings**.
@@ -550,6 +563,31 @@ buttons stay disabled once answered until a status frame removes the card. Only
 A prompt being sent and its idempotency key live in the slice next to the
 draft, so reopening the panel retries under the same key; a changed draft, a
 success or a new conversation clears them. `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
+Closing the panel unmounts it. The transcript keeps where the reader left it,
+including virtua's measured row sizes, in a module-level record keyed by
+member, conversation generation, epoch, history generation and first row,
+and reopening the same conversation returns there. Earlier messages loaded
+while the panel was closed change the first row, so the transcript starts at
+the bottom instead of at a stale offset. A transcript pinned to the bottom stays
+pinned, so it follows output that arrived while the panel was closed. A
+different conversation starts at the bottom.
+
+`store/view-context.ts` builds the view context each prompt carries (see
+[assistant.md](assistant.md#what-it-sees)): the route's ids, the run view
+`RunFrame` reports through `setShownRunView`, the active file only on the
+Files page or its own run's Files view, and `viewHistory`, the last 8 pages,
+recorded only while sharing is on and never persisted. The prompt's context is kept in the retry attempt with its
+key. While the panel is open and sharing is on, `syncViewContext` sends
+`assistant.view` at most once a second when the context changed, one call at a
+time, retrying a failed one with backoff and sending it again after each
+prompt. `ContextChip` (`components/assistant/context-chip.tsx`)
+above the composer shows it and turns sharing off with
+`assistant.settings {share_view}`; `assistantShareChoice` holds the choice
+until the server saves it, sending one save at a time so an older choice
+never lands after a newer one, retrying with backoff from 3 seconds up to a
+minute, stopping on `-32004` or `-32602`, or once another member signs in
+(`resetAssistant` drops the choice). `status.share_view` carries it to other
+tabs and devices.
 
 When the assistant launches or messages a run for the member, the server
 follows it and publishes `assistant.notice` on `/ws/events` as the run
@@ -568,8 +606,8 @@ seconds. A phone gets the web push the server sends for the same notice.
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
 component mounted in one place at a time: the sidebar's **New run** row (a secondary
 icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
-the phone toolbar under 768px; keeping it out of the top bar's row keeps every
-header destination visible at 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
+the phone toolbar under 768px; keeping it out of the top bar's row leaves that
+row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
 
@@ -733,6 +771,20 @@ elements for a finger than for a mouse, or for a narrow window, ask
 `src/lib/breakpoints.ts`. The shell has one breakpoint: under 768px
 (`useIsMobile()`, Tailwind `max-md:`) the top bar and the sidebar sheet
 replace the sidebar.
+
+A panel docked beside other content decides from room, not from the
+viewport. `minReadableWidth` (560px, `src/lib/breakpoints.ts`) is the width
+a run's content keeps beside one. The assistant docks only while `main` keeps
+it, and otherwise floats over `main` ([Assistant panel](#assistant-panel)).
+The run's Details and Subagent inspectors dock only while the run's row,
+measured with `useElementSize` and with the inspector inside it, holds the
+inspector plus that width; otherwise they open as overlays
+([Details](#details)). Measuring the row with the inspector inside it means
+opening one never flips the answer, so the layout cannot oscillate. A
+narrower run also narrows its terminal, and the shared PTY with it, for every
+viewer, which is why the run keeps a readable width rather than giving way to
+whatever opens beside it. At the desktop shell's 960px floor with the default
+260px sidebar, the assistant floats; it docks from 1140px.
 
 **Touch density is one variant, defined once.** `src/index.css` declares
 `@custom-variant coarse (@media (pointer: coarse))`, and a control that a
@@ -2053,8 +2105,12 @@ announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
 
-A subagent is the agent that Claude Code's `Agent` or `Task` tool launches;
-a dynamic workflow is its `Workflow` tool. Their items carry a parent link
+A subagent is the agent that Claude Code's `Agent` or `Task` tool launches,
+that another agent announces as an ACP child session, or that a fallback
+launch call names ([session item
+log](enhanced-runs.md#the-session-item-log)); a dynamic workflow is its
+`Workflow` tool. A launch card is any call with `tool_call.subagent`, or a
+Claude `Agent`, `Task` or `Workflow` call. Their items carry a parent link
 ([session item log](enhanced-runs.md#the-session-item-log)), and
 `store/subagents.ts` keeps them out of the conversation. Each session holds
 an index keyed by the launching tool call's id, with the call's latest
@@ -2084,13 +2140,19 @@ its first held item until a history page brings the launch; without the
 call its state is unknown. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
 agent only waits on its subagents, the live row reads "Waiting on 2
-subagents". Codex, opencode and the others send no parent link, so their
-sessions render as before.
+subagents". A fallback launch shows a card with no nested items;
+an agent with neither child sessions nor a launch call renders as before.
 
 A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
-at `?agent=<tool call id>`. At 1280px and wider it is an inline aside that
-replaces Details while open; narrower, it is a side sheet, and a bottom
-sheet on phones. It shows breadcrumbs back to **Session** through nested
+at `?agent=<tool call id>`. While the run's row holds 448px for it plus
+`minReadableWidth` (560px), it is an inline aside that replaces Details
+while open; narrower, it is a side sheet, and a bottom sheet on phones.
+Until the row is measured neither renders. An inline inspector that loses
+that room to the assistant docking beside the run closes instead of reopening
+as a modal sheet over it, and focus stays in the assistant
+(`replaceRouteKeepingFocus` in `components/shell/center-view.tsx` skips the
+focus move to the run heading). Losing the room any other way, such as
+showing the sidebar or narrowing the window, reopens it as the side sheet. It shows breadcrumbs back to **Session** through nested
 subagents, **Previous subagent** and **Next subagent** among siblings, and
 **Close subagent**; `Esc` closes it before it leaves the run. Stepping
 between siblings and closing replace the history entry, so Back does not
@@ -3206,9 +3268,11 @@ device run.
 
 ### Details
 
-At 1280px and wider Details is a 320px `complementary "Run details"` beside
-the view, toggled by the header button or `Mod+.` and remembered
-(`detailsOpen`, persisted); narrower desktops open it as a side sheet and
+While the run's row holds 320px for it plus `minReadableWidth` (560px),
+Details is a 320px `complementary "Run details"` beside the view, toggled by
+the header button or `Mod+.` and remembered (`detailsOpen`, persisted). When
+the row narrows, for example when the assistant docks, the inline panel goes
+and comes back once there is room again. Narrower rows open it as a side sheet and
 phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
 whatever opened it. Sections (`details.tsx`):
 
@@ -3751,6 +3815,72 @@ questions and queued messages stay contextual to their run, in its Details
   it onto the stored `server.info`, which is what fills the disk gauge in
   Settings > Server.
 
+## Insights
+
+`src/routes/insights/` is **Insights** (`?page=insights`), what a member's
+agents finished over a period. It is in the header navigation after
+**Activity** when the gateway offers `insights.get`, and reads that one
+method, and the server computes every number. The page re-reads when its
+controls change and
+when the event stream comes back live, dropping answers to an older request.
+
+- **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
+  months), **Workspace** (All workspaces or one; shown with more than one
+  workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
+  period ends at the next local midnight, so today counts; 12 months starts
+  on the Monday on or before, where weekly buckets start. The request
+  carries the browser's IANA time zone for day buckets, or "" (UTC) when the
+  browser reports none, which the page then says. The choices last while the
+  page is open; they are not in the address. On a phone the controls wrap
+  above the content instead of sitting in the header.
+- **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
+  completed across 3 workspaces." Runs in **Needs you** follow as a link to
+  the Board.
+- **Tiles.** Runs finished, success rate (finished of runs that ended, with
+  both counts, rounded down so 100% means nothing failed), swarms completed
+  (with agents and tasks accepted) and pull requests Aether opened. Runs
+  finished and success rate compare with the period before in raw numbers
+  ("Up from 8 the 7 days before"). Pull requests show a dash and say none
+  are recorded until the server reports `coverage.pull_requests_since`.
+- **Activity chart.** Per day (per week past 92 days): launched runs as the
+  outlined left bar, runs that ended as the right bar stacked Done, Failed
+  (failed and interrupted) and Abandoned, with a text legend. The chart is
+  one tab stop; arrow keys, **Home** and **End** move between bars, and
+  **Enter**, **Space** or a click selects one, and **Finished work** reads
+  `insights.get` again for that bucket alone, since the period's list holds
+  only its newest 50 runs. "Show every day" clears it. On a phone more than
+  30 daily bars fold into weeks, and on a coarse pointer each bar is at
+  least 44px wide, the chart scrolling sideways from the newest end.
+- **Finished work.** The server's 50 most recent runs that ended, ten shown
+  until **Show all**: title, outcome badge, workspace, agent and model
+  ("default model" when the run used the agent's own), duration, pull
+  request link and relative end time. A row opens the run. The server
+  learns a merge only when `run.pr.status` is called for the run, so after
+  each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
+  another for up to ten listed runs whose pull request is recorded `open`,
+  then reads `insights.get` again once if any state changed. A failed call
+  leaves the row as it was and puts the error in the pull request link's
+  tooltip; a failed second read is shown above the page, which keeps the
+  first.
+- **Last 26 weeks.** A calendar heatmap of runs active each day in one
+  accent hue, with a Fewer to More scale. It is one tab stop; arrow keys
+  move by day and week, and each day is labelled with its date and count.
+- **Breakdown.** By workspace and by agent: launched, finished and failed as
+  numbers beside a bar.
+- **Time.** Median and slowest-10% run time, and, from the server's state
+  record, median time working, waiting on you and your response time. When
+  fewer runs have state times than run times it says "measured for N of M
+  runs; Aether records this from <date> on."
+- **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
+  runs reported it, tokens, and a link to **Settings › Usage** for
+  subscription quota. Cost never stops a run.
+
+A failed read shows the server's error with **Retry**; a server without
+`insights.get` gets a neutral line asking for an update. Until the event
+stream is live the page names the connection problem instead of loading. An
+empty period offers **New run**, the last 12 months, and everyone's runs
+from **Mine**.
+
 ## Files
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
@@ -3976,8 +4106,10 @@ the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
 **Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
 the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
-`<name> copy`. With no templates the view says what one is and offers **New
-template**.
+`<name> copy`. The form's agent select lists the agents from `agent.list` by
+display name and keeps the template's current agent as an extra option when
+the list omits it. With no templates the view says what one is and offers
+**New template**.
 
 Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
 closes on Save or Delete and the list shows the result at once; a saved
@@ -4035,7 +4167,9 @@ render the same parts from `src/components/agents/`, so this section covers
 both. The page header has **Add agent…** where the gateway serves
 `agent.register`, and a sub-screen there shows **All agents** to go back.
 
-`AgentList` rows show the agent's coloured `AgentGlyph`, its display name,
+`AgentList` rows show the agent's coloured `AgentGlyph` (`ui/agent-glyph.tsx`
+maps each shipped name to an icon and its `--agent-*` colour token), its
+display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
 login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
@@ -4050,7 +4184,11 @@ difference?** beside the page's lead opens the Standard and Enhanced cards
 **Run** remembers the agent and its default mode and opens **New run** on it;
 in onboarding it moves to First run with that agent preselected. **Add
 agent…** (`add-agent.tsx`) asks for a name, a Standard and a Background
-command and an optional Enhanced command, sent through `agent.register`.
+command and an optional Enhanced command, Enhanced start mode and login file,
+sent through `agent.register`. The Background default follows the Standard
+command's first word, which is also the executable. A session that is not
+signed in offers its terminal login method, typed as the ACP server command
+(`agent_command` in the session state) with the method's args.
 
 Below the list, `AgentExtras` holds collapsed disclosures: **Git identity**
 (Agents page only), which says agents commit as the name and email in the
@@ -5260,7 +5398,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘K` / `Ctrl+K` | global | Open the command palette |
 | `⌘Shift+P` / `Ctrl+Shift+P` | global | Open the command palette |
 | `⌘B` / `Ctrl+B` | global | Show or hide the sidebar |
-| `⌘Shift+Space` / `Ctrl+Shift+Space` | global | Open or close the assistant |
+| `⌘Shift+Space` / `Ctrl+Shift+Space` | global | Open or close the assistant, from a field, an editor or a terminal too |
 | `?` | global | Open the shortcuts dialog |
 | `n` | global | New run |
 | `u` | global | Open the next run that needs you |

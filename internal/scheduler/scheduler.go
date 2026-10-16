@@ -139,6 +139,7 @@ type HarnessSpec struct {
 	TUIArgs         []string
 	HeadlessArgs    []string
 	ACPArgs         []string
+	ACPMode         string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -724,6 +725,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 		TUIArgs:         spec.TUIArgs,
 		HeadlessArgs:    spec.HeadlessArgs,
 		ACPArgs:         spec.ACPArgs,
+		ACPMode:         spec.ACPMode,
 		Executable:      spec.Executable,
 		ProfileRoot:     spec.ProfileRoot,
 		CredentialPaths: spec.CredentialPaths,
@@ -765,11 +767,11 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	if len(argv) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
 	}
-	if model != "" && len(profile.ModelArgs) == 0 {
-		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
-	}
 	if acp {
 		return nil, profile, true, nil
+	}
+	if model != "" && len(profile.ModelArgs) == 0 {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
 	}
 	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }
@@ -830,6 +832,7 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 				TUIArgs:         spec.TUIArgs,
 				HeadlessArgs:    spec.HeadlessArgs,
 				ACPArgs:         spec.ACPArgs,
+				ACPMode:         spec.ACPMode,
 				Executable:      spec.Executable,
 				ProfileRoot:     spec.ProfileRoot,
 				CredentialPaths: spec.CredentialPaths,
@@ -891,6 +894,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 		TUIArgs:         def.TUIArgs,
 		HeadlessArgs:    def.HeadlessArgs,
 		ACPArgs:         def.ACPArgs,
+		ACPMode:         def.ACPMode,
 		Executable:      def.Executable,
 		ProfileRoot:     def.ProfileRoot,
 		CredentialPaths: def.CredentialPaths,

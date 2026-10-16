@@ -40,7 +40,7 @@ describe('assistant settings', () => {
     expect(client.assistantSettings).toHaveBeenCalledTimes(1)
     expect(toggle().getAttribute('aria-checked')).toBe('false')
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true, share_view: true })
     await user.click(toggle())
     dialog = await screen.findByRole('alertdialog')
     await user.click(within(dialog).getByRole('button', { name: 'Turn on' }))
@@ -48,7 +48,7 @@ describe('assistant settings', () => {
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('true'))
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, share_view: true })
     await user.click(toggle())
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: false })

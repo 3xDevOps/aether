@@ -36,7 +36,15 @@ with wait_supported, unread_message_ids, wake_admitted and context. Context
 is a trusted inbox instruction only when admitted, never peer message text.
 No hook consumes or acknowledges mail. Unsupported wake servers fail with
 exit 2: stop the receiver and upgrade/relaunch the run, do not retry in a loop.
-Loaded native integrations can wake a live idle session; command hooks alone
+
+claude also accepts "wake", the asyncRewake hook a managed launch's settings
+run on SessionStart and Stop. It reads Claude Code's hook JSON and waits for
+unread mail the hooks have not announced. Once the server admits a wake, it
+writes the trusted inbox instruction to stderr and exits 2, which starts a
+turn in the idle session. It exits 0 when a prompt, a newer waiter or the end
+of Claude Code ends the wait, and 1 on errors; it never exits 2 otherwise.
+
+Loaded native integrations can wake a live idle session; other command hooks
 cannot. Neither starts an exited run or types into its terminal.
 
 "hook file" lists the shipped integrations. With a filename, it writes that
@@ -60,13 +68,14 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		return ExitFailure, errors.New("hook: expected a supported harness and native event; use hook --help")
 	}
 	harness, event := args[0], args[1]
+	claudeWaiter := harness == "claude" && event == "wake"
 	if os.Getenv(coordtransport.EnhancedEnv) == "1" {
-		if event == "wake" {
+		if event == "wake" && !claudeWaiter {
 			return ExitUsage, errors.New("hook wake: this is an enhanced run, whose agent Aether wakes with a session prompt; stop this receiver")
 		}
 		return ExitOK, nil
 	}
-	if event == "wake" {
+	if event == "wake" && !claudeWaiter {
 		return hookWake(ctx, cfg)
 	}
 	if _, err := os.Stat(cfg.Socket); errors.Is(err, fs.ErrNotExist) {
@@ -81,6 +90,9 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	}
 	if err := json.NewDecoder(reader).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		return ExitFailure, fmt.Errorf("hook: read event: %w", err)
+	}
+	if claudeWaiter {
+		return claudeWake(ctx, cfg, input)
 	}
 	if input.Name != "" && input.Name != event {
 		return ExitFailure, fmt.Errorf("hook: event %q does not match configured event %q", input.Name, event)
@@ -97,6 +109,10 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	var status protocol.CoordStatusResult
 	if err := coordtransport.Call(ctx, cfg.Socket, protocol.MethodCoordHookStatus, nil, &status); err != nil {
 		return ExitFailure, fmt.Errorf("hook: %w", err)
+	}
+	if harness == "claude" && (event == "UserPromptSubmit" || event == "PostToolBatch") {
+		// A busy session has no waiter; the turn's Stop starts the next one.
+		_ = os.Remove(claudeWakePath(status.RunID))
 	}
 	notices := currentHookNotices(status)
 	if commandHarness(harness) {
@@ -203,7 +219,7 @@ func writeHookNotices(path string, n hookNotices) {
 func validHookEvent(harness, event string) bool {
 	switch harness {
 	case "claude":
-		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolBatch" || event == "Stop"
+		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolBatch" || event == "Stop" || event == "wake"
 	case "codex":
 		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolUse" || event == "Stop"
 	case "copilot":

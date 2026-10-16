@@ -676,6 +676,7 @@ type AgentDefinition struct {
 	TUIArgs         []string `json:"tui_args"`
 	HeadlessArgs    []string `json:"headless_args"`
 	ACPArgs         []string `json:"acp_args,omitempty"`
+	ACPMode         string   `json:"acp_mode,omitempty"`
 	ProfileRoot     string   `json:"profile_root,omitempty"`
 	CredentialPaths []string `json:"credential_paths,omitempty"`
 	DenyNames       []string `json:"deny_names,omitempty"`
@@ -710,9 +711,12 @@ type AgentInfo struct {
 	Enhanced          string `json:"enhanced"`
 	EnhancedInstalled bool   `json:"enhanced_installed"`
 	Switchable        bool   `json:"switchable"`
+	// Executable is the command the agent runs, which a member's agent may
+	// name differently from the agent.
+	Executable string `json:"executable"`
 	// LoginFound checks the launch home for login paths, not for a working
-	// session.
-	LoginFound bool `json:"login_found"`
+	// session. Nil when the agent declares no login path.
+	LoginFound *bool `json:"login_found,omitempty"`
 	// "acp" when enhanced mode is installed and preferred, else "tui".
 	DefaultMode string `json:"default_mode"`
 	// EnhancedDefault: the agent prefers enhanced mode, installed or not.

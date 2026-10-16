@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
+import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
 import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -42,7 +43,7 @@ afterAll(() => {
 const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
 
 function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
-  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, ...over }
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, share_view: true, ...over }
 }
 
 const stop: AssistantConfirmation = {
@@ -136,10 +137,28 @@ describe('opening the assistant', () => {
     expect(useStore.getState().assistantOpen).toBe(true)
   })
 
-  it('opens from the keyboard shortcut', async () => {
+  it('opens from the keyboard shortcut and keeps the chord from a focused terminal or page', async () => {
     render(<AppShell />)
+    const forwarded = vi.fn((event: KeyboardEvent) => event.key === ' ' && event.ctrlKey)
+    document.body.addEventListener('keydown', forwarded)
     await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
+    document.body.removeEventListener('keydown', forwarded)
     expect(await panel()).toBeDefined()
+    expect(forwarded.mock.results.some((result) => result.value)).toBe(false)
+  })
+
+  it('closes from the keyboard shortcut while its own composer has focus', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    await userEvent.click(await within(aside).findByRole('textbox', { name: 'Message the assistant' }))
+    await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
+    expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Assistant' })))
+  })
+
+  it('titles itself below the page heading', async () => {
+    const aside = await openPanel()
+    expect(within(aside).getByRole('heading', { level: 2, name: 'Assistant' })).toBeDefined()
   })
 
   it('is absent for a viewer, who cannot launch, on every surface', async () => {
@@ -477,6 +496,8 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).toBe(first![1])
+    expect(first![2]).toMatchObject({ version: 1, route: { name: 'board' } })
+    expect(second![2]).toBe(first![2])
     expect(useStore.getState().assistantAttempt).toBeNull()
   })
 
@@ -493,6 +514,41 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).not.toBe(first![1])
+  })
+})
+
+describe('the view context', () => {
+  it('shows what is sent, and once turned off sends nothing more', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(api.assistantPrompt).mockResolvedValue({})
+      vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, share_view: false })
+      useStore.getState().navigate('run', { runId: 'run-8x2', view: 'changes' })
+      const aside = await openPanel()
+      acpOpen()
+      await act(() => vi.advanceTimersByTimeAsync(viewSyncDelay))
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(api.assistantView).mock.calls[0]![0].route).toMatchObject({ run_id: 'run-8x2', view: 'changes' })
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const chip = await within(aside).findByRole('button', { name: 'Sharing: run run-8x2 · Changes' })
+      expect(chip.getAttribute('aria-describedby')).toBeTruthy()
+      await user.click(chip)
+      expect(within(aside).getByRole('region', { name: 'Sent with this message' }).textContent).toContain('"run_id": "run-8x2"')
+      await user.click(within(aside).getByRole('checkbox', { name: 'Share the page I am on with the assistant' }))
+      expect(api.assistantSettings).toHaveBeenCalledWith({ share_view: false })
+      expect(within(aside).getByRole('button', { name: 'Not sharing this page' })).toBeDefined()
+
+      act(() => useStore.getState().navigate('board'))
+      await act(() => vi.advanceTimersByTimeAsync(5 * viewSyncDelay))
+      await user.type(within(aside).getByRole('textbox', { name: 'Message the assistant' }), 'what is this?{Enter}')
+      await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(api.assistantPrompt).mock.calls[0]![2]).toBeUndefined()
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(useStore.getState().assistantStatus?.share_view).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -595,23 +651,51 @@ describe('width', () => {
 
   it('clamps to the room beside the sidebar and re-clamps on resize', async () => {
     useStore.setState({ assistantWidth: 640, sidebarWidth: 260, sidebarCollapsed: false })
-    const resize = atViewport(1400)
+    const resize = atViewport(1500)
     const aside = await openPanel()
     expect(aside.style.width).toBe('640px')
-    resize(1000)
-    await waitFor(() => expect(aside.style.width).toBe('340px'))
+    resize(1200)
+    await waitFor(() => expect(aside.style.width).toBe('380px'))
     expect(useStore.getState().assistantWidth).toBe(640)
-    resize(1400)
+    resize(1500)
     await waitFor(() => expect(aside.style.width).toBe('640px'))
   })
 
-  it('becomes a sheet when even the smallest panel does not fit', async () => {
+  it('floats over main without a backdrop when docking would squeeze it, and closes on Escape', async () => {
     useStore.setState({ assistantWidth: 400, sidebarWidth: 260, sidebarCollapsed: false })
-    atViewport(768)
+    atViewport(1000)
     render(<AppShell />)
-    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(await screen.findByRole('dialog', { name: 'Assistant' })).toBeDefined()
+    const button = screen.getByRole('button', { name: 'Assistant' })
+    await userEvent.click(button)
+    const aside = await panel()
+    expect(screen.queryByRole('dialog', { name: 'Assistant' })).toBeNull()
+    expect(aside.style.width).toBe('400px')
+    expect(within(aside).queryByRole('separator', { name: 'Resize assistant' })).toBeNull()
+    expect(document.getElementById('main')?.closest('[inert], [aria-hidden="true"]')).toBeNull()
+
+    useStore.getState().setAssistantDraft('keep this')
+    await userEvent.click(within(aside).getByRole('button', { name: 'New conversation' }))
+    await userEvent.keyboard('{Escape}')
+    expect(await panel()).toBe(aside)
+    within(aside).getByRole('button', { name: 'Close assistant' }).focus()
+    await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(button))
+    expect(useStore.getState().assistantDraft).toBe('keep this')
+  })
+
+  it('keeps the same panel and its focused composer when it switches between docked and floating', async () => {
+    useStore.setState({ assistantWidth: 640, sidebarWidth: 260, sidebarCollapsed: false })
+    const resize = atViewport(1500)
+    const aside = await openPanel()
+    acpOpen()
+    const composer = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.click(composer)
+    resize(1000)
+    await waitFor(() => expect(within(aside).queryByRole('separator', { name: 'Resize assistant' })).toBeNull())
+    expect(await panel()).toBe(aside)
+    expect(aside.style.width).toBe('500px')
+    expect(document.activeElement).toBe(composer)
   })
 
   it('restores a stored width within its bounds', () => {

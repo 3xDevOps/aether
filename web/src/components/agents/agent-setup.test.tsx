@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { AgentSetup } from '@/components/agents/agent-setup'
 import { ModeComparison } from '@/components/agents/mode-comparison'
 import type { Api } from '@/lib/api'
@@ -87,6 +87,9 @@ describe('the Standard and Enhanced comparison', () => {
     ['omp', 'Runs with full permissions; its ACP mode has no asking option.'],
     ['pi', 'pi never asks for permission.'],
     ['opencode', "Runs with full permissions through its config; a workspace's own permission rules still apply."],
+    ['copilot', 'Runs with full permissions through --allow-all, which a run cannot take back.'],
+    ['gemini', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
+    ['cursor', "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the run for read-only."],
   ])('says how %s handles permissions in Enhanced', (name, note) => {
     render(<ModeComparison agent={{ ...codex, name }} value="acp" onChange={vi.fn()} />)
     expect(screen.getByRole('radio', { name: 'Enhanced' }).textContent).toContain(note)
@@ -148,6 +151,15 @@ describe('agent setup', () => {
     expect(useStore.getState().launchDefaults.claude.mode).toBe('acp')
   })
 
+  it("tells a Codex member to trust Aether's hooks once, and says nothing for Claude", () => {
+    setUp(codex)
+    expect(screen.getByText("Trust Aether's hooks once")).toBeDefined()
+    expect(screen.getByText(/choose Trust all and continue/)).toBeDefined()
+    cleanup()
+    setUp(claude)
+    expect(screen.queryByText("Trust Aether's hooks once")).toBeNull()
+  })
+
   it('installs the agent alone for Standard', async () => {
     const { client } = setUp(claude)
     fireEvent.click(screen.getByRole('button', { name: 'Install Claude Code' }))
@@ -203,6 +215,11 @@ describe('agent setup', () => {
     setUp({ ...claude, installed: true })
     expect(screen.getByText(/Start Claude Code, then type \/login/)).toBeDefined()
     expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nclaude')
+  })
+
+  it('types the Cursor login command with its agent executable', () => {
+    setUp(agentInfo({ name: 'cursor', display_name: 'Cursor CLI', executable: 'agent', enhanced: 'native' }))
+    expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nNO_OPEN_BROWSER=1 agent login')
   })
 
   it('types the install command on a gateway without agent.install', () => {

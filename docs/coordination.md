@@ -235,12 +235,17 @@ are four ways to notice mail:
    must not start an extra turn for that arrival.
 2. **A native wake can resume a live idle agent.** The loaded pi, OMP, and
    version-matched OpenCode integrations observe unread IDs with bounded
-   helper waits and use their native session APIs for a follow-up. The
-   server admits that wake only for the current eligible Standard run.
-3. **A boundary hook supplies context at the next native event.** Claude
-   Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI command hooks do not
-   watch an already-idle session. Mail arriving after their last hook waits
-   for the next supported boundary or explicit inbox read.
+   helper waits and use their native session APIs for a follow-up. Managed
+   Claude Code launches run an `asyncRewake` waiter that exits 2 to start a
+   turn. The server admits that wake only for the current eligible Standard
+   run.
+3. **A boundary hook supplies context at the next native event.** A manually
+   installed Claude Code `claude.json` and the Codex, Copilot CLI, Gemini CLI,
+   and Cursor CLI command hooks do not watch an already-idle session. Mail
+   arriving after their last hook waits for the next supported boundary or
+   explicit inbox read. Managed Standard Codex runs load their hooks
+   automatically, but Codex runs them only after you [trust them
+   once](harnesses.md#codex-inbox-integration).
 4. **An Enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox
@@ -267,8 +272,10 @@ in the transcript, so their hooks announce each notice once per state: the
 unread message IDs, the swarm state, and the overlapping files. A changed state is
 announced again; a Stop still blocks while mail is unread. The hook records
 what it announced in `$TMPDIR/aether-hook-<run>-<harness>.json`; a missing
-record repeats the notice. pi, OMP, and OpenCode add context per model call
-without keeping it, so their notices repeat.
+record repeats the notice. Claude's idle-wake waiter claims its session in
+`$TMPDIR/aether-hook-<run>-claude-wake` and adds the IDs it wakes for to the
+record. pi, OMP, and OpenCode add context per model call without keeping it,
+so their notices repeat.
 
 Every swarm worker's report, whatever its outcome, is forwarded to the
 current integrator as an ordinary inbox message: `from_run_id` is the
