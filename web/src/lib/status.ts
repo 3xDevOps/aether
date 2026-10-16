@@ -3,7 +3,6 @@ import {
   isPaused,
   memberName,
   needsYou,
-  supervised,
   unreadMail,
   unreadReason,
   waitingOn,
@@ -59,7 +58,7 @@ function liveState(run: RunRecord, ctx: StateContext): { state: PresentationStat
   const state = liveStateOf(run.status as 'running' | 'needs-attention', run.state)
   const waiter = waitingOn(run, ctx)
   if (waiter !== undefined) return { state: state === 'needs-you' ? 'idle' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
-  if (state === 'needs-you' && supervised(run, ctx)) return { state: 'waiting-agents', reason: 'Waiting for the integrator' }
+  if (state === 'needs-you' && run.mission_role === 'worker') return { state: 'waiting-agents', reason: 'Waiting for the integrator' }
   if (state === 'working' && run.toolActivity) {
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }

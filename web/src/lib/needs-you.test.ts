@@ -217,10 +217,12 @@ describe('needs you conditions', () => {
     ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
     ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
     ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
-    ['a Background question', { mode: 'headless', state: 'needs-you', reason: 'needs input: Which port?' }, 'needs-input'],
-    ['a Background request push does not announce', { mode: 'headless', state: 'needs-you' }, undefined],
-    ['a Background disconnect', { mode: 'headless', state: 'disconnected' }, 'disconnected'],
-    ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, undefined],
+    ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
+    ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, 'failed'],
+    ["a worker's request", { mission_role: 'worker', state: 'needs-you', reason: 'needs input: Which port?' }, undefined],
+    ["a worker's disconnect", { mission_role: 'worker', state: 'disconnected' }, undefined],
+    ["a worker's failure", { mission_role: 'worker', state: 'failed', outcome_unseen: true }, undefined],
+    ["a worker's blocked report", { mission_role: 'worker', state: 'needs-you', reason: 'blocked: no database access' }, 'blocked'],
     ['a finished run with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
     ['a live run with no state', { state: '' }, undefined],
   ] satisfies [string, Partial<Run>, NeedsYouID | undefined][])('attention for %s: %s', (_, fields, want) => {
@@ -426,23 +428,20 @@ describe('viewer scoping', () => {
 describe('swarm workers', () => {
   const stoppedWorker = record({ ...worker, mode: 'tui', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
 
-  it('leaves a worker to its live integrator', () => {
-    const ctx = stateContext({ runs: runRecords(integrator) })
-    expect(needsYou(stoppedWorker, ctx)).toBeUndefined()
-    expect(presentRun(stoppedWorker, ctx)).toEqual({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
+  it('leaves a worker to its integrator, live or not', () => {
+    for (const status of ['running', 'failed'] as const) {
+      const ctx = stateContext({ runs: runRecords({ ...integrator, status }) })
+      expect(needsYou(stoppedWorker, ctx)).toBeUndefined()
+      expect(presentRun(stoppedWorker, ctx)).toEqual({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
+    }
   })
 
-  it('counts a worker once its integrator is gone', () => {
-    const gone = stateContext({ runs: runRecords({ ...integrator, status: 'failed' }) })
-    expect(needsYou(stoppedWorker, gone)?.id).toBe('needs-input')
-  })
-
-  it('counts a worker while a human holds it', () => {
+  it('needs only the member holding a worker', () => {
     const held = stateContext({
       runs: runRecords(integrator),
       missionDetails: { mission_1: detail({ attempts: [attempt({ takeover_active: true, takeover_member_id: bob.id })] }) },
     })
-    expect(needsYou(stoppedWorker, held)?.id).toBe('needs-input')
+    expect(needsYou(stoppedWorker, held)).toBeUndefined()
     expect(needsYou(stoppedWorker, { ...held, viewerID: bob.id, viewerRole: bob.role })?.id).toBe('control-hold')
   })
 })

@@ -1337,7 +1337,7 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
-| `state` `failed` with `outcome_unseen` (labelled Failed), not Background | owner | Agent reported failure; review the result / the reason: Turn failed: … |
+| `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
 Needs you row does.
@@ -1369,17 +1369,15 @@ counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
 
 A condition that applies to someone else leaves the run in Working with
-"Waiting for Alice", labelled Idle when the run needs its owner. A worker in a
-running swarm with a live integrator counts only for a control hold or a
-blocked report: the integrator handles its stops and requests, and the worker
-reads Waiting on agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
+"Waiting for Alice", labelled Idle when the run needs its owner. A swarm
+worker counts only for a blocked report, as in push, or a control hold: its
+integrator handles its other requests, so a worker in `needs-you` reads
+Waiting on agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
-Background (`headless`) run reaches Needs you, as in push, only through a
-pending permission, the swarm rows, a control hold, `disconnected`, or
-`needs-you` with a reported question, blocker or usage limit; its failures
-list under Finished. It takes no input, so its row offers **Open**, not
-**Reply**. A Working run's reason is what its agent is
+Background (`headless`) run follows its `state` like any run; the server
+does not count its native questions, and neither does the dashboard. It takes
+no input, so its row offers **Open**, not **Reply**. A Working run's reason is what its agent is
 doing ("Reading src/auth.ts", from `run.agent`), else "Agent working". A
 reported success, unreviewed or not, is Finished and never lists in Needs
 you.

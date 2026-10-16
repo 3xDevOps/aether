@@ -74,7 +74,8 @@ interface Spec {
   resolvers: (run: RunRecord, ctx: StateContext) => (string | undefined)[]
   admins?: boolean
   background?: boolean
-  supervised?: boolean
+  /** Holds for a swarm worker too; any other row leaves a worker to its integrator. */
+  workers?: boolean
   /** A swarm's row, which holds whatever the run's own status. */
   swarm?: boolean
   reason: (run: RunRecord, ctx: StateContext) => string
@@ -89,7 +90,7 @@ function condition(spec: Spec): NeedsYouCondition {
   const holds = (run: RunRecord, ctx: StateContext) =>
     (spec.swarm || (isLive(run) && !isPaused(run, ctx))) &&
     (spec.background || run.mode !== 'headless') &&
-    (spec.supervised || !supervised(run, ctx)) &&
+    (spec.workers || run.mission_role !== 'worker') &&
     spec.holds(run, ctx)
   return {
     id: spec.id,
@@ -138,19 +139,6 @@ function attemptHold(run: RunRecord, ctx: StateContext) {
   if (run.mission_role !== 'worker' || !run.mission_id) return undefined
   return ctx.missionDetails[run.mission_id]?.attempts.find(
     (attempt) => attempt.run_id === run.id && attempt.takeover_active,
-  )
-}
-
-export function supervised(run: RunRecord, ctx: StateContext): boolean {
-  if (run.mission_role !== 'worker' || !run.integrator_run_id) return false
-  const integrator = ctx.runs[run.integrator_run_id]
-  const mission = missionOf(run, ctx)
-  return (
-    integrator !== undefined &&
-    !isTerminal(integrator.status) &&
-    swarmRunning(mission) &&
-    !mission?.integrator_launch_error &&
-    attemptHold(run, ctx) === undefined
   )
 }
 
@@ -328,7 +316,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'control-hold',
     target: 'terminal',
     background: true,
-    supervised: true,
+    workers: true,
     holds: (run, ctx) => attemptHold(run, ctx)?.takeover_member_id !== undefined,
     resolvers: (run, ctx) => [attemptHold(run, ctx)?.takeover_member_id],
     reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
@@ -348,7 +336,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'blocked',
     target: 'terminal',
     background: true,
-    supervised: true,
+    workers: true,
     holds: (run) => run.state === 'needs-you' && run.reason?.startsWith(blockedPrefix) === true,
     resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
     reason: (run) =>
@@ -359,8 +347,8 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'needs-input',
     target: 'run',
     background: true,
-    // Any other needs-you is a request not loaded here yet, so it reads neutrally. A Background run, as in push, shows only a reported question or a usage limit.
-    holds: (run) => run.state === 'needs-you' && (run.mode !== 'headless' || asks(run) || usageLimited(run)),
+    // Any other needs-you is a request not loaded here yet, so it reads neutrally.
+    holds: (run) => run.state === 'needs-you',
     resolvers: (run) => [run.member_id],
     reason: (run) => (asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'),
     // A Background run takes no input.
@@ -370,6 +358,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'failed',
     state: 'failed',
     target: 'changes',
+    background: true,
     holds: (run) => run.state === 'failed' && run.outcome_unseen === true,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
