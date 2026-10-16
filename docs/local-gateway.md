@@ -218,7 +218,12 @@ with `-32004` and `the server stopped answering keepalives`. Requests that
 arrive while a dial is in progress wait for that one dial, each only as long
 as its own request lasts, and a dial gives up after 90 seconds. A dial
 abandoned because the link changed, by `link.apply` or a config reload,
-hands its waiting requests to a dial of the new link. A link (`link.apply`, `edge.link`, `edge.claim`,
+hands its waiting requests to a dial of the new link. The gateway reloads
+`config.json` on every request whose file has changed, so `aether link` in
+a terminal moves the next request onto the server it names, stopping the
+forwards and syncs `link.switch` stops. A request that arrives while a
+switch, a sync start or a forward start is in progress serves the current
+link and leaves the reload to a later request rather than wait. A link (`link.apply`, `edge.link`, `edge.claim`,
 `edge.join`) is bounded the same way, including the `server.info` call that
 completes it.
 
@@ -244,6 +249,38 @@ update fixes it. `server.info` and `server.update_status` still answer,
 and so do the `update.*` verbs, which never call the server. The server
 gateway is never refused, because it runs inside the server. See
 [install.md](install.md#when-the-server-refuses-an-older-client).
+
+A failure on the way through an edge also carries error data naming the
+layer that failed, so the dashboard never reports one layer as another:
+
+```json
+{"refusal":{"kind":"server-not-connected","refusal":"server is not connected to the edge"},
+ "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.onaether.dev",
+                            "account":"github account dana",
+              "online":[{"id":"<other id>","name":"prod","online":true,"role":"admin",
+                         "access_policy":"approved-devices","kind":"self-hosted"}]}}
+```
+
+| `layer` | What failed | Typical cause |
+| --- | --- | --- |
+| `client-edge` | This machine reaching the edge | DNS, TCP, TLS or a proxy failed, the edge speaks another protocol version, or it rate-limited this address |
+| `authorization` | This device's standing | Not signed in to the edge, a revoked token, not a member, a pending or revoked device, an account mismatch |
+| `server-registration` | The server's own connection to the edge | Kinds `server-not-connected` (no live registration), `server-not-claimed` (connected while its claim is still being recorded; retry), `unknown-server`, or a server that did not attach |
+| `end-to-end` | The relayed connection to the server | The SSH handshake, a host key that does not derive the server id, a call with no answer, or a connection the server stopped answering |
+
+`refusal` is present when the server, the edge or this client refused,
+with the refusal's `kind`. `server_id` is the server the gateway dialed and
+`edge` the edge host it dialed through; `account` is the account this
+device is signed in to that edge as. `online`, only for
+`server-registration`, lists the other servers of that account the edge
+sees online, each as the edge's server list reports it: a server
+reinstalled under a new id shows up there while the link still names the
+old one, and the message names `aether link --from-edge <id>`.
+
+A link with an address carries `edge_path` only when a dial fails on both
+paths, with the edge path's layer. A failure on a connection already open
+carries no `edge_path`, since that connection may run over either path; a
+link with an address and no edge never carries one.
 
 The server gateway performs the equivalent identity lookup on each request.
 WhoIs failures are refused before dispatch; a tagged node is denied and an

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/webgate"
 )
@@ -41,6 +42,7 @@ type sshBackend struct {
 type dialAttempt struct {
 	done   chan struct{}
 	cancel context.CancelFunc
+	cfg    cli.Config
 	conn   *cli.Conn
 	err    error
 }
@@ -115,28 +117,29 @@ func (b *sshBackend) swap(conn *cli.Conn) *cli.Conn {
 	return old
 }
 
-// live returns the shared connection, dialing if needed. Concurrent callers
-// share one dial, and each stops waiting when its own ctx ends. Dial errors
-// come back classified so every surface reports them identically.
-// A dial that Relink abandoned sends its callers back for the new config.
-func (b *sshBackend) live(ctx context.Context) (*cli.Conn, error) {
+// live returns the shared connection and the link it was dialed for,
+// dialing if needed. Concurrent callers share one dial, and each stops
+// waiting when its own ctx ends. Dial errors come back classified so every
+// surface reports them identically. A dial that Relink abandoned sends its
+// callers back for the new config.
+func (b *sshBackend) live(ctx context.Context) (*cli.Conn, cli.Config, error) {
 	for {
 		b.mu.Lock()
 		if b.conn != nil {
-			conn := b.conn
+			conn, cfg := b.conn, b.cfg
 			b.mu.Unlock()
-			return conn, nil
+			return conn, cfg, nil
 		}
 		if b.closed {
 			b.mu.Unlock()
-			return nil, unreachableError(errClosed)
+			return nil, cli.Config{}, unreachableError(errClosed)
 		}
 		d := b.dialing
 		if d == nil {
 			dialCtx, cancel := context.WithTimeout(context.Background(), dialTimeout)
-			d = &dialAttempt{done: make(chan struct{}), cancel: cancel}
+			d = &dialAttempt{done: make(chan struct{}), cancel: cancel, cfg: b.cfg}
 			b.dialing = d
-			go b.dial(dialCtx, d, b.cfg)
+			go b.dial(dialCtx, d)
 		}
 		b.mu.Unlock()
 		select {
@@ -145,18 +148,18 @@ func (b *sshBackend) live(ctx context.Context) (*cli.Conn, error) {
 				continue
 			}
 			if d.err != nil {
-				return nil, unreachableError(d.err)
+				return nil, cli.Config{}, unreachableError(d.err)
 			}
-			return d.conn, nil
+			return d.conn, d.cfg, nil
 		case <-ctx.Done():
-			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "request cancelled"}
+			return nil, cli.Config{}, &protocol.Error{Code: protocol.CodeUnavailable, Message: "request cancelled"}
 		}
 	}
 }
 
-func (b *sshBackend) dial(ctx context.Context, d *dialAttempt, cfg cli.Config) {
+func (b *sshBackend) dial(ctx context.Context, d *dialAttempt) {
 	defer d.cancel()
-	conn, err := dialLink(ctx, cfg)
+	conn, err := dialLink(ctx, d.cfg)
 	var stale *cli.Conn
 	b.mu.Lock()
 	if b.dialing == d {
@@ -220,6 +223,17 @@ func (b *sshBackend) invalidate(conn *cli.Conn) {
 	if cached {
 		_ = conn.Close()
 	}
+}
+
+// endToEnd marks err, a failure on a connection already open to the
+// server of cfg, as the end-to-end layer of the edge path when cfg
+// reaches that server through an edge only. A link with an address too
+// may be connected either way, so its failure names no edge.
+func endToEnd(cfg cli.Config, err error) error {
+	if cfg.ServerID == "" || cfg.EdgeURL == "" || cfg.Addr != "" {
+		return err
+	}
+	return &cli.EdgePathError{Layer: cli.LayerEndToEnd, ServerID: cfg.ServerID, Edge: edgeclient.HostOf(cfg.EdgeURL), Err: err}
 }
 
 // unreachableError classifies a transport failure for the SPA, which routes on
@@ -297,14 +311,14 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 // callOnce drops the connection on transport failures and wedges so the next
 // attempt redials; server refusals and cancellations leave it alone.
 func (b *sshBackend) callOnce(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
-	conn, err := b.live(ctx)
+	conn, cfg, err := b.live(ctx)
 	if err != nil {
 		return nil, err
 	}
 	client, err := conn.Control()
 	if err != nil {
 		b.invalidate(conn)
-		return nil, err
+		return nil, endToEnd(cfg, err)
 	}
 	result, err := roundTrip(ctx, client, method, params)
 	if err == nil {
@@ -322,11 +336,11 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 	case errors.Is(err, errWedged):
 		// Coded so Call does not retry: a second wait on a wedged path
 		// doubles the worst case.
-		return nil, unreachableError(err)
+		return nil, unreachableError(endToEnd(cfg, err))
 	case silent:
-		return nil, fmt.Errorf("%w: %w", errSilent, err)
+		return nil, endToEnd(cfg, fmt.Errorf("%w: %w", errSilent, err))
 	}
-	return nil, err
+	return nil, endToEnd(cfg, err)
 }
 
 // noReplay holds the methods unsafe to run twice: a second run creates a
@@ -442,7 +456,7 @@ func (b *sshBackend) alive(conn *cli.Conn) bool {
 // (attach/sync ack refusals are untyped, hence the keepalive probe); only a
 // dead connection is invalidated, redialed and retried once.
 func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, error)) (T, error) {
-	conn, err := b.live(ctx)
+	conn, _, err := b.live(ctx)
 	if err != nil {
 		var zero T
 		return zero, err
@@ -453,7 +467,7 @@ func stream[T any](ctx context.Context, b *sshBackend, open func(*cli.Conn) (T, 
 		return out, oerr
 	}
 	b.invalidate(conn)
-	conn, err = b.live(ctx)
+	conn, _, err = b.live(ctx)
 	if err != nil {
 		var zero T
 		return zero, err
