@@ -178,13 +178,21 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	default:
 		_, _ = fmt.Fprintln(tw, "owner\tnone; get a claim code with `aether-server edge claim-code`")
 	}
+	stale := status.Stale(now)
 	switch {
 	case !ran:
 		_, _ = fmt.Fprintln(tw, "connection\tnever connected; the server has not run with this edge")
+	case stale != nil:
+		_, _ = fmt.Fprintf(tw, "connection\tstale: reported connected since %s, but %v\n", status.Since.Local().Format(time.DateTime), stale)
+		_, _ = fmt.Fprintln(tw, "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50")
 	case status.Connected:
-		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s\n", status.Since.Local().Format(time.DateTime))
+		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s; the edge answered a ping %s ago\n",
+			status.Since.Local().Format(time.DateTime), now.Sub(status.Heartbeat).Round(time.Second))
 	default:
 		_, _ = fmt.Fprintf(tw, "connection\tdisconnected since %s: %s\n", status.Since.Local().Format(time.DateTime), status.Error)
+	}
+	if ran {
+		_, _ = fmt.Fprintln(tw, "measures\tthe server->edge control connection; it does not prove clients can reach the server")
 	}
 	return tw.Flush()
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ var errDrain = errors.New("edge is restarting (drain)")
 type session struct {
 	c       *websocket.Conn
 	edgeKey ed25519.PublicKey
+	// since is when the session enrolled.
+	since time.Time
 
 	mu sync.Mutex
 	// transfers holds, by report id, each transfer waiting for the edge's
@@ -187,7 +190,7 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer cancel()
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
-	s := &session{c: c, edgeKey: ready.EdgeKey, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
+	s := &session{c: c, edgeKey: ready.EdgeKey, since: start, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
 	if err = a.setEdgeState(ready.State); err != nil {
 		return time.Since(start), err
 	}
@@ -199,7 +202,7 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	// connected only once transfers and claims can use the session.
 	a.setLive(s)
 	defer a.setLive(nil)
-	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
+	a.beat(s, time.Now())
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -272,6 +275,11 @@ func (a *Agent) ping(ctx context.Context, s *session) {
 			}
 		}
 	}
+}
+
+// beat records that the edge answered on s at now.
+func (a *Agent) beat(s *session, now time.Time) {
+	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: s.since, PID: os.Getpid(), Heartbeat: now})
 }
 
 func (a *Agent) setLive(s *session) {
@@ -355,6 +363,7 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 				return err
 			}
 		case edgeproto.Pong:
+			a.beat(s, time.Now())
 		case edgeproto.Open:
 			a.open(s, m)
 		case edgeproto.DeviceRevoked:

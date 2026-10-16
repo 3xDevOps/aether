@@ -403,7 +403,7 @@ state](#transfer-and-the-ownerless-state)).
 
 | Command | Does |
 | --- | --- |
-| `sudo aether-server edge status` | Edge, access policy, server id, pinned edge key, owner or claim code state, connection state |
+| `sudo aether-server edge status` | Edge, access policy, server id, pinned edge key, owner or claim code state, state of the server's control connection to the edge |
 | `sudo aether-server edge claim-code [--admin <member id>]` | Issue a new claim code, replacing the old one. Refused while the server has an owner, and without `--admin` while it has members. `--admin` names an existing admin the claim binds the claiming account to ([Console recovery](#console-recovery)) |
 | `sudo aether-server edge trust` | Fetch the edge's signing key from `GET <edge>/v1/edge`, show both fingerprints, and pin it after you type `yes` |
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner and the claim code, set `edge-url ""` |
@@ -419,8 +419,26 @@ edge access  approved-devices
 server id    <server id>
 edge key     SHA256:<fingerprint>
 owner        github <login> (subject <user id>)
-connection   connected since <time>
+connection   connected since <time>; the edge answered a ping 12s ago
+measures     the server->edge control connection; it does not prove clients can reach the server
 ```
+
+`connection` is read from `status.json`, which the running server
+rewrites each time the edge answers one of its pings, every 20 seconds.
+`edge status` reports `stale` instead of `connected` when the server
+process recorded there is no longer running, which a crash or `kill -9`
+leaves, or when no ping was answered for 40 seconds, which a hung server
+or a connection that died without either end noticing leaves:
+
+```
+connection   stale: reported connected since <time>, but server process <pid> is not running; it stopped without closing the connection
+next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50
+```
+
+A connected server can still be unreachable for a client: the client's
+own path to the edge, its sign-in, or its device approval can fail. A
+connection a client opens through the edge is the only test of the whole
+path.
 
 The server pins the edge's signing key on first enrollment. A different key
 later is refused, and the server keeps retrying with this error in its log
@@ -462,7 +480,7 @@ the edge's host names. Directories are mode 0700, files 0600:
 | `keys/sha256-<fingerprint>/owner.json` | The account that owns the server at the edge holding that key; the fingerprint is the key's, with `+` and `/` written `-` and `_` |
 | `keys/sha256-<fingerprint>/edge_state.json` | Whether the edge holding that key last reported the server `claimed` or `unclaimed`, with the server id it reported it for, read at startup; while `unclaimed`, invitations and account links are refused. A record for another server id, left by a changed SSH host key, is ignored |
 | `claim.json` | The claim code's SHA-256 hash, expiry, attempts left and the admin `--admin` named; never the code |
-| `status.json` | Last connection state, for `edge status` |
+| `status.json` | Last connection state, for `edge status`: while connected, the server's process id and when the edge last answered a ping |
 | `lock` | Serializes claim attempts and owner changes between the server and the commands |
 | `access_policy.json` | The policy of the last start, to log a change |
 
