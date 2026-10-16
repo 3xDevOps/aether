@@ -317,9 +317,11 @@ type RunReportParams struct {
 	UsageLimit bool `json:"usage_limit,omitempty"`
 	// Tools marks a working report whose background tasks are all tools the
 	// agent waits on. Subagent marks a subagent's activity, which carries no
-	// State and only keeps the run from stalling.
-	Tools    bool `json:"tools,omitempty"`
-	Subagent bool `json:"subagent,omitempty"`
+	// State and only keeps the run from stalling. TurnStart marks a working
+	// report sent as a prompt starts a turn.
+	Tools     bool `json:"tools,omitempty"`
+	Subagent  bool `json:"subagent,omitempty"`
+	TurnStart bool `json:"turn_start,omitempty"`
 }
 
 // RunReportResult is the result of run.report. It is empty: the caller is

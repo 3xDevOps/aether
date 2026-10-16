@@ -164,7 +164,8 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 		return protocol.RunReportResult{}, internalError(protocol.MethodRunReport, ErrNoReportSink)
 	}
 	report := agentstatus.Report{State: state, Reason: reportReason(p.Reason), InputUpdates: p.InputUpdates, SessionID: p.SessionID,
-		UsageLimit: p.UsageLimit && state == agentstatus.Idle, Tools: p.Tools && state == agentstatus.Working, Subagent: p.Subagent}
+		UsageLimit: p.UsageLimit && state == agentstatus.Idle, Tools: p.Tools && state == agentstatus.Working, Subagent: p.Subagent,
+		TurnStart: p.TurnStart && state == agentstatus.Working}
 	if report.SessionID != "" && !domain.ValidAgentSessionID(report.SessionID) {
 		slog.Warn("coord: run.report carries an unusable session id; ignoring it", "run", run, "bytes", len(report.SessionID))
 		report.SessionID = ""

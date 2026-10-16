@@ -107,6 +107,7 @@ func report(args []string) {
 		UsageLimit:   rep.UsageLimit,
 		Tools:        rep.Tools,
 		Subagent:     rep.Subagent,
+		TurnStart:    rep.TurnStart,
 	}, nil)
 	if err != nil {
 		warn("report %s: %v", harness, err)
