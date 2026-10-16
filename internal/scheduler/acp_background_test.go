@@ -14,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -335,7 +336,7 @@ func TestBackgroundRunOverACPResendsTaskToANewSession(t *testing.T) {
 				prompts = append(prompts, it.Message.Text)
 			}
 		}
-		return reset && slices.Equal(prompts, []string{s2.withCoAuthorInstruction(acpmock.PromptWait, false, false), s2.withCoAuthorInstruction(acpmock.PromptWait, false, false)})
+		return reset && slices.Equal(prompts, []string{withInstructions(acpmock.PromptWait, s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})), withInstructions(acpmock.PromptWait, s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}))})
 	})
 	if err := s2.ACPCancel(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
@@ -360,7 +361,7 @@ func TestBackgroundRunKeepsCommandLine(t *testing.T) {
 			if run.ACP {
 				t.Fatal("the background run is driven over ACP")
 			}
-			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", e.sched.withCoAuthorInstruction("say pong", false, true)}) {
+			if cmd := e.rt.byName(string(run.ID)).spec.Command; !slices.Equal(cmd, []string{"fake-agent", "-p", withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{Role: coordhooks.RoleBackground, Background: true}))}) {
 				t.Fatalf("container command %q, want the headless command line", cmd)
 			}
 			if execs := rt.all(); len(execs) != 0 {

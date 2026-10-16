@@ -11,7 +11,12 @@ import (
 )
 
 // Claude Code takes one --settings value, so the status reporter, the inbox
-// hooks and the idle-wake waiter share a single document.
+// hooks and the idle-wake waiter share a single document. It leaves out the
+// inbox Stop hook: Claude Code runs Stop hooks in parallel, so its block for
+// unread mail would continue a turn the reporter already ended. At turn end
+// the waiter wakes a new turn for mail no hook has announced. The inbox Stop
+// of a manual claude.json copy exits early under AETHER_MANAGED_HOOKS=1, so
+// it does nothing inside a managed launch.
 func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 	inbox, err := coordhooks.Files.ReadFile("claude.json")
 	if err != nil {
@@ -25,6 +30,7 @@ func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 	if err != nil {
 		return NativeLaunch{}, fmt.Errorf("decode claude native coordination asset: %w", err)
 	}
+	delete(extra, "Stop")
 	for event, entries := range extra {
 		merged[event] = append(merged[event], entries...)
 	}
@@ -50,6 +56,7 @@ func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 		Args:           []string{"--settings", path.Join(dir, agentstatus.ClaudeSettingsName)},
 		ReplacesStatus: true,
 		Reporter:       ReporterFull,
+		IdleWake:       true,
 	}, nil
 }
 

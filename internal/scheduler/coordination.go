@@ -465,11 +465,14 @@ type coordinationLaunch struct {
 	reporter harness.Reporter
 }
 
-func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profile, native harness.NativeLaunch) (coordinationLaunch, error) {
+// newCoordinationLaunch wires lifecycle reporting and, for a launch that
+// does not speak ACP, instructions into context the agent keeps through
+// compaction.
+func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, instructions string) (coordinationLaunch, error) {
 	l := coordinationLaunch{files: make(map[string][]byte), reporter: harness.ReporterNone}
 	maps.Copy(l.files, native.Files)
-	// Lifecycle reporting follows conflict policy; taskless discovery only needs
-	// the run transport. User-supplied MCP configuration is never rewritten.
+	// Lifecycle reporting follows conflict policy; instructions only need the
+	// run transport. User-supplied MCP configuration is never rewritten.
 	if enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone && !native.ReplacesStatus {
 		maps.Copy(l.files, profile.StatusFiles)
 		l.args = append(l.args, profile.StatusLaunchArgs(coordtransport.MountDir)...)
@@ -479,13 +482,23 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 	if native.ReplacesStatus {
 		l.reporter = native.Reporter
 	}
-	if run.Mode == domain.LaunchTUI && run.Task == "" {
-		if l.env == nil && len(profile.DiscoveryEnv) > 0 {
-			l.env = make(map[string]string, len(profile.DiscoveryEnv))
+	if native.IdleWake {
+		if l.env == nil {
+			l.env = make(map[string]string, 1)
 		}
-		maps.Copy(l.files, profile.DiscoveryFiles)
-		l.args = append(l.args, profile.DiscoveryLaunchArgs(coordtransport.MountDir)...)
-		if err := harness.MergeEnv(l.env, profile.DiscoveryLaunchEnv(coordtransport.MountDir)); err != nil {
+		l.env[coordtransport.WakeEnv] = "1"
+	}
+	if !run.ACP && instructions != "" {
+		l.args = append(l.args, profile.InstructionLaunchArgs(coordtransport.MountDir, instructions)...)
+		if profile.InstructionsFile != "" {
+			l.files[profile.InstructionsFile] = []byte(instructions + "\n")
+		}
+		env := map[string]string{coordtransport.RoleCardEnv: "1"}
+		maps.Copy(env, profile.InstructionLaunchEnv(coordtransport.MountDir))
+		if l.env == nil {
+			l.env = make(map[string]string, len(env))
+		}
+		if err := harness.MergeEnv(l.env, env); err != nil {
 			return coordinationLaunch{}, err
 		}
 	}
@@ -493,7 +506,11 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 }
 
 func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, entry *supervised, run *domain.Run, profile harness.Profile, native harness.NativeLaunch, digest, bin string, cliMount runtime.Mount) (mounts []runtime.Mount, launchArgs []string, launchEnv map[string]string, err error) {
-	launch, err := newCoordinationLaunch(c.enabled, run, profile, native)
+	instructions, err := s.launchInstructions(ctx, run, profile, entry.missionAssigned, native)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	launch, err := newCoordinationLaunch(c.enabled, run, profile, native, instructions)
 	if err != nil {
 		return nil, nil, nil, err
 	}

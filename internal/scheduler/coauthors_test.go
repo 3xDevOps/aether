@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/harness"
 )
 
 // countTimelineEvents drains what the subscription has already queued and
@@ -415,36 +415,34 @@ func TestConcurrentSteersBothReachTheCoAuthorList(t *testing.T) {
 func TestRunInstructionsCarryTheReportRuleOnlyWithLifecycleReporting(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	if got := e.sched.runInstructions(false, false); got != "" {
+	if got := e.sched.runInstructions(coordhooks.Guide{RunID: "run-1", Role: coordhooks.RoleInteractive}); got != "" {
 		t.Fatalf("instructions %q without a run transport, want none", got)
 	}
 	for _, enabled := range []bool{false, true} {
 		e.sched.UseCoordination(&fakeCoordinator{root: t.TempDir()}, t.TempDir(), enabled)
-		got := e.sched.runInstructions(false, false)
-		if !strings.Contains(got, coAuthorInstruction) || strings.Contains(got, harness.InteractiveReportInstruction) == !enabled {
+		got := e.sched.runInstructions(coordhooks.Guide{RunID: "run-1", Role: coordhooks.RoleInteractive})
+		if !strings.Contains(got, "run-1") || !strings.Contains(got, coAuthorInstruction) || strings.Contains(got, "--outcome") != enabled {
 			t.Fatalf("enabled=%v instructions %q", enabled, got)
 		}
 	}
 }
 
-func TestRunInstructionsPickTheReportRuleByRole(t *testing.T) {
+func TestRunGuidePrefersTheMissionRole(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	e.sched.UseCoordination(&fakeCoordinator{root: t.TempDir()}, t.TempDir(), true)
+	run, _ := e.launchFake(t, "task")
 	for _, tc := range []struct {
-		name                 string
-		assigned, background bool
-		want                 string
-		wantNeedsInput       bool
+		run                        domain.RunID
+		assigned, background, wake bool
+		want                       coordhooks.Guide
 	}{
-		{"interactive", false, false, harness.InteractiveReportInstruction, true},
-		{"background", false, true, harness.BackgroundReportInstruction, false},
-		{"assigned", true, false, harness.AssignedReportInstruction, false},
-		{"assigned background", true, true, harness.AssignedReportInstruction, false},
+		{run.ID, false, false, true, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}},
+		{run.ID, false, true, true, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleBackground, Background: true}},
+		{run.ID, true, false, false, coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleMission}},
+		{"", true, true, false, coordhooks.Guide{Role: coordhooks.RoleMission, Background: true}},
 	} {
-		got := e.sched.runInstructions(tc.assigned, tc.background)
-		if !strings.Contains(got, tc.want) || strings.Contains(got, "needs-input") != tc.wantNeedsInput {
-			t.Errorf("%s: instructions %q, want %q with needs-input=%v", tc.name, got, tc.want, tc.wantNeedsInput)
+		if got := e.sched.runGuide(t.Context(), tc.run, tc.assigned, tc.background, tc.wake); got != tc.want {
+			t.Errorf("runGuide(%q, %v, %v, %v) = %+v, want %+v", tc.run, tc.assigned, tc.background, tc.wake, got, tc.want)
 		}
 	}
 }
