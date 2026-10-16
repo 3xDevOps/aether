@@ -1040,3 +1040,103 @@ func TestLocalLinkRepoWithoutAnOriginRecordsNothing(t *testing.T) {
 		t.Fatalf("workspace.origin called with %s, want no call", call)
 	}
 }
+
+// blockingOriginBackend holds workspace.origin until released, the way a
+// slow server holds link.repo's backend call.
+type blockingOriginBackend struct {
+	verbStubBackend
+	recording chan struct{}
+	release   chan struct{}
+}
+
+func (b *blockingOriginBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	if method == protocol.MethodWorkspaceOrigin {
+		close(b.recording)
+		<-b.release
+	}
+	return b.verbStubBackend.Call(ctx, method, params)
+}
+
+// /api and /ws reload the link config on every request; a link.repo
+// waiting on the server must not hold them up.
+func TestAPIAnswersWhileLinkRepoWaitsOnTheServer(t *testing.T) {
+	useTempConfigDir(t)
+	backend := &blockingOriginBackend{
+		verbStubBackend: *workspaceListBackend(`{"id":"ws_1","name":"app","base_branch":"main","created_at":""}`),
+		recording:       make(chan struct{}),
+		release:         make(chan struct{}),
+	}
+	g := newVerbGateway(t, backend, cli.Config{Addr: "host:2222", User: "alice"})
+	repo := t.TempDir()
+	localGit(t, repo, "init")
+	localGit(t, repo, "remote", "add", "origin", "https://github.com/acme/app.git")
+	linked := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		linked <- do(g, http.MethodPost, "/local/v1/link.repo", `{"repo":`+strconv.Quote(repo)+`,"workspace_id":"ws_1"}`, true)
+	}()
+	<-backend.recording
+
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() { answered <- do(g, http.MethodPost, "/api/v1/workspace.list", "{}", true) }()
+	select {
+	case rec := <-answered:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("workspace.list = %d: %s", rec.Code, rec.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("/api waited on link.repo's call to the server")
+	}
+	close(backend.release)
+	if rec := <-linked; rec.Code != http.StatusOK {
+		t.Fatalf("link.repo = %d: %s", rec.Code, rec.Body)
+	}
+}
+
+// A link to another server saved in a terminal moves the gateway the way
+// link.switch does: syncs and forwards name the old server's runs, so they
+// stop rather than follow the backend onto the new server. A change that
+// keeps the server leaves them running.
+func TestTerminalRelinkStopsSyncsAndForwards(t *testing.T) {
+	useTempConfigDir(t)
+	start := time.Unix(1_700_000_000, 0)
+	cfg := cli.Config{Addr: "old:2222", Repo: t.TempDir()}
+	saveConfigAt(t, cfg, start)
+	backend := &switchBackend{}
+	g := newVerbGateway(t, backend, cfg)
+	defer func() { _ = g.Close() }()
+	g.local.sync.NewSession = func(string, overlay.Dialer) (localops.OverlaySession, error) {
+		return &stubOverlaySession{runErr: make(chan error, 1)}, nil
+	}
+	if rec := do(g, http.MethodPost, "/local/v1/sync.start", `{"run_id":"run_1"}`, true); rec.Code != http.StatusOK {
+		t.Fatalf("sync.start = %d: %s", rec.Code, rec.Body)
+	}
+	port := strconv.Itoa(freeLocalForwardPort(t))
+	if rec := do(g, http.MethodPost, "/local/v1/forward.start", `{"target":"run:run_1","port":`+port+`}`, true); rec.Code != http.StatusOK {
+		t.Fatalf("forward.start = %d: %s", rec.Code, rec.Body)
+	}
+
+	cfg.Repo = t.TempDir()
+	saveConfigAt(t, cfg, start.Add(time.Second))
+	if rec := do(g, http.MethodPost, "/api/v1/workspace.list", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("workspace.list = %d: %s", rec.Code, rec.Body)
+	}
+	if syncs := g.local.sync.Status(); len(syncs) != 1 || syncs[0].State != "running" || len(g.local.forward.Status()) != 1 {
+		t.Fatalf("a repo change stopped syncs %+v or forwards %+v", g.local.sync.Status(), g.local.forward.Status())
+	}
+
+	cfg.Addr = "new:2222"
+	saveConfigAt(t, cfg, start.Add(2*time.Second))
+	if rec := do(g, http.MethodPost, "/api/v1/workspace.list", "{}", true); rec.Code != http.StatusOK {
+		t.Fatalf("workspace.list = %d: %s", rec.Code, rec.Body)
+	}
+	backend.mu.Lock()
+	relinked := append([]cli.Config(nil), backend.relinked...)
+	backend.mu.Unlock()
+	if len(relinked) != 1 || relinked[0].Addr != "new:2222" {
+		t.Fatalf("relinked = %+v, want new:2222 alone", relinked)
+	}
+	syncs := g.local.sync.Status()
+	if len(syncs) != 1 || syncs[0].State != "stopped" || len(g.local.forward.Status()) != 0 {
+		t.Fatalf("after relink, syncs %+v and forwards %+v still run", syncs, g.local.forward.Status())
+	}
+}
