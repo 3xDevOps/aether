@@ -6,6 +6,7 @@ import { expect, test } from './fixtures'
 
 test('auto-approval is turned on only after the warning and is stored on the server', async ({ page, aether }) => {
   const alice = await aether.member('alice')
+  await alice.api.local('link.apply', { addr: aether.server.addr, name: alice.name })
   const settings = () => alice.api.rpc<{ auto_approve: boolean }>('assistant.settings')
 
   await page.goto(alice.url)
