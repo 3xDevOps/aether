@@ -8,6 +8,8 @@ export type DesktopControls = {
   close: () => void
   isMaximized: () => Promise<boolean>
   onMaximizedChange: (cb: (maximized: boolean) => void) => () => void
+  /** The title bar's native menu at a right-click; absent in older shells. */
+  showMenu?: (x: number, y: number) => void
 }
 
 /** What `desktop/preload.js` puts on `window`. */
@@ -21,6 +23,10 @@ export type AetherDesktop = {
   chooseFolder?: () => Promise<string>
   /** A folder picked after `chooseFolder` rejected; absent in older shells too. */
   onFolderChosen?: (cb: (path: string) => void) => () => void
+  /** The shell's Check for Updates… menu item; absent in older shells. */
+  onCheckForUpdates?: (cb: () => void) => () => void
+  /** Shown only while no app window is focused, once per version. */
+  notifyUpdate?: (update: { version: string; title: string; body: string }) => void
 }
 
 export function desktopBridge(): AetherDesktop | undefined {

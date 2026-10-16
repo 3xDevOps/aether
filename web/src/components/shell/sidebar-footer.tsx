@@ -15,7 +15,7 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from '@/components/ui/menu'
-import { useUpdateNotice } from '@/components/update-banner'
+import { useCheckForUpdates, useUpdateNotice } from '@/components/update-banner'
 import { useIsMobile } from '@/lib/breakpoints'
 import { TeamSummary } from '@/routes/team/budget'
 import { useStore } from '@/store'
@@ -51,9 +51,7 @@ export function SidebarFooter() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const openShortcuts = useStore((s) => s.setShortcutsOpen)
-  const openUpdates = useStore((s) => s.setUpdatesOpen)
-  const clearDismissed = useStore((s) => s.clearDismissedUpdates)
-  const update = useUpdateNotice(true)
+  const checkForUpdates = useCheckForUpdates()
   const mobile = useIsMobile()
   const openProfile = useStore((s) => s.setProfileOpen)
   const name = self?.display_name ?? 'Not signed in'
@@ -105,17 +103,10 @@ export function SidebarFooter() {
               <MenuSubContent>{themeItems}</MenuSubContent>
             </MenuSub>
           )}
-          {update?.action && (
-            <MenuItem
-              onSelect={() => {
-                clearDismissed()
-                openUpdates(true)
-              }}
-            >
-              <ArrowUpCircle />
-              Update…
-            </MenuItem>
-          )}
+          <MenuItem onSelect={checkForUpdates}>
+            <ArrowUpCircle />
+            Check for updates…
+          </MenuItem>
           <TeamSummary heading={<><MenuSeparator /><MenuLabel>Team</MenuLabel></>} />
         </MenuContent>
       </Menu>

@@ -1,4 +1,5 @@
-import { packagedLine, useUpdateNotice } from '@/components/update-banner'
+import { packagedLine, useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/components/update-banner'
+import { checkedTime, verbatim } from '@/components/update-banner-shared'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code'
@@ -7,6 +8,7 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { releaseFinishedPlan } from '@/lib/commands'
 import { api, type Api } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { memberName, resolveMember } from '@/lib/member-name'
 import type { DiskUsage } from '@/lib/types'
@@ -36,11 +38,17 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const info = useStore((s) => s.info)
   const admin = useIsAdmin()
   const update = useUpdateNotice(true)
+  const { server, client: cli } = useUpdateTargets()
   const packaged = useStore((s) => s.update?.cli.packaged)
   const openUpdates = useStore((s) => s.setUpdatesOpen)
-  const clearDismissed = useStore((s) => s.clearDismissedUpdates)
+  const checkForUpdates = useCheckForUpdates(client)
   const disk = info?.disk
   if (!info) return null
+  const failed = [server, cli].find((t) => t.state === 'check_failed')
+  const current = server.state === 'up_to_date' ? server : cli.state === 'up_to_date' ? cli : null
+  const checking = server.state === 'checking' || cli.state === 'checking'
+  const checkedLine =
+    current && !update && checkedTime(current.checkedAt) ? `Up to date. Checked ${checkedTime(current.checkedAt)}.` : ''
   return (
     <SettingsSection title="Server">
       <SettingRow
@@ -48,20 +56,31 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
         help={[
           `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
           update && `${update.text}.`,
+          checking ? 'Checking for updates…' : checkedLine,
           packaged && packagedLine(packaged),
         ].filter(Boolean).join(' ')}
-        control={update?.action && (
-          <Button
-            size="sm"
-            onClick={() => {
-              clearDismissed()
-              openUpdates(true)
-            }}
-          >
-            Update…
-          </Button>
+        control={
+          <div className="flex flex-wrap gap-1">
+            {update?.action && (
+              <Button size="sm" onClick={() => openUpdates(true)}>
+                Update…
+              </Button>
+            )}
+            <Button size="sm" variant="secondary" disabled={checking} onClick={checkForUpdates}>
+              {failed ? 'Check now' : 'Check for updates…'}
+            </Button>
+          </div>
+        }
+      >
+        {failed?.state === 'check_failed' && (
+          <div className="space-y-1">
+            <p className="text-ui-sm text-muted">
+              {failed === server ? 'The server could not check for a new release:' : 'This computer could not check for a new release:'}
+            </p>
+            <p className={cn(verbatim, 'text-state-failed')}>{failed.error}</p>
+          </div>
         )}
-      />
+      </SettingRow>
       <DockerInRunsRow client={client} />
       {!disk && (
         <SettingRow label="Disk" help="Storage accounting unavailable.">

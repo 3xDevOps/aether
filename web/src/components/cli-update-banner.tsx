@@ -4,7 +4,6 @@
 // administrator password dialog, or not at all - in which case the banner
 // hands over the sudo command rather than a button that could not work.
 
-import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
 import { CircleCheck, Download, LoaderCircle, TriangleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -21,24 +20,11 @@ import {
   Dismiss,
   verbatim,
 } from '@/components/update-banner-shared'
-import { ApiError, type Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import type { Api } from '@/lib/api'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-
-type ApplyState =
-  | { name: 'idle' }
-  | { name: 'applying' }
-  | { name: 'done'; result: UpdateApplyResult }
-  | { name: 'failed'; detail: string }
-  // The member closed the administrator dialog, or macOS refused the
-  // password. Not a failure: nothing was downloaded into place.
-  | { name: 'cancelled'; detail: string }
-  // The check the click makes first says this machine is already on the
-  // newest release. The version it was made about, so the verdict does not
-  // outlive the answer behind it.
-  | { name: 'current'; version: string }
+import { applyClientUpdate, type ClientApply } from '@/store/updates'
 
 /**
  * What the button, and everything above it, show. Derived from the apply
@@ -61,7 +47,7 @@ type Flow =
   | { name: 'relaunching' }
   | { name: 'rebuildFailed'; error: string }
 
-function deriveFlow(apply: ApplyState, build: UpdateBuildStatus | null): Flow {
+function deriveFlow(apply: ClientApply, build: UpdateBuildStatus | null): Flow {
   if (apply.name === 'idle') return { name: 'idle' }
   if (apply.name === 'applying') return { name: 'applying' }
   if (apply.name === 'failed') return { name: 'applyFailed', detail: apply.detail }
@@ -173,80 +159,18 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
 export function CliBanner({
   update,
   client,
-  recheck,
+  serverFirst,
 }: {
   update: UpdateStatus
   client: Api
-  recheck: (refresh?: boolean) => Promise<UpdateStatus>
+  /** An admin whose server is behind updates that first. */
+  serverFirst: boolean
 }) {
   const latest = update.cli.latest ?? ''
   const dismissed = useStore((s) => s.dismissedUpdates.cli)
-  const setGatewayRestarting = useStore((s) => s.setGatewayRestarting)
-  const setInstallingUpdate = useStore((s) => s.setInstallingUpdate)
-  const [apply, setApply] = useState<ApplyState>({ name: 'idle' })
-  const [build, setBuild] = useState<UpdateBuildStatus | null>(null)
-
-  // Polls update.status while a rebuild the apply started is in flight.
-  // Self-contained: it starts once `apply` becomes the rebuilding `done`
-  // state and stops itself, from inside the tick that sees a terminal
-  // phase, without depending on `build` and thereby restarting the clock
-  // on every poll.
-  useEffect(() => {
-    if (apply.name !== 'done') return
-    if (!apply.result.rebuilding) return
-    let cancelled = false
-    const timer = setInterval(() => {
-      void (async () => {
-        try {
-          const status = await client.localUpdateStatus()
-          if (cancelled) return
-          setBuild(status)
-          if (status.phase === 'done' || status.phase === 'error') {
-            clearInterval(timer)
-          }
-        } catch {
-          // A failed poll is transient; the next tick retries.
-        }
-      })()
-    }, 1000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [apply, client])
-
-  const run = async () => {
-    setApply({ name: 'applying' })
-    setBuild(null)
-    try {
-      const fresh = await recheck(true)
-      if (!fresh.cli.update_available) {
-        setApply({ name: 'current', version: fresh.cli.version })
-        return
-      }
-      setInstallingUpdate(true)
-      const result = await client.localUpdateApply()
-      // The page must stop showing the connection-error screen while the
-      // gateway is deliberately going away. `restarting` is exactly that
-      // claim; a rebuild on an unsupervised gateway is not - that tab keeps
-      // its gateway, and suppressing the page there would hide a real
-      // disconnect later, because the flag is never cleared.
-      if (result.restarting) setGatewayRestarting(true)
-      setApply({ name: 'done', result })
-    } catch (err) {
-      // 403 is the gateway's word for "administrator access was not
-      // granted": the member closed the dialog or macOS refused the
-      // password. A bearer-token refusal is 401, and neither update.check
-      // nor update.apply answers 403 for anything else.
-      if (err instanceof ApiError && err.status === 403) {
-        setApply({ name: 'cancelled', detail: message(err) })
-      } else {
-        setApply({ name: 'failed', detail: message(err) })
-      }
-    } finally {
-      setInstallingUpdate(false)
-    }
-  }
+  const apply = useStore((s) => s.clientApply)
+  const build = useStore((s) => s.clientBuild)
+  const run = () => applyClientUpdate(useStore, client)
 
   const flow = deriveFlow(apply, build)
   // The click found nothing to install. The verdict is about the answer it
@@ -327,6 +251,9 @@ export function CliBanner({
               <p className="font-medium">Aether {version} is available.</p>
               <p className="text-ui-sm text-muted">You are running {update.cli.version}.</p>
             </div>
+            {serverFirst && (
+              <p className="text-ui-sm text-muted">Update the server first; this client updates after it.</p>
+            )}
             <HowItInstalls update={update} />
           </>
         )}

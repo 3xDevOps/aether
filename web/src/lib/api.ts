@@ -283,6 +283,51 @@ export type ApiErrorData = { refusal?: EdgeRefusal } & Record<string, unknown>
 // internal/protocol's error codes.
 export const codeNotFound = -32000
 export const codeInvalidState = -32002
+export const codeUpgradeRequired = -32005
+
+/** The data of a -32005: this client is older than the server's release. */
+export interface UpgradeRequired {
+  message: string
+  client_version: string
+  server_version: string
+  min_client_version: string
+  command: string
+}
+
+/** Gateways answer a -32005 with HTTP 426; either one marks the refusal. */
+export function upgradeRequired(err: unknown): UpgradeRequired | null {
+  if (!(err instanceof ApiError)) return null
+  if (err.code !== codeUpgradeRequired && err.status !== 426) return null
+  // The client prefixes its own request path; the server's words follow.
+  return upgradeFrom(err.message.replace(/^[^\s:]+: /, ''), err.data)
+}
+
+/** The refusal as the stream ack and the RPC error both carry it. */
+export function upgradeFrom(message: string, data: ApiErrorData = {}): UpgradeRequired {
+  const text = (key: string) => (typeof data[key] === 'string' ? (data[key] as string) : '')
+  return {
+    message,
+    client_version: text('client_version'),
+    server_version: text('server_version'),
+    min_client_version: text('min_client_version'),
+    command: text('command') || 'aether update',
+  }
+}
+
+let upgradeListener: (required: UpgradeRequired) => void = () => {}
+
+/** Hears every upgrade-required refusal, from any call. */
+export function onUpgradeRequired(listener: (required: UpgradeRequired) => void): void {
+  upgradeListener = listener
+}
+
+async function refusal(res: Response, label: string): Promise<ApiError> {
+  const err = await failure(res)
+  const refused = new ApiError(res.status, `${label}: ${err.message}`, err.code, err.data)
+  const required = upgradeRequired(refused)
+  if (required) upgradeListener(required)
+  return refused
+}
 
 export class ApiError extends Error {
   constructor(
@@ -325,10 +370,7 @@ async function call<T>(method: string, params: unknown = {}, signal?: AbortSigna
     signal,
     ...(keepalive ? { keepalive } : {}),
   })
-  if (!res.ok) {
-    const err = await failure(res)
-    throw new ApiError(res.status, `${method}: ${err.message}`, err.code, err.data)
-  }
+  if (!res.ok) throw await refusal(res, method)
   return (await res.json()) as T
 }
 
@@ -338,10 +380,7 @@ async function getResponse(path: string, signal?: AbortSignal): Promise<Response
     headers: token ? { authorization: `Bearer ${token}` } : {},
     signal,
   })
-  if (!res.ok) {
-    const err = await failure(res)
-    throw new ApiError(res.status, `${path}: ${err.message}`, err.code, err.data)
-  }
+  if (!res.ok) throw await refusal(res, path)
   return res
 }
 
@@ -379,10 +418,7 @@ async function local<T>(
     signal,
     keepalive,
   })
-  if (!res.ok) {
-    const err = await failure(res)
-    throw new ApiError(res.status, `${verb}: ${err.message}`, err.code, err.data)
-  }
+  if (!res.ok) throw await refusal(res, verb)
   return (await res.json()) as T
 }
 
@@ -758,7 +794,8 @@ export const api = {
     call<{ overlaps: Overlap[] }>('run.overlaps').then((r) => r.overlaps),
   /** Whether the server can replace its own binaries, and what update is
    * in flight. Any member may read it; only an admin may call server.update. */
-  serverUpdateStatus: () => call<ServerUpdateStatus>('server.update_status'),
+  serverUpdateStatus: (refresh?: boolean) =>
+    call<ServerUpdateStatus>('server.update_status', refresh ? { refresh } : {}),
   /** Asks the server to update itself to the latest release now, at the
    * next idle moment, or to cancel the pending one. */
   serverUpdate: (when: ServerUpdateWhen) =>

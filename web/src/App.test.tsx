@@ -151,4 +151,30 @@ describe('App', () => {
       useStore.setState(previous, true)
     }
   })
+
+  it('puts the required-update gate in place of the connection error the refusal causes', async () => {
+    const previous = useStore.getState()
+    useStore.setState({ hydrated: false, gatewayRestarting: false, paletteDialog: null })
+    const app = render(<App />)
+
+    try {
+      act(() =>
+        useStore.setState({
+          hydrationError: 'workspace.list: this aether is v1.2.3 and the server runs v1.3.0; update this client first',
+          updateRequired: {
+            message: 'this aether is v1.2.3 and the server runs v1.3.0; update this client first',
+            client_version: 'v1.2.3',
+            server_version: 'v1.3.0',
+            min_client_version: 'v1.3.0',
+            command: 'aether update',
+          },
+        }),
+      )
+      expect(await screen.findByRole('heading', { name: 'Update Aether to keep using this server' })).toBeDefined()
+      expect(screen.queryByRole('button', { name: 'Retry connection' })).toBeNull()
+    } finally {
+      app.unmount()
+      useStore.setState(previous, true)
+    }
+  })
 })

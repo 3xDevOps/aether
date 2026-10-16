@@ -2,6 +2,7 @@
 // CLI and server banner suites so neither carries its own copy.
 
 import { act } from '@testing-library/react'
+import { RECHECK_MS } from '@/components/update-checks'
 import type { GatewayCapabilities, Member, UpdateStatus } from '@/lib/types'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
@@ -37,8 +38,21 @@ export function seed(
     members: { [alice.id]: alice, [bob.id]: bob },
     hydrated: true,
     gatewayRestarting: false,
+    serverUpdateError: null,
+    serverUpdateProgressAt: 0,
+    updateRequired: null,
+    clientChecking: false,
+    clientCheckError: null,
+    serverChecking: false,
+    clientApply: { name: 'idle' },
+    clientBuild: null,
+    notifiedUpdate: '',
   })
 }
+
+/** The longest jittered re-check delay: advancing by it fires exactly one
+ * periodic read, and by n of it n reads, for n up to 4. */
+export const RECHECK_PERIOD = Math.ceil(RECHECK_MS * 1.1)
 
 /** Lets the pending update.check promises settle. Needs fake timers. */
 export async function settle() {

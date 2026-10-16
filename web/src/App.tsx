@@ -7,6 +7,8 @@ import { TopBar } from '@/components/shell/top-bar'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
 import { Toaster } from '@/components/ui/toast'
+import { UpdateChecks } from '@/components/update-checks'
+import { UpdateGate } from '@/components/update-gate'
 import { useKeyboardInset } from '@/lib/keyboard-inset'
 import { bindRouteToUrl, handedLink, onHandedLink, onHandedLinkForgotten } from '@/lib/url-state'
 import { useStore } from '@/store'
@@ -29,6 +31,9 @@ export function App() {
   const resetConnection = useStore((s) => s.resetConnection)
   const drafts = useStore((s) => s.drafts)
   const onboardingRoute = useStore((s) => s.route.name === 'onboarding')
+  // The server enforces the floor; this only explains it, and it outranks
+  // every other screen because the server refuses everything else.
+  const gated = useStore((s) => s.updateRequired !== null || s.update?.client_update_required === true)
   const [handed, setHanded] = useState(handedLink)
   useEffect(() => onHandedLink(setHanded), [])
   useEffect(() => onHandedLinkForgotten(() => setHanded(null)), [])
@@ -77,25 +82,44 @@ export function App() {
   const blocked = !hydrated && hydrationError !== null && !gatewayRestarting && !(handed && onboardingRoute)
 
   useEffect(() => {
-    if (!hydrationError || blocked) return
+    if (!hydrationError || blocked || gated) return
     // A dead token is not an unreachable server; its error already says how to recover.
     if (streamDead) toast.error(hydrationError)
     else toast.error(`Could not reach the server: ${hydrationError}`)
-  }, [hydrationError, streamDead, blocked])
+  }, [hydrationError, streamDead, blocked, gated])
 
   const retry = useCallback(() => {
     resetConnection()
     setAttempt((n) => n + 1)
   }, [resetConnection])
 
+  const toaster = (
+    <Toaster
+      position="bottom-right"
+      theme={theme}
+      expand={false}
+      visibleToasts={4}
+      gap={4}
+      // Sonner uses `mobileOffset` under 600px and its own default without one.
+      offset={toastOffset}
+      mobileOffset={toastOffset}
+    />
+  )
+
   return (
     <>
       <ThemeEffect />
       <LaunchSplash />
+      <UpdateChecks />
       <div className="flex min-w-0 h-full flex-col">
-        {blocked && desktopBridge() && <TopBar navigation={false} />}
+        {(blocked || gated) && desktopBridge() && <TopBar navigation={false} />}
         <div className="min-h-0 min-w-0 flex-1">
-          {blocked ? (
+          {gated ? (
+            <>
+              <UpdateGate />
+              {toaster}
+            </>
+          ) : blocked ? (
             <ConnectionError
               kind={unreachable}
               dead={streamDead}
@@ -107,16 +131,7 @@ export function App() {
           ) : (
             <>
               <AppShell />
-              <Toaster
-                position="bottom-right"
-                theme={theme}
-                expand={false}
-                visibleToasts={4}
-                gap={4}
-                // Sonner uses `mobileOffset` under 600px and its own default without one.
-                offset={toastOffset}
-                mobileOffset={toastOffset}
-              />
+              {toaster}
             </>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { bareVersion } from '@/lib/format'
+import { compareVersions } from '@/lib/version'
 import type { ConnectionState } from '@/lib/stream'
 import type {
   AgentInfo,
@@ -47,10 +48,21 @@ export type UnreachableKind =
  * or cancelled - is not in it: those always win. */
 const phaseOrder: Record<ServerUpdatePhase, number> = {
   scheduled: 1,
-  applying: 2,
-  restarting: 3,
+  preflight: 2,
+  applying: 3,
+  restarting: 4,
+  verifying: 5,
+  applied: 0,
   failed: 0,
+  rolled_back: 0,
   cancelled: 0,
+}
+
+/** The phases between the decision to update and the new process committing. */
+export function serverInFlight(
+  phase: string | undefined,
+): phase is 'preflight' | 'applying' | 'restarting' | 'verifying' {
+  return phase === 'preflight' || phase === 'applying' || phase === 'restarting' || phase === 'verifying'
 }
 
 /**
@@ -62,7 +74,7 @@ const phaseOrder: Record<ServerUpdatePhase, number> = {
  * applied while the tab was away is still picked up.
  */
 export function serverUpdateApplying(progress: ServerUpdatePayload | null): boolean {
-  return progress?.phase === 'applying' || progress?.phase === 'restarting'
+  return serverInFlight(progress?.phase)
 }
 
 /**
@@ -79,6 +91,35 @@ function stalePhase(
   if (phaseOrder[next.phase] === 0 || phaseOrder[current.phase] === 0) return false
   if (current.version !== next.version) return false
   return phaseOrder[next.phase] < phaseOrder[current.phase]
+}
+
+/**
+ * The status is re-read on every reconnect, which is how an update ends. A
+ * server that records phases is the authority on its own update; an older
+ * one has finished once it runs the version the phases were about.
+ */
+function progressAfterStatus(
+  progress: ServerUpdatePayload | null,
+  at: number,
+  status: ServerUpdateStatus,
+): Pick<ServerSlice, 'serverUpdateProgress' | 'serverUpdateProgressAt'> {
+  if (status.phase && serverInFlight(status.phase)) {
+    if (progress?.phase === status.phase) return { serverUpdateProgress: progress, serverUpdateProgressAt: at }
+    const next: ServerUpdatePayload = { phase: status.phase, version: status.to_version || progress?.version }
+    if (stalePhase(progress, next)) return { serverUpdateProgress: progress, serverUpdateProgressAt: at }
+    return { serverUpdateProgress: next, serverUpdateProgressAt: Date.now() }
+  }
+  if (!progress) return { serverUpdateProgress: null, serverUpdateProgressAt: at }
+  const scheduledStill = progress.phase === 'scheduled' && status.pending !== undefined
+  if (status.phase) {
+    return scheduledStill
+      ? { serverUpdateProgress: progress, serverUpdateProgressAt: at }
+      : { serverUpdateProgress: null, serverUpdateProgressAt: 0 }
+  }
+  const version = progress.version ?? ''
+  const order = compareVersions(status.server_version, version)
+  const arrived = order === null ? bareVersion(version) === bareVersion(status.server_version) : order >= 0
+  return arrived ? { serverUpdateProgress: null, serverUpdateProgressAt: 0 } : { serverUpdateProgress: progress, serverUpdateProgressAt: at }
 }
 
 export interface ServerSlice {
@@ -120,6 +161,9 @@ export interface ServerSlice {
   /** How far the running self-update has got, from the server.update feed
    * and the RPC results. Session-scoped: a reload re-reads the status. */
   serverUpdateProgress: ServerUpdatePayload | null
+  /** When the progress last changed phase, in ms; what times out a server
+   * that never comes back. */
+  serverUpdateProgressAt: number
   agentList: { identity: string | null; agents: AgentInfo[] } | null
   setAgentList: (identity: string | null, agents: AgentInfo[]) => void
   setInfo: (info: ServerInfo) => void
@@ -168,6 +212,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     serverUpdate: null,
     serverUpdateError: null,
     serverUpdateProgress: null,
+    serverUpdateProgressAt: 0,
     agentList: null,
     setAgentList: (identity, agents) => set({ agentList: { identity, agents } }),
     setInfo: (info) => set({ info }),
@@ -190,23 +235,18 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
       set((s) => ({
         serverUpdate,
         serverUpdateError: null,
-        // The status is re-read on every reconnect, which is how an update
-        // ends: a server already running the version the phases were about
-        // has finished, so the progress is history and must stop saying a
-        // restart is coming.
-        serverUpdateProgress:
-          s.serverUpdateProgress &&
-          bareVersion(s.serverUpdateProgress.version ?? '') ===
-            bareVersion(serverUpdate.server_version)
-            ? null
-            : s.serverUpdateProgress,
+        ...progressAfterStatus(s.serverUpdateProgress, s.serverUpdateProgressAt, serverUpdate),
       })),
     setServerUpdateFailed: (serverUpdateError) => set({ serverUpdateError }),
     applyServerUpdate: (payload) =>
       set((s) =>
         stalePhase(s.serverUpdateProgress, payload)
           ? {}
-          : { serverUpdateProgress: payload },
+          : {
+              serverUpdateProgress: payload,
+              serverUpdateProgressAt:
+                s.serverUpdateProgress?.phase === payload.phase ? s.serverUpdateProgressAt : Date.now(),
+            },
       ),
     resetConnection,
     reconnect: () => {

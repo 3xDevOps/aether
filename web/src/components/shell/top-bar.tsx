@@ -41,7 +41,13 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
 
   return (
     <header ref={header} className="shrink-0 border-b border-seam bg-chrome pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-      <div className={cn(
+      <div
+        onContextMenu={desktop?.controls?.showMenu && ((event) => {
+          if (event.target !== event.currentTarget) return
+          event.preventDefault()
+          desktop.controls?.showMenu?.(event.clientX, event.clientY)
+        })}
+        className={cn(
         'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
         desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
         desktop?.platform === 'darwin' && 'pl-20',

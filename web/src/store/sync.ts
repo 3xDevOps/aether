@@ -930,6 +930,11 @@ export function connect(store: RootStore, client: Api = api): () => void {
     const ok = await hydrate(store, client, signal)
     hydrating = false
     if (signal.aborted) return
+    if (!ok && store.getState().updateRequired) {
+      // Every retry would be refused the same way until this client updates.
+      stopStream()
+      return
+    }
     if (!ok) {
       retryTimer = setTimeout(() => {
         retryTimer = null
@@ -976,6 +981,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
       },
+      onUpgradeRequired: (required) => store.getState().setUpdateRequired(required),
       afterSeq: () => store.getState().lastSeq,
     })
   }

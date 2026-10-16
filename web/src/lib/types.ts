@@ -1725,6 +1725,14 @@ export interface UpdateStatus {
   /** `admin-prompt`: macOS asks for the admin password first. `manual`: the
    * member runs `sudo aether update`. Absent when the probe failed. */
   install_method?: 'direct' | 'admin-prompt' | 'manual'
+  /** The connected server's release is newer than this client, so it
+   * refuses normal calls until the client updates. Absent on older
+   * gateways; false when the server did not answer. */
+  client_update_required?: boolean
+  min_client_version?: string
+  /** The release lookup failed, verbatim. `cli` then carries only what the
+   * binary knows about itself: no latest, no asset. */
+  cli_error?: string
 }
 
 /** update.apply: what the self-update replaced and what happens next. */
@@ -1796,6 +1804,20 @@ export interface ServerUpdateStatus {
   waiting?: ServerUpdateWaiting
   last?: ServerUpdateAttempt
   manual_commands?: string[]
+  /** The fields below come from servers that check for releases themselves
+   * and record each update's phases; older servers omit them. */
+  latest_version?: string
+  notes_url?: string
+  /** RFC3339 time of the server's last release check. */
+  checked_at?: string
+  /** That check's error, verbatim; empty when it succeeded. */
+  check_error?: string
+  /** The last update's phase. applied, failed and rolled_back stay until
+   * the next attempt; idle means there never was one. */
+  phase?: ServerUpdatePhase | 'idle'
+  error?: string
+  from_version?: string
+  to_version?: string
 }
 
 /** server.sysbox.status and server.sysbox.install: whether runs can use
@@ -1824,9 +1846,13 @@ export interface ServerUpdateResult {
  * carries: the server re-executes there and every connection drops. */
 export type ServerUpdatePhase =
   | 'scheduled'
+  | 'preflight'
   | 'applying'
   | 'restarting'
+  | 'verifying'
+  | 'applied'
   | 'failed'
+  | 'rolled_back'
   | 'cancelled'
 
 /** The server.update event payload: one moment of a self-update. */
@@ -1834,8 +1860,9 @@ export interface ServerUpdatePayload {
   phase: ServerUpdatePhase
   version?: string
   actor_id?: string
-  /** The real error behind a failed phase. */
+  /** The real error behind a failed or rolled_back phase. */
   detail?: string
+  from_version?: string
 }
 
 

@@ -2,8 +2,10 @@
 // dismiss control on its right. Kept apart from update-banner.tsx so the
 // per-banner files can import it without importing each other.
 
-import { X } from '@/components/icons'
+import type { ReactNode } from 'react'
+import { X, type LucideIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
 
@@ -38,5 +40,44 @@ export function Dismiss({ kind, version }: { kind: UpdateKind; version: string }
     >
       <X className="size-3.5" aria-hidden />
     </Button>
+  )
+}
+
+/** "14:05", the local time of a check. */
+export function checkedTime(iso: string | undefined): string {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  return at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+/** One target with nothing to act on: up to date, checking, or a failed check. */
+export function StatusRow({
+  Icon,
+  headline,
+  detail,
+  error,
+  spin = false,
+  action,
+}: {
+  Icon: LucideIcon
+  headline: string
+  detail?: ReactNode
+  error?: string
+  spin?: boolean
+  action?: ReactNode
+}) {
+  return (
+    <div role="status" className={banner}>
+      <div aria-hidden className={bannerIcon}>
+        <Icon className={cn('size-4', spin && 'animate-spin motion-reduce:animate-none')} />
+      </div>
+      <div className={bannerContent}>
+        <p className="font-medium">{headline}</p>
+        {detail && <p className="text-ui-sm text-muted">{detail}</p>}
+        {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
+      </div>
+      {action && <div className={bannerActions}>{action}</div>}
+    </div>
   )
 }

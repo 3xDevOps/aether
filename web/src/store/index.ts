@@ -21,6 +21,7 @@ import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
+import { createUpdatesSlice, type UpdatesSlice } from '@/store/updates'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
@@ -72,6 +73,7 @@ export type RootState = ServerSlice &
   DiffSlice &
   CollaborationSlice &
   LocalSlice &
+  UpdatesSlice &
   MissionsSlice &
   MessagesSlice &
   SessionsSlice &
@@ -102,6 +104,7 @@ const persistedUi = (s: RootState) => ({
   boardMapViewports: s.boardMapViewports,
   launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
+  notifiedUpdate: s.notifiedUpdate,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
   onboarded: s.onboarded,
   onboardingStep: s.onboardingStep,
@@ -139,6 +142,7 @@ export function createRootStore() {
         ...createFilesSlice(...a),
         ...createCollaborationSlice(...a),
         ...createLocalSlice(...a),
+        ...createUpdatesSlice(...a),
         ...createMissionsSlice(...a),
         ...createMessagesSlice(...a),
         ...createSessionsSlice(...a),

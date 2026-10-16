@@ -57,6 +57,41 @@ describe('connectEvents', () => {
     stop()
   })
 
+  it('stops for good on an upgrade-required refusal and hands it over', () => {
+    const heard: unknown[] = []
+    const stop = connectEvents({
+      onEvent: () => {},
+      onState: (s) => states.push(s),
+      onUpgradeRequired: (required) => heard.push(required),
+      afterSeq: () => 0,
+    })
+    streams.push(stop)
+    const socket = StubSocket.last()
+    socket.onopen?.()
+    socket.onmessage?.({
+      data: JSON.stringify({
+        ok: false,
+        code: -32005,
+        error: 'this aether is v1.2.3 and the server runs v1.3.0; update this client first',
+        data: { client_version: 'v1.2.3', server_version: 'v1.3.0', min_client_version: 'v1.3.0', command: 'aether update' },
+      }),
+    })
+    socket.onclose?.({ code: 1008 })
+    vi.advanceTimersByTime(60_000)
+
+    expect(heard).toEqual([
+      {
+        message: 'this aether is v1.2.3 and the server runs v1.3.0; update this client first',
+        client_version: 'v1.2.3',
+        server_version: 'v1.3.0',
+        min_client_version: 'v1.3.0',
+        command: 'aether update',
+      },
+    ])
+    expect(StubSocket.opened).toHaveLength(1)
+    expect(states.at(-1)).toBe('offline')
+  })
+
   it('replays from the last applied seq after a dropped socket', () => {
     const stop = open()
     StubSocket.last().onopen?.()
