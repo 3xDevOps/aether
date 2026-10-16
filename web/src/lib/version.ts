@@ -66,8 +66,3 @@ export function compareVersions(a: string, b: string): number | null {
   }
   return x.ahead === y.ahead ? 0 : x.ahead ? 1 : -1
 }
-
-/** selfupdate.Behind: an unparseable version is never behind. */
-export function behind(running: string, latest: string): boolean {
-  return (compareVersions(running, latest) ?? 0) < 0
-}
