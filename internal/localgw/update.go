@@ -3,6 +3,7 @@ package localgw
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // applyUpdate is selfupdate.UpdateWithAuthorization behind a variable
@@ -68,6 +70,9 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// the probe itself failed; the click then reports that error.
 		CLIPath       string            `json:"cli_path,omitempty"`
 		InstallMethod selfupdate.Method `json:"install_method,omitempty"`
+		// TargetVersion is the release update.apply would install, empty
+		// when it would install nothing.
+		TargetVersion string `json:"target_version"`
 	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
 	if perr != nil {
 		out.CLIError = perr.Message
@@ -76,14 +81,10 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		out.CLIPath, out.InstallMethod = access.Path, access.Method
 	}
 
-	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
-	if perr != nil {
-		out.ServerError = perr.Message
-		return out, nil
-	}
-	var info protocol.ServerInfoResult
-	if err := json.Unmarshal(result, &info); err != nil {
-		out.ServerError = "decode server info: " + err.Error()
+	info, err := g.serverInfo(r)
+	out.TargetVersion = updateTarget(check, info.ServerVersion)
+	if err != nil {
+		out.ServerError = err.Error()
 		return out, nil
 	}
 	out.ServerVersion = info.ServerVersion
@@ -93,7 +94,37 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	return out, nil
 }
 
-// localUpdateApply installs the newest release over this CLI. This
+func (g *Gateway) serverInfo(r *http.Request) (protocol.ServerInfoResult, error) {
+	var info protocol.ServerInfoResult
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerInfo, nil)
+	if perr != nil {
+		return info, errors.New(perr.Message)
+	}
+	if err := json.Unmarshal(result, &info); err != nil {
+		return info, fmt.Errorf("decode server info: %w", err)
+	}
+	return info, nil
+}
+
+// updateTarget is the release update.apply installs. A linked server
+// ahead of this CLI decides it: the client matches its server rather than
+// whatever GitHub calls latest, which skips prereleases and can lag a
+// publish. Otherwise it is the newest release when that is newer. The
+// server's version is checked as a tag because it lands in a download URL.
+func updateTarget(check selfupdate.Check, serverVersion string) string {
+	if check.Dev || check.Disabled || !check.CanSelfUpdate {
+		return ""
+	}
+	if core := version.ReleaseCore(serverVersion); selfupdate.ValidTag(core) && selfupdate.Behind(check.Version, core) {
+		return core
+	}
+	if check.UpdateAvailable {
+		return check.Latest
+	}
+	return ""
+}
+
+// localUpdateApply installs updateTarget's release over this CLI. This
 // process never gains privileges: on macOS a binary the user cannot write
 // is installed by the system's administrator dialog, one fixed command
 // run by root outside this process; elsewhere it is a refusal that names
@@ -120,11 +151,12 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "a release lookup or install is already running in this gateway"}
 	}
 	defer g.updating.Store(false)
-	check, perr := g.checkRelease(r, true)
-	if perr != nil {
-		return nil, perr
-	}
+	check, lookupErr := g.checkRelease(r, true)
+	info, _ := g.serverInfo(r)
+	target := updateTarget(check, info.ServerVersion)
 	switch {
+	case lookupErr != nil && target == "":
+		return nil, lookupErr
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "this is a dev build with no release to update to; rebuild it with `make build`"}
@@ -133,7 +165,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
 	case !check.CanSelfUpdate:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: selfupdate.ErrWindows.Error()}
-	case !check.UpdateAvailable:
+	case target == "":
 		// Nothing to install. Downloading the running version over itself
 		// would answer success for work that changed nothing, and on a
 		// supervised gateway it would restart the app for no reason.
@@ -146,15 +178,15 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// cost a download and, on macOS, a second password dialog for the
 	// same bytes, so the answer picks up after the swap instead.
 	var updated []string
-	if done := g.installed.Load(); done != nil && done.tag == check.Latest {
+	if done := g.installed.Load(); done != nil && done.tag == target {
 		updated = done.paths
 	} else {
 		var err error
-		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), check.Latest)
+		updated, err = applyUpdate(r.Context(), g.cfg.Update.BaseURL(), target)
 		if err != nil {
-			return nil, applyError(err, check.Latest)
+			return nil, applyError(err, target)
 		}
-		g.installed.Store(&installedRelease{tag: check.Latest, paths: updated})
+		g.installed.Store(&installedRelease{tag: target, paths: updated})
 	}
 
 	// The CLI is swapped; the Electron shell around the dashboard is not,
@@ -163,9 +195,9 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	// process already finished is not run again for a repeat click: the
 	// app on disk is new, and only the restart is left.
 	outcome := rebuildNone
-	rebuilt := g.rebuild.builtRelease() == check.Latest
+	rebuilt := g.rebuild.builtRelease() == target
 	if len(updated) > 0 && !rebuilt {
-		outcome = g.startAppRebuild(updated[0], check.Latest)
+		outcome = g.startAppRebuild(updated[0], target)
 	}
 	// A build for an earlier release covers nothing here: reporting it as
 	// this release's rebuild would have the dashboard watch it finish and
@@ -209,7 +241,7 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		Note           string   `json:"note,omitempty"`
 		RestartCommand string   `json:"restart_command,omitempty"`
 	}{
-		Updated: updated, Version: check.Latest, Restarting: g.cfg.Supervised,
+		Updated: updated, Version: target, Restarting: g.cfg.Supervised,
 		Rebuilding: rebuilding, Note: note,
 		RestartCommand: restartCommand(updated),
 	}, nil
