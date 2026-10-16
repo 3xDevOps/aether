@@ -1731,7 +1731,9 @@ CREATE TABLE assistant_settings (
 	updated_at   INTEGER NOT NULL
 );
 `,
-	// v67: insights. Every run status or reason change is kept as a
+	// v67: share_view sends the assistant the member's dashboard view context.
+	`ALTER TABLE assistant_settings ADD COLUMN share_view INTEGER NOT NULL DEFAULT 1;`,
+	// v68: insights. Every run status or reason change is kept as a
 	// transition, and every pull request a run opened through run.pr.create
 	// with the state Aether last observed; both go with their run.
 	// swarm_run marks a swarm's worker and integrator runs on the run itself,

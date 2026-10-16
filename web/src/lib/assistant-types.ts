@@ -29,15 +29,19 @@ export interface AssistantStatus {
   confirmations: AssistantConfirmation[]
   /** Confirmed tools run without a card, as if approved. */
   auto_approve: boolean
+  /** Prompts carry the member's view context. */
+  share_view: boolean
 }
 
 export interface AssistantSettings {
   auto_approve: boolean
+  share_view: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
 export interface AssistantSettingsParams {
   auto_approve?: boolean
+  share_view?: boolean
 }
 
 export interface AssistantStartParams {
@@ -48,4 +52,24 @@ export interface AssistantStartParams {
 /** A session frame, or the whole status: sent after the ack and whenever the state or the pending confirmations change. */
 export interface AssistantFrame extends SessionFrame {
   status?: AssistantStatus
+}
+
+/** One page of the dashboard: ids and view names only, never titles or content. */
+export interface ViewEntry {
+  name: string
+  workspace_id?: string
+  run_id?: string
+  mission_id?: string
+  subagent?: string
+  view?: string
+  at?: string
+}
+
+/** What `assistant.prompt` and `assistant.view` carry as `view_context`. */
+export interface ViewContext {
+  version: 1
+  captured_at: string
+  route: ViewEntry
+  open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
+  recent?: ViewEntry[]
 }
