@@ -291,6 +291,9 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 
 	s.conn = newConn(r, w, s, cfg.Logger)
 	s.conn.autoAllow = cfg.AutoAllow
+	// With subagent sessions, Claude's adapter withholds the Agent and Task
+	// tool calls whose results background task tracking reads.
+	s.conn.childSessions = !cfg.ClaudeCode
 	if cfg.SystemPrompt != "" || cfg.ClaudeCode {
 		s.conn.sessionMeta = map[string]any{}
 	}
@@ -900,20 +903,21 @@ func (s *Session) inputsLocked() {
 	s.callback(func() { s.cfg.OnInputs(inputs) })
 }
 
-func (s *Session) update(raw json.RawMessage) {
+func (s *Session) update(parent string, raw json.RawMessage) {
 	var head updateHead
 	_ = json.Unmarshal(raw, &head)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A background subagent streams while the main agent has not yet taken
 	// the prompt.
-	if head.Meta.ClaudeCode.ParentToolUseID == "" {
+	main := parent == "" && head.Meta.ClaudeCode.ParentToolUseID == ""
+	if main {
 		s.acceptedLocked()
 	}
-	if head.opensTurn() {
+	if main && head.opensTurn() {
 		s.openAutonomousLocked()
 	}
-	s.proj.update(raw)
+	s.proj.update(parent, raw)
 	s.trackLocked(head)
 	s.settleLocked()
 }

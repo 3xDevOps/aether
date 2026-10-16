@@ -2053,8 +2053,12 @@ announces a new request, a finished turn and a state change. The row
 components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
 
-A subagent is the agent that Claude Code's `Agent` or `Task` tool launches;
-a dynamic workflow is its `Workflow` tool. Their items carry a parent link
+A subagent is the agent that Claude Code's `Agent` or `Task` tool launches,
+that another agent announces as an ACP child session, or that a fallback
+launch call names ([session item
+log](enhanced-runs.md#the-session-item-log)); a dynamic workflow is its
+`Workflow` tool. A launch card is any call with `tool_call.subagent`, or a
+Claude `Agent`, `Task` or `Workflow` call. Their items carry a parent link
 ([session item log](enhanced-runs.md#the-session-item-log)), and
 `store/subagents.ts` keeps them out of the conversation. Each session holds
 an index keyed by the launching tool call's id, with the call's latest
@@ -2084,8 +2088,8 @@ its first held item until a history page brings the launch; without the
 call its state is unknown. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
 agent only waits on its subagents, the live row reads "Waiting on 2
-subagents". Codex, opencode and the others send no parent link, so their
-sessions render as before.
+subagents". A fallback launch shows a card with no nested items;
+an agent with neither child sessions nor a launch call renders as before.
 
 A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
 at `?agent=<tool call id>`. At 1280px and wider it is an inline aside that

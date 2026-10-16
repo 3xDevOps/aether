@@ -37,6 +37,37 @@ describe('indexing subagents', () => {
     expect(siblings(idx, idx.agents.a2!)).toEqual(['a1', 'a2'])
   })
 
+  it('nests launches that carry a subagent label and no tool name', () => {
+    const start = item('turn_start', 1)
+    const c1 = tool(1, 'subagent:c1', 'think', 'Explorer', 'in_progress', { subagent: { description: 'Explorer' }, raw_input: { prompt: 'Map the billing module' } })
+    const r1 = read(1, 'subagent:c1', 'r1')
+    const cm = item('message', 1, { message: { role: 'assistant', message_id: 'cm', parent_id: 'subagent:c1', text: 'Reading.', complete: true } })
+    const c2 = tool(1, 'subagent:c2', 'think', 'Worker', 'in_progress', { parent_id: 'subagent:c1', subagent: { description: 'Worker' } })
+    const r2 = read(1, 'subagent:c2', 'r2')
+    const c2done = tool(1, 'subagent:c2', 'think', 'Worker', 'completed', { parent_id: 'subagent:c1', subagent: { description: 'Worker' } })
+    const fallback = tool(1, 'task-1', 'other', 'Review', 'completed', {
+      subagent: { description: 'Review the diff', type: 'reviewer' },
+      raw_input: { subagent_type: 'reviewer', description: 'Review the diff', prompt: 'Check auth.go' },
+    })
+    const end = item('turn_end', 1)
+    const { index: idx, main } = index([start, c1, r1, cm, c2, r2, c2done, fallback, end])
+    expect(idx.roots).toEqual(['subagent:c1', 'task-1'])
+    expect(idx.agents['subagent:c1']!.children).toEqual(['subagent:c2'])
+    expect(idx.agents['subagent:c2']!.parentID).toBe('subagent:c1')
+    expect(idx.agents['subagent:c2']!.items.map((it) => it.seq)).toEqual([r2.seq])
+    expect(idx.agents['subagent:c1']!.items.map((it) => it.seq)).toEqual([r1.seq, cm.seq, c2.seq, c2done.seq])
+    expect(main.map((it) => it.seq)).toEqual([start.seq, c1.seq, fallback.seq, end.seq])
+    const explorer = idx.agents['subagent:c1']!
+    expect(agentLabel(explorer)).toBe('Explorer')
+    expect(agentPrompt(explorer)).toBe('Map the billing module')
+    expect(agentType(explorer)).toBeUndefined()
+    expect(agentState(explorer)).toBe('stopped')
+    expect(agentState(idx.agents['subagent:c2']!)).toBe('done')
+    expect(agentState(idx.agents['task-1']!)).toBe('done')
+    expect(agentLabel(idx.agents['task-1']!)).toBe('Review the diff')
+    expect(agentType(idx.agents['task-1']!)).toBe('reviewer')
+  })
+
   it('derives each state from the call, the turn and the workflow flag', () => {
     const run = (items: SessionItem[]) => Object.values(index(items).index.agents).map(agentState)
     expect(run([launch(1, 'a')])).toEqual(['running'])
