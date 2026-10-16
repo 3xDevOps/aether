@@ -618,7 +618,7 @@ func call[T any](t *testing.T, ctl *protocol.Client, method string, params any) 
 func (h *harness) claim(c *client, code string) (cli.LinkResult, error) {
 	h.advance(time.Minute)
 	res, err := as(c, func() (cli.LinkResult, error) {
-		return cli.Link(cli.LinkOptions{EdgeURL: h.relayURL, Claim: code}, cli.Config{})
+		return cli.Link(context.Background(), cli.LinkOptions{EdgeURL: h.relayURL, Claim: code}, cli.Config{})
 	})
 	if err == nil {
 		h.t.Cleanup(func() { _ = res.Conn.Close() })
@@ -1056,7 +1056,7 @@ func (s *serverNode) invitation(t *testing.T, inv *domain.Invitation) string {
 // `aether link <join link>` does.
 func (h *harness) joinBy(c *client, link string) (cli.LinkResult, error) {
 	res, err := as(c, func() (cli.LinkResult, error) {
-		return cli.Link(cli.LinkOptions{Join: link}, cli.Config{})
+		return cli.Link(context.Background(), cli.LinkOptions{Join: link}, cli.Config{})
 	})
 	if err == nil {
 		h.t.Cleanup(func() { _ = res.Conn.Close() })

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 )
 
 // NativeLaunch is one run's server-owned native mailbox integration. It is
@@ -35,7 +36,21 @@ func (n NativeLaunch) Command(argv []string) []string {
 
 // PrepareNativeLaunch is called only for coordinated, task-bearing interactive
 // runs. The registry capability, not the profile name alone, authorizes loading.
+// Every launch that loads managed files or arguments also gets the
+// AETHER_MANAGED_HOOKS marker.
 func (p Profile) PrepareNativeLaunch(dir string, argv []string, env map[string]string) (NativeLaunch, error) {
+	native, err := p.nativeLaunch(dir, argv, env)
+	if err != nil || len(native.Files) == 0 && len(native.Args) == 0 {
+		return native, err
+	}
+	if native.Env == nil {
+		native.Env = make(map[string]string)
+	}
+	native.Env[coordtransport.ManagedHooksEnv] = "1"
+	return native, nil
+}
+
+func (p Profile) nativeLaunch(dir string, argv []string, env map[string]string) (NativeLaunch, error) {
 	if !p.NativeCoordination || dir == "" || len(argv) == 0 {
 		return NativeLaunch{}, nil
 	}
@@ -64,6 +79,10 @@ func (p Profile) PrepareNativeLaunch(dir string, argv []string, env map[string]s
 			Args:  []string{"-e", extension},
 			Env:   map[string]string{"AETHER_MANAGED_NATIVE_WAKE": path.Join(dir, "aether.ts")},
 		}, nil
+	case "claude":
+		return claudeNativeLaunch(dir)
+	case "codex":
+		return codexNativeLaunch()
 	case "opencode":
 		return prepareOpenCodeNativeLaunch(dir, env)
 	default:

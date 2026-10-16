@@ -124,7 +124,7 @@ func TestClaimOffersTheCodeOnlyToTheServerItNames(t *testing.T) {
 	w.signIn(t, r.URL)
 	code, secret := claimCode(t, w.serverID())
 
-	_, err := DialClaim(Config{EdgeURL: r.URL}, code)
+	_, err := DialClaim(context.Background(), Config{EdgeURL: r.URL}, code)
 	if err == nil {
 		t.Fatal("DialClaim accepted a server whose host key does not derive the id in the code")
 	}
@@ -160,7 +160,7 @@ func TestClaimPresentsTheCodeAsTheSSHUser(t *testing.T) {
 	w.signIn(t, r.URL)
 	code, secret := claimCode(t, w.serverID())
 
-	conn, err := DialClaim(Config{EdgeURL: r.URL, Addr: closedAddr(t)}, " "+strings.ToUpper(code)+"\n")
+	conn, err := DialClaim(context.Background(), Config{EdgeURL: r.URL, Addr: closedAddr(t)}, " "+strings.ToUpper(code)+"\n")
 	if err != nil {
 		t.Fatal(err)
 	}

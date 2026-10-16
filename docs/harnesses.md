@@ -160,7 +160,10 @@ package that drives the CLI. Aether pins one version of each, taken from the
 `internal/harness/acpregistry.json`, a snapshot of only the entries Aether
 uses. A custom definition is enhanced only when it names its ACP server's
 argv: `ACPArgs` in `--agent-definitions`, `acp_args` in `agent.register`, or
-`--acp` on `aether agent add`.
+`--acp` on `aether agent add`. `ACPMode` / `acp_mode` / `--acp-mode` names the
+session mode a new Enhanced session starts in. Set the mode that acts without
+asking: an agent left in its default mode asks before every tool, and a swarm
+worker waits on that prompt. It needs `ACPArgs` and holds no whitespace.
 
 An adapter installs into the member home like an npm agent:
 
@@ -293,8 +296,8 @@ through the same native extension/plugin mechanism.
 
 | Agent CLI | `--agent` | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | yes | no | yes | `claude.json` |
-| Codex | `codex` | yes | no | yes | `codex.json` |
+| Claude Code | `claude` | yes | yes, managed Standard launches | yes | `claude.json` |
+| Codex | `codex` | yes, managed Standard launches, after you trust the hooks once | no | yes | `codex.json` |
 | Native pi | `pi` | yes | yes, owning session only | yes | `pi.ts` |
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
 | OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
@@ -352,6 +355,12 @@ test ! -e "$HOME/.omp/agent/extensions/aether.ts" &&
   aether-internal hook file omp.ts > "$HOME/.omp/agent/extensions/aether.ts"
 ```
 
+When the launch loaded the hooks ([managed loading](#managed-native-loading)),
+`aether-internal skill` prints `Inbox hooks (<agent>): loaded by this run's
+launch; do not install a manual copy.` instead of the file check, and
+`skill --hooks` prints that line first. Its file checks cover manual copies
+only.
+
 Do not add a manual copy merely because a managed run-scoped extension is
 absent from the checker’s fixed paths. `skill` is read-only: **configured
 means present on disk, not loaded, trusted, or executed**. It checks standard
@@ -372,12 +381,32 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `pi`, `omp`, and `opencode` agents, Aether stages native
-mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `codex`, `pi`, `omp`, and `opencode` agents, Aether
+loads native mailbox hooks for **coordinated, task-bearing Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
 not grant it idle wake.
+
+Claude Code accepts one `--settings` value, so the server writes one
+document, `/run/aether/claude-settings.json`, and adds
+`--settings /run/aether/claude-settings.json`. It merges the
+[status reporter](#status-reporting) hooks, the `claude.json` inbox hooks and
+the [idle-wake waiter](#claude-code-inbox-integration). No user or project
+settings file changes. Claude Code runs an identical command hook from several
+settings sources once, so an unmodified manual `claude.json` does not double
+the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
+too. Taskless launches keep the status-only document; Background and Enhanced
+launches load neither.
+
+Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
+`hooks.UserPromptSubmit`, `hooks.PostToolUse` and `hooks.Stop`, each a TOML
+inline table passed as one argv element. They are active only after the user
+trusts them once; see [Codex inbox integration](#codex-inbox-integration).
+
+Every managed launch, whether it loads a file or arguments, sets
+`AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
+output described above.
 
 For pi, the server stages `/run/aether/aether.ts` and adds
 `-e /run/aether/aether.ts`. For OMP it stages that same filename but adds
@@ -436,23 +465,96 @@ member configuration and does not mount over an existing user plugin path.
 
 ### Claude Code inbox integration
 
-Export `claude.json`; merge into `~/.claude/settings.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`claude` loads the inbox hooks and the idle-wake waiter through
+`/run/aether/claude-settings.json` ([managed loading](#managed-native-loading)).
+Nothing needs installing. A taskless launch's status-only document is not an
+inbox installation.
+
+**Manual.** Export `claude.json`; merge into `~/.claude/settings.json` (or
 `$CLAUDE_CONFIG_DIR/settings.json`). Project alternatives are
 `.claude/settings.json` and `.claude/settings.local.json`.
 Restart Claude Code and review `/hooks` in its normal workspace-trust UI.
 Honor `disableAllHooks`, `allowManagedHooksOnly`, and managed settings such
-as `/etc/claude-code/managed-settings.json`.
+as `/etc/claude-code/managed-settings.json`. `claude.json` has no waiter, so a
+manual copy announces mail at boundaries only: under `claude -p` an
+`asyncRewake` hook runs in the foreground and would block a Background run.
 
 The supported events are `SessionStart`, `UserPromptSubmit`, `PostToolBatch`,
 and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
 Older releases may lack these events or context outputs. Child-agent events
 do not take ownership of the run mailbox. Stop may request one continuation
-for pending mail or an integrator refresh; it is not an idle watcher. The
-built-in `--settings` status reporter alone is not this inbox installation.
+for pending mail or an integrator refresh.
+
+**Idle wake.** The managed document adds this `asyncRewake` hook to
+`SessionStart` and `Stop`:
+
+```json
+{"type":"command","command":"/usr/local/bin/aether-internal hook claude wake","async":true,"asyncRewake":true,"timeout":604800}
+```
+
+- The waiter claims the session by writing its PID to
+  `$TMPDIR/aether-hook-<run>-claude-wake`, then repeats bounded 30-second
+  server waits. A newer waiter (the next `Stop`, `/clear`, a resume)
+  replaces it. The inbox `UserPromptSubmit` and `PostToolBatch` hooks delete
+  the file, so a busy session has none; a replaced waiter exits within a
+  second. Esc fires no `Stop`, so after an interrupt wake pauses until a turn
+  completes.
+- When the server admits a wake for mail the hooks have not announced, the
+  waiter writes the trusted inbox instruction (never peer text) to stderr,
+  adds the IDs to `$TMPDIR/aether-hook-<run>-claude.json`, and exits 2.
+  Claude Code then starts a turn with no human input. The terminal shows
+  **Stop hook feedback**; the model receives the instruction inside a
+  background task notification as `Stop hook blocking error from command
+  "Stop": ...`. That wording is Claude Code's framing, not an error.
+- On `SessionStart` all unread mail counts as unannounced, so a resumed idle
+  session with mail waiting wakes at once. On `Stop` the waiter first gives
+  the inbox `Stop` hook beside it a second to record what it announced, then
+  wakes only for mail missing from that record: mail the hook announced
+  already blocked the stop, and mail that arrived after the hook's check
+  still wakes the session. A wake admitted while a turn runs joins that turn
+  as one more pointer.
+- Nothing else exits 2. Errors exit 1, after up to five retries with 1 to 16
+  second backoff for transport errors; Claude Code shows them only in
+  `claude --debug`. The next completed turn starts a new waiter.
+- The hook timeout is 604800 seconds (7 days); the waiter exits a minute
+  before it. A session idle longer is not woken until a turn completes.
+- `/exit` and SIGTERM stop the waiters. If Claude Code is killed, the waiter
+  sees its stderr hang up and exits within a second. Subagent events, an
+  Enhanced run, and a missing coordination socket make it exit 0 at once.
+- Protection, human takeover, and swarm authority suppress the wake; the
+  server rechecks them on every 30-second wait.
 
 ### Codex inbox integration
 
-Export `codex.json`; merge into `~/.codex/hooks.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`codex` loads the `codex.json` hooks through one `-c hooks.<Event>=[...]`
+argument per event, next to the `-c notify=[...]` status reporter. Codex has
+no hooks flag; a `-c` override is read as a session-flags source, which
+Codex lists but does not treat as managed.
+
+**Trust once.** Codex runs a hook only after you trust it. The first Standard
+run opens **Hooks need review**: choose **Trust all and continue**, or open
+`/hooks` and press `t`. Codex stores the approval in
+`$CODEX_HOME/config.toml` (`~/.codex/config.toml`) under
+`[hooks.state."<key>"]`. The key names the session-flags source, not a path,
+and the stored hash covers the event and handler, so one approval covers
+every workspace and worktree until Aether's hook definitions change. Choosing
+**Continue without trusting** asks again at the next start. A swarm worker can
+be the first Standard Codex run; open its terminal to answer. If the list shows
+hooks you don't recognize, choose **Review hooks**. Inside the run,
+`aether-internal skill` says whether a hook has run yet.
+
+Aether does not bypass or pre-write this trust: `--dangerously-bypass-hook-trust`
+also skips review of your own hooks, `/etc/codex` managed hooks cannot be
+disabled and apply to the whole container, and writing `hooks.state` would
+approve on your behalf.
+
+A manual copy in `~/.codex/hooks.json` has a different key and would run
+every hook twice in a managed run. Remove it.
+
+**Manual.** For other launches (Background, taskless, or an overridden
+argv), export `codex.json`; merge into `~/.codex/hooks.json` (or
 `$CODEX_HOME/hooks.json`), alternatively `.codex/hooks.json`.
 Restart Codex, then use `/hooks` to review and trust the **exact hook
 definitions**; repeat after changing them. Project trust is not hook trust.
@@ -462,7 +564,9 @@ in the applicable `config.toml`.
 Supported events are `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and
 `Stop`, filtered against child-agent events. The built-in `notify` reporter
 only reports turn completion: it neither installs these hooks nor wakes
-later-idle Codex. Use a version implementing the current
+later-idle Codex. No idle wake exists for Codex: no supported mechanism could
+be verified, so mail waits for the next hook boundary or an explicit inbox
+read. Use a version implementing the current
 [Codex hook contract](https://learn.chatgpt.com/docs/hooks).
 
 ### Native pi inbox integration
@@ -682,7 +786,8 @@ Native receiver errors appear in the agent's own warning UI or stderr. Only
 recoverable helper/transport failures get bounded backoff; unsupported
 protocols and nonretryable helper errors stop observation rather than spinning.
 After exhausting helper retries, pi/OMP require a reload/restart; OpenCode
-pauses until another explicit same-root prompt. Native synchronous send
+pauses until another explicit same-root prompt; Claude Code's waiter exits
+and the next completed turn starts a new one. Native synchronous send
 rejection instead permits [lifecycle-driven recovery with fresh admission](harness-integration.md#keep-observation-and-notification-separate),
 without marking the rejected IDs notified or blindly resending. Fix the
 underlying error first; reloading never erases or acknowledges durable mail.
@@ -711,14 +816,18 @@ container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
 coordination directory. The status-only argument additions are shown below;
-task-bearing native launches also use [managed loading](#managed-native-loading):
+task-bearing native launches also use [managed loading](#managed-native-loading),
+which for `claude` adds the inbox hooks and idle-wake waiter to the same
+`claude-settings.json`:
 
 ```
 claude --dangerously-skip-permissions "<task>" \
   --settings /run/aether/claude-settings.json
 
 codex --dangerously-bypass-approvals-and-sandbox "<task>" \
-  -c 'notify=["/opt/aether/aether-server","report","codex"]'
+  -c 'notify=["/opt/aether/aether-server","report","codex"]' \
+  -c 'hooks.SessionStart=[{hooks=[{type="command",command="/usr/local/bin/aether-internal hook codex SessionStart",timeout=5}]}]'
+  # ...and the same -c for UserPromptSubmit, PostToolUse and Stop
 
 pi "<task>" -e /run/aether/status.ts
 omp --auto-approve "<task>" -e /run/aether/status.ts
@@ -1090,7 +1199,8 @@ default. Each agent's flags, read from its CLI help on 2026-10-11:
 | `pi` | `--model <pattern>` (`provider/id`, optional `:<thinking>`) | `model` option, else `session/set_model` |
 | `omp` | `--model=<value>` (fuzzy: `opus`, `gpt-5.2`, `openai/gpt-5.2`) | `omp acp` has no model flag; `model` option, else `session/set_model` |
 | `opencode` | `-m, --model provider/model` on `opencode` and `opencode run`, plus `model` in `OPENCODE_CONFIG_CONTENT` | `model` in `OPENCODE_CONFIG_CONTENT`, then the session option |
-| custom definition, `fake` | refused | refused |
+| custom definition | refused | `model` option, else `session/set_model` |
+| `fake` | refused | refused |
 
 The flag goes into argv before the task, so a CLI that stops parsing options
 at the prompt still reads it; a resume command has no task, so the flag is
@@ -1098,8 +1208,9 @@ appended. `opencode acp` has no model flag, so every `opencode` launch also
 gets `model` in `OPENCODE_CONFIG_CONTENT`, merged after the workspace's
 variables: a per-run model beats a workspace default. An Enhanced run sets
 the model over ACP after the session opens; see
-[Enhanced runs](enhanced-runs.md#launch-one). A custom definition or `fake`
-has no model flag, and a launch with a model is refused:
+[Enhanced runs](enhanced-runs.md#launch-one), for a custom definition too.
+A Standard or Background launch of a custom definition or `fake` has no model
+flag, and a launch with a model is refused:
 
 ```text
 scheduler: agent "custom" has no model flag; launch it without a model
@@ -1192,7 +1303,8 @@ Environment terminal opens with its login command typed (`claude` then
 `/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`).
 **Check** reads `agent.list` again and shows **Installed**, **Enhanced
 installed** and **Login found** or **No login found**, from `installed`,
-`enhanced_installed` and `login_found`. A gateway without `agent.install`
+`enhanced_installed` and `login_found`; a custom agent with no login path
+shows only **Installed**. A gateway without `agent.install`
 types the install command into the terminal instead. In the CLI, run:
 
 ```sh
@@ -1203,7 +1315,8 @@ Install the executable into `~/.local/bin`, complete the vendor login in that
 terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member; **Add agent…**
-registers one with a Standard, a Background and an optional Enhanced command.
+registers one with a Standard, a Background and an optional Enhanced command,
+an optional Enhanced start mode and an optional login file.
 
 The Agents page shows **Installed** or **Not installed** and **Login found**
 or **No login found** for your account. These checks look for the executable
@@ -1288,6 +1401,10 @@ device-code option. Codex writes `auth.json` under `~/.codex`, which remains
 in your member home. `aether config push` never uploads known credential
 names.
 
+Your first Standard run opens Codex's **Hooks need review** screen for
+Aether's inbox hooks: choose **Trust all and continue**. See
+[Codex inbox integration](#codex-inbox-integration).
+
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 
 ### pi
@@ -1364,7 +1481,9 @@ Custom launch definitions come from two places, resolved in this order:
    scoped to the registering member, over the normal control channel; no
    server restart. A member's definition shapes argv only inside that
    member's own containers and never affects anyone else. Shipped names and
-   the reserved names `custom` and `fake` cannot be registered.
+   the reserved names `custom` and `fake` cannot be registered. If a stored
+   row later shares a name with a shipped agent, `agent.list` skips the row
+   and a launch uses the shipped agent.
 
 A member's own definition runs only on that member's own account. On a
 shared account, only a shipped agent or a server-wide definition is
@@ -1372,6 +1491,20 @@ launched, and its `CredentialPaths` are the login paths the share mounts from
 the owner's home. A launch is refused when a credential path is the home
 itself. A definition declares no install directories, so a recipient without
 its executable borrows only the owner's `~/.local/bin` and `~/.local/lib`.
+
+The name need not equal the command. `aether agent add mycursor --standard
+"agent {task}"` registers `mycursor` with executable `agent`, the first word of
+the Standard command, and a Background default of `agent -p {task}`. The name
+is what you choose at launch and what coordination (`AETHER_HARNESS`, inbox
+hooks, swarm choices) keys on; the executable is what runs. Inbox hooks ship
+for a fixed set of names, so a differently named agent gets none and
+`aether-internal skill` says `no packaged integration`.
+
+`aether agent add` also takes `--acp-mode <id>` and a repeatable
+`--login <path>`, such as `--login ~/.cursor/auth.json`. A `~/` path is stored
+as `/root/...`; when your shell expands `~` first, the CLI turns a path under
+your local home back into `~/`. With a login path, `agent.list` reports
+`login_found`; without one, setup never shows the agent as logged in.
 
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by agent name. Each definition must
@@ -1381,7 +1514,8 @@ is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only. A definition under a name Aether
-does not ship has no model flag, so a launch of it with a model is refused.
+does not ship has no model flag, so a Standard or Background launch of it with
+a model is refused; an Enhanced launch sets the model over ACP.
 
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,

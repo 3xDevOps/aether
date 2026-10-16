@@ -60,6 +60,9 @@ type Config struct {
 	// Code's background task frames, and takes agent output that arrives
 	// with no prompt open for a turn the agent runs on its own.
 	ClaudeCode bool
+	// AgentCommand is the ACP server's executable. A terminal auth method's
+	// args belong to it.
+	AgentCommand string
 
 	OnState func(TurnState)
 	// OnInputs reports the complete set of pending requests whenever it
@@ -127,6 +130,7 @@ type State struct {
 	Steering      bool            `json:"steering,omitempty"`
 	PromptImages  bool            `json:"prompt_images"`
 	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
+	AgentCommand  string          `json:"agent_command,omitempty"`
 	Usage         *Usage          `json:"usage,omitempty"`
 }
 
@@ -291,6 +295,9 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 
 	s.conn = newConn(r, w, s, cfg.Logger)
 	s.conn.autoAllow = cfg.AutoAllow
+	// With subagent sessions, Claude's adapter withholds the Agent and Task
+	// tool calls whose results background task tracking reads.
+	s.conn.childSessions = !cfg.ClaudeCode
 	if cfg.SystemPrompt != "" || cfg.ClaudeCode {
 		s.conn.sessionMeta = map[string]any{}
 	}
@@ -770,6 +777,7 @@ func (s *Session) State() State {
 	info := s.conn.Info()
 	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
 	st.PromptImages = info.PromptImages
+	st.AgentCommand = s.cfg.AgentCommand
 	return st
 }
 
@@ -916,20 +924,21 @@ func (s *Session) inputsLocked() {
 	s.callback(func() { s.cfg.OnInputs(inputs) })
 }
 
-func (s *Session) update(raw json.RawMessage) {
+func (s *Session) update(parent string, raw json.RawMessage) {
 	var head updateHead
 	_ = json.Unmarshal(raw, &head)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A background subagent streams while the main agent has not yet taken
 	// the prompt.
-	if head.Meta.ClaudeCode.ParentToolUseID == "" {
+	main := parent == "" && head.Meta.ClaudeCode.ParentToolUseID == ""
+	if main {
 		s.acceptedLocked()
 	}
-	if head.opensTurn() {
+	if main && head.opensTurn() {
 		s.openAutonomousLocked()
 	}
-	s.proj.update(raw)
+	s.proj.update(parent, raw)
 	s.trackLocked(head)
 	s.settleLocked()
 }

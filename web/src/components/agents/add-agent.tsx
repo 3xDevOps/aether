@@ -25,25 +25,30 @@ export function AddAgent({
   const [standard, setStandard] = useState<string | null>(null)
   const [background, setBackground] = useState<string | null>(null)
   const [enhanced, setEnhanced] = useState('')
+  const [mode, setMode] = useState('')
+  const [login, setLogin] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const trimmed = name.trim()
   const base = trimmed || 'myagent'
   const standardValue = standard ?? `${base} {task}`
-  const backgroundValue = background ?? `${base} -p {task}`
   const tui = splitArgv(standardValue)
+  const backgroundValue = background ?? `${tui[0] ?? base} -p {task}`
 
   const submit = async () => {
     setBusy(true)
     setError(null)
     try {
       const acp = splitArgv(enhanced)
+      const credentials = login.trim() ? [login.trim()] : []
       await client.agentRegister({
         name: trimmed,
         executable: tui[0] ?? '',
         tui_args: tui,
         headless_args: splitArgv(backgroundValue),
         ...(acp.length ? { acp_args: acp } : {}),
+        ...(mode.trim() ? { acp_mode: mode.trim() } : {}),
+        ...(credentials.length ? { credential_paths: credentials } : {}),
       })
       const listed = (await client.agentList()).find((agent) => agent.name === trimmed)
       if (!listed) throw new Error(`agent.list does not list ${trimmed} after agent.register`)
@@ -77,6 +82,12 @@ export function AddAgent({
       </FormField>
       <FormField label="Enhanced command" help="Optional. The command that serves the Agent Client Protocol on stdio, such as myagent acp.">
         <Input value={enhanced} onChange={(event) => setEnhanced(event.target.value)} />
+      </FormField>
+      <FormField label="Enhanced start mode" help="Optional. The ACP session mode an Enhanced run starts in, such as agent. Pick the one that does not ask before each tool, or workers stall on prompts.">
+        <Input value={mode} onChange={(event) => setMode(event.target.value)} />
+      </FormField>
+      <FormField label="Login file" help="Optional. A file or folder that exists once the agent is signed in, such as ~/.cursor/auth.json. Without one the agent shows as installed, never as logged in.">
+        <Input value={login} onChange={(event) => setLogin(event.target.value)} />
       </FormField>
       {error && <Callout tone="failed" role="alert" title="Agent not added">{error}</Callout>}
       <div className="flex flex-wrap gap-2">

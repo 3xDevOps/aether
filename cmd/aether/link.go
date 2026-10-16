@@ -232,7 +232,7 @@ const joinRetry = 5 * time.Second
 func linkWaiting(opts cli.LinkOptions, prev cli.Config) (cli.LinkResult, error) {
 	waiting := false
 	for {
-		result, err := cli.Link(opts, prev)
+		result, err := cli.Link(context.Background(), opts, prev)
 		var refused *edgeproto.Refused
 		if opts.Join == "" || !errors.As(err, &refused) || refused.Kind != edgeproto.RefusedDevicePending {
 			return result, err

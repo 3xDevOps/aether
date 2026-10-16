@@ -99,7 +99,10 @@ type Definition struct {
 	HeadlessArgs []string
 	// ACPArgs optionally serves the Agent Client Protocol; its first value
 	// may name a separate adapter executable.
-	ACPArgs         []string
+	ACPArgs []string
+	// ACPMode is the session mode a new enhanced session starts in; empty
+	// keeps the agent's default.
+	ACPMode         string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -127,6 +130,14 @@ func (d Definition) Validate() error {
 		}
 		if err := validateArgv(d.ACPArgs, d.ACPArgs[0]); err != nil {
 			return fmt.Errorf("harness: acp argv: %w", err)
+		}
+	}
+	if d.ACPMode != "" {
+		if len(d.ACPArgs) == 0 {
+			return fmt.Errorf("harness: acp mode %q needs acp args", d.ACPMode)
+		}
+		if strings.ContainsAny(d.ACPMode, " \t\r\n") {
+			return fmt.Errorf("harness: acp mode %q must not contain whitespace", d.ACPMode)
 		}
 	}
 	if d.ProfileRoot != "" {
@@ -226,12 +237,15 @@ func (d Definition) Profile() Profile {
 		CredentialPaths: append([]string(nil), d.CredentialPaths...),
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
+		ACPMode:         d.ACPMode,
 	}
 	if registered, ok := profiles[d.Name]; ok {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
-		p.ACPMode = registered.ACPMode
+		if p.ACPMode == "" {
+			p.ACPMode = registered.ACPMode
+		}
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}
@@ -387,9 +401,10 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 // deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:        "claude",
-		DisplayName: "Claude Code",
-		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:               "claude",
+		DisplayName:        "Claude Code",
+		NativeCoordination: true,
+		TUIArgs:            []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
 		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:         []string{claudeACP.Binary},
@@ -431,21 +446,22 @@ var profiles = map[string]Profile{
 		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
-		Name:            "codex",
-		DisplayName:     "Codex",
-		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		ACPArgs:         []string{codexACP.Binary},
-		ACPInstall:      codexACP,
-		ACPMode:         "agent-full-access",
-		ACPDefault:      true,
-		ModelArgs:       []string{"--model", ModelPlaceholder},
-		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
-		EnvPassthrough:  []string{"OPENAI_API_KEY"},
-		CredentialPaths: []string{".codex/auth.json"},
-		LocalRoot:       ".codex",
-		DenyNames:       []string{"auth.json", "keychain", "token.json"},
-		DiscoveryArgs:   []string{"-c", codexDiscoverySetting},
+		Name:               "codex",
+		DisplayName:        "Codex",
+		NativeCoordination: true,
+		TUIArgs:            []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		HeadlessArgs:       []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:            []string{codexACP.Binary},
+		ACPInstall:         codexACP,
+		ACPMode:            "agent-full-access",
+		ACPDefault:         true,
+		ModelArgs:          []string{"--model", ModelPlaceholder},
+		ResumeArgs:         []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
+		EnvPassthrough:     []string{"OPENAI_API_KEY"},
+		CredentialPaths:    []string{".codex/auth.json"},
+		LocalRoot:          ".codex",
+		DenyNames:          []string{"auth.json", "keychain", "token.json"},
+		DiscoveryArgs:      []string{"-c", codexDiscoverySetting},
 		// Codex notifies only when a turn completes, so the run comes back on
 		// the agent's own output.
 		Reporter:   ReporterTurnEnd,

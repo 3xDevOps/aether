@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/jsonc"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/pelletier/go-toml/v2"
@@ -102,7 +103,26 @@ func writeHookSummary(out io.Writer) error {
 	return writeHookSummaryWithInputs(out, harness, hookInstallInputs{home: home, cwd: cwd, env: os.Getenv, lookupEnv: os.LookupEnv})
 }
 
+func managedHooksLine(harness string, in hookInstallInputs) string {
+	if harness == "" || in.env(coordtransport.ManagedHooksEnv) != "1" || in.env(coordtransport.EnhancedEnv) == "1" {
+		return ""
+	}
+	if harness == "codex" {
+		// Codex runs a loaded hook only once the user trusts it; any hook call
+		// leaves this record.
+		if _, err := os.Stat(hookNoticePath(in.env("AETHER_RUN_ID"), harness)); err == nil {
+			return "Inbox hooks (codex): loaded by this run's launch and running. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
+		}
+		return "Inbox hooks (codex): loaded by this run's launch, but Codex runs them only after you trust them once (Hooks need review -> Trust all and continue, or /hooks then t). Until then, read aether-internal inbox yourself. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
+	}
+	return "Inbox hooks (" + harness + "): loaded by this run's launch; do not install a manual copy.\n"
+}
+
 func writeHookSummaryWithInputs(out io.Writer, harness string, in hookInstallInputs) error {
+	if line := managedHooksLine(harness, in); line != "" {
+		_, err := io.WriteString(out, line)
+		return err
+	}
 	var text strings.Builder
 	for _, plan := range hookInstallationPlans(in) {
 		if plan.id != harness && strings.TrimSuffix(strings.TrimSuffix(plan.id, "-v1"), "-v2") != harness {
@@ -173,7 +193,7 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 		cursorNote += " Custom CLI config environment is set; its effect on hooks.json is undocumented."
 	}
 	return []hookInstallPlan{
-		{id: "claude", assets: []string{"claude.json"}, paths: []string{filepath.Join(claude, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json")}, controls: []string{"/etc/claude-code/managed-settings.json"}, note: "CLI --settings and managed policy/trust remain unverified.", activate: "Restart Claude Code; review hooks in /hooks and accept workspace trust only through the normal UI. Managed-only policy may prohibit these hooks."},
+		{id: "claude", assets: []string{"claude.json"}, paths: []string{filepath.Join(claude, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json")}, controls: []string{"/etc/claude-code/managed-settings.json"}, note: "Managed Standard launches load these hooks through --settings /run/aether/claude-settings.json; this check covers manual copies only. Managed policy/trust remain unverified.", activate: "Restart Claude Code; review hooks in /hooks and accept workspace trust only through the normal UI. Managed-only policy may prohibit these hooks."},
 		{id: "codex", assets: []string{"codex.json"}, paths: []string{filepath.Join(codex, "hooks.json"), project(".codex", "hooks.json")}, controls: []string{filepath.Join(codex, "config.toml"), project(".codex", "config.toml"), "/etc/codex/config.toml"}, note: "Inline TOML hooks, ancestor project layers, plugins, CLI overrides and exact hook trust hashes are not inspected.", activate: "Restart Codex; use /hooks to review and trust these exact definitions (repeat after changes); honor project trust and managed policy. Never bypass hook trust."},
 		{id: "copilot", assets: []string{"copilot.json"}, paths: []string{filepath.Join(copilot, "hooks", "aether.json"), project(".github", "hooks", "aether.json")}, controls: []string{filepath.Join(copilot, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json"), project(".github", "copilot", "settings.json"), project(".github", "copilot", "settings.local.json")}, note: "Other hook filenames, plugins, --config-dir, session trust and enterprise policy are unverified.", activate: "Quit and restart Copilot CLI in the intended trusted repository; resolve trust in its normal UI. Honor disableAllHooks and allowManagedHooksOnly."},
 		{id: "gemini", assets: []string{"gemini.json"}, paths: []string{filepath.Join(gemini, "settings.json"), project(".gemini", "settings.json")}, controls: []string{root("GEMINI_CLI_SYSTEM_DEFAULTS_PATH", "/etc/gemini-cli/system-defaults.json"), root("GEMINI_CLI_SYSTEM_SETTINGS_PATH", "/etc/gemini-cli/settings.json")}, note: "GEMINI_CLI_HOME is the parent of .gemini. Folder trust and extension settings remain unverified.", activate: "Fully exit and restart Gemini CLI; inspect /hooks list. Honor folder trust and hooksConfig controls; if intentionally disabled, discuss /hooks enable aether-inbox with the user rather than enabling everything."},
@@ -187,6 +207,7 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 
 func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error {
 	var text strings.Builder
+	text.WriteString(managedHooksLine(in.env("AETHER_HARNESS"), in))
 	text.WriteString("\nHook installation (read-only): configured means matching files on disk, NOT loaded, trusted or executed. Install only your current harness; no process-tree guessing.\n")
 	text.WriteString("Bounded check: fixed user/current-directory project paths, regular files <=256 KiB; no ancestor/package scan or config execution. Explicit CLI paths, runtime flags, trust and managed layers may change results.\n")
 	text.WriteString("JSON install: export below, then create the destination only if absent; otherwise append only missing hooks.EVENT entries to their arrays, preserving unrelated keys, schema version and hooks. Resolve version conflicts; avoid duplicate user/project installs.\n")
@@ -212,7 +233,7 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 	}
 	text.WriteString("Safe self-install: inspect/export/diff, edit only the chosen harness with normal authorization, preserve unrelated config, and do not edit trust records, managed policy or disable flags. Restart/reload as above, then verify a real native boundary; disk checks alone never establish activation.\n")
 	text.WriteString("Generic integration: aether-internal hook file generic.sh adapts the host's documented context hook. A custom native receiver may call hook generic wake once per bounded wait; see docs/harness-integration.md for session ownership and cancellation. No standard installation path or activation claim.\n")
-	text.WriteString("JSON command hooks run only at lifecycle boundaries. Loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox and explicitly ack its token after handling; hook output never acknowledges mail.\n")
+	text.WriteString("JSON command hooks run only at lifecycle boundaries. Managed Claude Code launches and loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox and explicitly ack its token after handling; hook output never acknowledges mail.\n")
 	_, err := io.WriteString(out, text.String())
 	return err
 }
