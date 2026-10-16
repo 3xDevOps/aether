@@ -44,6 +44,7 @@ const elsewhere = record({
 })
 const done = record({ id: 'done', status: 'merged', finished_at: '2026-08-14T10:30:00Z' })
 const failed = record({ id: 'failed', status: 'failed', finished_at: '2026-08-14T10:10:00Z' })
+const interrupted = record({ id: 'interrupted', status: 'interrupted', finished_at: '2026-08-14T10:05:00Z' })
 
 describe('runGroups', () => {
   it('lists Needs you from every workspace and the others from the active one', () => {
@@ -70,10 +71,10 @@ describe('runGroups', () => {
     expect(groups['needs-you'][1].waitingSince).toBe('2026-08-14T10:15:00Z')
   })
 
-  it('sorts Working by latest change and Finished with failures first', () => {
-    const groups = runGroups(input([working, newer, done, failed]))
+  it('sorts Working by latest change and Finished with failures and interruptions first', () => {
+    const groups = runGroups(input([working, newer, done, interrupted, failed]))
     expect(ids(groups.working)).toEqual(['newer', 'working'])
-    expect(ids(groups.finished)).toEqual(['failed', 'done'])
+    expect(ids(groups.finished)).toEqual(['failed', 'interrupted', 'done'])
   })
 
   it('narrows Working and Finished to the viewer under Mine, never Needs you', () => {
@@ -110,13 +111,19 @@ describe('swarms', () => {
 
   it('folds a swarm into one collapsed entry with its counts', () => {
     const groups = runGroups(
-      input([integrator, worker('w1'), worker('w2', { status: 'needs-attention', state: 'needs-you' }), worker('w3', { status: 'completed' })]),
+      input([
+        integrator,
+        worker('w1'),
+        worker('w2', { status: 'needs-attention', state: 'needs-you' }),
+        worker('w3', { status: 'completed' }),
+        worker('w4', { status: 'interrupted' }),
+      ]),
     )
     expect(ids(groups.working)).toEqual(['run_integrator'])
     const [swarm] = groups.working
     expect(swarm.children).toEqual([])
-    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 0 } })
-    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3'])
+    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 1 } })
+    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3', 'w4'])
   })
 
   it('lists the swarm in Needs you with only the members that need the viewer', () => {

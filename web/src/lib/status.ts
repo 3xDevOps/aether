@@ -168,6 +168,11 @@ export function groupOf({ state, needsYou }: Pick<RunPresentation, 'state' | 'ne
 
 const finishedStates = new Set<PresentationState>(['completed', 'merged', 'closed', 'interrupted', 'failed'])
 
+/** A run that ended without its work done, which counts and sorts as failed. */
+export function endedBadly(state: PresentationState): boolean {
+  return state === 'failed' || state === 'interrupted'
+}
+
 const fallbackLabelLength = 120
 
 /**

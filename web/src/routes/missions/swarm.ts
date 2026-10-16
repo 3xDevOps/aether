@@ -4,6 +4,7 @@ import type { Tone } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import { type StateContext, unreadMail, unreadReason } from '@/lib/needs-you'
 import type { AgentInfo, Mission, MissionPhase } from '@/lib/types'
+import { endedBadly } from '@/lib/status'
 import { useStore } from '@/store'
 import { runRows, stateContextOf } from '@/store/selectors'
 
@@ -85,7 +86,7 @@ export function swarmLines(ctx: StateContext): Record<string, SwarmLine> {
     }
     if (row.needsYou) count.needsYou++
     else if (row.group === 'working') count.working++
-    else if (row.state === 'failed') count.failed++
+    else if (endedBadly(row.state)) count.failed++
     else count.done++
   }
   for (const [id, line] of Object.entries(lines)) line.counts = countsLabel(counts[id])

@@ -1,6 +1,7 @@
 import { resolveMember } from '@/lib/member-name'
 import type { NeedsYouID, StateContext } from '@/lib/needs-you'
 import {
+  endedBadly,
   groupLabel,
   groupOf,
   presentRun,
@@ -117,7 +118,7 @@ function swarmTree(root: RunRow, members: RunRow[]): RunTree {
   for (const row of members) {
     if (row.needsYou) counts.needsYou++
     else if (row.group === 'working') counts.working++
-    else if (row.state === 'failed') counts.failed++
+    else if (endedBadly(row.state)) counts.failed++
     else counts.done++
   }
   const waits = [root, ...children].filter((row) => row.needsYou)
@@ -156,7 +157,7 @@ const byWait = (a: RunRow, b: RunRow) =>
 const byChange = (a: RunRow, b: RunRow) =>
   b.run.stateChangedAt.localeCompare(a.run.stateChangedAt) || a.run.id.localeCompare(b.run.id)
 const failedFirst = (a: RunRow, b: RunRow) =>
-  Number(b.state === 'failed') - Number(a.state === 'failed') || byChange(a, b)
+  Number(endedBadly(b.state)) - Number(endedBadly(a.state)) || byChange(a, b)
 const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
   'needs-you': byWait,
   working: byChange,
