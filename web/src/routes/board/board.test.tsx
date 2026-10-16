@@ -212,7 +212,7 @@ describe('board columns', () => {
     renderBoard()
 
     expect(column('Working').getByText('busy agent')).toBeDefined()
-    expect(column('Working').getByText('Working in background: 2 tasks')).toBeDefined()
+    expect(column('Working').getByText('Working · Working in background: 2 tasks')).toBeDefined()
     expect(column('Needs you').getByText('asking agent')).toBeDefined()
     expect(column('Needs you').getByText('Agent asks: Which database?')).toBeDefined()
   })
@@ -220,7 +220,7 @@ describe('board columns', () => {
   it("keeps another member's stopped run in Working, waiting for its owner", () => {
     seed([run({ ...stopped, member_id: bob.id })])
     renderBoard()
-    expect(column('Working').getByText('Waiting for Bob')).toBeDefined()
+    expect(column('Working').getByText('Waiting · Waiting for Bob')).toBeDefined()
   })
 
   it('shows Paused off the timeline stream and clears it on resume', () => {

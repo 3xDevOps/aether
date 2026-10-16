@@ -141,6 +141,13 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   return live
 }
 
+/** The reason worth printing beside the state's label, without the words that restate it. */
+export function stateDetail({ state, reason }: Pick<RunPresentation, 'state' | 'reason'>): string | undefined {
+  const label = stateLabel[state]
+  if (reason === label || reason === stateReasons.working) return undefined
+  return reason.startsWith(`${label}: `) ? reason.slice(label.length + 2) : reason
+}
+
 /**
  * The tooltip every surface gives a run's state: the state, since when, the reason the server
  * gave, and what happens next.

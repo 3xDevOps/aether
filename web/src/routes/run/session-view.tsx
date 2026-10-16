@@ -417,7 +417,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         </div>
       )}
       <ChangesBar run={run} />
-      <CompletionPrompt run={run} />
+      <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />
       <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>

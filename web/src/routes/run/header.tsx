@@ -17,7 +17,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -104,12 +104,15 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const presentation = run.switching
     ? { state: 'working' as const, reason: `Switching to ${modeLabel[run.switching] ?? run.switching}…` }
     : presented
-  const { state, reason } = presentation
+  const { state } = presentation
   const subagents = useStore((s) =>
     state === 'waiting-agents'
       ? Object.values(s.acpSessions[run.id]?.agents.agents ?? {}).filter((agent) => agentState(agent) === 'running').length
       : 0,
   )
+  const detail = [subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`, stateDetail(presentation)]
+    .filter(Boolean)
+    .join(' · ')
   const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
   const owner = useStore((s) => resolveMember(s, run.member_id).member)
   const ownerName = useStore((s) => memberName(s, run.member_id))
@@ -124,10 +127,12 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span aria-hidden>·</span>
           <RelativeTime at={since} compact title={undefined} className="tabular-nums" />
         </span>
-        <span aria-hidden>·</span>
-        <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>
-          {subagents > 0 ? `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running · ${reason}` : reason}
-        </span>
+        {detail && (
+          <>
+            <span aria-hidden>·</span>
+            <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{detail}</span>
+          </>
+        )}
         <span className="flex shrink-0 items-center gap-1.5">
           <span aria-hidden>·</span>
           <AgentGlyph agent={run.harness} />

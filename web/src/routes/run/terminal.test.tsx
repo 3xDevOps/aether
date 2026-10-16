@@ -1252,7 +1252,7 @@ describe('terminal view', () => {
     )
 
     expect(screen.queryByText("Starting the run's container")).toBeNull()
-    expect(screen.getByText('Failed: provisioning: create checkout: no space left')).toBeDefined()
+    expect(screen.getByText('provisioning: create checkout: no space left')).toBeDefined()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()
   })
@@ -1292,7 +1292,7 @@ describe('terminal view', () => {
     )
 
     expect(
-      screen.getByText('Failed: provisioning: create checkout: no space left'),
+      screen.getByText('provisioning: create checkout: no space left'),
     ).toBeDefined()
     expect(screen.queryByText('Retry')).toBeNull()
     view.unmount()

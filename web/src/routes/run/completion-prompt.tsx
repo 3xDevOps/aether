@@ -2,14 +2,12 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { runCommands, useCommandRunner } from '@/lib/commands'
 import { plainReason } from '@/lib/reasons'
-import { cn } from '@/lib/utils'
-import { sessionColumn } from '@/routes/run/session-rows'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
 /** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
-export function CompletionPrompt({ run }: { run: RunRecord }) {
+export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
   const paused = useStore((s) => s.pausedRuns[run.id])
   const members = useStore((s) => s.members)
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
@@ -23,7 +21,7 @@ export function CompletionPrompt({ run }: { run: RunRecord }) {
   if (!complete || !later) return null
   const summary = run.reason && run.reason !== 'agent reported success' && !isTerminal(run.status) ? plainReason(run.reason) : undefined
   return (
-    <div className={cn(sessionColumn, 'pb-2')}>
+    <div className={className}>
       <Callout
         tone="review"
         role="region"

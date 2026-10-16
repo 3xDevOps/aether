@@ -21,6 +21,7 @@ import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useAgentTerminal } from '@/routes/run/agent-terminal'
 import { CapturesDialog } from '@/routes/run/captures'
 import { RawEventsDialog } from '@/routes/run/raw-events'
+import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
 import { MultiplayerControls } from '@/routes/run/multiplayer-controls'
@@ -278,6 +279,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           </div>
           {docked && <BrowserDock available={frame.width}>{browserView}</BrowserDock>}
         </div>
+        {view !== 'session' && <CompletionPrompt run={run} className="border-t border-seam p-2" />}
       </div>
       {agentInline && agentID && (
         <aside aria-label="Subagent" className="flex w-[28rem] shrink-0 flex-col border-l border-seam bg-canvas">

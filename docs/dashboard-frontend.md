@@ -1336,8 +1336,9 @@ state.
 `stateTitle` builds the tooltip each surface puts on a state: "*Label*
 since *relative* — *reason*. *What happens next*", for example "Waiting
 since 5 minutes ago — Turn ended without a report. Send a message to
-continue." The run header's state line reads *Label* · *elapsed* ·
-*reason*; its label sits in a `role=status` element, so a screen reader
+continue." A board card reads *Label* · *reason* outside Needs you, where
+the reason alone leads. `stateDetail` drops a reason that only restates the
+label. The run header's state line reads *Label* · *elapsed* · *reason*; its label sits in a `role=status` element, so a screen reader
 hears only a change of state, and the elapsed time is the first part to go
 on a narrow header. While a run waits for agents, the header counts the
 Enhanced session's running subagents, "2 subagents running".
@@ -1528,7 +1529,8 @@ the server as the run's `review` (`""`, `ready`, `later`, `accepted`) and
 `review_changed_at`. A success report sets `ready`; opening the run does not
 change it, so the run stays in Needs you. While the open run is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
-callout above the Session composer: "Your agent reports this task is
+callout above the Session composer, or at the foot of any other run view:
+"Your agent reports this task is
 finished. Mark it complete?", the agent's summary when its reason carries
 one, **Mark complete** and **Not yet**. Both are run commands
 (`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**

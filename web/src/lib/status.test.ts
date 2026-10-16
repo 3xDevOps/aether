@@ -1,6 +1,6 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
 import type { RunActivity } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
 import { bob, run, stateContext } from '@/test/fixtures'
@@ -100,6 +100,13 @@ describe('run presentation', () => {
       state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'It continues when they report back.',
     })
     expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 12m' }).reason).toBe('No update for 12m')
+  })
+
+  it('prints a reason beside its label only where it adds something', () => {
+    expect(stateDetail({ state: 'working', reason: 'Agent working' })).toBeUndefined()
+    expect(stateDetail({ state: 'waiting', reason: 'Turn ended without a report' })).toBe('Turn ended without a report')
+    expect(stateDetail({ state: 'failed', reason: 'Failed: Agent exited with code 1' })).toBe('Agent exited with code 1')
+    expect(stateDetail({ state: 'merged', reason: 'Merged' })).toBeUndefined()
   })
 
   it('titles a state with how long it has held, the reason and the next step', () => {
