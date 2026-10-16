@@ -118,6 +118,7 @@ import {
   Tablet as LucideTablet,
   Bug as LucideBug,
   FileSymlink as LucideFileSymlink,
+  ChartColumn as LucideChartColumn,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -161,6 +162,7 @@ export const GitBranch = icon(LucideGitBranch)
 export const Github = icon(LucideGithub)
 export const GitPullRequest = icon(LucideGitPullRequest)
 export const History = icon(LucideHistory)
+export const ChartColumn = icon(LucideChartColumn)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)
