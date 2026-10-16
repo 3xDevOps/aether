@@ -233,7 +233,7 @@ func (r *Relay) Online(serverID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	reg := r.servers[serverID]
-	return reg != nil && reg.claimed
+	return reg != nil && reg.claimed && reg.ctx.Err() == nil
 }
 
 // Metrics is a snapshot of the relay's counters.

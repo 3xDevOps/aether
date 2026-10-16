@@ -53,11 +53,53 @@ type State struct{ dir string }
 func OpenState(dataDir string) *State { return &State{dir: StateDir(dataDir)} }
 
 // Status is what the agent last reported about its control connection.
+// While Connected, PID is the server process and Heartbeat the last time
+// the edge answered: its Ready at enrollment, then each Pong.
 type Status struct {
 	Edge      string    `json:"edge"`
 	Connected bool      `json:"connected"`
 	Error     string    `json:"error,omitempty"`
 	Since     time.Time `json:"since"`
+	PID       int       `json:"pid,omitempty"`
+	Heartbeat time.Time `json:"heartbeat,omitzero"`
+}
+
+// HeartbeatMaxAge is how old the heartbeat of a live control connection
+// gets: the agent pings every edgeproto.PingInterval, so an older one
+// means two pings went unanswered.
+const HeartbeatMaxAge = 2 * edgeproto.PingInterval
+
+// Stale is why a Connected st no longer holds at now: the server process
+// it names is gone, which a stop without the agent's clean shutdown
+// leaves, or no ping was answered within HeartbeatMaxAge, as when the
+// server hangs or the edge dropped the connection unnoticed. Nil while it
+// holds, and for a status without a Heartbeat, which a server older than
+// heartbeats wrote and nothing here can check.
+func (st Status) Stale(now time.Time) error {
+	if !st.Connected {
+		return nil
+	}
+	if st.PID > 0 && !processRunning(st.PID) {
+		return fmt.Errorf("server process %d is not running; it stopped without closing the connection", st.PID)
+	}
+	if st.Heartbeat.IsZero() {
+		return nil
+	}
+	if age := now.Sub(st.Heartbeat); age > HeartbeatMaxAge {
+		return fmt.Errorf("no answer from the edge for %s (limit %s); the server is hung or the connection is dead and not yet detected",
+			age.Round(time.Second), HeartbeatMaxAge)
+	}
+	return nil
+}
+
+// processRunning reports whether pid is a live process. A process this
+// one may not signal is live.
+func processRunning(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return !errors.Is(p.Signal(syscall.Signal(0)), os.ErrProcessDone)
 }
 
 // ClaimCode describes the current claim code. The code itself is shown

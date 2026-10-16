@@ -41,6 +41,7 @@ const (
 	RefusedNotSignedIn    RefusedKind = "not-signed-in"
 	RefusedTokenRevoked   RefusedKind = "token-revoked"
 	RefusedNotConnected   RefusedKind = "server-not-connected"
+	RefusedNotClaimed     RefusedKind = "server-not-claimed"
 	RefusedUnknownServer  RefusedKind = "unknown-server"
 	RefusedTooMany        RefusedKind = "too-many-attempts"
 	RefusedConnLimit      RefusedKind = "connection-limit"
@@ -136,6 +137,8 @@ func RefusedBy(r Refusal) *Refused {
 		kind = RefusedUnknownServer
 	case RefusalNotConnected:
 		kind = RefusedNotConnected
+	case RefusalNotClaimed:
+		kind = RefusedNotClaimed
 	case RefusalTooMany:
 		kind = RefusedTooMany
 	case RefusalConnLimit:
@@ -231,6 +234,8 @@ func (r *Refused) Error() string {
 		return "the invitation link is not valid for this server: wrong, revoked or expired; ask the admin for a new one"
 	case RefusedInvitationNeedsLink:
 		return r.Account + " is invited to this server; open the invitation link the admin sent, or run: aether link <link>"
+	case RefusedNotClaimed:
+		return string(RefusalNotClaimed) + "; the server is finishing its claim, retry in a few seconds"
 	case RefusedNotSignedIn:
 		if r.Refusal == "" {
 			return "not signed in"

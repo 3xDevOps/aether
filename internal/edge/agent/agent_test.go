@@ -556,6 +556,35 @@ func waitStatus(t *testing.T, s *State, ok func(Status) bool) Status {
 	}
 }
 
+// TestHeartbeatFollowsAnsweredPings checks that only the edge answering
+// a ping refreshes the heartbeat, so an edge that holds the connection
+// open but stops answering leaves a status Stale reports.
+func TestHeartbeatFollowsAnsweredPings(t *testing.T) {
+	edge := newFakeEdge(t)
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	a.pingInterval = 20 * time.Millisecond
+	run(t, a)
+	ec := edge.nextControl(t)
+	first := waitStatus(t, a.state, func(st Status) bool { return st.Connected })
+	if first.PID != os.Getpid() || first.Heartbeat.Before(first.Since) || first.Stale(time.Now()) != nil {
+		t.Fatalf("status at enrollment %+v, stale: %v", first, first.Stale(time.Now()))
+	}
+	expect[edgeproto.Ping](t, ec)
+	ec.send(edgeproto.Pong{})
+	answered := waitStatus(t, a.state, func(st Status) bool { return st.Heartbeat.After(first.Heartbeat) })
+	if !answered.Connected || !answered.Since.Equal(first.Since) {
+		t.Fatalf("status after a pong %+v", answered)
+	}
+	expect[edgeproto.Ping](t, ec)
+	expect[edgeproto.Ping](t, ec)
+	if st, _, err := a.state.Status(); err != nil || !st.Heartbeat.Equal(answered.Heartbeat) {
+		t.Fatalf("heartbeat moved without a pong: %+v, %v", st, err)
+	}
+	if err := answered.Stale(answered.Heartbeat.Add(HeartbeatMaxAge + time.Second)); err == nil || !strings.Contains(err.Error(), "no answer from the edge") {
+		t.Fatalf("Stale after HeartbeatMaxAge without a pong = %v", err)
+	}
+}
+
 func TestReconnectsAfterEdgeDropsAndOnDrain(t *testing.T) {
 	edge := newFakeEdge(t)
 	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
