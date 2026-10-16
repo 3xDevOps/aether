@@ -1891,9 +1891,11 @@ then uploads the twelve assets and `checksums.txt`, downloads each asset
 anonymously from
 `https://github.com/<repository>/releases/download/<tag>/<name>`, compares
 its SHA-256 and size with the manifest, and only then uploads
-`aether-release.json` and `aether-release.json.sig`. It refuses a release
-that already has a manifest rather than replace assets that manifest signed;
-publish a new tag instead. Only after that succeeds do `standard-latest`
+`aether-release.json.sig`, then `aether-release.json`. Updaters treat a
+release missing either file as unsigned, so a run that fails between the two
+can be rerun; it replaces the lone signature. It refuses a release that
+already has `aether-release.json` rather than replace assets that manifest
+signed; publish a new tag instead. Only after that succeeds do `standard-latest`
 and `edge-latest` move their respective `latest` tags to the verified images;
 each checks that `latest` carries the expected architecture digests. Releases
 share one workflow-wide concurrency group. The GitHub release itself is
