@@ -365,6 +365,33 @@ store: begin migration 1: database is locked (5) (SQLITE_BUSY)
 Investigate the competing writer before retrying startup. Do not delete the
 database or edit `schema_migrations` to bypass the failure.
 
+### Interrupted or failed server update
+
+An update started by `aether server update` stays pending until both
+binaries are replaced. A server that stops during the download leaves it
+pending, and the next idle moment after the restart retries it. A scheduled
+update that cannot fetch the release's manifest or a binary is retried at
+the next idle poll, up to three attempts, then recorded `failed` with the
+error. Nothing is
+replaced until every binary has downloaded and verified.
+
+After the swap, the new binary has to open and migrate the database and
+bind its SSH listener. If it exits first more than twice, or is still not
+there 5 minutes after its first start, the next start rolls back: the
+`.prev` binaries go back into place, the pre-update database copy is
+restored if the schema already moved, and the previous binary records
+`rolled_back` with the error. A re-exec that fails outright is rolled back
+by the running server. `aether server update --status` prints it:
+
+```text
+update        rolled_back v0.8.0 -> v0.9.0
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...
+```
+
+Fix the cause, then update again. A binary that cannot start at all cannot
+roll itself back; restore it by hand with the commands in
+[install.md](install.md#upgrading).
+
 ### Server reboot, or a hard kill
 
 State is SQLite and git, both durable, so nothing on the shutdown path needs

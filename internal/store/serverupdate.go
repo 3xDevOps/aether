@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -27,14 +28,23 @@ type ServerUpdateStore interface {
 	// pending row in the same write, so a finished attempt can never be
 	// retried by the next idle tick.
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
+	// SchemaVersion is the highest migration applied to this database.
+	SchemaVersion(ctx context.Context) (int, error)
+	// Snapshot writes a consistent copy of the database to path, which
+	// must not exist. An update takes one before a release migrates the
+	// schema, so a rollback can restore it.
+	Snapshot(ctx context.Context, path string) error
 }
 
 // Outcome values of ServerUpdateAttempt.
 const (
-	// ServerUpdateApplied: the binaries were replaced.
+	// ServerUpdateApplied: the new binary booted on the replaced files.
 	ServerUpdateApplied = "applied"
 	// ServerUpdateFailed: nothing was replaced; Detail says why.
 	ServerUpdateFailed = "failed"
+	// ServerUpdateRolledBack: the new binary did not boot and the previous
+	// one was restored; Detail says why.
+	ServerUpdateRolledBack = "rolled_back"
 )
 
 // ServerUpdate is the whole state. Both fields are nil when unset.
@@ -151,4 +161,35 @@ func (d *DB) SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) 
 		return fmt.Errorf("store: write server update attempt: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) SchemaVersion(ctx context.Context) (int, error) {
+	var v int
+	if err := d.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v); err != nil {
+		return 0, fmt.Errorf("store: read schema version: %w", err)
+	}
+	return v, nil
+}
+
+func (d *DB) Snapshot(ctx context.Context, path string) error {
+	if _, err := d.db.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
+		return fmt.Errorf("store: snapshot to %s: %w", path, err)
+	}
+	return nil
+}
+
+// ReadSchemaVersion reads the schema version of the database at path
+// without opening it as a store, so without migrating it. A rollback uses
+// it to decide whether the new binary already migrated the database.
+func ReadSchemaVersion(path string) (int, error) {
+	db, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return 0, fmt.Errorf("store: open %s: %w", path, err)
+	}
+	defer db.Close() //nolint:errcheck // read-only
+	var v int
+	if err := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v); err != nil {
+		return 0, fmt.Errorf("store: read schema version of %s: %w", path, err)
+	}
+	return v, nil
 }

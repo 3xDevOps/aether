@@ -102,3 +102,27 @@ func TestUpdatePackagedChecksButNeverApplies(t *testing.T) {
 		t.Fatalf("packaged apply = %v, want the refusal", err)
 	}
 }
+
+func TestServerFirstRefusesWhenAnAdminCanUpdateTheServer(t *testing.T) {
+	var out bytes.Buffer
+	err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0", admin: true, capable: true})
+	if err == nil || !strings.HasPrefix(err.Error(), "update the server first: aether server update") {
+		t.Fatalf("err = %v, want the server-first refusal", err)
+	}
+}
+
+func TestServerFirstProceeds(t *testing.T) {
+	for name, server := range map[string]linkedServer{
+		"unreachable":   {},
+		"current":       {reachable: true, version: "v0.9.0", admin: true, capable: true},
+		"ahead":         {reachable: true, version: "v0.9.1", admin: true, capable: true},
+		"dev server":    {reachable: true, version: "dev", admin: true, capable: true},
+		"member":        {reachable: true, version: "v0.8.0"},
+		"manual server": {reachable: true, version: "v0.8.0", admin: true, manual: []string{"sudo aether update"}},
+	} {
+		var out bytes.Buffer
+		if err := serverFirst(&out, "v0.9.0", server); err != nil {
+			t.Errorf("%s: err = %v, want the install to proceed", name, err)
+		}
+	}
+}

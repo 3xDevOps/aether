@@ -15,14 +15,24 @@ const (
 	// ServerUpdateScheduled: the update is recorded and waits for the
 	// first moment with no active run and no open workspace shell.
 	ServerUpdateScheduled ServerUpdatePhase = "scheduled"
+	// ServerUpdatePreflight: the signed release manifest and every client
+	// asset it lists are being checked. Nothing is downloaded yet.
+	ServerUpdatePreflight ServerUpdatePhase = "preflight"
 	// ServerUpdateApplying: the release assets are being downloaded and
 	// verified. Nothing has been replaced yet.
 	ServerUpdateApplying ServerUpdatePhase = "applying"
 	// ServerUpdateRestarting: the binaries are swapped and the server is
 	// re-executing on the new version. Connections drop here.
 	ServerUpdateRestarting ServerUpdatePhase = "restarting"
+	// ServerUpdateApplied: the new binary booted, migrated, and bound its
+	// listeners. The new process publishes it.
+	ServerUpdateApplied ServerUpdatePhase = "applied"
 	// ServerUpdateFailed: nothing was replaced; Detail is the real error.
 	ServerUpdateFailed ServerUpdatePhase = "failed"
+	// ServerUpdateRolledBack: the new binary did not boot and the previous
+	// one was restored; Detail is the real error. The restored process
+	// publishes it.
+	ServerUpdateRolledBack ServerUpdatePhase = "rolled_back"
 	// ServerUpdateCancelled: a pending update was cleared.
 	ServerUpdateCancelled ServerUpdatePhase = "cancelled"
 )
@@ -31,10 +41,11 @@ const (
 // repeats the envelope's actor so a client reading only the payload can
 // still attribute the act; Detail explains a failed phase.
 type ServerUpdatePayload struct {
-	Phase   ServerUpdatePhase `json:"phase"`
-	Version string            `json:"version,omitempty"`
-	ActorID domain.MemberID   `json:"actor_id,omitempty"`
-	Detail  string            `json:"detail,omitempty"`
+	Phase       ServerUpdatePhase `json:"phase"`
+	Version     string            `json:"version,omitempty"`
+	FromVersion string            `json:"from_version,omitempty"`
+	ActorID     domain.MemberID   `json:"actor_id,omitempty"`
+	Detail      string            `json:"detail,omitempty"`
 }
 
 func (ServerUpdatePayload) EventType() Type { return TypeServerUpdate }

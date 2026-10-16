@@ -124,8 +124,8 @@ type Config struct {
 	WhoIs sshd.WhoIsResolver
 	// SelfUpdate overrides the server self-update service's release feed
 	// and restart mechanics; the zero value is the pinned GitHub releases
-	// and a real re-exec of this binary. Store and Bus are the server's
-	// own and are ignored here. The E2E suite sets it so an update runs
+	// and no host controls. Store, Bus, StateDir, and Database are the
+	// server's own and are ignored here. The E2E suite sets it so an update runs
 	// against a stub release server and never replaces a real binary.
 	SelfUpdate serverupdate.Config
 	// Harnesses are server-owned, administrator-supplied launch definitions.

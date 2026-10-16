@@ -211,6 +211,20 @@ command to run:
 aether: open /usr/local/bin/.aether-update-probe-1234567890: permission denied: /usr/local/bin is not writable by this user; re-run as `sudo aether update`
 ```
 
+Update the server before its clients: a server only moves to a release
+whose client binaries are all published, and a client newer than its server
+gains nothing. Before it installs a newer release, `aether update` asks the
+linked server for its version, and refuses when the server is behind and you
+are an admin of a server that can update itself:
+
+```
+aether: update the server first: aether server update (the server runs v0.8.0 and this installs v0.9.0; --force skips this check)
+```
+
+A member who is not an admin is told to ask one, and the install goes ahead.
+So does an install with no linked server, an unreachable one, or one already
+on the release. `--force` skips the check.
+
 With nothing to install, it prints the path of the binary it checked,
 because `sudo` and `PATH` order can each pick a different `aether` than the
 one your shell runs:
@@ -418,34 +432,102 @@ the "desktop app is out of date" prompt then shows that error above the
 `aether gui build` to run by hand. A successful build clears it.
 
 On a single-box install the same update replaces the `aether-server` beside
-the CLI. The prompt then names both binaries and the
-`sudo systemctl restart aether-server` that the running server still needs.
+the CLI, and prints the restart the running server still needs:
+
+```
+aether-server on disk is now v0.9.0; the running server keeps its old version until you restart it: sudo systemctl restart aether-server
+```
 
 Administrators see a second prompt when the **server** is behind the latest
 release. An admin updates it from their laptop, no shell on the server box
 needed:
 
 ```sh
-aether server update [--version <tag>] [--when now|idle] [--cancel] [--yes]
+aether server update [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]
 aether server update --status
 ```
 
-`--when now` (the default) downloads both binaries and verifies them
-against the release's signed manifest before replacing either, then renames
-`aether-server` and the `aether` beside it into place. It restarts by
-re-executing the new binary with the same argv and environment, keeping the
-same PID: the shipped unit is `Restart=on-failure`, so a clean exit would
-not come back. If the re-exec itself fails under systemd, the server falls
-back to `systemctl restart aether-server`.
+**Preflight.** Before it downloads anything, the server fetches the release's
+signed manifest, `aether-release.json`, and checks that clients can follow
+it: `aether-{linux,darwin}-{amd64,arm64}`,
+`aether-windows-{amd64,arm64}.exe` and `aether-android.apk` must each be
+listed and answer an anonymous request with the size the manifest records.
+A release that fails is refused, naming the asset and its URL:
 
-`--when idle` instead records one pending update, applied the first time no
+```
+aether: rpc error -32002: release preflight failed: aether-android.apk (https://github.com/3xDevOps/Aether/releases/download/v0.9.0/aether-android.apk): HEAD answered 404 Not Found
+```
+
+**Downgrades.** A tag older than the running release is refused unless
+`--allow-downgrade` is passed, which only works with `--when now`. A release
+whose manifest records an older database schema than this server's database
+is always refused: that binary could not open the database.
+
+**The swap.** `--when now` (the default) downloads both binaries and
+verifies them against the manifest before replacing either, then renames
+`aether-server` and the `aether` beside it into place. The files they
+replace stay beside them as `aether-server.prev` and `aether.prev`. When the
+release migrates the database, the server first copies it to
+`<data-dir>/server-update/aether.db.pre-update`. It then closes its
+listeners and the database and re-executes the new binary with the same
+argv and environment, keeping the same PID: the shipped unit is
+`Restart=on-failure`, so a clean exit would not come back. If the re-exec
+itself fails under systemd, the server falls back to
+`systemctl restart aether-server`.
+
+**Rollback.** The new binary records the update `applied` only after it has
+opened and migrated the database and bound its SSH listener. If it exits
+before that more than twice, or has not done it 5 minutes after its first
+start, it puts the `.prev` binaries back, restores the database copy when
+the schema already moved, records `rolled_back` with the error, and executes
+the previous binary. A re-exec that fails outright is undone the same way.
+`--status` shows the outcome until the next update:
+
+```
+update        rolled_back v0.8.0 -> v0.9.0
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...
+```
+
+`aether server update` prints each phase - checking the release, applying,
+restarting - then reconnects and exits 0 only once `server.info` reports the
+new version. A rollback, a failure, or a server that is not back on the new
+version within 8 minutes exits non-zero with the server's own error.
+
+**Release checks.** The server checks for a new signed release itself every
+6 hours, give or take 10%. A failed check is retried after 5 minutes,
+doubling up to 6 hours; the schedule survives restarts. `--status` prints the
+latest release, when it was checked, and a failed check's error verbatim. A
+build without a release version, or a server with `AETHER_NO_UPDATE_CHECK`
+set, does not check.
+
+**Recovering by hand.** When the new binary cannot start far enough to roll
+itself back, restore the previous one on the server host. The database
+lines are only needed if `<data-dir>/server-update/aether.db.pre-update`
+exists:
+
+```sh
+sudo systemctl stop aether-server
+sudo mv /usr/local/bin/aether-server.prev /usr/local/bin/aether-server
+sudo mv /usr/local/bin/aether.prev /usr/local/bin/aether
+sudo rm -f /var/lib/aether/aether.db-wal /var/lib/aether/aether.db-shm
+sudo mv /var/lib/aether/server-update/aether.db.pre-update /var/lib/aether/aether.db
+sudo systemctl start aether-server
+```
+
+The restored server records the update as rolled back by hand.
+
+`--when idle` instead runs the preflight, then records one pending update,
+applied the first time no
 run is working, no terminal is attached and no SSH connection into a run
 ([terminal.md](terminal.md#ssh-and-editors)) is open. Two kinds of run do not hold
 it back: one parked at `needs-attention`, waiting on a person, and one
 paused with `aether pause`, whose container is frozen. Neither has anything
 running inside it and both survive the restart like any other run. An SSH
 connection left open into a paused run still holds the update back. A second
-`--when idle` call replaces the pending one, and `--cancel` clears it.
+`--when idle` call replaces the pending one, and `--cancel` clears it. The
+update stays pending until the swap, so a server that stops mid-download
+retries it at the next idle moment. A release it cannot fetch at that moment
+is retried at the next idle poll, up to three attempts.
 
 A run that survives the restart keeps the Aether helper binary its
 container was created with. What a newer server adds to that helper, such as
@@ -454,10 +536,10 @@ file transfer and port forwarding over ssh
 after the upgrade.
 
 `--yes` skips the confirmation prompt. `--status` prints the running
-version, the latest release, whether this server can update itself, any
-pending update and what it is still waiting for, and the outcome of the
-last attempt. `server update` is admin only; any member can read
-`--status`.
+version, the latest release and its check, whether this server can update
+itself, the current or last update's phase and error, any pending update and
+what it is still waiting for, and the outcome of the last attempt.
+`server update` is admin only; any member can read `--status`.
 
 Runs keep going through the restart: the scheduler reattaches to their live
 containers when the server comes back. Attached terminals and live syncs do
@@ -1592,6 +1674,7 @@ automatic.
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
+| `server-update/` | Server update state: `swap.json`, the last update's versions, outcome and replaced binaries, read before the database opens; `check.json`, the release-check schedule; and `aether.db.pre-update`, the database as it was before the last update that migrated it. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes, mirror credentials and workspace secrets are server-owned

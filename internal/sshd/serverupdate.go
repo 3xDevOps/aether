@@ -19,9 +19,10 @@ func init() {
 // ServerUpdateService is the control channel's view of the server
 // self-update service (*serverupdate.Service).
 type ServerUpdateService interface {
-	// Status reports the running version, the newest release, whether the
-	// server can update itself, and any pending or last update.
-	Status(ctx context.Context) (protocol.ServerUpdateStatusResult, error)
+	// Status reports the running version, the server's own release check,
+	// whether the server can update itself, and the current or last
+	// update's phase.
+	Status(ctx context.Context, p protocol.ServerUpdateStatusParams) (protocol.ServerUpdateStatusResult, error)
 	// Update applies or schedules an update. The returned restart, when
 	// non-nil, re-executes the server and never returns; the caller runs
 	// it only once the response has reached the client.
@@ -38,12 +39,16 @@ func (s *Server) updates() (ServerUpdateService, *protocol.Error) {
 // serverUpdateStatus is readable by any member: a collaborator seeing the
 // dashboard's "server is behind" banner should be told whether an admin
 // can press the button or has to run the commands on the host.
-func (s *Server) serverUpdateStatus(ctx context.Context, _ domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
+func (s *Server) serverUpdateStatus(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	svc, perr := s.updates()
 	if perr != nil {
 		return nil, perr
 	}
-	out, err := svc.Status(ctx)
+	p, perr := decodeParams[protocol.ServerUpdateStatusParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	out, err := svc.Status(ctx, p)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -93,8 +98,11 @@ func serverUpdateError(err error) *protocol.Error {
 			Code:    protocol.CodeInvalidState,
 			Message: err.Error() + "; on the server host run: " + joinCommands(serverupdate.ManualCommands()),
 		}
-	case errors.Is(err, serverupdate.ErrBadTag), errors.Is(err, serverupdate.ErrBadWhen):
+	case errors.Is(err, serverupdate.ErrBadTag), errors.Is(err, serverupdate.ErrBadWhen),
+		errors.Is(err, serverupdate.ErrIdleDowngrade), errors.Is(err, serverupdate.ErrDowngrade):
 		return invalidParams(err.Error())
+	case errors.Is(err, serverupdate.ErrPreflight):
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	case errors.Is(err, serverupdate.ErrBusy), errors.Is(err, serverupdate.ErrHeld):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}
 	}

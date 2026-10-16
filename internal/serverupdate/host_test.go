@@ -38,7 +38,8 @@ func TestServiceWithoutAHostCannotTouchTheMachine(t *testing.T) {
 	// refused connection instead of quietly reaching github.com - which
 	// is what it did while Tick skipped the capability check.
 	svc, err := New(Config{
-		Store: db, Bus: bus, Executable: self, Checker: offlineChecker(t),
+		StateDir: t.TempDir(),
+		Store:    db, Bus: bus, Executable: self, Checker: offlineChecker(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -89,7 +90,7 @@ func TestServiceWithoutAHostCannotTouchTheMachine(t *testing.T) {
 		t.Fatalf("last detail = %q, want it to name the missing host controls", state.Last.Detail)
 	}
 
-	status, err := svc.Status(t.Context())
+	status, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -117,6 +118,7 @@ func TestPartialHostIsNoHost(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	svc, err := New(Config{
+		StateDir:   t.TempDir(),
 		Store:      db,
 		Bus:        newTestBus(t),
 		Executable: self,
@@ -150,6 +152,7 @@ func TestUnresolvableBinaryDisablesRatherThanFails(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	svc, err := New(Config{
+		StateDir:   t.TempDir(),
 		Store:      db,
 		Bus:        newTestBus(t),
 		Executable: filepath.Join(dir, "gone"),
@@ -161,7 +164,7 @@ func TestUnresolvableBinaryDisablesRatherThanFails(t *testing.T) {
 	if svc.Capable() {
 		t.Fatal("a service that could not resolve its binary reports itself capable")
 	}
-	status, err := svc.Status(t.Context())
+	status, err := svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -204,14 +207,15 @@ func TestApplyRefusesOnAnIncapableServer(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	svc, err := New(Config{
-		Store: db, Bus: newTestBus(t), Executable: self, Checker: offlineChecker(t),
+		StateDir: t.TempDir(),
+		Store:    db, Bus: newTestBus(t), Executable: self, Checker: offlineChecker(t),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	restart, err := svc.apply(t.Context(), store.PendingServerUpdate{
 		Version: "v0.2.0", RequestedBy: "mem_a", RequestedAt: svc.cfg.Now(),
-	})
+	}, false, false)
 	if !errors.Is(err, ErrIncapable) {
 		t.Fatalf("apply error = %v, want ErrIncapable", err)
 	}

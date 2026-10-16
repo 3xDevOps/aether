@@ -168,6 +168,7 @@ func newEnv(t *testing.T, poison bool) *env {
 	e.sub = sub
 
 	svc, err := New(Config{
+		StateDir:   t.TempDir(),
 		Store:      db,
 		Bus:        bus,
 		Checker:    selfupdate.NewChecker(e.release.URL, time.Hour),
@@ -512,7 +513,7 @@ func TestStatusReportsTheWholeState(t *testing.T) {
 		protocol.ServerUpdateParams{Version: "v0.2.0", When: protocol.ServerUpdateIdle}); err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -551,7 +552,7 @@ func TestIncapableServerRefusesAndNamesTheManualCommands(t *testing.T) {
 	if !errors.Is(err, ErrIncapable) {
 		t.Fatalf("Update error = %v, want ErrIncapable", err)
 	}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -635,7 +636,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 		t.Fatalf("schedule: %v", err)
 	}
 	e.busy = domain.ServerBusy{Runs: 2, Paused: 1, Shells: 3}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -648,7 +649,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 
 	// Only paused runs left: nothing is holding it back any more.
 	e.busy = domain.ServerBusy{Paused: 1}
-	if got, err = e.svc.Status(t.Context()); err != nil {
+	if got, err = e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{}); err != nil {
 		t.Fatalf("Status: %v", err)
 	}
 	if got.Waiting != nil {
@@ -661,7 +662,7 @@ func TestStatusSaysWhatAPendingUpdateIsWaitingFor(t *testing.T) {
 func TestStatusReportsNoWaitWithoutAPendingUpdate(t *testing.T) {
 	e := newEnv(t, false)
 	e.busy = domain.ServerBusy{Runs: 5}
-	got, err := e.svc.Status(t.Context())
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}

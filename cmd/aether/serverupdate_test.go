@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -205,19 +208,85 @@ func TestFollowServerUpdateFailedReturnsDetail(t *testing.T) {
 	}
 }
 
-func TestFollowServerUpdateStreamEndReportsRestarting(t *testing.T) {
+func TestFollowServerUpdateStreamEndWaitsForTheServer(t *testing.T) {
 	var stream bytes.Buffer
 	stream.Write(serverUpdateEventLine(t, events.ServerUpdatePayload{Phase: events.ServerUpdateApplying, Version: "v0.2.0"}))
 	// No restarting event: the connection just drops, which is how a real
 	// restart ends the stream.
 	var out bytes.Buffer
-	err := followServerUpdate(&stream, &out, "v0.2.0")
-	if err != nil {
+	if err := followServerUpdate(&stream, &out, "v0.2.0"); err != nil {
 		t.Fatalf("stream end returned an error: %v", err)
 	}
-	got := out.String()
-	if !strings.Contains(got, "connection closed") || !strings.Contains(got, "restarting on v0.2.0") || !strings.Contains(got, "reconnect") {
-		t.Fatalf("stream-end message = %q, want it to say the server is restarting and to reconnect", got)
+	if got := out.String(); !strings.Contains(got, "waiting for the server to come back on v0.2.0") {
+		t.Fatalf("stream-end message = %q, want it to say it waits for v0.2.0", got)
+	}
+}
+
+func TestFollowServerUpdateRolledBackReturnsDetail(t *testing.T) {
+	var stream bytes.Buffer
+	stream.Write(serverUpdateEventLine(t, events.ServerUpdatePayload{
+		Phase: events.ServerUpdateRolledBack, Version: "v0.2.0", Detail: "v0.2.0 started 2 times without finishing its boot",
+	}))
+	err := followServerUpdate(&stream, &bytes.Buffer{}, "v0.2.0")
+	if err == nil || !strings.Contains(err.Error(), "started 2 times without finishing its boot") {
+		t.Fatalf("err = %v, want the rollback detail", err)
+	}
+}
+
+// A stream that drops while the server keeps answering on the old version
+// is a failed update, never a success.
+func TestAwaitServerVersionFailsWhenTheVersionNeverChanges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	probe := func(context.Context) (string, protocol.ServerUpdateStatusResult, error) {
+		return "v0.1.0", protocol.ServerUpdateStatusResult{Phase: protocol.ServerUpdatePhaseRestarting, ToVersion: "v0.2.0"}, nil
+	}
+	err := awaitServerVersion(ctx, &bytes.Buffer{}, "v0.2.0", probe, time.Millisecond)
+	if err == nil {
+		t.Fatal("an unchanged server version was reported as success")
+	}
+	if !strings.Contains(err.Error(), "did not come back on v0.2.0") || !strings.Contains(err.Error(), "runs v0.1.0") {
+		t.Fatalf("err = %q, want it to name the target and what the server runs", err)
+	}
+}
+
+func TestAwaitServerVersionReportsARollback(t *testing.T) {
+	probe := func(context.Context) (string, protocol.ServerUpdateStatusResult, error) {
+		return "v0.1.0", protocol.ServerUpdateStatusResult{
+			Phase: protocol.ServerUpdatePhaseRolledBack, ToVersion: "v0.2.0", Error: "store: apply migration 90: boom",
+		}, nil
+	}
+	err := awaitServerVersion(context.Background(), &bytes.Buffer{}, "v0.2.0", probe, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "rolled back") || !strings.Contains(err.Error(), "store: apply migration 90: boom") {
+		t.Fatalf("err = %v, want the rollback and its real error", err)
+	}
+}
+
+func TestAwaitServerVersionRetriesUntilTheTargetAnswers(t *testing.T) {
+	calls := 0
+	probe := func(context.Context) (string, protocol.ServerUpdateStatusResult, error) {
+		calls++
+		if calls < 3 {
+			return "", protocol.ServerUpdateStatusResult{}, errors.New("connection refused")
+		}
+		return "v0.2.0", protocol.ServerUpdateStatusResult{Phase: protocol.ServerUpdatePhaseApplied}, nil
+	}
+	var out bytes.Buffer
+	if err := awaitServerVersion(context.Background(), &out, "v0.2.0", probe, time.Millisecond); err != nil {
+		t.Fatalf("await: %v", err)
+	}
+	if !strings.Contains(out.String(), "the server is running v0.2.0") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestParseServerUpdateAllowDowngrade(t *testing.T) {
+	opts, err := parseServerUpdate([]string{"--version", "v0.1.0", "--allow-downgrade"})
+	if err != nil || !opts.allowDowngrade || opts.when != protocol.ServerUpdateNow {
+		t.Fatalf("opts = %+v, err = %v", opts, err)
+	}
+	if _, err := parseServerUpdate([]string{"--allow-downgrade", "--when", "idle"}); err == nil {
+		t.Fatal("--allow-downgrade with --when idle was accepted")
 	}
 }
 
