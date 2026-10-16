@@ -10,9 +10,14 @@ import org.junit.Test
  * part of a quantifier. The JVM these tests run on accepts both, so such a
  * pattern passes every other test here and then throws from its class
  * initializer on the phone.
+ *
+ * This scans source text for brace rules only; it is not ICU. It sees
+ * `Regex("...")` and `Regex("""...""")` literals, not patterns built by
+ * concatenation, `toRegex()` or `Pattern.compile`.
  */
 class RegexDialectTest {
     private val literal = Regex("""Regex\("((?:[^"\\]|\\.)*)"\)""")
+    private val rawLiteral = Regex("Regex\\(\"\"\"(.*?)\"\"\"\\)")
     private val quantifier = Regex("""\{\d+(,\d*)?}""")
 
     @Test
@@ -21,9 +26,11 @@ class RegexDialectTest {
         assertTrue(sources.isNotEmpty())
         val refused =
             sources.flatMap { file ->
-                literal.findAll(file.readText()).mapNotNull { match ->
-                    // Undoes the Kotlin string's escapes.
-                    val pattern = match.groupValues[1].replace(Regex("""\\(.)"""), "$1")
+                val text = file.readText()
+                // Undoes the Kotlin string's escapes; a raw string has none.
+                val escaped = literal.findAll(text).map { it.groupValues[1].replace(Regex("""\\(.)"""), "$1") }
+                val raw = rawLiteral.findAll(text).map { it.groupValues[1] }
+                (escaped + raw).mapNotNull { pattern ->
                     strayBrace(pattern)?.let { "${file.name}: index $it of $pattern" }
                 }.toList()
             }
