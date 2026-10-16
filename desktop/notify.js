@@ -192,10 +192,11 @@ function onOutcomeSeen(runId) {
 }
 
 // run.review only ever puts a success off or accepts it, so it can end a
-// need but never start one.
+// need but never start one; a read still in flight may predate it.
 function onReview(runId, p) {
   if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
   if (p.status_seq > 0) seqs.set(runId, p.status_seq)
+  reading.delete(runId)
   const entry = standing.get(runId)
   if (entry && !needsAttention({ ...entry.run, review: p.review || '' })) resolve(runId)
 }
