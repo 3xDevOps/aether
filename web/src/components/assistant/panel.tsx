@@ -202,9 +202,6 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
   )
 }
 
-/** What `main` keeps beside the docked assistant. */
-const minMainWidth = minReadableWidth
-
 function subscribeResize(notify: () => void) {
   window.addEventListener('resize', notify)
   return () => window.removeEventListener('resize', notify)
@@ -214,7 +211,7 @@ function subscribeResize(notify: () => void) {
 function useRoom(): number {
   const sidebar = useStore((s) => (s.sidebarCollapsed ? 0 : s.sidebarWidth))
   const innerWidth = useSyncExternalStore(subscribeResize, () => window.innerWidth)
-  return innerWidth - sidebar - minMainWidth
+  return innerWidth - sidebar - minReadableWidth
 }
 
 function DesktopAside({ children, room }: { children: React.ReactNode; room: number }) {
