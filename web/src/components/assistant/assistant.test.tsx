@@ -42,7 +42,7 @@ afterAll(() => {
 const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
 
 function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
-  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, ...over }
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, suggest_auto_approve: false, ...over }
 }
 
 const stop: AssistantConfirmation = {
@@ -270,7 +270,7 @@ describe('states', () => {
     acpOpen()
     assistantSocket().send({ status: status({ auto_approve: true }) })
     expect(await within(aside).findByText(/Acts without asking/)).toBeDefined()
-    expect(within(aside).getByText(/launches, messages and stops runs and saves your environment without asking/)).toBeDefined()
+    expect(within(aside).getByText(/launches, messages and stops your runs and saves your environment without asking/)).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
     expect(useStore.getState().route.name).toBe('settings')
   })
@@ -393,7 +393,7 @@ describe('confirmations', () => {
 
     await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
     expect(api.assistantConfirm).toHaveBeenCalledWith('c1', true)
-    for (const button of within(card).getAllByRole('button')) expect(button).toHaveProperty('disabled', true)
+    for (const name of ['Approving…', 'Decline']) expect(within(card).getByRole('button', { name })).toHaveProperty('disabled', true)
     await userEvent.click(within(card).getByRole('button', { name: 'Decline' }))
     expect(api.assistantConfirm).toHaveBeenCalledTimes(1)
     expect(within(aside).getByText(stop.summary)).toBeDefined()
@@ -416,6 +416,98 @@ describe('confirmations', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Start new conversation' }))
     await waitFor(() => expect(api.assistantReset).toHaveBeenCalled())
     await waitFor(() => expect(within(aside).queryByText('old question')).toBeNull())
+  })
+})
+
+describe('the auto-approval suggestion', () => {
+  const title = 'Skip approval cards for the assistant?'
+  const conversation = () => [item('turn_start', 1), say(1, 'user', 'Stop the flaky run'), item('turn_end', 1, { stop_reason: 'end_turn' })]
+
+  it('shows only while the assistant is idle with a conversation and nothing waiting', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
+    await within(aside).findByRole('button', { name: 'Launch a run to …' })
+    expect(within(aside).queryByRole('group', { name: title })).toBeNull()
+
+    assistantSocket().items(...conversation())
+    const notice = await within(aside).findByRole('group', { name: title })
+    expect(within(notice).getByText(/Each action is still noted here before it runs/)).toBeDefined()
+    expect(within(notice).getByText("Still asks: anything that touches another member's run.")).toBeDefined()
+    for (const name of ['Turn on auto-approval', 'Not now', "Don't suggest again"]) {
+      expect(within(notice).getByRole('button', { name }).className).toBe(within(notice).getByRole('button', { name: 'Not now' }).className)
+    }
+
+    assistantSocket().send({ status: status({ suggest_auto_approve: true, confirmations: [stop] }) })
+    await waitFor(() => expect(within(aside).queryByRole('group', { name: title })).toBeNull())
+    assistantSocket().send({ status: status({ suggest_auto_approve: true, state: 'running' }) }).items(item('turn_start', 2))
+    await waitFor(() => expect(within(aside).queryByRole('button', { name: 'Stop' })).not.toBeNull())
+    expect(within(aside).queryByRole('group', { name: title })).toBeNull()
+    assistantSocket().send({ status: status({ suggest_auto_approve: false }) }).items(item('turn_end', 2, { stop_reason: 'end_turn' }))
+    await waitFor(() => expect(within(aside).queryByRole('button', { name: 'Stop' })).toBeNull())
+    expect(within(aside).queryByRole('group', { name: title })).toBeNull()
+  })
+
+  it('turns auto-approval on without a second dialog and confirms until the next turn', async () => {
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false })
+    const aside = await openPanel()
+    acpOpen(conversation())
+    assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
+    await userEvent.click(within(await within(aside).findByRole('group', { name: title })).getByRole('button', { name: 'Turn on auto-approval' }))
+    expect(api.assistantSettings).toHaveBeenCalledWith({ auto_approve: true })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(await within(aside).findByText(/Auto-approval is on\. Turn it off any time in/)).toBeDefined()
+    expect(within(aside).queryByRole('group', { name: title })).toBeNull()
+    expect(useStore.getState().assistantStatus?.auto_approve).toBe(true)
+
+    assistantSocket().send({ status: status({ auto_approve: true, state: 'running' }) }).items(item('turn_start', 2))
+    await waitFor(() => expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull())
+  })
+
+  it.each([
+    ['Not now', { suggestion: 'later' }, /You can turn this on later in/],
+    ["Don't suggest again", { suggestion: 'never' }, /We won't suggest this again\. Auto-approval stays available in/],
+  ] as const)('answers %s and links to Settings → Assistant', async (button, params, confirmation) => {
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false })
+    const aside = await openPanel()
+    acpOpen(conversation())
+    assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
+    await userEvent.click(within(await within(aside).findByRole('group', { name: title })).getByRole('button', { name: button }))
+    expect(api.assistantSettings).toHaveBeenCalledWith(params)
+    const said = await within(aside).findByText(confirmation)
+    expect(within(aside).queryByRole('group', { name: title })).toBeNull()
+    await userEvent.click(within(said).getByRole('button', { name: 'Settings → Assistant' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'assistant' } })
+  })
+
+  it('keeps the notice and shows the error when the answer fails', async () => {
+    vi.mocked(api.assistantSettings).mockRejectedValue(new Error('assistant.settings: store: put assistant settings: disk I/O error'))
+    const aside = await openPanel()
+    acpOpen(conversation())
+    assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
+    const notice = await within(aside).findByRole('group', { name: title })
+    await userEvent.click(within(notice).getByRole('button', { name: 'Not now' }))
+    expect(await within(notice).findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('disk I/O error'))
+  })
+})
+
+describe('the approval card', () => {
+  it('links to the setting while auto-approval is off', async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ confirmations: [stop] }) })
+    const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}` })
+    await userEvent.click(within(card).getByRole('button', { name: 'Skip these cards…' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'assistant' } })
+  })
+
+  it("says why another member's run still asks, with no link", async () => {
+    const aside = await openPanel()
+    acpOpen()
+    assistantSocket().send({ status: status({ auto_approve: true, confirmations: [{ ...stop, summary: `${stop.summary}, owned by Grace`, other_owner: 'Grace' }] }) })
+    const card = await within(aside).findByRole('group', { name: `Approve this action? ${stop.summary}, owned by Grace` })
+    expect(within(card).getByText('Grace owns this run, so this asks even with auto-approval on.')).toBeDefined()
+    expect(within(card).queryByRole('button', { name: 'Skip these cards…' })).toBeNull()
   })
 })
 

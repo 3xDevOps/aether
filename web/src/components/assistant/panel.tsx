@@ -5,6 +5,7 @@ import { assistantTriggerID, useAssistantAvailable } from '@/components/assistan
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
 import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
+import { AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
 import { Confirm } from '@/components/confirm'
 import { Button } from '@/components/ui/button'
@@ -79,7 +80,7 @@ function AutoApproveLine() {
   const navigate = useStore((s) => s.navigate)
   return (
     <p className="mx-3 mt-3 flex shrink-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
-      <span>Acts without asking: launches, messages, stops and saves need no card.</span>
+      <span>Acts without asking: launches, saves, and messages or stops your own runs with no card.</span>
       <Button variant="link" size="sm" onClick={() => navigate('settings', {})}>Change in Settings</Button>
     </p>
   )
@@ -134,6 +135,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       {connection && session?.stream !== 'refused' && hasRows && (
         <p role="status" className="shrink-0 px-3 pb-1 text-ui-sm text-muted">{connection}</p>
       )}
+      <AutoApproveSuggestion busy={running || confirmations.length > 0 || (session?.pending.length ?? 0) > 0} hasRows={hasRows} />
       {!failed && (
         <AssistantComposer
           textarea={textarea}

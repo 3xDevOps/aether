@@ -5,9 +5,10 @@ import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo } from '@/test/fixtures'
 
-function show(methods = ['*']) {
+function show(methods = ['*'], params: Record<string, string> = {}) {
   useStore.setState({
     ...useStore.getInitialState(),
+    route: { name: 'settings', params },
     info: serverInfo,
     members: { [alice.id]: alice },
     capabilities: { gateway: 'remote', methods, ws: [] },
@@ -40,7 +41,7 @@ describe('assistant settings', () => {
     expect(client.assistantSettings).toHaveBeenCalledTimes(1)
     expect(toggle().getAttribute('aria-checked')).toBe('false')
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false })
     await user.click(toggle())
     dialog = await screen.findByRole('alertdialog')
     await user.click(within(dialog).getByRole('button', { name: 'Turn on' }))
@@ -48,7 +49,7 @@ describe('assistant settings', () => {
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('true'))
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false })
     await user.click(toggle())
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: false })
@@ -66,5 +67,17 @@ describe('assistant settings', () => {
     expect(await within(dialog).findByText('the assistant is not configured on this server', { exact: false })).toBeDefined()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(toggle().getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('lists what auto-approval covers and scrolls into view from a link', async () => {
+    const scroll = vi.mocked(Element.prototype.scrollIntoView)
+    scroll.mockClear()
+    show(['*'], { section: 'assistant' })
+    const scope = screen.getByLabelText('What auto-approval covers')
+    for (const text of ['Without a card', 'Always asks', 'Not affected', /another member’s run/, /shell and file tools/]) {
+      expect(within(scope).getByText(text)).toBeDefined()
+    }
+    expect(scroll).toHaveBeenCalled()
+    expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById('settings-assistant'))
   })
 })

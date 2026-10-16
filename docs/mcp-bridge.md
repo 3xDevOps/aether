@@ -208,7 +208,8 @@ member id and the server rejects any param containing `member_id`, except the `r
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
-[auto-approval](assistant.md#auto-approval). A decline, timeout or closed
+[auto-approval](assistant.md#auto-approval), except that a message to or stop
+of another member's run always waits for a click. A decline, timeout or closed
 session fails the call with the reason. `aether_docs`
 reads the guides in `docs/`, which the server binary embeds. Without
 `--assistant` the bridge serves the coordination tools above, unchanged.

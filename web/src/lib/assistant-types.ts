@@ -19,6 +19,8 @@ export interface AssistantConfirmation {
   params: unknown
   created_at: string
   expires_at: string
+  /** The owner of the run the call acts on, when another member: such a call asks even with auto-approval on. */
+  other_owner?: string
 }
 
 export interface AssistantStatus {
@@ -29,15 +31,20 @@ export interface AssistantStatus {
   confirmations: AssistantConfirmation[]
   /** Confirmed tools run without a card, as if approved. */
   auto_approve: boolean
+  /** The member approved enough cards by hand that the panel may suggest auto-approval. */
+  suggest_auto_approve: boolean
 }
 
 export interface AssistantSettings {
   auto_approve: boolean
+  suggest_auto_approve: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
 export interface AssistantSettingsParams {
   auto_approve?: boolean
+  /** Answers the suggestion: `later` snoozes it, `never` stops it. */
+  suggestion?: 'later' | 'never'
 }
 
 export interface AssistantStartParams {

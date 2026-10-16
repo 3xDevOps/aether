@@ -528,7 +528,23 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   answered with `assistant.answer`; each pending confirmation renders as a
   card with the summary, the method and exact params, a relative deadline,
   **Approve** and **Decline** (`assistant.confirm`). A card leaves only when a
-  `confirmations` frame stops listing it.
+  `confirmations` frame stops listing it. While `auto_approve` is off a card
+  links **Skip these cards…** to Settings > Assistant; a card with
+  `other_owner` says that member owns the run, so it asks even with
+  auto-approval on.
+- **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
+  the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
+  no confirmation or harness prompt waits and the conversation has items, a
+  notice between the transcript and the composer asks **Skip approval cards
+  for the assistant?** It says what auto-approval passes, that each action is
+  still noted, that read text could steer the assistant, and that anything
+  touching another member's run still asks. Its three equal buttons call
+  `assistant.settings`: **Turn on auto-approval** (`auto_approve: true`, no
+  second dialog: the notice is the warning), **Not now** (`suggestion:
+  "later"`) and **Don't suggest again** (`suggestion: "never"`). Each leaves a
+  one-line answer with a **Settings → Assistant** link that clears at the next
+  turn; a refusal stays in the notice. The server decides when the
+  suggestion is due; see [assistant.md](assistant.md#the-suggestion).
 
 State lives in `store/assistant.ts`. The transcript is the `AcpSession` under
 `acpSessions.assistant`, built by the run reducers and kept out of `runs`, so
@@ -4633,10 +4649,14 @@ through either gateway:
   under [Push notifications](#push-notifications).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
   **Let the assistant act without asking** reads and sets `assistant.settings`
-  `auto_approve`. Turning it on first asks **Let the assistant act without
-  asking?** with the warning that the assistant will launch, message and stop
-  runs and save the environment on its own; turning it off does not ask. A
-  refusal stays in the dialog or under the row.
+  `auto_approve`. Under it, **What auto-approval covers** lists what runs
+  without a card, what always asks and that the assistant's shell and file
+  tools are unaffected. Turning it on first asks **Let the assistant act
+  without asking?** with the warning that the assistant will launch runs,
+  message and stop the member's runs and save the environment on its own;
+  turning it off does not ask. A refusal stays in the dialog or under the
+  row. Links from the assistant panel navigate with `{section: "assistant"}`,
+  which scrolls the section into view.
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`) with **Link another server** (**Link a server**
 before any), **Saved servers** (the default link, then named ones) with
