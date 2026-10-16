@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // applyUpdate is selfupdate.UpdateWithAuthorization behind a variable
@@ -70,10 +70,22 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// the probe itself failed; the click then reports that error.
 		CLIPath       string            `json:"cli_path,omitempty"`
 		InstallMethod selfupdate.Method `json:"install_method,omitempty"`
-		// TargetVersion is the release update.apply would install, empty
-		// when it would install nothing.
+		// TargetVersion is the release this CLI should move to, empty when
+		// there is none or ServerFirst holds. It is set where update.apply
+		// refuses to install it, CanSelfUpdate false: the user then
+		// installs it another way.
 		TargetVersion string `json:"target_version"`
-	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
+		// ServerFirst reports that the linked server is behind the target
+		// and this member, an admin, can update it: update.apply refuses
+		// until `aether server update` has run.
+		ServerFirst bool `json:"server_first"`
+		// CanSelfUpdate reports that update.apply can install a release
+		// here: false for a dev build, on Windows, and in a packaged app.
+		CanSelfUpdate bool `json:"can_self_update"`
+	}{
+		CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError(),
+		CanSelfUpdate: check.CanSelfUpdate && !check.Dev && g.cfg.Packaged == "",
+	}
 	if perr != nil {
 		out.CLIError = perr.Message
 	}
@@ -83,6 +95,9 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 
 	info, err := g.serverInfo(r)
 	out.TargetVersion = updateTarget(check, info.ServerVersion)
+	if g.serverFirst(r, info, out.TargetVersion) {
+		out.TargetVersion, out.ServerFirst = "", true
+	}
 	if err != nil {
 		out.ServerError = err.Error()
 		return out, nil
@@ -92,6 +107,23 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	out.MinClientVersion = info.MinClientVersion
 	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
 	return out, nil
+}
+
+// serverFirst is cli.ServerFirst for the linked server: server.info
+// supplies its version and this member's role, and server.update_status,
+// asked only when the rest of the rule holds, whether it can update
+// itself. A server that does not answer is not waited for.
+func (g *Gateway) serverFirst(r *http.Request, info protocol.ServerInfoResult, target string) bool {
+	admin := info.Member.Role == string(domain.RoleAdmin)
+	if target == "" || !cli.ServerFirst(info.ServerVersion, target, admin, true) {
+		return false
+	}
+	result, perr := g.cfg.Backend.Call(r.Context(), protocol.MethodServerUpdateStatus, nil)
+	if perr != nil {
+		return false
+	}
+	var status protocol.ServerUpdateStatusResult
+	return json.Unmarshal(result, &status) == nil && status.Capable
 }
 
 func (g *Gateway) serverInfo(r *http.Request) (protocol.ServerInfoResult, error) {
@@ -106,16 +138,15 @@ func (g *Gateway) serverInfo(r *http.Request) (protocol.ServerInfoResult, error)
 	return info, nil
 }
 
-// updateTarget is the release update.apply installs. A linked server
+// updateTarget is the release this CLI should move to. A linked server
 // ahead of this CLI decides it: the client matches its server rather than
 // whatever GitHub calls latest, which skips prereleases and can lag a
-// publish. Otherwise it is the newest release when that is newer. The
-// server's version is checked as a tag because it lands in a download URL.
+// publish. Otherwise it is the newest release when that is newer.
 func updateTarget(check selfupdate.Check, serverVersion string) string {
-	if check.Dev || check.Disabled || !check.CanSelfUpdate {
+	if check.Dev || check.Disabled {
 		return ""
 	}
-	if core := version.ReleaseCore(serverVersion); selfupdate.ValidTag(core) && selfupdate.Behind(check.Version, core) {
+	if core := cli.MatchServer(check.Version, serverVersion); core != "" {
 		return core
 	}
 	if check.UpdateAvailable {
@@ -165,6 +196,9 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
 	case !check.CanSelfUpdate:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: selfupdate.ErrWindows.Error()}
+	case g.serverFirst(r, info, target):
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "update the server first: aether server update (the server runs " + info.ServerVersion + " and this installs " + target + ")"}
 	case target == "" && check.Latest == "":
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "no signed release is published yet; this aether stays on " + check.Version}

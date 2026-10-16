@@ -229,10 +229,15 @@ func TestUpdateCheckReportsReleaseToPackagedBuild(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 	var got struct {
-		CLI selfupdate.Check `json:"cli"`
+		CLI           selfupdate.Check `json:"cli"`
+		TargetVersion string           `json:"target_version"`
+		CanSelfUpdate bool             `json:"can_self_update"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
+	}
+	if got.TargetVersion != releaseTag || got.CanSelfUpdate {
+		t.Fatalf("target_version = %q can_self_update = %v, want %s from the release page", got.TargetVersion, got.CanSelfUpdate, releaseTag)
 	}
 	cli := got.CLI
 	if cli.Packaged != "Android app" || !cli.UpdateAvailable || cli.Latest != releaseTag ||
