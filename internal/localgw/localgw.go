@@ -169,7 +169,7 @@ func (g *Gateway) authorize(r *http.Request, handshake bool) (webgate.Backend, *
 			},
 		}
 	}
-	g.local.snapshot()
+	g.followLink()
 	return g.cfg.Backend, nil
 }
 
