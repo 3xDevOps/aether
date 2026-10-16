@@ -2768,7 +2768,20 @@ both what it renders and the overlap set the conflict chips read.
   because a snapshot landing *during* a request would write true over true
   and then be cleared by the response: the answer records the revision it was
   issued at, and anything newer asks again. A failure records the revision
-  too, so it cannot spin; the next snapshot or **Refresh** asks again.
+  too, so it cannot spin, and the patch already on screen stays beside the
+  server's error; the next snapshot or **Refresh** asks again. One fetch per
+  run is in flight at a time, even across a remount of the view. A stored
+  patch over 1 MiB is not re-fetched on a snapshot, so a reader is never
+  frozen or reshuffled mid-read: the strip's button becomes **New changes ·
+  Refresh** and loads them on click.
+- **Files are split by scanning, then parsed when read.** `parsePatch`
+  (`parse.ts`) finds each `diff --git` boundary and counts a file's
+  additions, deletions and content lines without allocating a row per line,
+  so a 20 MB patch splits in well under a second. A file's `lines` are parsed
+  the first time something reads them, so a closed or off-screen file is never
+  split into lines. A refetch hands the previous files back in, and a file
+  whose text is unchanged is the same object, so its memoised rows and placed
+  review comments are not redone.
 - **An interval is a menu row.** The interval menu lists **Current diff**
   (against the fork point) and then the `run.diff` snapshots, newest first,
   as "What changed 5 min ago" with their file count and totals, or the file
@@ -2787,12 +2800,17 @@ both what it renders and the overlap set the conflict chips read.
   unavailable error; **Current diff** stays a distinct cumulative choice.
 - **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
   sticky header with a chevron, its path, a status word and `+a −d`. A file
-  over 500 lines, a binary file and a deleted file start collapsed; the header
-  then also gives the line count. Line counts here leave out hunk headers.
-  An opened file over 500 lines renders its lines through `virtua` in a box
-  of its own. A patch over 1,500 lines in total also mounts only the files
-  near the screen, so a large diff costs the rows on screen rather than one
-  DOM node per line. Lines carry old and new line numbers, which `parse.ts`
+  over 500 lines or 256 KiB of patch text, a binary file and a deleted file
+  start collapsed; the header then also gives the line count, or the size for
+  a file big in bytes but short in lines, such as a minified bundle. Line
+  counts here leave out hunk headers. An opened file over 500 lines renders
+  its lines through `virtua` in a box of its own. A patch over 1,500 lines in
+  total or over 100 files also mounts only the files near the screen, so a
+  large diff costs the rows on screen rather than one DOM node per line. The
+  file list virtualizes past 100 files, and the strip's file menu lists the
+  first 100 and says how many more there are. A line renders at most 3,000
+  characters followed by "… N more characters"; review comments still quote
+  the whole line. Lines carry old and new line numbers, which `parse.ts`
   reads from the hunk headers.
 - **The path opens the file.** Clicking a file's path opens it in the run's
   [Files view](#files-in-a-run) (`openInFiles` in `routes/files/open.ts`),

@@ -865,3 +865,111 @@ test('a route that names a file opens the current diff at it', async () => {
   act(() => useStore.getState().navigate('run', { runId: active.id, view: 'changes', file: 'notes.md' }))
   await waitFor(() => expect(files.getByRole('button', { name: /notes\.md/ }).getAttribute('aria-current')).toBe('true'))
 })
+
+function single(path: string, characters: number): string {
+  return `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1 @@\n+${'x'.repeat(characters)}\n`
+}
+
+test('a 20 MB patch splits quickly into files with counts and no line parsing', () => {
+  const body = Array.from({ length: 200_000 }, (_, i) => `+${String(i).padStart(6, '0')} ${'y'.repeat(90)}`)
+  const huge = ['diff --git a/huge.txt b/huge.txt', '--- a/huge.txt', '+++ b/huge.txt', '@@ -0,0 +1,200000 @@', ...body, ''].join('\n')
+  const text = Array.from({ length: 2000 }, (_, i) => added(`dir/f${i}.txt`, 10)).join('') + single('min.js', 5_000_000) + huge
+  expect(text.length).toBeGreaterThan(20_000_000)
+
+  const started = performance.now()
+  const files = parsePatch(text)
+  const elapsed = performance.now() - started
+
+  expect(elapsed).toBeLessThan(1500)
+  expect(files).toHaveLength(2002)
+  expect(files.at(-2)).toMatchObject({ path: 'min.js', contentLines: 1, additions: 1 })
+  expect(files.at(-1)).toMatchObject({ path: 'huge.txt', contentLines: 200_000, additions: 200_000 })
+  expect(files[0].lines[0]).toEqual({ kind: 'hunk', text: '@@ -0,0 +1,10 @@' })
+  expect(files[0].lines).toBe(files[0].lines)
+})
+
+test('a refetch keeps the file objects whose text did not change', () => {
+  const before = parsePatch(patch)
+  const after = parsePatch(patch.replace('+new line', '+newer line') + newFile, before)
+
+  expect(after.map((file) => file.path)).toEqual(['cmd/main.go', 'db/schema.sql', 'notes.md', 'newer.txt'])
+  expect(after[0]).not.toBe(before[0])
+  expect(after[0].lines).toContainEqual({ kind: 'add', text: 'newer line', new: 11 })
+  expect(after[1]).toBe(before[1])
+  expect(after[2]).toBe(before[2])
+})
+
+test('a file big in bytes starts closed, says its size and caps what one line renders', () => {
+  seed({ ...ready, patch: single('min.js', 600_000) + added('small.txt', 3) })
+  renderDiff()
+
+  const bundle = screen.getByRole('region', { name: 'min.js' })
+  expect(bundle.textContent).toContain('586 KiB')
+  expect(within(bundle).queryByText(/^\+x/)).toBeNull()
+  expect(screen.getByRole('button', { name: 'Collapse small.txt' })).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Expand min.js' }))
+  const line = within(bundle).getByText(/more characters$/).parentElement!
+  expect(line.textContent!.length).toBeLessThan(3100)
+  expect(line.textContent).toContain('… 597,000 more characters')
+})
+
+test('many files mount a bounded number of file sections and list rows', () => {
+  seed({ ...ready, patch: Array.from({ length: 400 }, (_, i) => added(`dir/f${i}.txt`, 2)).join('') })
+  renderDiff()
+
+  expect(screen.getByRole('group', { name: 'Changes' }).textContent).toContain('400 files')
+  expect(document.querySelectorAll('section[aria-label^="dir/"]').length).toBeLessThan(100)
+  expect(within(screen.getByRole('navigation', { name: 'Changed files' })).queryAllByRole('listitem').length).toBeLessThan(100)
+})
+
+test('the strip menu lists a bounded number of files and says how many it left out', () => {
+  seed({ ...ready, patch: Array.from({ length: 150 }, (_, i) => added(`dir/f${i}.txt`, 1)).join('') })
+  renderDiff()
+
+  fireEvent.pointerDown(screen.getByRole('button', { name: /150 files/ }), { button: 0, ctrlKey: false })
+  expect(screen.getAllByRole('menuitem')).toHaveLength(100)
+  expect(screen.getByText('50 more files are not listed.')).toBeTruthy()
+})
+
+const big = (text: string) => single('min.js', 1_100_000) + text
+
+test('a large patch is not refetched on a new snapshot; the strip offers New changes and Refresh loads them', async () => {
+  seed({ ...ready, patch: big(patch) })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef12', patch: big(patch + newFile), truncated: false })
+  renderDiff()
+
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: '2026-08-14T10:03:00Z', files: [{ path: 'newer.txt', additions: 1, deletions: 0 }] }))
+  const refresh = await screen.findByRole('button', { name: 'New changes · Refresh' })
+  expect(api.runPatch).not.toHaveBeenCalled()
+  expect(screen.queryByRole('region', { name: 'newer.txt' })).toBeNull()
+
+  fireEvent.click(refresh)
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('button', { name: 'New changes · Refresh' })).toBeNull()
+})
+
+test('a failed refresh of a large patch keeps it on screen with the server error', async () => {
+  seed({ ...ready, patch: big(patch) })
+  vi.mocked(api.runPatch).mockRejectedValue(new Error('patch store unavailable'))
+  renderDiff()
+
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: '2026-08-14T10:03:00Z', files: [] }))
+  fireEvent.click(await screen.findByRole('button', { name: 'New changes · Refresh' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('patch store unavailable')
+  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+})
+
+test('a remount during a fetch does not start a second one', async () => {
+  seed({ ...ready, revision: 1 })
+  let land: (p: RunPatch) => void = () => {}
+  vi.mocked(api.runPatch).mockReturnValue(new Promise<RunPatch>((resolve) => (land = resolve)))
+  const first = renderDiff()
+  await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
+  first.unmount()
+  renderDiff()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
+  await act(async () => land({ run_id: active.id, base: 'abcdef12', patch, truncated: false }))
+})
