@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useAssistantDocked } from '@/components/assistant/panel'
 import { MissingRun } from '@/components/missing-run'
+import { replaceRouteKeepingFocus } from '@/components/shell/center-view'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { minReadableWidth, useIsMobile } from '@/lib/breakpoints'
@@ -61,6 +63,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const mobile = useIsMobile()
   // Measured with the inspectors inside it, so opening one never changes the answer.
   const [rowRef, row] = useElementSize<HTMLDivElement>()
+  const measured = row.width > 0
   const inline = row.width >= detailsWidth + minReadableWidth
   const agentInline = row.width >= agentWidth + minReadableWidth
   const navigate = useStore((s) => s.navigate)
@@ -103,12 +106,17 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const inlineNow = useRef(agentInline)
   inlineNow.current = agentInline
   const closeAgent = useCallback(() => redirectRoute(useStore, { name: 'run', params: { runId: run.id, view } }), [run.id, view])
-  // An inline inspector squeezed out closes rather than reopening as a modal over whatever took the room.
-  const agentWasInline = useRef(agentInline)
+  // An inline inspector squeezed out by the assistant docking closes rather than reopening as a modal over it.
+  // The assistant docks a render before the row's new width arrives, so compare against the last width's state.
+  const assistantDocked = useAssistantDocked()
+  const rowBefore = useRef({ width: row.width, docked: assistantDocked })
+  const resized = rowBefore.current.width !== row.width
+  const squeezed = Boolean(agentID) && resized && !agentInline && assistantDocked && !rowBefore.current.docked
+    && rowBefore.current.width >= agentWidth + minReadableWidth
   useEffect(() => {
-    if (agentWasInline.current && !agentInline && agentID) closeAgent()
-    agentWasInline.current = agentInline
-  }, [agentInline, agentID, closeAgent])
+    if (resized) rowBefore.current = { width: row.width, docked: assistantDocked }
+    if (squeezed) replaceRouteKeepingFocus({ name: 'run', params: { runId: run.id, view } })
+  }, [resized, squeezed, row.width, assistantDocked, run.id, view])
 
   const detailsOpen = inline ? detailsPreference && !agentID : overlayDetails
   const setDetails = useCallback((open: boolean) => {
@@ -303,7 +311,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           </DialogContent>
         </Dialog>
       )}
-      {!agentInline && (
+      {measured && !agentInline && !squeezed && (
         <Dialog open={Boolean(agentID)} onOpenChange={(open) => !open && closeAgent()}>
           <DialogContent
             variant={mobile ? 'bottom' : 'side'}

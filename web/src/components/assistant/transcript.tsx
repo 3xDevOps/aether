@@ -28,7 +28,8 @@ export function Transcript({ session }: { session: AcpSession }) {
   const list = useRef<VListHandle>(null)
   const generation = useStore((s) => `${s.identityKey}:${s.assistantGeneration}`)
   const conversation = useRef('')
-  conversation.current = `${generation}:${session.epoch}:${session.historyGeneration}`
+  // The first row changes when earlier messages load, which moves every offset and cached size.
+  conversation.current = `${generation}:${session.epoch}:${session.historyGeneration}:${session.more}:${flat[0]?.key}`
   const [restored] = useState(() => (kept?.conversation === conversation.current ? kept : null))
   const pinned = useRef(restored?.pinned ?? true)
   const firstKey = useRef(flat[0]?.key)

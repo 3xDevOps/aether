@@ -29,11 +29,12 @@ Every entry point is offered only when the server supports the assistant.
   the onboarding steps.
 
 On desktop the panel docks to the right of the page and can be resized, as
-long as the page keeps 560px beside it. A run's Details and Subagent panels
-move to overlays to make that room, and Details returns when the assistant
+long as the page keeps 560px beside it. A run's Details panel hides to make
+that room and returns when the assistant closes; an open Subagent panel
 closes. In a window too narrow for that, the panel floats over the right of
-the page instead, without dimming it: the run underneath keeps its size and
-stays usable, and `Esc` inside the panel closes it. On a phone it is a side
+the page instead, without dimming it and leaving at least 240px of the page
+uncovered: the run underneath keeps its size, the part you can see stays
+usable, and `Esc` inside the panel or the shortcut closes it. On a phone it is a side
 sheet. Closing the panel keeps your unsent message and your place in the
 conversation.
 

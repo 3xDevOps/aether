@@ -148,6 +148,7 @@ describe('opening the assistant', () => {
     await userEvent.click(await within(aside).findByRole('textbox', { name: 'Message the assistant' }))
     await userEvent.keyboard('{Control>}{Shift>} {/Shift}{/Control}')
     expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Assistant' })))
   })
 
   it('titles itself below the page heading', async () => {
@@ -639,6 +640,20 @@ describe('width', () => {
     expect(screen.queryByRole('complementary', { name: 'Assistant' })).toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(button))
     expect(useStore.getState().assistantDraft).toBe('keep this')
+  })
+
+  it('keeps the same panel and its focused composer when it switches between docked and floating', async () => {
+    useStore.setState({ assistantWidth: 640, sidebarWidth: 260, sidebarCollapsed: false })
+    const resize = atViewport(1500)
+    const aside = await openPanel()
+    acpOpen()
+    const composer = await within(aside).findByRole('textbox', { name: 'Message the assistant' })
+    await userEvent.click(composer)
+    resize(1000)
+    await waitFor(() => expect(within(aside).queryByRole('separator', { name: 'Resize assistant' })).toBeNull())
+    expect(await panel()).toBe(aside)
+    expect(aside.style.width).toBe('500px')
+    expect(document.activeElement).toBe(composer)
   })
 
   it('restores a stored width within its bounds', () => {

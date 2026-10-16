@@ -511,11 +511,16 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   is capped to what the window leaves after the sidebar and
   `minReadableWidth` (560px, `lib/breakpoints.ts`) of `main`.
 - **Desktop, floating:** below 320px of that room, the same `aside` floats
-  over the right edge of `main` at the saved width, raised by a shadow. It has
-  no backdrop, no focus trap and no resize handle, so the run under it keeps
-  its full width and stays live. `Esc` inside it closes it and returns focus
-  to the Assistant button, unless something inside it, such as the **New
-  conversation** confirmation, handled the key first.
+  over the right edge of `main`, raised by a shadow. Its width is the saved
+  width, capped so at least 240px of `main` (`uncoveredWidth`) stays
+  uncovered on its left, but never below 320px. It has no backdrop, no focus
+  trap and no resize handle, so the run keeps its full width, and the part
+  the panel does not cover stays interactive. `Esc` inside it, outside an IME
+  composition, closes it and returns focus to the Assistant button, unless
+  something inside it, such as the **New conversation** confirmation, handled
+  the key first; so does `Mod+Shift+Space` from anywhere. Crossing between
+  docked and floating restyles the one `aside` rather than remounting it, so
+  the draft, the focused composer and the transcript's scroll survive.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
   takes the run header's height on a run and the view header's elsewhere, so
@@ -560,8 +565,10 @@ draft, so reopening the panel retries under the same key; a changed draft, a
 success or a new conversation clears them. `assistantOpen` on desktop persists; a phone never reopens the sheet on load.
 Closing the panel unmounts it. The transcript keeps where the reader left it,
 including virtua's measured row sizes, in a module-level record keyed by
-member, conversation generation, epoch and history generation, and reopening
-the same conversation returns there. A transcript pinned to the bottom stays
+member, conversation generation, epoch, history generation and first row,
+and reopening the same conversation returns there. Earlier messages loaded
+while the panel was closed change the first row, so the transcript starts at
+the bottom instead of at a stale offset. A transcript pinned to the bottom stays
 pinned, so it follows output that arrived while the panel was closed. A
 different conversation starts at the bottom.
 
@@ -2118,10 +2125,13 @@ sessions render as before.
 A card opens the subagent inspector (`routes/run/subagent-inspector.tsx`)
 at `?agent=<tool call id>`. While the run's row holds 448px for it plus
 `minReadableWidth` (560px), it is an inline aside that replaces Details
-while open; narrower, it is a side sheet, and a bottom sheet on phones. An
-inline inspector that loses that room, for example when the assistant docks
-beside the run, closes instead of reopening as a modal sheet over what took
-the room. It shows breadcrumbs back to **Session** through nested
+while open; narrower, it is a side sheet, and a bottom sheet on phones.
+Until the row is measured neither renders. An inline inspector that loses
+that room to the assistant docking beside the run closes instead of reopening
+as a modal sheet over it, and focus stays in the assistant
+(`replaceRouteKeepingFocus` in `components/shell/center-view.tsx` skips the
+focus move to the run heading). Losing the room any other way, such as
+showing the sidebar or narrowing the window, reopens it as the side sheet. It shows breadcrumbs back to **Session** through nested
 subagents, **Previous subagent** and **Next subagent** among siblings, and
 **Close subagent**; `Esc` closes it before it leaves the run. Stepping
 between siblings and closing replace the history entry, so Back does not
