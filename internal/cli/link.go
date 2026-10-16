@@ -17,6 +17,8 @@ import (
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // LinkOptions controls one server link operation.
@@ -197,6 +199,16 @@ func Link(ctx context.Context, opts LinkOptions, prev Config) (LinkResult, error
 		prev.ServerID = cfg.ServerID
 	}
 	return LinkResult{Config: linkConfig(cfg, prev, opts.Name), Conn: conn, Info: info, KeyGenerated: keyGenerated}, nil
+}
+
+// UpgradeRequired is the refusal a server whose release is newer than this
+// client gives every call but server.info, nil when there is none. A link
+// calls only server.info, so it asks here to report the refusal at once.
+func UpgradeRequired(info protocol.ServerInfoResult) *protocol.Error {
+	if !selfupdate.Behind(version.Version, info.MinClientVersion) {
+		return nil
+	}
+	return protocol.UpgradeRequired(version.Version, info.ServerVersion, info.MinClientVersion)
 }
 
 // serverInfoTimeout bounds the server.info call that ends a link. Past

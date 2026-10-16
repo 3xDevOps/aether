@@ -278,6 +278,9 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 	if perr := g.adoptLink(result, params.Name); perr != nil {
 		return nil, perr
 	}
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
+		return nil, perr
+	}
 	cfg := result.Config
 	return struct {
 		Addr         string          `json:"addr"`

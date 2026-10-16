@@ -52,7 +52,7 @@ func (d *Daemon) runSession(ctx context.Context, stream io.ReadWriteCloser) (boo
 		if ack.Code == protocol.CodeUnavailable {
 			d.lastSeq = 0
 		}
-		return false, fmt.Errorf("subscribe refused: rpc error %d: %s", ack.Code, ack.Error)
+		return false, fmt.Errorf("subscribe refused: %w", &protocol.Error{Code: ack.Code, Message: ack.Error})
 	}
 
 	// Catch-up: the offline story. Everything that moved while

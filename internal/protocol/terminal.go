@@ -86,9 +86,10 @@ type TerminalResponse struct {
 	Rows   uint   `json:"rows,omitempty"`
 	Framed bool   `json:"framed,omitempty"`
 	// Replay is the number of bytes of scrollback replay that follow the ack before live output.
-	Replay int    `json:"replay,omitempty"`
-	Code   int    `json:"code,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Replay int             `json:"replay,omitempty"`
+	Code   int             `json:"code,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
 // TerminalStatusResult is the wire form of domain.TerminalStatus.

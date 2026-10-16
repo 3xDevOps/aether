@@ -321,7 +321,7 @@ func printCheck(got selfupdate.Check) {
 	case got.UpdateAvailable:
 		fmt.Printf("update available: %s (running %s); run: aether update\n", got.Latest, version.String())
 	case got.Latest == "":
-		fmt.Printf("running %s; no signed release is published yet\n", version.String())
+		fmt.Printf("no signed release is published yet (running %s)\n", version.String())
 	case got.Latest == version.Version:
 		fmt.Printf("already on the latest release %s\n", got.Latest)
 	default:

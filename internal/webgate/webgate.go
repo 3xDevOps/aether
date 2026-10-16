@@ -43,6 +43,8 @@ func StatusFor(code int) int {
 		return http.StatusConflict
 	case protocol.CodeUnavailable:
 		return http.StatusServiceUnavailable
+	case protocol.CodeUpgradeRequired:
+		return http.StatusUpgradeRequired
 	default:
 		return http.StatusInternalServerError
 	}

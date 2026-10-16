@@ -67,6 +67,9 @@ func (c *Conn) RunSSH(runID string) (io.ReadWriteCloser, ssh.PublicKey, error) {
 	}
 	if !ack.OK {
 		_ = out.Close()
+		if ack.Code == protocol.CodeUpgradeRequired {
+			return nil, nil, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}
+		}
 		return nil, nil, errors.New(ack.Error)
 	}
 	hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(ack.HostKey))

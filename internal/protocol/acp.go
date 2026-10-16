@@ -40,6 +40,7 @@ type ACPStreamResponse struct {
 	ControlGeneration uint64          `json:"control_generation,omitempty"`
 	Code              int             `json:"code,omitempty"`
 	Error             string          `json:"error,omitempty"`
+	Data              json.RawMessage `json:"data,omitempty"`
 }
 
 // ACPFrame is one aether-acp stream line: an item, or a reset after which the

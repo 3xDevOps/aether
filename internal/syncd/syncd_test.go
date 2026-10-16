@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -340,5 +342,36 @@ func TestRunBranchRefspec(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "+") {
 		t.Error("refspec must be forced: run branches are server-owned")
+	}
+}
+
+func TestWaitReplaced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether")
+	if err := os.WriteFile(path, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := waitReplaced(ctx, path, 5*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unchanged executable: waitReplaced = %v, want deadline exceeded", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- waitReplaced(context.Background(), path, 5*time.Millisecond) }()
+	time.Sleep(20 * time.Millisecond)
+	next := path + ".new"
+	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(next, path); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("replaced executable: waitReplaced = %v, want nil", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitReplaced did not notice the replaced executable")
 	}
 }

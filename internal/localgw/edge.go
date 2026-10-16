@@ -391,8 +391,17 @@ func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) 
 	cfg := result.Config
 	var out bytes.Buffer
 	linked := &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}
-	if _, err := localops.MoveRemote(prev, cfg, &out, &out); err != nil {
-		linked.RemoteError = fmt.Sprintf("the link is saved, but the clone's aether remote was not updated: %v: %s", err, strings.TrimSpace(out.String()))
+	_, moveErr := localops.MoveRemote(prev, cfg, &out, &out)
+	if moveErr != nil {
+		linked.RemoteError = fmt.Sprintf("the link is saved, but the clone's aether remote was not updated: %v: %s", moveErr, strings.TrimSpace(out.String()))
+	}
+	// MoveRemote compares prev with the saved link, so after an update it
+	// can no longer tell the remote moved: move it before the refusal.
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
+		if moveErr != nil {
+			perr.Message += "; " + linked.RemoteError
+		}
+		return nil, perr
 	}
 	return linked, nil
 }

@@ -18,7 +18,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -27,12 +26,13 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		return nil, rpcError(err)
 	}
 	return protocol.ServerInfoResult{
-		ServerVersion:       version.Version,
+		ServerVersion:       s.cfg.release,
 		ProtocolVersion:     protocol.Version,
 		Time:                time.Now().UTC().Format(time.RFC3339),
 		Member:              protocol.MemberFromDomain(m),
 		TailnetHostname:     s.cfg.TailnetHostname,
 		TailnetIdentityAuth: s.cfg.WhoIs != nil,
+		MinClientVersion:    s.minClientVersion(),
 	}, nil
 }
 

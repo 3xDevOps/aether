@@ -12,8 +12,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -58,14 +56,11 @@ const (
 // DefaultStandardImage is the published image matching this build.
 var DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
 
-var describeSuffixPattern = regexp.MustCompile(`-\d+-g[0-9a-f]+(?:-dirty)?$`)
-
 // releaseImageTag reduces a build version to a published image tag. The
 // release workflow tags every published image with the release ref name, so
 // a release version is its own image tag.
 func releaseImageTag(buildVersion string) string {
-	tag := describeSuffixPattern.ReplaceAllString(buildVersion, "")
-	tag = strings.TrimSuffix(tag, "-dirty")
+	tag, _ := version.TrimDescribe(buildVersion)
 	if scheduler.ReleaseTag(tag) {
 		return tag
 	}

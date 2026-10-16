@@ -12,7 +12,13 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/3xDevOps/Aether/internal/version"
 )
+
+// ClientBanner is the SSH banner of every Aether client. The server reads
+// the version from it to refuse a client older than its release.
+func ClientBanner() string { return "SSH-2.0-Aether " + version.Version }
 
 const (
 	dialTimeout     = 10 * time.Second
@@ -113,6 +119,7 @@ func dial(ctx context.Context, cfg Config, user string, requireAuth bool) (*Conn
 func handshake(ctx context.Context, nc net.Conn, addr string, conf *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
 	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
 	read := &readClock{Conn: nc}
+	conf.ClientVersion = ClientBanner()
 	cc, chans, reqs, err := ssh.NewClientConn(read, addr, conf)
 	if !stop() {
 		if err == nil {
