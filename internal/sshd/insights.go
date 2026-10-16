@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-	// A server without system zoneinfo must still bucket in the member's
-	// time zone.
-	_ "time/tzdata"
+	_ "time/tzdata" // a server without system zoneinfo still buckets in the member's time zone
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -60,7 +58,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		return nil, invalidParams(fmt.Sprintf("range spans %d days; the limit is %d", span, insightsMaxDays))
 	}
 	if p.WorkspaceID != "" {
-		if _, err := s.cfg.Store.GetWorkspace(ctx, q.Workspace); err != nil {
+		if _, err = s.cfg.Store.GetWorkspace(ctx, q.Workspace); err != nil {
 			return nil, rpcError(err)
 		}
 	}

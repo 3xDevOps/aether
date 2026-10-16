@@ -289,12 +289,12 @@ func TestInsightsGet(t *testing.T) {
 		"bad scope":         with(func(p *protocol.InsightsParams) { p.Scope = "all" }),
 		"bad from":          with(func(p *protocol.InsightsParams) { p.From = "2026-03-07" }),
 	} {
-		if _, perr := get(alice, params); perr == nil || perr.Code != protocol.CodeInvalidParams {
-			t.Errorf("%s: error = %+v, want invalid params", name, perr)
+		if _, bad := get(alice, params); bad == nil || bad.Code != protocol.CodeInvalidParams {
+			t.Errorf("%s: error = %+v, want invalid params", name, bad)
 		}
 	}
-	if _, perr := get(alice, with(func(p *protocol.InsightsParams) { p.WorkspaceID = "ws-missing" })); perr == nil || perr.Code != protocol.CodeNotFound {
-		t.Errorf("unknown workspace: error = %+v, want not found", perr)
+	if _, missing := get(alice, with(func(p *protocol.InsightsParams) { p.WorkspaceID = "ws-missing" })); missing == nil || missing.Code != protocol.CodeNotFound {
+		t.Errorf("unknown workspace: error = %+v, want not found", missing)
 	}
 	utc, perr := get(alice, with(func(p *protocol.InsightsParams) { p.TimeZone = "" }))
 	if perr != nil || utc.TimeZone != "UTC" || utc.Series[0].Start != "2026-03-07" {

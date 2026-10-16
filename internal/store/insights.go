@@ -543,9 +543,9 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 			created, finished int64
 			started           *int64
 		)
-		if err := row.Scan(&r.ID, &r.Title, &r.WorkspaceID, &r.Status, &r.Reason, &r.Harness, &r.Model,
-			&created, &started, &finished, &r.PRURL, &r.PRState); err != nil {
-			return nil, err
+		if scanErr := row.Scan(&r.ID, &r.Title, &r.WorkspaceID, &r.Status, &r.Reason, &r.Harness, &r.Model,
+			&created, &started, &finished, &r.PRURL, &r.PRState); scanErr != nil {
+			return nil, scanErr
 		}
 		r.CreatedAt, r.FinishedAt = decodeTime(created), decodeTime(finished)
 		if started != nil {
