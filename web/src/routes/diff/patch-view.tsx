@@ -12,10 +12,11 @@ import { linePrefix, type FileStatus, type PatchFile, type PatchLine } from '@/r
 import { addComment, commentable, growComment, placeComments, reach, useFileComments, written, type ReviewComment } from '@/routes/diff/review'
 
 export const largeFile = 500
-
-export function contentLines(file: PatchFile): number {
-  return file.lines.filter((line) => line.kind !== 'hunk' && line.kind !== 'meta').length
-}
+/** A file whose patch text is longer than this starts closed, whatever its line count. */
+export const largeText = 256 * 1024
+/** A line renders at most this many characters; the rest stays in the data. */
+const longLine = 3000
+const noLines: PatchLine[] = []
 
 const statusWord: Record<FileStatus, string> = {
   added: 'added',
@@ -68,11 +69,12 @@ export const FilePatch = memo(function FilePatch({
 }) {
   const open = !onCollapsedChange || !collapsed
   const body = id ? `${id}-body` : undefined
-  const gutter = lineNumbers ? `calc(${Math.max(String(lastLine(file)).length, 2)}ch + 1rem)` : undefined
-  const size = contentLines(file)
+  const last = useMemo(() => (open && lineNumbers ? lastLine(file.lines) : 0), [file, open, lineNumbers])
+  const gutter = lineNumbers ? `calc(${Math.max(String(last).length, 2)}ch + 1rem)` : undefined
+  const size = file.contentLines
   const runID = review?.runID ?? ''
   const comments = useFileComments(runID, file.path)
-  const picker = useLinePicker(file, review, comments)
+  const picker = useLinePicker(file, review, comments, open)
   // A long file's lines are virtual; its tab stop has to exist wherever the list is scrolled.
   const kept = useMemo(() => [picker.tab], [picker.tab])
   const noted = written(comments).length
@@ -144,6 +146,9 @@ export const FilePatch = memo(function FilePatch({
           {!open && size > largeFile && (
             <span className="text-muted tabular-nums">{size} lines</span>
           )}
+          {!open && size <= largeFile && file.size > largeText && (
+            <span className="text-muted tabular-nums">{Math.round(file.size / 1024).toLocaleString('en-US')} KiB</span>
+          )}
           <Counts additions={file.additions} deletions={file.deletions} />
         </span>
       </header>
@@ -186,7 +191,7 @@ function inGutter(target: EventTarget): boolean {
 }
 
 /** A range never leaves its hunk. `cursor` is the one line per file whose gutter the keyboard can reach. */
-function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, comments: ReviewComment[]) {
+function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, comments: ReviewComment[], open: boolean) {
   const coarse = useMediaQuery(coarsePointer)
   const body = useRef<HTMLDivElement>(null)
   const [picked, setPicked] = useState<Picked | null>(null)
@@ -195,7 +200,9 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
   const beginDrag = useDrag()
   const [cursor, setCursor] = useState(-1)
   const scope = review?.scope ?? ''
-  const { placed, outdated } = useMemo(() => placeComments(file.lines, comments, scope), [file.lines, comments, scope])
+  // A closed file is never split into lines.
+  const lines = open ? file.lines : noLines
+  const { placed, outdated } = useMemo(() => placeComments(lines, comments, scope), [lines, comments, scope])
   const latest = useRef({ file, placed, review })
   latest.current = { file, placed, review }
 
@@ -304,6 +311,8 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
     },
   }
 
+  const tab = useMemo(() => (commentable(lines[cursor]) ? cursor : lines.findIndex(commentable)), [lines, cursor])
+
   return {
     body,
     handlers,
@@ -311,7 +320,7 @@ function useLinePicker(file: PatchFile, review: ReviewTarget | undefined, commen
     marked,
     outdated,
     picking: picked !== null,
-    tab: commentable(file.lines[cursor]) ? cursor : file.lines.findIndex(commentable),
+    tab,
     focusLine,
   }
 }
@@ -350,7 +359,10 @@ const Line = memo(function Line({
       ) : numbers}
       <code className={cn('min-w-0 flex-1 px-2', wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre')}>
         {linePrefix[line.kind]}
-        {line.text || ' '}
+        {line.text.length > longLine ? line.text.slice(0, longLine) : line.text || ' '}
+        {line.text.length > longLine && (
+          <span className="text-muted select-none"> … {(line.text.length - longLine).toLocaleString('en-US')} more characters</span>
+        )}
       </code>
     </div>
   )
@@ -373,8 +385,8 @@ function LineNumber({ value, width, last, marked, className }: { value?: number;
   )
 }
 
-function lastLine(file: PatchFile): number {
+function lastLine(lines: PatchLine[]): number {
   let last = 0
-  for (const line of file.lines) last = Math.max(last, line.old ?? 0, line.new ?? 0)
+  for (const line of lines) last = Math.max(last, line.old ?? 0, line.new ?? 0)
   return last
 }
