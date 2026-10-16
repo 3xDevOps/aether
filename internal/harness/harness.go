@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 )
 
@@ -22,22 +24,13 @@ const TaskPlaceholder = "{task}"
 // ModelPlaceholder is replaced by the run's model in ModelArgs and ModelEnv.
 const ModelPlaceholder = "{model}"
 
-// DiscoveryInstruction points to live run identity, available capabilities, and
-// any assignment. It carries no authority, identity, or task details.
+// InstructionsPlaceholder is replaced by the run's instructions in
+// InstructionArgs; QuotedInstructionsPlaceholder by them as a quoted string.
 const (
-	DiscoveryInstruction = "Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified."
-	DiscoveryFileName    = "discovery.md"
-	// InteractiveReportInstruction tells an ordinary interactive run which
-	// turns end with a report.
-	InteractiveReportInstruction = "When you need the user's decision or information, you MUST run `aether-internal report --outcome needs-input --summary \"<your question>\"` and then end your turn; the reply arrives as your next prompt. When a task you were given is done or cannot be done, or an external blocker stops it, you MUST report success, failure or blocked with `aether-internal report` before ending that turn. A turn that only answers or discusses, or that ends waiting on workers, peers or mail, ends without a report."
-	// BackgroundReportInstruction tells a background run how it ends.
-	BackgroundReportInstruction = "Before your final turn ends you MUST run `aether-internal report` with outcome success or failure, or blocked if an external blocker stops you."
-	// AssignedReportInstruction points a mission worker or integrator at its
-	// role's rules.
-	AssignedReportInstruction = "Report outcomes only as `aether-internal skill` describes for your role; do not report while waiting on workers or peers."
-	// developer_instructions is the Codex config key for additional
-	// instructions; model_instructions_file would replace built-ins.
-	codexDiscoverySetting = "developer_instructions=\"" + DiscoveryInstruction + "\""
+	InstructionsPlaceholder       = "{instructions}"
+	QuotedInstructionsPlaceholder = "{instructions_quoted}"
+	// InstructionsFileName is OpenCode's InstructionsFile.
+	InstructionsFileName = "instructions.md"
 )
 
 // CoordPlaceholder is replaced by the container path of the run's
@@ -338,13 +331,20 @@ type Profile struct {
 	// ModelEnv carries the model in JSON configuration variables, where
 	// ModelPlaceholder is substituted JSON-escaped.
 	ModelEnv map[string]string
-	// DiscoveryArgs load the discovery hint on a taskless interactive launch.
-	DiscoveryArgs []string
-	// DiscoveryEnv is DiscoveryArgs for a harness with no startup flag for it.
-	DiscoveryEnv map[string]string
-	// DiscoveryFiles are written into the coordination directory before a
-	// taskless interactive container exists.
-	DiscoveryFiles map[string][]byte
+	// InstructionArgs append the run's instructions to the agent's system
+	// prompt, so they survive compaction and need no prompt of their own.
+	InstructionArgs []string
+	// InstructionEnv is InstructionArgs for a harness with no startup flag
+	// for it.
+	InstructionEnv map[string]string
+	// InstructionsFile is the coordination-directory file a launch writes
+	// the instructions to, for a harness whose InstructionArgs or
+	// InstructionEnv load them from a file.
+	InstructionsFile string
+	// InstructionsConfig is the home-relative TOML file whose top-level
+	// developer_instructions InstructionArgs would replace; a launch carries
+	// that value ahead of the run's instructions.
+	InstructionsConfig string
 	// NativeCoordination enables the run-scoped mailbox for coordinated
 	// interactive runs with a task. Overrides never inherit it.
 	NativeCoordination bool
@@ -433,10 +433,10 @@ var profiles = map[string]Profile{
 		// Claude Code writes the login to a temporary file and renames it
 		// over the old one, and rewrites it in place only when that rename
 		// fails with EXDEV, EPERM, EEXIST or EBUSY.
-		PinnedLogins:  []string{".claude/.credentials.json"},
-		LocalRoot:     ".claude",
-		DenyNames:     []string{".credentials.json", "credentials", ".claude.json"},
-		DiscoveryArgs: []string{"--append-system-prompt", DiscoveryInstruction},
+		PinnedLogins:    []string{".claude/.credentials.json"},
+		LocalRoot:       ".claude",
+		DenyNames:       []string{".credentials.json", "credentials", ".claude.json"},
+		InstructionArgs: []string{"--append-system-prompt", InstructionsPlaceholder},
 		// --settings merges a settings document registering the reporter over
 		// the member's own, for this launch alone.
 		Reporter:      ReporterFull,
@@ -461,7 +461,10 @@ var profiles = map[string]Profile{
 		CredentialPaths:    []string{".codex/auth.json"},
 		LocalRoot:          ".codex",
 		DenyNames:          []string{"auth.json", "keychain", "token.json"},
-		DiscoveryArgs:      []string{"-c", codexDiscoverySetting},
+		// developer_instructions adds to Codex's instructions;
+		// model_instructions_file would replace its built-in ones.
+		InstructionArgs:    []string{"-c", "developer_instructions=" + QuotedInstructionsPlaceholder},
+		InstructionsConfig: ".codex/config.toml",
 		// Codex notifies only when a turn completes, so the run comes back on
 		// the agent's own output.
 		Reporter:   ReporterTurnEnd,
@@ -485,7 +488,7 @@ var profiles = map[string]Profile{
 		CredentialPaths:    []string{".pi/agent/auth.json"},
 		LocalRoot:          ".pi",
 		DenyNames:          []string{"auth.json", "oauth.json"},
-		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
+		InstructionArgs:    []string{"--append-system-prompt", InstructionsPlaceholder},
 		Reporter:           ReporterFull,
 		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
@@ -517,7 +520,7 @@ var profiles = map[string]Profile{
 		LocalRoot:       ".omp",
 		// The WAL and shm files hold provider keys too.
 		DenyNames:          []string{"agent.db", "agent.db-wal", "agent.db-shm"},
-		DiscoveryArgs:      []string{"--append-system-prompt", DiscoveryInstruction},
+		InstructionArgs:    []string{"--append-system-prompt", InstructionsPlaceholder},
 		Reporter:           ReporterFull,
 		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
@@ -554,13 +557,13 @@ var profiles = map[string]Profile{
 		},
 		StatusFiles:        map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
 		NativeCoordination: true,
-		// Discovery must work without the reporter; the scheduler merges this
-		// overlay with StatusEnv when both apply.
-		DiscoveryEnv: map[string]string{
-			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + DiscoveryFileName + `"]}`,
+		// Instructions must work without the reporter; the scheduler merges
+		// this overlay with StatusEnv when both apply.
+		InstructionEnv: map[string]string{
+			"OPENCODE_CONFIG_CONTENT": `{"instructions":["` + CoordPlaceholder + "/" + InstructionsFileName + `"]}`,
 		},
-		DiscoveryFiles: map[string][]byte{DiscoveryFileName: []byte(DiscoveryInstruction + "\n")},
-		InstallScript:  "curl -fsSL https://opencode.ai/install | bash",
+		InstructionsFile: InstructionsFileName,
+		InstallScript:    "curl -fsSL https://opencode.ai/install | bash",
 		// No UpdateScript: an upgrade can cross a major version that the
 		// managed OpenCode launch wrapper refuses.
 	},
@@ -576,7 +579,11 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
 		// here trusts the working directory as well.
-		Env:                map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		Env: map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		// Copilot puts every *.instructions.md in these directories into its
+		// system prompt, after the repository's own instructions.
+		InstructionEnv:     map[string]string{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": CoordPlaceholder},
+		InstructionsFile:   "aether.instructions.md",
 		NativeCoordination: true,
 		EnvPassthrough:     []string{"COPILOT_GITHUB_TOKEN"},
 		// With no system keychain, as in a run container, copilot login keeps
@@ -598,7 +605,10 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// In a folder it does not trust, Gemini drops yolo to default and
 		// skips ~/.gemini/.env.
-		Env:             map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
+		Env: map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
+		// No InstructionArgs: the interactive UI asks to trust every
+		// --include-directories entry, and GEMINI_CLI_TRUST_WORKSPACE covers
+		// only the working directory.
 		EnvPassthrough:  []string{"GEMINI_API_KEY"},
 		CredentialPaths: []string{".gemini/oauth_creds.json", ".gemini/.env"},
 		// Gemini writes oauth_creds.json to a temporary file and renames it
@@ -708,26 +718,49 @@ func (p Profile) ModelLaunchEnv(model string) map[string]string {
 	return out
 }
 
-func (p Profile) DiscoveryLaunchArgs(dir string) []string {
-	if len(p.DiscoveryArgs) == 0 || dir == "" {
+// InstructionLaunchArgs are InstructionArgs carrying text for a run whose
+// coordination directory is mounted at dir.
+func (p Profile) InstructionLaunchArgs(dir, text string) []string {
+	if len(p.InstructionArgs) == 0 || dir == "" {
 		return nil
 	}
-	out := make([]string, 0, len(p.DiscoveryArgs))
-	for _, a := range p.DiscoveryArgs {
-		out = append(out, strings.ReplaceAll(a, CoordPlaceholder, dir))
+	quoted, _ := json.Marshal(text)
+	r := strings.NewReplacer(QuotedInstructionsPlaceholder, string(quoted), InstructionsPlaceholder, text, CoordPlaceholder, dir)
+	out := make([]string, 0, len(p.InstructionArgs))
+	for _, a := range p.InstructionArgs {
+		out = append(out, r.Replace(a))
 	}
 	return out
 }
 
-func (p Profile) DiscoveryLaunchEnv(dir string) map[string]string {
-	if len(p.DiscoveryEnv) == 0 || dir == "" {
+// ConfiguredInstructions is the top-level developer_instructions of the
+// TOML document an InstructionsConfig names.
+func ConfiguredInstructions(config []byte) (string, error) {
+	var doc struct {
+		DeveloperInstructions string `toml:"developer_instructions"`
+	}
+	if err := toml.Unmarshal(config, &doc); err != nil {
+		return "", err
+	}
+	return doc.DeveloperInstructions, nil
+}
+
+func (p Profile) InstructionLaunchEnv(dir string) map[string]string {
+	if len(p.InstructionEnv) == 0 || dir == "" {
 		return nil
 	}
-	out := make(map[string]string, len(p.DiscoveryEnv))
-	for name, value := range p.DiscoveryEnv {
+	out := make(map[string]string, len(p.InstructionEnv))
+	for name, value := range p.InstructionEnv {
 		out[name] = strings.ReplaceAll(value, CoordPlaceholder, dir)
 	}
 	return out
+}
+
+// CarriesInstructions reports whether a launch of p delivers run
+// instructions in context it keeps through compaction rather than in its
+// first prompt.
+func (p Profile) CarriesInstructions() bool {
+	return len(p.InstructionArgs) > 0 || len(p.InstructionEnv) > 0
 }
 
 func (p Profile) StatusLaunchArgs(dir string) []string {

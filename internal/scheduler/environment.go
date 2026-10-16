@@ -242,6 +242,27 @@ func explicitEnvironment(profile harness.Profile, ws *domain.Workspace, secrets 
 	return env, nil
 }
 
+// harnessEnvironment is the harness configuration a run's container was
+// launched with, for the run's current model.
+func (s *Scheduler) harnessEnvironment(ctx context.Context, run *domain.Run, profile harness.Profile, model string) (map[string]string, error) {
+	ws, err := s.cfg.Store.GetWorkspace(ctx, run.WorkspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: read workspace environment: %w", err)
+	}
+	ws, secrets, err := s.workspaceEnvironment(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	env, err := explicitEnvironment(profile, ws, secrets)
+	if err != nil {
+		return nil, err
+	}
+	if err := harness.MergeEnv(env, profile.ModelLaunchEnv(model)); err != nil {
+		return nil, fmt.Errorf("scheduler: apply the run's model over the workspace variables: %w", err)
+	}
+	return env, nil
+}
+
 func inheritCacheEnvironment(env, inherited map[string]string) {
 	for _, key := range cacheEnvironmentKeys {
 		if value, present := inherited[key]; present {

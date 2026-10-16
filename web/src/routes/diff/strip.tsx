@@ -24,6 +24,7 @@ import type { DiffSnapshot } from '@/store/diff'
 import type { RunRecord } from '@/store/runs'
 
 const current = 'current'
+const menuFiles = 100
 
 export const noTree =
   'This server did not record a tree for this snapshot, so what changed then cannot be shown.'
@@ -42,6 +43,7 @@ export function SummaryStrip({
   wrap,
   onWrap,
   loading,
+  behind,
   onRefresh,
   onJump,
   onCollapseAll,
@@ -56,6 +58,8 @@ export function SummaryStrip({
   wrap: boolean
   onWrap: (wrap: boolean) => void
   loading: boolean
+  /** The stored patch is large and a newer snapshot has arrived that it does not show. */
+  behind: boolean
   onRefresh: () => void
   onJump: (path: string) => void
   onCollapseAll: (collapsed: boolean) => void
@@ -94,12 +98,15 @@ export function SummaryStrip({
           </Button>
         </MenuTrigger>
         <MenuContent align="start" className="max-w-[min(32rem,calc(100vw-1rem))]">
-          {files.map((file) => (
+          {files.slice(0, menuFiles).map((file) => (
             <MenuItem key={file.path} onSelect={() => onJump(file.path)}>
               <span className="min-w-0 flex-1 truncate font-code">{file.path}</span>
               <Counts additions={file.additions} deletions={file.deletions} />
             </MenuItem>
           ))}
+          {files.length > menuFiles && (
+            <MenuLabel>{(files.length - menuFiles).toLocaleString('en-US')} more files are not listed.</MenuLabel>
+          )}
         </MenuContent>
       </Menu>
       <IntervalMenu snapshots={snapshots} selected={selected} onSelect={onSelect} base={base} />
@@ -114,9 +121,16 @@ export function SummaryStrip({
         >
           <WrapText />
         </Button>
-        <Button variant="ghost" size="icon-sm" label="Refresh" onClick={onRefresh}>
-          <RefreshCw className={cn(loading && 'animate-spin motion-reduce:animate-none')} />
-        </Button>
+        {behind ? (
+          <Button variant="secondary" size="sm" onClick={onRefresh}>
+            <RefreshCw className={cn(loading && 'animate-spin motion-reduce:animate-none')} />
+            New changes · Refresh
+          </Button>
+        ) : (
+          <Button variant="ghost" size="icon-sm" label="Refresh" onClick={onRefresh}>
+            <RefreshCw className={cn(loading && 'animate-spin motion-reduce:animate-none')} />
+          </Button>
+        )}
         <Menu>
           <MenuTrigger asChild>
             <Button ref={more} variant="ghost" size="icon-sm" label="More">

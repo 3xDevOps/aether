@@ -9,7 +9,7 @@ import { CommentCard } from '@/routes/diff/comment-card'
 import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
-import { contentLines, FilePatch, largeFile } from '@/routes/diff/patch-view'
+import { FilePatch, largeFile, largeText } from '@/routes/diff/patch-view'
 import { useReview } from '@/routes/diff/review'
 import { ReviewBar } from '@/routes/diff/review-bar'
 import { hasTree, SummaryStrip } from '@/routes/diff/strip'
@@ -20,10 +20,19 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { initialDiff, intervalKey, type DiffSnapshot, type IntervalPatch } from '@/store/diff'
 
+/** Past this many content lines or files only the files near the screen are mounted. */
 const largePatch = 1500
+const largeFileCount = 100
+/** A stored patch longer than this is not re-fetched on a new snapshot: the reader chooses when. */
+const largeStored = 1024 * 1024
 
 function collapsedByDefault(file: PatchFile): boolean {
-  return contentLines(file) > largeFile || file.status === 'binary' || file.status === 'deleted'
+  return file.contentLines > largeFile || file.size > largeText || file.status === 'binary' || file.status === 'deleted'
+}
+
+function useParsed(patch: string): PatchFile[] {
+  const previous = useRef<PatchFile[]>([])
+  return useMemo(() => (previous.current = parsePatch(patch, previous.current)), [patch])
 }
 
 /** A snapshot shows the diff between its parent tree and its tree, not a filter
@@ -45,13 +54,18 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   const ids = useId()
   const [focusedFile, setFocusedFile] = useState<number | null>(null)
   const list = useRef<VirtualizerHandle>(null)
-  usePatch(run ? runID : '')
+  const scroller = useRef<HTMLDivElement>(null)
+  const behind = usePatch(run ? runID : '')
 
   const interval = useInterval(run ? runID : '', snapshot)
-  const cumulative = useMemo(() => parsePatch(state.patch), [state.patch])
+  const cumulative = useParsed(state.patch)
   const changed = useMemo(() => parsePatch(interval?.patch ?? ''), [interval?.patch])
   const files = snapshot ? changed : cumulative
-  const virtual = useMemo(() => files.reduce((total, file) => total + contentLines(file), 0) > largePatch, [files])
+  const virtual = useMemo(
+    () => files.length > largeFileCount || files.reduce((total, file) => total + file.contentLines, 0) > largePatch,
+    [files],
+  )
+  const deleted = useMemo(() => new Set(cumulative.filter((file) => file.status === 'deleted').map((file) => file.path)), [cumulative])
   const error = snapshot ? interval?.error : state.error
   const failed = snapshot ? interval?.status === 'error' : state.status === 'error'
   const loading = snapshot ? !interval || interval.status === 'loading' : state.status === 'loading'
@@ -91,8 +105,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   if (!run) return <MissingRun />
 
   const canOpen = hasFiles(run, caps)
-  const openable = (file: PatchFile) =>
-    file.status !== 'deleted' && file.status !== 'binary' && cumulative.find((entry) => entry.path === file.path)?.status !== 'deleted'
+  const openable = (file: PatchFile) => file.status !== 'deleted' && file.status !== 'binary' && !deleted.has(file.path)
   const patchAt = (file: PatchFile, index: number) => (
     <FilePatch
       key={file.path}
@@ -119,7 +132,11 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
         wrap={wrap}
         onWrap={setWrapping}
         loading={state.status === 'loading'}
-        onRefresh={() => useStore.getState().refreshDiff(runID)}
+        behind={behind && !snapshot}
+        onRefresh={() => {
+          useStore.getState().refreshDiff(runID)
+          loadPatch(runID)
+        }}
         onJump={jump}
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
         publishable={!state.recorded && cumulative.length > 0}
@@ -152,13 +169,13 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
       )}
       <div className="flex min-h-0 flex-1">
         {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
-        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div ref={scroller} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           {virtual ? (
             <div onFocus={(event) => {
               const id = (event.target as HTMLElement).closest('section')?.id ?? ''
               if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
             }}>
-              <Virtualizer ref={list} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
+              <Virtualizer ref={list} scrollRef={scroller} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
                 {patchAt}
               </Virtualizer>
             </div>
@@ -195,37 +212,46 @@ function Empty({ snapshot, loading, recorded }: { snapshot: DiffSnapshot | null;
   return <EmptyState title="No changes yet.">Nothing differs from the fork point. Files the agent changes show up here.</EmptyState>
 }
 
-function usePatch(runID: string): void {
+/** Runs with a cumulative fetch in flight, across remounts of the view. A snapshot
+ * landing mid-request neither cancels it nor starts a second one: the response
+ * records its revision and the next render asks again if needed. */
+const fetching = new Set<string>()
+
+function loadPatch(runID: string): void {
+  if (fetching.has(runID)) return
+  const store = useStore.getState()
+  const at = store.diffs[runID]?.revision ?? 0
+  fetching.add(runID)
+  store.setDiff(runID, { status: 'loading' })
+  api
+    .runPatch(runID)
+    .then((patch) => {
+      fetching.delete(runID)
+      useStore.getState().applyPatch(patch, at)
+    })
+    .catch((err: unknown) => {
+      fetching.delete(runID)
+      // Recorded as answered so a failure cannot spin; the patch already on screen stays.
+      useStore.getState().setDiff(runID, {
+        status: 'error',
+        fetched: at,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+}
+
+/** Keeps the patch current, except a large one, which waits for Refresh. Returns
+ * whether newer changes than the stored patch exist and are waiting. */
+function usePatch(runID: string): boolean {
   const revision = useStore((s) => s.diffs[runID]?.revision ?? 0)
   const fetched = useStore((s) => s.diffs[runID]?.fetched ?? -1)
-  // A snapshot landing mid-request must neither cancel it nor start a second one:
-  // the response records its revision and the next render asks again if needed.
-  const inFlight = useRef<string | null>(null)
+  const large = useStore((s) => (s.diffs[runID]?.patch.length ?? 0) > largeStored)
 
   useEffect(() => {
-    if (!runID || revision === fetched || inFlight.current === runID) return
-    const at = revision
-    inFlight.current = runID
-    const done = () => {
-      if (inFlight.current === runID) inFlight.current = null
-    }
-    useStore.getState().setDiff(runID, { status: 'loading' })
-    api
-      .runPatch(runID)
-      .then((patch) => {
-        done()
-        useStore.getState().applyPatch(patch, at)
-      })
-      .catch((err: unknown) => {
-        done()
-        // Recorded as answered so a failure cannot spin.
-        useStore.getState().setDiff(runID, {
-          status: 'error',
-          fetched: at,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      })
-  }, [runID, revision, fetched])
+    if (runID && revision !== fetched && !large) loadPatch(runID)
+  }, [runID, revision, fetched, large])
+
+  return large && revision !== fetched
 }
 
 /** The interval response's `base` is the `from` tree, so it must not be written

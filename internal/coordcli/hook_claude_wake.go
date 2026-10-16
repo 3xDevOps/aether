@@ -23,11 +23,6 @@ const claudeWakeExit = 2
 // The waiter ends before Claude Code's hook timeout kills it.
 const claudeWakeLifetime = time.Duration(coordhooks.ClaudeWakeTimeout)*time.Second - time.Minute
 
-// The inbox Stop hook runs beside the waiter, and when it announces mail it
-// blocks the stop, so that mail must not wake the session again. Its record
-// of what it announced is written well within this grace.
-const claudeStopGrace = time.Second
-
 var claudeWakeBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 
 func claudeWakePath(run string) string {
@@ -84,13 +79,6 @@ func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err
 		}
 	}()
 
-	if input.Name == "Stop" {
-		select {
-		case <-ctx.Done():
-			return ExitOK, nil
-		case <-time.After(claudeStopGrace):
-		}
-	}
 	var seen []string
 	failures := 0
 	for {

@@ -14,8 +14,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -55,11 +58,15 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	g := newGate()
-	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, nil)
+	var opts *mcp.ServerOptions
+	if !cfg.Assistant {
+		opts = &mcp.ServerOptions{Instructions: instructions(ctx, cfg.Socket)}
+	}
+	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
 		registerAssistantTools(srv, cfg.Socket)
-	} else {
-		registerTools(srv, cfg.Socket, g)
+	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
+		return err
 	}
 	if err := srv.Run(ctx, &mcp.IOTransport{
 		Reader: g.reader(cfg.In),
@@ -68,6 +75,23 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("mcpbridge: %w", err)
 	}
 	return nil
+}
+
+// instructions are the run's role card, or only its standalone reporting
+// rules when the agent's system prompt already carries the card. Without a
+// status answer they claim no reporting rules.
+func instructions(ctx context.Context, socket string) string {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var status protocol.CoordStatusResult
+	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &status); err != nil {
+		return coordhooks.RoleCard(coordhooks.Guide{})
+	}
+	g := coordhooks.StatusGuide(status)
+	if os.Getenv(coordtransport.RoleCardEnv) == "1" {
+		return coordhooks.Brief(g)
+	}
+	return coordhooks.RoleCard(g)
 }
 
 // nopCloser adapts os.Stdout, which the bridge must not close, to the

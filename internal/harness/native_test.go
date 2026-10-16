@@ -133,8 +133,12 @@ func TestOpenCodeNativeLauncherPreservesProcessContract(t *testing.T) {
 			if status != "file://"+filepath.Join(dir, "opencode-status.js") || mailbox != "file://"+filepath.Join(dir, "opencode-v1.js") {
 				t.Fatalf("V1 selected wrong API assets: %s", actual["plugin"])
 			}
+			if want := `["` + filepath.Join(dir, InstructionsFileName) + `"]`; string(actual["instructions"]) != want {
+				t.Fatalf("V1 instructions = %s, want %s", actual["instructions"], want)
+			}
 			delete(actual, "plugin")
 			delete(original, "plugin")
+			delete(actual, "instructions")
 			if !reflect.DeepEqual(actual, original) {
 				t.Fatalf("unrelated config changed: %s", config)
 			}
@@ -225,6 +229,11 @@ func TestClaudeNativeLaunchMergesHooksIntoOneSettingsDocument(t *testing.T) {
 		"timeout":     float64(coordhooks.ClaudeWakeTimeout),
 	}}}
 	status, extra, merged := hooksOf(agentstatus.ClaudeSettings), hooksOf(inbox), hooksOf(body)
+	if _, ok := extra["Stop"]; !ok {
+		t.Fatal("claude.json has no Stop hook to leave out")
+	}
+	// A blocking inbox Stop would race the reporter's Stop.
+	delete(extra, "Stop")
 	for event := range extra {
 		if _, ok := status[event]; !ok {
 			status[event] = nil

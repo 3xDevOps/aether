@@ -128,27 +128,13 @@ func TestClaudeWakeWaitsPastAnnouncedMail(t *testing.T) {
 	}
 }
 
-func TestClaudeWakeLeavesMailTheStopHookAnnounced(t *testing.T) {
-	_, _, socket, _ := hookMailbox(t)
-	var out bytes.Buffer
-	if code, err := Run(t.Context(), []string{"hook", "claude", "Stop"}, Config{Socket: socket, In: strings.NewReader(`{"hook_event_name":"Stop"}`), Out: &out}); err != nil || code != ExitOK || !strings.Contains(out.String(), `"block"`) {
-		t.Fatalf("inbox Stop hook = %d, %v, %q; want it to block for the mail", code, err, out.String())
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2500*time.Millisecond)
-	defer cancel()
-	result := waitClaudeWaiter(t, startClaudeWaiter(ctx, socket, `{"hook_event_name":"Stop","stop_hook_active":false}`), 5*time.Second)
-	if result.code != ExitOK || result.err != nil || result.stderr != "" {
-		t.Fatalf("waiter beside a blocking Stop hook = %d, %v, %q; want no second wake", result.code, result.err, result.stderr)
-	}
-}
-
-func TestClaudeWakeCatchesMailAfterTheStopHookLetItStop(t *testing.T) {
-	// The mail arrived after the inbox Stop hook found none and let the
-	// session stop, so nothing announced it.
+func TestClaudeWakeCarriesMailWaitingAtTurnEnd(t *testing.T) {
+	// A managed launch has no blocking inbox Stop hook, so the waiter alone
+	// brings unannounced mail into a new turn.
 	_, _, socket, _ := hookMailbox(t)
 	result := waitClaudeWaiter(t, startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":false}`), 5*time.Second)
 	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1) {
-		t.Fatalf("mail after the Stop hook's check = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
+		t.Fatalf("mail waiting at turn end = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
 	}
 }
 

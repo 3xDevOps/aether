@@ -773,7 +773,6 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	if err = domain.ValidModel(model); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
-	task = s.withCoAuthorInstruction(task, assigned, mode == domain.LaunchHeadless)
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
 		return nil, harness.Profile{}, false, err
@@ -798,6 +797,9 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	}
 	if model != "" && len(profile.ModelArgs) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
+	}
+	if !profile.CarriesInstructions() {
+		task = withInstructions(task, s.runInstructions(s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false)))
 	}
 	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }
@@ -871,9 +873,8 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
 		profile.StatusFiles = nil
-		profile.DiscoveryArgs = nil
-		profile.DiscoveryEnv = nil
-		profile.DiscoveryFiles = nil
+		profile.InstructionArgs = nil
+		profile.InstructionEnv = nil
 		profile.ACPSystemPrompt = false
 		profile.ACPClaudeCode = false
 		profile.NativeCoordination = false
@@ -949,6 +950,9 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 	}
 	if run.Mode == domain.LaunchACP {
 		env[coordtransport.EnhancedEnv] = "1"
+	}
+	if run.Mode == domain.LaunchHeadless {
+		env[coordtransport.BackgroundEnv] = "1"
 	}
 	if run.Mode.Interactive() || persistSupervisor || run.ACP {
 		argv = wrapTUICommand(argv)
