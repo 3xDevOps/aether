@@ -30,7 +30,8 @@ var httpClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: HTTPSOnly
 // LatestTag resolves the newest release tag from a GitHub /releases/latest
 // URL, which redirects - possibly through more than one hop - to
 // /releases/tag/<tag>. No API token, no rate limit. A repository without a
-// release is ErrNoRelease.
+// release redirects to its release list instead, which is ErrNoRelease;
+// any other non-200 answer is returned as the error it is.
 func LatestTag(ctx context.Context, latestURL string) (string, error) {
 	var tag string
 	client := &http.Client{
@@ -65,10 +66,10 @@ func LatestTag(ctx context.Context, latestURL string) (string, error) {
 			tag = t
 			return false, nil
 		}
-		if code >= 500 || code == http.StatusTooManyRequests {
-			return true, fmt.Errorf("resolve latest release: GET %s: %s", latestURL, resp.Status)
+		if code == http.StatusOK {
+			return false, fmt.Errorf("%w: %s led to %s, not a release tag; pass --version <tag>", ErrNoRelease, latestURL, resp.Request.URL.Redacted())
 		}
-		return false, fmt.Errorf("%w: %s led to %s (%s), not a release tag; pass --version <tag>", ErrNoRelease, latestURL, resp.Request.URL.Redacted(), resp.Status)
+		return code >= 500 || code == http.StatusTooManyRequests, fmt.Errorf("resolve latest release: GET %s: %s", latestURL, resp.Status)
 	})
 	if err != nil {
 		return "", err

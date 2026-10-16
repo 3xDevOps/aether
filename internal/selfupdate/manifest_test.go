@@ -169,6 +169,38 @@ func TestDownloadsDoNotRetryANotFound(t *testing.T) {
 	}
 }
 
+func TestLatestTagReturnsAnUnexpectedStatus(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		http.Error(w, "rate limited", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	_, err := LatestTag(t.Context(), srv.URL+"/releases/latest")
+	if err == nil || errors.Is(err, ErrNoRelease) || !strings.Contains(err.Error(), "GET "+srv.URL+"/releases/latest: 403 Forbidden") {
+		t.Fatalf("err = %v, want the real 403, not ErrNoRelease", err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("dialed %d times, want 1", n)
+	}
+}
+
+func TestLatestTagWithoutAReleaseIsNoRelease(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/releases/latest" {
+			http.Redirect(w, r, "/releases", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if _, err := LatestTag(t.Context(), srv.URL+"/releases/latest"); !errors.Is(err, ErrNoRelease) {
+		t.Fatalf("err = %v, want ErrNoRelease", err)
+	}
+}
+
 func TestLatestTagFollowsSeveralRedirects(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
