@@ -36,21 +36,22 @@ const (
 )
 
 var tiers = map[string]string{
-	protocol.MethodRunList:        tierRead,
-	protocol.MethodRunGet:         tierRead,
-	protocol.MethodRunACPHistory:  tierRead,
-	protocol.MethodWorkspaceList:  tierRead,
-	protocol.MethodWorkspaceGet:   tierRead,
-	protocol.MethodAgentList:      tierRead,
-	protocol.MethodAccountUsage:   tierRead,
-	protocol.MethodTerminalStatus: tierRead,
-	protocol.MethodAssistantDocs:  tierRead,
-	protocol.MethodRunLaunch:      tierConfirmed,
-	protocol.MethodRunInject:      tierConfirmed,
-	protocol.MethodRunPause:       tierReversible,
-	protocol.MethodRunResume:      tierReversible,
-	protocol.MethodRunKill:        tierConfirmed,
-	protocol.MethodEnvSave:        tierConfirmed,
+	protocol.MethodRunList:              tierRead,
+	protocol.MethodRunGet:               tierRead,
+	protocol.MethodRunACPHistory:        tierRead,
+	protocol.MethodWorkspaceList:        tierRead,
+	protocol.MethodWorkspaceGet:         tierRead,
+	protocol.MethodAgentList:            tierRead,
+	protocol.MethodAccountUsage:         tierRead,
+	protocol.MethodTerminalStatus:       tierRead,
+	protocol.MethodAssistantDocs:        tierRead,
+	protocol.MethodAssistantViewContext: tierRead,
+	protocol.MethodRunLaunch:            tierConfirmed,
+	protocol.MethodRunInject:            tierConfirmed,
+	protocol.MethodRunPause:             tierReversible,
+	protocol.MethodRunResume:            tierReversible,
+	protocol.MethodRunKill:              tierConfirmed,
+	protocol.MethodEnvSave:              tierConfirmed,
 }
 
 type Caller interface {
@@ -66,6 +67,8 @@ type Server struct {
 	// request selects their runs.
 	Member string
 	Follow func(ctx context.Context, runID string)
+	// View is the member's latest view context.
+	View func() protocol.AssistantViewContextResult
 }
 
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
@@ -192,6 +195,8 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 	switch {
 	case req.Method == protocol.MethodAssistantDocs:
 		return serveDocs(req.Params)
+	case req.Method == protocol.MethodAssistantViewContext:
+		return s.serveView()
 	case tier == tierConfirmed:
 		summary, rpcErr := s.summarize(ctx, req)
 		if rpcErr != nil {
@@ -394,6 +399,18 @@ func serveDocs(raw json.RawMessage) (json.RawMessage, *protocol.Error) {
 	result, err := json.Marshal(out)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "assistant.docs: " + err.Error()}
+	}
+	return result, nil
+}
+
+func (s *Server) serveView() (json.RawMessage, *protocol.Error) {
+	var out protocol.AssistantViewContextResult
+	if s.View != nil {
+		out = s.View()
+	}
+	result, err := json.Marshal(out)
+	if err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "assistant.view_context: " + err.Error()}
 	}
 	return result, nil
 }

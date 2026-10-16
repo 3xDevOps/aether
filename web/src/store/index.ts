@@ -25,6 +25,7 @@ import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
+import { createViewContextSlice, type ViewContextSlice } from '@/store/view-context'
 import {
   createUiSlice,
   maxSidebarWidth,
@@ -75,6 +76,7 @@ export type RootState = ServerSlice &
   MessagesSlice &
   SessionsSlice &
   AssistantSlice &
+  ViewContextSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -141,6 +143,7 @@ export function createRootStore() {
         ...createMessagesSlice(...a),
         ...createSessionsSlice(...a),
         ...createAssistantSlice(...a),
+        ...createViewContextSlice(...a),
         ...createUiSlice(...a),
       }),
       {

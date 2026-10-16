@@ -35,7 +35,7 @@ func TestAssistantTools(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	if len(names) != 15 || slices.Contains(names, toolSend) || !slices.Contains(names, "aether_stop_run") {
+	if len(names) != 16 || slices.Contains(names, toolSend) || !slices.Contains(names, "aether_stop_run") {
 		t.Fatalf("tools: %v", names)
 	}
 

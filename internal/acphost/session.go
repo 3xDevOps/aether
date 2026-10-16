@@ -610,6 +610,9 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	var text strings.Builder
 	var attachments []Content
 	for _, b := range blocks {
+		if forAgentOnly(b) {
+			continue
+		}
 		if b.Text != nil {
 			text.WriteString(b.Text.Text)
 		} else {
@@ -621,6 +624,19 @@ func (s *Session) userMessageLocked(blocks []acp.ContentBlock) {
 	s.emitLocked(Item{Kind: KindMessage, Truncated: cut, Message: &Message{
 		Role: "user", MessageID: rand.Text(), Text: body, Attachments: attachments, Complete: true,
 	}})
+}
+
+// forAgentOnly reports a block annotated for the agent's audience alone,
+// which the transcript does not record.
+func forAgentOnly(b acp.ContentBlock) bool {
+	var a *acp.Annotations
+	switch {
+	case b.Text != nil:
+		a = b.Text.Annotations
+	case b.Resource != nil:
+		a = b.Resource.Annotations
+	}
+	return a != nil && len(a.Audience) > 0 && !slices.Contains(a.Audience, acp.RoleUser)
 }
 
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
