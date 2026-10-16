@@ -235,7 +235,7 @@ func (r *Refused) Error() string {
 	case RefusedInvitationNeedsLink:
 		return r.Account + " is invited to this server; open the invitation link the admin sent, or run: aether link <link>"
 	case RefusedNotClaimed:
-		return string(RefusalNotClaimed) + "; claim it with a code from:\n  sudo aether-server edge claim-code"
+		return string(RefusalNotClaimed) + "; the server is finishing its claim, retry in a few seconds"
 	case RefusedNotSignedIn:
 		if r.Refusal == "" {
 			return "not signed in"
