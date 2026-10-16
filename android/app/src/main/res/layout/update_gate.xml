@@ -87,12 +87,12 @@
             android:textSize="12sp" />
 
         <Button
-            android:id="@+id/update_gate_switch"
+            android:id="@+id/update_gate_connection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:minHeight="48dp"
-            android:text="@string/update_gate_switch"
+            android:text="@string/connection"
             android:textAllCaps="false" />
 
         <Button

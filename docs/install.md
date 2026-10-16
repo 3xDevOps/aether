@@ -972,15 +972,20 @@ the dashboard and cannot be dismissed: `This app (v0.7.0) is too old for the
 server (v0.8.0 needs v0.8.0 or newer).` **Download update** opens
 `https://github.com/3xDevOps/Aether/releases/download/<tag>/aether-android.apk`,
 or the Play listing for a Play install, with no 7-day wait. The tag is the
-gateway's `target_version` (the server's release), else its `latest`, else
-`min_client_version`, and never one older than `min_client_version`: GitHub's
-latest release skips prereleases and can lag, and Android refuses an older
-APK as a downgrade. The URL is printed on the screen to copy. Installing the
-update restarts the app, whose new gateway answers that no update is
-required, so the dashboard comes back. **Check for updates** asks again,
-with `refresh`; **Switch server** opens the
-Connection screen; **Copy details** puts the versions and the download URL on
-the clipboard. A dev build or a version that is not a release tag is never
+gateway's `target_version` (the server's release), else
+`min_client_version`, and never one older than `min_client_version`, which
+Android would refuse as a downgrade. GitHub's latest release is not used: it
+can be newer than the server, which refuses a newer client too. The URL is
+printed on the screen to copy. While the screen is up the dashboard is
+unloaded, so it stops calling the server. Installing the update restarts the
+app, whose new gateway answers that no update is required, so the dashboard
+comes back. A check whose answer has no `server_version` (the gateway could
+not reach the server; `server_error` says why) leaves the screen as it was
+and shows the error under it. **Check for updates** asks again, with
+`refresh`; **Connection** opens the Connection screen, which switches between
+Aether Edge and Tailscale (choosing another Edge server happens in the
+dashboard, after updating); **Copy details** puts the versions and the
+download URL on the clipboard. A dev build or a version that is not a release tag is never
 gated. Tailscale mode has no gate: the server hosts that dashboard, so it is
 always the server's own version, and only the banner applies to the app.
 

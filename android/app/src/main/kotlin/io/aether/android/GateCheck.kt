@@ -1,17 +1,20 @@
 package io.aether.android
 
+import java.io.IOException
+
 /**
  * The fields of the Edge gateway's `update.check` the update gate reads:
  * whether the server refuses this app until it updates, the versions on
- * both sides, the newest release, empty when the release lookup failed, and
- * the release the gateway would install, empty from a gateway before it.
+ * both sides, empty on the server's side when the gateway could not reach
+ * it, why it could not, and the server's release, empty from a gateway
+ * before it.
  */
 data class GateCheck(
     val required: Boolean,
     val clientVersion: String,
     val serverVersion: String,
+    val serverError: String,
     val minClientVersion: String,
-    val latest: String,
     val targetVersion: String,
 )
 
@@ -54,8 +57,8 @@ fun parseGateCheck(body: String): GateCheck? {
         required = boolField(json, "client_update_required") ?: false,
         clientVersion = clientVersion,
         serverVersion = stringField(json, "server_version") ?: "",
+        serverError = stringField(json, "server_error") ?: "",
         minClientVersion = stringField(json, "min_client_version") ?: "",
-        latest = stringField(json, "latest") ?: "",
         targetVersion = stringField(json, "target_version") ?: "",
     )
 }
@@ -64,20 +67,33 @@ fun parseGateCheck(body: String): GateCheck? {
  * The gate for [check], or null to let the dashboard through. The server
  * decides; this only refuses to gate on a version it cannot build a URL
  * from, so a dev build or a malformed answer never locks anyone out. What
- * to install is the gateway's target release, else the newest release,
- * else the oldest one the server accepts. The newest release can trail
- * that oldest one - GitHub's latest skips prereleases and is cached - and
- * an older APK is refused as a downgrade or leaves the gate up, so no tag
- * below it is offered.
+ * to install is the server's release, else the oldest one it accepts.
+ * GitHub's newest release is never offered: it can be newer than the
+ * server, and an app newer than its server is refused in turn. An APK
+ * older than the oldest accepted is refused as a downgrade or leaves the
+ * gate up, so no target below it is offered either.
  */
 fun gateFor(check: GateCheck?): Gate? {
     if (check == null || !check.required) return null
     val min = check.minClientVersion
     if (!isReleaseTag(check.clientVersion) || !isReleaseTag(min)) return null
-    val tag =
-        listOf(check.targetVersion, check.latest).firstOrNull { isReleaseTag(it) && compareReleaseTags(it, min) >= 0 }
-            ?: min
+    val target = check.targetVersion
+    val tag = if (isReleaseTag(target) && compareReleaseTags(target, min) >= 0) target else min
     return Gate(check.clientVersion, check.serverVersion, min, tag)
+}
+
+/**
+ * What an `update.check` response [body] means for the gate: a failure
+ * when it is not a check, or when the gateway could not reach the server,
+ * which then said nothing about this app. Only a check the server answered
+ * may take a gate down.
+ */
+fun gateAnswer(body: String): Result<Gate?> {
+    val check = parseGateCheck(body) ?: return Result.failure(IOException("update.check answered: ${body.trim()}"))
+    if (check.serverVersion.isEmpty()) {
+        return Result.failure(IOException("update.check did not reach the server: ${check.serverError}"))
+    }
+    return Result.success(gateFor(check))
 }
 
 // Semantic version precedence of two tags isReleaseTag accepts.

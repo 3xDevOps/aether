@@ -2,6 +2,7 @@ package io.aether.android
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 // What the Edge gateway's update.check answers, as json.Encoder writes it.
@@ -25,36 +26,22 @@ private const val APK = "https://github.com/3xDevOps/Aether/releases/download/v0
 
 class GateCheckTest {
     @Test
-    fun aRequiredUpdateGatesOnTheNewestRelease() {
-        assertEquals(Gate("v0.7.0", "v0.8.0", "v0.8.0", "v0.8.1"), gateFor(parseGateCheck(body())))
+    fun aRequiredUpdateGatesOnTheServersRelease() {
+        assertEquals(Gate("v0.7.0", "v0.8.0", "v0.8.0", "v0.8.0"), gateFor(parseGateCheck(body(target = "v0.8.0"))))
+        assertEquals("v0.9.0-rc.10", gateFor(parseGateCheck(body(target = "v0.9.0-rc.10", minClient = "v0.9.0-rc.2")))?.tag)
+        assertEquals("v0.10.0", gateFor(parseGateCheck(body(target = "v0.10.0", minClient = "v0.9.0")))?.tag)
     }
 
     @Test
-    fun withoutTheNewestReleaseTheGateInstallsTheOneTheServerNeeds() {
+    fun withoutTheServersReleaseTheGateInstallsTheOldestItAccepts() {
+        // GitHub's newest release can be newer than the server, which would
+        // refuse that app in turn.
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "v0.8.1")))?.tag)
         assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = null)))?.tag)
-        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "garbage")))?.tag)
-    }
-
-    @Test
-    fun theGatewaysTargetReleaseWins() {
-        assertEquals("v0.8.0", gateFor(parseGateCheck(body(target = "v0.8.0")))?.tag)
-        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = null, target = "v0.8.0")))?.tag)
-        // A target the gate cannot use falls back as if it were absent.
-        assertEquals("v0.8.1", gateFor(parseGateCheck(body(target = "dev")))?.tag)
-        assertEquals("v0.8.1", gateFor(parseGateCheck(body(target = "v0.7.9")))?.tag)
-    }
-
-    @Test
-    fun noReleaseOlderThanTheServerNeedsIsOffered() {
-        // GitHub's latest skips prereleases and lags behind a new release.
-        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "v0.7.9")))?.tag)
-        assertEquals("v0.9.0-rc.2", gateFor(parseGateCheck(body(latest = "v0.8.1", minClient = "v0.9.0-rc.2")))?.tag)
-        assertEquals("v0.9.0-rc.10", gateFor(parseGateCheck(body(latest = "v0.9.0-rc.10", minClient = "v0.9.0-rc.2")))?.tag)
-        assertEquals("v0.9.0", gateFor(parseGateCheck(body(latest = "v0.9.0", minClient = "v0.9.0-rc.2")))?.tag)
-        assertEquals("v0.9.0", gateFor(parseGateCheck(body(latest = "v0.9.0-rc.2", minClient = "v0.9.0")))?.tag)
-        assertEquals("v0.10.0", gateFor(parseGateCheck(body(latest = "v0.10.0", minClient = "v0.9.0")))?.tag)
-        // Equal to the oldest accepted is enough.
-        assertEquals("v0.8.0", gateFor(parseGateCheck(body(latest = "v0.8.0")))?.tag)
+        // A target the gate cannot use, or one older than the server accepts.
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(target = "dev")))?.tag)
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body(target = "v0.7.9")))?.tag)
+        assertEquals("v0.9.0", gateFor(parseGateCheck(body(target = "v0.9.0-rc.2", minClient = "v0.9.0")))?.tag)
     }
 
     @Test
@@ -86,13 +73,32 @@ class GateCheckTest {
 
     @Test
     fun theGateClearsOnceTheUpdatedAppAsks() {
-        assertEquals("v0.8.1", gateFor(parseGateCheck(body()))?.tag)
+        assertEquals("v0.8.0", gateFor(parseGateCheck(body()))?.tag)
         assertNull(gateFor(parseGateCheck(body(version = "v0.8.1", required = false))))
     }
 
     @Test
+    fun onlyACheckTheServerAnsweredDecides() {
+        assertEquals("v0.8.0", gateAnswer(body()).getOrThrow()?.tag)
+        assertNull(gateAnswer(body(required = false)).getOrThrow())
+        // The gateway answers 200 without the server's version when it could
+        // not reach the server; that is no reason to take a gate down.
+        val unreached =
+            body(serverVersion = "", required = false).replace(
+                "\"supervised\"",
+                "\"server_error\":\"connection refused\",\"supervised\"",
+            )
+        assertEquals(
+            "update.check did not reach the server: connection refused",
+            gateAnswer(unreached).exceptionOrNull()?.message,
+        )
+        assertTrue(gateAnswer(body(serverVersion = "", required = false)).isFailure)
+        assertTrue(gateAnswer("not json").isFailure)
+    }
+
+    @Test
     fun eachInstallSourceOpensItsOwnUpdate() {
-        val gate = gateFor(parseGateCheck(body()))!!
+        val gate = gateFor(parseGateCheck(body(target = "v0.8.1", minClient = "v0.8.1")))!!
         assertEquals(listOf(UpdateTarget(APK)), updateTargets(InstallSource.RELEASE, "io.aether.android", gate.tag))
         assertEquals(
             "market://details?id=io.aether.android",
@@ -102,7 +108,7 @@ class GateCheckTest {
 
     @Test
     fun theDetailsNameBothVersionsAndTheDownload() {
-        val gate = gateFor(parseGateCheck(body()))!!
+        val gate = gateFor(parseGateCheck(body(target = "v0.8.1")))!!
         assertEquals(
             "This Aether app (v0.7.0) is too old for the server (v0.8.0 needs v0.8.0 or newer).\nInstall v0.8.1:\n$APK\n",
             gateDetails(gate, listOf(UpdateTarget(APK))),

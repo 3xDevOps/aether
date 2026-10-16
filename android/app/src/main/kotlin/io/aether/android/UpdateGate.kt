@@ -24,13 +24,13 @@ private const val GATE_TIMEOUT_MS = 30_000
  * The full-window panel that replaces the Edge dashboard while the server
  * refuses this app as too old. It cannot be dismissed: the way past it is
  * installing the update, which restarts the app and with it the gateway
- * whose answer clears the gate, or switching servers. Every resume checks
+ * whose answer clears the gate, or changing the connection. Every resume checks
  * again. [onChange] hears whether the gate is up.
  */
 class UpdateGate(
     private val activity: Activity,
     private val panel: View,
-    onSwitchServer: () -> Unit,
+    onConnection: () -> Unit,
     private val onChange: (shown: Boolean) -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -60,7 +60,7 @@ class UpdateGate(
         panel.findViewById<Button>(R.id.update_gate_check).setOnClickListener {
             gatewayUrl?.let { check(it, refresh = true) }
         }
-        panel.findViewById<Button>(R.id.update_gate_switch).setOnClickListener { onSwitchServer() }
+        panel.findViewById<Button>(R.id.update_gate_connection).setOnClickListener { onConnection() }
         panel.findViewById<Button>(R.id.update_gate_copy).setOnClickListener { copyDetails() }
     }
 
@@ -87,7 +87,7 @@ class UpdateGate(
             val read = installFacts(context)
             val answer =
                 try {
-                    Result.success(post(call, if (refresh) "{\"refresh\":true}" else "{}"))
+                    gateAnswer(post(call, if (refresh) "{\"refresh\":true}" else "{}"))
                 } catch (e: IOException) {
                     Result.failure(e)
                 }
@@ -97,7 +97,7 @@ class UpdateGate(
                 facts = read
                 answer.fold(
                     onSuccess = {
-                        show(gateFor(parseGateCheck(it)))
+                        show(it)
                         if (gate != null) {
                             val time = DateFormat.getTimeFormat(activity).format(Date())
                             status.text = activity.getString(R.string.update_gate_checked, time)

@@ -53,7 +53,6 @@
     <string name="update_gate_detail">This app (%1$s) is too old for the server (%2$s needs %3$s or newer).</string>
     <string name="update_gate_release">Download update fetches the APK below in your browser. Open it, and Android asks you to confirm, checks it is signed like this app, and installs it over this app with your settings and sign-in. Aether then opens past this screen.</string>
     <string name="update_gate_play">Update Aether in Google Play. Aether then opens past this screen.</string>
-    <string name="update_gate_switch">Switch server</string>
     <string name="update_gate_copy">Copy details</string>
     <string name="update_gate_copied">Copied</string>
     <string name="update_gate_checking">Checking again…</string>

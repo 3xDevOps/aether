@@ -168,11 +168,21 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
         updates = UpdateNotice(this, findViewById(R.id.update_notice))
         gate =
-            UpdateGate(this, findViewById(R.id.update_gate), onSwitchServer = ::openSetup) { shown ->
+            UpdateGate(this, findViewById(R.id.update_gate), onConnection = ::openSetup) { shown ->
                 web.visibility = if (shown) View.INVISIBLE else View.VISIBLE
                 syncBackCallback()
-                // The dashboard under the gate may be showing the refusal.
-                if (!shown) loaded?.let(web::loadUrl)
+                // A refused dashboard keeps calling, and every 426 would ask
+                // update.check again, so it goes blank until the gate clears.
+                if (shown) {
+                    web.stopLoading()
+                    web.loadUrl("about:blank")
+                } else {
+                    loaded?.let {
+                        // Back must not reach the blank page.
+                        clearHistoryOnLoad = true
+                        web.loadUrl(it)
+                    }
+                }
             }
 
         pickFiles =
@@ -427,6 +437,13 @@ class MainActivity : ComponentActivity() {
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     connection.visibility = View.GONE
+                    // A gateway restart or a link can load the dashboard
+                    // under the gate; it stays blank until the gate clears.
+                    if (gate?.isShown == true && url != "about:blank") {
+                        view.stopLoading()
+                        view.post { if (gate?.isShown == true) view.loadUrl("about:blank") }
+                        return
+                    }
                     if (startedOnDashboard(loaded, url)) return
                     // The refused request still commits, on the blank
                     // document it was answered with, so the dashboard goes
@@ -480,8 +497,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // The first refusal asks past the gateway's release cache,
                     // which can predate the release the server now needs.
-                    if (errorResponse.statusCode == 426) {
-                        gatewayUrl?.let { gate?.check(it, refresh = gate?.isShown != true) }
+                    // With the gate up its own checks take over.
+                    if (errorResponse.statusCode == 426 && gate?.isShown != true) {
+                        gatewayUrl?.let { gate?.check(it, refresh = true) }
                     }
                 }
 
