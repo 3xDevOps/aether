@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 func TestInsightsMigrationMarksSwarmRuns(t *testing.T) {
@@ -42,5 +45,44 @@ func TestInsightsMigrationMarksSwarmRuns(t *testing.T) {
 		if err := db.db.QueryRowContext(context.Background(), `SELECT swarm_run FROM runs WHERE id = ?`, id).Scan(&got); err != nil || got != swarm {
 			t.Errorf("run %s swarm_run = %v, %v; want %v", id, got, err, swarm)
 		}
+	}
+}
+
+func TestRunActivityChangeRecordsTransition(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	r := mustCreateRun(t, db, mustCreateWorkspace(t, db).ID, mustCreateMember(t, db).ID, domain.RunRunning)
+	for _, activity := range []domain.RunActivity{domain.ActivityWorking, domain.ActivityWaitingTools, domain.ActivityWaitingTools} {
+		if _, err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, "", activity, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := db.GetRun(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Activity = domain.ActivityNeedsYou
+	if err = db.UpdateRun(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.db.QueryContext(ctx, `SELECT from_status || '>' || to_status || ' ' || activity FROM run_state_transitions WHERE run_id = ? ORDER BY rowid`, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var got []string
+	for rows.Next() {
+		var row string
+		if err = rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"running>running working", "running>running waiting-tools", "running>running needs-you"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("transitions = %q, want %q", got, want)
 	}
 }

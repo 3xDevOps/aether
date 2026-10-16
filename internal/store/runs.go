@@ -330,10 +330,11 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if !r.Status.Live() {
 		activity = ""
 	}
-	changed, err := encodeTime(time.Now().UTC())
+	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("store: update run: %w", err)
 	}
+	changed := now
 	if statusChangedAt != nil {
 		changed = *statusChangedAt
 	}
@@ -342,7 +343,7 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		return fmt.Errorf("store: update run: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = recordTransition(ctx, tx, r.ID, r.Status, r.Reason, changed); err != nil {
+	if err = recordTransition(ctx, tx, r.ID, r.Status, r.Reason, activity, changed, now); err != nil {
 		return fmt.Errorf("store: update run: %w", err)
 	}
 	err = tx.QueryRowContext(ctx,
@@ -377,14 +378,16 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	return nil
 }
 
-// recordTransition keeps a change of the run's status or reason in
-// run_state_transitions. The caller writes the new status in the same
-// transaction afterwards.
-func recordTransition(ctx context.Context, tx *sql.Tx, id domain.RunID, status domain.RunStatus, reason string, at int64) error {
+// recordTransition keeps a change of the run's status, reason or activity
+// in run_state_transitions, at changed when the status or reason changes and
+// at now when only the activity does. The caller writes the new status in
+// the same transaction afterwards.
+func recordTransition(ctx context.Context, tx *sql.Tx, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, changed, now int64) error {
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, at)
-		 SELECT id, workspace_id, status, ?, ?, ? FROM runs WHERE id = ? AND (status <> ? OR reason <> ?)`,
-		status, reason, at, id, status, reason); err != nil {
+		`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, activity, at)
+		 SELECT id, workspace_id, status, ?, ?, ?, CASE WHEN status = ? AND reason = ? THEN ? ELSE ? END
+		 FROM runs WHERE id = ? AND (status <> ? OR reason <> ? OR activity <> ?)`,
+		status, reason, activity, status, reason, now, changed, id, status, reason, activity); err != nil {
 		return fmt.Errorf("record transition: %w", err)
 	}
 	return nil
@@ -505,7 +508,7 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		return RunStatusStamp{}, fmt.Errorf("store: update run status: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = recordTransition(ctx, tx, id, status, reason, changed); err != nil {
+	if err = recordTransition(ctx, tx, id, status, reason, activity, changed, changed); err != nil {
 		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
 	var stamp RunStatusStamp

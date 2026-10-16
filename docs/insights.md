@@ -73,14 +73,29 @@ top-level.
 
 - `median_run_seconds`, `p90_run_seconds`: from start (or creation, if the
   run never started) to finish. `runs_measured` is how many runs.
-- `median_working_seconds`: a run's total time in `running`.
-- `median_waiting_seconds`: a run's total time in `needs-attention`.
-- `median_response_seconds`: every stretch of `needs-attention` that ended
-  with the run going back to `running`, so how long a run waited for an
-  answer.
+- `median_working_seconds`: a run's total time working.
+- `median_waiting_seconds`: a run's total time waiting on you.
+- `median_response_seconds`: every stretch of waiting on you that ended
+  with the run working again, so how long a run waited for an answer.
 
-The last three come from the status changes the server records. They
-cover a run's last session that spent time in `running`: from leaving
+The last three come from the status and activity changes the server
+records. A run's *activity* is what the scheduler sees it doing while it
+is `running` or `needs-attention`, published as the run's `state`
+([run activity](failure-handling.md#run-activity)). Where a change
+recorded the activity:
+
+| Activity | Counts as |
+| --- | --- |
+| `working`, `waiting-agents`, `waiting-tools` | working |
+| `needs-you` | waiting on you |
+| `idle`, `finished`, `failed`, `disconnected` | neither |
+
+So a swarm integrator parked in `needs-attention` while its workers run is
+working, not waiting on you. Where a change did not record an activity,
+as on every change before this version, time in `running` is working and
+time in `needs-attention` is waiting on you.
+
+They cover a run's last session that spent time working: from leaving
 `queued`, or from a relaunch, to finishing. A relaunch that failed and was
 rolled back before the agent ran leaves the session before it measured.
 A run whose record starts mid-session is left out; `state_runs_measured`
@@ -127,8 +142,10 @@ finished stays `open` here until a client makes that call.
 Older servers kept only each run's current status and no pull requests, so
 these measurements start when the server is upgraded:
 
-- `run_state_transitions`: one row per status or reason change of a run,
-  written in the same transaction as the change.
+- `run_state_transitions`: one row per status, reason or activity change
+  of a run, written in the same transaction as the change. Its `activity`
+  column is the activity the run moved to, `""` on rows written before it
+  was added and on runs that are not `running` or `needs-attention`.
 - `run_pull_requests`: one row per pull request opened through
   `run.pr.create`, with the state the server last observed.
 - `runs.swarm_run`: set when a swarm creates the run, and at upgrade from
