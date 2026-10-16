@@ -192,6 +192,9 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	runningRow.StartedAt = &now
 	runningRow.FinishedAt = nil
 	runningRow.StatusChangedAt = &now
+	if runningRow.Review != "" {
+		runningRow.Review, runningRow.ReviewChangedAt = "", &now
+	}
 	wasArchived := fresh.ArchivedAt != nil
 	if wasArchived {
 		if _, clearErr := s.cfg.Store.SetRunArchived(ctx, run, nil); clearErr != nil {

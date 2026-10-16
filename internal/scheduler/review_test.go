@@ -180,3 +180,38 @@ func TestReviewOfABackgroundSuccess(t *testing.T) {
 		t.Fatalf("complete on a failed run = %v, want ErrInvalidTransition", err)
 	}
 }
+
+// TestFailedRelaunchKeepsTheReview:a relaunch that fails puts the retained
+// row back with the review it had, so a success still awaits its owner.
+func TestFailedRelaunchKeepsTheReview(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) { cfg.RunContainerTTL = time.Hour })
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "relaunch a reviewed success")
+	e.retainLegacyReportedRun(t, run.ID)
+	ready, err := e.db.GetRun(ctx, run.ID)
+	if err != nil || ready.Review != domain.ReviewReady || ready.ReviewChangedAt == nil {
+		t.Fatalf("retained success = %+v, %v; want review ready", ready, err)
+	}
+	if err = e.sched.Close(); err != nil {
+		t.Fatal(err)
+	}
+	resumeErr := errors.New("runtime resume unavailable")
+	s2 := e.newScheduler(t, e.rt, newFakePTY())
+	s2.cfg.Runtime = &resumeFailureRuntime{Runtime: e.rt, resumeErr: resumeErr}
+	t.Cleanup(func() { _ = s2.Close() })
+	if err = s2.recoverRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s2.Relaunch(ctx, run.ID, e.member.ID); !errors.Is(err, resumeErr) {
+		t.Fatalf("Relaunch error = %v, want resume error", err)
+	}
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != domain.RunCompleted || row.Review != domain.ReviewReady || row.ReviewChangedAt == nil ||
+		!row.ReviewChangedAt.Equal(*ready.ReviewChangedAt) || row.NeedKey() != ready.NeedKey() {
+		t.Fatalf("row after the failed relaunch = %s review %q at %v, want completed and ready at %v", row.Status, row.Review, row.ReviewChangedAt, ready.ReviewChangedAt)
+	}
+}
