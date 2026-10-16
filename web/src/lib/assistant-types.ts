@@ -29,15 +29,19 @@ export interface AssistantStatus {
   confirmations: AssistantConfirmation[]
   /** Confirmed tools run without a card, as if approved. */
   auto_approve: boolean
+  /** Prompts carry the member's view context. */
+  share_view: boolean
 }
 
 export interface AssistantSettings {
   auto_approve: boolean
+  share_view: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
 export interface AssistantSettingsParams {
   auto_approve?: boolean
+  share_view?: boolean
 }
 
 export interface AssistantStartParams {
@@ -58,7 +62,6 @@ export interface ViewEntry {
   mission_id?: string
   subagent?: string
   view?: string
-  path?: string
   at?: string
 }
 
@@ -70,9 +73,4 @@ export interface ViewContext {
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   layout?: Record<string, boolean>
   recent?: ViewEntry[]
-  pending?: {
-    approvals: number
-    assistant_notices: number
-    needs_you?: { run_id: string; reason?: string }[]
-  }
 }

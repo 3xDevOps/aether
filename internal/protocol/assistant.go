@@ -21,8 +21,7 @@ const (
 	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
-	// MethodAssistantView replaces the caller's latest view context, or
-	// clears it when none is sent.
+	// MethodAssistantView replaces the caller's latest view context.
 	MethodAssistantView = "assistant.view"
 	// MethodAssistantViewContext is served only on the assistant tool socket.
 	MethodAssistantViewContext = "assistant.view_context"
@@ -62,16 +61,20 @@ type AssistantStatus struct {
 	Error         string                  `json:"error,omitempty"`
 	Confirmations []AssistantConfirmation `json:"confirmations"`
 	AutoApprove   bool                    `json:"auto_approve"`
+	ShareView     bool                    `json:"share_view"`
 }
 
 // AssistantSettingsParams changes each field that is set; none reads.
 type AssistantSettingsParams struct {
 	AutoApprove *bool `json:"auto_approve,omitempty"`
+	ShareView   *bool `json:"share_view,omitempty"`
 }
 
 type AssistantSettings struct {
 	// AutoApprove runs confirmed tools without a card, as if approved.
 	AutoApprove bool `json:"auto_approve"`
+	// ShareView sends the assistant the member's dashboard view context.
+	ShareView bool `json:"share_view"`
 }
 
 type AssistantStartParams struct {
@@ -93,13 +96,11 @@ type AssistantViewParams struct {
 // names only, never titles, file contents, drafts or terminal text. Its ids
 // are hints for the assistant's member-scoped tools, never permissions.
 type AssistantViewContext struct {
-	Version    int                   `json:"version"`
-	CapturedAt time.Time             `json:"captured_at"`
-	Route      AssistantViewEntry    `json:"route"`
-	OpenFile   *AssistantViewFile    `json:"open_file,omitempty"`
-	Layout     map[string]bool       `json:"layout,omitempty"`
-	Recent     []AssistantViewEntry  `json:"recent,omitempty"`
-	Pending    *AssistantViewPending `json:"pending,omitempty"`
+	Version    int                  `json:"version"`
+	CapturedAt time.Time            `json:"captured_at"`
+	Route      AssistantViewEntry   `json:"route"`
+	OpenFile   *AssistantViewFile   `json:"open_file,omitempty"`
+	Recent     []AssistantViewEntry `json:"recent,omitempty"`
 }
 
 type AssistantViewEntry struct {
@@ -109,7 +110,6 @@ type AssistantViewEntry struct {
 	MissionID   string    `json:"mission_id,omitempty"`
 	Subagent    string    `json:"subagent,omitempty"`
 	View        string    `json:"view,omitempty"`
-	Path        string    `json:"path,omitempty"`
 	At          time.Time `json:"at,omitzero"`
 }
 
@@ -120,23 +120,14 @@ type AssistantViewFile struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
-type AssistantViewPending struct {
-	Approvals        int                     `json:"approvals"`
-	AssistantNotices int                     `json:"assistant_notices"`
-	NeedsYou         []AssistantViewNeedsYou `json:"needs_you,omitempty"`
-}
-
-type AssistantViewNeedsYou struct {
-	RunID  string `json:"run_id"`
-	Reason string `json:"reason,omitempty"`
-}
-
 // AssistantViewContextResult is the member's latest view context. Several
-// dashboards share one: the latest navigation wins.
+// dashboards share one: the one the server received last wins.
 type AssistantViewContextResult struct {
 	ViewContext *AssistantViewContext `json:"view_context"`
-	AgeSeconds  int64                 `json:"age_seconds,omitempty"`
-	// Connected is true while a dashboard streams the member's assistant.
+	// AgeSeconds counts from when the server received it.
+	AgeSeconds int64 `json:"age_seconds,omitempty"`
+	// Connected is true while a dashboard streams the member's assistant
+	// conversation, the only time it sends view updates.
 	Connected bool `json:"connected"`
 }
 

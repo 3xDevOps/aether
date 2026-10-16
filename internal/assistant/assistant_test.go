@@ -21,12 +21,14 @@ type memStore struct {
 	rows map[domain.MemberID]*store.AssistantSession
 	keys map[string]bool
 	auto map[domain.MemberID]bool
+	// hidden holds the members who turned view sharing off.
+	hidden map[domain.MemberID]bool
 	// autoReads counts AssistantAutoApprove calls.
 	autoReads int
 }
 
 func newMemStore() *memStore {
-	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, auto: map[domain.MemberID]bool{}}
+	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, auto: map[domain.MemberID]bool{}, hidden: map[domain.MemberID]bool{}}
 }
 
 func (m *memStore) AssistantAutoApprove(_ context.Context, id domain.MemberID) (bool, error) {
@@ -40,6 +42,19 @@ func (m *memStore) SetAssistantAutoApprove(_ context.Context, id domain.MemberID
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.auto[id] = on
+	return nil
+}
+
+func (m *memStore) AssistantShareView(_ context.Context, id domain.MemberID) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.hidden[id], nil
+}
+
+func (m *memStore) SetAssistantShareView(_ context.Context, id domain.MemberID, on bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hidden[id] = !on
 	return nil
 }
 

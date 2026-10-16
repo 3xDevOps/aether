@@ -622,9 +622,8 @@ export const api = {
   assistantStart: (params: AssistantStartParams = {}) => call<AssistantStatus>('assistant.start', params),
   assistantPrompt: (text: string, idempotencyKey: string, viewContext?: ViewContext) =>
     call<unknown>('assistant.prompt', { text, idempotency_key: idempotencyKey, ...(viewContext ? { view_context: viewContext } : {}) }),
-  /** Replaces the member's latest view context; null clears it. */
-  assistantView: (viewContext: ViewContext | null) =>
-    call<unknown>('assistant.view', viewContext ? { view_context: viewContext } : {}),
+  /** Replaces the member's latest view context. */
+  assistantView: (viewContext: ViewContext) => call<unknown>('assistant.view', { view_context: viewContext }),
   assistantCancel: () => call<unknown>('assistant.cancel', {}),
   assistantAnswer: (requestID: string, optionID: string, values?: Record<string, unknown>) =>
     call<unknown>('assistant.answer', { request_id: requestID, option_id: optionID, ...(values ? { values } : {}) }),

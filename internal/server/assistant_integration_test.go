@@ -345,23 +345,12 @@ func TestIntegrationAssistant(t *testing.T) {
 		Recent: []protocol.AssistantViewEntry{{Name: "run", RunID: "run-abc"}, {Name: "board"}},
 	}
 	tooBig := *view
-	tooBig.Layout = map[string]bool{}
-	tooBig.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("a/", 250)}
+	tooBig.OpenFile = &protocol.AssistantViewFile{Kind: "workspace", Path: strings.Repeat("a/", 256)}
 	for range 50 {
-		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 100)})
+		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), MissionID: strings.Repeat("m", 128)})
 	}
 	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{ViewContext: &tooBig}, nil); perr != nil {
-		t.Fatalf("assistant.view over the recent cap: %v, want it cut to fit", perr)
-	}
-	tooBig.Recent, tooBig.Pending = nil, &protocol.AssistantViewPending{}
-	for range 5 {
-		tooBig.Pending.NeedsYou = append(tooBig.Pending.NeedsYou, protocol.AssistantViewNeedsYou{RunID: strings.Repeat("n", 128)})
-	}
-	for i := range 8 {
-		tooBig.Recent = append(tooBig.Recent, protocol.AssistantViewEntry{Name: "run", RunID: strings.Repeat("r", 128), Path: strings.Repeat(string(rune('a'+i)), 300)})
-	}
-	if perr := env.call(protocol.MethodAssistantPrompt, protocol.AssistantPromptParams{Text: "hi", IdempotencyKey: "k-big", ViewContext: &tooBig}, nil); perr == nil || perr.Code != protocol.CodeInvalidParams || !strings.Contains(perr.Message, "limit is 4096") {
-		t.Fatalf("assistant.prompt with a view context over 4 KiB = %v, want invalid params", perr)
+		t.Fatalf("assistant.view over the size limit: %v, want it trimmed to fit", perr)
 	}
 	prompt := protocol.AssistantPromptParams{Text: "what is running?", IdempotencyKey: "k1", ViewContext: view}
 	for range 2 {
@@ -406,8 +395,8 @@ func TestIntegrationAssistant(t *testing.T) {
 		t.Fatalf("view context the agent received = %s, %v, want the run kept and the malformed workspace id dropped", blocks[1].Resource.Text, err)
 	}
 	for _, f := range history.Frames {
-		if strings.Contains(string(f.Item), `"role":"user"`) && (!strings.Contains(string(f.Item), assistant.ViewContextURI) || strings.Contains(string(f.Item), "run-abc")) {
-			t.Fatalf("user message item = %s, want the view context as a bare attachment", f.Item)
+		if strings.Contains(string(f.Item), `"role":"user"`) && (strings.Contains(string(f.Item), "view-context") || strings.Contains(string(f.Item), "run-abc")) {
+			t.Fatalf("user message item = %s, want only the member's text recorded", f.Item)
 		}
 	}
 
@@ -482,8 +471,13 @@ func TestIntegrationAssistant(t *testing.T) {
 	if got := readView(); got.ViewContext == nil || got.ViewContext.Route.RunID != "run-abc" || !got.Connected {
 		t.Fatalf("assistant.view_context = %+v, want the prompt's view context and a connected dashboard", got)
 	}
-	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{}, nil); perr != nil {
-		t.Fatalf("assistant.view clearing the context: %v", perr)
+	off := false
+	var settings protocol.AssistantSettings
+	if perr := env.call(protocol.MethodAssistantSettings, protocol.AssistantSettingsParams{ShareView: &off}, &settings); perr != nil || settings.ShareView {
+		t.Fatalf("assistant.settings turning view sharing off = %+v, %v", settings, perr)
+	}
+	if perr := env.call(protocol.MethodAssistantView, protocol.AssistantViewParams{ViewContext: view}, nil); perr != nil {
+		t.Fatalf("assistant.view with sharing off: %v", perr)
 	}
 	if got := readView(); got.ViewContext != nil {
 		t.Fatalf("assistant.view_context after sharing was turned off = %+v, want none", got.ViewContext)

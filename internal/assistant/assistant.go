@@ -126,8 +126,10 @@ type member struct {
 	// the last maxKeys that succeeded.
 	attempts map[string]*attempt
 	done     []string
-	// view is the latest view context the member's dashboard sent.
-	view *protocol.AssistantViewContext
+	// view is the latest view context the member's dashboard sent, and
+	// viewAt when it arrived.
+	view   *protocol.AssistantViewContext
+	viewAt time.Time
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -278,7 +280,11 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	if err != nil {
 		return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
 	}
-	status := protocol.AssistantStatus{Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(), AutoApprove: auto}
+	share, err := s.cfg.Store.AssistantShareView(ctx, id)
+	if err != nil {
+		return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
+	}
+	status := protocol.AssistantStatus{Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(), AutoApprove: auto, ShareView: share}
 	switch {
 	case live != nil:
 		status.Agent = live.agent
@@ -686,7 +692,7 @@ func (s *Service) Fence(ctx context.Context, id domain.MemberID) error {
 	m.op.Lock()
 	defer m.op.Unlock()
 	m.removing = true
-	s.SetView(id, nil)
+	m.clearView()
 	if err := s.stop(ctx, m); err != nil {
 		m.removing = false
 		return err
@@ -739,10 +745,11 @@ type attempt struct {
 // restart, is not sent again: a duplicate waits for the first attempt and
 // returns its result.
 func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string, view *protocol.AssistantViewContext) error {
-	if view != nil {
-		s.SetView(id, view)
-	}
 	m := s.member(id)
+	view, err := s.keepView(ctx, m, view)
+	if err != nil {
+		return err
+	}
 	a, first := m.begin(key)
 	if !first {
 		select {

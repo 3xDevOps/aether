@@ -173,7 +173,11 @@ func (s *Service) Settings(ctx context.Context, id domain.MemberID) (protocol.As
 	if err != nil {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
 	}
-	return protocol.AssistantSettings{AutoApprove: auto}, nil
+	share, err := s.cfg.Store.AssistantShareView(ctx, id)
+	if err != nil {
+		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %w", err)
+	}
+	return protocol.AssistantSettings{AutoApprove: auto, ShareView: share}, nil
 }
 
 // SetAutoApprove stores the member's choice and notes a change in their

@@ -13,12 +13,8 @@ import { noAgents, turnExtras } from '@/store/subagents'
 
 const bottomSlack = 24
 
-/** An agent without embedded context gets the view context as delimited text after the prompt. */
-const viewContextText = /\s*<aether-view-context>[\s\S]*?<\/aether-view-context>\s*$/
-
 export function assistantRows(session: AcpSession) {
   return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null)
-    .map((row) => (row.kind === 'user' ? { ...row, body: row.body.replace(viewContextText, '') } : row))
 }
 
 export function Transcript({ session }: { session: AcpSession }) {

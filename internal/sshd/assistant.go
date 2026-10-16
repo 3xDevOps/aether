@@ -23,7 +23,7 @@ type AssistantService interface {
 	Status(ctx context.Context, member domain.MemberID) (protocol.AssistantStatus, error)
 	Start(ctx context.Context, member domain.MemberID, p protocol.AssistantStartParams) (protocol.AssistantStatus, error)
 	Prompt(ctx context.Context, member domain.MemberID, text, idempotencyKey string, view *protocol.AssistantViewContext) error
-	SetView(member domain.MemberID, view *protocol.AssistantViewContext)
+	SetView(ctx context.Context, member domain.MemberID, view *protocol.AssistantViewContext) error
 	Cancel(ctx context.Context, member domain.MemberID) error
 	Answer(member domain.MemberID, requestID, optionID string, values map[string]any) error
 	Confirm(member domain.MemberID, confirmationID string, approve bool) error
@@ -37,6 +37,7 @@ type AssistantService interface {
 	Unfence(member domain.MemberID)
 	Settings(ctx context.Context, member domain.MemberID) (protocol.AssistantSettings, error)
 	SetAutoApprove(ctx context.Context, member domain.MemberID, on bool) (protocol.AssistantSettings, error)
+	SetShareView(ctx context.Context, member domain.MemberID, on bool) error
 }
 
 func init() {
@@ -95,7 +96,7 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 	if strings.TrimSpace(p.Text) == "" || p.IdempotencyKey == "" {
 		return nil, invalidParams("text and idempotency_key are required")
 	}
-	view, err := assistant.CleanViewContext(p.ViewContext, time.Now())
+	view, err := assistant.CleanViewContext(p.ViewContext)
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
@@ -106,8 +107,8 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 }
 
 // assistantView replaces the caller's latest view context, which the
-// assistant reads with its view context tool, or clears it.
-func (s *Server) assistantView(_ context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+// assistant reads with its view context tool.
+func (s *Server) assistantView(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc := s.cfg.Services.Assistant
 	if svc == nil {
 		return nil, errAssistantUnavailable
@@ -116,11 +117,16 @@ func (s *Server) assistantView(_ context.Context, member domain.MemberID, raw js
 	if perr != nil {
 		return nil, perr
 	}
-	view, err := assistant.CleanViewContext(p.ViewContext, time.Now())
+	if p.ViewContext == nil {
+		return nil, invalidParams("view_context is required")
+	}
+	view, err := assistant.CleanViewContext(p.ViewContext)
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	svc.SetView(member, view)
+	if err := svc.SetView(ctx, member, view); err != nil {
+		return nil, assistantError(err)
+	}
 	return struct{}{}, nil
 }
 
@@ -183,13 +189,17 @@ func (s *Server) assistantSettings(ctx context.Context, member domain.MemberID, 
 	if perr != nil {
 		return nil, perr
 	}
-	var settings protocol.AssistantSettings
-	var err error
 	if p.AutoApprove != nil {
-		settings, err = svc.SetAutoApprove(ctx, member, *p.AutoApprove)
-	} else {
-		settings, err = svc.Settings(ctx, member)
+		if _, err := svc.SetAutoApprove(ctx, member, *p.AutoApprove); err != nil {
+			return nil, assistantError(err)
+		}
 	}
+	if p.ShareView != nil {
+		if err := svc.SetShareView(ctx, member, *p.ShareView); err != nil {
+			return nil, assistantError(err)
+		}
+	}
+	settings, err := svc.Settings(ctx, member)
 	if err != nil {
 		return nil, assistantError(err)
 	}

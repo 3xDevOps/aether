@@ -42,9 +42,6 @@ export interface AssistantSlice {
   assistantGeneration: number
   /** Run notices from the assistant that arrived while the panel was closed. */
   assistantNotices: number
-  /** Off sends the assistant no view context and clears the server's copy. */
-  assistantShareView: boolean
-  setAssistantShareView: (share: boolean) => void
   noteAssistantNotice: () => void
   setAssistantOpen: (open: boolean) => void
   setAssistantWidth: (width: number) => void
@@ -69,8 +66,6 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
   assistantSending: false,
   assistantGeneration: 0,
   assistantNotices: 0,
-  assistantShareView: true,
-  setAssistantShareView: (assistantShareView) => set({ assistantShareView }),
   noteAssistantNotice: () => set((s) => (s.assistantOpen ? s : { assistantNotices: s.assistantNotices + 1 })),
   setAssistantOpen: (assistantOpen) => set(assistantOpen ? { assistantOpen, assistantNotices: 0 } : { assistantOpen }),
   setAssistantWidth: (width) => set({ assistantWidth: clampAssistantWidth(width) }),

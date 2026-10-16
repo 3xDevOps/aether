@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -18,17 +19,10 @@ import (
 const (
 	// ViewContextURI names the view context block in a prompt.
 	ViewContextURI = "aether://view-context"
-	// ViewContextOpen and ViewContextClose wrap the view context in a text
-	// block for an agent that takes no embedded resources; the dashboard
-	// strips them from the transcript.
-	ViewContextOpen  = "<aether-view-context>"
-	ViewContextClose = "</aether-view-context>"
 
 	viewContextVersion  = 1
 	maxViewContextBytes = 4 << 10
 	maxViewRecent       = 8
-	maxViewNeedsYou     = 5
-	maxViewLayout       = 8
 	maxViewPath         = 512
 )
 
@@ -38,58 +32,45 @@ var (
 )
 
 // CleanViewContext checks a view context from the dashboard: an id, word or
-// path that is malformed is dropped, lists are cut to their caps, and the
-// result must fit in 4 KiB.
-func CleanViewContext(v *protocol.AssistantViewContext, now time.Time) (*protocol.AssistantViewContext, error) {
-	if v == nil {
+// path that is malformed is dropped, recent is cut to its cap, and the oldest
+// recent pages, then the open file, go until it fits in 4 KiB. An unknown
+// version is dropped whole.
+func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
+	if v == nil || v.Version != viewContextVersion {
 		return nil, nil
 	}
-	if v.Version != viewContextVersion {
-		return nil, fmt.Errorf("view_context version %d is not supported; send version %d", v.Version, viewContextVersion)
-	}
 	out := &protocol.AssistantViewContext{Version: v.Version, CapturedAt: v.CapturedAt.UTC(), Route: cleanEntry(v.Route)}
-	if out.CapturedAt.IsZero() || out.CapturedAt.After(now) {
-		out.CapturedAt = now.UTC()
-	}
 	out.Route.At = time.Time{}
 	if f := v.OpenFile; f != nil && (f.Kind == "workspace" || f.Kind == "home") && cleanPath(f.Path) != "" {
 		out.OpenFile = &protocol.AssistantViewFile{Kind: f.Kind, Path: cleanPath(f.Path), RunID: cleanID(f.RunID), WorkspaceID: cleanID(f.WorkspaceID)}
-	}
-	for key, on := range v.Layout {
-		if viewWord.MatchString(key) && len(out.Layout) < maxViewLayout {
-			if out.Layout == nil {
-				out.Layout = make(map[string]bool)
-			}
-			out.Layout[key] = on
-		}
 	}
 	for _, e := range v.Recent {
 		if e = cleanEntry(e); e.Name != "" && len(out.Recent) < maxViewRecent {
 			out.Recent = append(out.Recent, e)
 		}
 	}
-	if p := v.Pending; p != nil {
-		out.Pending = &protocol.AssistantViewPending{Approvals: max(p.Approvals, 0), AssistantNotices: max(p.AssistantNotices, 0)}
-		for _, n := range p.NeedsYou {
-			if id := cleanID(n.RunID); id != "" && len(out.Pending.NeedsYou) < maxViewNeedsYou {
-				out.Pending.NeedsYou = append(out.Pending.NeedsYou, protocol.AssistantViewNeedsYou{RunID: id, Reason: cleanWord(n.Reason)})
-			}
+	for {
+		b, err := json.Marshal(out)
+		if err != nil {
+			return nil, fmt.Errorf("encode view_context: %w", err)
+		}
+		switch {
+		case len(b) <= maxViewContextBytes:
+			return out, nil
+		case len(out.Recent) > 0:
+			out.Recent = out.Recent[:len(out.Recent)-1]
+		case out.OpenFile != nil:
+			out.OpenFile = nil
+		default:
+			return nil, fmt.Errorf("view_context is %d bytes with only its route; the limit is %d", len(b), maxViewContextBytes)
 		}
 	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		return nil, fmt.Errorf("encode view_context: %w", err)
-	}
-	if len(b) > maxViewContextBytes {
-		return nil, fmt.Errorf("view_context is %d bytes; the limit is %d", len(b), maxViewContextBytes)
-	}
-	return out, nil
 }
 
 func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 	return protocol.AssistantViewEntry{
 		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
-		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), Path: cleanPath(e.Path), At: e.At.UTC(),
+		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: e.At.UTC(),
 	}
 }
 
@@ -114,57 +95,94 @@ func cleanPath(s string) string {
 	return s
 }
 
-// viewBlock carries v to the agent as an embedded resource, which the
-// transcript lists as an attachment without its text, or, for an agent that
-// takes none, as delimited text the dashboard strips.
-func viewBlock(v *protocol.AssistantViewContext, embedded bool) (acp.ContentBlock, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return acp.ContentBlock{}, fmt.Errorf("assistant: encode the view context: %w", err)
-	}
-	if !embedded {
-		return acp.TextBlock("\n\n" + ViewContextOpen + "\n" + string(b) + "\n" + ViewContextClose), nil
-	}
-	mime := "application/json"
-	return acp.ResourceBlock(acp.EmbeddedResourceResource{TextResourceContents: &acp.TextResourceContents{
-		Uri: ViewContextURI, MimeType: &mime, Text: string(b),
-	}}), nil
-}
-
+// promptBlocks follows text with v, annotated for the agent alone so the
+// transcript records only the member's text: an embedded resource, or
+// delimited text for an agent that takes none.
 func promptBlocks(text string, v *protocol.AssistantViewContext, embedded bool) ([]acp.ContentBlock, error) {
 	blocks := []acp.ContentBlock{acp.TextBlock(text)}
 	if v == nil {
 		return blocks, nil
 	}
-	block, err := viewBlock(v, embedded)
+	b, err := json.Marshal(v)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("assistant: encode the view context: %w", err)
 	}
+	agentOnly := &acp.Annotations{Audience: []acp.Role{acp.RoleAssistant}}
+	if !embedded {
+		block := acp.TextBlock("\n\n<aether-view-context>\n" + string(b) + "\n</aether-view-context>")
+		block.Text.Annotations = agentOnly
+		return append(blocks, block), nil
+	}
+	mime := "application/json"
+	block := acp.ResourceBlock(acp.EmbeddedResourceResource{TextResourceContents: &acp.TextResourceContents{
+		Uri: ViewContextURI, MimeType: &mime, Text: string(b),
+	}})
+	block.Resource.Annotations = agentOnly
 	return append(blocks, block), nil
 }
 
-// SetView replaces the member's latest view context unless the one held was
-// captured later, so a replayed or late update from another tab loses; nil
-// clears it. It is kept in memory only.
-func (s *Service) SetView(id domain.MemberID, v *protocol.AssistantViewContext) {
-	m := s.member(id)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if v == nil || m.view == nil || !m.view.CapturedAt.After(v.CapturedAt) {
-		m.view = v
+// keepView makes v the member's latest view context, ordered by when it
+// arrived, and returns it; it returns nil and keeps nothing while the member
+// has sharing off.
+func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
+	if v == nil {
+		return nil, nil
 	}
+	m.settings.Lock()
+	defer m.settings.Unlock()
+	on, err := s.cfg.Store.AssistantShareView(ctx, m.id)
+	if err != nil {
+		return nil, fmt.Errorf("assistant: read the view sharing setting: %w", err)
+	}
+	if !on {
+		return nil, nil
+	}
+	m.mu.Lock()
+	m.view, m.viewAt = v, time.Now()
+	m.mu.Unlock()
+	return v, nil
 }
 
-// View is the member's latest view context, its age, and whether a
-// dashboard streams their assistant now.
+// SetView replaces the member's latest view context. It is kept in memory
+// only.
+func (s *Service) SetView(ctx context.Context, id domain.MemberID, v *protocol.AssistantViewContext) error {
+	_, err := s.keepView(ctx, s.member(id), v)
+	return err
+}
+
+// SetShareView stores whether the member shares their view context; off
+// forgets the one held, and the setting orders with keepView so an update
+// already on its way cannot bring it back.
+func (s *Service) SetShareView(ctx context.Context, id domain.MemberID, on bool) error {
+	m := s.member(id)
+	defer m.notify()
+	m.settings.Lock()
+	defer m.settings.Unlock()
+	if err := s.cfg.Store.SetAssistantShareView(ctx, id, on); err != nil {
+		return fmt.Errorf("assistant: %w", err)
+	}
+	if !on {
+		m.clearView()
+	}
+	return nil
+}
+
+func (m *member) clearView() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.view, m.viewAt = nil, time.Time{}
+}
+
+// View is the member's latest view context, its age since it arrived, and
+// whether a dashboard streams their assistant now.
 func (s *Service) View(id domain.MemberID, now time.Time) protocol.AssistantViewContextResult {
 	m := s.member(id)
 	m.mu.Lock()
 	out := protocol.AssistantViewContextResult{ViewContext: m.view}
-	m.mu.Unlock()
-	if out.ViewContext != nil {
-		out.AgeSeconds = int64(max(now.Sub(out.ViewContext.CapturedAt), 0) / time.Second)
+	if m.view != nil {
+		out.AgeSeconds = int64(max(now.Sub(m.viewAt), 0) / time.Second)
 	}
+	m.mu.Unlock()
 	m.wmu.Lock()
 	out.Connected = len(m.watchers) > 0
 	m.wmu.Unlock()

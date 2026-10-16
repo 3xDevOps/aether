@@ -84,6 +84,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
+  const setShownRunView = useStore((s) => s.setShownRunView)
+  useEffect(() => setShownRunView(run.id, view), [setShownRunView, run.id, view])
 
   const agent = useAgentTerminal(run, visited.has(defaultView(run)))
   const { agents } = useAgentList()

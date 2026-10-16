@@ -25,7 +25,7 @@ import { requestTitle } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
-import { syncViewContext, trackViewContext } from '@/store/view-context'
+import { assistantShareView, syncViewContext, trackViewContext } from '@/store/view-context'
 
 const stateWord: Record<AssistantState, string> = {
   setup: 'Needs setup',
@@ -274,7 +274,7 @@ export function AssistantPanel() {
   const identity = useStore((s) => s.identityKey)
   const state = useStore((s) => s.assistantStatus?.state)
   const waiting = useStore(assistantWaiting) > 0
-  const share = useStore((s) => s.assistantShareView)
+  const share = useStore(assistantShareView)
   const supported = useAssistantAvailable()
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
