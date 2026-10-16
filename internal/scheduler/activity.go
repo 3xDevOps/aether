@@ -96,8 +96,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		f.waitingTools = held && entry.heldTools
 	}
 	f.turn = to == domain.RunRunning && !f.waitingAgents && !f.waitingTools
-	if to == domain.RunNeedsAttention && !f.disconnected && !f.human && !f.waitingAgents &&
-		(entry == nil || !entry.missionAssigned) {
+	if to == domain.RunNeedsAttention && !f.disconnected && !f.human && !f.waitingAgents {
 		waiting, err := s.cfg.Store.IntegratorWaiting(ctx, run)
 		if err != nil {
 			slog.Warn("scheduler: read the integrator's workers", "run", run, "error", err)

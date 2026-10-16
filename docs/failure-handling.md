@@ -14,7 +14,7 @@ for `--run-container-ttl`, negative means no retention and immediate cleanup.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention. A run already parked because its agent said it is waiting keeps that reason. |
+| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention with activity `idle`. A run already parked because its agent said it is waiting keeps that reason. A run whose agent reported `waiting` shows `idle` after three times this. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | When a finished run's worktree becomes eligible for cleanup, subject to evidence and execution ownership protection. Negative disables this GC. |
 | `--run-container-ttl` | `168h` (7 days) | Grace for an explicitly closed Standard or Enhanced run, or completed swarm worker's exact container. `0` uses the default; a positive duration overrides it, and negative requests immediate release. Active/waiting runs and services are not expired. |
@@ -36,16 +36,16 @@ cannot report their own state.
 
 Where the agent reports (`claude`, `codex`, `opencode`, `pi` and `omp` - see
 [harnesses.md](harnesses.md)), a turn that ends can park the run at `needs-attention`
-immediately. This does not mean the agent needs an answer: an open request
-is a separate indication of an unresolved structured request. The threshold
+immediately. This does not mean the agent needs an answer: the run's
+[activity](#run-activity) says whether anyone is needed. The threshold
 still catches an agent that hangs mid-turn with a `stalled:` reason. Where
 the agent does not report, silence is all the server has, and the threshold
 is a bet about the longest legitimate silence: an agent thinking, compiling,
 or waiting on a slow tool call produces no PTY output and touches no files,
 and there is no way to tell that apart from a hang.
 
-- **Too low** and long tool calls park healthy runs, which trains people to
-  ignore **Needs you**.
+- **Too low** and long tool calls park healthy runs as idle, hiding the
+  ones that really stopped.
 - **Too high** and a wedged agent burns an afternoon before anyone notices.
 
 10 minutes suits interactive TUI runs on a normal codebase. Raise it for
@@ -867,9 +867,42 @@ for schedule administration.
 
 ### Agent stall or crash
 
-`needs-attention` - **Needs you** for the run's owner on the board - describes
-execution, not a request from the agent. It means one of two things, and the reason on the run says
-which.
+#### Run activity
+
+A live run (`running` or `needs-attention`) carries an `activity` that the
+scheduler derives on every status change; `status_reason` stays the
+human-readable reason. Every change of status, reason or activity increases
+the run's `status_seq`, which its `run.status` event carries.
+
+| Activity | Meaning |
+| --- | --- |
+| `working` | A turn is in progress. |
+| `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or unacknowledged worker mail, or a `waiting` report this turn. |
+| `waiting-tools` | No turn runs, and the agent waits on a background tool it holds for, such as a monitor. A backgrounded shell such as a dev server does not count. |
+| `needs-you` | A human request is open: a `needs-input` or `blocked` report, or a pending permission or question. |
+| `idle` | The turn ended with none of the above, including a stall. |
+| `finished` / `failed` | An interactive run reported `success` / `failure` and is parked for review. |
+| `disconnected` | The Enhanced session failed or ended while the run is open. |
+
+When several apply, the order is disconnected, needs-you, failed, finished,
+waiting-agents, waiting-tools, idle; a turn in progress is `working` unless a
+human request is open. **Needs you** on the board, `aether runs --needs-you`,
+push notifications and assistant notices cover `needs-you`, `failed` and
+`disconnected`; `finished` sends a non-urgent notice. `idle`, `waiting-*` and
+`working` never notify. A notification fires once per transition into one of
+those activities.
+
+A `waiting` report (`aether-internal report --outcome waiting --summary
+'waiting on 3 workers'`) shows `waiting-agents` with the summary as its
+reason at turn end, until the next turn starts. With no activity for three
+times `--stall-threshold` the run shows `idle` with `waited <duration> with
+no activity`. An integrator's `waiting-agents` from live workers has no such
+limit: the scheduler rechecks it every poll and after a restart.
+
+#### Parked runs
+
+`needs-attention` describes execution, not a request from the agent. It
+means one of two things, and the reason on the run says which.
 
 **The agent reported idle or turn completion.** An agent that reports
 its own state parks the run when it has no active work. The `waiting` wire
@@ -878,7 +911,8 @@ do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
 turn parks at its end with `blocked: <summary>` instead of `agent idle`,
 until it resumes. `--outcome needs-input` does the same with
-`needs input: <question>` when the agent needs a user decision; an Enhanced
+`needs input: <question>`, the whole question, when the agent needs a user
+decision; both are `needs-you`. An Enhanced
 Claude run shows it at the end of the turn that asked even while background
 tasks keep running. The execution report is recovered through a server
 restart.
@@ -907,7 +941,8 @@ than `agent idle` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at
-`needs-attention` with a reason that leads with `stalled:`. This is the hang
+`needs-attention` with a reason that leads with `stalled:` and activity
+`idle`, so it does not show as **Needs you**. This is the hang
 detector: it catches an agent that said it was working and then wedged, and
 it is the only signal at all for an agent that cannot report. An Enhanced
 run waiting for Claude background tasks parks only after three times

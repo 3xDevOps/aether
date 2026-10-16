@@ -1290,8 +1290,8 @@ verification evidence and exact delivery.
   --idempotency-key report-example-1
 ```
 
-`--outcome` is exactly one of `success`, `failure`, `blocked`, or
-`needs-input`. A non-empty summary is required. `--evidence-ref` may be
+`--outcome` is exactly one of `success`, `failure`, `blocked`,
+`needs-input`, or `waiting`. A non-empty summary is required. `--evidence-ref` may be
 repeated, and `--summary-file` accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 Terminal worker reports wait for concurrent swarm operations to leave admission
@@ -1355,6 +1355,17 @@ What a report does depends on the run:
   failure instead`), a swarm worker, which asks its integrator with
   `aether-internal ask`, and a run that already finished (`the run already
   finished; its reported outcome stands, so it cannot ask its user`).
+  The question shows whole, up to the 4 KiB summary limit.
+- **Waiting report.** `--outcome waiting` says the turn ends waiting on the
+  run's own agents, for example `--summary 'waiting on 3 workers'`. At turn
+  end the run shows the summary as its reason with activity
+  `waiting-agents` instead of `idle`, so it is not **Needs you**; the next
+  turn clears it, and with no activity for three times the stall threshold
+  it becomes `idle`. Every role may report it. Like needs-input it is
+  nonterminal and not durable, and takes no `--evidence-ref`. An integrator
+  with live worker attempts or unacknowledged worker mail shows
+  `waiting-agents` at turn end without reporting it
+  ([run activity](failure-handling.md#run-activity)).
 
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason

@@ -527,7 +527,9 @@ func TestOnlyATurnEndWaitShowsAnInteractiveOutcome(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
-	expectNoStatusEvent(t, sub, run.ID, "an input-only report on an armed run")
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning); p.Activity != domain.ActivityNeedsYou {
+		t.Fatalf("an input-only report on an armed run published %+v, want only its activity to change", p)
+	}
 	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
 		t.Fatalf("idle with a permission open: %v", err)
 	}
@@ -1178,6 +1180,7 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
+	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
 	waitFor(t, "the run to stall", func() bool {
 		e.sched.checkStalls(ctx)
 		r, err := e.db.GetRun(ctx, run.ID)
@@ -1195,7 +1198,9 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
 		t.Fatalf("permission answered: %v", err)
 	}
-	expectNoStatusEvent(t, sub, run.ID, "closing the input on a stalled, armed run")
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Activity != domain.ActivityIdle || !strings.HasPrefix(p.Reason, "stalled: ") {
+		t.Fatalf("closing the input on a stalled, armed run published %+v, want it idle on its stall", p)
+	}
 	e.expireReportDeadline(t, run.ID)
 	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.Reason != reportedSuccessReason {
 		t.Fatalf("park reason = %q, want %q", row.Reason, reportedSuccessReason)
