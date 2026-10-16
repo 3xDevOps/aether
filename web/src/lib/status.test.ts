@@ -1,9 +1,9 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateLabel, stateTone } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
 import type { RunActivity } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
-import { run, stateContext } from '@/test/fixtures'
+import { bob, run, stateContext } from '@/test/fixtures'
 
 describe('runLabel', () => {
   it('prefers a terminal title over the task', () => {
@@ -60,19 +60,90 @@ describe('run presentation', () => {
     expect(shown({ status: 'queued' })).toEqual({ state: 'working', reason: 'Queued' })
     expect(shown({ status: 'provisioning' })).toEqual({ state: 'working', reason: 'Starting' })
     expect(shown({ status: 'running', state: 'working' })).toEqual({ state: 'working', reason: 'Agent working' })
-    expect(shown({ status: 'completed' })).toEqual({ state: 'finished', reason: 'Finished' })
-    expect(shown({ status: 'merged' })).toEqual({ state: 'finished', reason: 'Merged' })
-    expect(shown({ status: 'abandoned' })).toEqual({ state: 'finished', reason: 'Closed without merging' })
+    expect(shown({ status: 'completed' })).toEqual({ state: 'completed', reason: 'Finished' })
+    expect(shown({ status: 'completed', review: 'accepted' })).toEqual({ state: 'completed', reason: 'Marked complete' })
+    expect(shown({ status: 'merged' })).toEqual({ state: 'merged', reason: 'Merged' })
+    expect(shown({ status: 'abandoned' })).toEqual({ state: 'closed', reason: 'Closed without merging' })
     expect(shown({ status: 'failed', reason: 'agent exited 1' })).toEqual({ state: 'failed', reason: 'Failed: Agent exited with code 1' })
-    expect(shown({ status: 'interrupted' })).toEqual({ state: 'failed', reason: 'Interrupted' })
-    for (const state of ['working', 'waiting-agents', 'waiting-tools', 'idle', 'finished', 'failed', 'disconnected', 'needs-you'] as const) {
-      expect(shown({ status: 'needs-attention', state }).state).toBe(state)
+    expect(shown({ status: 'interrupted' })).toEqual({ state: 'interrupted', reason: 'Interrupted' })
+    const live: [RunActivity, string][] = [
+      ['working', 'Working'],
+      ['waiting-agents', 'Waiting for agents'],
+      ['waiting-ci', 'Waiting for CI'],
+      ['waiting-tools', 'Waiting for process'],
+      ['waiting', 'Waiting'],
+      ['idle', 'Waiting'],
+      ['finished', 'Ready for review'],
+      ['failed', 'Failed'],
+      ['disconnected', 'Disconnected'],
+      ['needs-you', 'Needs you'],
+    ]
+    for (const [state, label] of live) {
+      expect(stateLabel[shown({ status: 'needs-attention', state }).state]).toBe(label)
     }
   })
 
-  it('labels a live run without a known state by its status, never Working', () => {
+  it('shows the idle older servers wrote exactly as Waiting, and never says Idle', () => {
+    const legacy = shown({ status: 'needs-attention', state: 'idle', reason: 'agent idle' })
+    expect(legacy).toEqual(shown({ status: 'needs-attention', state: 'waiting', reason: 'turn ended without a report' }))
+    expect(legacy).toEqual({ state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.' })
+    expect(stateTone[legacy.state]).toBe('ended')
+    expect(Object.values(stateLabel).join(' ')).not.toMatch(/idle/i)
+    expect(plainReason('agent idle')).toBe('Turn ended without a report')
+  })
+
+  it('gives each waiting state the reason the agent reported and what happens next', () => {
+    expect(shown({ status: 'running', state: 'waiting-ci', reason: 'waiting for the PR checks' })).toEqual({
+      state: 'waiting-ci', reason: 'waiting for the PR checks', next: 'The agent checks back on its next turn; send a message to nudge it.',
+    })
+    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'deploy running' }).next).toBe('The agent checks back on its next turn; send a message to nudge it.')
+    expect(shown({ status: 'running', state: 'waiting-agents' })).toEqual({
+      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents can wake it; send a message to nudge it.',
+    })
+    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'working in background: 1 task' })).toEqual({
+      state: 'waiting-tools', reason: 'Working in background: 1 task', next: 'Claude Code resumes it when a background task ends.',
+    })
+    expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 12m' }).reason).toBe('No update for 12m')
+  })
+
+  it('prints a reason beside its label only where it adds something', () => {
+    expect(stateDetail({ state: 'working', reason: 'Agent working' })).toBeUndefined()
+    expect(stateDetail({ state: 'waiting', reason: 'Turn ended without a report' })).toBe('Turn ended without a report')
+    expect(stateDetail({ state: 'failed', reason: 'Failed: Agent exited with code 1' })).toBe('Agent exited with code 1')
+    expect(stateDetail({ state: 'merged', reason: 'Merged' })).toBeUndefined()
+  })
+
+  it('titles a state with how long it has held, the reason and the next step', () => {
+    const now = Date.parse('2026-08-14T10:20:00Z')
+    expect(stateTitle({ state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.' }, '2026-08-14T10:15:00Z', now))
+      .toBe('Waiting since 5 minutes ago — Turn ended without a report. Send a message to continue.')
+    expect(stateTitle({ state: 'working', reason: 'Working' }, '2026-08-14T10:15:00Z', now)).toBe('Working since 5 minutes ago.')
+  })
+
+  it('reads a reported success as Ready for review until the owner answers it', () => {
+    const ready = shown({ status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' })
+    expect(ready).toMatchObject({ state: 'ready', reason: 'Your agent reports this task is finished' })
+    expect(ready.needsYou?.id).toBe('ready')
+    expect(groupOf(ready)).toBe('needs-you')
+    const later = shown({ status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'later' })
+    expect(later).toEqual({ state: 'ready', reason: 'Agent reported success', next: 'Mark it complete, or send a message to keep going.' })
+    expect(groupOf(later)).toBe('review')
+    const headless = shown({ mode: 'headless', status: 'completed', reason: 'agent reported success', review: 'ready' })
+    expect(headless.state).toBe('ready')
+    expect(groupOf(headless)).toBe('needs-you')
+    expect(shown({ status: 'completed', review: 'later' }).state).toBe('ready')
+    expect(groupOf(shown({ status: 'completed', review: 'accepted' }))).toBe('finished')
+    // Only the owner is asked; a teammate sees the same state in the quiet group.
+    const teammate = shown({ status: 'needs-attention', state: 'finished', review: 'ready', member_id: bob.id })
+    expect(teammate.state).toBe('ready')
+    expect(groupOf(teammate)).toBe('review')
+  })
+
+  it('labels a live run without a known state honestly, never Working', () => {
     expect(shown({ status: 'running', state: '' })).toEqual({ state: 'running', reason: 'Running' })
-    expect(shown({ status: 'needs-attention', state: undefined, reason: 'agent idle' })).toEqual({ state: 'needs-attention', reason: 'Agent idle' })
+    expect(shown({ status: 'needs-attention', state: undefined, reason: 'agent idle' })).toEqual({
+      state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.',
+    })
     const future = shown({ status: 'running', state: 'compacting' as RunActivity })
     expect(future).toEqual({ state: 'running', reason: 'Running' })
     expect(stateTone[future.state]).toBe('neutral')
@@ -95,13 +166,17 @@ describe('run presentation', () => {
     expect(integrator({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })).toEqual({
       state: 'waiting-agents', reason: 'Integrator has not read 3 messages (12 min)', unread: 3,
     })
-    expect(integrator({ unacked_messages: 1, oldest_unacked_at: '2026-08-14T10:19:00Z' }).reason).toBe('Waiting on its agents')
+    expect(integrator({ unacked_messages: 1, oldest_unacked_at: '2026-08-14T10:19:00Z' }).reason).toBe('Waiting for its agents to report')
     expect(presentRun(toRecord(run({ unacked_messages: 3, oldest_unacked_at: '2026-08-14T10:08:00Z' })), ctx).reason).toBe('Agent working')
   })
 
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', state: 'needs-you', paused: true }))
     expect(presentRun(paused, ctx).state).toBe('paused')
+    for (const review of ['ready', 'later'] as const) {
+      expect(shown({ status: 'needs-attention', state: 'finished', review, paused: true }).state).toBe('paused')
+    }
+    expect(shown({ status: 'completed', review: 'ready', paused: true }).state).toBe('ready')
     expect(groupOf({ state: 'paused' })).toBe('working')
   })
 
@@ -109,9 +184,9 @@ describe('run presentation', () => {
     const failed = shown({ status: 'needs-attention', state: 'failed', reason: 'agent reported failure', outcome_unseen: true })
     expect(groupOf(failed)).toBe('needs-you')
     expect(groupOf(shown({ status: 'needs-attention', state: 'disconnected' }))).toBe('needs-you')
-    for (const state of ['working', 'waiting-agents', 'waiting-tools', 'idle', 'paused'] as const) expect(groupOf({ state })).toBe('working')
-    expect(groupOf({ state: 'finished' })).toBe('finished')
-    expect(groupOf({ state: 'failed' })).toBe('finished')
+    for (const state of ['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'waiting', 'paused'] as const) expect(groupOf({ state })).toBe('working')
+    expect(groupOf({ state: 'ready' })).toBe('review')
+    for (const state of ['completed', 'merged', 'closed', 'interrupted', 'failed'] as const) expect(groupOf({ state })).toBe('finished')
   })
 
   it.each(['tui', 'acp'] as const)('keeps %s reported work distinct from a finished runtime', (mode) => {
@@ -122,7 +197,8 @@ describe('run presentation', () => {
       }))
       expect(isTerminal(parked.status)).toBe(false)
       expect(awaitingReview(parked)).toBe(true)
-      expect(presentRun(parked, ctx).reason).toContain('Run remains open for follow-up.')
+      if (outcome === 'success') expect(presentRun(parked, ctx).state).toBe('ready')
+      else expect(presentRun(parked, ctx).reason).toContain('Run remains open for follow-up.')
       expect(presentRun({ ...parked, status: 'running', state: 'working', reason: 'agent resumed', outcome_unseen: false }, ctx))
         .toEqual({ state: 'working', reason: 'Agent working' })
     }
@@ -137,11 +213,15 @@ describe('run presentation', () => {
     expect(awaitingReview({ status: 'running', state: 'working', outcome_unseen: true })).toBe(false)
   })
 
-  it('labels every state in words, so no state is told by colour alone', () => {
+  it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
-      'Working', 'Waiting on agents', 'Waiting on tools', 'Needs you', 'Idle', 'Finished', 'Failed', 'Disconnected', 'Paused',
-      'Running', 'Parked',
+      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Waiting', 'Needs you', 'Ready for review',
+      'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running',
     ])
+    expect(stateTone).toMatchObject({
+      'waiting-agents': 'waiting', 'waiting-ci': 'waiting', 'waiting-tools': 'waiting', waiting: 'ended',
+      'needs-you': 'needs-you', ready: 'review', completed: 'done', failed: 'failed', disconnected: 'disconnected',
+    })
   })
 })
 

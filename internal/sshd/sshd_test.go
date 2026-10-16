@@ -602,6 +602,17 @@ func (f *fakeRuns) Seen(_ context.Context, run domain.RunID, actor domain.Member
 	}, nil
 }
 
+func (f *fakeRuns) Review(_ context.Context, run domain.RunID, actor domain.MemberID, action string) (*domain.Run, error) {
+	if err := f.record(fmt.Sprintf("review:%s:%s:%s", run, actor, action)); err != nil {
+		return nil, err
+	}
+	return &domain.Run{
+		ID: run, WorkspaceID: "ws", MemberID: actor,
+		Task: "t", Harness: "claude", Mode: domain.LaunchTUI,
+		Status: domain.RunCompleted, Review: domain.ReviewAccepted, CreatedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (f *fakeRuns) Pause(_ context.Context, run domain.RunID, actor domain.MemberID) error {
 	return f.record(fmt.Sprintf("pause:%s:%s", run, actor))
 }

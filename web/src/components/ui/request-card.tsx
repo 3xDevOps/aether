@@ -1,9 +1,10 @@
 import type * as React from 'react'
-import { StatusDot } from '@/components/ui/status-dot'
+import { StatusDot, toneClasses, type Tone } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
 
 export function RequestCard({
   title,
+  tone = 'needs-you',
   meta,
   actions,
   children,
@@ -11,6 +12,7 @@ export function RequestCard({
   ...props
 }: Omit<React.ComponentProps<'div'>, 'title'> & {
   title: React.ReactNode
+  tone?: Tone
   meta?: React.ReactNode
   actions?: React.ReactNode
 }) {
@@ -18,11 +20,11 @@ export function RequestCard({
     <div
       data-slot="request-card"
       tabIndex={-1}
-      className={cn('flex flex-col gap-1.5 rounded-panel bg-state-needs-you-soft px-3 py-2 text-ui text-text outline-none focus-visible:outline-2 focus-visible:outline-accent', className)}
+      className={cn('flex flex-col gap-1.5 rounded-panel px-3 py-2 text-ui text-text outline-none focus-visible:outline-2 focus-visible:outline-accent', toneClasses(tone).soft, className)}
       {...props}
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <StatusDot tone="needs-you" />
+        <StatusDot tone={tone} />
         <p className="min-w-0 flex-1 font-medium break-words">{title}</p>
         {meta !== undefined && <span className="shrink-0 text-ui-sm text-muted tabular-nums">{meta}</span>}
       </div>

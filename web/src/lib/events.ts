@@ -17,6 +17,7 @@ export const eventLabel = {
   'run.archived': 'Archive',
   'run.outcome_seen': 'Result opened',
   'run.finish_opened': 'Result opened',
+  'run.review': 'Completion review',
   'run.agent': 'Agent tool use',
   'run.diff': 'File changes',
   'run.cost': 'Usage',

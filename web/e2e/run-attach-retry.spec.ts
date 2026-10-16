@@ -77,7 +77,7 @@ test('a run whose session is missing never reads as offline while it waits', asy
   // is only about what it says while the run is one.
   await expect(
     page.locator('header').filter({ hasText: 'a run whose session is late' }),
-  ).toContainText('Agent working')
+  ).toContainText('Working')
 
   // Every dropped socket, the refusal, and the reconnect that refusal earns.
   await expect(async () => {

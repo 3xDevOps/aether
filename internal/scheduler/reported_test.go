@@ -127,6 +127,36 @@ func TestReportedSuccessParksTUIRunAtTurnEnd(t *testing.T) {
 	}
 }
 
+// The agent starts before the launch marks its run running, so a fast agent
+// can report success and end its turn while the run is still provisioning.
+// The turn end waits for the run to be running, then parks it.
+func TestReportedSuccessParksWhenTheTurnEndsWhileProvisioning(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	turnEnd := make(chan error, 1)
+	e.git.watchHook = func(run domain.RunID) {
+		if err := e.sched.FinishReported(ctx, run, "report-1", domain.RunCompleted, time.Now().UTC()); err != nil {
+			t.Errorf("report while provisioning: %v", err)
+		}
+		go func() { turnEnd <- e.sched.ReportAgentState(ctx, run, waitingForInput) }()
+		select {
+		case err := <-turnEnd:
+			t.Errorf("turn end returned %v while the run was provisioning, want it to wait", err)
+			turnEnd <- err
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	run, _ := e.launchReporting(t)
+	if err := <-turnEnd; err != nil {
+		t.Fatalf("turn end: %v", err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if row.Reason != reportedSuccessReason || row.Review != domain.ReviewReady {
+		t.Fatalf("row = %+v, want needs-attention because %q with review ready", row, reportedSuccessReason)
+	}
+}
+
 func TestReportedFailureParksAtDeadlineAndResumesWithoutRelaunch(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -295,8 +325,8 @@ func TestBlockedReasonSurvivesTheHooksThatFollowIt(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	report(waitingForInput)
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got := reason(); got != agentstatus.ReasonIdle {
-		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
+	if got := reason(); got != turnEndedReason {
+		t.Fatalf("reason after the agent resumed = %q, want %q", got, turnEndedReason)
 	}
 }
 
@@ -533,8 +563,8 @@ func TestOnlyATurnEndWaitShowsAnInteractiveOutcome(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
 		t.Fatalf("idle with a permission open: %v", err)
 	}
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("park reason with a permission open = %q, want %q", p.Reason, agentstatus.ReasonIdle)
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Reason != turnEndedReason {
+		t.Fatalf("park reason with a permission open = %q, want %q", p.Reason, turnEndedReason)
 	}
 	e.sched.mu.Lock()
 	entry := e.sched.runs[run.ID]
@@ -689,8 +719,8 @@ func TestReplayedBlockedReportStaysCleared(t *testing.T) {
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)
 	blocked()
 	report(waitingForInput)
-	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("reason after a replayed blocked report = %q, want %q", r.Reason, agentstatus.ReasonIdle)
+	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != turnEndedReason {
+		t.Fatalf("reason after a replayed blocked report = %q, want %q", r.Reason, turnEndedReason)
 	}
 	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.IdleReportID != "report-blocked-1" || sc.IdleReason != "" {
 		t.Fatalf("sidecar = %+v, %v; want the applied report ID and no reason", sc, err)
@@ -1198,7 +1228,7 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
 		t.Fatalf("permission answered: %v", err)
 	}
-	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Activity != domain.ActivityIdle || !strings.HasPrefix(p.Reason, "stalled: ") {
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Activity != domain.ActivityWaiting || !strings.HasPrefix(p.Reason, "stalled: ") {
 		t.Fatalf("closing the input on a stalled, armed run published %+v, want it idle on its stall", p)
 	}
 	e.expireReportDeadline(t, run.ID)
@@ -1270,7 +1300,7 @@ func TestClearedInteractiveOutcomeStaysClearedAfterRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if row.Reason != agentstatus.ReasonIdle || row.OutcomeUnseen || row.FinishedAt != nil {
+	if row.Reason != turnEndedReason || row.OutcomeUnseen || row.FinishedAt != nil {
 		t.Fatalf("recovery resurrected outcome: %+v", row)
 	}
 	if sc, err := s2.readSidecar(run.ID); err != nil || sc.IdleReason != "" || sc.IdleReportID != "done-before-reboot" || sc.IdleReportAt == nil || !sc.IdleReportAt.Equal(at) {
@@ -1506,8 +1536,8 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	}
 	report(waitingForInput)
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got := reason(); got != agentstatus.ReasonIdle {
-		t.Fatalf("reason after the agent resumed = %q, want %q", got, agentstatus.ReasonIdle)
+	if got := reason(); got != turnEndedReason {
+		t.Fatalf("reason after the agent resumed = %q, want %q", got, turnEndedReason)
 	}
 }
 

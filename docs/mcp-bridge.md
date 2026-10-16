@@ -63,8 +63,7 @@ prompt already carries the card, they are only a brief of under 512 bytes:
 report success or failure when the work the agent owns is done or cannot be
 done, needs-input only for a question a human must answer (workers and
 Background runs are told never to), blocked when a human must intervene,
-and waiting when it ends its turn awaiting subagents, workers, peers or
-tools, or, where nothing resumes an idle session, never waiting but waiting
+and waiting when it ends its turn to await agents, CI or a process, or, where nothing resumes an idle session, never waiting but waiting
 for mail in the turn with `aether_inbox`; never report while still working;
 subagents and spawned workflows never report. Both come from `coord.status`,
 asked once with a 2-second limit: without `coord.report` in its
@@ -97,7 +96,7 @@ integrator-management commands.
 | `aether_inbox` | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | `messages`, `ack_token` |
 | `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
-| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
+| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 
 The bridge returns the established structured result directly. This
 presentation differs from any CLI envelope, but it does not add operations or
@@ -146,8 +145,10 @@ and `waiting`, which its input schema enumerates, and requires a non-empty
 summary. Every coordination tool field has a schema description, and the
 `aether_report` description leads with the rule that subagents and spawned
 workflows never report. `needs-input` and `waiting` take no `evidence_refs`.
-`waiting` marks a turn the agent ends while awaiting subagents, workers, peers
-or tools; the next turn clears it. The schema's outcome description is the
+`waiting` marks a turn the agent ends while work it started goes on; the
+next turn clears it. `waiting_for` is `agents` (the default), `ci` or
+`process`, which the schema enumerates, and is valid only with `waiting`;
+anything else is invalid params. The schema's outcome description is the
 same for every run; the server refuses outcomes a run's role or launch
 cannot use, and the instructions list the ones that apply. Before the server accepts a report, Aether
 captures the run's evidence, including a private Git evidence commit and a bounded PTY

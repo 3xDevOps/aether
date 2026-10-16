@@ -13,7 +13,7 @@ import { listedRuns, runGroups, runRows, runTrees, type RunRow, type RunTree, ty
 export type BoardCard = RunTree
 
 export interface BoardColumn {
-  key: RunGroup
+  key: Exclude<RunGroup, 'review'>
   label: string
   cards: BoardCard[]
 }
@@ -49,11 +49,13 @@ function archivedRows(s: RunsInput): RunRow[] {
 
 export function board(s: RunsInput): BoardData {
   const groups = runGroups(s)
+  // Ready for review heads Finished: the work is done, and only the owner's answer is left.
+  const cards = { ...groups, finished: [...groups.review, ...groups.finished] }
   return {
-    columns: (Object.keys(groups) as RunGroup[]).map((key) => ({
+    columns: (['needs-you', 'working', 'finished'] as const).map((key) => ({
       key,
       label: groupLabel[key],
-      cards: groups[key],
+      cards: cards[key],
     })),
     archivedCards: runTrees(archivedRows(s), s.ctx).sort(
       (a, b) => at(b.run.archived_at ?? '') - at(a.run.archived_at ?? ''),

@@ -44,6 +44,7 @@ const elsewhere = record({
 })
 const done = record({ id: 'done', status: 'merged', finished_at: '2026-08-14T10:30:00Z' })
 const failed = record({ id: 'failed', status: 'failed', finished_at: '2026-08-14T10:10:00Z' })
+const interrupted = record({ id: 'interrupted', status: 'interrupted', finished_at: '2026-08-14T10:05:00Z' })
 
 describe('runGroups', () => {
   it('lists Needs you from every workspace and the others from the active one', () => {
@@ -70,10 +71,10 @@ describe('runGroups', () => {
     expect(groups['needs-you'][1].waitingSince).toBe('2026-08-14T10:15:00Z')
   })
 
-  it('sorts Working by latest change and Finished with failures first', () => {
-    const groups = runGroups(input([working, newer, done, failed]))
+  it('sorts Working by latest change and Finished with failures and interruptions first', () => {
+    const groups = runGroups(input([working, newer, done, interrupted, failed]))
     expect(ids(groups.working)).toEqual(['newer', 'working'])
-    expect(ids(groups.finished)).toEqual(['failed', 'done'])
+    expect(ids(groups.finished)).toEqual(['failed', 'interrupted', 'done'])
   })
 
   it('narrows Working and Finished to the viewer under Mine, never Needs you', () => {
@@ -110,13 +111,19 @@ describe('swarms', () => {
 
   it('folds a swarm into one collapsed entry with its counts', () => {
     const groups = runGroups(
-      input([integrator, worker('w1'), worker('w2', { status: 'needs-attention', state: 'needs-you' }), worker('w3', { status: 'completed' })]),
+      input([
+        integrator,
+        worker('w1'),
+        worker('w2', { status: 'needs-attention', state: 'needs-you' }),
+        worker('w3', { status: 'completed' }),
+        worker('w4', { status: 'interrupted' }),
+      ]),
     )
     expect(ids(groups.working)).toEqual(['run_integrator'])
     const [swarm] = groups.working
     expect(swarm.children).toEqual([])
-    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 0 } })
-    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3'])
+    expect(swarm.swarm).toMatchObject({ collapsed: true, counts: { working: 2, needsYou: 0, done: 1, failed: 1 } })
+    expect(ids(swarm.swarm?.members ?? []).sort()).toEqual(['w1', 'w2', 'w3', 'w4'])
   })
 
   it('lists the swarm in Needs you with only the members that need the viewer', () => {
@@ -218,6 +225,37 @@ describe('needsYouByWorkspace', () => {
       [workspace.id]: 1,
       [otherWorkspace.id]: 1,
     })
+  })
+})
+
+describe('the Needs you count', () => {
+  const ready = record({ id: 'ready', status: 'needs-attention', state: 'finished', review: 'ready', review_changed_at: '2026-08-14T10:06:00Z' })
+  const later = record({ id: 'later', status: 'needs-attention', state: 'finished', review: 'later' })
+  const headless = record({ id: 'headless', mode: 'headless', status: 'completed', review: 'ready' })
+  const accepted = record({ id: 'accepted', status: 'completed', review: 'accepted' })
+  const agents = record({ id: 'agents', status: 'running', state: 'waiting-agents' })
+  const waiting = record({ id: 'waiting', status: 'needs-attention', state: 'waiting' })
+  const runs = [stopped, ready, later, headless, accepted, agents, waiting]
+
+  it('counts needs-you and ready runs alike in the sidebar, the badge and the list', () => {
+    const sidebar = sidebarGroups(input(runs)).find((group) => group.key === 'needs-you')
+    expect(sidebar?.count).toBe(3)
+    expect(ids(sidebar?.runs ?? [])).toEqual(['headless', 'stopped', 'ready'])
+    expect(needsYouByWorkspace(input(runs).ctx)).toEqual({ [workspace.id]: 3 })
+    expect(listedRuns(workspace.id, input(runs).ctx).filter((row) => row.needsYou).map((row) => row.run.id).sort())
+      .toEqual(['headless', 'ready', 'stopped'])
+  })
+
+  it('lists a run answered Not yet quietly under Ready for review, outside the count', () => {
+    const groups = sidebarGroups(input(runs))
+    expect(groups.map((group) => group.key)).toEqual(['needs-you', 'working', 'review', 'finished'])
+    expect(ids(groups.find((group) => group.key === 'review')?.runs ?? [])).toEqual(['later'])
+    expect(ids(groups.find((group) => group.key === 'working')?.runs ?? []).sort()).toEqual(['agents', 'waiting'])
+  })
+
+  it('keeps a ready run in Needs you after its owner opens it', () => {
+    const opened = { ...ready, outcome_unseen: false, finish_unopened: false }
+    expect(needsYouByWorkspace(input([opened]).ctx)).toEqual({ [workspace.id]: 1 })
   })
 })
 

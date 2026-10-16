@@ -37,7 +37,9 @@ type OutcomeSink interface {
 	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
 	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
 	ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error
-	ReportWaiting(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error
+	// ReportWaiting's waitingFor is a protocol.CoordWaitingFor* value,
+	// empty for agents.
+	ReportWaiting(ctx context.Context, run domain.RunID, id, waitingFor, summary string, at time.Time) error
 }
 
 // reportNeedsInput hands the question straight to the scheduler. It is not a
@@ -83,7 +85,7 @@ func (s *Service) reportWaiting(ctx context.Context, run domain.RunID, p protoco
 		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
 	}
 	id := fmt.Sprintf("waiting:%s:%s", run, p.IdempotencyKey)
-	if err := s.cfg.Outcomes.ReportWaiting(ctx, run, id, reportReason(summary), time.Now().UTC()); errors.Is(err, ErrRunFinished) {
+	if err := s.cfg.Outcomes.ReportWaiting(ctx, run, id, p.WaitingFor, reportReason(summary), time.Now().UTC()); errors.Is(err, ErrRunFinished) {
 		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
 	} else if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)

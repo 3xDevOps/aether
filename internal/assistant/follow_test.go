@@ -137,13 +137,23 @@ func newRun(status domain.RunStatus, reason string) *domain.Run {
 	case status == domain.RunNeedsAttention && (strings.HasPrefix(reason, "blocked: ") || strings.HasPrefix(reason, "needs input: ")):
 		run.Activity = domain.ActivityNeedsYou
 	case status == domain.RunNeedsAttention:
-		run.Activity = domain.ActivityIdle
+		run.Activity = domain.ActivityWaiting
 	}
 	return run
 }
 
+// withActivity also gives a finished run the review its reported success
+// asks for, as the scheduler does.
 func withActivity(run *domain.Run, activity domain.RunActivity) *domain.Run {
 	run.Activity = activity
+	if activity == domain.ActivityFinished {
+		run.Review = domain.ReviewReady
+	}
+	return run
+}
+
+func later(run *domain.Run) *domain.Run {
+	run.Review = domain.ReviewLater
 	return run
 }
 
@@ -197,7 +207,7 @@ func TestClassify(t *testing.T) {
 			name: "attention", run: newRun(domain.RunNeedsAttention, "blocked: no credentials"),
 			kind: "needs_attention", severity: "warning", title: `Run "Fix login" needs your attention`, body: "Blocked: no credentials",
 		},
-		{name: "idle", run: newRun(domain.RunNeedsAttention, "agent idle")},
+		{name: "waiting", run: newRun(domain.RunNeedsAttention, "turn ended without a report")},
 		{name: "stalled", run: newRun(domain.RunNeedsAttention, "stalled: no output or file changes for 10m0s")},
 		{name: "waiting on agents", run: withActivity(newRun(domain.RunNeedsAttention, "waiting on 3 workers"), domain.ActivityWaitingAgents)},
 		{name: "waiting on a tool", run: withActivity(newRun(domain.RunRunning, "working in background: 1 task"), domain.ActivityWaitingTools)},
@@ -205,6 +215,7 @@ func TestClassify(t *testing.T) {
 			name: "reported success", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished),
 			kind: "finished", severity: "info", title: `Run "Fix login" finished`, body: "agent reported success",
 		},
+		{name: "reported success put off for later", run: later(withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished))},
 		{
 			name: "reported failure", run: unseen(withActivity(newRun(domain.RunNeedsAttention, "agent reported failure"), domain.ActivityFailed)),
 			kind: "needs_attention", severity: "warning", title: `Run "Fix login" failed`, body: "Agent reported failure, review the result",

@@ -292,7 +292,13 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, OutcomeUnseen: true})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Finished, review the result", Run: id})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	stamp, _, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady)
+	if err != nil {
+		t.Fatalf("SetRunReview: %v", err)
+	}
+	h.publish(run, events.RunReviewPayload{Review: stamp.Review, StatusSeq: stamp.StatusSeq})
+	phone.expectNone(t, testQuiet)
 
 	// A member closing a run of their own is not news to them.
 	closed := h.run(h.ada, "Try the other approach", domain.LaunchTUI)

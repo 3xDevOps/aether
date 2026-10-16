@@ -2248,8 +2248,8 @@ func TestRecoveryKeepsARunParkedForItsMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("recovered run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonIdle)
+	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
+		t.Fatalf("recovered run = %s because %q, want it still parked because %q", r.Status, r.Reason, turnEndedReason)
 	}
 
 	if rerr := s2.ReportAgentState(t.Context(), run.ID, waiting); rerr != nil {
@@ -2300,9 +2300,9 @@ func TestRecoveryKeepsAWaitingReportAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
+	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
 		t.Fatalf("run = %s because %q after a repaint, want it still parked because %q: the waiting report survives a restart",
-			r.Status, r.Reason, agentstatus.ReasonIdle)
+			r.Status, r.Reason, turnEndedReason)
 	}
 
 	if rerr := s2.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working}); rerr != nil {
@@ -2344,9 +2344,9 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
+	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
 		t.Fatalf("run = %s because %q after a recovered repaint, want it still parked because %q",
-			r.Status, r.Reason, agentstatus.ReasonIdle)
+			r.Status, r.Reason, turnEndedReason)
 	}
 
 	e.waitStoreStatus(t, run.ID, domain.RunRunning)

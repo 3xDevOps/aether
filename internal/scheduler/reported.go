@@ -13,6 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -76,7 +77,7 @@ func retainedReason(status domain.RunStatus, reason string) bool {
 	case domain.RunMerged, domain.RunAbandoned:
 		return reason == retainedCloseReason
 	case domain.RunCompleted:
-		return reason == reportedSuccessRetainedReason
+		return reason == reportedSuccessRetainedReason || reason == retainedCloseReason
 	case domain.RunFailed:
 		return reason == reportedFailureRetainedReason
 	}
@@ -100,7 +101,8 @@ func releasedReason(status domain.RunStatus, reason, closed string) (string, boo
 		return reportedFailureReason, true
 	case (status == domain.RunCompleted || status == domain.RunFailed) && reason == retainedCompletionReason:
 		return "worker finished", true
-	case status == domain.RunMerged || status == domain.RunAbandoned:
+	case status == domain.RunMerged || status == domain.RunAbandoned ||
+		(status == domain.RunCompleted && reason == retainedCloseReason):
 		return closed, true
 	}
 	return "", false
@@ -128,7 +130,7 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened, StatusSeq: stamp.StatusSeq},
+		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened, StatusSeq: stamp.StatusSeq, Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt},
 	})
 	return nil
 }
@@ -371,7 +373,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 	s.publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,
 		RunID:       run,
-		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened, StatusSeq: stamp.StatusSeq},
+		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened, StatusSeq: stamp.StatusSeq, Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt},
 	})
 	return nil
 }
@@ -397,11 +399,18 @@ func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, 
 	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report", coord.ErrRunFinished)
 }
 
-// ReportWaiting records that the agent waits on its own agents like
-// ReportBlocked: at its turn end the run shows the summary as waiting-agents
-// rather than idle.
-func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error {
-	return s.reportIdle(ctx, run, id, waitingReasonPrefix+summary, at, "waiting report", coord.ErrRunFinished)
+// ReportWaiting records what the agent waits for like ReportBlocked: at its
+// turn end the run shows the summary as waiting-agents, waiting-ci or
+// waiting-tools rather than waiting with no reason.
+func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, waitingFor, summary string, at time.Time) error {
+	prefix := waitingReasonPrefix
+	switch waitingFor {
+	case protocol.CoordWaitingForCI:
+		prefix = waitingCIReasonPrefix
+	case protocol.CoordWaitingForProcess:
+		prefix = waitingProcessReasonPrefix
+	}
+	return s.reportIdle(ctx, run, id, prefix+summary, at, "waiting report", coord.ErrRunFinished)
 }
 
 func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string, finished error) error {

@@ -15,6 +15,7 @@ import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { ChangesBar } from '@/routes/run/changes-bar'
+import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
@@ -416,6 +417,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
         </div>
       )}
       <ChangesBar run={run} />
+      <CompletionPrompt run={run} className={cn(sessionColumn, 'pb-2')} />
       <Composer run={run} agent={agent} room={room} textarea={textarea} autoFocus={focusComposer} onFocusChange={onComposing} dock={dock || undefined} onEscape={() => viewport.current?.focus()} />
       <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</span>
     </div>

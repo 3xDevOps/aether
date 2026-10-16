@@ -480,6 +480,13 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		p.Outcome != protocol.CoordOutcomeWaiting {
 		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", \"blocked\", \"needs-input\", or \"waiting\"")
 	}
+	switch {
+	case p.WaitingFor != "" && p.Outcome != protocol.CoordOutcomeWaiting:
+		return protocol.CoordReportResult{}, invalidParams(method, "waiting_for is only valid with the \"waiting\" outcome")
+	case p.WaitingFor != "" && p.WaitingFor != protocol.CoordWaitingForAgents &&
+		p.WaitingFor != protocol.CoordWaitingForCI && p.WaitingFor != protocol.CoordWaitingForProcess:
+		return protocol.CoordReportResult{}, invalidParams(method, "waiting_for must be \"agents\", \"ci\", or \"process\"")
+	}
 	if p.IdempotencyKey == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "idempotency_key is required")
 	}

@@ -62,7 +62,16 @@ func legalTransition(from, to domain.RunStatus) bool {
 const maxPublicRunStatusReason = 256
 
 func publicRunStatusReason(reason string) string {
-	reason = strings.TrimPrefix(strings.TrimSpace(reason), waitingReasonPrefix)
+	reason = strings.TrimSpace(reason)
+	for _, w := range waitingPrefixes {
+		if rest, ok := strings.CutPrefix(reason, w.prefix); ok {
+			reason = rest
+			break
+		}
+	}
+	if reason == agentstatus.ReasonIdle {
+		return turnEndedReason
+	}
 	if strings.HasPrefix(reason, needsInputReasonPrefix) {
 		// The agent's question, already bounded by its summary limit,
 		// shows whole.
@@ -317,6 +326,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	payload := events.RunStatusPayload{
 		From: from, To: to, Reason: public, Activity: activity, StatusSeq: stamp.StatusSeq,
 		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
+		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
 	if e := s.runs[run]; e != nil {
 		e.status, e.reason, e.activity = to, public, activity

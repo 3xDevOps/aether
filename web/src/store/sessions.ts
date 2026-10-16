@@ -408,7 +408,7 @@ function workRow(calls: { id: string; at: string; tool: AgentPayload }[], result
   return { kind: 'work', id: `work:${calls[0]!.id}`, at: calls[0]!.at, summary: workSummary(tools), entries }
 }
 
-interface TimelinePayload {
+export interface TimelinePayload {
   kind?: string
   message?: string
   outcome?: string

@@ -198,13 +198,13 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 		want, refuse                     []string
 	}{
 		{name: "ordinary", capabilities: reports,
-			want: []string{ordinaryOutcomes, "- needs-input: only", "never report waiting"}, refuse: []string{"- waiting:"}},
+			want: []string{ordinaryOutcomes, "- needs-input: only", "never report waiting", coordhooks.ReviewRule}, refuse: []string{"- waiting:"}},
 		{name: "enhanced", enhanced: "1", capabilities: reports,
 			want: []string{ordinaryOutcomes, "- needs-input: only", "- waiting: "}, refuse: []string{"never report waiting"}},
 		{name: "background", background: "1", capabilities: reports,
 			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
 		{name: "worker", role: "worker", enhanced: "1", capabilities: reports,
-			want: []string{workerOutcomes, "- needs-input: not for workers", "- waiting: "}},
+			want: []string{workerOutcomes, "- needs-input: not for workers", "- waiting: "}, refuse: []string{coordhooks.ReviewRule}},
 		{name: "background worker", role: "worker", background: "1", enhanced: "1", capabilities: reports,
 			want: []string{workerOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
 		{name: "integrator", role: "integrator", capabilities: reports,
@@ -429,6 +429,9 @@ func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 	if code, _ = runCLI(t, s.path, []string{"report", "--outcome", "needs-input", "--summary", "which region?", "--idempotency-key", "ask-user"}, ""); code != ExitOK {
 		t.Fatalf("needs-input report exit = %d, want %d", code, ExitOK)
 	}
+	if code, _ = runCLI(t, s.path, []string{"report", "waiting", "--for", "ci", "--summary", "CI on PR 12", "--idempotency-key", "wait-ci"}, ""); code != ExitOK {
+		t.Fatalf("waiting report exit = %d, want %d", code, ExitOK)
+	}
 	if code, _ = runCLI(t, s.path, []string{"send", "--to", "run-2", "--body", "retry", "--idempotency-key", "send-fixed"}, ""); code != ExitOK {
 		t.Fatalf("idempotent send retry exit = %d, want %d", code, ExitOK)
 	}
@@ -440,8 +443,15 @@ func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 			asked = p.Summary == "which region?" && p.IdempotencyKey == "ask-user"
 		}
 	}
-	if !asked {
-		t.Fatalf("no needs-input report reached the socket: %+v", seen)
+	var waited bool
+	for _, req := range seen {
+		var p protocol.CoordReportParams
+		if req.Method == protocol.MethodCoordReport && json.Unmarshal(req.Params, &p) == nil && p.Outcome == protocol.CoordOutcomeWaiting {
+			waited = p.WaitingFor == protocol.CoordWaitingForCI && p.Summary == "CI on PR 12"
+		}
+	}
+	if !asked || !waited {
+		t.Fatalf("no needs-input or waiting report reached the socket: %+v", seen)
 	}
 	var sends []protocol.CoordSendParams
 	for _, req := range seen {

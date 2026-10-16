@@ -21,6 +21,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
+const turnEnded = "turn ended without a report"
+
 // The status reporter's whole path, in a real container: the settings file
 // the server wrote into the run's coordination directory, the argument
 // pointing the harness at it, the staged binary executing
@@ -115,8 +117,8 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
+	if p := parked.Payload.(events.RunStatusPayload); p.Reason != turnEnded {
+		t.Fatalf("park reason = %q, want %q", p.Reason, turnEnded)
 	}
 	// The shipped threshold is ten minutes and this test's own budget is
 	// three, so anything that lands here was the agent talking.
@@ -167,8 +169,8 @@ func TestIntegrationAgentStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(piRun.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := piParked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("pi park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
+	if p := piParked.Payload.(events.RunStatusPayload); p.Reason != turnEnded {
+		t.Fatalf("pi park reason = %q, want %q", p.Reason, turnEnded)
 	}
 	if waited := time.Since(piStarted); waited > time.Minute {
 		t.Errorf("the pi run took %s to park; that is the silence heuristic, not the reporter", waited)
@@ -285,8 +287,8 @@ func TestIntegrationOpenCodeStatusReporterInContainer(t *testing.T) {
 		p, isStatus := ev.Payload.(events.RunStatusPayload)
 		return isStatus && ev.RunID == domain.RunID(run.ID) && p.To == domain.RunNeedsAttention
 	})
-	if p := parked.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
+	if p := parked.Payload.(events.RunStatusPayload); p.Reason != turnEnded {
+		t.Fatalf("park reason = %q, want %q", p.Reason, turnEnded)
 	}
 	if waited := time.Since(started); waited > time.Minute {
 		t.Errorf("the run took %s to park; that is the silence heuristic, not the reporter", waited)

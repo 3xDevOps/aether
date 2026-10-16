@@ -264,7 +264,7 @@ Use task propose --help or task revise --help for revision JSON and required fla
 Worker mutations use the mission authority on the run socket. Dispatch keys
 are explicit identities for retry-safe starts and retries.
 `,
-	"report": `usage: aether-internal report --outcome <success|failure|blocked|needs-input|waiting> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting> [--for <agents|ci|process>] (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
 Record your state. aether-internal skill lists which outcome your role reports
 when. Subagents and spawned workflows never report; they return their results
@@ -277,18 +277,19 @@ phase for Replace integrator. Interactive Standard/TUI and Enhanced/ACP runs,
 integrators included, stay open: end your turn and await follow-up; only an
 explicit user Close shuts the session. Background runs have one success or
 failure per launch; workers have one per attempt.
+` + coordhooks.ReviewRule + ` A worker's success goes to its integrator.
 Blocked is nonterminal and may repeat; its summary is the Needs you reason at
 turn end, not while input is open.
 Needs-input is nonterminal and takes no --evidence-ref: the summary is one
 specific question shown as the Needs you reason at turn end. End your turn
 after it; the reply arrives as your next prompt. Refused for Background runs
 and mission workers, who ask their integrator with ask.
-Waiting is nonterminal, takes no --evidence-ref and is allowed for every role:
-report it when you end your turn while awaiting subagents, workers, peers or
-tools, with what you wait on as the summary. Your next turn clears it. Only
-Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
-integrations are resumed by mail while idle; elsewhere, and in Background runs, wait inside your turn with
-inbox --wait 30 instead.
+Waiting is nonterminal, takes no --evidence-ref and is allowed for every role;
+the summary is what you wait on, and your next turn clears it. Report it when
+` + coordhooks.WaitingUse + `
+Only Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
+integrations are resumed by mail while idle; elsewhere, and in Background
+runs, wait inside your turn with inbox --wait 30 instead.
 Use a fresh idempotency key for each new report. Retry the same request with
 the same key; a superseded report's key conflicts.
 A summary file of "-" reads standard input.
@@ -806,13 +807,24 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 func report(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordReportResult, error) {
 	fs := newFlags("report")
 	outcome := fs.String("outcome", "", "success, failure, blocked, needs-input or waiting")
+	waitingFor := fs.String("for", "", "with waiting: agents, ci or process")
 	summary := fs.String("summary", "", "bounded outcome summary")
 	summaryFile := fs.String("summary-file", "", "read summary from a file, or - for stdin")
 	key := fs.String("idempotency-key", "", "stable key used to replay this mutation")
 	refs := stringList{}
 	fs.Var(&refs, "evidence-ref", "evidence reference (repeatable)")
+	positional := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		positional, args = args[0], args[1:]
+	}
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordReportResult{}, err
+	}
+	switch {
+	case positional != "" && *outcome != "":
+		return protocol.CoordReportResult{}, usageError("report: give the outcome once, as --outcome or the first argument")
+	case positional != "":
+		*outcome = positional
 	}
 	if *summary == "" && fs.NArg() > 0 {
 		*summary = strings.Join(fs.Args(), " ")
@@ -825,7 +837,7 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	if err != nil {
 		return protocol.CoordReportResult{}, err
 	}
-	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey}
+	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey, WaitingFor: *waitingFor}
 	var out protocol.CoordReportResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
 		return out, err

@@ -112,12 +112,26 @@ type RunActivity string
 const (
 	ActivityWorking       RunActivity = "working"
 	ActivityWaitingAgents RunActivity = "waiting-agents"
+	ActivityWaitingCI     RunActivity = "waiting-ci"
 	ActivityWaitingTools  RunActivity = "waiting-tools"
+	ActivityWaiting       RunActivity = "waiting"
 	ActivityNeedsYou      RunActivity = "needs-you"
-	ActivityIdle          RunActivity = "idle"
 	ActivityFinished      RunActivity = "finished"
 	ActivityFailed        RunActivity = "failed"
 	ActivityDisconnected  RunActivity = "disconnected"
+	// ActivityIdle is what rows and events written before waiting existed
+	// carry; it means waiting.
+	ActivityIdle RunActivity = "idle"
+)
+
+// RunReview is whether the run's owner has dealt with the success its agent
+// reported: empty when no success awaits them.
+type RunReview string
+
+const (
+	ReviewReady    RunReview = "ready"
+	ReviewLater    RunReview = "later"
+	ReviewAccepted RunReview = "accepted"
 )
 
 // BlockedReasonPrefix starts the reason of a run whose agent reported
@@ -127,15 +141,20 @@ const BlockedReasonPrefix = "blocked: "
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether runs --needs-you and
 // the dashboard's Needs you list share: a live run with an open human
-// request, a disconnected agent, or a failure nobody has seen. A paused run
-// never does. A swarm worker's integrator answers for it, so a worker needs
-// a member only while it reports itself blocked.
+// request, a disconnected agent, or a failure nobody has seen, or a reported
+// success awaiting review. A paused run never does. A swarm worker's
+// integrator answers for it, so a worker needs a member only while it
+// reports itself blocked.
 func (r *Run) NeedsAttention(paused bool) bool {
 	switch {
-	case paused || !r.Status.Live():
+	case paused:
 		return false
 	case r.MissionRole == "worker":
-		return r.Activity == ActivityNeedsYou && strings.HasPrefix(r.Reason, BlockedReasonPrefix)
+		return r.Status.Live() && r.Activity == ActivityNeedsYou && strings.HasPrefix(r.Reason, BlockedReasonPrefix)
+	case r.Review == ReviewReady && (r.Status.Live() || r.Status == RunCompleted):
+		return true
+	case !r.Status.Live():
+		return false
 	case r.Activity == ActivityNeedsYou, r.Activity == ActivityDisconnected:
 		return true
 	}
@@ -144,11 +163,15 @@ func (r *Run) NeedsAttention(paused bool) bool {
 
 // NeedKey identifies the standing the run is in: its status, state and
 // reason, and when it entered them. Opening the run keeps it, so a need is
-// announced once.
+// announced once. Each success ready for review is its own standing, so one
+// reported again after a later is announced again.
 func (r *Run) NeedKey() string {
 	changed := ""
 	if r.StatusChangedAt != nil {
 		changed = strconv.FormatInt(r.StatusChangedAt.UnixNano(), 10)
+	}
+	if r.Review == ReviewReady && r.ReviewChangedAt != nil {
+		changed += "|" + strconv.FormatInt(r.ReviewChangedAt.UnixNano(), 10)
 	}
 	return string(r.Status) + "|" + string(r.Activity) + "|" + r.Reason + "|" + changed
 }
@@ -697,7 +720,11 @@ type Run struct {
 	// reported outcome. A member who closes or kills a run has opened it.
 	// A same-status relabel keeps it.
 	FinishUnopened bool
-	CreatedAt      time.Time
+	// Review is whether the owner dealt with the success the agent reported;
+	// ReviewChangedAt is when it last changed, nil while it never has.
+	Review          RunReview
+	ReviewChangedAt *time.Time
+	CreatedAt       time.Time
 	// StartedAt is when the run entered running; nil while queued or
 	// provisioning.
 	StartedAt *time.Time

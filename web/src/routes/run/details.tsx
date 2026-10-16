@@ -16,6 +16,7 @@ import { formatBytes } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
+import { stateTone } from '@/lib/status'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -220,6 +221,7 @@ function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunVie
   if (!waiting) return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
   return (
     <RequestCard
+      tone={stateTone[presented.state]}
       title={presented.reason}
       actions={primary && <Button size="sm" variant="secondary" onClick={primary.act}>{primary.label}</Button>}
     />

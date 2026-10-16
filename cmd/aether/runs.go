@@ -28,7 +28,7 @@ func init() {
 func needsYou(r protocol.Run) bool {
 	run := domain.Run{
 		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
-		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole,
+		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole, Review: domain.RunReview(r.Review),
 	}
 	return run.NeedsAttention(r.Paused)
 }
@@ -73,21 +73,53 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 	return tw.Flush()
 }
 
-// displayStatus is a live run's state, else its status. A result parked for
-// review is marked open, unlike the terminal status of the same name.
+// displayStatus is the dashboard's label for a live run's state, else for
+// its status. A reported success awaiting review is Ready for review, live or
+// completed.
 func displayStatus(r protocol.Run) string {
-	switch domain.RunActivity(r.Activity) {
-	case "":
-		return r.Status
-	case domain.ActivityFailed, domain.ActivityFinished:
-		return r.Activity + " (open)"
+	review := domain.RunReview(r.Review)
+	if review == domain.ReviewReady || review == domain.ReviewLater {
+		if r.Activity == string(domain.ActivityFinished) || r.Status == string(domain.RunCompleted) {
+			return "Ready for review"
+		}
 	}
-	return r.Activity
+	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
+		return label
+	}
+	if label, ok := statusLabels[domain.RunStatus(r.Status)]; ok {
+		return label
+	}
+	return r.Status
+}
+
+var activityLabels = map[domain.RunActivity]string{
+	domain.ActivityWorking:       "Working",
+	domain.ActivityWaitingAgents: "Waiting for agents",
+	domain.ActivityWaitingCI:     "Waiting for CI",
+	domain.ActivityWaitingTools:  "Waiting for process",
+	domain.ActivityWaiting:       "Waiting",
+	domain.ActivityIdle:          "Waiting",
+	domain.ActivityNeedsYou:      "Needs you",
+	domain.ActivityFinished:      "Finished",
+	domain.ActivityFailed:        "Failed",
+	domain.ActivityDisconnected:  "Disconnected",
+}
+
+var statusLabels = map[domain.RunStatus]string{
+	domain.RunQueued:         "Queued",
+	domain.RunProvisioning:   "Provisioning",
+	domain.RunRunning:        "Running",
+	domain.RunNeedsAttention: "Needs attention",
+	domain.RunCompleted:      "Completed",
+	domain.RunMerged:         "Merged",
+	domain.RunAbandoned:      "Closed",
+	domain.RunFailed:         "Failed",
+	domain.RunInterrupted:    "Interrupted",
 }
 
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, or an unseen failure; never paused, and a swarm worker only when blocked)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, an unseen failure, or a reported success ready for review; never paused, and a swarm worker only when blocked)")
 	archived := fs.Bool("archived", false, "list only archived runs")
 	if err := fs.Parse(args); err != nil {
 		return err

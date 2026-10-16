@@ -68,6 +68,7 @@ func reportSchema() (*jsonschema.Schema, error) {
 		"blocked: " + coordhooks.BlockedUse + " " +
 		"waiting: " + coordhooks.WaitingUse + " " +
 		"Which outcomes this run may use depends on its role and launch; the server refuses the others and your instructions list them."
+	schema.Properties["waiting_for"].Enum = []any{protocol.CoordWaitingForAgents, protocol.CoordWaitingForCI, protocol.CoordWaitingForProcess}
 	return schema, nil
 }
 
@@ -169,7 +170,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 		Description: coordhooks.SubagentRule + " " +
 			"Records this run's state: success, failure, blocked, needs-input or waiting. Never report while still working. " +
 			"needs-input is only for a question a human must answer: the summary is that question, shown as the Needs you reason at turn end; end your turn after it. It takes no evidence_refs and is refused for Background runs and mission workers, who ask their integrator with aether_ask. " +
-			"waiting marks a turn you end while awaiting subagents, workers, peers or tools; the next turn clears it. It takes no evidence_refs. " +
+			"waiting means " + coordhooks.WaitingUse + " The next turn clears it. It takes no evidence_refs. " +
 			"success and failure end the work you own: a worker's success submits its attempt and stops it, an integrator's completes the mission, a Background run has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
 			"The shell command `aether-internal skill` lists your role's rules. An explicit stable idempotency_key is required; the server captures evidence before accepting it.",

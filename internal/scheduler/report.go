@@ -14,6 +14,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
+// reportWait bounds how long a report waits for its run to leave
+// provisioning.
+const reportWait = 30 * time.Second
+
+var errProvisioning = errors.New("the run is still provisioning")
+
 // ReportAgentState accepts execution and correlated input independently. An
 // input-only report preserves the last execution report, including an idle hold.
 // Sidecar persistence precedes any observable change; no input delta is saved as
@@ -22,15 +28,28 @@ import (
 // Interactive outcomes share blocked reports' nonterminal park: only a real
 // turn end with no pending input shows the reason, and only Working after
 // that park clears it. Background outcomes instead start their terminal finish.
+//
+// The agent starts before its launch marks the run running, so a report that
+// arrives while the run is provisioning waits for that, up to reportWait.
 func (s *Scheduler) ReportAgentState(ctx context.Context, run domain.RunID, report agentstatus.Report) error {
 	if report.UsageLimit && s.continueTerminalRun(ctx, run, report) {
 		return nil
 	}
-	newSession, err := s.applyAgentReport(ctx, run, report)
-	if newSession != nil {
-		s.recordAgentSession(ctx, newSession)
+	deadline := time.Now().Add(reportWait)
+	for {
+		newSession, err := s.applyAgentReport(ctx, run, report)
+		if newSession != nil {
+			s.recordAgentSession(ctx, newSession)
+		}
+		if !errors.Is(err, errProvisioning) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	return err
 }
 
 // recordAgentSession stores the run's latest reported session. sessionMu
@@ -61,6 +80,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	entry := s.runs[run]
 	if entry == nil {
 		return nil, fmt.Errorf("scheduler: agent status report for %s: the run has no live container", run)
+	}
+	if entry.status == domain.RunProvisioning {
+		return nil, fmt.Errorf("scheduler: agent status report for %s: %w", run, errProvisioning)
 	}
 	if (entry.status != domain.RunRunning && entry.status != domain.RunNeedsAttention) ||
 		entry.exitObserved || entry.finalizing || entry.retained || entry.destroyPending {

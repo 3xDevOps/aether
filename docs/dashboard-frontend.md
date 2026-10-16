@@ -1321,9 +1321,12 @@ A run shows one state and one plain-words reason line, derived in
 `state` field: the scheduler derives it, so the dashboard never infers a wait
 from a reason string. A live run or stored `run.status` event from before the
 server derived one has no `state`, and a newer server may send a `state`
-this dashboard does not know; either reads **Running** or **Parked** from its
-wire status, with a neutral dot, never Working. The reason line is the server's `status_reason`
-(`reason` on the wire) in plain words, such as "waiting on 3 workers".
+this dashboard does not know: a `running` one reads **Running** with a
+neutral dot, never Working, and a `needs-attention` one reads **Waiting**.
+The `idle` older servers wrote reads exactly as `waiting`; no surface says
+Idle. The reason line is the server's `status_reason` (`reason` on the
+wire) in plain words, such as an agent's waiting summary, "Turn ended
+without a report" or "No update for 12m"; the dashboard never invents one.
 Details lists the raw `reason` as **Last reason**.
 
 `stateLabel` and `stateTone` in `src/lib/status.ts` are the one mapping from
@@ -1331,38 +1334,69 @@ state to label, dot colour and dot shape; the sidebar, board, run header,
 run lists, swarm page, activity feed and palette all use it. Each state has
 its own dot shape and a text or `aria-label` label, so no state is told by
 colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
+Waiting states are a neutral, static glyph; Needs you is the only amber
+state.
 
-| State | Comes from | Group |
-| --- | --- | --- |
-| Working | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
-| Waiting on agents | `waiting-agents`: held background subagents or workflows, an integrator with live workers or unread worker mail, or a `waiting` report | Working |
-| Waiting on tools | `waiting-tools`: a tool the agent waits on, such as Claude's Monitor | Working |
-| Needs you | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Idle | `idle`: the turn ended with nothing open, a stall included | Working |
-| Finished | `finished` (an interactive success parked for review), or `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
-| Failed | `failed` (an interactive failure parked for review, or a turn that failed), or `failed`, `interrupted` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
-| Disconnected | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
-| Paused | a live run paused by a member | Working |
+`stateTitle` builds the tooltip each surface puts on a state: "*Label*
+since *relative* — *reason*. *What happens next*", for example "Waiting
+since 5 minutes ago — Turn ended without a report. Send a message to
+continue." A board card reads *Label* · *reason* outside Needs you, where
+the reason alone leads. `stateDetail` drops a reason that only restates the
+label. The run header's state line reads *Label* · *elapsed* · *reason*; its label sits in a `role=status` element, so a screen reader
+hears only a change of state, and the elapsed time is the first part to go
+on a narrow header. While a run waits for agents, the header counts the
+Enhanced session's running subagents, "2 subagents running".
+
+| State | Dot | Comes from | Group |
+| --- | --- | --- | --- |
+| Working | filled circle, pulses | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
+| Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
+| Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
+| Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
+| Waiting | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale | Working |
+| Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
+| Ready for review | filled accent circle with a check | `finished` (a reported success on a live run), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
+| Completed / Merged | check | `completed`, `merged` | Finished |
+| Closed | ring with a bar | `abandoned` ("Closed without merging") | Finished |
+| Failed | cross | `failed` (an interactive failure parked for review, or a turn that failed), or `failed` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
+| Interrupted | ring with an exclamation mark | `interrupted` | Finished |
+| Disconnected | broken ring, neutral | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
+| Paused | bars | a live run paused by a member | Working |
+
+The sidebar and run list show Ready for review as its own quiet group
+between Working and Finished; the board lists it at the head of Finished.
 
 Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
 
 **`status_seq`** increments on every change of a run's status, state,
-reason or outcome flags. `applyRunStatus` in `src/store/runs.ts` drops a
+reason, outcome flags or `review`. `applyRunStatus` in `src/store/runs.ts` drops a
 `run.status` event whose `status_seq` is not greater than the one it holds,
 and `toRecord` keeps every field such an event set (status, reason, state,
-`status_seq`, `outcome_unseen`, `finish_unopened`, `finished_at`) when a
+`status_seq`, `outcome_unseen`, `finish_unopened`, `review`,
+`review_changed_at`, `finished_at`) when a
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
 run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
 `finish_unopened` again once `run.outcome_seen` or opening the run cleared it.
-A kill's prediction clears `state` with the status.
+A kill's prediction clears `state` with the status. `applyRunReview` applies
+a `run.review` event under the same `status_seq` rule.
+
+**Review** is the owner's answer to a reported success
+([failure-handling.md](failure-handling.md#review)). `run.review` with
+`action` `complete` closes a live run as `completed` (or records it on a
+`completed` run) and sets `review` to `accepted`; `later` sets it to `later`
+and leaves the run where it is. Both return `{"run": Run}` and need the same
+permission as `run.close`; a live swarm worker is refused.
 
 The Needs you group, its counts and badges follow the run-state attention
 rule push notifications, assistant follow and `aether runs --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
-`disconnected`, or `failed` while `outcome_unseen`. Finished, Idle, Waiting
-and Working never count. The request rows below need a live, unpaused run
+`disconnected`, or `failed` while `outcome_unseen`, and a reported success,
+live or `completed` and not a swarm worker's, whose `review` is `ready`. Waiting, every Waiting for
+state, Working, a `review` of `later` or `accepted`, and a finished run
+never count. The sidebar's Needs you count, the workspace badges and the
+list's Needs you rows come from the same `runRows`, so they always agree. The request rows below need a live, unpaused run
 too; only the two swarm rows, an open swarm question and a stopped
 integrator, hold whatever the integrator run's status, paused included.
 Needs you means the viewer can resolve it.
@@ -1389,6 +1423,7 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
+| `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
@@ -1421,10 +1456,10 @@ counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
 
 A condition that applies to someone else leaves the run in Working with
-"Waiting for Alice", labelled Idle when the run needs its owner. A swarm
+"Waiting for Alice", labelled Waiting when the run needs its owner. A swarm
 worker counts only for a blocked report, as in push, or a control hold: its
 integrator handles its other requests, so a worker in `needs-you` reads
-Waiting on agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
+Waiting for agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
 Background (`headless`) run follows its `state` like any run; the server
@@ -1487,10 +1522,30 @@ An answer is not ordered against the event stream, so one that a newer
 `run.status` event for the run overtook is dropped and the run is asked about
 again.
 
-A reported success presents **Finished** in Finished whether or not the
-flag is set; a reported failure stays a **Failed** row in Needs you until its
-owner opens the run, the next turn or Close. A run that has ended is never in
-Needs you: an unreviewed one keeps its unopened marker in Finished.
+A reported success presents **Ready for review** whether or not the flag is
+set; a reported failure stays a **Failed** row in Needs you until its owner
+opens the run, the next turn or Close. A run that has ended is in Needs you
+only while its `review` is `ready`; any other keeps its unopened marker in
+Finished.
+
+**Completion review** is the owner's answer to a reported success, held by
+the server as the run's `review` (`""`, `ready`, `later`, `accepted`) and
+`review_changed_at`. A success report sets `ready`; opening the run does not
+change it, so the run stays in Needs you. While the open run is `ready`,
+`CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
+callout above the Session composer, or at the foot of any other run view:
+"Your agent reports this task is
+finished. Mark it complete?", the summary of the run's latest success
+report when its agent messages are loaded, **Mark complete** and **Not
+yet**. Both are run commands
+(`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**
+sends `run.review {action: "complete"}` and predicts `review` `accepted`
+and, for a live run, status `completed`; **Not yet** sends `action:
+"later"` and predicts `later`. A refusal puts the callout back and toasts the
+server's error. After Not yet the callout stays hidden until a new success
+report sets `ready` again, and **Mark complete** stays in the run's actions
+menu and the palette for any run that reads Ready for review. Both need the
+gateway's `run.review` method and the kill permission.
 An interactive run still accepts messages and terminal input; the reason
 line says it remains open for follow-up. Its next working turn returns it
 to Working. Archive eligibility and input gates use the wire status, not
@@ -2073,7 +2128,7 @@ session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
 `finished`, and while the run works with no pending input a `live` row (the
 run's `toolActivity`, "Reading src/billing.js", else its state label such as
-"Working" or "Waiting on agents", with that state's dot, which pulses only
+"Working" or "Waiting for agents", with that state's dot, which pulses only
 while Working) and a
 `terminal-note` row, **Live detail is in the Terminal.** with **Open
 terminal**. An "Agent report" event is dropped while the report's agent
@@ -3867,7 +3922,7 @@ questions and queued messages stay contextual to their run, in its Details
   a run belongs to exactly one workspace.
 - **A feed row is a sentence.** `src/components/event-words.tsx` words
   every event type the server declares: "You messaged the agent: “…”",
-  "Needs you: agent idle", "Alice approved “Bash: rm -rf build”", "Failed:
+  "Waiting: turn ended without a report", "Alice approved “Bash: rm -rf build”", "Failed:
   Agent exited with code 1". The viewer is "You", server reasons go through
   `plainReason` (`src/lib/status.ts`), and room ids, run ids and wire enums
   never appear outside Raw events. Its table is keyed by `src/lib/events.ts`'s
@@ -5031,10 +5086,13 @@ with `run.get` for its title, `paused`, `mission_role` and `member_id`, and
 announces only runs the signed-in member owns, as push does. When `run.get`
 fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
 words it as `internal/push/need.go` does. An event whose `status_seq` is not
-above the last one seen is ignored. `idle`, `waiting-*` and `working` never
-notify. A need counts toward the dock badge and its notification closes when
-the need ends, including on `run.outcome_seen` for an unseen failure. A
-finished result gets one silent, low-urgency notice outside the badge.
+above the last one seen is ignored. `waiting`, `waiting-*` and `working`
+never notify. A need counts toward the dock badge and its notification
+closes when the need ends, including on `run.outcome_seen` for an unseen
+failure and on a `run.review` event that sets `later` or `accepted`. A
+review `ready` gets one silent, low-urgency notice per entry into `ready`,
+counted in the badge; an unseen failure of a run that already ended gets
+one outside it.
 `cd desktop && node --test` runs `desktop/notify.test.js`; `make
 test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches
@@ -5847,9 +5905,11 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **Agent and state are separate.** The agent glyph says who is running;
   the state mark says what state. `StatusDot`
   (`src/components/ui/status-dot.tsx`) is the only run-state mark: one shape
-  and colour per state (filled circle Working, ring with a dot Waiting, ring
-  Needs you, ring with a bar Idle, check Finished, cross Failed, broken ring
-  Disconnected, bars Paused), named by the state word where it stands alone.
+  and colour per state (filled circle Working, clock Waiting for, dashed ring
+  Waiting, amber ring Needs you, filled accent check Ready for review, check
+  Completed, ring with a bar Closed, cross Failed, ring with an exclamation
+  mark Interrupted, broken ring Disconnected, bars Paused), named by the state
+  word where it stands alone.
   `StateLine` pairs it with the reason, as on board cards. The states are
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All

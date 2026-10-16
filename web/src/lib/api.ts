@@ -690,6 +690,8 @@ export const api = {
     call<{ run: Run }>('run.mode.switch', { run_id: runID, mode, ...lease }).then((r) => r.run),
   runClose: (runID: string, outcome: 'merged' | 'abandoned') =>
     call<{ run: Run }>('run.close', { run_id: runID, outcome }).then((r) => r.run),
+  runReview: (runID: string, action: 'complete' | 'later') =>
+    call<{ run: Run }>('run.review', { run_id: runID, action }).then((r) => r.run),
   runHandoff: (runID: string, toMemberID: string) =>
     call<unknown>('run.handoff', { run_id: runID, to_member_id: toMemberID }),
   runRoomList: (params: {

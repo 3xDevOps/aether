@@ -47,6 +47,8 @@ const (
 	// TypeRunFinishOpened signals that a member opened a finished run,
 	// clearing finish_unopened and leaving outcome_unseen as it was.
 	TypeRunFinishOpened Type = "run.finish_opened"
+	// TypeRunReview carries a run's review after run.review changed it.
+	TypeRunReview Type = "run.review"
 	// TypeRunDiff carries a periodic diff snapshot of a run's worktree.
 	TypeRunDiff Type = "run.diff"
 	// TypeRunCost carries token usage and cost attribution for a run.
@@ -129,6 +131,9 @@ type RunStatusPayload struct {
 	// one it holds; an event stored before status_seq existed carries 0.
 	Activity  domain.RunActivity `json:"state,omitempty"`
 	StatusSeq int64              `json:"status_seq"`
+	// Review and ReviewChangedAt are the run's after this transition.
+	Review          domain.RunReview `json:"review,omitempty"`
+	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`
 }
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields
@@ -242,6 +247,18 @@ type RunFinishOpenedPayload struct{}
 func (RunFinishOpenedPayload) EventType() Type { return TypeRunFinishOpened }
 
 func init() { registerPayload[RunFinishOpenedPayload](TypeRunFinishOpened) }
+
+// RunReviewPayload is a run's review after run.review changed it. A client
+// applies it under the same status_seq rule as RunStatusPayload.
+type RunReviewPayload struct {
+	Review          domain.RunReview `json:"review"`
+	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`
+	StatusSeq       int64            `json:"status_seq"`
+}
+
+func (RunReviewPayload) EventType() Type { return TypeRunReview }
+
+func init() { registerPayload[RunReviewPayload](TypeRunReview) }
 
 func (RunStatusPayload) EventType() Type { return TypeRunStatus }
 

@@ -132,6 +132,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		baseCheckedAt         *int64
 		archivedAt            *int64
 		statusChangedAt       *int64
+		reviewChangedAt       *int64
 		oldestUnacked         *int64
 		fallbackOrder         string
 	)
@@ -139,7 +140,8 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.Mode, &r.Status, &r.Reason, &r.Activity, &r.StatusSeq, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
-		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt, &r.ACP,
+		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
+		&r.Review, &reviewChangedAt, &r.ACP,
 		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
@@ -159,14 +161,15 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 	}
 	r.ArchivedAt = decodeTimePtr(archivedAt)
 	r.StatusChangedAt = decodeTimePtr(statusChangedAt)
+	r.ReviewChangedAt = decodeTimePtr(reviewChangedAt)
 	return &r, nil
 }
 
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
-	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at, runs.acp,
-	COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model`
+	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -296,9 +299,9 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 // never writes archived_at, outcome_unseen or finish_unopened directly; a
 // changed status or needs-attention reason clears outcome_unseen and sets
 // finish_unopened to whether the new status is terminal, as UpdateRunStatus
-// does. That same change is the only one that writes status_changed_at, from
-// the snapshot, so a caller that moves the status sets it and a rollback
-// restores it. Activity is written only on a live status, and status_seq
+// does. That same change is the only one that writes status_changed_at,
+// review and review_changed_at, from the snapshot, so a caller that moves the
+// status sets them and a rollback restores them. Activity is written only on a live status, and status_seq
 // increases when status, reason or activity changes; r.StatusSeq is set to
 // the stored value.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
@@ -325,6 +328,10 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	statusChangedAt, err := encodeTimePtr(r.StatusChangedAt)
 	if err != nil {
 		return fmt.Errorf("store: update run: status changed at: %w", err)
+	}
+	reviewChangedAt, err := encodeTimePtr(r.ReviewChangedAt)
+	if err != nil {
+		return fmt.Errorf("store: update run: review changed at: %w", err)
 	}
 	activity := r.Activity
 	if !r.Status.Live() {
@@ -356,7 +363,9 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		     status_seq = status_seq + CASE WHEN status = ? AND reason = ? AND activity = ? THEN 0 ELSE 1 END,
 		     outcome_unseen = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
 		     finish_unopened = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
-		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
+		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END,
+		     review_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review_changed_at ELSE ? END,
+		     review = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review ELSE ? END
 		 WHERE id = ? RETURNING status_seq`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
@@ -364,7 +373,8 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, activity,
 		r.Status, r.Reason, activity, r.Status, r.Reason,
 		r.Status, r.Reason, r.Status.Terminal(),
-		r.Status, r.Reason, statusChangedAt, r.ID,
+		r.Status, r.Reason, statusChangedAt,
+		r.Status, r.Reason, reviewChangedAt, r.Status, r.Reason, r.Review, r.ID,
 	).Scan(&r.StatusSeq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -511,18 +521,31 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	if err = recordTransition(ctx, tx, id, status, reason, activity, changed, changed); err != nil {
 		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
-	var stamp RunStatusStamp
+	// A write that keeps the run's standing keeps its review, so a replayed
+	// report cannot re-arm one the owner already put off or accepted. A
+	// success reported over an exit's reason on the same terminal status is
+	// new, so it asks for review.
+	const review = `(CASE WHEN ? AND review = '' AND reason <> ? THEN 'ready' WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review WHEN ? THEN 'ready' ELSE '' END)`
+	success := reported && (activity == domain.ActivityFinished || status == domain.RunCompleted)
+	var (
+		stamp           RunStatusStamp
+		reviewChangedAt *int64
+	)
 	err = tx.QueryRowContext(ctx,
 		`UPDATE runs SET status = ?, reason = ?, activity = ?, status_seq = status_seq + 1,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
 		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
 		     finish_unopened = CASE WHEN ? THEN 1 WHEN ? THEN 0 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
-		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
-		 WHERE id = ? RETURNING status_seq, outcome_unseen, finish_unopened`,
+		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END,
+		     review_changed_at = CASE WHEN `+review+` = review THEN review_changed_at ELSE ? END,
+		     review = `+review+`
+		 WHERE id = ? RETURNING status_seq, outcome_unseen, finish_unopened, review, review_changed_at`,
 		status, reason, activity, started, finished, reported, status, reason,
 		reported, byMember, status, reason, status.Terminal(),
-		status, reason, changed, id).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened)
+		status, reason, changed,
+		success, reason, status, reason, success, changed,
+		success, reason, status, reason, success, id).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened, &stamp.Review, &reviewChangedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return RunStatusStamp{}, ErrNotFound
@@ -532,15 +555,51 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	if err := tx.Commit(); err != nil {
 		return RunStatusStamp{}, fmt.Errorf("store: update run status: commit: %w", err)
 	}
+	stamp.ReviewChangedAt = decodeTimePtr(reviewChangedAt)
 	return stamp, nil
 }
 
-// RunStatusStamp is a run's status_seq and outcome flags as a status write
-// left them, for the event that announces the write.
+// RunStatusStamp is a run's status_seq, outcome flags and review as a status
+// write left them, for the event that announces the write.
 type RunStatusStamp struct {
-	StatusSeq      int64
-	OutcomeUnseen  bool
-	FinishUnopened bool
+	StatusSeq       int64
+	OutcomeUnseen   bool
+	FinishUnopened  bool
+	Review          domain.RunReview
+	ReviewChangedAt *time.Time
+}
+
+// SetRunReview moves the run's review to review when it is one of from. The
+// reported bool is whether this call changed it; false with a nil error also
+// covers a run that does not exist.
+func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.RunReview, from ...domain.RunReview) (RunStatusStamp, bool, error) {
+	changed, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return RunStatusStamp{}, false, fmt.Errorf("store: set run review: %w", err)
+	}
+	args := []any{review, changed, id}
+	marks := make([]string, len(from))
+	for i, f := range from {
+		marks[i] = "?"
+		args = append(args, f)
+	}
+	var (
+		stamp RunStatusStamp
+		at    *int64
+	)
+	err = d.db.QueryRowContext(ctx,
+		`UPDATE runs SET review = ?, review_changed_at = ?, status_seq = status_seq + 1
+		 WHERE id = ? AND review IN (`+strings.Join(marks, ", ")+`)
+		 RETURNING status_seq, outcome_unseen, finish_unopened, review, review_changed_at`, args...,
+	).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened, &stamp.Review, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RunStatusStamp{}, false, nil
+	}
+	if err != nil {
+		return RunStatusStamp{}, false, fmt.Errorf("store: set run review: %w", err)
+	}
+	stamp.ReviewChangedAt = decodeTimePtr(at)
+	return stamp, true, nil
 }
 
 // TransferRun reassigns a run's owner. Existence of the new owner is

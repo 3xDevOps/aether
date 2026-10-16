@@ -103,7 +103,7 @@ func TestNativeSilentWorkingHeartbeat(t *testing.T) {
 				want := domain.RunRunning
 				if checkpoint.Phase == "idle" || checkpoint.Phase == "late-message" {
 					want = domain.RunNeedsAttention
-					if stored.Reason != agentstatus.ReasonIdle {
+					if stored.Reason != turnEndedReason {
 						t.Fatalf("%s reason = %q, want genuine agent idle", checkpoint.Phase, stored.Reason)
 					}
 				}

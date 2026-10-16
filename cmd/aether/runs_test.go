@@ -18,6 +18,10 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r5", Status: "needs-attention", Activity: "needs-you", Reason: "needs input: which?", MissionRole: "worker", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Worker", Task: "task five"},
 		{ID: "r6", Status: "needs-attention", Activity: "failed", OutcomeUnseen: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Parked", Task: "task six"},
 		{ID: "r7", Status: "failed", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Ended", Task: "task seven"},
+		{ID: "r8", Status: "needs-attention", Activity: "finished", Review: "ready", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Done", Task: "task eight"},
+		{ID: "r9", Status: "completed", Review: "later", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Later", Task: "task nine"},
+		{ID: "r10", Status: "needs-attention", Activity: "waiting-ci", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "CI", Task: "task ten"},
+		{ID: "r11", Status: "needs-attention", Activity: "idle", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Legacy", Task: "task eleven"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -33,18 +37,22 @@ func TestRenderRuns(t *testing.T) {
 	}{
 		{
 			name: "default hides archived runs",
-			want: "ID  STATUS          AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
-				"r1  working         claude  m1      m1                            Title one  task one\n" +
-				"r2  needs-you       claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
-				"r4  waiting-agents  claude  m1      m1                            Integrate  task four\n" +
-				"r5  needs-you       claude  m1      m1                            Worker     task five\n" +
-				"r6  failed (open)   claude  m1      m1                            Parked     task six\n" +
-				"r7  failed          claude  m1      m1                            Ended      task seven\n",
+			want: "ID   STATUS              AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
+				"r1   Working             claude  m1      m1                            Title one  task one\n" +
+				"r2   Needs you           claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
+				"r4   Waiting for agents  claude  m1      m1                            Integrate  task four\n" +
+				"r5   Needs you           claude  m1      m1                            Worker     task five\n" +
+				"r6   Failed              claude  m1      m1                            Parked     task six\n" +
+				"r7   Failed              claude  m1      m1                            Ended      task seven\n" +
+				"r8   Ready for review    claude  m1      m1                            Done       task eight\n" +
+				"r9   Ready for review    claude  m1      m1                            Later      task nine\n" +
+				"r10  Waiting for CI      claude  m1      m1                            CI         task ten\n" +
+				"r11  Waiting             claude  m1      m1                            Legacy     task eleven\n",
 		},
 		{
-			name:     "--needs-you hides archived, waiting, worker and ended runs",
+			name:     "--needs-you hides archived, waiting, worker, ended and put off runs",
 			needsYou: true,
-			wantIDs:  []string{"r2", "r6"},
+			wantIDs:  []string{"r2", "r6", "r8"},
 		},
 		{
 			name:     "--archived shows only archived runs",

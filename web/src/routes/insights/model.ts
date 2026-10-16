@@ -1,4 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
+import { outcomeState, stateLabel, stateTone } from '@/lib/status'
 import type { InsightsBucket, InsightsResult, InsightsRun, InsightsTotals } from '@/lib/types'
 
 export type Period = '7d' | '30d' | '90d' | '12m'
@@ -119,20 +120,9 @@ export function chartSeries(result: InsightsResult, mobile: boolean): { series: 
 }
 
 export function outcome(run: Pick<InsightsRun, 'status' | 'reason'>): { label: string; tone: Tone } {
-  switch (run.status) {
-    case 'completed':
-      return { label: 'Completed', tone: 'done' }
-    case 'merged':
-      return { label: 'Merged', tone: 'done' }
-    case 'failed':
-      return { label: 'Failed', tone: 'failed' }
-    case 'interrupted':
-      return { label: 'Interrupted', tone: 'failed' }
-    case 'abandoned':
-      return { label: run.reason === 'killed' ? 'Killed' : 'Abandoned', tone: 'paused' }
-    default:
-      return { label: run.status, tone: 'neutral' }
-  }
+  const state = outcomeState(run.status)
+  if (!state) return { label: run.status, tone: 'neutral' }
+  return { label: run.status === 'abandoned' && run.reason === 'killed' ? 'Stopped' : stateLabel[state], tone: stateTone[state] }
 }
 
 export function agentLabel(harness: string, model: string, names: Record<string, string>): string {

@@ -87,11 +87,11 @@ func TestAgentWaitingParksAndResumes(t *testing.T) {
 		t.Fatalf("report waiting: %v", err)
 	}
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
-	if p := ev.Payload.(events.RunStatusPayload); p.From != domain.RunRunning || p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("park event = %+v, want running -> needs-attention because %q", p, agentstatus.ReasonIdle)
+	if p := ev.Payload.(events.RunStatusPayload); p.From != domain.RunRunning || p.Reason != turnEndedReason {
+		t.Fatalf("park event = %+v, want running -> needs-attention because %q", p, turnEndedReason)
 	}
-	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("stored reason = %q, want %q", r.Reason, agentstatus.ReasonIdle)
+	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != turnEndedReason {
+		t.Fatalf("stored reason = %q, want %q", r.Reason, turnEndedReason)
 	}
 
 	// A TUI repainting while the member types is output on the same stream
@@ -174,7 +174,7 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 	}
 	waitFor(t, "the stall reason to be replaced", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
-		return err == nil && r.Reason == agentstatus.ReasonIdle
+		return err == nil && r.Reason == turnEndedReason
 	})
 
 	// This harness has no reporter, so it can never say "working" again:
@@ -200,7 +200,7 @@ func TestAgentWaitingReplacesAStallReason(t *testing.T) {
 	}
 	waitFor(t, "the second stall reason to be replaced", func() bool {
 		r, err := e.db.GetRun(t.Context(), run.ID)
-		return err == nil && r.Reason == agentstatus.ReasonIdle
+		return err == nil && r.Reason == turnEndedReason
 	})
 }
 
@@ -366,8 +366,8 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
 		t.Fatalf("report waiting on a paused run: %v", err)
 	}
-	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("stored reason = %q, want %q", r.Reason, agentstatus.ReasonIdle)
+	if r := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); r.Reason != turnEndedReason {
+		t.Fatalf("stored reason = %q, want %q", r.Reason, turnEndedReason)
 	}
 	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -379,8 +379,8 @@ func TestAgentWaitingWhilePausedStillParks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("resumed run = %s because %q, want it still parked because %q", r.Status, r.Reason, agentstatus.ReasonIdle)
+	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
+		t.Fatalf("resumed run = %s because %q, want it still parked because %q", r.Status, r.Reason, turnEndedReason)
 	}
 }
 
@@ -415,8 +415,8 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 		t.Fatalf("report waiting: %v", err)
 	}
 	ev := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention)
-	if p := ev.Payload.(events.RunStatusPayload); p.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("park reason = %q, want %q", p.Reason, agentstatus.ReasonIdle)
+	if p := ev.Payload.(events.RunStatusPayload); p.Reason != turnEndedReason {
+		t.Fatalf("park reason = %q, want %q", p.Reason, turnEndedReason)
 	}
 
 	// The finished turn goes on painting after the report, and polls land
@@ -430,9 +430,9 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if r.Status != domain.RunNeedsAttention || r.Reason != agentstatus.ReasonIdle {
+	if r.Status != domain.RunNeedsAttention || r.Reason != turnEndedReason {
 		t.Fatalf("run = %s because %q, want it still parked because %q: the turn that ended is not the next one",
-			r.Status, r.Reason, agentstatus.ReasonIdle)
+			r.Status, r.Reason, turnEndedReason)
 	}
 
 	// An agent that is really talking again is still writing once the
