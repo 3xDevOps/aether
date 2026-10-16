@@ -70,6 +70,25 @@ func TestRestoredEnhancedRunKeepsItsRecordedMode(t *testing.T) {
 	}
 }
 
+func (w *acpWire) setMode(t *testing.T) []string {
+	t.Helper()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var modes []string
+	for line := range bytes.SplitSeq(w.data.Bytes(), []byte("\n")) {
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				ModeID string `json:"modeId"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(line, &request) == nil && request.Method == acp.AgentMethodSessionSetMode {
+			modes = append(modes, request.Params.ModeID)
+		}
+	}
+	return modes
+}
+
 func (w *acpWire) setOption(t *testing.T, configID string) []any {
 	t.Helper()
 	w.mu.Lock()
@@ -177,5 +196,42 @@ func TestComposerModelChoiceIsRecorded(t *testing.T) {
 		case <-timer.C:
 			t.Fatal("no run.model event")
 		}
+	}
+}
+
+func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	storeMemberDefinition(t, e, e.member.ID, harness.Definition{
+		Name:         "mycursor",
+		Executable:   "agent",
+		TUIArgs:      []string{"agent", "{task}"},
+		HeadlessArgs: []string{"agent", "-p", "{task}"},
+		ACPArgs:      []string{"agent", "acp"},
+		ACPMode:      "plan",
+	})
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchACP, "opus"); err != nil {
+		t.Fatalf("ValidateMissionLaunch of an Enhanced launch with a model: %v", err)
+	}
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "mycursor", domain.LaunchTUI, "opus"); err == nil {
+		t.Fatal("ValidateMissionLaunch accepted a Standard launch with a model for an agent with no model flag")
+	}
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "mycursor", domain.LaunchACP, domain.LaunchOptions{Model: "opus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	exec := rt.all()[0]
+	if !slices.Equal(exec.argv, []string{"agent", "acp"}) {
+		t.Fatalf("agent exec argv = %v, want [agent acp]", exec.argv)
+	}
+	if got := exec.wire.setMode(t); !slices.Equal(got, []string{"plan"}) {
+		t.Fatalf("session/set_mode sent %v, want [plan]", got)
+	}
+	if got := exec.wire.setOption(t, "model"); !slices.Equal(got, []any{"opus"}) {
+		t.Fatalf("model option set to %v, want [opus]", got)
+	}
+	if got := rt.byName(string(run.ID)).spec.Env["AETHER_HARNESS"]; got != "mycursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want the agent's name mycursor", got)
 	}
 }

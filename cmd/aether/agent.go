@@ -66,6 +66,8 @@ type agentAddOptions struct {
 	standard   string
 	background string
 	acp        string
+	acpMode    string
+	login      stringList
 	enhanced   bool
 }
 
@@ -75,12 +77,23 @@ func parseAgentAdd(args []string) (agentAddOptions, error) {
 	standard := fs.String("standard", "", "Standard mode command template")
 	background := fs.String("background", "", "Background mode command template")
 	acp := fs.String("acp", "", "Agent Client Protocol server command")
+	acpMode := fs.String("acp-mode", "", "ACP session mode an Enhanced run starts in")
+	var login stringList
+	fs.Var(&login, "login", "file whose presence shows the agent is logged in, such as ~/.cursor/auth.json (repeatable)")
 	enhanced := fs.Bool("enhanced", false, "also install the shipped agent's enhanced-mode adapter")
 	name, err := parseLeadingArg(fs, args)
 	if err != nil || name == "" {
-		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>]")
+		return agentAddOptions{}, fmt.Errorf("usage: aether agent add <name> [--enhanced] [--standard <argv>] [--background <argv>] [--acp <argv>] [--acp-mode <id>] [--login <path>]")
 	}
-	return agentAddOptions{name: name, standard: *standard, background: *background, acp: *acp, enhanced: *enhanced}, nil
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		for i, path := range login {
+			// The caller's shell expands ~ to its own home, which no run has.
+			if rest, ok := strings.CutPrefix(path, home+"/"); ok {
+				login[i] = "~/" + rest
+			}
+		}
+	}
+	return agentAddOptions{name: name, standard: *standard, background: *background, acp: *acp, acpMode: *acpMode, login: login, enhanced: *enhanced}, nil
 }
 
 // resolveAgentArgs turns flag values into argv templates. Shipped names send
@@ -97,7 +110,11 @@ func resolveAgentArgs(name, standardFlag, backgroundFlag string, shipped bool, p
 	}
 	resolve := func(flagValue, label, def string) ([]string, error) {
 		if flagValue != "" {
-			return strings.Fields(flagValue), nil
+			fields := strings.Fields(flagValue)
+			if len(fields) == 0 {
+				return nil, fmt.Errorf("--%s is blank", strings.ToLower(label))
+			}
+			return fields, nil
 		}
 		if lines != nil {
 			fmt.Fprintf(os.Stderr, "%s command [%s]: ", label, def)
@@ -114,7 +131,7 @@ func resolveAgentArgs(name, standardFlag, backgroundFlag string, shipped bool, p
 	if standard, err = resolve(standardFlag, "Standard", name+" {task}"); err != nil {
 		return nil, nil, err
 	}
-	if background, err = resolve(backgroundFlag, "Background", name+" -p {task}"); err != nil {
+	if background, err = resolve(backgroundFlag, "Background", standard[0]+" -p {task}"); err != nil {
 		return nil, nil, err
 	}
 	return standard, background, nil
@@ -166,11 +183,13 @@ func agentAdd(args []string) error {
 		var result protocol.AgentRegisterResult
 		if err := c.Call(protocol.MethodAgentRegister, protocol.AgentRegisterParams{
 			Definition: protocol.AgentDefinition{
-				Name:         opts.name,
-				Executable:   opts.name,
-				TUIArgs:      standardArgs,
-				HeadlessArgs: backgroundArgs,
-				ACPArgs:      strings.Fields(opts.acp),
+				Name:            opts.name,
+				Executable:      standardArgs[0],
+				TUIArgs:         standardArgs,
+				HeadlessArgs:    backgroundArgs,
+				ACPArgs:         strings.Fields(opts.acp),
+				ACPMode:         opts.acpMode,
+				CredentialPaths: opts.login,
 			},
 		}, &result); err != nil {
 			return err

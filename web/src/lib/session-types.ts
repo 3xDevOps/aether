@@ -162,6 +162,7 @@ export interface SessionState {
   steering?: boolean
   prompt_images: boolean
   auth_methods?: AuthMethod[]
+  agent_command?: string
   usage?: SessionUsage
 }
 

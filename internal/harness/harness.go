@@ -99,7 +99,10 @@ type Definition struct {
 	HeadlessArgs []string
 	// ACPArgs optionally serves the Agent Client Protocol; its first value
 	// may name a separate adapter executable.
-	ACPArgs         []string
+	ACPArgs []string
+	// ACPMode is the session mode a new enhanced session starts in; empty
+	// keeps the agent's default.
+	ACPMode         string
 	Executable      string
 	ProfileRoot     string
 	CredentialPaths []string
@@ -127,6 +130,14 @@ func (d Definition) Validate() error {
 		}
 		if err := validateArgv(d.ACPArgs, d.ACPArgs[0]); err != nil {
 			return fmt.Errorf("harness: acp argv: %w", err)
+		}
+	}
+	if d.ACPMode != "" {
+		if len(d.ACPArgs) == 0 {
+			return fmt.Errorf("harness: acp mode %q needs acp args", d.ACPMode)
+		}
+		if strings.ContainsAny(d.ACPMode, " \t\r\n") {
+			return fmt.Errorf("harness: acp mode %q must not contain whitespace", d.ACPMode)
 		}
 	}
 	if d.ProfileRoot != "" {
@@ -226,12 +237,15 @@ func (d Definition) Profile() Profile {
 		CredentialPaths: append([]string(nil), d.CredentialPaths...),
 		LocalRoot:       d.ProfileRoot,
 		DenyNames:       append([]string(nil), d.DenyNames...),
+		ACPMode:         d.ACPMode,
 	}
 	if registered, ok := profiles[d.Name]; ok {
 		p.EnvPassthrough = append([]string(nil), registered.EnvPassthrough...)
 		p.Env = maps.Clone(registered.Env)
 		p.PermissionEnv = maps.Clone(registered.PermissionEnv)
-		p.ACPMode = registered.ACPMode
+		if p.ACPMode == "" {
+			p.ACPMode = registered.ACPMode
+		}
 		p.ModelArgs = slices.Clone(registered.ModelArgs)
 		p.ModelEnv = maps.Clone(registered.ModelEnv)
 	}

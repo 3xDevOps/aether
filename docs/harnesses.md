@@ -160,7 +160,10 @@ package that drives the CLI. Aether pins one version of each, taken from the
 `internal/harness/acpregistry.json`, a snapshot of only the entries Aether
 uses. A custom definition is enhanced only when it names its ACP server's
 argv: `ACPArgs` in `--agent-definitions`, `acp_args` in `agent.register`, or
-`--acp` on `aether agent add`.
+`--acp` on `aether agent add`. `ACPMode` / `acp_mode` / `--acp-mode` names the
+session mode a new Enhanced session starts in. Set the mode that acts without
+asking: an agent left in its default mode asks before every tool, and a swarm
+worker waits on that prompt. It needs `ACPArgs` and holds no whitespace.
 
 An adapter installs into the member home like an npm agent:
 
@@ -1159,7 +1162,8 @@ default. Each agent's flags, read from its CLI help on 2026-10-11:
 | `pi` | `--model <pattern>` (`provider/id`, optional `:<thinking>`) | `model` option, else `session/set_model` |
 | `omp` | `--model=<value>` (fuzzy: `opus`, `gpt-5.2`, `openai/gpt-5.2`) | `omp acp` has no model flag; `model` option, else `session/set_model` |
 | `opencode` | `-m, --model provider/model` on `opencode` and `opencode run`, plus `model` in `OPENCODE_CONFIG_CONTENT` | `model` in `OPENCODE_CONFIG_CONTENT`, then the session option |
-| custom definition, `fake` | refused | refused |
+| custom definition | refused | `model` option, else `session/set_model` |
+| `fake` | refused | refused |
 
 The flag goes into argv before the task, so a CLI that stops parsing options
 at the prompt still reads it; a resume command has no task, so the flag is
@@ -1167,8 +1171,9 @@ appended. `opencode acp` has no model flag, so every `opencode` launch also
 gets `model` in `OPENCODE_CONFIG_CONTENT`, merged after the workspace's
 variables: a per-run model beats a workspace default. An Enhanced run sets
 the model over ACP after the session opens; see
-[Enhanced runs](enhanced-runs.md#launch-one). A custom definition or `fake`
-has no model flag, and a launch with a model is refused:
+[Enhanced runs](enhanced-runs.md#launch-one), for a custom definition too.
+A Standard or Background launch of a custom definition or `fake` has no model
+flag, and a launch with a model is refused:
 
 ```text
 scheduler: agent "custom" has no model flag; launch it without a model
@@ -1261,7 +1266,8 @@ Environment terminal opens with its login command typed (`claude` then
 `/login`, `codex login`, `pi` then `/login`, `omp`, `opencode auth login`).
 **Check** reads `agent.list` again and shows **Installed**, **Enhanced
 installed** and **Login found** or **No login found**, from `installed`,
-`enhanced_installed` and `login_found`. A gateway without `agent.install`
+`enhanced_installed` and `login_found`; a custom agent with no login path
+shows only **Installed**. A gateway without `agent.install`
 types the install command into the terminal instead. In the CLI, run:
 
 ```sh
@@ -1272,7 +1278,8 @@ Install the executable into `~/.local/bin`, complete the vendor login in that
 terminal, and return to the dashboard. The login and executable are in your
 member home, so every container for that member sees them. A member-defined
 name also records a launch definition under that member; **Add agent…**
-registers one with a Standard, a Background and an optional Enhanced command.
+registers one with a Standard, a Background and an optional Enhanced command,
+an optional Enhanced start mode and an optional login file.
 
 The Agents page shows **Installed** or **Not installed** and **Login found**
 or **No login found** for your account. These checks look for the executable
@@ -1433,7 +1440,9 @@ Custom launch definitions come from two places, resolved in this order:
    scoped to the registering member, over the normal control channel; no
    server restart. A member's definition shapes argv only inside that
    member's own containers and never affects anyone else. Shipped names and
-   the reserved names `custom` and `fake` cannot be registered.
+   the reserved names `custom` and `fake` cannot be registered. If a stored
+   row later shares a name with a shipped agent, `agent.list` skips the row
+   and a launch uses the shipped agent.
 
 A member's own definition runs only on that member's own account. On a
 shared account, only a shipped agent or a server-wide definition is
@@ -1441,6 +1450,20 @@ launched, and its `CredentialPaths` are the login paths the share mounts from
 the owner's home. A launch is refused when a credential path is the home
 itself. A definition declares no install directories, so a recipient without
 its executable borrows only the owner's `~/.local/bin` and `~/.local/lib`.
+
+The name need not equal the command. `aether agent add mycursor --standard
+"agent {task}"` registers `mycursor` with executable `agent`, the first word of
+the Standard command, and a Background default of `agent -p {task}`. The name
+is what you choose at launch and what coordination (`AETHER_HARNESS`, inbox
+hooks, swarm choices) keys on; the executable is what runs. Inbox hooks ship
+for a fixed set of names, so a differently named agent gets none and
+`aether-internal skill` says `no packaged integration`.
+
+`aether agent add` also takes `--acp-mode <id>` and a repeatable
+`--login <path>`, such as `--login ~/.cursor/auth.json`. A `~/` path is stored
+as `/root/...`; when your shell expands `~` first, the CLI turns a path under
+your local home back into `~/`. With a login path, `agent.list` reports
+`login_found`; without one, setup never shows the agent as logged in.
 
 Both forms carry the same fields and pass the same validation. The
 administrator JSON is an object keyed by agent name. Each definition must
@@ -1450,7 +1473,8 @@ is replaced as one argv value, never passed through a shell. Profile and
 credential paths are explicit absolute container paths under `/root` or
 `/home/aether`; credentials must be inside the profile root when one is
 configured. Deny names are basenames only. A definition under a name Aether
-does not ship has no model flag, so a launch of it with a model is refused.
+does not ship has no model flag, so a Standard or Background launch of it with
+a model is refused; an Enhanced launch sets the model over ACP.
 
 For example, an administrator can point `omp` at a different build for every
 member. A shipped name is the one case a member cannot register themselves,

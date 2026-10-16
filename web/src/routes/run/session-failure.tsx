@@ -100,7 +100,7 @@ function OpenInStandard({ run, switchable, nav }: { run: RunRecord; switchable: 
   )
 }
 
-function LoginActions({ run, methods, shells, nav }: { run: RunRecord; methods: AuthMethod[]; shells: RunShells; nav: RunNavigation }) {
+function LoginActions({ run, command, methods, shells, nav }: { run: RunRecord; command: string | undefined; methods: AuthMethod[]; shells: RunShells; nav: RunNavigation }) {
   const terminal = methods.filter((method) => method.type === 'terminal')
   const openShell = async (typed?: string) => {
     nav.go('terminal')
@@ -113,7 +113,7 @@ function LoginActions({ run, methods, shells, nav }: { run: RunRecord; methods: 
   return (
     <>
       {terminal.map((method) => (
-        <Button key={method.id} size="sm" onClick={() => void openShell([run.harness, ...(method.args ?? [])].join(' '))}>
+        <Button key={method.id} size="sm" onClick={() => void openShell(command && [command, ...(method.args ?? [])].join(' '))}>
           {method.name}
         </Button>
       ))}
@@ -141,7 +141,7 @@ export function SessionFailureCallout({ run, session, switchable, shells, nav }:
       <Callout
         tone="needs-you"
         title="The agent is not signed in"
-        actions={<LoginActions run={run} methods={methods} shells={shells} nav={nav} />}
+        actions={<LoginActions run={run} command={session?.state?.agent_command} methods={methods} shells={shells} nav={nav} />}
       >
         <p>{label ? `${label}. ` : ''}Log the agent in from a terminal in this run, then send your message again.</p>
         {methods.length > 0 && (

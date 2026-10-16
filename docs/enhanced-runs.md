@@ -18,7 +18,7 @@ run.
 | `pi` | adapter `pi-acp` | nothing: pi never asks |
 | `omp` | `omp acp --auto-approve` | the `--auto-approve` flag |
 | `opencode` | `opencode acp` | `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT` |
-| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | whatever the definition passes |
+| custom | the definition's `ACPArgs` / `acp_args` / `--acp` | the session mode in `ACPMode` / `acp_mode` / `--acp-mode`, else whatever the definition passes |
 
 Like Standard, an Enhanced run acts without asking by default. The session
 mode stays yours to change in the run.
@@ -78,7 +78,7 @@ An agent with no ACP command is refused:
 scheduler: harness "custom" has no command for mode "acp"
 ```
 
-`--model` is set over ACP after the session opens, through the agent's
+`--model` is set over ACP after the session opens, for a custom agent too, through the agent's
 native `model` config option when it advertises one, else
 `session/set_model` ([per-agent flags](harnesses.md#launch-argv)). If the
 agent rejects it, the Session view shows a **Model not set** error notice

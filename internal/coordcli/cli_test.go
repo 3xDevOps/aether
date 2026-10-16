@@ -650,3 +650,27 @@ func TestCLIAckSpendsOneInboxRead(t *testing.T) {
 		t.Fatalf("ack made %d inbox reads, want 1", reads)
 	}
 }
+
+// An agent's name need not equal its command, and AETHER_HARNESS carries the
+// name. The skill must still print a worker's commands and say plainly that
+// no packaged hooks match the name.
+func TestCLISkillForAnAgentNamedApartFromItsCommand(t *testing.T) {
+	t.Setenv("AETHER_HARNESS", "mycursor")
+	t.Setenv("HOME", t.TempDir())
+	status := protocol.CoordStatusResult{
+		RunID:        "run-current",
+		Capabilities: []string{protocol.MethodCoordInbox},
+		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
+	}
+	var out bytes.Buffer
+	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
+		t.Fatalf("skill = %d, %v", code, err)
+	}
+	raw := out.String()
+	if !strings.Contains(raw, workerOutcomes) {
+		t.Fatalf("skill lacks the worker's outcome guidance: %s", raw)
+	}
+	if !strings.Contains(raw, "Inbox hooks: no packaged integration for harness mycursor; see aether-internal skill --hooks.") {
+		t.Fatalf("skill hook summary = %s", raw)
+	}
+}
