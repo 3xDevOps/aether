@@ -238,11 +238,11 @@ A server whose release is newer than the CLI behind `aether gui` refuses
 that CLI with `-32005` (upgrade required). The gateway passes the refusal
 through as HTTP 426, with `data` set to
 `{"client_version":"v0.7.0","server_version":"v0.8.0","min_client_version":"v0.8.0","command":"aether update"}`.
-A WebSocket gets the same code in its ack frame, then close 1008. The
-gateway never redials or retries on `-32005`, because only an update fixes
-it. `server.info` and `server.update_status` still answer, and so do the
-`update.*` verbs, which never call the server. The server gateway is never
-refused, because it runs inside the server. See
+A WebSocket gets the same code and `data` in its ack frame, then close
+1008. The gateway never redials or retries on `-32005`, because only an
+update fixes it. `server.info` and `server.update_status` still answer,
+and so do the `update.*` verbs, which never call the server. The server
+gateway is never refused, because it runs inside the server. See
 [install.md](install.md#when-the-server-refuses-an-older-client).
 
 The server gateway performs the equivalent identity lookup on each request.

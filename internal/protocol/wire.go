@@ -582,10 +582,11 @@ type AttachResponse struct {
 	ControllerID      string `json:"controller_id,omitempty"`
 	ControlGeneration uint64 `json:"control_generation,omitempty"`
 	// RFC3339.
-	ControlExpiresAt string `json:"control_expires_at,omitempty"`
-	HasControl       bool   `json:"has_control,omitempty"`
-	Code             int    `json:"code,omitempty"`
-	Error            string `json:"error,omitempty"`
+	ControlExpiresAt string          `json:"control_expires_at,omitempty"`
+	HasControl       bool            `json:"has_control,omitempty"`
+	Code             int             `json:"code,omitempty"`
+	Error            string          `json:"error,omitempty"`
+	Data             json.RawMessage `json:"data,omitempty"`
 }
 
 func (r AttachResponse) HighWater() TerminalPosition {
@@ -663,9 +664,10 @@ type SyncRequest struct {
 // After an OK SyncResponse the stream is a mutagen remote endpoint session
 // rooted at the run's worktree.
 type SyncResponse struct {
-	OK    bool   `json:"ok"`
-	Code  int    `json:"code,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK    bool            `json:"ok"`
+	Code  int             `json:"code,omitempty"`
+	Error string          `json:"error,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
 }
 
 // SyncConflictParams: the target resolver reads run_id, so the Steer gate

@@ -55,7 +55,7 @@ func (c *Conn) openDevelopment(ctx context.Context, subsystem string, request an
 	}
 	if !ack.OK {
 		cleanup()
-		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}
 	}
 	return &developmentStream{ReadCloser: out, stop: stop}, ack, nil
 }

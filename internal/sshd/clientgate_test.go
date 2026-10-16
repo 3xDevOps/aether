@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -150,11 +151,47 @@ func TestClientVersionGateControl(t *testing.T) {
 		})
 	}
 
-	t.Run("in-process client", func(t *testing.T) {
-		if _, perr := e.srv.Local(e.member.ID).Call(t.Context(), protocol.MethodWorkspaceList, nil); perr != nil {
-			t.Fatalf("Local workspace.list: %v", perr)
+	t.Run("server gateway", func(t *testing.T) {
+		local := e.srv.Local(e.member.ID)
+		g, err := webgate.New(webgate.Config{Authorize: func(*http.Request, bool) (webgate.Backend, *webgate.Refusal) {
+			return localBackend{local}, nil
+		}})
+		if err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = g.Close() })
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/"+protocol.MethodWorkspaceList, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		g.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("workspace.list status = %d: %s", rec.Code, rec.Body)
+		}
+		events, err := local.Events(t.Context(), protocol.SubscribeRequest{})
+		if err != nil {
+			t.Fatalf("Local events: %v", err)
+		}
+		_ = events.Close()
 	})
+}
+
+// localBackend serves a webgate from Local the way the server gateway does.
+type localBackend struct{ local *Local }
+
+func (b localBackend) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	return b.local.Call(ctx, method, params)
+}
+
+func (b localBackend) Events(ctx context.Context, req protocol.SubscribeRequest) (io.ReadCloser, error) {
+	return b.local.Events(ctx, req)
+}
+
+func (b localBackend) Attach(ctx context.Context, req protocol.AttachRequest) (webgate.Terminal, protocol.AttachResponse, error) {
+	return nil, protocol.AttachResponse{}, errors.New("attach not served in this test")
+}
+
+func (b localBackend) Terminal(ctx context.Context, req protocol.TerminalRequest) (webgate.Terminal, protocol.TerminalResponse, error) {
+	return nil, protocol.TerminalResponse{}, errors.New("terminal not served in this test")
 }
 
 func TestClientVersionGateDevServer(t *testing.T) {
@@ -170,7 +207,11 @@ func TestClientVersionGateStreams(t *testing.T) {
 	e := newTestEnv(t, func(c *Config) { c.release = gateRelease })
 	client := dialBanner(t, e, "SSH-2.0-Aether v0.8.0-alpha.2")
 
-	for _, name := range []string{protocol.SubsystemEvents, protocol.SubsystemAttach, protocol.SubsystemTerminal, protocol.SubsystemSync} {
+	for _, name := range []string{
+		protocol.SubsystemEvents, protocol.SubsystemAttach, protocol.SubsystemTerminal, protocol.SubsystemSync,
+		protocol.SubsystemACP, protocol.SubsystemAssistant, protocol.SubsystemRunSSH,
+		protocol.SubsystemDevBrowser, protocol.SubsystemDevArtifact,
+	} {
 		t.Run(name, func(t *testing.T) {
 			ch, reqs, err := client.OpenChannel("session", nil)
 			if err != nil {
@@ -197,16 +238,18 @@ func TestClientVersionGateStreams(t *testing.T) {
 				t.Fatalf("read ack: %v", err)
 			}
 			var ack struct {
-				OK    bool   `json:"ok"`
-				Code  int    `json:"code"`
-				Error string `json:"error"`
+				OK    bool            `json:"ok"`
+				Code  int             `json:"code"`
+				Error string          `json:"error"`
+				Data  json.RawMessage `json:"data"`
 			}
 			if err = json.Unmarshal(line, &ack); err != nil {
 				t.Fatalf("ack %s: %v", line, err)
 			}
-			if ack.OK || ack.Code != protocol.CodeUpgradeRequired || !strings.Contains(ack.Error, "run `aether update`") {
-				t.Fatalf("ack = %+v", ack)
+			if ack.OK {
+				t.Fatalf("ack = %s", line)
 			}
+			wantUpgradeRequired(t, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}, "v0.8.0-alpha.2")
 			stderr, err := io.ReadAll(ch.Stderr())
 			if err != nil || !strings.Contains(string(stderr), ack.Error) {
 				t.Fatalf("stderr = %q (%v), want the refusal", stderr, err)
@@ -256,7 +299,22 @@ func TestClientVersionGateGateway(t *testing.T) {
 		http.Redirect(w, r, "/releases/tag/"+gateFloor, http.StatusFound)
 	}))
 	t.Cleanup(releases.Close)
-	backend := localgw.NewSSHBackend(cli.Config{Addr: e.addr, Key: keyPath, KnownHosts: filepath.Join(home, "known_hosts")})
+	cliCfg := cli.Config{Addr: e.addr, Key: keyPath, KnownHosts: filepath.Join(home, "known_hosts")}
+	conn, err := cli.Dial(cliCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_, _, err = conn.ACPStream(protocol.ACPStreamRequest{RunID: string(e.run.ID)})
+	wantUpgradeRequired(t, err, "v0.8.0-alpha.2")
+	_, _, err = conn.AssistantStream(protocol.AssistantStreamRequest{})
+	wantUpgradeRequired(t, err, "v0.8.0-alpha.2")
+	_, _, err = conn.RunSSH(string(e.run.ID))
+	wantUpgradeRequired(t, err, "v0.8.0-alpha.2")
+	_, err = conn.Sync(string(e.run.ID), false)
+	wantUpgradeRequired(t, err, "v0.8.0-alpha.2")
+
+	backend := localgw.NewSSHBackend(cliCfg)
 	g, err := localgw.New(localgw.Config{Backend: backend, Update: selfupdate.NewChecker(releases.URL, time.Hour)})
 	if err != nil {
 		t.Fatal(err)

@@ -189,7 +189,7 @@ func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protoc
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, refusal("attach", ack.Code, ack.Error)
+		return nil, ack, refusal("attach", ack.Code, ack.Error, ack.Data)
 	}
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
@@ -204,7 +204,7 @@ func (c *Conn) ACPStream(req protocol.ACPStreamRequest) (io.ReadWriteCloser, pro
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}
 	}
 	return out, ack, nil
 }
@@ -219,7 +219,7 @@ func (c *Conn) AssistantStream(req protocol.AssistantStreamRequest) (io.ReadClos
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error}
+		return nil, ack, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}
 	}
 	return out, ack, nil
 }
@@ -234,7 +234,7 @@ func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, pr
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, refusal("terminal", ack.Code, ack.Error)
+		return nil, ack, refusal("terminal", ack.Code, ack.Error, ack.Data)
 	}
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
@@ -259,7 +259,7 @@ func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, refusal("sync", ack.Code, ack.Error)
+		return nil, refusal("sync", ack.Code, ack.Error, ack.Data)
 	}
 	return out, nil
 }
@@ -311,9 +311,9 @@ func readAck(stream *sessionStream, v any) (*bufferedStream, error) {
 
 // refusal is a refused stream ack. An upgrade refusal keeps its code, so
 // every caller stops rather than retrying what only an update fixes.
-func refusal(what string, code int, message string) error {
+func refusal(what string, code int, message string, data json.RawMessage) error {
 	if code == protocol.CodeUpgradeRequired {
-		return &protocol.Error{Code: code, Message: message}
+		return &protocol.Error{Code: code, Message: message, Data: data}
 	}
 	return fmt.Errorf("cli: %s: %s", what, message)
 }
