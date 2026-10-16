@@ -11,6 +11,7 @@ import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -359,6 +360,14 @@ class MainActivity : ComponentActivity() {
                     // case: the server answered, so the address is right.
                     if (request.isForMainFrame) connection.visibility = View.VISIBLE
                 }
+
+                // Unhandled, WebView kills the app along with its renderer.
+                // Android reclaims the renderer of an app in the background,
+                // as while the member signs in to Edge in the browser.
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    replaceWebView()
+                    return true
+                }
             }
 
         web.webChromeClient =
@@ -402,6 +411,23 @@ class MainActivity : ComponentActivity() {
                     window.destroy()
                 }
             }
+    }
+
+    /**
+     * Puts a new WebView where the one whose renderer is gone was, and loads
+     * the dashboard into it. The old one can do nothing but be destroyed.
+     */
+    private fun replaceWebView() {
+        val parent = web.parent as ViewGroup
+        val index = parent.indexOfChild(web)
+        val params = web.layoutParams
+        parent.removeView(web)
+        web.destroy()
+        web = WebView(this).apply { id = R.id.web }
+        parent.addView(web, index, params)
+        configureWebView()
+        syncBackCallback()
+        loaded?.let(web::loadUrl)
     }
 
     /**
@@ -460,6 +486,14 @@ class MainActivity : ComponentActivity() {
                         view.stopLoading()
                         route(url, scheme)
                     }
+                }
+
+                // The popup shares the dashboard's renderer, and WebView kills
+                // the app unless every WebView on a lost renderer handles it.
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    done = true
+                    view.destroy()
+                    return true
                 }
             }
         return popup
