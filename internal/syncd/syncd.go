@@ -147,7 +147,9 @@ func New(cfg Config) (*Daemon, error) {
 // after a session that was acknowledged and held for stableSession, so a
 // long-lived connection dropping reconnects promptly while an ack-then-
 // drop server still backs off. A server that refuses this client's
-// release ends the daemon: only an update fixes that.
+// release ends the daemon once this executable is replaced: only an
+// update fixes that, and a supervisor restarting the daemon sooner would
+// only be refused again.
 func (d *Daemon) Run(ctx context.Context) error {
 	attempt := 0
 	for {
@@ -157,7 +159,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if protocol.IsUpgradeRequired(err) {
-			return err
+			slog.Error("syncd: refused; waiting for this executable to be updated", "error", err)
+			exe, exeErr := os.Executable()
+			if exeErr != nil {
+				return fmt.Errorf("%w; find this executable to wait for its update: %w", err, exeErr)
+			}
+			if waitErr := waitReplaced(ctx, exe, updatePoll); waitErr != nil {
+				return waitErr
+			}
+			return fmt.Errorf("%w; %s changed, so exiting to run it", err, exe)
 		}
 		attempt = nextAttempt(attempt, subscribed, time.Since(started))
 		delay := backoffDelay(attempt, rand.Float64())
@@ -166,6 +176,36 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-time.After(delay):
 		case <-ctx.Done():
 			return ctx.Err()
+		}
+	}
+}
+
+// updatePoll is how often a refused daemon checks whether its executable
+// was replaced.
+const updatePoll = 30 * time.Second
+
+// waitReplaced returns nil once path names a file other than the one it
+// named on entry, or that file's size or modification time changes. It
+// returns ctx.Err() when ctx ends first.
+func waitReplaced(ctx context.Context, path string, poll time.Duration) error {
+	before, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("syncd: stat %s: %w", path, err)
+	}
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+		now, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if !os.SameFile(before, now) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
+			return nil
 		}
 	}
 }
