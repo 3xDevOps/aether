@@ -123,6 +123,10 @@ const (
 	// MethodRunSeen records that the caller opened a run: it clears
 	// finish_unopened, and outcome_unseen too when the caller owns the run.
 	MethodRunSeen = "run.seen"
+	// MethodRunReview records what the owner did with a reported success:
+	// complete accepts it, closing a live run as completed; later puts it
+	// off (Kill-gated, like run.close).
+	MethodRunReview = "run.review"
 	// MethodSyncConflict notifies both affected members via the event feed
 	// (Steer-gated, like the sync bridge).
 	MethodSyncConflict = "sync.conflict"

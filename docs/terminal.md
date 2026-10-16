@@ -353,7 +353,7 @@ but not message the agent.**
 
 **Details** lists, in order: **Needs you** (every pending request with the
 actions that answer it; when the run needs you for another reason, such as
-an idle agent or an unreviewed finish, one card with that reason and the
+a turn that ended without a report or a success ready for review, one card with that reason and the
 header's action; otherwise **Nothing is waiting on you.**), **Agent
 messages** (agent-to-agent mail to or from this run, shown when there is any
 or the run belongs to a swarm), **Notes** and the run's facts. A note is for

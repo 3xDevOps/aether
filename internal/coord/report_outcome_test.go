@@ -62,14 +62,14 @@ func (o *recordingOutcomes) ReportNeedsInput(_ context.Context, run domain.RunID
 	return nil
 }
 
-func (o *recordingOutcomes) ReportWaiting(_ context.Context, run domain.RunID, id, summary string, at time.Time) error {
+func (o *recordingOutcomes) ReportWaiting(_ context.Context, run domain.RunID, id, waitingFor, summary string, at time.Time) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.err != nil {
 		return o.err
 	}
 	o.reportedAt = append(o.reportedAt, at)
-	o.calls = append(o.calls, outcomeCall{run: run, reason: "waiting: " + summary, reportID: id})
+	o.calls = append(o.calls, outcomeCall{run: run, reason: strings.TrimSpace("waiting: "+waitingFor) + " " + summary, reportID: id})
 	return nil
 }
 
@@ -442,6 +442,23 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	want = outcomeCall{run: worker, reason: "waiting: waiting on the build", reportID: "waiting:" + string(worker) + ":wait-1"}
 	if got := outcomes.recorded(); len(got) != 4 || got[3] != want {
 		t.Fatalf("scheduler calls = %+v, want the worker's waiting report last", got)
+	}
+	if _, rpcErr := h.svc.CoordReport(ctx, run, protocol.CoordReportParams{
+		Outcome: protocol.CoordOutcomeWaiting, WaitingFor: protocol.CoordWaitingForCI, Summary: "CI on PR 12", IdempotencyKey: "wait-ci",
+	}); rpcErr != nil {
+		t.Fatalf("waiting for ci: %v", rpcErr)
+	}
+	want = outcomeCall{run: run, reason: "waiting: ci CI on PR 12", reportID: "waiting:" + string(run) + ":wait-ci"}
+	if got := outcomes.recorded(); len(got) != 5 || got[4] != want {
+		t.Fatalf("scheduler calls = %+v, want the waiting for ci report last", got)
+	}
+	for name, params := range map[string]protocol.CoordReportParams{
+		"unknown waiting_for":    {Outcome: protocol.CoordOutcomeWaiting, WaitingFor: "humans", Summary: "s", IdempotencyKey: "k"},
+		"waiting_for on blocked": {Outcome: protocol.CoordOutcomeBlocked, WaitingFor: protocol.CoordWaitingForCI, Summary: "s", IdempotencyKey: "k"},
+	} {
+		if _, rpcErr := h.svc.CoordReport(ctx, run, params); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
+			t.Fatalf("%s: err = %+v, want invalid params", name, rpcErr)
+		}
 	}
 }
 

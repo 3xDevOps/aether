@@ -65,6 +65,7 @@ async function status(run, fields) {
         state: run.state,
         status_seq: run.status_seq,
         outcome_unseen: run.outcome_unseen,
+        review: run.review,
       },
     }),
   })
@@ -81,11 +82,20 @@ beforeEach(() => {
   notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
 })
 
-test('idle, waiting and working never notify', async () => {
+async function review(run, value) {
+  Object.assign(run, { review: value, status_seq: ++seq })
+  runs.set(run.id, { ...run })
+  socket.onmessage({ data: JSON.stringify({ type: 'run.review', run_id: run.id, payload: { review: value, status_seq: run.status_seq } }) })
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+test('waiting and working never notify', async () => {
   const run = lead('r1')
   await status(run, { status: 'needs-attention', state: 'idle', reason: 'agent idle' })
-  await status(run, { state: 'idle', reason: 'stalled: no output for 10m' })
+  await status(run, { state: 'waiting', reason: 'turn ended without a report' })
+  await status(run, { state: 'waiting', reason: 'no update for 30m' })
   await status(run, { state: 'waiting-agents', reason: 'waiting on 3 workers' })
+  await status(run, { state: 'waiting-ci', reason: 'CI on PR 12' })
   await status(run, { status: 'running', state: 'waiting-tools', reason: '' })
   await status(run, { state: 'working' })
   assert.equal(shown.length, 0)
@@ -148,21 +158,44 @@ test('an unseen failure needs you until the owner sees it', async () => {
   assert.equal(badge, 0)
 })
 
-test('a finished run gets one non-urgent notice outside the badge', async () => {
+test('a success ready for review notifies once, quietly, until it is put off', async () => {
   const run = lead('r6')
-  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true })
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
   assert.equal(shown.length, 1)
   assert.equal(shown[0].options.body, 'Agent reported success, review the result')
   assert.equal(shown[0].options.silent, true)
+  assert.equal(badge, 1)
+  await status(run, {})
+  assert.equal(shown.length, 1)
+
+  await review(run, 'later')
+  assert.ok(shown[0].closed)
   assert.equal(badge, 0)
   await status(run, {})
+  assert.equal(shown.length, 1, 'a success put off for later stays quiet')
+
+  await status(run, { status: 'running', state: 'working', reason: '', review: '' })
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready', status_changed_at: '2026-10-16T00:02:00Z' })
+  assert.equal(badge, 1, 'a new success report asks again')
+})
+
+test('a completed success notifies until accepted; an old finished run never does', async () => {
+  const run = lead('r9')
+  await status(run, { status: 'completed', state: '', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  assert.equal(shown.length, 1)
+  await review(run, 'accepted')
+  assert.ok(shown[0].closed)
+  assert.equal(badge, 0)
+
+  const old = lead('r10')
+  await status(old, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true })
   assert.equal(shown.length, 1)
 })
 
 test("another member's run never notifies or counts", async () => {
   const run = { ...lead('r7'), member_id: 'someone-else' }
   await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no credentials for the registry' })
-  await status(run, { state: 'finished', reason: 'agent reported success', outcome_unseen: true })
+  await status(run, { state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
   assert.equal(shown.length, 0)
   assert.equal(badge, 0)
 })

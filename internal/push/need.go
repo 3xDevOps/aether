@@ -25,8 +25,7 @@ const (
 	turnFailedPrefix = "enhanced turn failed: "
 	interrupted      = "turn interrupted"
 	turnEndedPrefix  = "turn ended: "
-	reportedPrefix   = "agent reported "
-	reportedFailure  = reportedPrefix + "failure"
+	reportedFailure  = "agent reported failure"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -93,22 +92,14 @@ func AttentionBody(run *domain.Run) string {
 }
 
 // statusBody announces a run only when it needs a member
-// (domain.Run.NeedsAttention) or finished with a result nobody has seen.
-// Idle, waiting and working never do.
+// (domain.Run.NeedsAttention) or failed with a result nobody has seen. A
+// success put off for later or accepted, waiting and working never do.
 func statusBody(run *domain.Run, worker bool) string {
 	if !run.NeedsAttention(false) {
-		if worker || !run.OutcomeUnseen {
+		if worker || !run.OutcomeUnseen || run.Status != domain.RunFailed {
 			return ""
 		}
-		switch {
-		case run.Activity == domain.ActivityFinished:
-			return "Agent reported " + strings.TrimPrefix(run.Reason, reportedPrefix) + ", review the result"
-		case run.Status == domain.RunFailed:
-			return "Failed, review the result"
-		case run.Status == domain.RunCompleted:
-			return "Finished, review the result"
-		}
-		return ""
+		return "Failed, review the result"
 	}
 	switch run.Activity {
 	case domain.ActivityNeedsYou:
@@ -138,6 +129,9 @@ func statusBody(run *domain.Run, worker bool) string {
 			}
 		}
 		return "Agent disconnected"
+	}
+	if run.Review == domain.ReviewReady {
+		return "Agent reported success, review the result"
 	}
 	if rest, ok := strings.CutPrefix(run.Reason, turnFailedPrefix); ok {
 		return "Turn failed: " + rest

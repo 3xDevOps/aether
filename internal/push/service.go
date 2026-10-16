@@ -129,7 +129,7 @@ func New(cfg Config) (*Service, error) {
 func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
 		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval, events.TypeRunOutcomeSeen,
-		events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
+		events.TypeRunReview, events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
 	}}})
 	if err != nil {
 		return fmt.Errorf("push: subscribe: %w", err)

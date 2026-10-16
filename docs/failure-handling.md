@@ -14,7 +14,7 @@ for `--run-container-ttl`, negative means no retention and immediate cleanup.
 
 | Flag | Default | What it controls |
 | --- | --- | --- |
-| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention with state `idle`. A run already parked because its agent said it is waiting keeps that reason. A run waiting on its own agents shows `idle` after three times this. |
+| `--stall-threshold` | `10m` | How long a live run may go with no agent output, no file changes and nothing from its agent's own reporter before it parks at needs-attention with state `waiting`. A run already parked because its agent said it is waiting keeps that reason. A run waiting on its own agents, CI or a reported process shows `waiting` after three times this. |
 | `--poll-interval` | `30s` | How often that is checked, and the granularity of the return to running. |
 | `--checkout-ttl` | `72h` | When a finished run's worktree becomes eligible for cleanup, subject to evidence and execution ownership protection. Negative disables this GC. |
 | `--run-container-ttl` | `168h` (7 days) | Grace for an explicitly closed Standard or Enhanced run, or completed swarm worker's exact container. `0` uses the default; a positive duration overrides it, and negative requests immediate release. Active/waiting runs and services are not expired. |
@@ -44,7 +44,7 @@ is a bet about the longest legitimate silence: an agent thinking, compiling,
 or waiting on a slow tool call produces no PTY output and touches no files,
 and there is no way to tell that apart from a hang.
 
-- **Too low** and long tool calls park healthy runs as idle, hiding the
+- **Too low** and long tool calls park healthy runs as stalled, hiding the
   ones that really stopped.
 - **Too high** and a wedged agent burns an afternoon before anyone notices.
 
@@ -490,10 +490,11 @@ aether-internal report --outcome success --summary 'Implemented and tested the c
 ```
 
 At turn end, with no permission or question request open, the run becomes
-ready for review with the reported outcome. Its container and agent session
-remain live: send another message or type into the native terminal without
-reopening. A new working turn clears the idle outcome, and a later task can
-report again under a new idempotency key. Reporting alone starts no expiry
+ready for review with the reported outcome: a success shows **Ready for
+review** until you mark it complete or later ([coordination.md](coordination.md#report-an-outcome)).
+Its container and agent session remain live: send another message or type
+into the native terminal without reopening. A new working turn clears the
+shown outcome, and a later task can report again under a new idempotency key. Reporting alone starts no expiry
 timer and does not publish a result commit.
 
 Background runs still commit, publish and finish automatically after a
@@ -583,7 +584,7 @@ the container and shell are still healthy, not that an OOM spared them.
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
 | Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`, state `needs-you`; background tasks the old server was running are gone. |
-| A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
+| A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled` and state `waiting`. |
 | A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop. While such a task is live, the run parks `stalled:` only after three times the stall threshold with nothing from the agent ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
 | The container is paused at a reattach | The ACP server starts when the run is resumed. |
@@ -646,7 +647,7 @@ reconciled first, and without holding up the recovery of other runs: from
 the exit of a run whose agent exited while the server was down, and at once
 for a run whose container is still live, as a swarm worker's, a Standard
 run's or an Enhanced run's. A run that recovery then cannot move gets the
-report it would have had without fallback (a Standard run idles with the
+report it would have had without fallback (a Standard run parks with the
 agent's own message, an Enhanced turn fails as without fallback), or the
 reason it cannot move as in the table above. A second report of a limit
 while a move holds the run neither reports nor clears it, but a limit the
@@ -872,23 +873,52 @@ for schedule administration.
 A live run (`running` or `needs-attention`) carries a state, wire field
 `state`, that the scheduler derives on every status change; the reason stays
 the human-readable detail. `status_seq` starts at 1 and increases on every
-published change of the run's status, reason, state or outcome flags; each
-`run.status` event carries the run's `state` and `status_seq` after it.
+published change of the run's status, reason, state, outcome flags or
+review; each `run.status` event carries the run's `state`, `status_seq`,
+`review` and `review_changed_at` after it.
 
-| State | Meaning |
-| --- | --- |
-| `working` | A turn is in progress. |
-| `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting` report this turn. |
-| `waiting-tools` | No turn runs, and the agent waits on a background tool, such as a Claude monitor. A backgrounded shell such as a dev server does not count. |
-| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, a usage limit Aether will not continue from on another account, or an interactive Enhanced turn that ended `turn interrupted` or `turn ended: <stop reason>` and waits for a message to continue. A Background run's question does not count: it has no terminal to answer it in. |
-| `idle` | The turn ended with none of the above, including a stall and `turn cancelled`: whoever cancelled the turn already knows. |
-| `finished` | An interactive run reported `success` and is parked for review. |
-| `failed` | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
-| `disconnected` | The Enhanced session failed or ended while the run is open. Reopening the session clears it. |
+| State | Label | Meaning |
+| --- | --- | --- |
+| `working` | Working | A turn or tool is executing. |
+| `waiting-agents` | Waiting for agents | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, ACP Task agents, swarm workers, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting --for agents` report this turn. |
+| `waiting-ci` | Waiting for CI | No turn runs, and the agent reported `waiting --for ci` this turn. |
+| `waiting-tools` | Waiting for process | No turn runs, and the agent waits on a background task it holds, such as a Claude monitor, or reported `waiting --for process`. A backgrounded shell such as a dev server does not count. |
+| `waiting` | Waiting | The turn ended with no outcome report, including a stall and `turn cancelled` (whoever cancelled the turn already knows), or a wait went stale. |
+| `needs-you` | Needs you | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, a usage limit Aether will not continue from on another account, or an interactive Enhanced turn that ended `turn interrupted` or `turn ended: <stop reason>` and waits for a message to continue. A Background run's question does not count: it has no terminal to answer it in. |
+| `finished` | Ready for review | An interactive run reported `success` and is parked for review. |
+| `failed` | Failed | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
+| `disconnected` | Disconnected | The Enhanced session failed or ended while the run is open. Reopening the session clears it. |
 
 When several apply, the order is disconnected, needs-you, failed, finished,
-waiting-agents, waiting-tools, idle; a turn in progress is `working` unless a
-human request is open.
+waiting-agents, waiting-ci, waiting-tools, waiting; a turn in progress is
+`working` unless a human request is open. Rows and events written before
+`waiting` existed carry `idle`, which means `waiting`.
+
+A turn that ends with no outcome report shows reason `turn ended without a
+report`. Status plugins still send the wire reason `agent idle`, and older
+rows show it.
+
+#### Review
+
+A reported success also sets the run's `review`, wire fields `review`
+(`""`, `ready`, `later` or `accepted`) and `review_changed_at` (RFC 3339).
+It becomes `ready` when an interactive run parks `finished`, or when a
+Background run finishes `completed` by its success report. A turn end,
+Stop, a `waiting` report, a crash, or an exit without a success report never
+sets it. A status write that keeps the run's standing (the same status, and
+the same reason at `needs-attention`) keeps the review; any other change
+clears it to `""`, so a new turn clears it and a later success report sets
+`ready` again. Runs that existed before migration v72 start at `""`.
+
+`run.review` with `{"run_id","action"}` records what you did with it. It
+needs the same permission as `run.close` and returns `{"run": Run}`:
+
+| Action | Effect |
+| --- | --- |
+| `complete` | A live run closes as `run.close` closes it (commit, publish the run branch, retain the container per `--run-container-ttl`) but ends `completed`; a `completed` run only records it. Review becomes `accepted`; repeating it is a no-op. Refused for other terminal statuses and for a live swarm worker, which completes through its integrator. |
+| `later` | Only while review is `ready` or `later`. Review becomes `later`; the run stays where it is. |
+
+Both publish a `run.review` event with `{"review","review_changed_at","status_seq"}`.
 
 One rule on the run state decides whether a run needs you. **Needs you** on
 the board, `aether runs --needs-you`, push notifications and assistant
@@ -900,41 +930,46 @@ notices all apply it:
 | `disconnected` | yes | once, on the transition |
 | `failed`, result not yet seen by the owner | yes | once, on the transition |
 | `failed`, result seen | no | no |
-| `finished` | no; the board lists it under Finished until seen | a non-urgent notice once |
-| `working`, `waiting-agents`, `waiting-tools`, `idle` (including `turn cancelled`) | no | no |
+| review `ready`, live or `completed` | yes | a non-urgent notice once per entry into `ready` |
+| review `later` or `accepted` | no | no |
+| `working`, `waiting-agents`, `waiting-ci`, `waiting-tools`, `waiting` (including `turn cancelled`) | no | no |
 | any state while paused | no | no |
 
 A swarm worker's requests go to its integrator, so only its `blocked`
-report needs its owner.
+report needs its owner; its review never does. A run that ended `failed` with
+a result nobody has seen notifies `Failed, review the result` once.
 
 A notice is keyed on the need itself: the run's status, state and reason
 and when it entered them. Opening the run moves `status_seq` but not the
 need, so it is not announced again. Push sends every need with `Urgency: high`
-and a `finished` notice with `Urgency: normal`. A need
+and a review `ready` notice, `Agent reported success, review the result`,
+with `Urgency: normal`. A need
 that stood before the server started, including one the first start after an
 upgrade backfills a state for, is not announced again. A paused run is
 rechecked when it resumes.
 
-A `waiting` report (`aether-internal report --outcome waiting --summary
-'waiting on 3 workers'`) shows `waiting-agents` with the summary as its
-reason at turn end, until the next turn starts. An integrator shows
-`waiting-agents` at turn end without reporting it while its mission is open
-and a worker attempt is live or a worker's mail since its last turn started
-is unacknowledged; the scheduler rechecks this every poll and after a
-restart. Either way, with no activity for three times `--stall-threshold`
-the run shows `idle` with `waited <duration> with no activity`.
+A `waiting` report (`aether-internal report waiting --for ci --summary
+'CI on PR #12'`) shows `waiting-agents`, `waiting-ci` or `waiting-tools` for
+`--for agents`, `ci` or `process`, with the summary as its reason at turn
+end, until the next turn starts. An integrator shows `waiting-agents` at
+turn end without reporting it while its mission is open and a worker attempt
+is live or a worker's mail since its last turn started is unacknowledged;
+the scheduler rechecks this every poll and after a restart. A parked run
+showing `waiting-agents`, `waiting-ci`, or a reported `waiting-tools` with no
+activity for three times `--stall-threshold` (30 minutes by default) shows
+`waiting` with `no update for <duration>`, such as `no update for 30m`.
 
 #### Parked runs
 
 `needs-attention` describes execution, not a request from the agent. It
 means one of two things, and the reason on the run says which.
 
-**The agent reported idle or turn completion.** An agent that reports
-its own state parks the run when it has no active work. The `waiting` wire
-state means idle; generic turn completion, interruption, silence, and prose
+**The agent reported a turn end.** An agent that reports
+its own state parks the run when it has no active work. The reporter's
+`waiting` wire state means the turn ended; generic turn completion, interruption, silence, and prose
 do not create an input request. An agent that ran
 `aether-internal report --outcome blocked --summary '<summary>'` during the
-turn parks at its end with `blocked: <summary>` instead of `agent idle`,
+turn parks at its end with `blocked: <summary>` instead of `turn ended without a report`,
 until it resumes. `--outcome needs-input` does the same with
 `needs input: <question>`, the whole question, when the agent needs a user
 decision; both are `needs-you`. An Enhanced
@@ -962,12 +997,12 @@ Output here is anything drawn in the terminal, because an agent that
 cannot say when a turn starts leaves nothing else to go on. The echo of
 your own typing counts: type a long prompt into a parked `codex` run and it
 can read as `running` before you send it, and read as `stalled:` rather
-than `agent idle` if you then walk away.
+than `turn ended without a report` if you then walk away.
 
 **The run stalled.** No agent output, no file changes and nothing from the
 agent's reporter past `--stall-threshold` parks a live run at
 `needs-attention` with a reason that leads with `stalled:` and state
-`idle`, so it does not show as **Needs you**. This is the hang
+`waiting`, so it does not show as **Needs you**. This is the hang
 detector: it catches an agent that said it was working and then wedged, and
 it is the only signal at all for an agent that cannot report. An Enhanced
 run waiting for Claude background tasks parks only after three times

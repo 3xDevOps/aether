@@ -86,9 +86,9 @@ recorded the activity:
 
 | Activity | Counts as |
 | --- | --- |
-| `working`, `waiting-agents`, `waiting-tools` | working |
+| `working`, `waiting-agents`, `waiting-ci`, `waiting-tools` | working |
 | `needs-you` | waiting on you |
-| `idle`, `finished`, `failed`, `disconnected` | neither |
+| `waiting` (or legacy `idle`), `finished`, `failed`, `disconnected` | neither |
 
 So a swarm integrator parked in `needs-attention` while its workers run is
 working, not waiting on you. Where a change did not record an activity,

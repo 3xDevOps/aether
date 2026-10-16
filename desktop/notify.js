@@ -97,6 +97,7 @@ function connect(wsURL) {
     if (!ev.run_id) return
     if (ev.type === 'run.status') onStatus(ev.run_id, ev.payload || {})
     else if (ev.type === 'run.outcome_seen') onOutcomeSeen(ev.run_id)
+    else if (ev.type === 'run.review') onReview(ev.run_id, ev.payload || {})
   }
 
   ws.onclose = () => {
@@ -161,7 +162,7 @@ async function showNotice(p) {
 function onStatus(runId, p) {
   if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
   if (p.status_seq > 0) seqs.set(runId, p.status_seq)
-  const seen = { status: p.to, reason: p.reason || '', state: p.state || '', outcome_unseen: p.outcome_unseen === true }
+  const seen = { status: p.to, reason: p.reason || '', state: p.state || '', outcome_unseen: p.outcome_unseen === true, review: p.review || '' }
   // The event carries neither paused nor mission_role, so it is first read
   // as a lead run, whose needs include a worker's, then checked on run.get.
   if (!bodyOf(seen)) {
@@ -188,6 +189,15 @@ function onStatus(runId, p) {
 function onOutcomeSeen(runId) {
   const entry = standing.get(runId)
   if (entry && !needsAttention({ ...entry.run, outcome_unseen: false })) resolve(runId)
+}
+
+// run.review only ever puts a success off or accepts it, so it can end a
+// need but never start one.
+function onReview(runId, p) {
+  if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
+  if (p.status_seq > 0) seqs.set(runId, p.status_seq)
+  const entry = standing.get(runId)
+  if (entry && !needsAttention({ ...entry.run, review: p.review || '' })) resolve(runId)
 }
 
 async function readRun(runId) {
@@ -234,7 +244,7 @@ function announce(runId, run) {
   const notification = new Notification({
     title: titleOf(run),
     body,
-    ...(attention ? {} : { silent: true, urgency: 'low' }),
+    ...(attention && run.review !== 'ready' ? {} : { silent: true, urgency: 'low' }),
   })
   notification.on('click', () => openRun(runId))
   notification.show()
@@ -256,14 +266,19 @@ function resolve(runId) {
 // reads like the one a phone gets for the same run.
 
 function needsAttention(run) {
-  if (run.paused || (run.status !== 'running' && run.status !== 'needs-attention')) return false
-  if (run.mission_role === 'worker') return run.state === 'needs-you' && (run.reason || '').startsWith('blocked: ')
+  const live = run.status === 'running' || run.status === 'needs-attention'
+  if (run.paused) return false
+  if (run.mission_role === 'worker') return live && run.state === 'needs-you' && (run.reason || '').startsWith('blocked: ')
+  if (run.review === 'ready' && (live || run.status === 'completed')) return true
+  if (!live) return false
   if (run.state === 'needs-you' || run.state === 'disconnected') return true
   return run.state === 'failed' && run.outcome_unseen === true
 }
 
 function needKey(run) {
-  return [run.status, run.state || '', run.reason || '', run.status_changed_at || ''].join('|')
+  const key = [run.status, run.state || '', run.reason || '', run.status_changed_at || '']
+  if (run.review === 'ready' && run.review_changed_at) key.push(run.review_changed_at)
+  return key.join('|')
 }
 
 function titleOf(run) {
@@ -292,11 +307,8 @@ function statusBody(run) {
   const reason = run.reason || ''
   const worker = run.mission_role === 'worker'
   if (!needsAttention(run)) {
-    if (worker || !run.outcome_unseen) return ''
-    if (run.state === 'finished') return 'Agent reported ' + reason.replace(/^agent reported /, '') + ', review the result'
-    if (run.status === 'failed') return 'Failed, review the result'
-    if (run.status === 'completed') return 'Finished, review the result'
-    return ''
+    if (worker || !run.outcome_unseen || run.status !== 'failed') return ''
+    return 'Failed, review the result'
   }
   if (run.state === 'needs-you') {
     if (reason.startsWith('blocked: ')) return (worker ? 'Worker blocked: ' : 'Blocked: ') + reason.slice('blocked: '.length)
@@ -310,6 +322,7 @@ function statusBody(run) {
     const match = disconnects.find(([prefix]) => reason.startsWith(prefix))
     return match ? match[1] + reason.slice(match[0].length) : 'Agent disconnected'
   }
+  if (run.review === 'ready') return 'Agent reported success, review the result'
   if (reason.startsWith('enhanced turn failed: ')) return 'Turn failed: ' + reason.slice('enhanced turn failed: '.length)
   return reason === 'agent reported failure' ? 'Agent reported failure, review the result' : 'Agent failed'
 }

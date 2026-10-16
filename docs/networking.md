@@ -337,10 +337,12 @@ the [rule](failure-handling.md#run-activity) **Needs you** applies:
 | needs you another way | `Waiting for your reply`, or the usage-limit reason |
 | loses its Enhanced session | `Enhanced could not start: <error>` or `Agent disconnected: <cause>` |
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
-| reports success, or ends with a result | `Agent reported success, review the result`, `Finished, review the result` or `Failed, review the result` |
+| reports success | `Agent reported success, review the result`, once each time the review becomes `ready` |
+| ends `failed` with a result nobody has seen | `Failed, review the result` |
 
-A run that is working, idle, stalled or waiting on its own agents or tools
-does not notify. A Background run does not notify for a question, a paused
+A run that is working, waiting, stalled, waiting on its own agents, CI or a
+process, or whose success you marked complete or put off for later does not
+notify. A Background run does not notify for a question, a paused
 run notifies once it is resumed, and a swarm worker, whose integrator
 answers for it, notifies only when blocked. A teammate's question, a queued
 message and the swarm rows do not notify. A success is sent with

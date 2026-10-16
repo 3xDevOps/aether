@@ -434,6 +434,14 @@ func TestIntegrationMissionOrchestration(t *testing.T) {
 	if err := pacedCall(ctx, integratorSocket, protocol.MethodCoordInbox, protocol.CoordInboxParams{AckToken: reportMail.AckToken}, &reportMail); err != nil {
 		t.Fatalf("acknowledge worker report: %v", err)
 	}
+	// The worker's result is the integrator's to review, never its owner's.
+	var workerRun protocol.RunResult
+	if err := boCtrl.Call(protocol.MethodRunGet, protocol.RunIDParams{RunID: string(retried.Attempt.RunID)}, &workerRun); err != nil {
+		t.Fatalf("run.get worker: %v", err)
+	}
+	if workerRun.Run.Review != "" {
+		t.Fatalf("worker review after its success report = %q, want none", workerRun.Run.Review)
+	}
 	var history protocol.CoordMessagesListResult
 	if err := boCtrl.Call(protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{
 		WorkspaceID: string(e.ws.ID), MissionID: missionID, RunID: retried.Attempt.RunID,
@@ -921,7 +929,7 @@ test "$(ls worker-*.txt | wc -l)" = 2`},
 			t.Fatalf("run.get integrator: %v", err)
 		}
 		if run.Run.Status == string(domain.RunNeedsAttention) && run.Run.Reason == "agent reported success" {
-			if run.Run.FinishedAt != nil || run.Run.ContainerRetainedUntil != nil || run.Run.Paused {
+			if run.Run.FinishedAt != nil || run.Run.ContainerRetainedUntil != nil || run.Run.Paused || run.Run.Review != string(domain.ReviewReady) {
 				t.Fatalf("completed mission stopped the integrator's environment: %+v", run.Run)
 			}
 			break

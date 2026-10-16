@@ -406,7 +406,7 @@ func (e *testEnv) launchClaudeACP(t *testing.T, task string) *domain.Run {
 }
 
 func parkedIdle(trail []events.RunStatusPayload) bool {
-	return len(trail) > 0 && trail[len(trail)-1].To == domain.RunNeedsAttention && trail[len(trail)-1].Reason == agentstatus.ReasonIdle
+	return len(trail) > 0 && trail[len(trail)-1].To == domain.RunNeedsAttention && trail[len(trail)-1].Reason == turnEndedReason
 }
 
 func statusIndex(trail []events.RunStatusPayload, to domain.RunStatus, reason string) int {
@@ -441,8 +441,8 @@ func TestEnhancedClaudeRunStaysRunningWhileABackgroundTaskRuns(t *testing.T) {
 		t.Fatal("the run parked before the background follow-up")
 	}
 	got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if got.Reason != agentstatus.ReasonIdle {
-		t.Fatalf("run reason %q, want %q", got.Reason, agentstatus.ReasonIdle)
+	if got.Reason != turnEndedReason {
+		t.Fatalf("run reason %q, want %q", got.Reason, turnEndedReason)
 	}
 }
 

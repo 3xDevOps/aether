@@ -507,12 +507,17 @@ changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
 A live run (`running` or `needs-attention`) carries `state`: `working`,
-`waiting-agents`, `waiting-tools`, `needs-you`, `idle`, `finished`, `failed`
-or `disconnected` ([run activity](failure-handling.md#run-activity)); it is
-absent on any other status. `status_seq` is always present, starts at 1 and
+`waiting-agents`, `waiting-ci`, `waiting-tools`, `waiting`, `needs-you`,
+`finished`, `failed` or `disconnected`
+([run activity](failure-handling.md#run-activity)); it is absent on any
+other status. Rows and events written before `waiting` existed carry `idle`,
+which means `waiting`. `status_seq` is always present, starts at 1 and
 increases on every published change of status, reason, state,
-`outcome_unseen` or `finish_unopened`. Every `run.status` payload carries the
-run's `state` and `status_seq` after it; ignore one whose `status_seq` is not
+`outcome_unseen`, `finish_unopened` or `review`. Every run carries `review`
+(`""`, `ready`, `later` or `accepted`) and, once it has changed,
+`review_changed_at` (RFC 3339) ([review](failure-handling.md#review)).
+Every `run.status` payload carries the run's `state`, `status_seq`,
+`review` and `review_changed_at` after it; ignore one whose `status_seq` is not
 greater than the one you hold. A `run.status` event stored before the server
 had `status_seq` carries `0` and no `state`: label it by its status alone.
 
@@ -560,7 +565,7 @@ optional `reason`, and optional `input_updates`:
 }
 ```
 
-`waiting` reports idle execution, not an unresolved question. `state` can be
+`waiting` reports that the turn ended, not an unresolved question. `state` can be
 omitted only when `input_updates` is nonempty; an input-only report preserves
 execution, including when the last request closes. `reason` is execution
 metadata, not a prompt body or evidence of input. An optional `session_id`
@@ -692,6 +697,19 @@ a reported outcome becomes reviewable until the owner opens it, `false` after
 work resumes, Close or another status change. `finish_unopened` is `true`
 from the finish until a member opens or closes the run, `false` after work
 resumes.
+
+`run.review` accepts `{"run_id":"...","action":"complete"}` or
+`"action":"later"` and returns a `RunResult`. It needs the kill permission,
+as `run.close` does. `complete` closes a live run as `run.close` does but
+records `completed`, or only records the acceptance on a `completed` run,
+and sets `review` to `accepted`; it is idempotent once accepted, and refused
+with `-32002` for other terminal statuses and for a live swarm worker, which
+completes through its integrator. `later` without a `ready` or `later`
+review is `-32002` too. `later` sets
+`review` to `later` and leaves the run where it is.
+Each change publishes `run.review` with
+`{"review":"...","review_changed_at":"...","status_seq":N}`; apply it only
+when `status_seq` is above the one you hold.
 
 The `push.*` methods manage Web Push for the caller's own browsers
 ([networking.md](networking.md#notifications)). `push.status` accepts an

@@ -97,7 +97,7 @@ integrator-management commands.
 | `aether_inbox` | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | `messages`, `ack_token` |
 | `aether_ask` | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `aether_reply` | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
-| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
+| `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 
 The bridge returns the established structured result directly. This
 presentation differs from any CLI envelope, but it does not add operations or
@@ -147,7 +147,9 @@ summary. Every coordination tool field has a schema description, and the
 `aether_report` description leads with the rule that subagents and spawned
 workflows never report. `needs-input` and `waiting` take no `evidence_refs`.
 `waiting` marks a turn the agent ends while awaiting subagents, workers, peers
-or tools; the next turn clears it. The schema's outcome description is the
+or tools; the next turn clears it. `waiting_for` is `agents` (the default),
+`ci` or `process`, and is valid only with `waiting`; anything else is invalid
+params. The schema's outcome description is the
 same for every run; the server refuses outcomes a run's role or launch
 cannot use, and the instructions list the ones that apply. Before the server accepts a report, Aether
 captures the run's evidence, including a private Git evidence commit and a bounded PTY
