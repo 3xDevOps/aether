@@ -641,7 +641,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 			var err error
 			switch {
 			case e.status == domain.RunRunning && idle > limit:
-				reason := fmt.Sprintf("stalled: no output or file changes for %s", idle.Truncate(time.Second))
+				reason := fmt.Sprintf("%sno output or file changes for %s", stalledReasonPrefix, idle.Truncate(time.Second))
 				// The stall is the turn end only on a harness that cannot
 				// report one; elsewhere the agent is quiet mid-turn and the
 				// idle outcome waits for its turn-end report.
@@ -651,12 +651,17 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				} else {
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
+			case e.status == domain.RunNeedsAttention && e.activity == domain.ActivityWaitingAgents && idle > waitedFactor*s.cfg.StallThreshold:
+				err = s.expireWaitLocked(ctx, e, idle)
 			case released:
 				// The run goes back to being judged on silence alone, so
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				old := e.sidecar()
-				oldParked, oldActivity := e.parkedAt, e.postParkActivity
+				oldParked, oldActivity, oldTurn := e.parkedAt, e.postParkActivity, e.turnStartedAt
+				// The resumed activity is the next turn's start: a turn-end
+				// reporter sends none.
+				e.turnStartedAt = activity
 				reason := "activity resumed"
 				if heldByTasks(e.agentReport) {
 					// The tasks still run, and the session sends no new
@@ -676,7 +681,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				}
 				if err != nil {
 					e.agentReport = old.agentReport()
-					e.parkedAt, e.postParkActivity = oldParked, oldActivity
+					e.parkedAt, e.postParkActivity, e.turnStartedAt = oldParked, oldActivity, oldTurn
 					e.idleReason, e.idleShown = old.IdleReason, old.IdleShown
 					err = errors.Join(err, s.writeSidecar(old))
 				}

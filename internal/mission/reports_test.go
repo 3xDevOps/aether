@@ -357,7 +357,7 @@ func TestReconcileRecordsAWorkerThatEndedWithoutAReport(t *testing.T) {
 			fix.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {
 				return MissionRunObservation{State: MissionRunStopped, RetentionSettled: true}, nil
 			}
-			if err := fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunFailed, reason, nil, nil); err != nil {
+			if _, err := fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunFailed, reason, "", nil, nil); err != nil {
 				t.Fatalf("end worker run: %v", err)
 			}
 			if err := fix.svc.reconcileMission(ctx, fix.mission); err != nil {

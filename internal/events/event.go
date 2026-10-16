@@ -124,6 +124,11 @@ type RunStatusPayload struct {
 	OutcomeUnseen bool `json:"outcome_unseen,omitempty"`
 	// FinishUnopened is the run's finish_unopened flag after this transition.
 	FinishUnopened bool `json:"finish_unopened,omitempty"`
+	// Activity (wire name state) and StatusSeq are the run's after this
+	// transition. A client ignores an event whose StatusSeq is not above the
+	// one it holds; an event stored before status_seq existed carries 0.
+	Activity  domain.RunActivity `json:"state,omitempty"`
+	StatusSeq int64              `json:"status_seq"`
 }
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields

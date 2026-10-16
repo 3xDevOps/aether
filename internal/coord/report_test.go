@@ -107,6 +107,28 @@ func TestRunReportCarriesUsableSessionIDs(t *testing.T) {
 	}
 }
 
+// TestRunReportCarriesTurnStart: a prompt's turn start reaches the
+// scheduler on a working report and nowhere else.
+func TestRunReportCarriesTurnStart(t *testing.T) {
+	sink := &fakeSink{}
+	h := newHarness(t, 1, func(c *Config) { c.Reports = sink })
+	h.start()
+	run := h.run(0)
+	if _, err := h.svc.Provision(context.Background(), run, nil); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	client := h.dial(t, run)
+	for _, state := range []agentstatus.State{agentstatus.Working, agentstatus.Idle} {
+		if err := client.Call(protocol.MethodRunReport, protocol.RunReportParams{State: string(state), TurnStart: true}, nil); err != nil {
+			t.Fatalf("run.report %s turn_start: %v", state, err)
+		}
+	}
+	_, got := sink.reports()
+	if len(got) != 2 || !got[0].TurnStart || got[1].TurnStart {
+		t.Fatalf("reports %+v, want turn start only on the working report", got)
+	}
+}
+
 // TestRunReportWithoutSink: a server with nothing behind run.report says
 // so rather than telling the agent's hook its state was recorded.
 func TestRunReportWithoutSink(t *testing.T) {

@@ -22,18 +22,18 @@ type failingRunStatusStore struct {
 	fail bool
 }
 
-func (s *failingRunStatusStore) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+func (s *failingRunStatusStore) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (store.RunStatusStamp, error) {
 	if s.fail {
-		return errors.New("test: status transition failed")
+		return store.RunStatusStamp{}, errors.New("test: status transition failed")
 	}
-	return s.Store.UpdateRunStatus(ctx, id, status, reason, startedAt, finishedAt)
+	return s.Store.UpdateRunStatus(ctx, id, status, reason, activity, startedAt, finishedAt)
 }
 
-func (s *failingRunStatusStore) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+func (s *failingRunStatusStore) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (store.RunStatusStamp, error) {
 	if s.fail {
-		return errors.New("test: status transition failed")
+		return store.RunStatusStamp{}, errors.New("test: status transition failed")
 	}
-	return s.Store.FinishRunByMember(ctx, id, status, reason, startedAt, finishedAt)
+	return s.Store.FinishRunByMember(ctx, id, status, reason, activity, startedAt, finishedAt)
 }
 
 type destroyFailureRuntime struct {

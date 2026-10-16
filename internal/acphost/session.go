@@ -87,8 +87,10 @@ type Config struct {
 type TurnState struct {
 	Working bool
 	Reason  string
-	// Tasks counts the background tasks a background state waits for.
-	Tasks int
+	// Tasks counts the background tasks a background state waits for, and
+	// Agents those of them that are subagents or workflows.
+	Tasks  int
+	Agents int
 	// Autonomous says a background state's agent runs a turn of its own.
 	Autonomous bool
 	// Failed is the error a turn's prompt failed with while the agent stayed

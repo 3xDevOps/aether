@@ -1771,6 +1771,14 @@ UPDATE runs SET swarm_run = 1 WHERE id IN (
 	UNION SELECT initial_run_id FROM mission_create_receipts
 	UNION SELECT run_id FROM mission_integrator_replacements);
 `,
+	// v69: a live run's activity, which the scheduler derives, and
+	// status_seq, which every published status change increases from 1.
+	// Live runs from before this version get their activity at the
+	// scheduler's recovery.
+	`
+ALTER TABLE runs ADD COLUMN activity TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN status_seq INTEGER NOT NULL DEFAULT 1;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

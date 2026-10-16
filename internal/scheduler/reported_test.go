@@ -500,7 +500,7 @@ func (e *testEnv) retainLegacyReportedRun(t *testing.T, run domain.RunID) {
 	if err := e.sched.CloseRun(t.Context(), run, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.db.FinishRunReported(t.Context(), run, domain.RunCompleted, reportedSuccessRetainedReason, nil, nil); err != nil {
+	if _, err := e.db.FinishRunReported(t.Context(), run, domain.RunCompleted, reportedSuccessRetainedReason, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.sched.mu.Lock()
@@ -527,7 +527,9 @@ func TestOnlyATurnEndWaitShowsAnInteractiveOutcome(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
-	expectNoStatusEvent(t, sub, run.ID, "an input-only report on an armed run")
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning); p.Activity != domain.ActivityNeedsYou {
+		t.Fatalf("an input-only report on an armed run published %+v, want only its activity to change", p)
+	}
 	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
 		t.Fatalf("idle with a permission open: %v", err)
 	}
@@ -1006,11 +1008,11 @@ type failingReportedFinishStore struct {
 	fail atomic.Int32
 }
 
-func (s *failingReportedFinishStore) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
+func (s *failingReportedFinishStore) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (store.RunStatusStamp, error) {
 	if s.fail.Add(-1) >= 0 {
-		return errors.New("test: reported finish row write failed")
+		return store.RunStatusStamp{}, errors.New("test: reported finish row write failed")
 	}
-	return s.Store.FinishRunReported(ctx, id, status, reason, startedAt, finishedAt)
+	return s.Store.FinishRunReported(ctx, id, status, reason, activity, startedAt, finishedAt)
 }
 
 // TestFailedReportedFinishIsRetried: a finish whose close failed is retried
@@ -1178,6 +1180,7 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("open")); err != nil {
 		t.Fatalf("permission wait: %v", err)
 	}
+	expectOnlyStatusEvent(t, sub, run.ID, domain.RunRunning)
 	waitFor(t, "the run to stall", func() bool {
 		e.sched.checkStalls(ctx)
 		r, err := e.db.GetRun(ctx, run.ID)
@@ -1195,7 +1198,9 @@ func TestStalledInteractiveOutcomeParksAtTheDeadline(t *testing.T) {
 	if err := e.sched.ReportAgentState(ctx, run.ID, permissionInput("close")); err != nil {
 		t.Fatalf("permission answered: %v", err)
 	}
-	expectNoStatusEvent(t, sub, run.ID, "closing the input on a stalled, armed run")
+	if p := expectOnlyStatusEvent(t, sub, run.ID, domain.RunNeedsAttention); p.Activity != domain.ActivityIdle || !strings.HasPrefix(p.Reason, "stalled: ") {
+		t.Fatalf("closing the input on a stalled, armed run published %+v, want it idle on its stall", p)
+	}
 	e.expireReportDeadline(t, run.ID)
 	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.Reason != reportedSuccessReason {
 		t.Fatalf("park reason = %q, want %q", row.Reason, reportedSuccessReason)

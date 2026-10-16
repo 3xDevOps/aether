@@ -235,7 +235,7 @@ func TestRecoveryDestroysProvisioningContainer(t *testing.T) {
 	if uerr := e.db.UpdateRun(ctx, r); uerr != nil {
 		t.Fatalf("UpdateRun: %v", uerr)
 	}
-	if uerr := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", nil, nil); uerr != nil {
+	if _, uerr := e.db.UpdateRunStatus(ctx, r.ID, domain.RunProvisioning, "", "", nil, nil); uerr != nil {
 		t.Fatalf("UpdateRunStatus: %v", uerr)
 	}
 	cid, err := e.rt.Create(ctx, runtime.Spec{
@@ -300,7 +300,7 @@ func TestSweepSkipsCheckoutSharedWithActiveRun(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", uerr)
 	}
 	finished := time.Now().UTC().Add(-2 * time.Hour)
-	if uerr := e.db.UpdateRunStatus(ctx, old.ID, domain.RunInterrupted, "", nil, &finished); uerr != nil {
+	if _, uerr := e.db.UpdateRunStatus(ctx, old.ID, domain.RunInterrupted, "", "", nil, &finished); uerr != nil {
 		t.Fatalf("UpdateRunStatus: %v", uerr)
 	}
 	// A leftover active row still names the old checkout (the pre-fix
@@ -352,7 +352,7 @@ func TestSweepSkipsReopenedCheckoutFromStaleTerminalSnapshot(t *testing.T) {
 		t.Fatalf("UpdateRun: %v", updateErr)
 	}
 	finished := time.Now().UTC().Add(-2 * time.Hour)
-	if statusErr := e.db.UpdateRunStatus(ctx, run.ID, domain.RunInterrupted, "", nil, &finished); statusErr != nil {
+	if _, statusErr := e.db.UpdateRunStatus(ctx, run.ID, domain.RunInterrupted, "", "", nil, &finished); statusErr != nil {
 		t.Fatalf("UpdateRunStatus: %v", statusErr)
 	}
 	entry := &supervised{

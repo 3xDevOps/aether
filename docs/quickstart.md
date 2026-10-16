@@ -1254,8 +1254,11 @@ aether pull <run-id>
 ```
 
 `aether runs` prints `ID`, `STATUS`, `AGENT`, `MEMBER`, `ACCOUNT`, `OVERLAP`,
-`TITLE` and `TASK` columns; within seconds the run's `STATUS` reads `needs-you` (the
-wire status `needs-attention`) and `AGENT` reads `fake`. The
+`TITLE` and `TASK` columns; within seconds the run's `STATUS` reads `working`
+and `AGENT` reads `fake`. The script exits into the run's shell, which stays
+open until you close the run, so after `--stall-threshold` with no output
+`STATUS` reads `idle`. A result the agent reported and left open for review
+reads `finished (open)` or `failed (open)`, unlike the terminal `failed`. The
 pulled branch carries a commit adding `result.txt`. That is the full path -
 container, worktree, PTY, commit, fetch - with nothing mocked but the agent.
 

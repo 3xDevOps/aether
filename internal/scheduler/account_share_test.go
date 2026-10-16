@@ -761,7 +761,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheLaunchersHome(t *testing.T) {
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", nil, nil); err != nil {
+	if _, err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, run := range []*domain.Run{closed, unstarted} {
@@ -818,7 +818,7 @@ func TestRecoveredSharedRunWithoutSidecarHoldsTheOwnersLogin(t *testing.T) {
 	if err = e.sched.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", nil, nil); err != nil {
+	if _, err = e.db.UpdateRunStatus(ctx, unstarted.ID, domain.RunProvisioning, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	runs := []*domain.Run{closed, unstarted}

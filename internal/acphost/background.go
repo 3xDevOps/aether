@@ -6,6 +6,8 @@ import (
 	"maps"
 	"slices"
 	"time"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
 )
 
 // autonomousQuiet ends an autonomous turn whose agent reports no result for
@@ -57,11 +59,11 @@ type liveTask struct {
 	dismissed bool
 }
 
-// holds reports whether the run waits for the task: a subagent, workflow or
-// any other task but a shell. A shell, such as a dev server, may never end,
-// and Claude Code is idle while one runs.
+// holds reports whether the run waits for the task (agentstatus.HeldTask).
+// Claude Code is idle while only a shell runs.
 func (t *liveTask) holds() bool {
-	return !t.ambient && !t.dismissed && t.typ != "local_bash"
+	held, _ := agentstatus.HeldTask(t.typ)
+	return !t.ambient && !t.dismissed && held
 }
 
 type sdkMessage struct {
@@ -221,6 +223,18 @@ func (s *Session) tasksLocked() []Task {
 
 func (s *Session) heldLocked() int { return len(s.heldTasksLocked()) }
 
+// heldAgentsLocked counts the held tasks that are the agent's own subagents
+// or workflows; the rest are tools it waits on, such as a monitor.
+func (s *Session) heldAgentsLocked() int {
+	n := 0
+	for _, id := range s.heldTasksLocked() {
+		if _, agent := agentstatus.HeldTask(s.tasks[id].typ); agent {
+			n++
+		}
+	}
+	return n
+}
+
 func (s *Session) heldTasksLocked() []string {
 	var ids []string
 	for _, id := range slices.Sorted(maps.Keys(s.tasks)) {
@@ -328,7 +342,7 @@ func (s *Session) settleLocked() {
 		}
 	}
 	if s.backgroundLocked() && (s.autonomous || !s.holdIdle) {
-		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked(), Autonomous: s.autonomous}
+		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked(), Agents: s.heldAgentsLocked(), Autonomous: s.autonomous}
 		if s.reported != st {
 			s.stateLocked(st)
 		}

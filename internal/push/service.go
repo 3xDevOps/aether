@@ -73,6 +73,9 @@ type Service struct {
 	key    *vapidKey
 	client *http.Client
 	quiet  time.Duration
+	// started is when Start ran. A run standing in a need it entered before
+	// then was announced, if at all, by the server before this one.
+	started time.Time
 
 	wg   sync.WaitGroup
 	stop context.CancelFunc
@@ -133,7 +136,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.mu.Lock()
-	s.sub, s.stop = sub, cancel
+	s.sub, s.stop, s.started = sub, cancel, time.Now()
 	s.mu.Unlock()
 	s.wg.Go(func() { s.consume(loopCtx, sub) })
 	return nil
@@ -212,6 +215,9 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			clear(announced)
 			clear(offered)
 		}
+		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
+			announced[n.key] = true
+		}
 		var free <-chan time.Time
 		if n != nil && !announced[n.key] {
 			if wait := time.Until(s.freeAt(run.MemberID)); wait > 0 {
@@ -229,6 +235,12 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 		case <-free:
 		}
 	}
+}
+
+func (s *Service) startedAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started
 }
 
 // unwatch ends a run's watcher unless an event is waiting for it.
@@ -261,7 +273,7 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 			continue
 		}
 		offered[device] = true
-		if err := s.send(ctx, sub, payload, runTopic(run.ID)); err != nil {
+		if err := s.send(ctx, sub, payload, runTopic(run.ID), n.urgency); err != nil {
 			slog.Warn("push: notification not delivered", "member", run.MemberID, "error", err)
 		}
 		return true
@@ -303,7 +315,9 @@ func runTopic(run domain.RunID) string {
 	return b64.EncodeToString(digest[:])[:32]
 }
 
-func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, flush <-chan struct{}, current func(context.Context) bool) error {
+// Notify sends an assistant notice to member's devices; only an urgent one
+// wakes them.
+func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, urgent bool, flush <-chan struct{}, current func(context.Context) bool) error {
 	for flushed := false; !flushed; {
 		wait := time.Until(s.freeAt(member))
 		if wait <= 0 {
@@ -328,9 +342,13 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 	if err != nil {
 		return fmt.Errorf("push: list subscriptions: %w", err)
 	}
+	urgency := urgencyNormal
+	if urgent {
+		urgency = urgencyHigh
+	}
 	var errs []error
 	for _, sub := range subs {
-		errs = append(errs, s.send(ctx, sub, payload, runTopic(run)))
+		errs = append(errs, s.send(ctx, sub, payload, runTopic(run), urgency))
 	}
 	return errors.Join(errs...)
 }
@@ -343,12 +361,12 @@ func (s *Service) freeAt(member domain.MemberID) time.Time {
 	return s.active[member].Add(s.quiet)
 }
 
-func (s *Service) send(ctx context.Context, sub *store.PushSubscription, payload []byte, topic string) error {
+func (s *Service) send(ctx context.Context, sub *store.PushSubscription, payload []byte, topic, urgency string) error {
 	to, err := parseTarget(sub.Endpoint, sub.P256DH, sub.Auth)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	err = s.key.send(ctx, s.client, to, payload, topic)
+	err = s.key.send(ctx, s.client, to, payload, topic, urgency)
 	if errors.Is(err, errGone) {
 		if derr := s.store.DeletePushSubscription(ctx, sub.MemberID, sub.Endpoint); derr != nil && !errors.Is(derr, store.ErrNotFound) {
 			return errors.Join(fmt.Errorf("%w: %w", ErrDelivery, err), derr)
@@ -402,7 +420,7 @@ func (s *Service) Test(ctx context.Context, member domain.MemberID, endpoint str
 	if err != nil {
 		return err
 	}
-	return s.send(ctx, sub, payload, "")
+	return s.send(ctx, sub, payload, "", urgencyHigh)
 }
 
 // Active records that member is using a dashboard now.

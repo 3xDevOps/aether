@@ -279,8 +279,11 @@ type supervised struct {
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter
-	// Mutated only under Scheduler.mu.
+	// Mutated only under Scheduler.mu. reason and activity are the row's
+	// since its last transition.
 	status        domain.RunStatus
+	reason        string
+	activity      domain.RunActivity
 	startedAt     time.Time
 	paused        bool
 	killRequested bool
@@ -371,6 +374,9 @@ type supervised struct {
 	// betweenTurns says an Enhanced agent works only on background tasks
 	// with no turn running, which settles a needs-input outcome's turn.
 	betweenTurns bool
+	// turnStartedAt is when the agent's last turn started; worker mail an
+	// integrator got before it is mail that turn could handle.
+	turnStartedAt time.Time
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
@@ -620,6 +626,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		stopWatch()
 		<-watched
 	}()
+	// An approval request is a human request: its activity follows it at
+	// once, and the sweep covers an event a full subscription dropped.
+	approvals, subErr := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeApproval}}})
+	if errors.Is(subErr, events.ErrBusClosed) {
+		return nil
+	}
+	if subErr != nil {
+		return fmt.Errorf("scheduler: subscribe to approvals: %w", subErr)
+	}
+	defer func() { _ = approvals.Close() }()
+	approvalEvents := approvals.Events()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute
@@ -639,8 +656,17 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
+		case e, ok := <-approvalEvents:
+			if !ok {
+				approvalEvents = nil
+				continue
+			}
+			if err := s.refreshRunActivity(ctx, e.RunID); err != nil {
+				slog.Warn("scheduler: refresh run activity after an approval", "run", e.RunID, "error", err)
+			}
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.refreshActivities(ctx)
 			s.finishOverdueReports()
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)

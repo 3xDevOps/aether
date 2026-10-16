@@ -1,31 +1,30 @@
 package push
 
 import (
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // These mirror the scheduler's reasons: acp*Reason in
-// internal/scheduler/acp_driver.go, reported*Reason in
-// internal/scheduler/reported.go, and the blocked, needs-input and stalled
-// prefixes. The labels are the dashboard's (web/src/lib/needs-you.ts).
-var enhancedFailures = []struct{ prefix, label string }{
+// internal/scheduler/acp_turn.go, reported*Reason in
+// internal/scheduler/reported.go, usageLimitReason in
+// internal/scheduler/usage_fallback.go, and the blocked and needs-input
+// prefixes.
+// The labels are the dashboard's (web/src/lib/needs-you.ts).
+var disconnects = []struct{ prefix, label string }{
 	{"enhanced session failed: ", "Enhanced could not start: "},
 	{"enhanced session ended: ", "Agent disconnected: "},
-	{"enhanced turn failed: ", "Turn failed: "},
 }
 
 const (
-	blockedPrefix     = "blocked: "
-	needsInputPrefix  = "needs input: "
-	stalledPrefix     = "stalled:"
-	turnStoppedPrefix = "turn ended: "
-	reportedPrefix    = "agent reported "
-	reportedSuccess   = reportedPrefix + "success"
-	reportedFailure   = reportedPrefix + "failure"
+	needsInputPrefix = "needs input: "
+	usageLimitPrefix = "Usage limit reached on "
+	turnFailedPrefix = "enhanced turn failed: "
+	reportedPrefix   = "agent reported "
+	reportedFailure  = reportedPrefix + "failure"
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -35,110 +34,110 @@ const (
 )
 
 // need is one reason a run waits on its owner. key identifies the standing
-// state, so the same one is announced once.
+// state, so the same one is announced once. since is when the run entered a
+// standing status need, zero for a request.
 type need struct {
-	key  string
-	body string
+	key     string
+	body    string
+	urgency string
+	since   time.Time
 }
 
 // needOf is the owner's rows of the dashboard's Needs you table
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
 // the run alone. A swarm worker's integrator answers for it, so a worker
-// counts only when it reports itself blocked.
+// counts only when it reports itself blocked (domain.Run.NeedsAttention).
 func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest, paused bool) *need {
+	if paused {
+		return nil
+	}
 	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
 	if !worker {
 		if approval != nil {
-			return &need{key: "approval:" + approval.ID, body: clip("Permission: "+approval.Action, maxBodyRunes)}
+			return &need{key: "approval:" + approval.ID, body: clip("Permission: "+approval.Action, maxBodyRunes), urgency: urgencyHigh}
 		}
 		if request := firstInput(inputs, "permission"); request != nil {
 			body := "Permission: answer in the terminal"
 			if run.ACP {
 				body = "Permission requested"
 			}
-			return &need{key: inputKey(request), body: body}
+			return &need{key: inputKey(request), body: body, urgency: urgencyHigh}
 		}
 		if request := firstInput(inputs, "question", "form", "extension_ui"); request != nil && !background {
 			body := "Question: answer in the terminal"
 			if run.ACP {
 				body = "Question from the agent"
 			}
-			return &need{key: inputKey(request), body: body}
+			return &need{key: inputKey(request), body: body, urgency: urgencyHigh}
 		}
 	}
-	body := statusBody(run, worker, background, paused)
+	body := statusBody(run, worker)
 	if body == "" {
 		return nil
 	}
-	changed := ""
+	n := &need{key: "status:" + run.NeedKey(), body: clip(body, maxBodyRunes), urgency: urgencyHigh}
+	if run.Activity == domain.ActivityFinished || run.Status == domain.RunCompleted {
+		n.urgency = urgencyNormal
+	}
 	if run.StatusChangedAt != nil {
-		changed = strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
+		n.since = *run.StatusChangedAt
 	}
-	return &need{
-		key:  "status:" + string(run.Status) + "|" + run.Reason + "|" + changed,
-		body: clip(body, maxBodyRunes),
-	}
+	return n
 }
 
 func AttentionBody(run *domain.Run) string {
-	return clip(statusBody(run, run.MissionRole == "worker", false, false), maxBodyRunes)
+	return clip(statusBody(run, run.MissionRole == "worker"), maxBodyRunes)
 }
 
-func statusBody(run *domain.Run, worker, background, paused bool) string {
-	switch run.Status {
-	case domain.RunNeedsAttention:
-		if rest, ok := strings.CutPrefix(run.Reason, blockedPrefix); ok {
+// statusBody announces a run only when it needs a member
+// (domain.Run.NeedsAttention) or finished with a result nobody has seen.
+// Idle, waiting and working never do.
+func statusBody(run *domain.Run, worker bool) string {
+	if !run.NeedsAttention(false) {
+		if worker || !run.OutcomeUnseen {
+			return ""
+		}
+		switch {
+		case run.Activity == domain.ActivityFinished:
+			return "Agent reported " + strings.TrimPrefix(run.Reason, reportedPrefix) + ", review the result"
+		case run.Status == domain.RunFailed:
+			return "Failed, review the result"
+		case run.Status == domain.RunCompleted:
+			return "Finished, review the result"
+		}
+		return ""
+	}
+	switch run.Activity {
+	case domain.ActivityNeedsYou:
+		if rest, ok := strings.CutPrefix(run.Reason, domain.BlockedReasonPrefix); ok {
 			if worker {
 				return "Worker blocked: " + rest
 			}
 			return "Blocked: " + rest
 		}
-		if worker {
-			return ""
-		}
 		if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {
 			return rest
 		}
-		for _, failure := range enhancedFailures {
-			if rest, ok := strings.CutPrefix(run.Reason, failure.prefix); ok {
-				return failure.label + rest
+		if strings.HasPrefix(run.Reason, usageLimitPrefix) {
+			return run.Reason
+		}
+		return "Waiting for your reply"
+	case domain.ActivityDisconnected:
+		for _, d := range disconnects {
+			if rest, ok := strings.CutPrefix(run.Reason, d.prefix); ok {
+				return d.label + rest
 			}
 		}
-		if background {
-			return ""
-		}
-		switch {
-		case run.Reason == reportedSuccess || run.Reason == reportedFailure:
-			if !run.OutcomeUnseen {
-				return ""
-			}
-			return "Agent reported " + strings.TrimPrefix(run.Reason, reportedPrefix) + ", review the result"
-		case paused:
-			return ""
-		case strings.HasPrefix(run.Reason, stalledPrefix):
-			return "No activity"
-		case !run.ACP:
-		case run.Reason == "turn cancelled":
-			return "Turn cancelled"
-		case run.Reason == "turn interrupted":
-			return "Turn interrupted"
-		case strings.HasPrefix(run.Reason, turnStoppedPrefix):
-			return "Stopped: " + strings.TrimPrefix(run.Reason, turnStoppedPrefix)
-		default:
-			return "Waiting for your reply"
-		}
-		return "Agent idle"
-	case domain.RunCompleted, domain.RunFailed:
-		if worker || !run.OutcomeUnseen {
-			return ""
-		}
-		if run.Status == domain.RunFailed {
-			return "Failed, review the result"
-		}
-		return "Finished, review the result"
+		return "Agent disconnected"
 	}
-	return ""
+	if rest, ok := strings.CutPrefix(run.Reason, turnFailedPrefix); ok {
+		return "Turn failed: " + rest
+	}
+	if run.Reason != reportedFailure {
+		return "Agent failed"
+	}
+	return "Agent reported failure, review the result"
 }
 
 func firstInput(inputs []domain.RunInputRequest, kinds ...string) *domain.RunInputRequest {

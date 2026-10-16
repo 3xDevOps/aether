@@ -457,7 +457,7 @@ func TestAttachReplaysFinishedRun(t *testing.T) {
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
 	e.pty.setTranscript(e.run.ID, []byte("recorded output"))
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -497,7 +497,7 @@ func TestAttachFinishedRunReportsExpiredPrefixWithoutChangingBytes(t *testing.T)
 					e.run.ID: {Cols: 80, Rows: 24, Data: []byte(retained), TruncatedBefore: true},
 				}
 			}
-			if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+			if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			pipe := openSubsystem(t, e.dial(t), protocol.SubsystemAttach, nil)
@@ -545,7 +545,7 @@ func TestAttachFinishedRunUsesFramedTranscript(t *testing.T) {
 	e.pty.snapshots = map[domain.RunID]ptyhost.ScreenSnapshot{
 		e.run.ID: {Cols: 120, Rows: 30, Data: []byte("screen")},
 	}
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -576,7 +576,7 @@ func TestAttachFinishedFramedHistoryIgnoresPendingSnapshot(t *testing.T) {
 	e.pty.setErr(errNoSession)
 	e.pty.snapshotErr = ptyhost.ErrSnapshotPending
 	e.pty.setTranscript(e.run.ID, []byte("complete recorded output"))
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -611,7 +611,7 @@ func TestAttachFinishedScreenUsesRecentReplayWhileSnapshotPending(t *testing.T) 
 			truncatedBefore: true,
 		},
 	}
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
@@ -652,7 +652,7 @@ func TestAttachFinishedRunWithoutTranscriptStillRefuses(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	e.pty.setErr(errNoSession)
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if _, err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 
