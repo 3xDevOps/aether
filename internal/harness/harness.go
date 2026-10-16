@@ -576,8 +576,9 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
 		// here trusts the working directory as well.
-		Env:            map[string]string{"COPILOT_ALLOW_ALL": "true"},
-		EnvPassthrough: []string{"COPILOT_GITHUB_TOKEN"},
+		Env:                map[string]string{"COPILOT_ALLOW_ALL": "true"},
+		NativeCoordination: true,
+		EnvPassthrough:     []string{"COPILOT_GITHUB_TOKEN"},
 		// With no system keychain, as in a run container, copilot login keeps
 		// the token in config.json. Copilot replaces it by rename, but it is
 		// not pinned: whether Copilot can write it as a mount is unverified.

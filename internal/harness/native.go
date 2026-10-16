@@ -83,6 +83,18 @@ func (p Profile) nativeLaunch(dir string, argv []string, env map[string]string) 
 		return claudeNativeLaunch(dir)
 	case "codex":
 		return codexNativeLaunch()
+	case "copilot":
+		hooks, err := coordhooks.Files.ReadFile("copilot.json")
+		if err != nil {
+			return NativeLaunch{}, fmt.Errorf("read copilot native coordination asset: %w", err)
+		}
+		return NativeLaunch{
+			Files: map[string][]byte{
+				"plugin.json":        []byte(`{"name":"aether-inbox","hooks":"copilot-hooks.json"}` + "\n"),
+				"copilot-hooks.json": hooks,
+			},
+			Args: []string{"--plugin-dir", dir},
+		}, nil
 	case "opencode":
 		return prepareOpenCodeNativeLaunch(dir, env)
 	default:

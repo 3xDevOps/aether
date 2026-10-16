@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -257,5 +258,33 @@ func TestClaudeNativeLaunchMergesHooksIntoOneSettingsDocument(t *testing.T) {
 		if native.Env[coordtransport.ManagedHooksEnv] != "1" {
 			t.Fatalf("%s env = %v, want %s=1", name, native.Env, coordtransport.ManagedHooksEnv)
 		}
+	}
+}
+
+func TestCopilotNativeLaunchStagesPlugin(t *testing.T) {
+	p, _ := Lookup("copilot")
+	native, err := p.PrepareNativeLaunch("/run/aether", []string{"copilot", "--allow-all", "--interactive=task"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := coordhooks.Files.ReadFile("copilot.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(native.Files["copilot-hooks.json"], want) {
+		t.Fatal("staged hooks differ from copilot.json")
+	}
+	var manifest struct{ Name, Hooks string }
+	if err := json.Unmarshal(native.Files["plugin.json"], &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Name == "" || manifest.Hooks != "copilot-hooks.json" || len(native.Files) != 2 {
+		t.Fatalf("manifest = %+v with %d files", manifest, len(native.Files))
+	}
+	if wantArgs := []string{"--plugin-dir", "/run/aether"}; !reflect.DeepEqual(native.Args, wantArgs) {
+		t.Fatalf("args = %v, want %v", native.Args, wantArgs)
+	}
+	if native.Env[coordtransport.ManagedHooksEnv] != "1" {
+		t.Fatalf("env = %v, want %s", native.Env, coordtransport.ManagedHooksEnv)
 	}
 }

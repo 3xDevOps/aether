@@ -98,7 +98,7 @@ its turn with the vendor's error.
 | `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, npm | adapter `pi-acp@0.0.34` | no |
 | `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, vendor script | native (`omp acp`) | yes |
 | `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | yes, vendor script | native (`opencode acp`) | no |
-| `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | - | PTY | yes, npm | native (`copilot --acp`) | no |
+| `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | plugin (`--plugin-dir`) | PTY | yes, npm | native (`copilot --acp`) | no |
 | `gemini` | Gemini CLI | `~/.gemini/oauth_creds.json`, `~/.gemini/.env` | - | `GEMINI_API_KEY` | `GEMINI_CLI_TRUST_WORKSPACE=true` | - | PTY | yes, npm | native (`gemini --acp`) | no |
 | `cursor` | Cursor CLI (runs as `agent`) | `~/.config/cursor/auth.json` | - | `CURSOR_API_KEY` | - | - | PTY | yes, vendor script | native (`agent acp`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
@@ -312,7 +312,7 @@ through the same native extension/plugin mechanism.
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
 | OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
 | OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | yes | `opencode-v2.js` |
-| Copilot CLI | `copilot` | yes, once installed by hand | no | yes | `copilot.json` |
+| Copilot CLI | `copilot` | yes, managed Standard launches | no | yes | `copilot.json` |
 | Gemini CLI | `gemini` | yes, once installed by hand | no | yes | `gemini.json` |
 | Cursor CLI | `cursor` | yes, once installed by hand | no | yes | `cursor.json` |
 | Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
@@ -391,8 +391,9 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `claude`, `codex`, `pi`, `omp`, and `opencode` agents, Aether
-loads native mailbox hooks for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `codex`, `copilot`, `pi`, `omp`, and `opencode`
+agents, Aether loads native mailbox hooks for **coordinated, task-bearing
+Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
@@ -413,6 +414,21 @@ Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
 `hooks.UserPromptSubmit`, `hooks.PostToolUse` and `hooks.Stop`, each a TOML
 inline table passed as one argv element. They are active only after the user
 trusts them once; see [Codex inbox integration](#codex-inbox-integration).
+
+Copilot CLI loads hooks from a plugin directory, so the server stages
+`/run/aether/plugin.json` (a manifest named `aether-inbox`) beside
+`/run/aether/copilot-hooks.json`, the `copilot.json` hooks, and adds
+`--plugin-dir /run/aether`. No user or
+project file changes. Copilot reads the hooks only in a trusted folder; the
+profile's `COPILOT_ALLOW_ALL=true` trusts the working directory, so no
+trust dialog appears.
+
+Gemini CLI and Cursor CLI stay manual. Gemini has no per-launch path:
+`GEMINI_CLI_SYSTEM_DEFAULTS_PATH` replaces the image's system-defaults
+file, Gemini skips system files not owned by root, and extensions load
+only from `~/.gemini/extensions`. Cursor's `--plugin-dir` loads only when
+logged in and needs a path at least three directories deep; it is not
+verified live, so it stays manual for now.
 
 Every managed launch, whether it loads a file or arguments, sets
 `AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
@@ -715,8 +731,11 @@ session event.
 
 ### Copilot CLI inbox integration
 
-`copilot` does not load this file on its own in Standard mode; install it
-by hand. Export `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`copilot` loads the inbox hooks through `--plugin-dir /run/aether`
+([managed loading](#managed-native-loading)). Nothing needs installing.
+
+**Manual.** Export `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
 `$COPILOT_HOME/hooks/aether.json`), alternatively
 `.github/hooks/aether.json`. Quit and restart in the intended trusted
 repository. Honor `disableAllHooks`, `allowManagedHooksOnly`, enterprise
@@ -1195,7 +1214,8 @@ vendor's own answer is to run the container as a non-root user. It is a
 stopgap until the standard image ships one. The Environment launches no
 agent, so it gets none of this.
 
-Every `copilot` run gets `COPILOT_ALLOW_ALL=true` and every `gemini` run
+A managed `copilot` Standard launch appends `--plugin-dir /run/aether` to
+that argv. Every `copilot` run gets `COPILOT_ALLOW_ALL=true` and every `gemini` run
 `GEMINI_CLI_TRUST_WORKSPACE=true`. `--allow-all` leaves Copilot's "Confirm
 folder trust" dialog up; the variable, set to exactly `true`, also trusts the
 working directory. Gemini in a folder it does not trust silently drops
