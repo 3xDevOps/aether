@@ -180,6 +180,9 @@ func runLink(args []string) error {
 		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, result.Info.Member.Role)
 	}
 	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
+		return perr
+	}
 
 	if cfg.Repo == "" {
 		return nil

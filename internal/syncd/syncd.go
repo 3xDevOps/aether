@@ -146,7 +146,8 @@ func New(cfg Config) (*Daemon, error) {
 // exponential backoff plus jitter on any failure. The backoff resets only
 // after a session that was acknowledged and held for stableSession, so a
 // long-lived connection dropping reconnects promptly while an ack-then-
-// drop server still backs off.
+// drop server still backs off. A server that refuses this client's
+// release ends the daemon: only an update fixes that.
 func (d *Daemon) Run(ctx context.Context) error {
 	attempt := 0
 	for {
@@ -154,6 +155,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		subscribed, err := d.connectOnce(ctx)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if protocol.IsUpgradeRequired(err) {
+			return err
 		}
 		attempt = nextAttempt(attempt, subscribed, time.Since(started))
 		delay := backoffDelay(attempt, rand.Float64())
@@ -263,6 +267,7 @@ func (d *Daemon) dial(ctx context.Context) (*ssh.Client, error) {
 	defer auth.Close()
 	conf := &ssh.ClientConfig{
 		User:            d.cfg.User,
+		ClientVersion:   cli.ClientBanner(),
 		Auth:            auth.Methods(),
 		HostKeyCallback: hostKeys,
 		BannerCallback:  auth.Banner,

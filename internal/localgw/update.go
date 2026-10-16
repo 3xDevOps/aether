@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/macinstall"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -28,12 +29,12 @@ var probeAccess = selfupdate.Probe
 // server's version, so the dashboard can tell the user which half of the
 // pair is behind.
 //
-// A server that does not answer costs the server half only. The CLI half
-// is about a binary on this machine and has nothing to do with the SSH
-// hop, and failing the whole verb would take the CLI banner down with it
-// during exactly the outage the user is most likely to be looking at. A
-// refresh that cannot reach GitHub does fail the whole verb: the click
-// behind it has nothing to install either way.
+// Each half fails alone. A server that does not answer costs the server
+// half only: the CLI half is about a binary on this machine, and failing
+// the whole verb would take the CLI banner down with it during exactly the
+// outage the user is most likely to be looking at. A release lookup that
+// cannot reach GitHub costs the CLI half only, so a server that refuses
+// this client still says so.
 func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol.Error) {
 	var params struct {
 		Refresh bool `json:"refresh"`
@@ -42,15 +43,19 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		return nil, perr
 	}
 	check, perr := g.checkRelease(r, params.Refresh)
-	if perr != nil {
-		return nil, perr
-	}
 	out := struct {
-		CLI           selfupdate.Check `json:"cli"`
-		ServerVersion string           `json:"server_version"`
-		ServerBehind  bool             `json:"server_behind"`
-		ServerError   string           `json:"server_error,omitempty"`
-		Supervised    bool             `json:"supervised"`
+		CLI selfupdate.Check `json:"cli"`
+		// CLIError is why the release lookup failed; cli then carries
+		// only this build's own fields.
+		CLIError      string `json:"cli_error,omitempty"`
+		ServerVersion string `json:"server_version"`
+		ServerBehind  bool   `json:"server_behind"`
+		ServerError   string `json:"server_error,omitempty"`
+		// ClientUpdateRequired reports that the server refuses this CLI
+		// until it updates to MinClientVersion, which server.info names.
+		ClientUpdateRequired bool   `json:"client_update_required"`
+		MinClientVersion     string `json:"min_client_version"`
+		Supervised           bool   `json:"supervised"`
 		// ShellBuildError is why the last desktop-app rebuild failed. The
 		// gateway that ran it exited so the shell could respawn on the new
 		// CLI, so this gateway reads the record it left behind: without it
@@ -64,6 +69,9 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		CLIPath       string            `json:"cli_path,omitempty"`
 		InstallMethod selfupdate.Method `json:"install_method,omitempty"`
 	}{CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError()}
+	if perr != nil {
+		out.CLIError = perr.Message
+	}
 	if access, err := probeAccess(); err == nil {
 		out.CLIPath, out.InstallMethod = access.Path, access.Method
 	}
@@ -80,6 +88,8 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 	}
 	out.ServerVersion = info.ServerVersion
 	out.ServerBehind = selfupdate.Behind(info.ServerVersion, check.Latest)
+	out.MinClientVersion = info.MinClientVersion
+	out.ClientUpdateRequired = cli.UpgradeRequired(info) != nil
 	return out, nil
 }
 

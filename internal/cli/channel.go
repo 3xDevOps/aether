@@ -189,7 +189,7 @@ func (c *Conn) AttachStream(req protocol.AttachRequest) (*TerminalStream, protoc
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, fmt.Errorf("cli: attach: %s", ack.Error)
+		return nil, ack, refusal("attach", ack.Code, ack.Error)
 	}
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
@@ -234,7 +234,7 @@ func (c *Conn) TerminalStream(req protocol.TerminalRequest) (*TerminalStream, pr
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, ack, fmt.Errorf("cli: terminal: %s", ack.Error)
+		return nil, ack, refusal("terminal", ack.Code, ack.Error)
 	}
 	return &TerminalStream{bufferedStream: out}, ack, nil
 }
@@ -259,7 +259,7 @@ func (c *Conn) Sync(runID string, force bool) (io.ReadWriteCloser, error) {
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, fmt.Errorf("cli: sync: %s", ack.Error)
+		return nil, refusal("sync", ack.Code, ack.Error)
 	}
 	return out, nil
 }
@@ -274,7 +274,7 @@ func (c *Conn) EventsStream(req protocol.SubscribeRequest) (io.ReadWriteCloser, 
 	}
 	if !ack.OK {
 		_ = out.Close()
-		return nil, &protocol.Error{Code: ack.Code, Message: ack.Error}
+		return nil, &protocol.Error{Code: ack.Code, Message: ack.Error, Data: ack.Data}
 	}
 	return out, nil
 }
@@ -307,6 +307,15 @@ func readAck(stream *sessionStream, v any) (*bufferedStream, error) {
 		return nil, fmt.Errorf("cli: decode ack: %w", err)
 	}
 	return &bufferedStream{r: br, sessionStream: stream}, nil
+}
+
+// refusal is a refused stream ack. An upgrade refusal keeps its code, so
+// every caller stops rather than retrying what only an update fixes.
+func refusal(what string, code int, message string) error {
+	if code == protocol.CodeUpgradeRequired {
+		return &protocol.Error{Code: code, Message: message}
+	}
+	return fmt.Errorf("cli: %s: %s", what, message)
 }
 
 // openStream decodes the ack whether or not it is a refusal; detecting

@@ -222,6 +222,9 @@ type ServerInfoResult struct {
 	TailnetHostname string `json:"tailnet_hostname,omitempty"`
 	// Whether the server resolves tailnet identities (WhoIs) for keyless auth.
 	TailnetIdentityAuth bool `json:"tailnet_identity_auth,omitempty"`
+	// MinClientVersion is the oldest client release the server serves:
+	// its own release, any `git describe` tail removed.
+	MinClientVersion string `json:"min_client_version"`
 }
 
 type WorkspaceListResult struct {

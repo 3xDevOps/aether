@@ -388,6 +388,9 @@ func (g *Gateway) linkEdge(opts cli.LinkOptions) (*edgeLinked, *protocol.Error) 
 	if perr := g.adoptLink(result, opts.Name); perr != nil {
 		return nil, perr
 	}
+	if perr := cli.UpgradeRequired(result.Info); perr != nil {
+		return nil, perr
+	}
 	cfg := result.Config
 	var out bytes.Buffer
 	linked := &edgeLinked{ServerID: cfg.ServerID, Edge: cfg.EdgeURL, Addr: cfg.Addr, User: cfg.User, Member: result.Info.Member}

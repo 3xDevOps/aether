@@ -286,3 +286,40 @@ func TestUpdateCheckRefreshBypassesTheCache(t *testing.T) {
 		t.Fatalf("refreshed latest = %q, want v1.4.0", tag)
 	}
 }
+
+// TestUpdateCheckAnswersWithoutGitHub: a release lookup that fails costs
+// the CLI half only, so a server refusing this client still says so.
+func TestUpdateCheckAnswersWithoutGitHub(t *testing.T) {
+	pinVersion(t)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "rate limited", http.StatusForbidden)
+	}))
+	t.Cleanup(github.Close)
+	backend := &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodServerInfo: json.RawMessage(`{"server_version":"v1.3.0","min_client_version":"v1.3.0"}`),
+	}}}
+	g, err := New(Config{Backend: backend, Update: selfupdate.NewChecker(github.URL, time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(g, http.MethodPost, "/local/v1/update.check", `{"refresh":true}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		CLI                  selfupdate.Check `json:"cli"`
+		CLIError             string           `json:"cli_error"`
+		ClientUpdateRequired bool             `json:"client_update_required"`
+		MinClientVersion     string           `json:"min_client_version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.CLIError, "check for releases: ") || got.CLI.Version != runningTag {
+		t.Fatalf("cli = %+v, cli_error = %q", got.CLI, got.CLIError)
+	}
+	if !got.ClientUpdateRequired || got.MinClientVersion != "v1.3.0" {
+		t.Fatalf("client_update_required = %v, min_client_version = %q", got.ClientUpdateRequired, got.MinClientVersion)
+	}
+}

@@ -123,6 +123,9 @@ func (s *Server) handleSession(ctx context.Context, member domain.MemberID, nc s
 				reply(req, false)
 				continue
 			}
+			if perr := s.upgradeRequired(ctx); perr != nil && p.Name != protocol.SubsystemControl {
+				handler = func() { refuseUpgrade(ch, perr) }
+			}
 			started = true
 			reply(req, true)
 			s.spawn(handler)
