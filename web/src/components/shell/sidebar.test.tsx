@@ -541,14 +541,14 @@ describe('update notice and footer', () => {
     expect(nav().queryByText(/is available/)).toBeNull()
   })
 
-  it('brings a dismissed update back from the footer menu', async () => {
+  it('checks for updates from the footer menu, bringing a dismissed one back', async () => {
     const update = updateStatus()
     useStore.setState({ update, dismissedUpdates: { cli: update.cli.latest ?? '', server: '', shell: '' } })
     render(<AppShell />)
     expect(nav().queryByText(/is available/)).toBeNull()
 
     fireEvent.keyDown(nav().getByRole('button', { name: 'Alice, Connecting' }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Update…' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Check for updates…' }))
 
     expect(useStore.getState().updatesOpen).toBe(true)
     expect(useStore.getState().dismissedUpdates.cli).toBe('')

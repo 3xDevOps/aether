@@ -1,7 +1,7 @@
 // The /ws/events subscription: one socket, jittered reconnect, replay from
 // the last sequence the store has seen so a reconnect loses nothing.
 
-import { api, type ApiErrorData } from '@/lib/api'
+import { api, codeUpgradeRequired, upgradeFrom, type ApiErrorData, type UpgradeRequired } from '@/lib/api'
 import type { Event, SubscribeRequest } from '@/lib/types'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline'
@@ -20,6 +20,9 @@ export interface StreamHandlers {
    * client ever gets. `data` carries the refusal and the failed layer for
    * a failure on the edge path. Fired before the retry is scheduled. */
   onUnreachable?: (kind: 'network' | 'server', detail: string, data?: ApiErrorData) => void
+  /** The server refuses this client until it updates; the stream stops
+   * for good, since every resubscribe would be refused the same way. */
+  onUpgradeRequired?: (required: UpgradeRequired) => void
   /** Last sequence applied to the store; replay resumes after it. */
   afterSeq: () => number
 }
@@ -107,6 +110,10 @@ export function connectEvents(h: StreamHandlers): () => void {
           if (parsed.ok) {
             attempt = 0
             h.onState('live')
+          } else if (parsed.ok === false && parsed.code === codeUpgradeRequired) {
+            closed = true
+            h.onState('offline')
+            h.onUpgradeRequired?.(upgradeFrom(parsed.error ?? '', parsed.data))
           } else if (parsed.ok === false && parsed.code === codeUnavailable) {
             const detail = parsed.error ?? ''
             if (detail.startsWith('network unreachable')) {

@@ -1,21 +1,31 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
 const Module = require('node:module')
-const { test, beforeEach } = require('node:test')
+const os = require('node:os')
+const path = require('node:path')
+const { test, beforeEach, after } = require('node:test')
 
 const shown = []
 let badge = 0
+let supported = true
+let focused = null
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'aether-notify-'))
+after(() => fs.rmSync(userData, { recursive: true, force: true }))
 
 class FakeNotification {
   static isSupported() {
-    return true
+    return supported
   }
   constructor(options) {
     this.options = options
     this.closed = false
+    this.handlers = {}
   }
-  on() {}
+  on(name, handler) {
+    this.handlers[name] = handler
+  }
   show() {
     shown.push(this)
   }
@@ -27,7 +37,11 @@ class FakeNotification {
 const load = Module._load
 Module._load = function (request, ...rest) {
   if (request === 'electron') {
-    return { app: { setBadgeCount: (n) => { badge = n } }, Notification: FakeNotification }
+    return {
+      app: { setBadgeCount: (n) => { badge = n }, getPath: () => userData },
+      BrowserWindow: { getFocusedWindow: () => focused },
+      Notification: FakeNotification,
+    }
   }
   return load.call(this, request, ...rest)
 }
@@ -78,6 +92,8 @@ function lead(id) {
 beforeEach(() => {
   shown.length = 0
   readFails = false
+  supported = true
+  focused = null
   notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
 })
 
@@ -181,4 +197,44 @@ test('a failed read announces nothing, and the next read announces the need once
   assert.equal(badge, 1)
   await status(run, {})
   assert.equal(shown.length, 1)
+})
+
+test('an update notifies once per key, across a sidecar respawn', () => {
+  let clicks = 0
+  const update = { key: 'cli:v1.2.0', title: 'Aether 1.2.0 is available', body: 'Run aether update' }
+  notify.showUpdate(update, () => clicks++)
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.title, 'Aether 1.2.0 is available')
+  assert.equal(shown[0].options.body, 'Run aether update')
+  shown[0].handlers.click()
+  assert.equal(clicks, 1)
+
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 1)
+  notify.showUpdate({ ...update, key: 'server:v1.2.0' }, () => {})
+  assert.equal(shown.length, 2)
+  notify.showUpdate({ ...update, key: 'cli:v1.3.0' }, () => {})
+  assert.equal(shown.length, 3)
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userData, 'announced-updates.json'), 'utf8')), [
+    'cli:v1.2.0',
+    'server:v1.2.0',
+    'cli:v1.3.0',
+  ])
+})
+
+test('a focused window gets no update notification, and a later unfocused call still does', () => {
+  const update = { key: 'cli:v2.0.0', title: 'Aether 2.0.0 is available', body: '' }
+  focused = {}
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 0)
+  focused = null
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 1)
+})
+
+test('no update notification where notifications are unsupported', () => {
+  supported = false
+  notify.showUpdate({ key: 'cli:v3.0.0', title: 'Aether 3.0.0 is available', body: '' }, () => {})
+  assert.equal(shown.length, 0)
 })

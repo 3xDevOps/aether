@@ -41,11 +41,18 @@ export function TopBar({ navigation = true }: { navigation?: boolean }) {
 
   return (
     <header ref={header} className="shrink-0 border-b border-seam bg-chrome pt-[var(--safe-top)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-      <div className={cn(
-        'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
-        desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
-        desktop?.platform === 'darwin' && 'pl-20',
-      )}>
+      <div
+        onContextMenu={desktop?.controls?.showMenu && ((event) => {
+          if ((event.target as HTMLElement).closest('button, a')) return
+          event.preventDefault()
+          desktop.controls?.showMenu?.(event.clientX, event.clientY)
+        })}
+        className={cn(
+          'flex min-h-11 flex-wrap items-center gap-x-2 px-2 coarse:min-h-12',
+          desktop && 'flex-nowrap select-none [-webkit-app-region:drag] [&_button]:[-webkit-app-region:no-drag]',
+          desktop?.platform === 'darwin' && 'pl-20',
+        )}
+      >
         <div className="flex shrink-0 -translate-y-px items-center gap-1.5">
           <img src="/aether-mark.png" alt="" width={24} height={24} />
           <span className="text-wordmark">aether</span>

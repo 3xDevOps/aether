@@ -353,8 +353,8 @@ top to bottom:
    non-admin) are reached from the palette only, and its `link` entries
    (Approvals, the board's Needs you; Onboarding, opened from **Settings ›
    Onboarding**) only from a link.
-5. **One update notice row** when a CLI, server or desktop update exists, for
-   example "Aether 0.5.3 is available · Update"; see
+5. **One update notice row** when a server, CLI or desktop update exists, for
+   example "Server 0.5.3 is available · Update"; see
    [Update prompts](#update-prompts).
 6. **Footer**: the member's avatar (a neutral glyph before the computer is
    linked) and name and a connection dot, whose word
@@ -362,7 +362,7 @@ top to bottom:
    Its menu holds **Profile** (a dialog: display name, colour, git identity
    and agent account sharing; see [Members, devices and
    Profile](#members-devices-and-profile)), **Keyboard shortcuts**, **Theme**,
-   **Update…** when an update exists, and a **Team** line with who is online
+   **Check for updates…**, and a **Team** line with who is online
    and the spend against workspace budgets.
 
 A run row is a 28px `ListRow` (44px on a coarse pointer). From the left: a
@@ -656,7 +656,11 @@ is no separate title-bar strip. On Windows and Linux,
 `src/components/shell/window-bar.tsx` adds minimize, maximize/restore and close
 at the right edge, wired to `window.aetherDesktop.controls`. Their callbacks
 take no arguments: forwarding React's pointer event through Electron's
-context bridge fails with `An object could not be cloned.`
+context bridge fails with `An object could not be cloned.` Those platforms
+have no application menu, so a right-click on the row opens the shell's
+native menu - **Check for Updates…**, Minimize, Maximize or Restore, Close -
+from the window's `system-context-menu` event on a drag region and from
+`controls.showMenu(x, y)` elsewhere on the row.
 
 On macOS, the shell keeps the native traffic lights, centers them in the
 44px navigation row and reserves 80px before the logo. The row uses
@@ -4915,8 +4919,9 @@ before any), **Saved servers** (the default link, then named ones) with
   reused. Successful explicit revision acceptance upserts/selects the workspace
   and opens its repository page. Nonadmins see neither this section nor its
   repository-add controls.
-- **Server**: the server version and protocol, with **Update…** when an
-  update is waiting; data-filesystem used and available space, separate from
+- **Server**: the server version and protocol, **Check for updates…** (named
+  **Check now** after a failed check, whose error shows verbatim below it)
+  and **Update…** when an update is waiting; data-filesystem used and available space, separate from
   Aether's attributed worktrees, transcripts, database, repositories, homes,
   managed caches, evidence and other data. Snapshots are included in worktrees, not added
   again. Daemon-wide Docker accounting includes non-Aether workloads and has
@@ -5304,165 +5309,298 @@ not on the step.
 
 ## Update prompts
 
-`src/components/update-banner.tsx` is where the dashboard says a binary is out
-of date. `UpdateCenter`, mounted once by `AppShell`, runs the reads below and
-hosts the **Updates** dialog, which lists every prompt that applies, with the
-CLI one in `src/components/cli-update-banner.tsx` and the pieces they share in
-`src/components/update-banner-shared.tsx`. The sidebar shows one notice row
-from `useUpdateNotice()` - "Aether 0.5.3 is available · Update", "Server 0.5.3
-is available", "The desktop app is out of date" or "Server update in progress,
-terminals reconnect briefly" - and its **Update** opens the dialog. The
-prompts are rows in that dialog, not banners stacked over the shell. The CLI
-and shell prompts read `update.check` from the local gateway, because the
-dashboard can update only the machine running `aether gui`. The server prompt
-asks the linked server about itself and appears wherever the member is an
-admin. When the gateway reports the CLI as `packaged` (the Android app), the
-CLI prompt and its sidebar row are gone and the dialog says `Updates come
-from the Android app: install its new version to update Aether.`, followed,
-when the check found a newer release, by `Aether <tag> is released; the
-app's banner says when and where to update.` with no button: the app's own
-native banner is the notice, and for a Google Play install it waits 7
-days so Play has the release ([install.md](install.md#android-app)). The
-workspace repository panel hides **Local clone** because the gateway has no
-`link.repo`.
+The dashboard tracks three update targets: the **server**, **this client**
+(the `aether` binary running `aether gui`) and the **desktop shell**.
+`src/store/updates.ts` derives each target's state from the store:
+`up_to_date`, `checking`, `check_failed`, `available`, `required`,
+`scheduled`, `applying`, `restarting`, `ready_to_restart`, `failed` or
+`rolled_back`. Every surface below renders from those states:
 
-- **Two reads.** The host reads `update.check` on mount, again every half
-  hour, and again whenever the window comes back to the front, on `focus` and
-  on `visibilitychange` alike. No read runs while the window is hidden, the
-  timer included, so the freshness this buys is best-effort on a minimized
-  app and immediate when the member returns to it. The desktop app runs for
-  days, so a release that ships after launch has to arrive on its own, and
-  the half-hour timer is half the gateway's cache period
-  (`docs/local-gateway.md`) rather than all of it, which bounds the wait at
-  the two added together. One reader serves both the re-checks and the
-  Update button. A re-check never starts while a lookup is out, and every
-  read is numbered so that only the newest one's answer is written: a read
-  issued before the click is served the cache the click has yet to refresh,
-  and would otherwise bring the superseded release back. The re-checks also
-  stand down for the length of an install, so nothing renames the prompt
-  over the release being written to disk. A successful lookup is cached for
-  an hour, so the re-checks cost the gateway one request to GitHub an hour
-  at most; a failed one is cached for five minutes, so an unreachable GitHub
-  is retried sooner. The answer goes on the `local` slice, which is also
-  what the notice row reads. A re-check that fails is swallowed, as the
-  first read always was: it leaves the last good answer standing rather than
-  blanking a prompt that is already on screen, and the next re-check still
-  runs. It reads `server.update_status` as well - any member may - and
-  re-reads it on every reconnect and whenever `server.info` names a different
-  version. The reconnect is the one that matters: a server that updates
-  itself re-executes, so the socket drops and
-  comes back, and that fresh status is what ends the prompt and the notice.
-  `connect()` re-hydrates on the same signal while an update is in flight,
-  even with a cursor to replay from, because only a fresh `server.info` says
-  the server came back on the new version. A read that fails is recorded, not
-  swallowed: the prompt then says it could not read the status, with a
-  **Retry**, rather than claiming the server cannot update itself.
-- **The CLI prompt is for everyone.** It names the new version and the running
-  one, says what updating costs - it replaces the `aether` binary on this
-  machine and restarts the dashboard, taking attached terminals and any
-  running sync session with it, while the runs keep going on the server - and
-  offers **Update now**, the release notes, and a dismiss. What the button
-  will do is decided before the click, from `update.check`'s `install_method`
-  (`docs/local-gateway.md`): *direct* offers the button and nothing more;
-  *admin-prompt* (macOS with a GUI session and a `cli_path` in a directory
-  only root can write, such as `/usr/local/bin/aether`) offers the
-  button and says, before the click: *macOS will ask for an administrator
-  password: {cli_path} is in a directory this account cannot write to. The
-  dialog is labelled osascript, the tool Aether asks through. Aether never
-  sees your password.*; *manual* (Linux with a directory this account
-  cannot write, Windows, or a macOS gateway the dialog cannot serve - the
-  rule is in `docs/local-gateway.md`) offers no button and shows the
-  command to run instead - `sudo aether update` with a copy button, or the
-  release link where the platform has no self-update at all. Clicking
-  **Update now** first re-reads `update.check` with `refresh: true`, which
-  skips the gateway's cached answer, and puts that on the store, so the
-  version the prompt names while the download runs is the release that was
-  newest a moment before `update.apply` resolved its own. A fresh answer
-  saying this machine is already current - the update ran in a terminal
-  while the app was open - installs nothing and says so, *Aether vX is the
-  newest release. Nothing was downloaded.*, rather than taking the prompt
-  away under the click. That notice is about the answer it was made from:
-  when a later release lands, the offer and its button come back. A fresh
-  check that cannot reach GitHub shows the gateway's message and leaves the
-  button usable. Otherwise the call goes on to `update.apply` and the prompt
-  follows the phases below; nothing else reconnects, because the existing
-  `ConnectionError` page already owns a gateway that goes away. The done
-  state names what the gateway said is left to do, every binary the swap
-  replaced and, on a single-box install where `aether-server` was one of
-  them, the `restart_command` the gateway sends back: the server keeps
-  running the old code until its unit restarts, and the CLI prints that same
-  line. Everything from `update.apply` onwards is rendered from that answer
-  rather than from `update.check`, because the re-checks carry on behind it
-  and report this machine as current the moment the swap lands - which would
-  otherwise take the restart command, and a rebuild still running, off the
-  screen. The offer headline gives way to *Aether vX is installed.* there,
-  since the release is no longer on offer. A `-32001` (denied) answer is the
-  dialog cancelled or the password refused: the prompt shows *Update
-  cancelled, nothing was changed.* muted rather than as a failure, and the
-  button comes back. Any other refusal is
-  rendered verbatim -
-  the gateway's own message, ending in the command to run where there is one -
-  and the button becomes usable again.
-- **The server prompt is for admins, and it acts.** Capability is half the
-  gate and the caller's role is the other half, the same rule the admin
-  surfaces follow, so it needs `useIsAdmin()` as well. It shows the server
-  version and the latest release side by side, and what it offers under that
-  comes from `server.update_status`:
-  - *capable*: **Update now** and **Update when idle**. Update now opens a
-    confirm dialog that counts the runs active in this member's own run list -
-    the server's definition of busy, so a paused run and one parked at
-    needs-attention are not counted - and says what the restart costs: the
-    runs keep going because the server reattaches to their containers, and
-    attached terminals reconnect on their own. It then calls `server.update`
-    with `when: "now"`. Update when idle sends `when: "idle"`, and the prompt
-    becomes *Update to vX scheduled by <member>, applies when no run is
-    active* with a **Cancel** that sends `when: "cancel"`.
-  - *not capable*: the documented unprivileged install. No buttons: the
-    server's own reason, then the two commands to run on the server host with
-    a copy button, as before. A gateway that does not carry the method keeps
-    that prompt from `update.check`'s `server_behind`, and says only what it
-    knows - "The dashboard cannot update the server."
-  - The scheduled state also names what the update is still waiting for
-    (`status.waiting`), because a live terminal attach holds it back the
-    same way a working run does.
-- **The phases come off the feed.** `server.update` events land on the
-  `server` slice through `applyEvent`, once per workspace and once more from
-  the RPC result, so the slice keeps the furthest phase rather than the last
-  one to arrive: *scheduled*, *applying*, *restarting* - the socket drops
-  there, the reconnect re-hydrates and re-reads the status, and a status
-  whose `server_version` is the version the phases were about clears the
-  progress and ends the prompt - or *failed*, which shows the server's error
-  verbatim and falls back to the manual commands. Every phase is a row in
-  the activity feed too, filterable as *Server updates*.
-- **Everyone else gets one line.** A member who is not an admin sees
-  *Server update in progress, terminals reconnect briefly* in the sidebar's
-  notice row while one is in flight, so a restart nobody explained
-  does not read as an outage. A server that does not answer costs the CLI
-  prompt nothing: `update.check` still returns the CLI half with the failure
-  in `server_error`, because the CLI is a binary on this machine and a dead
-  SSH hop is no reason to hide that it is out of date.
-- **Dismissal is per version and it persists.** `dismissedUpdates` on the `ui`
-  slice records which version was dismissed for each prompt and rides the same
-  persisted preferences as the theme and the sidebar, so a dismissal survives a
-  reload, and the next release shows the prompt again - without a reload,
-  when a re-check is what brings that release in. It silences the offer,
-  not an update already moving: a scheduled or applying server comes back
-  regardless, because that prompt is why the server is about to restart.
-- **The footer menu brings a dismissed prompt back.** **Update…** in the
-  sidebar footer menu appears while any update exists, dismissed or not; it
-  clears the dismissals and opens the dialog.
-- **The desktop shell has a prompt of its own.** The SPA ships inside the CLI,
-  but the Electron shell around it is whatever `aether gui build` last
-  produced. That build records the complete CLI version and its executable
-  path alongside the shell's npm-valid `package.json` version.
+- the sidebar notice row,
+- the **Updates** dialog (`UpdateCenter` in
+  `src/components/update-banner.tsx`, mounted by `AppShell`),
+- the required-update gate (`src/components/update-gate.tsx`, mounted by
+  `App`),
+- **Settings › Server**.
+
+The client row lives in `src/components/cli-update-banner.tsx`. The pieces
+the rows share are in `src/components/update-banner-shared.tsx`. Versions
+compare with `src/lib/version.ts`, which follows `internal/selfupdate`'s
+semver precedence:
+
+- numeric prerelease identifiers order numerically;
+- a `git describe` tail ranks just above its tag;
+- an unparseable version (`dev`, a bare commit) is never behind.
+
+The server always comes first. It updates before its clients, and a server
+that runs a newer release than a client refuses that client
+([install.md](install.md#upgrading)).
+
+- **The reads.** `src/components/update-checks.tsx` is mounted by `App`, so
+  it keeps running behind the gate. It reads `update.check` from the local
+  gateway and `server.update_status` from the server at these times:
+  - on mount;
+  - on a timer of 30 minutes ±10%, so dashboards opened together do not
+    check together;
+  - on window `focus` and `visibilitychange`, at most once a minute.
+
+  `server.update_status` is read again after every reconnect, and whenever
+  `server.info` names a different version. A reconnect that finds an update
+  in flight (`preflight`, `applying`, `restarting`, `verifying`) re-reads
+  the status every 3 seconds, up to 20 times, so a server that came back
+  verifying is seen to reach `applied` instead of timing out. The timer and
+  focus reads skip the status while the stream is not live, or while a
+  status read is already out. Nothing is read while the window is hidden,
+  except in a desktop shell that can notify: there the reads run in the
+  background too.
+
+  The CLI and shell rows come from `update.check`, because the dashboard can
+  update only the machine running `aether gui`. The server row comes from
+  the server's own background release check. Any member may read the
+  server's status.
+
+  Reads of each kind are numbered, and only the newest one's answer is
+  written, so a click supersedes reads already out and an older status
+  cannot overwrite a newer one. The periodic read stands down while
+  an install runs, so it cannot rename the release the row names.
+
+  A failed read is recorded, not swallowed. The last good answer stays on
+  the store, so an offer already on screen does not vanish. The error shows
+  wherever the target has nothing better to say, even over an older status.
+  The server counts as up to date only when its status names a latest
+  release. When the gateway's release
+  lookup fails, `update.check` answers with `cli_error`; that is a failed
+  check too.
+- **Check for updates.** **Check for updates…** is always in the sidebar
+  footer menu and in **Settings › Server**, and **Check now** is in the
+  dialog footer. The desktop shell's **Check for Updates…** menu item runs
+  the same check. It:
+  1. clears the dismissals;
+  2. opens the dialog;
+  3. reads `update.check` and `server.update_status` with `refresh: true`.
+
+  The server runs its release check there and then, and the gateway skips
+  its cache. The check always answers. With nothing to update, the dialog
+  says *You're up to date (vX). Checked HH:MM.*, and each row says the same
+  for its target; an out-of-date desktop app withholds that line. A check that failed shows the error verbatim:
+  - *Could not check for a new Aether release.*
+  - *The server could not check for a new release.*
+  - *Could not read the server's update status.* when the status read
+    itself failed.
+
+  Settings › Server shows the same error under **Version**, and its button
+  reads **Check now**.
+- **The notice row.** The sidebar shows one line, linked to the dialog by
+  **Update**. In priority order:
+  1. *Server update in progress, terminals reconnect briefly*;
+  2. for admins, *Server update to X failed* or *The server update was
+     rolled back*;
+  3. *Server X is available* (members: *Server X is available, ask an
+     admin*);
+  4. *Update to Aether X failed* or *Aether X is available*;
+  5. *The desktop app is out of date*.
+- **The dialog lists the server first.**
+  - **Admins** get the server's version, the latest release and the
+    release notes link. What else the row offers comes from
+    `server.update_status`:
+    - *capable*: **Update now** and **Update when idle**. Update now opens
+      a confirm dialog. It counts the runs active in this member's own run
+      list, using the server's definition of busy: a paused run and one
+      parked at needs-attention do not count. The dialog says what the
+      restart costs: runs keep going because the server reattaches to
+      their containers, and attached terminals reconnect on their own. The
+      confirm calls `server.update` with `when: "now"`. Update when idle
+      sends `when: "idle"`, and the row becomes *Server X is scheduled.
+      Scheduled by <member>, applies when no run is active.*, with a
+      **Cancel** that sends `when: "cancel"`. A scheduled row also names
+      what the update is still waiting for (`status.waiting`), because a
+      live terminal attach holds it back the same way a working run does.
+    - *not capable*: no buttons. The row shows the server's own reason,
+      then the commands to run on the server host, each with a copy button.
+      A server without `server.update_status` falls back to
+      `update.check`'s `server_behind`.
+
+    While the server is behind (its row says *available*, or
+    `update.check` reports `server_behind` because the server's own
+    release check failed), the client row adds *Update the server first,
+    from its row above or with aether server update; this client updates
+    after it.* When `update.check` reports `server_first`, `update.apply`
+    would refuse, so the client row drops **Update now**; a member is told
+    to ask an admin to run `aether server update`.
+  - **Members** see *Server X is available.* and *Ask an admin to run
+    `aether server update`; this client updates after it.*, with no
+    buttons. A failed update shows the server's error and says to ask an
+    admin.
+- **Server phases.** `server.update` events land on the `server` slice
+  through `applyEvent`. They arrive once per workspace and once more from
+  the RPC result, so the slice keeps the furthest phase of one update,
+  never the last frame to arrive. The phases render as:
+  - *preflight* and *applying*: *Updating the server to X…*, saying nothing
+    has been replaced yet;
+  - *restarting* and *verifying*: *Restarting the server on X…*;
+  - *failed*: the server's error verbatim, then the manual commands;
+  - *rolled_back*: *The server update was rolled back; it runs Y again.*,
+    with the error.
+
+  Once one update is `applied`, `failed` or `rolled_back`, a late
+  `applying`, `restarting` or `verifying` frame for the same version is
+  ignored; **Update now** and **Update when idle** clear the settled phase
+  before they ask. A **Cancel** result ends a schedule at once, ahead of
+  the status read before it that still lists `pending`.
+
+  `server.update_status` carries the same `phase`, `error`, `from_version`
+  and `to_version`. A status still in flight seeds the progress after a
+  reload. A status with a settled `phase` (`applied`, `failed`,
+  `rolled_back`, `idle`) ends it, and so does, on an older server, a
+  `server_version` at or past the version the phases were about.
+  `failed` and `rolled_back` show only while the server is still behind
+  the latest release. A server whose phases stop for 10 minutes becomes
+  *failed*: *The server did not finish updating to X within 10 minutes.
+  Last error: …*, with the last error the status, the last attempt or the
+  status read reported. Every phase is also a row in the activity feed,
+  filterable as *Server updates*.
+- **The client row is for everyone.** It names the new version and the
+  running one, says what updating costs, and offers **Update now**, the
+  release notes and a dismiss. Updating replaces the `aether` binary on
+  this machine and restarts the dashboard, which stops attached terminals
+  and any running sync session; the runs keep going on the server.
+
+  What the button does is decided before the click, from `update.check`'s
+  `install_method` (`docs/local-gateway.md`):
+  - *direct*: the button and nothing more.
+  - *admin-prompt* (macOS with a GUI session and a `cli_path` in a
+    directory only root can write, such as `/usr/local/bin/aether`): the
+    button, and before the click: *macOS will ask for an administrator
+    password: {cli_path} is in a directory this account cannot write to.
+    The dialog is labelled osascript, the tool Aether asks through. Aether
+    never sees your password.*
+  - *manual*: no button. The row shows `sudo aether update` with a copy
+    button.
+
+  When `update.check`'s top-level `can_self_update` is not `true` (Windows,
+  a packaged or a development build), there is no button and no
+  `aether update`. One line names `target_version` and the platform's way
+  to install it, such as *Self-update is not supported on Windows. Close
+  Aether, then rerun install.ps1 to install vX.*, followed by a link to
+  that tag's GitHub release page. The link appears only when the tag has
+  the `vMAJOR.MINOR.PATCH[-PRERELEASE]` form.
+
+  `applyClientUpdate` in `src/store/updates.ts` runs the click, shared with
+  the gate:
+  1. It re-reads `update.check` with `refresh: true`. A fresh answer that
+     finds this machine current installs nothing and says *Aether vX is the
+     newest release. Nothing was downloaded.* A fresh `cli_error` is the
+     click's error, except on a gated client whose `target_version` is
+     set: the server's release was found anyway, so the install goes on.
+  2. It calls `update.apply`. While a desktop-app rebuild runs, it polls
+     `update.status` every second.
+
+  The outcome stays on the store, so the row keeps saying what happened
+  after the re-checks report this machine as current:
+  - the paths replaced;
+  - the `restart_command` for a co-located `aether-server`;
+  - a rebuild still running, or its real error with `aether gui build`.
+
+  A `403` answer means the macOS dialog was cancelled or the password
+  refused: *Update cancelled, nothing was changed.*, muted, with the
+  gateway's words, and the button comes back. Any other refusal is
+  rendered verbatim. A failure or cancel is about one release: a later
+  check that names another one clears it and offers the new release.
+
+  When the gateway reports the CLI as `packaged` (the Android app), the
+  client row and its notice are gone. The dialog says *Updates come from
+  the Android app: install its new version to update Aether.*, followed,
+  when a newer release exists, by *Aether <tag> is released; the app's
+  banner says when and where to update.* The app's own banner is the
+  notice ([install.md](install.md#android-app)).
+- **The required-update gate.** The gate replaces the whole dashboard while
+  this client is gated:
+  - after any call answers `-32005` or HTTP 426 (`onUpgradeRequired` in
+    `src/lib/api.ts` hears every one);
+  - after the events stream's subscribe ack does
+    (`{"ok":false,"code":-32005}`);
+  - when `update.check` reports `client_update_required`.
+
+  `App` renders the gate ahead of `ConnectionError`, because a gated client
+  is refused everything except `server.info` and `server.update_status`.
+  The hydration retry and the event stream stop for good, since every
+  retry would be refused the same way.
+
+  The gate cannot be dismissed. It is a region labelled by its heading,
+  which takes focus when the gate appears. It shows the server's own
+  message once, which names both versions, and the `min_client_version`
+  the server accepts. **Update now** runs `applyClientUpdate`. While gated,
+  `update.apply` installs the server's release, named by `update.check`'s
+  `target_version`, not the latest one. An empty `target_version` means no
+  published release matches the server; the click then installs nothing
+  and shows that error. Progress, the real error and a cancelled
+  administrator prompt share one status live region. The manual command
+  (`aether update`, or `sudo aether update` for a *manual* install) is
+  chosen by the dashboard; the `command` a -32005 carries is ignored, so a
+  server cannot choose what a member pastes into a terminal. It is
+  followed by what makes it take effect: *Then restart `aether gui` and
+  reload this page.*, or in the desktop shell *Then quit and reopen the
+  desktop app.*, because the running gateway keeps the binary it started
+  with. A client that cannot update itself gets neither button nor
+  command, only the line and release link the client row shows; a
+  *packaged* one (the Android app) reads *Updates come from the Android
+  app: install its vX release to update Aether.* What follows a finished
+  update depends on the gateway:
+  - under the desktop shell, the gateway relaunches and the page comes
+    back on the new version;
+  - in a browser tab, the gate says *Aether X is installed.*, says to
+    restart `aether gui`, and offers **Reload**.
+
+  A later `update.check` that reached the server (`server_version` set, no
+  `server_error`) and reports `client_update_required: false` ends the
+  gate with one reload, since the stopped stream restarts only on a
+  reload. It reloads once per client version per tab session
+  (`aether.update-gate-reloaded` in `sessionStorage`), so a server that
+  keeps refusing leaves the gate up rather than looping.
+
+  The way out is always there:
+  - **Copy details** copies the versions, the message, the manual command
+    and the last error;
+  - **Reload**;
+  - **Switch to <name>** for every other server saved with `aether link
+    --name`, through `link.switch`.
+
+  A dashboard served by the server itself is never gated. It reloads
+  instead when the server comes back on a different version, since its
+  pages are that server's build.
+- **Dismissal is per version and it persists.** `dismissedUpdates` on the
+  `ui` slice records which version was dismissed for each target. It rides
+  the persisted preferences, so a dismissal survives a reload, and the next
+  release shows the prompt again. A dismissal hides only an offer. A
+  scheduled, applying, failed or rolled-back server update still shows.
+- **Desktop notifications.** In the desktop shell, a newly available
+  release raises one OS notification per target and version, through
+  `desktop/notify.js`. It names the server release for an admin whose
+  server is behind, and the client release otherwise. It fires only while
+  no app window is focused; in front, the notice row is the notice. The
+  shell owns the record of what it announced, keyed `server:<tag>` or
+  `cli:<tag>`, in `announced-updates.json` under Electron's `userData`
+  directory: the gateway listens on a new port every launch, so the page's
+  own storage would start empty each time. Clicking the notification opens
+  the dialog and runs a check.
+- **The desktop shell has a prompt of its own.** The SPA ships inside the
+  CLI, but the Electron shell around it is whatever `aether gui build`
+  last produced. That build records the complete CLI version and its
+  executable path beside the shell's npm-valid `package.json` version.
   `desktop/main.js` starts the recorded binary ahead of `PATH` (unless
-  `AETHER_BIN` explicitly overrides it) and hands the build version to the
-  renderer; `desktop/preload.js` exposes it as
-  `window.aetherDesktop.shellVersion`. On a local gateway, a different
-  capabilities version raises the app-out-of-date prompt with `aether gui
-  build`. A browser tab and a server-hosted dashboard do not have a local
-  shell to compare. The prompt is independent of `update_available`: the CLI
-  is usually current *after* an update that left the shell old.
+  `AETHER_BIN` overrides it) and hands the build version to the renderer.
+  `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`.
+  On a local gateway, a shell whose version differs from the capabilities
+  version by release precedence raises *The desktop app is out of date.*
+  with `aether gui build`. Two builds of one tag do not count as
+  different. A browser tab and a server-hosted dashboard have no local
+  shell to compare. The prompt is independent of `update_available`: the
+  CLI is usually current *after* an update that left the shell old.
+
+  The bridge also carries `onCheckForUpdates` (the menu item) and
+  `notifyUpdate`. On Windows and Linux, `controls.showMenu` opens the
+  title-bar menu. All three are optional, because a shell built by an older
+  `aether gui build` lacks them.
 
 ## Keyboard and focus
 

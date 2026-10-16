@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { RECHECK_MS, UpdateCenter } from '@/components/update-banner'
+import { UpdateHost } from '@/test/update-host'
 import { ApiError } from '@/lib/api'
 import type { UpdateApplyResult } from '@/lib/types'
 import { useStore } from '@/store'
-import { bob, fakeApi, updateStatus } from '@/test/fixtures'
+import { bob, fakeApi, serverUpdateStatus, updateStatus } from '@/test/fixtures'
 import {
   cachedUntilRefreshed,
+  RECHECK_PERIOD,
   seed,
   settle,
   withLatest,
@@ -27,7 +28,7 @@ afterEach(() => {
 test('shows the CLI banner to a collaborator when the CLI is behind', async () => {
   const client = fakeApi()
   seed({ self: bob })
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   expect(await screen.findByText('Aether v1.3.0 is available.')).toBeTruthy()
   expect(screen.getByText(/You are running v1\.2\.3/)).toBeTruthy()
@@ -46,22 +47,71 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
 })
 
-// Windows cannot replace a running binary, so the button would only ever
-// fail: the banner names the release page instead.
-test('offers no button where the CLI cannot update itself', async () => {
+// Windows cannot replace a running binary, so the button and `aether
+// update` would only ever fail: the banner names the installer instead.
+test('offers no button or command where the CLI cannot update itself', async () => {
   const status = updateStatus()
   const client = fakeApi({
     localUpdateCheck: vi.fn(async () => ({
       ...status,
+      can_self_update: false,
+      target_version: 'v1.3.0',
       cli: { ...status.cli, can_self_update: false },
     })),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
-  expect(await screen.findByText(/Self-update is not supported/)).toBeTruthy()
+  expect(
+    await screen.findByText(/Self-update is not supported on Windows\. Close Aether, then rerun install\.ps1 to install v1\.3\.0\./),
+  ).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
+    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+  )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
-  expect(screen.getByRole('link', { name: 'Release notes' })).toBeTruthy()
+  expect(screen.queryByText(/aether update/)).toBeNull()
+})
+
+describe('a server that must update first', () => {
+  // The gateway refuses update.apply with server_first, so the button would
+  // only ever fail.
+  test('an admin is sent to the server row instead of Update now', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true, server_first: true })),
+    })
+    seed()
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText(/Update the server first, from its row above or with aether server update/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  })
+
+  test('a member is told to ask an admin', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true, server_first: true })),
+    })
+    seed({ self: bob })
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText(/Update the server first: ask an admin to run aether server update\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  })
+
+  // The server's own release check failed, so its row cannot say
+  // `available`; update.check still knows the server is behind.
+  test('the admin hint stays when the server release check failed', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true })),
+      serverUpdateStatus: vi.fn(async () =>
+        serverUpdateStatus({ server_version: 'v1.2.9', latest: '', update_available: false, check_error: 'github: 503' }),
+      ),
+    })
+    seed()
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText('github: 503')).toBeTruthy()
+    expect(await screen.findByText(/Update the server first, from its row above/)).toBeTruthy()
+  })
 })
 
 // An app-packaged CLI is updated by installing the app's new version, so
@@ -75,7 +125,7 @@ test('a packaged CLI offers nothing and names the app that updates it', async ()
     })),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   expect(
     await screen.findByText('Updates come from the Android app: install its new version to update Aether.'),
@@ -92,7 +142,7 @@ test('a packaged CLI behind a release names it without offering an update', asyn
   const packaged = { ...status, cli: { ...status.cli, packaged: 'Android app', asset: undefined, can_self_update: false } }
   const client = fakeApi({ localUpdateCheck: vi.fn(async () => packaged) })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   expect(
     await screen.findByText(
@@ -107,7 +157,7 @@ test('a packaged CLI behind a release names it without offering an update', asyn
 test('the Update button applies and the banner says it is restarting', async () => {
   const client = fakeApi()
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -131,7 +181,7 @@ test('the done state names the replaced binaries and the server restart', async 
     })),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -147,7 +197,7 @@ test('the done state names the replaced binaries and the server restart', async 
 test('the done state says nothing about a server that was not replaced', async () => {
   const client = fakeApi()
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -166,7 +216,7 @@ test('a failed apply shows the gateway message and leaves the button usable', as
     }),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -197,7 +247,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
   test('names the path and the dialog before and after the click', async () => {
     const client = adminPrompt()
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     fireEvent.click(
       await screen.findByRole('button', { name: 'Install details: macOS administrator approval' }),
@@ -228,7 +278,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
       )
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -251,7 +301,7 @@ describe('a binary macOS installs through the administrator dialog', () => {
       throw new ApiError(503, 'update.apply: install failed: checksum mismatch')
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
 
@@ -275,7 +325,7 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
     ),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   expect(
     await screen.findByText(
@@ -292,7 +342,7 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
 test('a dismissal hides that version and a newer release comes back', async () => {
   const client = fakeApi()
   seed()
-  const first = render(<UpdateCenter client={client} />)
+  const first = render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
   expect(useStore.getState().dismissedUpdates.cli).toBe('v1.3.0')
@@ -301,7 +351,7 @@ test('a dismissal hides that version and a newer release comes back', async () =
 
   // The same dismissal, the same release: still silent.
   useStore.setState({ update: null })
-  const again = render(<UpdateCenter client={client} />)
+  const again = render(<UpdateHost client={client} />)
   await waitFor(() => expect(useStore.getState().update).not.toBeNull())
   expect(screen.queryByText('Aether v1.3.0 is available.')).toBeNull()
   again.unmount()
@@ -313,7 +363,7 @@ test('a dismissal hides that version and a newer release comes back', async () =
     }),
   })
   useStore.setState({ update: null })
-  render(<UpdateCenter client={newer} />)
+  render(<UpdateHost client={newer} />)
   expect(await screen.findByText('Aether v1.3.1 is available.')).toBeTruthy()
 })
 
@@ -331,7 +381,7 @@ test('the done state keeps the gateway note over the restart line', async () => 
     })),
   })
   seed()
-  render(<UpdateCenter client={client} />)
+  render(<UpdateHost client={client} />)
 
   fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
   expect(await screen.findByText(/rerun the update once it finishes/)).toBeTruthy()
@@ -375,7 +425,7 @@ describe('what the banner keeps after the install', () => {
       }),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -384,7 +434,7 @@ describe('what the banner keeps after the install', () => {
 
     await act(async () => {
       window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(screen.getByText(/Updated to v1\.3\.0/)).toBeTruthy()
     expect(screen.getByText('sudo systemctl restart aether-server')).toBeTruthy()
@@ -409,7 +459,7 @@ describe('what the banner keeps after the install', () => {
       localUpdateStatus: vi.fn(async () => ({ phase: 'packaging' as const })),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -417,7 +467,7 @@ describe('what the banner keeps after the install', () => {
 
     await act(async () => {
       window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(screen.getByText(/Rebuilding the app/)).toBeTruthy()
     // The rebuild states have no Applied block, so the lead is what names
@@ -449,7 +499,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
         .mockResolvedValue({ phase: 'done' }),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     // Let the initial update.check settle - a plain microtask, no timer.
     await act(async () => {
@@ -505,7 +555,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       })),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -530,7 +580,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
   test('sets gatewayRestarting as soon as the apply says the gateway is going away', async () => {
     const client = fakeApi({ localUpdateApply: rebuildApply() })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await waitFor(() => expect(useStore.getState().gatewayRestarting).toBe(true))
@@ -550,7 +600,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       })),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }))
     await screen.findByText(
@@ -574,7 +624,7 @@ describe('the desktop-app rebuild the Update button waits on', () => {
       localUpdateStatus: vi.fn(async () => ({ phase: 'done' as const })),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0)
     })
@@ -622,7 +672,7 @@ describe('the release the Update button installs', () => {
       ),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
     expect(screen.getByText('Aether v1.3.0 is available.')).toBeTruthy()
 
@@ -661,7 +711,7 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -673,7 +723,7 @@ describe('the release the Update button installs', () => {
 
     released = true
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(RECHECK_MS)
+      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD)
     })
     expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Update now' })).toBeTruthy()
@@ -695,7 +745,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
@@ -725,14 +775,14 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))
     await settle()
     await act(async () => {
       window.dispatchEvent(new Event('focus'))
-      await vi.advanceTimersByTimeAsync(RECHECK_MS * 2)
+      await vi.advanceTimersByTimeAsync(RECHECK_PERIOD * 2)
     })
 
     expect(screen.getByText('Aether v1.4.0 is available.')).toBeTruthy()
@@ -758,7 +808,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50)
     })
@@ -795,7 +845,7 @@ describe('the release the Update button installs', () => {
       localUpdateApply: vi.fn(() => new Promise<UpdateApplyResult>(() => {})),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     await act(async () => {
@@ -823,7 +873,7 @@ describe('the release the Update button installs', () => {
       }),
     })
     seed()
-    render(<UpdateCenter client={client} />)
+    render(<UpdateHost client={client} />)
     await settle()
 
     fireEvent.click(screen.getByRole('button', { name: 'Update now' }))

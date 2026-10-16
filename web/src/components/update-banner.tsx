@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { CliBanner } from '@/components/cli-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
-import { CircleAlert, MonitorCog, ServerCog } from '@/components/icons'
+import { CircleAlert, CircleCheck, LoaderCircle, MonitorCog, ServerCog } from '@/components/icons'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Code } from '@/components/ui/code'
 import {
   Dialog,
   DialogContent,
@@ -22,151 +24,140 @@ import {
   bannerActions,
   bannerContent,
   bannerIcon,
+  checkedTime,
   Dismiss,
+  packagedLine,
+  StatusRow,
   verbatim,
 } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
+import { useClock } from '@/lib/clock'
 import { bareVersion, message } from '@/lib/format'
 import type {
-  ServerUpdatePayload,
   ServerUpdateStatus,
   ServerUpdateWaiting,
   ServerUpdateWhen,
 } from '@/lib/types'
 import { memberName } from '@/lib/member-name'
-import { cn } from '@/lib/utils'
+import { cn, focusRing } from '@/lib/utils'
+import { compareVersions } from '@/lib/version'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { UpdateKind } from '@/store/ui'
+import { checkForUpdates, clientTarget, serverTarget, type UpdateTarget } from '@/store/updates'
 
-export const RECHECK_MS = 30 * 60 * 1000
-
-export function packagedLine(packaged: string): string {
-  return `Updates come from the ${packaged}: install its new version to update Aether.`
-}
-
+/** A shell built by another release than the CLI serving it, in either
+ * direction; a dev shell's "0.1.0" counts, two builds of one tag do not. */
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion
   if (!shell || !cliVersion) return false
-  return bareVersion(shell) !== bareVersion(cliVersion)
+  return (compareVersions(shell, cliVersion) ?? 0) !== 0
+}
+
+export function useUpdateTargets(): { server: UpdateTarget; client: UpdateTarget } {
+  // The clock re-renders the timeout of a server that never came back.
+  useClock()
+  const server = useStore(useShallow((s) => serverTarget(s, Date.now())))
+  const client = useStore(useShallow(clientTarget))
+  return { server, client }
+}
+
+/** Opens the Updates dialog and runs both checks past their caches. */
+export function useCheckForUpdates(client: Api = api): () => void {
+  const caps = useCapability()
+  const serves = caps.hasLocal('update.check')
+  const reads = caps.hasMethod('server.update_status')
+  return useCallback(() => {
+    useStore.getState().clearDismissedUpdates()
+    useStore.getState().setUpdatesOpen(true)
+    void checkForUpdates(useStore, client, { client: serves, server: reads })
+  }, [client, serves, reads])
+}
+
+/** The answer a check always gives, even when nothing is out of date. */
+function summary(server: UpdateTarget, cli: UpdateTarget): string {
+  if (server.state === 'checking' || cli.state === 'checking') return 'Checking for updates…'
+  const known = [server, cli].filter((t) => t.state !== 'unknown')
+  if (known.length === 0 || !known.every((t) => t.state === 'up_to_date')) return ''
+  const first = known[0] as Extract<UpdateTarget, { state: 'up_to_date' }>
+  const at = checkedTime(first.checkedAt)
+  return `You're up to date (${first.version}).${at ? ` Checked ${at}.` : ''}`
 }
 
 export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   const caps = useCapability()
   const serves = caps.hasLocal('update.check')
-  const readsServerUpdate = caps.hasMethod('server.update_status')
   const update = useStore((s) => s.update)
-  const setUpdate = useStore((s) => s.setUpdate)
-  const setServerUpdate = useStore((s) => s.setServerUpdate)
-  const setServerUpdateFailed = useStore((s) => s.setServerUpdateFailed)
-  // A self-updating server re-executes and drops the socket; the read on
-  // reconnect is what clears the prompt.
-  const serverVersion = useStore((s) => s.info?.server_version)
-  const connection = useStore((s) => s.connection)
-  const [statusReads, setStatusReads] = useState(0)
-
-  const live = useRef(true)
-  const pending = useRef(0)
-  const issued = useRef(0)
-  useEffect(() => {
-    live.current = true
-    return () => {
-      live.current = false
-    }
-  }, [])
-
-  // Only the newest read writes, so a click supersedes reads in flight.
-  // `pending` counts because reads overlap.
-  const recheck = useCallback(
-    async (refresh?: boolean) => {
-      const id = ++issued.current
-      pending.current += 1
-      try {
-        const status = await client.localUpdateCheck(refresh)
-        if (live.current && id === issued.current) setUpdate(status)
-        return status
-      } finally {
-        pending.current -= 1
-      }
-    },
-    [client, setUpdate],
-  )
-
-  useEffect(() => {
-    if (!serves) return
-    const read = () => {
-      if (pending.current > 0 || document.visibilityState === 'hidden') return
-      // The prompt must keep naming the release being installed.
-      if (useStore.getState().installingUpdate) return
-      void recheck()
-        // A background lookup the member did not ask for fails silently.
-        .catch(() => {})
-    }
-    read()
-    const timer = setInterval(read, RECHECK_MS)
-    window.addEventListener('focus', read)
-    document.addEventListener('visibilitychange', read)
-    return () => {
-      clearInterval(timer)
-      window.removeEventListener('focus', read)
-      document.removeEventListener('visibilitychange', read)
-    }
-  }, [serves, recheck])
-
-  useEffect(() => {
-    if (!readsServerUpdate || !serverVersion) return
-    let live = true
-    void client
-      .serverUpdateStatus()
-      .then((status) => {
-        if (live) setServerUpdate(status)
-      })
-      .catch((err) => {
-        if (live) setServerUpdateFailed(message(err))
-      })
-    return () => {
-      live = false
-    }
-  }, [
-    readsServerUpdate,
-    serverVersion,
-    connection,
-    statusReads,
-    client,
-    setServerUpdate,
-    setServerUpdateFailed,
-  ])
-
   const open = useStore((s) => s.updatesOpen)
   const setOpen = useStore((s) => s.setUpdatesOpen)
-  const anything = useUpdateNotice() !== null
+  const check = useCheckForUpdates(client)
+  const { server, client: cli } = useUpdateTargets()
+  const cliVersion = useStore((s) => s.capabilities?.version)
   const packaged = serves ? update?.cli.packaged : undefined
   const packagedLatest = packaged && update?.cli.update_available ? update.cli.latest : undefined
+  // A stale desktop app is out of date too, whatever the two release checks say.
+  const line = serves && shellIsStale(cliVersion) ? '' : summary(server, packaged ? { state: 'unknown' } : cli)
+  const checking = server.state === 'checking' || cli.state === 'checking'
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Updates</DialogTitle>
-          {packaged ? (
+          {packaged && (
             <DialogDescription>
               {packagedLine(packaged)}
               {packagedLatest && ` Aether ${packagedLatest} is released; the app's banner says when and where to update.`}
             </DialogDescription>
-          ) : (
-            !anything && <DialogDescription>Nothing to update.</DialogDescription>
           )}
+          {line && <p role="status" className="text-ui text-muted">{line}</p>}
         </DialogHeader>
         <div className="min-w-0">
+          <ServerRow client={client} target={server} />
+          {serves && !packaged && <ClientRow client={client} target={cli} serverBehind={server.state === 'available' || !!update?.server_behind} />}
           {serves && <ShellBanner />}
-          {serves && update && (
-            <CliBanner update={update} client={client} recheck={recheck} />
-          )}
-          <ServerBanner client={client} onRetry={() => setStatusReads((n) => n + 1)} />
         </div>
+        <DialogFooter>
+          <Button size="sm" variant="secondary" disabled={checking} onClick={check}>
+            {checking ? 'Checking…' : 'Check now'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
+}
+
+function ClientRow({ client, target, serverBehind }: { client: Api; target: UpdateTarget; serverBehind: boolean }) {
+  const update = useStore((s) => s.update)
+  const answered = useStore((s) => s.clientApply.name !== 'idle')
+  // A click's own answer, a cancel or "already current", stays on screen.
+  if (answered && update) return <CliBanner update={update} client={client} serverBehind={serverBehind} />
+  if (target.state === 'checking') {
+    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Aether release…" />
+  }
+  if (target.state === 'up_to_date') {
+    const at = checkedTime(target.checkedAt)
+    return (
+      <StatusRow
+        Icon={CircleCheck}
+        headline={`Aether on this computer is up to date (${target.version}).`}
+        detail={at ? `Checked ${at}.` : undefined}
+      />
+    )
+  }
+  if (target.state === 'check_failed') {
+    const at = checkedTime(target.checkedAt)
+    return (
+      <StatusRow
+        Icon={CircleAlert}
+        headline="Could not check for a new Aether release."
+        detail={at ? `Last successful check ${at}.` : undefined}
+        error={target.error}
+      />
+    )
+  }
+  if (!update) return null
+  return <CliBanner update={update} client={client} serverBehind={serverBehind} />
 }
 
 /** A server update already moving is named even when dismissed: it is about to restart the server. */
@@ -174,25 +165,30 @@ export function useUpdateNotice(includeDismissed = false): { text: string; actio
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const update = useStore((s) => s.update)
-  const status = useStore((s) => s.serverUpdate)
-  const progress = useStore((s) => s.serverUpdateProgress)
   const stored = useStore((s) => s.dismissedUpdates)
   const dismissed = includeDismissed ? noneDismissed : stored
   const cliVersion = useStore((s) => s.capabilities?.version)
+  const { server, client } = useUpdateTargets()
   const serves = caps.hasLocal('update.check')
-  const latest = update?.cli.latest ?? ''
-  // A packaged CLI's notice is its app's own, outside the dashboard.
-  if (serves && update?.cli.update_available && !update.cli.packaged && latest && dismissed.cli !== latest) {
-    return { text: `Aether ${bareVersion(latest)} is available`, action: true }
-  }
-  const flow = serverFlow(status, progress)
-  const serverLatest = status?.latest || update?.cli.latest || ''
-  const behind = status ? status.update_available : (update?.server_behind ?? false)
-  if (flow.name === 'scheduled' || flow.name === 'applying' || flow.name === 'restarting') {
+  if (server.state === 'scheduled' || server.state === 'applying' || server.state === 'restarting') {
     return { text: 'Server update in progress, terminals reconnect briefly', action: isAdmin }
   }
-  if (isAdmin && behind && serverLatest && (flow.name === 'failed' || dismissed.server !== serverLatest)) {
-    return { text: `Server ${bareVersion(serverLatest)} is available`, action: true }
+  if (isAdmin && server.state === 'failed') {
+    return { text: `Server update to ${bareVersion(server.latest)} failed`, action: true }
+  }
+  if (isAdmin && server.state === 'rolled_back') {
+    return { text: 'The server update was rolled back', action: true }
+  }
+  if (server.state === 'available' && dismissed.server !== server.latest) {
+    const text = `Server ${bareVersion(server.latest)} is available`
+    return { text: isAdmin ? text : `${text}, ask an admin`, action: true }
+  }
+  // A packaged CLI's notice is its app's own, outside the dashboard.
+  if (serves && !update?.cli.packaged && client.state === 'failed') {
+    return { text: `Update to Aether ${bareVersion(client.latest)} failed`, action: true }
+  }
+  if (serves && !update?.cli.packaged && client.state === 'available' && dismissed.cli !== client.latest) {
+    return { text: `Aether ${bareVersion(client.latest)} is available`, action: true }
   }
   if (serves && cliVersion && shellIsStale(cliVersion) && dismissed.shell !== cliVersion) {
     return { text: 'The desktop app is out of date', action: true }
@@ -242,44 +238,6 @@ function ShellBanner() {
       <Dismiss kind="shell" version={cliVersion} />
     </div>
   )
-}
-
-/** A progress frame beats the fetched status because it is newer. */
-type ServerFlow =
-  | { name: 'available' }
-  | { name: 'scheduled'; version: string; by: string }
-  | { name: 'applying' }
-  | { name: 'restarting' }
-  | { name: 'failed'; detail: string }
-
-function serverFlow(
-  status: ServerUpdateStatus | null,
-  progress: ServerUpdatePayload | null,
-): ServerFlow {
-  switch (progress?.phase) {
-    case 'scheduled':
-      return {
-        name: 'scheduled',
-        version: progress.version ?? '',
-        by: progress.actor_id ?? '',
-      }
-    case 'applying':
-      return { name: 'applying' }
-    case 'restarting':
-      return { name: 'restarting' }
-    case 'failed':
-      return { name: 'failed', detail: progress.detail ?? '' }
-    case 'cancelled':
-      return { name: 'available' }
-  }
-  if (status?.pending) {
-    return {
-      name: 'scheduled',
-      version: status.pending.version,
-      by: status.pending.requested_by,
-    }
-  }
-  return { name: 'available' }
 }
 
 /** Mirrors the server's idle check in internal/scheduler. */
@@ -335,13 +293,27 @@ function manualCommands(status: ServerUpdateStatus | null): string[] {
     : ['sudo aether update', 'sudo systemctl restart aether-server']
 }
 
+const serverHeadline: Partial<Record<UpdateTarget['state'], (latest: string, running: string) => string>> = {
+  available: (latest) => `Server ${latest} is available.`,
+  scheduled: (latest) => `Server ${latest} is scheduled.`,
+  applying: (latest) => `Updating the server to ${latest}…`,
+  restarting: (latest) => `Restarting the server on ${latest}…`,
+  failed: (latest) => `The server update to ${latest} failed.`,
+  rolled_back: (_latest, running) => `The server update was rolled back; it runs ${running} again.`,
+}
+
+const applyingStep: Record<string, string> = {
+  preflight: 'Checking that every client asset of the release is published. Nothing has been downloaded yet.',
+  applying: 'Downloading and verifying the release. Nothing has been replaced yet.',
+}
+
 /** The local gateway advertises every method to anyone, so the admin role is checked too. */
-function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void }) {
-  const update = useStore((s) => s.update)
+function ServerRow({ client, target }: { client: Api; target: UpdateTarget }) {
   const status = useStore((s) => s.serverUpdate)
   const statusError = useStore((s) => s.serverUpdateError)
-  const progress = useStore((s) => s.serverUpdateProgress)
+  const running = useStore((s) => s.serverUpdate?.server_version || s.info?.server_version || s.update?.server_version || '')
   const applyProgress = useStore((s) => s.applyServerUpdate)
+  const clearSettled = useStore((s) => s.clearSettledServerUpdate)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const runs = useStore((s) => s.runs)
@@ -353,19 +325,68 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // update.check is read once, so only the status call clears this after a restart.
-  const behind = status ? status.update_available : (update?.server_behind ?? false)
-  const latest = status?.latest || update?.cli.latest || ''
-  const running = status?.server_version || update?.server_version || ''
-  const flow = serverFlow(status, progress)
+  if (target.state === 'unknown') return null
+  if (target.state === 'checking') {
+    return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new server release…" />
+  }
+  if (target.state === 'up_to_date') {
+    const at = checkedTime(target.checkedAt)
+    return (
+      <StatusRow
+        Icon={CircleCheck}
+        headline={`The server is up to date (${target.version}).`}
+        detail={at ? `Checked ${at}.` : undefined}
+      />
+    )
+  }
+  if (target.state === 'check_failed') {
+    const at = checkedTime(target.checkedAt)
+    return (
+      <StatusRow
+        Icon={CircleAlert}
+        headline={target.unread ? "Could not read the server's update status." : 'The server could not check for a new release.'}
+        detail={at ? `Last check ${at}.` : undefined}
+        error={target.error}
+      />
+    )
+  }
+  if (target.state === 'required' || target.state === 'ready_to_restart') return null
+  const latest = target.latest
+  if (target.state === 'available' && dismissed === latest) return null
+  const headline = serverHeadline[target.state]?.(latest, running) ?? ''
+  const notesUrl = target.state === 'available' ? target.notesUrl : undefined
+  const failedError = target.state === 'failed' || target.state === 'rolled_back' ? target.error : ''
+  const NoticeIcon = failedError || error ? CircleAlert : ServerCog
 
-  if (!isAdmin) return null
-  if (!behind || !latest) return null
-  if (dismissed === latest && flow.name === 'available') return null
+  if (!isAdmin) {
+    return (
+      <div role="status" className={banner}>
+        <div aria-hidden className={bannerIcon}>
+          <NoticeIcon className="size-4" />
+        </div>
+        <div className={bannerContent}>
+          <p className="font-medium">{headline}</p>
+          {target.state === 'available' ? (
+            <p className="text-ui-sm text-muted">
+              The server runs {running}. Ask an admin to run <Code>aether server update</Code>; this client
+              updates after it.
+            </p>
+          ) : (
+            <p className="text-ui-sm text-muted">
+              {failedError ? 'Ask an admin to look at the server.' : 'Terminals reconnect briefly while it restarts.'}
+            </p>
+          )}
+          {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
+        </div>
+        {notesUrl && <div className={bannerActions}><NotesLink href={notesUrl} /></div>}
+      </div>
+    )
+  }
 
   const act = async (when: ServerUpdateWhen) => {
     setError(null)
     setBusy(true)
+    if (when !== 'cancel') clearSettled()
     try {
       const result = await client.serverUpdate(when)
       // The feed reaches workspace timelines only, so a server with no workspaces sends nothing else.
@@ -384,10 +405,8 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
   const capable = status?.capable ?? false
   const active = activeRunCount(runs, pausedRuns)
   const waiting = waitingLine(status?.waiting)
-  const scheduledBy =
-    flow.name === 'scheduled' ? memberName({ members, mergedInto }, flow.by) : ''
-
-  const NoticeIcon = flow.name === 'failed' || error ? CircleAlert : ServerCog
+  const scheduledBy = target.state === 'scheduled' ? memberName({ members, mergedInto }, target.by) : ''
+  const offer = target.state === 'available' || target.state === 'failed' || target.state === 'rolled_back'
 
   return (
     <div role="status" className={banner}>
@@ -396,12 +415,10 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
       </div>
       <div className={bannerContent}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <p className="font-medium">The server is behind.</p>
-          <p className="text-ui-sm text-muted">
-            Server {running}, latest {latest}.
-          </p>
+          <p className="font-medium">{headline}</p>
+          {target.state === 'available' && <p className="text-ui-sm text-muted">The server runs {running}.</p>}
         </div>
-        {flow.name === 'available' && capable && (
+        {target.state === 'available' && capable && (
           <Collapsible className="text-ui-sm text-muted">
             <CollapsibleTrigger className="font-medium hover:text-text">
               What a server restart affects
@@ -410,41 +427,34 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
               <p className="mt-1.5 leading-5">
                 Updating replaces the server binaries and restarts the server. Runs
                 keep going - the server reattaches to their containers when it comes
-                back - and attached terminals reconnect on their own.
+                back - and attached terminals reconnect on their own. Clients update
+                after the server.
               </p>
             </CollapsibleContent>
           </Collapsible>
         )}
-        {flow.name === 'scheduled' && (
+        {target.state === 'scheduled' && (
           <>
             <p className="text-muted">
-              Update to {flow.version || latest} scheduled by {scheduledBy}, applies
-              when no run is active.
+              Scheduled by {scheduledBy}, applies when no run is active.
             </p>
             {waiting && <p className="text-muted">{waiting}</p>}
           </>
         )}
-        {flow.name === 'applying' && (
+        {target.state === 'applying' && (
+          <p className="text-muted">{applyingStep[target.step ?? 'applying'] ?? applyingStep.applying}</p>
+        )}
+        {target.state === 'restarting' && (
           <p className="text-muted">
-            Downloading and verifying the release. Nothing has been replaced yet.
+            The new version is starting. Attached terminals reconnect on their own.
           </p>
         )}
-        {flow.name === 'restarting' && (
-          <p className="text-muted">
-            Restarting on the new version. Attached terminals reconnect on their
-            own.
-          </p>
+        {target.state === 'failed' && (
+          <p className="text-muted">The server keeps running {running}.</p>
         )}
-        {flow.name === 'failed' && (
-          <>
-            <p className="text-muted">
-              The update failed and nothing was replaced.
-            </p>
-            <p className={cn(verbatim, 'text-state-failed')}>{flow.detail}</p>
-          </>
-        )}
+        {failedError && <p className={cn(verbatim, 'text-state-failed')}>{failedError}</p>}
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
-        {(!capable || flow.name === 'failed') && (
+        {(!capable || target.state === 'failed' || target.state === 'rolled_back') && (
           <>
             <p className="text-muted">
               {capable
@@ -459,44 +469,27 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
           </>
         )}
       </div>
-      {!status && statusError && (
+      {(notesUrl || (canUpdate && capable && (offer || target.state === 'scheduled'))) && (
         <div className={bannerActions}>
-          <Button size="sm" variant="secondary" onClick={onRetry}>
-            Retry
-          </Button>
-        </div>
-      )}
-      {canUpdate && capable && (
-        <div className={bannerActions}>
-          {flow.name === 'scheduled' ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => void act('cancel')}
-            >
+          {canUpdate && capable && target.state === 'scheduled' && (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void act('cancel')}>
               Cancel
             </Button>
-          ) : (
-            (flow.name === 'available' || flow.name === 'failed') && (
-              <>
-                <Button size="sm" disabled={busy} onClick={() => setConfirming(true)}>
-                  Update now
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => void act('idle')}
-                >
-                  Update when idle
-                </Button>
-              </>
-            )
           )}
+          {canUpdate && capable && offer && (
+            <>
+              <Button size="sm" disabled={busy} onClick={() => setConfirming(true)}>
+                Update now
+              </Button>
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => void act('idle')}>
+                Update when idle
+              </Button>
+            </>
+          )}
+          {notesUrl && <NotesLink href={notesUrl} />}
         </div>
       )}
-      <Dismiss kind="server" version={latest} />
+      {target.state === 'available' && <Dismiss kind="server" version={latest} />}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
           <DialogHeader>
@@ -519,5 +512,21 @@ function ServerBanner({ client, onRetry }: { client: Api; onRetry: () => void })
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export function NotesLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={cn(
+        focusRing,
+        'inline-flex min-h-[22px] items-center whitespace-nowrap px-1 text-ui-sm underline underline-offset-2 hover:text-text',
+      )}
+    >
+      Release notes
+    </a>
   )
 }
