@@ -3,7 +3,6 @@ package selfupdate
 import (
 	"context"
 	"os"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -92,27 +91,6 @@ type semver struct {
 	ahead bool
 }
 
-// describeTail matches what `git describe --tags --always --dirty` appends
-// to the tag it found: the commit count since that tag, the abbreviated
-// commit, and an optional dirty marker. It is not a semver prerelease -
-// reading it as one ranks a source build *below* the tag it descends from,
-// which offers that user a downgrade - so it is stripped and remembered as
-// "past that tag" instead.
-var describeTail = regexp.MustCompile(`-[0-9]+-g[0-9a-f]{4,}(-dirty)?$`)
-
-// trimDescribe removes a describe tail, reporting whether one was there. A
-// bare "-dirty" counts: the tree carries uncommitted changes on top of the
-// tag, so it is not that tag any more.
-func trimDescribe(tag string) (string, bool) {
-	if loc := describeTail.FindStringIndex(tag); loc != nil {
-		return tag[:loc[0]], true
-	}
-	if trimmed := strings.TrimSuffix(tag, "-dirty"); trimmed != tag {
-		return trimmed, true
-	}
-	return tag, false
-}
-
 // parseVersion reads vX.Y.Z with an optional prerelease and an optional
 // `git describe` tail. Build metadata (+something) never affects
 // precedence, so it is discarded.
@@ -122,7 +100,7 @@ func parseVersion(tag string) (semver, bool) {
 	if i := strings.IndexByte(tag, '+'); i >= 0 {
 		tag = tag[:i]
 	}
-	tag, out.ahead = trimDescribe(tag)
+	tag, out.ahead = version.TrimDescribe(tag)
 	core := tag
 	if i := strings.IndexByte(tag, '-'); i >= 0 {
 		core, out.pre = tag[:i], strings.Split(tag[i+1:], ".")
