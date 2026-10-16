@@ -26,6 +26,7 @@ private val PLAY_INSTALLERS = setOf(PLAY_PACKAGE, "com.google.android.feedback")
 private const val RELEASE_CERT_SHA256 = "2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a"
 
 private const val RELEASES = "https://github.com/3xDevOps/Aether/releases/tag/"
+private const val DOWNLOADS = "https://github.com/3xDevOps/Aether/releases/download/"
 
 // selfupdate.ValidTag: nothing else is built into a URL.
 private val TAG = Regex("""v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?""")
@@ -46,8 +47,9 @@ data class UpdateTarget(val url: String, val packageName: String? = null)
  * The pages that update this install to [tag], in the order to try them.
  *
  * A Play install opens its listing: in the Play app, else in the browser. Any
- * other install opens the release page, which carries the signed APK. Null
- * for a [tag] that is not a release tag.
+ * other install opens the release's signed APK, which the browser downloads
+ * and Android's installer confirms and checks against this app's signing
+ * certificate. Null for a [tag] that is not a release tag.
  */
 fun updateTargets(source: InstallSource, packageName: String, tag: String): List<UpdateTarget>? {
     if (!isReleaseTag(tag)) return null
@@ -57,7 +59,7 @@ fun updateTargets(source: InstallSource, packageName: String, tag: String): List
                 UpdateTarget("market://details?id=$packageName", PLAY_PACKAGE),
                 UpdateTarget("https://play.google.com/store/apps/details?id=$packageName"),
             )
-        InstallSource.RELEASE -> listOf(UpdateTarget(RELEASES + tag))
+        InstallSource.RELEASE -> listOf(UpdateTarget("$DOWNLOADS$tag/aether-android.apk"))
     }
 }
 

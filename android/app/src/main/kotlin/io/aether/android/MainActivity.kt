@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private var mode = ConnectionMode.TAILSCALE
     private var gateway: Gateway? = null
     private var updates: UpdateNotice? = null
+    private var gate: UpdateGate? = null
 
     /** The running gateway's address, once it has printed it. */
     private var gatewayUrl: String? = null
@@ -135,7 +136,7 @@ class MainActivity : ComponentActivity() {
     private val back =
         object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (web.canGoBack()) web.goBack() else moveTaskToBack(true)
+                if (gate?.isShown != true && web.canGoBack()) web.goBack() else moveTaskToBack(true)
             }
         }
 
@@ -166,6 +167,13 @@ class MainActivity : ComponentActivity() {
         }
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
         updates = UpdateNotice(this, findViewById(R.id.update_notice))
+        gate =
+            UpdateGate(this, findViewById(R.id.update_gate), onSwitchServer = ::openSetup) { shown ->
+                web.visibility = if (shown) View.INVISIBLE else View.VISIBLE
+                syncBackCallback()
+                // The dashboard under the gate may be showing the refusal.
+                if (!shown) loaded?.let(web::loadUrl)
+            }
 
         pickFiles =
             registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -209,6 +217,7 @@ class MainActivity : ComponentActivity() {
             loaded = null
             web.stopLoading()
             stopGateway()
+            gate?.reset()
         }
         connect(intent)
     }
@@ -228,10 +237,12 @@ class MainActivity : ComponentActivity() {
         ) {
             startGateway()
         }
+        gatewayUrl?.let { gate?.check(it) }
     }
 
     override fun onDestroy() {
         updates?.destroy()
+        gate?.destroy()
         stopGateway()
         super.onDestroy()
     }
@@ -295,6 +306,13 @@ class MainActivity : ComponentActivity() {
             val params = connection.layoutParams as ViewGroup.MarginLayoutParams
             params.bottomMargin = margin + if (pageHandlesSafeAreas) bars.bottom else 0
             connection.requestLayout()
+            val gatePanel = findViewById<View>(R.id.update_gate)
+            gatePanel.setPadding(
+                margin,
+                margin + if (pageHandlesSafeAreas) bars.top else 0,
+                margin,
+                margin + if (pageHandlesSafeAreas) bars.bottom else 0,
+            )
             val noticeParams = notice.layoutParams as ViewGroup.MarginLayoutParams
             noticeParams.topMargin = noticeMargin + if (pageHandlesSafeAreas) bars.top else 0
             if (pageHandlesSafeAreas) {
@@ -450,6 +468,16 @@ class MainActivity : ComponentActivity() {
                     if (request.isForMainFrame) connection.visibility = View.VISIBLE
                 }
 
+                // webgate answers -32005 with HTTP 426 on any call from a
+                // client the server refuses as too old, the page's included.
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: WebResourceResponse,
+                ) {
+                    if (errorResponse.statusCode == 426) gatewayUrl?.let { gate?.check(it) }
+                }
+
                 // Unhandled, WebView kills the app along with its renderer.
                 // Android reclaims the renderer of an app in the background,
                 // as while the member signs in to Edge in the browser.
@@ -463,7 +491,11 @@ class MainActivity : ComponentActivity() {
                     val page = view.url
                     parent.removeView(view)
                     view.destroy()
-                    web = WebView(this@MainActivity).apply { id = R.id.web }
+                    web =
+                        WebView(this@MainActivity).apply {
+                            id = R.id.web
+                            if (gate?.isShown == true) visibility = View.INVISIBLE
+                        }
                     parent.addView(web, index, params)
                     // The insets pass ran before this WebView existed.
                     ViewCompat.requestApplyInsets(parent)
@@ -670,6 +702,7 @@ class MainActivity : ComponentActivity() {
                     loaded = url
                     web.loadUrl(url + pendingSuffix)
                     pendingSuffix = ""
+                    gate?.check(url)
                 },
                 onExited = {
                     gatewayUrl = null
@@ -703,7 +736,7 @@ class MainActivity : ComponentActivity() {
      * WebView actually has, wherever that history changes.
      */
     private fun syncBackCallback() {
-        if (platformBackgroundsUs) back.isEnabled = web.canGoBack()
+        if (platformBackgroundsUs) back.isEnabled = gate?.isShown != true && web.canGoBack()
     }
 
     private fun openSetup() {

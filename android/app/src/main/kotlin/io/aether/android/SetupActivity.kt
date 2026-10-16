@@ -2,6 +2,7 @@ package io.aether.android
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.format.DateFormat
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
@@ -11,10 +12,12 @@ import androidx.activity.ComponentActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import java.util.Date
 
 /**
  * The first-run and settings screen: a choice between Aether Edge and
- * Tailscale, and for Tailscale one field for the server's tailnet name.
+ * Tailscale, for Tailscale one field for the server's tailnet name, and
+ * "Check for updates", which always answers.
  *
  * It stores no credential. Edge sign-in happens in the dashboard, and the
  * CLI sidecar keeps the resulting device key and tokens in app-private
@@ -90,10 +93,59 @@ class SetupActivity : ComponentActivity() {
         }
 
         findViewById<Button>(R.id.open).setOnClickListener { submit() }
+        setUpUpdateCheck()
         address.setOnEditorActionListener { _, _, event ->
             // A hardware Enter arrives twice, key-down then key-up.
             if (event == null || event.action == KeyEvent.ACTION_DOWN) submit()
             true
+        }
+    }
+
+    private fun setUpUpdateCheck() {
+        val button = findViewById<Button>(R.id.check_updates)
+        val status = findViewById<TextView>(R.id.update_status)
+        val get = findViewById<Button>(R.id.update_get)
+        val openError = findViewById<TextView>(R.id.update_open_error)
+        var targets = emptyList<UpdateTarget>()
+        get.setOnClickListener { openUpdate(this, targets, openError) }
+
+        fun render(stored: StoredUpdate, facts: InstallFacts?) {
+            if (stored.checkedAt == 0L || (stored.line == null && stored.error == null)) return
+            val time = DateFormat.getTimeFormat(this).format(Date(stored.checkedAt))
+            val check = stored.line?.takeIf { stored.error == null }?.let(::parseUpdateCheck)
+            val tag = check?.latest?.takeIf { check.updateAvailable && isReleaseTag(it) }
+            status.text =
+                when {
+                    check == null -> getString(R.string.update_failed_at, time, stored.error ?: "")
+                    tag != null -> getString(R.string.update_available, tag, check.version, time)
+                    check.latest.isEmpty() -> getString(R.string.update_not_checked, check.version, time)
+                    else -> getString(R.string.update_up_to_date, check.version, time)
+                }
+            status.setTextColor(getColor(if (check == null) R.color.error_text else R.color.text))
+            status.visibility = View.VISIBLE
+            targets = if (tag != null && facts != null) updateTargets(facts.source, packageName, tag).orEmpty() else emptyList()
+            get.setText(if (facts?.source == InstallSource.PLAY) R.string.update_open_play else R.string.update_download)
+            get.visibility = if (targets.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        render(storedUpdate(), null)
+        button.setOnClickListener {
+            button.isEnabled = false
+            status.setText(R.string.update_checking)
+            status.setTextColor(getColor(R.color.text))
+            status.visibility = View.VISIBLE
+            get.visibility = View.GONE
+            openError.visibility = View.GONE
+            Thread {
+                    val facts = installFacts(applicationContext)
+                    val run = runCheck(applicationContext)
+                    runOnUiThread {
+                        if (isDestroyed) return@runOnUiThread
+                        button.isEnabled = true
+                        render(recordCheck(this, run, facts.updatedAt), facts)
+                    }
+                }
+                .start()
         }
     }
 }

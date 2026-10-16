@@ -83,11 +83,12 @@ device-to-device transfer (`allowBackup=false` and
   port 53 to the active network's DNS servers, bypassing Android Private DNS
   (DNS-over-TLS), so that network can see which names it looks up.
 - **In both modes, to `github.com` for the newest release.** When the app
-  comes to the front, at most once an hour, the bundled CLI asks `github.com`
-  for the tag of the newest Aether release, so the app can say an update
-  exists. GitHub sees the phone's IP address and that request, nothing about
-  you or your server. Nothing is downloaded: you install a release from
-  Google Play or the release page.
+  comes to the front, about once an hour, and when you tap **Check for
+  updates**, the bundled CLI asks `github.com` for the tag of the newest
+  Aether release, so the app can say an update exists. GitHub sees the
+  phone's IP address and that request, nothing about you or your server.
+  The app downloads nothing itself: you install a release from Google Play,
+  or download its APK in the browser.
 - **In Tailscale mode, your identity reaches the server through Tailscale, not
   through the app.** The server asks its own tailscaled which tailnet login
   owns the connecting device. The app sends no name, email, or identifier of
