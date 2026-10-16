@@ -12,6 +12,8 @@ import {
   MenuTrigger,
 } from '@/components/ui/menu'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { api } from '@/lib/api'
+import { clockTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import type { PatchFile } from '@/routes/diff/parse'
@@ -19,27 +21,27 @@ import { Counts } from '@/routes/diff/patch-view'
 import { PublishDialog } from '@/routes/diff/publish-dialog'
 import { useReviewing } from '@/routes/diff/review'
 import { ReviewLocallyDialog, useCanReviewLocally } from '@/routes/diff/review-commands'
+import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-import type { DiffSnapshot } from '@/store/diff'
+import { initialDiff, readCheckpoints, type Checkpoint, type Comparison } from '@/store/diff'
 import type { RunRecord } from '@/store/runs'
 
-const current = 'current'
 const menuFiles = 100
 
 export const noTree =
-  'This server did not record a tree for this snapshot, so what changed then cannot be shown.'
+  'This server did not record a tree for this snapshot, so changes since then cannot be shown.'
 
-export function hasTree(snapshot: DiffSnapshot): boolean {
-  return Boolean(snapshot.tree && snapshot.parentTree)
+/** Why a checkpoint cannot be compared against, or undefined when it can. A
+ * history gap before a recorded tree does not stop a diff since that tree. */
+function unavailable(checkpoint: Checkpoint): string | undefined {
+  return checkpoint.tree ? undefined : (checkpoint.snapshotError ?? noTree)
 }
 
 export function SummaryStrip({
   run,
   files,
-  snapshots,
-  selected,
-  onSelect,
-  base,
+  comparison,
+  onCompare,
   wrap,
   onWrap,
   loading,
@@ -51,10 +53,8 @@ export function SummaryStrip({
 }: {
   run: RunRecord
   files: PatchFile[]
-  snapshots: DiffSnapshot[]
-  selected: DiffSnapshot | null
-  onSelect: (time: string | null) => void
-  base: string
+  comparison: Comparison
+  onCompare: (comparison: Comparison) => void
   wrap: boolean
   onWrap: (wrap: boolean) => void
   loading: boolean
@@ -109,7 +109,7 @@ export function SummaryStrip({
           )}
         </MenuContent>
       </Menu>
-      <IntervalMenu snapshots={snapshots} selected={selected} onSelect={onSelect} base={base} />
+      <CompareMenu run={run} comparison={comparison} onSelect={onCompare} />
       <ConflictChips run={run} />
       <span className="ml-auto flex items-center gap-1">
         <Button
@@ -159,76 +159,115 @@ export function SummaryStrip({
   )
 }
 
-function IntervalMenu({
-  snapshots,
-  selected,
-  onSelect,
-  base,
-}: {
-  snapshots: DiffSnapshot[]
-  selected: DiffSnapshot | null
-  onSelect: (time: string | null) => void
-  base: string
-}) {
+const shortSha = (sha: string) => sha.slice(0, 7)
+
+function CompareMenu({ run, comparison, onSelect }: { run: RunRecord; comparison: Comparison; onSelect: (comparison: Comparison) => void }) {
+  const diff = useStore((s) => s.diffs[run.id] ?? initialDiff)
+  const { checkpoints, history, historyError } = diff
+  // A recorded patch names its base by tree, a live one by commit.
+  const startable = Boolean(diff.forkTree && diff.base && run.base_commit && diff.base !== run.base_commit && diff.base !== diff.forkTree)
+  const key = (checkpoint: Checkpoint) => `since:${checkpoint.tree ?? checkpoint.time}`
+  const selected =
+    comparison.kind === 'since' ? key(comparison.checkpoint) : comparison.kind
   return (
     <Menu>
       <MenuTrigger asChild>
         <Button variant="ghost" size="sm">
           <History />
           <span className="@max-[640px]:sr-only">
-            {selected ? (
-              <>
-                What changed <RelativeTime at={selected.time} />
-              </>
-            ) : (
-              'Current diff'
-            )}
+            {comparison.kind === 'all' && 'All changes'}
+            {comparison.kind === 'start' && 'Since the run started'}
+            {comparison.kind === 'since' && `Since ${clockTime(comparison.checkpoint.time)}`}
           </span>
           <ChevronDown />
         </Button>
       </MenuTrigger>
-      <MenuContent align="start" className="w-72">
+      <MenuContent align="start" className="w-80">
         <MenuRadioGroup
-          value={selected?.time ?? current}
-          onValueChange={(value) => onSelect(value === current ? null : value)}
+          value={selected}
+          onValueChange={(value) => {
+            if (value === 'all' || value === 'start') return onSelect({ kind: value })
+            const checkpoint = checkpoints.find((entry) => key(entry) === value)
+            if (checkpoint) onSelect({ kind: 'since', checkpoint })
+          }}
         >
-          <MenuRadioItem value={current} description={`Against ${base.slice(0, 8) || 'the fork point'}`}>
-            Current diff
+          <MenuRadioItem
+            value="all"
+            description={`Against ${run.base_branch || 'the base branch'}${diff.base ? ` @ ${shortSha(diff.base)}` : ''}`}
+          >
+            All changes
           </MenuRadioItem>
+          {startable && (
+            <MenuRadioItem
+              value="start"
+              description={`Against ${shortSha(run.base_commit!)}, where the run forked. Includes upstream work merged since.`}
+            >
+              Since the run started
+            </MenuRadioItem>
+          )}
           <MenuSeparator />
           <MenuLabel>
-            {snapshots.length === 0 ? 'No intervals since you opened the dashboard.' : 'Change intervals'}
+            {history === undefined && !historyError
+              ? 'Loading checkpoints…'
+              : checkpoints.length === 0 && !historyError
+                ? 'No checkpoints recorded yet.'
+                : 'Changes since a checkpoint'}
           </MenuLabel>
-          {snapshots.map((snapshot, i) => {
-            const additions = snapshot.files.reduce((sum, file) => sum + file.additions, 0)
-            const deletions = snapshot.files.reduce((sum, file) => sum + file.deletions, 0)
+          {checkpoints.map((checkpoint, i) => {
+            const blocked = unavailable(checkpoint)
+            const older = checkpoints[i + 1]
+            const committed =
+              checkpoint.headSubject && older?.head && checkpoint.head && checkpoint.head !== older.head
             return (
               <MenuRadioItem
-                key={snapshot.time + i}
-                value={snapshot.time}
-                disabled={!hasTree(snapshot)}
+                key={key(checkpoint) + i}
+                value={key(checkpoint)}
+                disabled={blocked !== undefined}
                 description={
-                  hasTree(snapshot) ? (
+                  blocked ??
+                  (committed ? (
+                    checkpoint.headSubject
+                  ) : (
                     <>
-                      {snapshot.files.length} file{snapshot.files.length === 1 ? '' : 's'}
-                      {!snapshot.truncated && (
+                      {checkpoint.files} file{checkpoint.files === 1 ? '' : 's'}
+                      {!checkpoint.truncated && (
                         <>
                           {' · '}
-                          <Counts additions={additions} deletions={deletions} />
+                          <Counts additions={checkpoint.additions} deletions={checkpoint.deletions} />
                         </>
                       )}
-                      {snapshot.historyGap && ' · History gap'}
                     </>
-                  ) : (
-                    snapshot.snapshotError ?? (snapshot.historyGap ? 'Snapshot history is unavailable for this interval.' : noTree)
-                  )
+                  ))
                 }
               >
-                What changed <RelativeTime at={snapshot.time} />
+                {clockTime(checkpoint.time)} · <RelativeTime at={checkpoint.time} />
               </MenuRadioItem>
             )
           })}
         </MenuRadioGroup>
+        {historyError && (
+          <>
+            <MenuLabel>Checkpoints could not be loaded: {historyError}</MenuLabel>
+            <MenuItem
+              onSelect={(event) => {
+                event.preventDefault()
+                void readCheckpoints(useStore, api, run, history !== undefined)
+              }}
+            >
+              Retry
+            </MenuItem>
+          </>
+        )}
+        {history?.more && (
+          <MenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              void readCheckpoints(useStore, api, run, true)
+            }}
+          >
+            Show older checkpoints
+          </MenuItem>
+        )}
       </MenuContent>
     </Menu>
   )

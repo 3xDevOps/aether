@@ -5,22 +5,18 @@ import type { SliceCreator } from '@/store/slice'
 
 /**
  * One `run.diff` event: the stat set of a run's worktree at the moment the
- * server took the snapshot, plus the trees bounding the interval it ended.
- * The list is the timeline - what changed, and when - and the patch text
- * beside it is the current diff against the fork point.
+ * server took the snapshot. The patch text beside it is a diff against the
+ * comparison the reader chose.
  */
 export interface DiffSnapshot {
   time: string
   files: FileDiffStat[]
   truncated?: boolean
-  /** The worktree's git tree at this snapshot. */
+  /** The worktree's git tree at this snapshot; absent on a server that predates them. */
   tree?: string
-  /**
-   * The tree the previous snapshot ended at, or the fork point for the first.
-   * Both are absent on a server that predates per-snapshot trees, and the
-   * interval such a snapshot ended cannot be shown.
-   */
-  parentTree?: string
+  /** The checkout's HEAD commit at this snapshot and its subject line. */
+  head?: string
+  headSubject?: string
   historyGap?: boolean
   snapshotError?: string
 }
@@ -31,7 +27,8 @@ export function diffSnapshot(time: string, p: RunDiffPayload): DiffSnapshot {
     files: p.files ?? [],
     truncated: p.truncated,
     tree: p.tree,
-    parentTree: p.parent_tree,
+    head: p.head,
+    headSubject: p.head_subject,
     historyGap: p.history_gap,
     snapshotError: p.snapshot_error,
   }
@@ -49,37 +46,87 @@ export function diffTotals(files: { additions: number; deletions: number }[] | u
 }
 
 /**
- * The diff of one interval: `from` tree to `to` tree. It is addressed by two
- * tree ids, so its text can never go stale and is fetched once.
+ * What the Compare menu keeps of a snapshot: its tree and the numbers its row
+ * shows, never the file list, so a long run's history stays small.
  */
-export interface IntervalPatch {
-  patch: string
-  truncated: boolean
-  /** Loaded, loading, or the message from the attempt that failed. */
-  status: 'loading' | 'ready' | 'error'
-  error?: string
+export interface Checkpoint {
+  time: string
+  tree?: string
+  head?: string
+  headSubject?: string
+  files: number
+  additions: number
+  deletions: number
+  truncated?: boolean
+  historyGap?: boolean
+  snapshotError?: string
 }
 
-/** The cache key for one interval. */
-export function intervalKey(from: string, to: string): string {
-  return `${from}..${to}`
+export function checkpointOf(snapshot: DiffSnapshot): Checkpoint {
+  const { additions, deletions } = diffTotals(snapshot.files)!
+  return {
+    time: snapshot.time,
+    tree: snapshot.tree,
+    head: snapshot.head,
+    headSubject: snapshot.headSubject,
+    files: snapshot.files.length,
+    additions,
+    deletions,
+    truncated: snapshot.truncated,
+    historyGap: snapshot.historyGap,
+    snapshotError: snapshot.snapshotError,
+  }
+}
+
+/**
+ * What the Changes view diffs the run's current state against: its effective
+ * base, the tree it was forked from, or a recorded checkpoint.
+ */
+export type Comparison = { kind: 'all' } | { kind: 'start' } | { kind: 'since'; checkpoint: Checkpoint }
+
+/** The `from` tree the patch endpoint takes for `comparison`; '' for all changes. */
+export function comparisonFrom(comparison: Comparison, forkTree: string): string {
+  if (comparison.kind === 'start') return forkTree
+  return comparison.kind === 'since' ? (comparison.checkpoint.tree ?? '') : ''
+}
+
+/** Review comments belong to the comparison they were written on: '' for all changes. */
+export function comparisonScope(comparison: Comparison): string {
+  if (comparison.kind === 'start') return 'start'
+  return comparison.kind === 'since' ? `since:${comparison.checkpoint.tree}` : ''
+}
+
+/** Newest first, one entry per tree, the newest for a tree a run returned to;
+ * snapshots without a tree are told apart by time. */
+function mergeCheckpoints(known: Checkpoint[], incoming: Checkpoint[]): Checkpoint[] {
+  const seen = new Set<string>()
+  return [...known, ...incoming]
+    .sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+    .filter((entry) => {
+      const key = entry.tree ?? `at ${entry.time}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 }
 
 /** What the Changes view knows about one run. */
 export interface RunDiffState {
+  /** The commit the all-changes patch is measured against, as the server last said. */
   base: string
+  /** The tree of the commit the run forked from, which "since the run started" diffs against. */
+  forkTree: string
   patch: string
+  /**
+   * The comparison the patch, and the status and error below, answer for:
+   * '' for all changes, else the snapshot tree the patch starts at.
+   */
+  from: string
   truncated: boolean
   recorded: boolean
   /** Loaded, loading, or the message from the attempt that failed. */
   status: 'loading' | 'ready' | 'error'
   error?: string
-  /**
-   * Interval patches by `intervalKey`, pruned to the keys the surviving
-   * snapshots name whenever the list is trimmed, so the cache stays bounded
-   * by `maxSnapshots` rather than by how long the run has been open.
-   */
-  intervals: Record<string, IntervalPatch>
   /**
    * Bumped by every snapshot. The patch is behind whenever this has moved
    * past `fetched`, which is what a counter buys over a stale flag: a
@@ -89,7 +136,13 @@ export interface RunDiffState {
   revision: number
   /** The revision the patch, or the error, answers for; -1 before the first. */
   fetched: number
+  /** Live snapshots with their file lists, newest first. */
   snapshots: DiffSnapshot[]
+  /** Every recorded snapshot the Compare menu offers, newest first: history merged with live ones. */
+  checkpoints: Checkpoint[]
+  /** Set once history has been read; `before` is the cursor of the next older page. */
+  history?: { more: boolean; before?: number }
+  historyError?: string
   /**
    * The newest `run.diff` in the run's history, read while this page has
    * seen none: `undefined` until answered, `null` when the run has none. Any
@@ -101,18 +154,18 @@ export interface RunDiffState {
 
 export const initialDiff: RunDiffState = {
   base: '',
+  forkTree: '',
   patch: '',
+  from: '',
   truncated: false,
   recorded: false,
   status: 'loading',
-  intervals: {},
   revision: 0,
   fetched: -1,
   snapshots: [],
+  checkpoints: [],
 }
 
-// Bound menu metadata and fetched patches independently. A menu update must
-// not invalidate an immutable interval the user is still reading.
 const maxSnapshots = 40
 
 export interface DiffSlice {
@@ -122,8 +175,8 @@ export interface DiffSlice {
   toggleChanges: (runID: string) => void
   overlaps: Record<string, OverlapPeer[]>
   setDiff: (runID: string, patch: Partial<RunDiffState>) => void
-  applyPatch: (patch: RunPatch, revision: number) => void
-  setIntervalPatch: (runID: string, key: string, entry: IntervalPatch) => void
+  applyPatch: (patch: RunPatch, revision: number, from: string) => void
+  applyCheckpoints: (runID: string, checkpoints: Checkpoint[], history: { more: boolean; before?: number }) => void
   noteDiffSnapshot: (runID: string, snapshot: DiffSnapshot) => void
   refreshDiff: (runID: string) => void
   setOverlaps: (overlaps: Overlap[]) => void
@@ -145,36 +198,40 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
     set((s) => ({
       diffs: { ...s.diffs, [runID]: { ...(s.diffs[runID] ?? initialDiff), ...patch } },
     })),
-  applyPatch: (patch, revision) =>
-    set((s) => ({
-      diffs: {
-        ...s.diffs,
-        [patch.run_id]: {
-          ...(s.diffs[patch.run_id] ?? initialDiff),
-          base: patch.base,
-          patch: patch.patch,
-          truncated: patch.truncated,
-          recorded: patch.recorded ?? false,
-          status: 'ready',
-          error: undefined,
-          fetched: revision,
-        },
-      },
-    })),
-  // An interval patch answers for two tree ids, so it is written once and
-  // never invalidated: the cumulative patch's revision machinery does not
-  // apply to it.
-  setIntervalPatch: (runID, key, entry) =>
+  applyPatch: (patch, revision, from) =>
     set((s) => {
-      const current = s.diffs[runID] ?? initialDiff
-      const intervals = { ...current.intervals }
-      delete intervals[key]
-      intervals[key] = entry
-      for (const oldest of Object.keys(intervals).slice(0, -maxSnapshots)) delete intervals[oldest]
+      const current = s.diffs[patch.run_id] ?? initialDiff
       return {
         diffs: {
           ...s.diffs,
-          [runID]: { ...current, intervals },
+          [patch.run_id]: {
+            ...current,
+            // A patch that starts at a snapshot names that snapshot as its base.
+            base: from === '' ? patch.base : current.base,
+            forkTree: patch.fork_tree ?? current.forkTree,
+            patch: patch.patch,
+            from,
+            truncated: patch.truncated,
+            recorded: patch.recorded ?? false,
+            status: 'ready',
+            error: undefined,
+            fetched: revision,
+          },
+        },
+      }
+    }),
+  applyCheckpoints: (runID, checkpoints, history) =>
+    set((s) => {
+      const current = s.diffs[runID] ?? initialDiff
+      return {
+        diffs: {
+          ...s.diffs,
+          [runID]: {
+            ...current,
+            checkpoints: mergeCheckpoints(current.checkpoints, checkpoints),
+            history,
+            historyError: undefined,
+          },
         },
       }
     }),
@@ -190,27 +247,17 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
             ...current,
             revision: current.revision + 1,
             snapshots,
+            checkpoints: mergeCheckpoints(current.checkpoints, [checkpointOf(snapshot)]),
           },
         },
       }
     })
   },
   // Refresh asks again by declaring the current patch one revision behind.
-  // Failed intervals are dropped with it: an interval that answered is
-  // immutable and stays, but a cached failure would otherwise be the one
-  // thing on this tab that no button can retry.
   refreshDiff: (runID) =>
     set((s) => {
       const current = s.diffs[runID] ?? initialDiff
-      const intervals = Object.fromEntries(
-        Object.entries(current.intervals).filter(([, entry]) => entry.status !== 'error'),
-      )
-      return {
-        diffs: {
-          ...s.diffs,
-          [runID]: { ...current, fetched: current.revision - 1, intervals },
-        },
-      }
+      return { diffs: { ...s.diffs, [runID]: { ...current, fetched: current.revision - 1 } } }
     }),
   setOverlaps: (overlaps) =>
     set(() => ({
@@ -248,5 +295,36 @@ export async function readPersistedDiff(store: RootStore, client: Api, run: Pick
     const again = reading.get(run.id)
     reading.delete(run.id)
     if (again) void readPersistedDiff(store, client, run)
+  }
+}
+
+/** Runs with a history page in flight. */
+const paging = new Set<string>()
+
+const checkpointPage = 50
+
+/**
+ * Reads one page of the run's recorded snapshots: the newest, or with `older`
+ * the page before the oldest already read.
+ */
+export async function readCheckpoints(store: RootStore, client: Api, run: Pick<Run, 'id' | 'workspace_id'>, older = false): Promise<void> {
+  const before = store.getState().diffs[run.id]?.history?.before
+  if (paging.has(run.id) || (older && !before)) return
+  paging.add(run.id)
+  try {
+    const page = await client.workspaceTimeline({
+      workspace_id: run.workspace_id,
+      run_id: run.id,
+      types: ['run.diff'],
+      newest: true,
+      limit: checkpointPage,
+      ...(older && { before_seq: before }),
+    })
+    const read = page.events.map((ev) => checkpointOf(diffSnapshot(ev.time, ev.payload as RunDiffPayload)))
+    store.getState().applyCheckpoints(run.id, read, { more: page.more, before: page.older_seq })
+  } catch (err) {
+    store.getState().setDiff(run.id, { historyError: err instanceof Error ? err.message : String(err) })
+  } finally {
+    paging.delete(run.id)
   }
 }

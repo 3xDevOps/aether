@@ -14,6 +14,8 @@ type ConnectionErrorProps = {
   error: string | null
   /** The edge of the local gateway's link, when it runs through one. */
   edge?: string
+  /** The server id of that link. */
+  serverID?: string
   /** Set only when nobody can approve this device in the app. */
   approvalCode?: string | null
   onRetry: () => void
@@ -43,7 +45,7 @@ function Cmd({ children }: { children: string }) {
  * never be described as one they can, which is why `gateway` is the desktop
  * origin only.
  */
-function copyFor({ kind, dead, edge, approvalCode }: ConnectionErrorProps): ErrorCopy {
+function copyFor({ kind, dead, edge, serverID, approvalCode }: ConnectionErrorProps): ErrorCopy {
   if (dead) {
     return {
       icon: KeyRound,
@@ -95,13 +97,30 @@ function copyFor({ kind, dead, edge, approvalCode }: ConnectionErrorProps): Erro
   if (kind === 'edge-server') {
     return {
       icon: ServerOff,
-      eyebrow: 'Server not on the edge',
-      title: 'Your server is not connected to the edge',
+      eyebrow: 'Server registration',
+      title: 'The edge has no live registration for your server',
       description: (
         <>
-          The edge answered, and your server holds no connection to it: the server is stopped,
-          offline, or failing to reach the edge. On the server host,{' '}
-          <Cmd>sudo aether-server edge status</Cmd> shows why.
+          The edge answered and holds no control connection from server{' '}
+          <Cmd>{serverID ?? 'unknown'}</Cmd>: the server is stopped, offline, or its connection to the
+          edge dropped. Compare with <Cmd>sudo aether-server edge status</Cmd> on that host; it reports
+          the server&apos;s side of the same connection.
+        </>
+      ),
+      action: 'Retry connection',
+    }
+  }
+
+  if (kind === 'edge-not-claimed') {
+    return {
+      icon: ServerOff,
+      eyebrow: 'Server registration',
+      title: 'Your server is finishing its claim',
+      description: (
+        <>
+          The edge holds a live connection from server <Cmd>{serverID ?? 'unknown'}</Cmd> and has
+          recorded its owner, and the server has not applied the claim to that connection yet. This
+          takes a moment; retry.
         </>
       ),
       action: 'Retry connection',
@@ -249,8 +268,8 @@ function copyFor({ kind, dead, edge, approvalCode }: ConnectionErrorProps): Erro
  * rather than sitting inside it: an empty sidebar and an empty board around
  * a toast tell the user nothing about what broke or what to do next.
  */
-export function ConnectionError({ kind, dead, error, edge, approvalCode, onRetry }: ConnectionErrorProps) {
-  const content = copyFor({ kind, dead, error, edge, approvalCode, onRetry })
+export function ConnectionError({ kind, dead, error, edge, serverID, approvalCode, onRetry }: ConnectionErrorProps) {
+  const content = copyFor({ kind, dead, error, edge, serverID, approvalCode, onRetry })
   const Icon = content.icon
 
   return (

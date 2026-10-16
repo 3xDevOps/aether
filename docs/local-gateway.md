@@ -880,7 +880,7 @@ unavailable owned source remains the server's protocol error.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
+| `run.patch` | `RunPatchParams` (`{"run_id":"...","from":"...","to":"..."}`; `from` and `to` optional, `to` only with `from`) | `RunPatchResult` - the same JSON shape the patch `GET` answers |
 | `coord.messages.list` | `{"workspace_id":"...","mission_id":"...","run_id":"...","correlation_id":"...","before":"...","limit":50}` (only `workspace_id` required; `run_id` matches either side) | `{"messages":[{"id":"...","workspace_id":"...","mission_id":"...","from_run_id":"...","to_run_id":"...","kind":"message"\|"question"\|"reply"\|"report","correlation_id":"...","body":"...","created_at":"...","delivered_at":"...","acked_at":"...","outcome":"...","summary":"...","next_action":"..."}],"next_before":"..."}` newest first; report fields only on `report` rows. See [coordination.md](coordination.md#seeing-agent-messages) |
 | `server.disk` | none | `ServerDiskResult` - the same JSON shape the disk `GET` answers |
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
@@ -1219,7 +1219,7 @@ Not an RPC method, because patch text is a read of a working tree rather
 than a control-channel call. `run.diff` events carry per-file stats and the
 tree each snapshot wrote, never patch text, and no patch text is stored
 anywhere in the server, so the diff timeline reads the text here and uses
-those events to know when to ask again and which interval to ask for.
+those events to know when to ask again and which snapshot to ask from.
 
 With no query params the server renders the run checkout's whole diff against
 the run's effective base, covering committed work, uncommitted edits and
@@ -1254,13 +1254,22 @@ untracked content to count lines. Past that the event carries
 `truncated:true`: the files left unread count zero and the totals are a
 floor.
 
-`from` and `to` render one interval instead. Both take a snapshot tree id off
-a `run.diff` event - its `parent_tree` and its `tree` - and the answer is the
-diff between those two trees, which is what the run changed in that interval.
-Passing one without the other is an invalid-params error. An id has to be a
-full object id, has to resolve against that run's own object database and no
-other, and has to name a tree: a commit id would otherwise peel to its tree
-and render a diff the timeline never offered.
+`from` alone renders everything that changed since a recorded snapshot: the
+diff from that snapshot's `tree`, off a `run.diff` event, to the run's current
+state. With a checkout the worktree is staged exactly as for the whole diff,
+so edits made after the snapshot count, committed or not, and the base is the
+`from` tree. After checkout cleanup the diff runs from `from` to the last
+recorded snapshot and carries `recorded:true`. `fork_tree`, on every render
+without `from`, is the tree of the fork-point commit; passing it as `from`
+renders the run's current state against where it started, including upstream
+work merged since.
+
+`from` and `to` together render one interval: the diff between the two trees,
+which is what the run changed in that interval. `to` without `from` is an
+invalid-params error. An id has to be a full object id, has to be recorded in
+that run's own snapshot store and no other, and has to name a tree: a commit
+id would otherwise peel to its tree and render a diff the timeline never
+offered. The fork-point tree counts as recorded.
 
 Snapshot sidecars preserve captured trees until explicit run deletion, even
 after checkout cleanup. Consecutive unchanged trees do not add duplicate refs.
@@ -1281,7 +1290,11 @@ Each `run.diff` carries `base`, the effective base commit its stats are
 measured against. A fetch that moves `origin/<base branch>` schedules a
 snapshot, and a moved base publishes new stats even when the worktree is
 unchanged, including after a watch restart. `parent_tree` is unchanged: the
-first snapshot's parent is the fork-point tree.
+first snapshot's parent is the fork-point tree. It also carries `head`, the
+commit the checkout had checked out, and `head_subject`, that commit's subject
+line cut to 200 bytes. A `head` that differs from the previous snapshot's means
+a commit landed between the two. The subject is read by the server from its
+own object store, never by running Git in the checkout.
 
 `run.diff` may include `history_gap:true` and a bounded, path-free
 `snapshot_error` when an interval could not be recorded. The next successful
@@ -1296,7 +1309,7 @@ Staging refusal returns unavailable with
 claim the checkout was removed, and it never returns a partial complete diff.
 
 ```json
-{"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false}
+{"run_id":"run_01H...","base":"9f2c1e...","patch":"diff --git a/main.go b/main.go\n...","truncated":false,"fork_tree":"4b825d..."}
 ```
 
 - Visibility is `run.get`'s, applied by calling it: a member who could not
@@ -1304,7 +1317,9 @@ claim the checkout was removed, and it never returns a partial complete diff.
   unchanged.
 - `base` is what the patch is measured from: the effective base commit on a
   live cumulative render, its tree when `recorded` is true, the `from` tree on
-  an interval one.
+  any render that names one.
+- `fork_tree` is the fork-point commit's tree, present on renders without
+  `from`.
 - `patch` contains the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line. The dashboard
   renders the response inline; it does not serve repositories.
@@ -1436,7 +1451,8 @@ exceeds the 64 MiB limit`.
 
 - `run.patch` returns the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line.
-  `from` and `to` select one interval here exactly as they do on the `GET`.
+  `from` and `to` select a starting snapshot or one interval here exactly as
+  they do on the `GET`.
 - The read methods answer `-32004` (unavailable) when the read cannot be
   served: `run.patch` when diff rendering is not enabled (no git engine
   wired), when the run has no checkout left to diff, or when a requested tree

@@ -96,15 +96,17 @@ describe('ConnectionError', () => {
         <ConnectionError
           kind="edge-server"
           dead={false}
+          serverID="abc"
           error="server unreachable: connect to server abc: edge.example.test refused: server is not connected to the edge (HTTP 503)"
           onRetry={vi.fn()}
         />,
       )
 
       expect(
-        screen.getByRole('heading', { name: 'Your server is not connected to the edge' }),
+        screen.getByRole('heading', { name: 'The edge has no live registration for your server' }),
       ).toBeDefined()
       expect(screen.getByText('sudo aether-server edge status')).toBeDefined()
+      expect(screen.getByText('abc')).toBeDefined()
       expect(screen.getByText(/refused: server is not connected to the edge/)).toBeDefined()
       expect(screen.queryByText(/Tailscale/)).toBeNull()
     })

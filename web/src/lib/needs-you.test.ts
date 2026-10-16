@@ -216,6 +216,9 @@ describe('needs you conditions', () => {
     ['a paused request', { state: 'needs-you', paused: true }, undefined],
     ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
     ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
+    ['an interrupted Enhanced turn', { mode: 'acp', acp: true, state: 'needs-you', reason: 'turn interrupted' }, 'needs-input'],
+    ['an Enhanced turn stopped short', { mode: 'acp', acp: true, state: 'needs-you', reason: 'turn ended: max_tokens' }, 'needs-input'],
+    ['a cancelled Enhanced turn', { mode: 'acp', acp: true, state: 'idle', reason: 'turn cancelled' }, undefined],
     ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
     ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
     ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, 'failed'],
@@ -233,7 +236,6 @@ describe('needs you conditions', () => {
     ['idle', 'agent idle', 'Agent idle'],
     ['idle', 'stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
     ['idle', 'turn cancelled', 'Turn cancelled'],
-    ['idle', 'turn ended: max_tokens', 'Stopped: the reply reached its token limit'],
     ['waiting-agents', 'waiting on 3 workers', 'waiting on 3 workers'],
     ['waiting-agents', 'working in background: 2 tasks', 'Working in background: 2 tasks'],
     ['waiting-tools', '', 'Waiting on a tool'],
@@ -244,6 +246,16 @@ describe('needs you conditions', () => {
       expect(waitingOn(parked, stateContext())).toBeUndefined()
       expect(presentRun(parked, stateContext())).toEqual({ state, reason: shown })
     }
+  })
+
+  it.each([
+    ['turn interrupted', 'Turn interrupted · reply to continue'],
+    ['turn ended: max_tokens', 'Stopped: the reply reached its token limit · reply to continue'],
+  ])('asks for a reply to continue an Enhanced run parked with %j', (reason, shown) => {
+    const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason })
+    const presented = presentRun(parked, stateContext())
+    expect(presented).toMatchObject({ state: 'needs-you', reason: shown })
+    expect(presented.needsYou?.action(parked, undefined)).toEqual({ kind: 'reply', label: 'Reply' })
   })
 
   it("labels a disconnected agent with the server's reason", () => {

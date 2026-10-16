@@ -72,7 +72,7 @@ test('a phone protects a run from More and reads its changes', async ({
   }).toPass({ timeout: 60 * 1000 })
 
   // Nothing stands between the strip and the first file: the file list and
-  // the intervals are menus in the strip on a phone.
+  // the comparisons are menus in the strip on a phone.
   await expect(page.getByRole('region', { name: 'result.txt' })).toBeInViewport()
   await expect(page.getByText('+hello-from-agent')).toBeVisible()
 

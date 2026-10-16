@@ -70,3 +70,67 @@ test('a rejected token reads as an expired link, not an unreachable server', asy
   await expect(page.getByText(/a valid gateway token is required/)).toBeVisible()
   await expect(page.getByText(/check your connection/i)).toHaveCount(0)
 })
+
+// The reported contradiction: a refusal on one subscribe, then a replay
+// reconnect that goes live without re-fetching the snapshot. The refusal is
+// the edge's real wire shape; the reconnect around it is the real gateway
+// and server.
+test('a replay reconnect that goes live clears the edge refusal before it', async ({
+  page,
+  aether,
+}) => {
+  const alice = await aether.member('alice')
+  const repo = await aether.seedRepo('project')
+  await seedWorkspace(alice, aether.server.addr, repo)
+
+  let refusing = false
+  const subscribes: { replay: boolean; after_seq: number }[] = []
+  const live: WebSocketRoute[] = []
+  let events = 0
+  await page.routeWebSocket(/\/ws\/events/, (ws) => {
+    if (refusing) {
+      ws.onMessage((frame) => {
+        subscribes.push(JSON.parse(String(frame)))
+        ws.send(JSON.stringify({
+          ok: false,
+          code: -32004,
+          error: 'server unreachable: connect to server srv123: edge.example.test refused: server is not connected to the edge (HTTP 503)',
+          data: { refusal: { kind: 'server-not-connected', refusal: 'server is not connected to the edge' } },
+        }))
+        void ws.close({ code: 1008 })
+      })
+      return
+    }
+    live.push(ws)
+    const server = ws.connectToServer()
+    server.onMessage((frame) => {
+      if (String(frame).includes('"seq"')) events++
+      ws.send(frame)
+    })
+  })
+
+  await page.goto(alice.url)
+  const footer = page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: /, (Connecting|Live|Reconnecting|Offline|Unreachable)$/ })
+  await expect(footer).toHaveAccessibleName(/, Live$/)
+  // An event gives the client a cursor, so its next subscribe replays.
+  await alice.api.rpc('workspace.add', { name: 'second', base_branch: 'main', environment: {} })
+  await expect.poll(() => events).toBeGreaterThan(0)
+
+  refusing = true
+  await live[0].close({ code: 1011 })
+  const problem = page.getByRole('status').filter({ hasText: 'Server registration failed' })
+  await expect(problem).toContainText('has no live registration for server')
+  await expect(problem).toContainText('aether-server edge status')
+  // The announcer is screen-reader only; the line on screen must say the same.
+  const line = page.getByText(/^Server registration failed · /).filter({ visible: true })
+  await expect(line.first()).toBeVisible()
+  await expect(line.first()).toContainText('has no live registration for server')
+  await expect(footer).toHaveAccessibleName(/, Unreachable$/)
+  expect(subscribes[0]?.replay).toBe(true)
+
+  refusing = false
+  await expect(footer).toHaveAccessibleName(/, Live$/, { timeout: 10_000 })
+  await expect(problem).toHaveCount(0)
+  await expect(line).toHaveCount(0)
+  await expect(page.getByText(/Live · /)).toHaveCount(0)
+})

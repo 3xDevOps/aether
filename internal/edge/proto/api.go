@@ -76,6 +76,7 @@ const (
 	RefusalNotMember      Refusal = "not a member of this server"
 	RefusalUnknownServer  Refusal = "unknown server"
 	RefusalNotConnected   Refusal = "server is not connected to the edge"
+	RefusalNotClaimed     Refusal = "server is connected to the edge but not claimed"
 	RefusalNotAttached    Refusal = "server did not attach"
 	RefusalTooMany        Refusal = "too many attempts"
 	RefusalConnLimit      Refusal = "connection limit reached"
@@ -102,7 +103,7 @@ func (r Refusal) Status() int {
 		return http.StatusForbidden
 	case RefusalUnknownServer:
 		return http.StatusNotFound
-	case RefusalClaimed:
+	case RefusalClaimed, RefusalNotClaimed:
 		return http.StatusConflict
 	case RefusalTooMany, RefusalConnLimit:
 		return http.StatusTooManyRequests

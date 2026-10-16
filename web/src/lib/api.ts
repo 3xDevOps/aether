@@ -19,6 +19,7 @@ import type {
   EdgeLinkResult,
   EdgeRefusal,
   EdgeLogin,
+  EdgePath,
   EdgeServer,
   EdgeStatus,
   EnvAgentsResult,
@@ -278,7 +279,7 @@ async function uploadTerminalFile(file: File, runID?: string): Promise<{ path: s
 
 /** A JSON-RPC error's data. The local gateway sets `refusal` on every
  * failure on the edge path; other fields belong to the method. */
-export type ApiErrorData = { refusal?: EdgeRefusal } & Record<string, unknown>
+export type ApiErrorData = { refusal?: EdgeRefusal; edge_path?: EdgePath } & Record<string, unknown>
 
 // internal/protocol's error codes.
 export const codeNotFound = -32000
@@ -958,8 +959,9 @@ export const api = {
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
-  // diff against the fork point; with one, `base` is the `from` tree.
-  runPatch: (runID: string, range?: { from: string; to: string }) =>
+  // diff against the run's effective base; with `from`, everything since that
+  // snapshot tree, and `base` is the `from` tree.
+  runPatch: (runID: string, range?: { from: string }) =>
     get<RunPatch>(
       `/run/${encodeURIComponent(runID)}/patch` +
         (range ? `?${new URLSearchParams(range).toString()}` : ''),

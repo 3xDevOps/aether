@@ -35,7 +35,9 @@ type fakeDir struct {
 	dirs      map[string][]edgeproto.DirectoryEntry
 	dirWrites int
 	// admitHook, when set, runs once at the start of the next Admit.
-	admitHook  func()
+	admitHook func()
+	// authHook, when set, runs once at the start of the next Authenticate.
+	authHook   func()
 	unenrolled []string
 	// claimRefusal, when set, is AdmitClaim's answer; claimAddrs are the
 	// addresses AdmitClaim was called with.
@@ -52,6 +54,13 @@ type tokenEntry struct {
 }
 
 func (d *fakeDir) Authenticate(_ context.Context, token string) (edgeproto.Account, edgeproto.Device, error) {
+	d.mu.Lock()
+	hook := d.authHook
+	d.authHook = nil
+	d.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	e, ok := d.tokens[token]

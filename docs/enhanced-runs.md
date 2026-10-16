@@ -353,9 +353,9 @@ whether anyone is needed:
 | `needs input: <question>` | `needs-you` | The agent asked you with `aether-internal report --outcome needs-input` ([coordination.md](coordination.md)) and ended its turn. |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker and ended its turn. |
 | `<summary>` of a `waiting` report | `waiting-agents` | The agent reported it waits on its own agents and ended its turn. |
-| `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. |
-| `turn interrupted` | `idle` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. |
-| `turn ended: <stop reason>` | `idle` | Any other ACP stop reason, such as `max_tokens` or `refusal`. |
+| `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. Whoever cancelled it already knows, so it does not ask anyone. |
+| `turn interrupted` | `needs-you` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. Send a message to continue. |
+| `turn ended: <stop reason>` | `needs-you` | Any other ACP stop reason, such as `max_tokens` or `refusal`. Send a message to continue. |
 | `enhanced turn failed: <error>` | `failed` | The agent failed the prompt while staying connected. |
 | `enhanced session ended: <cause>` | `disconnected` | The adapter exited or closed its output. Reopening the session clears it. |
 | `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session. |
@@ -563,8 +563,8 @@ agent session with `session/resume`, or `session/load` with the replayed
 history dropped because the log already holds it. The session id is stored in the
 run (`harness_session_id`). A turn cut off by a restart ends with a **Turn
 interrupted** notice, its unanswered permission requests are dropped, and
-the run parks at `needs-attention` with `turn interrupted` until the next
-prompt. The same happens when the run was waiting for background tasks: they
+the run parks at `needs-attention` with `turn interrupted`, state `needs-you`,
+until the next prompt. The same happens when the run was waiting for background tasks: they
 end with the old adapter, the log gets a **Background work interrupted**
 notice naming them, and a `background` item with no tasks and
 `stop_reason: "interrupted"` records that none outlived the connection. A

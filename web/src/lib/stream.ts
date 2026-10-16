@@ -2,7 +2,7 @@
 // the last sequence the store has seen so a reconnect loses nothing.
 
 import { api, type ApiErrorData } from '@/lib/api'
-import type { EdgeRefusal, Event, SubscribeRequest } from '@/lib/types'
+import type { Event, SubscribeRequest } from '@/lib/types'
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
@@ -17,9 +17,9 @@ export interface StreamHandlers {
    * never got off its own network stack; `server` means it did and
    * aether-server did not answer. `detail` is the refusal message, which on
    * a stream that never goes live is the only account of the failure the
-   * client ever gets. `refusal` is set for a failure on the edge path.
-   * Fired before the retry is scheduled. */
-  onUnreachable?: (kind: 'network' | 'server', detail: string, refusal?: EdgeRefusal) => void
+   * client ever gets. `data` carries the refusal and the failed layer for
+   * a failure on the edge path. Fired before the retry is scheduled. */
+  onUnreachable?: (kind: 'network' | 'server', detail: string, data?: ApiErrorData) => void
   /** Last sequence applied to the store; replay resumes after it. */
   afterSeq: () => number
 }
@@ -110,9 +110,9 @@ export function connectEvents(h: StreamHandlers): () => void {
           } else if (parsed.ok === false && parsed.code === codeUnavailable) {
             const detail = parsed.error ?? ''
             if (detail.startsWith('network unreachable')) {
-              h.onUnreachable?.('network', detail)
+              h.onUnreachable?.('network', detail, parsed.data)
             } else if (detail.startsWith('server unreachable')) {
-              h.onUnreachable?.('server', detail, parsed.data?.refusal)
+              h.onUnreachable?.('server', detail, parsed.data)
             }
           }
           return

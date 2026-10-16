@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -24,6 +25,10 @@ var errDrain = errors.New("edge is restarting (drain)")
 type session struct {
 	c       *websocket.Conn
 	edgeKey ed25519.PublicKey
+	// since is when the session enrolled.
+	since time.Time
+	// beats holds the latest answered ping recordBeats has not written.
+	beats chan time.Time
 
 	mu sync.Mutex
 	// transfers holds, by report id, each transfer waiting for the edge's
@@ -187,7 +192,7 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	defer cancel()
 	defer c.CloseNow() //nolint:errcheck // the close error of a dead session is not actionable
 	start := time.Now()
-	s := &session{c: c, edgeKey: ready.EdgeKey, transfers: map[string]chan edgeproto.OwnerTransferResult{}}
+	s := &session{c: c, edgeKey: ready.EdgeKey, since: start, beats: make(chan time.Time, 1), transfers: map[string]chan edgeproto.OwnerTransferResult{}}
 	if err = a.setEdgeState(ready.State); err != nil {
 		return time.Since(start), err
 	}
@@ -199,13 +204,22 @@ func (a *Agent) session(ctx context.Context) (time.Duration, error) {
 	// connected only once transfers and claims can use the session.
 	a.setLive(s)
 	defer a.setLive(nil)
-	a.state.writeStatus(Status{Edge: a.origin, Connected: true, Since: start})
+	a.state.writeStatus(a.connected(s, time.Now()))
 	slog.Info("edge: connected", "edge", a.origin, "server_id", a.serverID, "state", ready.State)
 	sctx, stop := context.WithCancel(ctx)
 	defer stop()
 	go a.pushDirectory(sctx, s)
 	go a.ping(sctx, s)
+	recorded := make(chan struct{})
+	go func() {
+		a.recordBeats(sctx, s)
+		close(recorded)
+	}()
 	err = a.serve(sctx, s)
+	// The disconnected status the caller writes must land after the last
+	// heartbeat.
+	stop()
+	<-recorded
 	return time.Since(start), err
 }
 
@@ -270,6 +284,40 @@ func (a *Agent) ping(ctx context.Context, s *session) {
 			if err := s.send(edgeproto.Ping{}); err != nil {
 				return
 			}
+		}
+	}
+}
+
+// connected is the status of live session s whose edge last answered at
+// heartbeat.
+func (a *Agent) connected(s *session, heartbeat time.Time) Status {
+	return Status{Edge: a.origin, Connected: true, Since: s.since, PID: os.Getpid(), Heartbeat: heartbeat}
+}
+
+// answered queues the heartbeat at now for recordBeats, replacing one it
+// has not written yet. Only serve calls it, so the send cannot block.
+func (s *session) answered(now time.Time) {
+	select {
+	case <-s.beats:
+	default:
+	}
+	s.beats <- now
+}
+
+// recordBeats writes s's heartbeats to the status file off the read loop,
+// which a slow disk must not stall. A run of failed writes logs once.
+func (a *Agent) recordBeats(ctx context.Context, s *session) {
+	failing := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-s.beats:
+			err := a.state.write(statusFile, a.connected(s, now))
+			if err != nil && !failing {
+				slog.Warn("edge: write status heartbeat; later failures are not logged until a write succeeds", "error", err)
+			}
+			failing = err != nil
 		}
 	}
 }
@@ -355,6 +403,7 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 				return err
 			}
 		case edgeproto.Pong:
+			s.answered(time.Now())
 		case edgeproto.Open:
 			a.open(s, m)
 		case edgeproto.DeviceRevoked:
