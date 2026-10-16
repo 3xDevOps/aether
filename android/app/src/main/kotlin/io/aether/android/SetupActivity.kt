@@ -1,7 +1,10 @@
 package io.aether.android
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.format.DateFormat
 import android.view.KeyEvent
 import android.view.View
@@ -13,6 +16,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.Date
+import java.util.concurrent.Executors
 
 /**
  * The first-run and settings screen: a choice between Aether Edge and
@@ -27,6 +31,8 @@ import java.util.Date
  * from the button a failed load shows.
  */
 class SetupActivity : ComponentActivity() {
+    private var checkDone: ((InstallFacts) -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.enableEdgeToEdge(window)
@@ -101,6 +107,11 @@ class SetupActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        if (ManualCheck.listener === checkDone) ManualCheck.listener = null
+        super.onDestroy()
+    }
+
     private fun setUpUpdateCheck() {
         val button = findViewById<Button>(R.id.check_updates)
         val status = findViewById<TextView>(R.id.update_status)
@@ -130,31 +141,63 @@ class SetupActivity : ComponentActivity() {
             get.visibility = if (targets.isEmpty()) View.GONE else View.VISIBLE
         }
 
-        Thread {
-                val facts = installFacts(applicationContext)
-                runOnUiThread {
-                    // A check the member started since owns the status.
-                    if (!isDestroyed && button.isEnabled) render(storedUpdate(), facts)
-                }
-            }
-            .start()
-        button.setOnClickListener {
+        fun showChecking() {
             button.isEnabled = false
             status.setText(R.string.update_checking)
             status.setTextColor(getColor(R.color.text))
             status.visibility = View.VISIBLE
             get.visibility = View.GONE
             openError.visibility = View.GONE
-            Thread {
-                    val facts = installFacts(applicationContext)
-                    val run = runCheck(applicationContext)
-                    runOnUiThread {
-                        if (isDestroyed) return@runOnUiThread
-                        button.isEnabled = true
-                        render(recordCheck(this, run, facts.updatedAt), facts)
-                    }
+        }
+
+        val done = { facts: InstallFacts ->
+            button.isEnabled = true
+            render(storedUpdate(), facts)
+        }
+        checkDone = done
+        ManualCheck.listener = done
+        if (ManualCheck.running) showChecking()
+
+        Thread {
+                val facts = installFacts(applicationContext)
+                runOnUiThread {
+                    // A check the member started since owns the status.
+                    if (!isDestroyed && !ManualCheck.running) render(storedUpdate(), facts)
                 }
-                .start()
+            }
+            .start()
+        button.setOnClickListener {
+            showChecking()
+            ManualCheck.start(applicationContext)
+        }
+    }
+}
+
+/**
+ * The check "Check for updates" started. It outlives the screen: a rotation
+ * recreates SetupActivity mid-check, and the new one hears the answer.
+ * Main thread only.
+ */
+private object ManualCheck {
+    private val main = Handler(Looper.getMainLooper())
+    private val executor = Executors.newSingleThreadExecutor()
+
+    var running = false
+        private set
+
+    var listener: ((InstallFacts) -> Unit)? = null
+
+    fun start(context: Context) {
+        if (running) return
+        running = true
+        executor.execute {
+            val facts = installFacts(context)
+            val run = runCheck(context)
+            main.post {
+                recordCheck(context, run, facts.updatedAt)
+                running = false
+                listener?.invoke(facts)
+            }
         }
     }
 }

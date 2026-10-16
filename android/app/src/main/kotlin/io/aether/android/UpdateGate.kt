@@ -72,7 +72,6 @@ class UpdateGate(
      */
     fun check(handshakeUrl: String, refresh: Boolean = false) {
         if (destroyed) return
-        // A check against an earlier gateway's port answers for nothing now.
         if (handshakeUrl != gatewayUrl) {
             generation++
             checking = false
@@ -114,7 +113,6 @@ class UpdateGate(
         }
     }
 
-    /** Takes the gate down for a gateway that is gone or a mode without one. */
     fun reset() {
         generation++
         checking = false
@@ -162,7 +160,6 @@ class UpdateGate(
     }
 }
 
-/** POSTs [body] to [call] and returns the response, or throws with the gateway's own error. */
 private fun post(call: GatewayCall, body: String): String {
     val connection = URL(call.url).openConnection() as HttpURLConnection
     try {
