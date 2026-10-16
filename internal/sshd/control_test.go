@@ -88,7 +88,7 @@ func TestControlListsAndGets(t *testing.T) {
 
 	// run.get carries the stored reason and the scheduler-decorated
 	// paused flag.
-	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "stalled: no output", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(context.Background(), e.run.ID, domain.RunNeedsAttention, "stalled: no output", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	e.runs.setPaused(e.run.ID, true)

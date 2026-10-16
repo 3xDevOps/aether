@@ -674,3 +674,20 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	}
 	return &domain.Acceptance{SubmissionID: id, MissionID: missionID, TaskID: taskID, TaskRevision: taskRevision, AcceptedSetVersion: newVersion, IntegratorGeneration: generation, AcceptedByRunID: acceptedBy, ScopeDisposition: scopeDisposition, AcceptedAt: now}, nil
 }
+
+func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID) (bool, error) {
+	var waiting bool
+	err := d.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
+		WHERE m.current_integrator_run_id = ?1 AND a.state IN ('reserved', 'launching', 'running', 'unknown')
+	) OR EXISTS (
+		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
+		JOIN run_messages ON run_messages.from_run = a.run_id
+		WHERE m.current_integrator_run_id = ?1 AND run_messages.to_run = ?1
+		  AND run_messages.acked_at IS NULL AND run_messages.retired_at IS NULL
+	)`, run).Scan(&waiting)
+	if err != nil {
+		return false, fmt.Errorf("store: integrator waiting: %w", err)
+	}
+	return waiting, nil
+}

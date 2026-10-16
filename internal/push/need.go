@@ -9,23 +9,18 @@ import (
 )
 
 // These mirror the scheduler's reasons: acp*Reason in
-// internal/scheduler/acp_driver.go, reported*Reason in
-// internal/scheduler/reported.go, and the blocked, needs-input and stalled
-// prefixes. The labels are the dashboard's (web/src/lib/needs-you.ts).
-var enhancedFailures = []struct{ prefix, label string }{
+// internal/scheduler/acp_turn.go, reported*Reason in
+// internal/scheduler/reported.go, and the blocked and needs-input prefixes.
+// The labels are the dashboard's (web/src/lib/needs-you.ts).
+var disconnects = []struct{ prefix, label string }{
 	{"enhanced session failed: ", "Enhanced could not start: "},
 	{"enhanced session ended: ", "Agent disconnected: "},
-	{"enhanced turn failed: ", "Turn failed: "},
 }
 
 const (
-	blockedPrefix     = "blocked: "
-	needsInputPrefix  = "needs input: "
-	stalledPrefix     = "stalled:"
-	turnStoppedPrefix = "turn ended: "
-	reportedPrefix    = "agent reported "
-	reportedSuccess   = reportedPrefix + "success"
-	reportedFailure   = reportedPrefix + "failure"
+	blockedPrefix    = "blocked: "
+	needsInputPrefix = "needs input: "
+	reportedPrefix   = "agent reported "
 
 	// fallbackTitleRunes matches fallbackLabelLength in web/src/lib/status.ts.
 	fallbackTitleRunes = 120
@@ -45,7 +40,7 @@ type need struct {
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
 // the run alone. A swarm worker's integrator answers for it, so a worker
 // counts only when it reports itself blocked.
-func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest, paused bool) *need {
+func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest) *need {
 	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
 	if !worker {
@@ -67,68 +62,60 @@ func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputR
 			return &need{key: inputKey(request), body: body}
 		}
 	}
-	body := statusBody(run, worker, background, paused)
+	body := statusBody(run, worker, background)
 	if body == "" {
 		return nil
 	}
-	changed := ""
-	if run.StatusChangedAt != nil {
-		changed = strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
-	}
 	return &need{
-		key:  "status:" + string(run.Status) + "|" + run.Reason + "|" + changed,
+		key:  "status:" + string(run.Status) + "|" + string(run.Activity) + "|" + strconv.FormatInt(run.StatusSeq, 10),
 		body: clip(body, maxBodyRunes),
 	}
 }
 
 func AttentionBody(run *domain.Run) string {
-	return clip(statusBody(run, run.MissionRole == "worker", false, false), maxBodyRunes)
+	return clip(statusBody(run, run.MissionRole == "worker", false), maxBodyRunes)
 }
 
-func statusBody(run *domain.Run, worker, background, paused bool) string {
+// statusBody announces a live run only for the activities that need a
+// member: needs-you, failed, disconnected and finished. Idle, waiting and
+// working never do.
+func statusBody(run *domain.Run, worker, background bool) string {
 	switch run.Status {
-	case domain.RunNeedsAttention:
-		if rest, ok := strings.CutPrefix(run.Reason, blockedPrefix); ok {
+	case domain.RunRunning, domain.RunNeedsAttention:
+		switch run.Activity {
+		case domain.ActivityNeedsYou:
+			if rest, ok := strings.CutPrefix(run.Reason, blockedPrefix); ok {
+				if worker {
+					return "Worker blocked: " + rest
+				}
+				return "Blocked: " + rest
+			}
 			if worker {
-				return "Worker blocked: " + rest
+				return ""
 			}
-			return "Blocked: " + rest
-		}
-		if worker {
-			return ""
-		}
-		if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {
-			return rest
-		}
-		for _, failure := range enhancedFailures {
-			if rest, ok := strings.CutPrefix(run.Reason, failure.prefix); ok {
-				return failure.label + rest
+			if rest, ok := strings.CutPrefix(run.Reason, needsInputPrefix); ok {
+				return rest
 			}
-		}
-		if background {
-			return ""
-		}
-		switch {
-		case run.Reason == reportedSuccess || run.Reason == reportedFailure:
-			if !run.OutcomeUnseen {
+			if background {
+				return ""
+			}
+			return "Waiting for your reply"
+		case domain.ActivityDisconnected:
+			if worker {
+				return ""
+			}
+			for _, d := range disconnects {
+				if rest, ok := strings.CutPrefix(run.Reason, d.prefix); ok {
+					return d.label + rest
+				}
+			}
+			return "Agent disconnected"
+		case domain.ActivityFailed, domain.ActivityFinished:
+			if worker || background || !run.OutcomeUnseen {
 				return ""
 			}
 			return "Agent reported " + strings.TrimPrefix(run.Reason, reportedPrefix) + ", review the result"
-		case paused:
-			return ""
-		case strings.HasPrefix(run.Reason, stalledPrefix):
-			return "No activity"
-		case !run.ACP:
-		case run.Reason == "turn cancelled":
-			return "Turn cancelled"
-		case run.Reason == "turn interrupted":
-			return "Turn interrupted"
-		case strings.HasPrefix(run.Reason, turnStoppedPrefix):
-			return "Stopped: " + strings.TrimPrefix(run.Reason, turnStoppedPrefix)
-		default:
-			return "Waiting for your reply"
 		}
-		return "Agent idle"
 	case domain.RunCompleted, domain.RunFailed:
 		if worker || !run.OutcomeUnseen {
 			return ""

@@ -412,7 +412,7 @@ func TestPlanMergeRefusals(t *testing.T) {
 	if _, err := db.PlanMerge(ctx, "code", b.ID, "", now); !isRefusal(err, string(run.ID)) {
 		t.Fatalf("live run = %v", err)
 	}
-	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, db, `INSERT INTO handoff_outbox (id, workspace_id, run_id, actor_id, from_member_id, to_member_id, evidence_state,

@@ -82,6 +82,7 @@ const (
 	CoordOutcomeBlocked = "blocked"
 	// CoordOutcomeNeedsInput is nonterminal and never stored as a durable report.
 	CoordOutcomeNeedsInput = "needs-input"
+	CoordOutcomeWaiting    = "waiting"
 )
 
 // Peer authorization states.

@@ -188,6 +188,8 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 	runningRow := *fresh
 	runningRow.Status = domain.RunRunning
 	runningRow.Reason = ""
+	runningRow.Activity = domain.ActivityWorking
+	runningRow.StatusSeq++
 	runningRow.StartedAt = &now
 	runningRow.FinishedAt = nil
 	runningRow.StatusChangedAt = &now
@@ -315,7 +317,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		// and a finish a member had opened is still opened.
 		var unseenErr, unopenedErr error
 		if terminalRow.OutcomeUnseen {
-			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, nil, nil); flagErr != nil {
+			if flagErr := s.cfg.Store.FinishRunReported(ctx, run, terminalRow.Status, terminalRow.Reason, "", nil, nil); flagErr != nil {
 				unseenErr = fmt.Errorf("scheduler: relaunch rollback outcome unseen: %w", flagErr)
 			}
 		}
@@ -375,7 +377,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 			return nil, rollback(fmt.Errorf("scheduler: relaunch: %w", supersedeErr))
 		}
 	}
-	entry.status = domain.RunRunning
+	entry.status, entry.reason, entry.activity = domain.RunRunning, "", domain.ActivityWorking
 	entry.startedAt = now
 	entry.evidenceIdentity = relaunchIdentity
 	entry.retained = false
@@ -387,7 +389,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		WorkspaceID: fresh.WorkspaceID,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: old.Status, To: domain.RunRunning},
+		Payload:     events.RunStatusPayload{From: old.Status, To: domain.RunRunning, Activity: domain.ActivityWorking, StatusSeq: runningRow.StatusSeq},
 	})
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: clear retained sidecar after relaunch", "run", run, "error", werr)
@@ -611,6 +613,7 @@ func (s *Scheduler) recoverRuns(ctx context.Context) error {
 			s.recoverSupervised(ctx, r)
 		}
 	}
+	s.refreshActivities(ctx)
 	s.cleanupTerminalSidecars(ctx)
 	s.cleanupTerminalCreationKeyContainers(ctx)
 	// The sidecars that survived reconciliation are the live references to
@@ -1754,7 +1757,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	}
 	// A crash can leave the shown sidecar durable before the parked row.
 	// Reapply that pending outcome, but never mark an already reviewed one unseen.
-	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != sc.IdleReason) {
+	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != shownIdleReason(sc.IdleReason)) {
 		sc.IdleShown = false
 	}
 	return &supervised{
@@ -1782,6 +1785,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		acp:                 acp,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
+		reason:              r.Reason,
+		activity:            r.Activity,
 		startedAt:           started,
 		relaunchedAt:        relaunched,
 		paused:              sc.Paused,

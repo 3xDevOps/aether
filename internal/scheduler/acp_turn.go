@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -27,23 +26,8 @@ const (
 	acpStoppedReason     = "turn ended: "
 )
 
-// acpBackgroundReason is a working run's reason while its agent works with no
-// prompt open, with ": 1 task" or ": N tasks" appended while it waits for
-// background tasks (web/src/lib/status.ts).
-const acpBackgroundReason = "working in background"
-
-func backgroundReason(tasks int) string {
-	switch tasks {
-	case 0:
-		return acpBackgroundReason
-	case 1:
-		return acpBackgroundReason + ": 1 task"
-	}
-	return fmt.Sprintf("%s: %d tasks", acpBackgroundReason, tasks)
-}
-
 func backgroundWork(report agentstatus.Report) bool {
-	return report.State == agentstatus.Working && strings.HasPrefix(report.Reason, acpBackgroundReason)
+	return report.State == agentstatus.Working && strings.HasPrefix(report.Reason, agentstatus.ReasonBackground)
 }
 
 // heldStallFactor stretches the stall threshold while background tasks the
@@ -53,7 +37,7 @@ const heldStallFactor = 3
 
 // heldByTasks reports whether background tasks the run waits for are live.
 func heldByTasks(report agentstatus.Report) bool {
-	return backgroundWork(report) && report.Reason != acpBackgroundReason
+	return backgroundWork(report) && report.Reason != agentstatus.ReasonBackground
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
@@ -67,11 +51,12 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	}
 	d.s.mu.Lock()
 	entry.betweenTurns = st.Working && st.Reason == "background" && !st.Autonomous
+	entry.heldTools = st.Working && st.Reason == "background" && st.Tasks > 0 && st.Agents == 0
 	d.s.mu.Unlock()
 	report := agentstatus.Report{State: agentstatus.Working}
 	switch {
 	case st.Working && st.Reason == "background":
-		report.Reason = backgroundReason(st.Tasks)
+		report.Reason = agentstatus.BackgroundReason(st.Tasks)
 	case st.Working:
 	case st.Failed != nil:
 		// Not a turn end: a waiting outcome report must not finish the run

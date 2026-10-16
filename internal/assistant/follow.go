@@ -167,13 +167,15 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 	case approval != nil:
 		n.kind, n.title = events.AssistantNoticeNeedsApproval, label+" needs your approval"
 		n.key, n.body = "approval:"+approval.ID, approval.Action
-	case run.Status == domain.RunNeedsAttention:
-		n.kind, n.title = events.AssistantNoticeNeedsAttention, label+" needs your attention"
-		changed := ""
-		if run.StatusChangedAt != nil {
-			changed = strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
-		}
-		n.key = "attention:" + run.Reason + "|" + changed
+	case run.Activity == domain.ActivityFinished:
+		n.kind, n.severity, n.title = events.AssistantNoticeFinished, "info", label+" finished"
+		n.key, n.body = "finished:parked|"+strconv.FormatInt(run.StatusSeq, 10), run.Reason
+	case run.Activity == domain.ActivityNeedsYou, run.Activity == domain.ActivityFailed, run.Activity == domain.ActivityDisconnected:
+		n.kind, n.title = events.AssistantNoticeNeedsAttention, label+map[domain.RunActivity]string{
+			domain.ActivityNeedsYou: " needs your attention", domain.ActivityFailed: " failed",
+			domain.ActivityDisconnected: " disconnected",
+		}[run.Activity]
+		n.key = "attention:" + string(run.Activity) + "|" + strconv.FormatInt(run.StatusSeq, 10)
 		if n.body = push.AttentionBody(run); n.body == "" {
 			n.body = run.Reason
 		}

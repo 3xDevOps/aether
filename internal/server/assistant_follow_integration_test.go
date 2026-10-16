@@ -101,7 +101,7 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	}
 	waitRunStatus(t, sub, &seen, string(run.ID), domain.RunRunning)
 
-	if err = store.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "needs input: pick a database", nil, nil); err != nil {
+	if err = store.UpdateRunStatus(ctx, run.ID, domain.RunNeedsAttention, "needs input: pick a database", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	publishStatus := func() {

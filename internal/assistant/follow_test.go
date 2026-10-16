@@ -122,9 +122,25 @@ type fakeRunState struct {
 func (f *fakeRunState) PendingInputs(domain.RunID) []domain.RunInputRequest { return f.inputs }
 func (f *fakeRunState) ACPPending(domain.RunID) []acphost.Request           { return f.pending }
 
+// newRun is a run as the scheduler leaves it: a live run's activity follows
+// its reason, a request for a human or an idle turn end.
 func newRun(status domain.RunStatus, reason string) *domain.Run {
 	changed := time.Unix(100, 5)
-	return &domain.Run{ID: "run-1", WorkspaceID: "ws-1", MemberID: "m1", Title: "Fix login", Status: status, Reason: reason, StatusChangedAt: &changed}
+	run := &domain.Run{ID: "run-1", WorkspaceID: "ws-1", MemberID: "m1", Title: "Fix login", Status: status, Reason: reason, StatusChangedAt: &changed, StatusSeq: 1}
+	switch {
+	case status == domain.RunRunning:
+		run.Activity = domain.ActivityWorking
+	case status == domain.RunNeedsAttention && (strings.HasPrefix(reason, "blocked: ") || strings.HasPrefix(reason, "needs input: ")):
+		run.Activity = domain.ActivityNeedsYou
+	case status == domain.RunNeedsAttention:
+		run.Activity = domain.ActivityIdle
+	}
+	return run
+}
+
+func withActivity(run *domain.Run, activity domain.RunActivity) *domain.Run {
+	run.Activity = activity
+	return run
 }
 
 func TestClassify(t *testing.T) {
@@ -171,6 +187,22 @@ func TestClassify(t *testing.T) {
 			name: "attention", run: newRun(domain.RunNeedsAttention, "blocked: no credentials"),
 			kind: "needs_attention", severity: "warning", title: `Run "Fix login" needs your attention`, body: "Blocked: no credentials",
 		},
+		{name: "idle", run: newRun(domain.RunNeedsAttention, "agent idle")},
+		{name: "stalled", run: newRun(domain.RunNeedsAttention, "stalled: no output or file changes for 10m0s")},
+		{name: "waiting on agents", run: withActivity(newRun(domain.RunNeedsAttention, "waiting on 3 workers"), domain.ActivityWaitingAgents)},
+		{name: "waiting on a tool", run: withActivity(newRun(domain.RunRunning, "working in background: 1 task"), domain.ActivityWaitingTools)},
+		{
+			name: "reported success", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished),
+			kind: "finished", severity: "info", title: `Run "Fix login" finished`, body: "agent reported success",
+		},
+		{
+			name: "reported failure", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported failure"), domain.ActivityFailed),
+			kind: "needs_attention", severity: "warning", title: `Run "Fix login" failed`, body: "agent reported failure",
+		},
+		{
+			name: "disconnected", run: withActivity(newRun(domain.RunNeedsAttention, "enhanced session ended: exit code 1"), domain.ActivityDisconnected),
+			kind: "needs_attention", severity: "warning", title: `Run "Fix login" disconnected`, body: "Agent disconnected: exit code 1",
+		},
 		{
 			name: "input outranks attention", run: newRun(domain.RunNeedsAttention, "needs input: pick"), inputs: []domain.RunInputRequest{input},
 			kind: "needs_input", severity: "warning", title: `Run "Fix login" needs your input`, body: "Question: answer in the run",
@@ -214,7 +246,7 @@ func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 		t.Fatalf("a running run announced %+v", got)
 	}
 
-	fs.run = newRun(domain.RunNeedsAttention, "agent idle")
+	fs.run = newRun(domain.RunNeedsAttention, "blocked: no key")
 	f.check(ctx, "run-1", false)
 	f.check(ctx, "run-1", false)
 	if len(got) != 2 || got[0].kind != "needs_attention" || got[0].member == got[1].member {
@@ -259,7 +291,7 @@ func TestCheckAnnouncesEachStateOnceAndEndsTheFollowWhenFinished(t *testing.T) {
 func TestAStateInFlightIsQueuedOnceAndAFailedOneAgain(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "agent idle"), follows: map[domain.MemberID]*store.AssistantFollow{}}
+	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "blocked: no key"), follows: map[domain.MemberID]*store.AssistantFollow{}}
 	_ = fs.PutAssistantFollow(ctx, "m1", "run-1")
 	var queued []notice
 	f := &follower{store: fs, runs: &fakeRunState{}, queued: map[[2]string]string{}, deliver: func(n notice) { queued = append(queued, n) }}
@@ -317,7 +349,7 @@ func eventually(t *testing.T, what string, ok func() bool) {
 func TestAStalledMemberDoesNotHoldBackAnother(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "blocked: no key"))
 	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
 	_ = x.fs.PutAssistantFollow(ctx, "m2", "run-1")
 	stalled := x.svc.member("m1")
@@ -343,7 +375,7 @@ func TestANoticeQueuedAtShutdownIsAnnouncedAfterTheRestart(t *testing.T) {
 	was := closeDrain
 	closeDrain = 100 * time.Millisecond
 	t.Cleanup(func() { closeDrain = was })
-	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "blocked: no key"))
 	_ = x.fs.PutAssistantFollow(ctx, "m1", "run-1")
 	m := x.svc.member("m1")
 	m.op.Lock()
@@ -423,7 +455,7 @@ func TestStartupResolvesRunsThatFinishedWhileTheServerWasDown(t *testing.T) {
 
 func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 	t.Parallel()
-	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "agent idle"))
+	x := newServiceFixture(t, newRun(domain.RunNeedsAttention, "blocked: no key"))
 	type call struct {
 		member  domain.MemberID
 		checked bool
@@ -460,7 +492,7 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 func TestAFinishThatOverlapsAnOlderNoticeIsQueuedOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "agent idle"), follows: map[domain.MemberID]*store.AssistantFollow{}}
+	fs := &fakeFollows{run: newRun(domain.RunNeedsAttention, "blocked: no key"), follows: map[domain.MemberID]*store.AssistantFollow{}}
 	_ = fs.PutAssistantFollow(ctx, "m1", "run-1")
 	var queued []notice
 	f := &follower{store: fs, runs: &fakeRunState{}, queued: map[[2]string]string{}, deliver: func(n notice) { queued = append(queued, n) }}

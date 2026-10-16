@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -221,6 +222,18 @@ func (s *Session) tasksLocked() []Task {
 
 func (s *Session) heldLocked() int { return len(s.heldTasksLocked()) }
 
+// heldAgentsLocked counts the held tasks that are subagents or workflows;
+// the rest are tools the agent waits on, such as a monitor.
+func (s *Session) heldAgentsLocked() int {
+	n := 0
+	for _, id := range s.heldTasksLocked() {
+		if typ := s.tasks[id].typ; strings.Contains(typ, "agent") || strings.Contains(typ, "workflow") {
+			n++
+		}
+	}
+	return n
+}
+
 func (s *Session) heldTasksLocked() []string {
 	var ids []string
 	for _, id := range slices.Sorted(maps.Keys(s.tasks)) {
@@ -328,7 +341,7 @@ func (s *Session) settleLocked() {
 		}
 	}
 	if s.backgroundLocked() && (s.autonomous || !s.holdIdle) {
-		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked(), Autonomous: s.autonomous}
+		st := TurnState{Working: true, Reason: "background", Tasks: s.heldLocked(), Agents: s.heldAgentsLocked(), Autonomous: s.autonomous}
 		if s.reported != st {
 			s.stateLocked(st)
 		}

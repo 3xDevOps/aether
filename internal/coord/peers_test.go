@@ -162,7 +162,7 @@ func TestSendReceiptCarriesRecipientStatus(t *testing.T) {
 	h := newHarness(t, 2)
 	ctx := context.Background()
 	a, b := h.run(0), h.run(1)
-	if err := h.db.UpdateRunStatus(ctx, b, domain.RunNeedsAttention, "waiting for input", nil, nil); err != nil {
+	if err := h.db.UpdateRunStatus(ctx, b, domain.RunNeedsAttention, "waiting for input", "", nil, nil); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 	params := sendParams(b, "ping")
@@ -196,7 +196,7 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	if err := h.db.UpdateRun(ctx, h.runs[recent]); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	if err := h.db.UpdateRunStatus(ctx, h.run(recent), domain.RunNeedsAttention, "", nil, nil); err != nil {
+	if err := h.db.UpdateRunStatus(ctx, h.run(recent), domain.RunNeedsAttention, "", "", nil, nil); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 

@@ -226,7 +226,7 @@ func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
 		t.Fatalf("mark run retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
@@ -277,7 +277,7 @@ func TestRelaunchRejectsCompletedAccountRevokeBeforeFreshCheck(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
 		t.Fatalf("mark run retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
@@ -340,7 +340,7 @@ func TestRelaunchAdmissionSerializesWorkspaceSteerRevocation(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
-	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", nil, nil); err != nil {
+	if err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunMerged, "closed; retained container", "", nil, nil); err != nil {
 		t.Fatalf("mark run retained: %v", err)
 	}
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)

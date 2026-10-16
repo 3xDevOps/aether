@@ -279,8 +279,11 @@ type supervised struct {
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter
-	// Mutated only under Scheduler.mu.
+	// Mutated only under Scheduler.mu. reason and activity are the row's
+	// since its last transition.
 	status        domain.RunStatus
+	reason        string
+	activity      domain.RunActivity
 	startedAt     time.Time
 	paused        bool
 	killRequested bool
@@ -371,6 +374,9 @@ type supervised struct {
 	// betweenTurns says an Enhanced agent works only on background tasks
 	// with no turn running, which settles a needs-input outcome's turn.
 	betweenTurns bool
+	// heldTools says the background tasks the agent waits for are tools,
+	// not subagents or workflows.
+	heldTools bool
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time
@@ -641,6 +647,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-sweep.C:
 			s.checkStalls(ctx)
+			s.refreshActivities(ctx)
 			s.finishOverdueReports()
 			s.sweepRetained(ctx)
 			s.drainEvidencePublications(ctx)

@@ -120,7 +120,7 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 	if memberCause(actor) == causeMember {
 		write = s.cfg.Store.FinishRunByMember
 	}
-	if err := write(ctx, run, status, public, nil, nil); err != nil {
+	if err := write(ctx, run, status, public, "", nil, nil); err != nil {
 		return err
 	}
 	row, err := s.cfg.Store.GetRun(ctx, run)
@@ -131,7 +131,7 @@ func (s *Scheduler) relabelLocked(ctx context.Context, run domain.RunID, workspa
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen, FinishUnopened: row.FinishUnopened},
+		Payload:     events.RunStatusPayload{From: status, To: status, Reason: public, OutcomeUnseen: row.OutcomeUnseen, FinishUnopened: row.FinishUnopened, StatusSeq: row.StatusSeq},
 	})
 	return nil
 }
@@ -364,16 +364,16 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 		}
 	}
 	reason := publicRunStatusReason(reportedClose(outcome).reason)
-	if err := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, nil, nil); err != nil {
+	if err := s.cfg.Store.FinishRunReported(ctx, run, outcome, reason, "", nil, nil); err != nil {
 		return fmt.Errorf("scheduler: finish reported run %s over its exit: %w", run, err)
 	}
 	if e := s.runs[run]; e != nil {
-		e.status = outcome
+		e.status, e.reason, e.activity = outcome, reason, ""
 	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,
 		RunID:       run,
-		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: true, FinishUnopened: true},
+		Payload:     events.RunStatusPayload{From: r.Status, To: outcome, Reason: reason, OutcomeUnseen: true, FinishUnopened: true, StatusSeq: r.StatusSeq + 1},
 	})
 	return nil
 }
@@ -399,8 +399,15 @@ func (s *Scheduler) ReportNeedsInput(ctx context.Context, run domain.RunID, id, 
 	return s.reportIdle(ctx, run, id, needsInputReasonPrefix+question, at, "needs-input report", coord.ErrRunFinished)
 }
 
+// ReportWaiting records that the agent waits on its own agents like
+// ReportBlocked: at its turn end the run shows the summary as waiting-agents
+// rather than idle.
+func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error {
+	return s.reportIdle(ctx, run, id, waitingReasonPrefix+summary, at, "waiting report", coord.ErrRunFinished)
+}
+
 func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string, finished error) error {
-	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason {
+	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason && !strings.HasPrefix(reason, needsInputReasonPrefix) {
 		reason = string(runes[:maxPublicRunStatusReason])
 	}
 	s.mu.Lock()

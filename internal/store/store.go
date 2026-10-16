@@ -113,22 +113,26 @@ type Store interface {
 
 	// UpdateRunCommit updates only the last published commit metadata.
 	UpdateRunCommit(ctx context.Context, id domain.RunID, commit string, at time.Time) error
-	// UpdateRunStatus sets only the run's status and reason (the reason
+	// UpdateRunStatus sets only the run's status, reason and activity (the reason
 	// column is always overwritten, empty clears it), plus started/finished
 	// timestamps when non-nil, leaving every other field untouched. This
 	// is the mutator lifecycle transitions should use so they cannot
 	// clobber concurrent writes to other fields. A status change clears
 	// outcome_unseen, sets finish_unopened to whether the new status is
 	// terminal and moves status_changed_at to now; a same-status write
-	// keeps all three.
-	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	// keeps all three. activity must be empty unless the status is live;
+	// status_seq increases when status, reason or activity changes.
+	UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) error
 	// FinishRunReported is UpdateRunStatus that also sets outcome_unseen
 	// and finish_unopened in the same write, for the transition an agent's
 	// report causes.
-	FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) error
 	// FinishRunByMember is UpdateRunStatus that also clears finish_unopened
 	// in the same write, for the close or kill a member asked for.
-	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error
+	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) error
+	// IntegratorWaiting reports whether run integrates a swarm that has a
+	// worker attempt still live, or worker mail run has not acknowledged.
+	IntegratorWaiting(ctx context.Context, run domain.RunID) (bool, error)
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error

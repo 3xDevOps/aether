@@ -22,7 +22,7 @@ func (f *missionFixture) cancel(actor domain.MemberID, key string) (protocol.Mis
 func (f *missionFixture) settleRuns(t *testing.T, runs ...domain.RunID) {
 	t.Helper()
 	for _, run := range runs {
-		if err := f.db.UpdateRunStatus(t.Context(), run, domain.RunFailed, "killed", nil, nil); err != nil {
+		if err := f.db.UpdateRunStatus(t.Context(), run, domain.RunFailed, "killed", "", nil, nil); err != nil {
 			t.Fatalf("settle run %s: %v", run, err)
 		}
 	}

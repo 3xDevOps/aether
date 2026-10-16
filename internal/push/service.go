@@ -49,7 +49,6 @@ type Store interface {
 // Runs is what the scheduler knows about a live run that its row does not.
 type Runs interface {
 	PendingInputs(run domain.RunID) []domain.RunInputRequest
-	Paused(run domain.RunID) bool
 }
 
 // Config wires the service. Store, Bus, Runs and KeyPath are required.
@@ -291,7 +290,7 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 			break
 		}
 	}
-	n := needOf(run, approval, s.runs.PendingInputs(id), s.runs.Paused(id))
+	n := needOf(run, approval, s.runs.PendingInputs(id))
 	if n != nil {
 		n.key = string(run.MemberID) + "|" + n.key
 	}

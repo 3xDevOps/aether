@@ -55,13 +55,19 @@ func legalTransition(from, to domain.RunStatus) bool {
 	return false
 }
 
-// maxPublicRunStatusReason bounds user-visible status details. Setup output
+// maxPublicRunStatusReason bounds user-visible status details other than an
+// agent's needs-input question. Setup output
 // is never part of the public reason, even when a non-Docker runtime includes
 // it in an error string.
 const maxPublicRunStatusReason = 256
 
 func publicRunStatusReason(reason string) string {
 	reason = strings.TrimSpace(reason)
+	if strings.HasPrefix(reason, needsInputReasonPrefix) {
+		// The agent's question, already bounded by its summary limit,
+		// shows whole.
+		return reason
+	}
 	lower := strings.ToLower(reason)
 	redactedSetup := false
 	for _, marker := range []string{"setup script exited ", "release setup gate exited ", "probe setup gate"} {
@@ -278,7 +284,8 @@ func (s *Scheduler) transitionLocked(ctx context.Context, run domain.RunID, work
 // transitionOutcomeLocked also marks a newly reported outcome unseen and
 // unopened, including a nonterminal interactive park. Other transitions
 // clear outcome_unseen and leave finish_unopened set only on a terminal
-// status no member asked for.
+// status no member asked for; a same-status write keeps both. Every
+// transition derives the run's activity (activityLocked).
 func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, from, to domain.RunStatus, reason string, actor domain.MemberID, cause finishCause) error {
 	if !legalTransition(from, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
@@ -292,6 +299,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
+	activity := s.activityLocked(ctx, run, s.runs[run], to, public)
 	write := s.cfg.Store.UpdateRunStatus
 	switch cause {
 	case causeReported:
@@ -299,11 +307,22 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	case causeMember:
 		write = s.cfg.Store.FinishRunByMember
 	}
-	if err := write(ctx, run, to, public, startedAt, finishedAt); err != nil {
+	if err := write(ctx, run, to, public, activity, startedAt, finishedAt); err != nil {
 		return err
 	}
+	payload := events.RunStatusPayload{
+		From: from, To: to, Reason: public, Activity: activity,
+		OutcomeUnseen:  cause == causeReported,
+		FinishUnopened: cause == causeReported || (cause == causeUnattended && to.Terminal()),
+	}
+	if row, err := s.cfg.Store.GetRun(ctx, run); err == nil {
+		payload.StatusSeq = row.StatusSeq
+		payload.OutcomeUnseen, payload.FinishUnopened = row.OutcomeUnseen, row.FinishUnopened
+	} else {
+		slog.Warn("scheduler: read the run's status sequence", "run", run, "error", err)
+	}
 	if e := s.runs[run]; e != nil {
-		e.status = to
+		e.status, e.reason, e.activity = to, public, activity
 		if startedAt != nil {
 			e.startedAt = now
 		}
@@ -327,11 +346,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		WorkspaceID: workspace,
 		RunID:       run,
 		ActorID:     actor,
-		Payload: events.RunStatusPayload{
-			From: from, To: to, Reason: public,
-			OutcomeUnseen:  cause == causeReported,
-			FinishUnopened: cause == causeReported || (cause == causeUnattended && to.Terminal()),
-		},
+		Payload:     payload,
 	})
 	if to.Terminal() || s.retentionPublished[run] != (events.RunRetentionPayload{}) {
 		s.publishRetentionLocked(run)

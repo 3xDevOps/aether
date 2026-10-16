@@ -4,6 +4,7 @@ package agentstatus
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -32,7 +33,22 @@ func ParseState(s string) (State, bool) {
 const (
 	ReasonIdle    = "agent idle"
 	ReasonResumed = "agent resumed"
+	// ReasonBackground is a working run's reason while its agent works with
+	// no prompt open (web/src/lib/status.ts).
+	ReasonBackground = "working in background"
 )
+
+// BackgroundReason is ReasonBackground with ": 1 task" or ": N tasks"
+// appended while the agent waits for background tasks.
+func BackgroundReason(tasks int) string {
+	switch tasks {
+	case 0:
+		return ReasonBackground
+	case 1:
+		return ReasonBackground + ": 1 task"
+	}
+	return fmt.Sprintf("%s: %d tasks", ReasonBackground, tasks)
+}
 
 // An input-only report preserves the last execution state. SessionID is the
 // agent's top-level session, not a subagent's. UsageLimit marks a turn that
@@ -108,16 +124,22 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 			Operation: operation, SessionID: session, Kind: kind, ID: id,
 		}}}, true
 	}
+	// A subagent's hooks say nothing about the main agent's turn: one that
+	// runs in the background works on after the turn that started it ended.
+	working := Report{State: Working}
+	if hook.AgentID != "" {
+		working = Report{}
+	}
 	switch hook.Event {
-	case "UserPromptSubmit", "SubagentStart":
+	case "UserPromptSubmit":
 		return Report{State: Working}, true
 	case "PreToolUse":
 		if hook.Tool == "AskUserQuestion" {
 			return input("open", "question", hook.ToolUseID)
 		}
-		return Report{State: Working}, true
+		return working, working.State != ""
 	case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
-		report := Report{State: Working}
+		report := working
 		if hook.IsInterrupt {
 			report.State = ""
 		}
@@ -130,12 +152,12 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 		return input("open", "form", hook.ElicitationID)
 	case "ElicitationResult":
 		return input("close", "form", hook.ElicitationID)
-	case "Stop", "StopFailure":
-		if hook.AgentID != "" {
+	case "Stop", "StopFailure", "SubagentStop":
+		if hook.AgentID != "" || hook.Event == "SubagentStop" {
 			return Report{}, false
 		}
 		if len(hook.BackgroundTasks) > 0 {
-			return Report{State: Working}, true
+			return Report{State: Working, Reason: BackgroundReason(len(hook.BackgroundTasks))}, true
 		}
 		if hook.Event == "Stop" {
 			return Report{State: Idle, Reason: ReasonIdle}, true

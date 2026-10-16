@@ -62,6 +62,17 @@ func (o *recordingOutcomes) ReportNeedsInput(_ context.Context, run domain.RunID
 	return nil
 }
 
+func (o *recordingOutcomes) ReportWaiting(_ context.Context, run domain.RunID, id, summary string, at time.Time) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.err != nil {
+		return o.err
+	}
+	o.reportedAt = append(o.reportedAt, at)
+	o.calls = append(o.calls, outcomeCall{run: run, reason: "waiting: " + summary, reportID: id})
+	return nil
+}
+
 func (o *recordingOutcomes) fail(err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -380,7 +391,9 @@ func TestInteractiveFollowupStillRequiresEvidence(t *testing.T) {
 }
 
 // A needs-input report is not durable: it reaches the scheduler directly with
-// an id derived from the key, reserves nothing, and leaves the terminal slot free.
+// an id derived from the key, reserves nothing, and leaves the terminal slot
+// free. Its question reaches the scheduler whole. A waiting report takes the
+// same path, from any role.
 func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	ctx := context.Background()
 	outcomes := &recordingOutcomes{}
@@ -390,12 +403,13 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	})
 	run, worker := h.run(0), h.run(1)
 
-	result := report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion?", "ask-1")
-	report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion?", "ask-1")
-	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeNeedsInput || result.Summary != "which region?" {
+	long := strings.Repeat("x", 400)
+	result := report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion? "+long, "ask-1")
+	report(t, h, run, protocol.CoordOutcomeNeedsInput, "which\nregion? "+long, "ask-1")
+	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeNeedsInput || result.Summary != "which region? "+long {
 		t.Fatalf("result = %+v, want an id-less needs-input echo of the question", result)
 	}
-	want := outcomeCall{run: run, reason: "needs input: which region?", reportID: "needs-input:" + string(run) + ":ask-1"}
+	want := outcomeCall{run: run, reason: "needs input: which region? " + long, reportID: "needs-input:" + string(run) + ":ask-1"}
 	if got := outcomes.recorded(); len(got) != 2 || got[0] != want || got[1] != want {
 		t.Fatalf("scheduler calls = %+v, want the same id twice", got)
 	}
@@ -420,6 +434,14 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	}
 	if got := outcomes.recorded(); len(got) != 3 {
 		t.Fatalf("scheduler calls = %+v, want only the accepted reports", got)
+	}
+	result = report(t, h, worker, protocol.CoordOutcomeWaiting, "waiting on\nthe build", "wait-1")
+	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeWaiting {
+		t.Fatalf("waiting result = %+v, want an id-less waiting echo", result)
+	}
+	want = outcomeCall{run: worker, reason: "waiting: waiting on the build", reportID: "waiting:" + string(worker) + ":wait-1"}
+	if got := outcomes.recorded(); len(got) != 4 || got[3] != want {
+		t.Fatalf("scheduler calls = %+v, want the worker's waiting report last", got)
 	}
 }
 

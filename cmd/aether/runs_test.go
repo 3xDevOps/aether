@@ -11,9 +11,10 @@ import (
 func TestRenderRuns(t *testing.T) {
 	archivedAt := "2026-09-10T00:00:00Z"
 	runs := []protocol.Run{
-		{ID: "r1", Status: "running", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Title one", Task: "task one"},
-		{ID: "r2", Status: "needs-attention", Harness: "claude", MemberID: "m2", AccountMemberID: "m1", RequestedAccountMemberID: "m2",
+		{ID: "r1", Status: "running", Activity: "working", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Title one", Task: "task one"},
+		{ID: "r2", Status: "needs-attention", Activity: "needs-you", Harness: "claude", MemberID: "m2", AccountMemberID: "m1", RequestedAccountMemberID: "m2",
 			Title: "Title two", Task: "task two"},
+		{ID: "r4", Status: "needs-attention", Activity: "waiting-agents", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Integrate", Task: "task four"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -29,12 +30,13 @@ func TestRenderRuns(t *testing.T) {
 	}{
 		{
 			name: "default hides archived runs",
-			want: "ID  STATUS     AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
-				"r1  running    claude  m1      m1                            Title one  task one\n" +
-				"r2  needs-you  claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n",
+			want: "ID  STATUS          AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
+				"r1  working         claude  m1      m1                            Title one  task one\n" +
+				"r2  needs-you       claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
+				"r4  waiting-agents  claude  m1      m1                            Integrate  task four\n",
 		},
 		{
-			name:     "--needs-you hides archived runs",
+			name:     "--needs-you hides archived and waiting runs",
 			needsYou: true,
 			want: "ID  STATUS     AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
 				"r2  needs-you  claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n",

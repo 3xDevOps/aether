@@ -49,7 +49,7 @@ func TestIntegratorSuccessReportCompletesTheMissionAndStopsLeftoverWorkers(t *te
 	if len(fix.canceller.runs) != 1 || fix.canceller.runs[0] != fix.attempt.RunID {
 		t.Fatalf("stopped runs = %v, want only the leftover worker %s", fix.canceller.runs, fix.attempt.RunID)
 	}
-	if err = fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunFailed, "killed", nil, nil); err != nil {
+	if err = fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunFailed, "killed", "", nil, nil); err != nil {
 		t.Fatalf("settle worker run: %v", err)
 	}
 	fix.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {
@@ -147,7 +147,7 @@ func TestCompletingAMissionRetainsASubmittedWorker(t *testing.T) {
 	if len(killed.runs) != 0 || len(retained.runs) != 1 || retained.runs[0] != fix.attempt.RunID {
 		t.Fatalf("killed %v, retained %v; want only %s retained", killed.runs, retained.runs, fix.attempt.RunID)
 	}
-	if err = fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunCompleted, "worker finished; retained container", nil, nil); err != nil {
+	if err = fix.db.UpdateRunStatus(ctx, fix.attempt.RunID, domain.RunCompleted, "worker finished; retained container", "", nil, nil); err != nil {
 		t.Fatalf("settle worker run: %v", err)
 	}
 	fix.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {
@@ -290,7 +290,7 @@ func TestIntegratorReopensACompletedMissionByTakingUpNewWork(t *testing.T) {
 	if len(f.canceller.runs) != 1 {
 		t.Fatalf("stopped runs = %v, want the leftover worker", f.canceller.runs)
 	}
-	if err = f.db.UpdateRunStatus(ctx, f.canceller.runs[0], domain.RunFailed, "killed", nil, nil); err != nil {
+	if err = f.db.UpdateRunStatus(ctx, f.canceller.runs[0], domain.RunFailed, "killed", "", nil, nil); err != nil {
 		t.Fatalf("settle worker run: %v", err)
 	}
 	f.svc.cfg.ObserveMissionRun = func(context.Context, domain.RunID) (MissionRunObservation, error) {

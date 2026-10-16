@@ -987,7 +987,7 @@ func TestUpdateRunStatus(t *testing.T) {
 	r := mustCreateRun(t, db, w.ID, m.ID, domain.RunQueued)
 
 	started := time.Date(2026, 8, 9, 10, 30, 0, 0, time.UTC)
-	if err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, "container started", &started, nil); err != nil {
+	if err := db.UpdateRunStatus(ctx, r.ID, domain.RunRunning, "container started", "", &started, nil); err != nil {
 		t.Fatalf("UpdateRunStatus to running: %v", err)
 	}
 	got, err := db.GetRun(ctx, r.ID)
@@ -1005,7 +1005,7 @@ func TestUpdateRunStatus(t *testing.T) {
 	}
 
 	finished := started.Add(time.Hour)
-	if uerr := db.UpdateRunStatus(ctx, r.ID, domain.RunMerged, "", nil, &finished); uerr != nil {
+	if uerr := db.UpdateRunStatus(ctx, r.ID, domain.RunMerged, "", "", nil, &finished); uerr != nil {
 		t.Fatalf("UpdateRunStatus to merged: %v", uerr)
 	}
 	got, err = db.GetRun(ctx, r.ID)
@@ -1019,10 +1019,10 @@ func TestUpdateRunStatus(t *testing.T) {
 		t.Fatalf("second transition kept stale reason %q, want empty", got.Reason)
 	}
 
-	if err := db.UpdateRunStatus(ctx, r.ID, "warp-drive", "", nil, nil); err == nil {
+	if err := db.UpdateRunStatus(ctx, r.ID, "warp-drive", "", "", nil, nil); err == nil {
 		t.Fatal("UpdateRunStatus accepted invalid status")
 	}
-	if err := db.UpdateRunStatus(ctx, "no-such-run", domain.RunRunning, "", nil, nil); !errors.Is(err, ErrNotFound) {
+	if err := db.UpdateRunStatus(ctx, "no-such-run", domain.RunRunning, "", "", nil, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("UpdateRunStatus on missing run: %v, want ErrNotFound", err)
 	}
 }
@@ -1079,7 +1079,7 @@ func TestZeroTimeRejected(t *testing.T) {
 	if err := db.UpdateRun(ctx, ok); err == nil {
 		t.Fatal("UpdateRun accepted a zero FinishedAt")
 	}
-	if err := db.UpdateRunStatus(ctx, ok.ID, domain.RunRunning, "", &zero, nil); err == nil {
+	if err := db.UpdateRunStatus(ctx, ok.ID, domain.RunRunning, "", "", &zero, nil); err == nil {
 		t.Fatal("UpdateRunStatus accepted a zero StartedAt")
 	}
 	far := time.Date(2263, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -1442,11 +1442,11 @@ func TestRunOutcomeUnseen(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", nil, &now); err != nil {
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &now); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	unseen(true, "reported finish")
-	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent reported success; retained container", nil, nil); err != nil {
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent reported success; retained container", "", nil, nil); err != nil {
 		t.Fatalf("relabel: %v", err)
 	}
 	unseen(true, "same-status relabel")
@@ -1463,15 +1463,15 @@ func TestRunOutcomeUnseen(t *testing.T) {
 		t.Fatalf("repeat clear = %v, %v; want unchanged", changed, err)
 	}
 
-	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", nil, nil); err != nil {
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil); err != nil {
 		t.Fatalf("FinishRunReported again: %v", err)
 	}
-	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "closed", nil, nil); err != nil {
+	if err := db.UpdateRunStatus(ctx, run.ID, domain.RunMerged, "closed", "", nil, nil); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	unseen(false, "status change")
 
-	if err := db.FinishRunReported(ctx, run.ID, domain.RunFailed, "agent reported failure", nil, nil); err != nil {
+	if err := db.FinishRunReported(ctx, run.ID, domain.RunFailed, "agent reported failure", "", nil, nil); err != nil {
 		t.Fatalf("FinishRunReported failure: %v", err)
 	}
 	row, err := db.GetRun(ctx, run.ID)
@@ -1526,8 +1526,8 @@ func TestRunStatusChangedAt(t *testing.T) {
 		}
 		last = got
 	}
-	status := func(write func(context.Context, domain.RunID, domain.RunStatus, string, *time.Time, *time.Time) error, to domain.RunStatus, reason string) func() error {
-		return func() error { return write(ctx, run.ID, to, reason, nil, nil) }
+	status := func(write func(context.Context, domain.RunID, domain.RunStatus, string, domain.RunActivity, *time.Time, *time.Time) error, to domain.RunStatus, reason string) func() error {
+		return func() error { return write(ctx, run.ID, to, reason, "", nil, nil) }
 	}
 
 	step("turn ended", true, status(db.UpdateRunStatus, domain.RunNeedsAttention, "agent idle"))
@@ -1578,7 +1578,7 @@ func TestRunFinishUnopened(t *testing.T) {
 			write := func(status domain.RunStatus, reason string) {
 				t.Helper()
 				if !snapshot {
-					if err := db.UpdateRunStatus(ctx, run.ID, status, reason, nil, nil); err != nil {
+					if err := db.UpdateRunStatus(ctx, run.ID, status, reason, "", nil, nil); err != nil {
 						t.Fatalf("UpdateRunStatus %s %q: %v", status, reason, err)
 					}
 					return
@@ -1594,13 +1594,13 @@ func TestRunFinishUnopened(t *testing.T) {
 			}
 			report := func(reason string) {
 				t.Helper()
-				if err := db.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, nil, nil); err != nil {
+				if err := db.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, "", nil, nil); err != nil {
 					t.Fatalf("FinishRunReported %q: %v", reason, err)
 				}
 			}
 			byMember := func(status domain.RunStatus, reason string) {
 				t.Helper()
-				if err := db.FinishRunByMember(ctx, run.ID, status, reason, nil, nil); err != nil {
+				if err := db.FinishRunByMember(ctx, run.ID, status, reason, "", nil, nil); err != nil {
 					t.Fatalf("FinishRunByMember %s %q: %v", status, reason, err)
 				}
 			}

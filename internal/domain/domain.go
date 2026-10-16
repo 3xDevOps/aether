@@ -97,6 +97,28 @@ func (s RunStatus) Valid() bool {
 	return slices.Contains(AllRunStatuses, s)
 }
 
+// Live reports whether the run's agent is open: running or needs-attention.
+// Only a live run has an activity.
+func (s RunStatus) Live() bool {
+	return s == RunRunning || s == RunNeedsAttention
+}
+
+// RunActivity is what a live run is doing, which the scheduler derives on
+// every status change; empty on a run that is not live. Only needs-you is a
+// request for a human.
+type RunActivity string
+
+const (
+	ActivityWorking       RunActivity = "working"
+	ActivityWaitingAgents RunActivity = "waiting-agents"
+	ActivityWaitingTools  RunActivity = "waiting-tools"
+	ActivityNeedsYou      RunActivity = "needs-you"
+	ActivityIdle          RunActivity = "idle"
+	ActivityFinished      RunActivity = "finished"
+	ActivityFailed        RunActivity = "failed"
+	ActivityDisconnected  RunActivity = "disconnected"
+)
+
 // LaunchMode is how the agent process is hosted inside a run.
 type LaunchMode string
 
@@ -614,7 +636,10 @@ type Run struct {
 	Status RunStatus
 	// Reason is the last run.status reason, sanitized like the event
 	// payload; empty when the last transition carried no reason.
-	Reason string
+	Reason   string
+	Activity RunActivity
+	// StatusSeq increases on every change of status, reason or activity.
+	StatusSeq int64
 	// Branch is aether/run-<slug>-<id>.
 	Branch string
 	// LastCommit is the most recently published commit on the run branch.

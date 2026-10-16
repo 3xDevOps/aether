@@ -467,7 +467,7 @@ func TestEnhancedClaudeRunParksWhileADevServerRuns(t *testing.T) {
 	sub := e.subscribe(t)
 	run := e.launchClaudeACP(t, acpmock.PromptDevServer)
 	trail := e.statusTrail(t, sub, run.ID, parkedIdle)
-	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, acpBackgroundReason) }); i >= 0 {
+	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, agentstatus.ReasonBackground) }); i >= 0 {
 		t.Fatalf("status events %+v, want the dev server never to hold the run working", trail)
 	}
 }
@@ -487,7 +487,7 @@ func TestEnhancedRunOfAnotherAgentStaysParkedOnOutputAfterItsTurn(t *testing.T) 
 	if last := trail[len(trail)-1]; last.To != domain.RunNeedsAttention || parks(trail) != 1 {
 		t.Fatalf("status events %+v, want one park and nothing after it", trail)
 	}
-	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, acpBackgroundReason) }); i >= 0 {
+	if i := slices.IndexFunc(trail, func(p events.RunStatusPayload) bool { return strings.HasPrefix(p.Reason, agentstatus.ReasonBackground) }); i >= 0 {
 		t.Fatalf("status events %+v, want no background reason", trail)
 	}
 }

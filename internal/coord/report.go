@@ -37,6 +37,7 @@ type OutcomeSink interface {
 	FinishReported(ctx context.Context, run domain.RunID, reportID string, outcome domain.RunStatus, reportedAt time.Time) error
 	ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error
 	ReportNeedsInput(ctx context.Context, run domain.RunID, id, question string, at time.Time) error
+	ReportWaiting(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error
 }
 
 // reportNeedsInput hands the question straight to the scheduler. It is not a
@@ -61,13 +62,34 @@ func (s *Service) reportNeedsInput(ctx context.Context, run domain.RunID, p prot
 		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
 	}
 	id := fmt.Sprintf("needs-input:%s:%s", run, p.IdempotencyKey)
-	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportReason(question), time.Now().UTC()); errors.Is(err, ErrCannotAsk) || errors.Is(err, ErrRunFinished) {
+	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportText(question), time.Now().UTC()); errors.Is(err, ErrCannotAsk) || errors.Is(err, ErrRunFinished) {
 		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
 	} else if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	return protocol.CoordReportResult{
 		Outcome: protocol.CoordOutcomeNeedsInput, Summary: question, NextAction: "answer the agent's question",
+	}, nil
+}
+
+// reportWaiting hands the summary straight to the scheduler like
+// reportNeedsInput. Every role may report it.
+func (s *Service) reportWaiting(ctx context.Context, run domain.RunID, p protocol.CoordReportParams, summary string) (protocol.CoordReportResult, *protocol.Error) {
+	const method = protocol.MethodCoordReport
+	if len(p.EvidenceRefs) > 0 {
+		return protocol.CoordReportResult{}, invalidParams(method, "waiting takes no evidence_refs")
+	}
+	if s.cfg.Outcomes == nil {
+		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
+	}
+	id := fmt.Sprintf("waiting:%s:%s", run, p.IdempotencyKey)
+	if err := s.cfg.Outcomes.ReportWaiting(ctx, run, id, reportReason(summary), time.Now().UTC()); errors.Is(err, ErrRunFinished) {
+		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
+	} else if err != nil {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	return protocol.CoordReportResult{
+		Outcome: protocol.CoordOutcomeWaiting, Summary: summary, NextAction: "end your turn; the next prompt or mail resumes you",
 	}, nil
 }
 
@@ -159,15 +181,20 @@ func (s *Service) Report(ctx context.Context, run domain.RunID, p protocol.RunRe
 // TUI would act on - become spaces, and the whole thing is capped at the
 // same length a stall reason is.
 func reportReason(reason string) string {
-	reason = strings.Map(func(r rune) rune {
-		if r == '\t' || r == '\n' || r == '\r' || !unicode.IsControl(r) {
-			return r
-		}
-		return ' '
-	}, reason)
-	reason = strings.Join(strings.Fields(reason), " ")
+	reason = reportText(reason)
 	if runes := []rune(reason); len(runes) > maxReportReason {
 		reason = string(runes[:maxReportReason])
 	}
 	return reason
+}
+
+// reportText is a report summary on one line.
+func reportText(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' || !unicode.IsControl(r) {
+			return r
+		}
+		return ' '
+	}, text)
+	return strings.Join(strings.Fields(text), " ")
 }

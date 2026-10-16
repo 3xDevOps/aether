@@ -124,16 +124,30 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		}
 	}
 
+	// The transition derives the run's activity from the state it applies.
+	priorReport, priorPending := entry.agentReport, entry.pendingInputs
+	priorIdle, priorShown := entry.idleReason, entry.idleShown
+	entry.agentReport, entry.pendingInputs = execution, pending
+	switch {
+	case showsIdle:
+		entry.idleShown = true
+	case unshows:
+		entry.idleShown = false
+	case clearsIdle:
+		entry.idleReason, entry.idleShown = "", false
+	}
 	var transitionErr error
 	switch {
 	case report.State == agentstatus.Idle || showsIdle:
 		if parks {
 			cause := causeUnattended
+			shown := reason
 			if showsIdle {
 				cause = idleCause(reason)
+				shown = shownIdleReason(reason)
 			}
 			transitionErr = s.transitionOutcomeLocked(ctx, run, entry.workspaceID, entry.status,
-				domain.RunNeedsAttention, reason, "", cause)
+				domain.RunNeedsAttention, shown, "", cause)
 		}
 	case report.State == agentstatus.Working && !held:
 		// A run working in the background says so in its reason, so the
@@ -149,6 +163,8 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		}
 	}
 	if transitionErr != nil {
+		entry.agentReport, entry.pendingInputs = priorReport, priorPending
+		entry.idleReason, entry.idleShown = priorIdle, priorShown
 		if showsIdle {
 			// The native boundary is still true when parking its outcome
 			// fails. Keep it durable so the poll/recovery path can retry
@@ -183,17 +199,13 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		entry.inputPublishPending = true
 	}
 	if showsIdle {
-		entry.idleShown = true
 		entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
-	}
-	if unshows {
-		entry.idleShown = false
-	}
-	if clearsIdle {
-		entry.idleReason, entry.idleShown = "", false
 	}
 	if finishes {
 		s.startReportedFinishLocked(entry)
+	}
+	if err := s.refreshActivityLocked(ctx, entry); err != nil {
+		slog.Warn("scheduler: refresh run activity", "run", run, "error", err)
 	}
 	var newSession *supervised
 	if s.recordReportedSessionLocked(entry, report.SessionID) {

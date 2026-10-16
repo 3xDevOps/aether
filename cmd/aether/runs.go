@@ -23,10 +23,14 @@ func init() {
 	})
 }
 
-// needsAttention selects the needs-attention execution status, not the
-// independent set of outstanding input requests.
-func needsAttention(r protocol.Run) bool {
-	return r.Status == string(domain.RunNeedsAttention)
+// needsYou selects the runs whose activity needs a member: an open request
+// for a human, a reported failure, or a disconnected agent.
+func needsYou(r protocol.Run) bool {
+	switch domain.RunActivity(r.Activity) {
+	case domain.ActivityNeedsYou, domain.ActivityFailed, domain.ActivityDisconnected:
+		return true
+	}
+	return false
 }
 
 // plural renders a count with its noun, so the notice reads as a sentence
@@ -39,7 +43,7 @@ func plural(n int, noun string) string {
 }
 
 // renderRuns writes the table, filtering archived runs independently of status.
-func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, needsYou, archived bool) error {
+func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string, overlapOf map[string]string, onlyNeedsYou, archived bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, "ID\tSTATUS\tAGENT\tMEMBER\tACCOUNT\tOVERLAP\tTITLE\tTASK"); err != nil {
 		return err
@@ -48,7 +52,7 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 		if (r.ArchivedAt != nil) != archived {
 			continue
 		}
-		if needsYou && !needsAttention(r) {
+		if onlyNeedsYou && !needsYou(r) {
 			continue
 		}
 		title := r.Title
@@ -69,21 +73,22 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 	return tw.Flush()
 }
 
+// displayStatus is a live run's activity, else its status.
 func displayStatus(r protocol.Run) string {
-	if needsAttention(r) {
-		return "needs-you"
+	if r.Activity != "" {
+		return r.Activity
 	}
 	return r.Status
 }
 
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	needsYou := fs.Bool("needs-you", false, "list only runs that need you (wire status needs-attention)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (activity needs-you, failed or disconnected)")
 	archived := fs.Bool("archived", false, "list only archived runs")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *needsYou && *archived {
+	if *onlyNeedsYou && *archived {
 		return fmt.Errorf("aether runs: --needs-you and --archived cannot be used together")
 	}
 	return withControl(func(c *protocol.Client) error {
@@ -126,16 +131,16 @@ func runRuns(args []string) error {
 		}
 		waiting := 0
 		for _, r := range rl.Runs {
-			if needsAttention(r) {
+			if needsYou(r) {
 				waiting++
 			}
 		}
-		if err := renderRuns(os.Stdout, rl.Runs, memberName, overlapOf, *needsYou, *archived); err != nil {
+		if err := renderRuns(os.Stdout, rl.Runs, memberName, overlapOf, *onlyNeedsYou, *archived); err != nil {
 			return err
 		}
 		// The notice goes to stderr so it never lands in a pipeline reading
 		// the table, and it is skipped when the table already is the answer.
-		if waiting > 0 && !*needsYou && !*archived {
+		if waiting > 0 && !*onlyNeedsYou && !*archived {
 			_, _ = fmt.Fprintf(os.Stderr, "\n%s waiting for you: aether runs --needs-you\n",
 				plural(waiting, "run"))
 		}
