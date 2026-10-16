@@ -256,14 +256,16 @@ layer that failed, so the dashboard never reports one layer as another:
 ```json
 {"refusal":{"kind":"server-not-connected","refusal":"server is not connected to the edge"},
  "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.onaether.dev",
-              "account":"github account dana","online":[{"id":"<other id>","name":"prod","online":true}]}}
+                            "account":"github account dana",
+              "online":[{"id":"<other id>","name":"prod","online":true,"role":"admin",
+                         "access_policy":"approved-devices","kind":"self-hosted"}]}}
 ```
 
 | `layer` | What failed | Typical cause |
 | --- | --- | --- |
 | `client-edge` | This machine reaching the edge | DNS, TCP, TLS or a proxy failed, the edge speaks another protocol version, or it rate-limited this address |
 | `authorization` | This device's standing | Not signed in to the edge, a revoked token, not a member, a pending or revoked device, an account mismatch |
-| `server-registration` | The server's own connection to the edge | Kinds `server-not-connected` (no live registration), `server-not-claimed` (connected, no owner on the edge), `unknown-server`, or a server that did not attach |
+| `server-registration` | The server's own connection to the edge | Kinds `server-not-connected` (no live registration), `server-not-claimed` (connected while its claim is still being recorded; retry), `unknown-server`, or a server that did not attach |
 | `end-to-end` | The relayed connection to the server | The SSH handshake, a host key that does not derive the server id, a call with no answer, or a connection the server stopped answering |
 
 `refusal` is present when the server, the edge or this client refused,
@@ -271,11 +273,14 @@ with the refusal's `kind`. `server_id` is the server the gateway dialed and
 `edge` the edge host it dialed through; `account` is the account this
 device is signed in to that edge as. `online`, only for
 `server-registration`, lists the other servers of that account the edge
-sees online: a server reinstalled under a new id shows up there while the
-link still names the old one, and the message names
-`aether link --from-edge <id>`. A link with an address as well as an edge
-names no `edge` for a connection that fails once open, since it may run
-over either path; a link with an address only carries no `edge_path`.
+sees online, each as the edge's server list reports it: a server
+reinstalled under a new id shows up there while the link still names the
+old one, and the message names `aether link --from-edge <id>`.
+
+A link with an address carries `edge_path` only when a dial fails on both
+paths, with the edge path's layer. A failure on a connection already open
+carries no `edge_path`, since that connection may run over either path; a
+link with an address and no edge never carries one.
 
 The server gateway performs the equivalent identity lookup on each request.
 WhoIs failures are refused before dispatch; a tagged node is denied and an
