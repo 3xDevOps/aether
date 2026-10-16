@@ -294,7 +294,7 @@ through the same native extension/plugin mechanism.
 | Agent CLI | `--agent` | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | `claude` | yes | yes, managed Standard launches | yes | `claude.json` |
-| Codex | `codex` | yes | no | yes | `codex.json` |
+| Codex | `codex` | yes, managed Standard launches, after you trust the hooks once | no | yes | `codex.json` |
 | Native pi | `pi` | yes | yes, owning session only | yes | `pi.ts` |
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
 | OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
@@ -378,8 +378,8 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `claude`, `pi`, `omp`, and `opencode` agents, Aether stages
-native mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `codex`, `pi`, `omp`, and `opencode` agents, Aether
+loads native mailbox hooks for **coordinated, task-bearing Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
@@ -396,8 +396,14 @@ the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
 too. Taskless launches keep the status-only document; Background and Enhanced
 launches load neither.
 
-Every managed launch sets `AETHER_MANAGED_HOOKS=1` in the run environment,
-which switches the `skill` output described above.
+Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
+`hooks.UserPromptSubmit`, `hooks.PostToolUse` and `hooks.Stop`, each a TOML
+inline table passed as one argv element. They are active only after the user
+trusts them once; see [Codex inbox integration](#codex-inbox-integration).
+
+Every managed launch, whether it loads a file or arguments, sets
+`AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
+output described above.
 
 For pi, the server stages `/run/aether/aether.ts` and adds
 `-e /run/aether/aether.ts`. For OMP it stages that same filename but adds
@@ -518,7 +524,34 @@ for pending mail or an integrator refresh.
 
 ### Codex inbox integration
 
-Export `codex.json`; merge into `~/.codex/hooks.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`codex` loads the `codex.json` hooks through one `-c hooks.<Event>=[...]`
+argument per event, next to the `-c notify=[...]` status reporter. Codex has
+no hooks flag; a `-c` override is read as a session-flags source, which
+Codex lists but does not treat as managed.
+
+**Trust once.** Codex runs a hook only after you trust it. The first Standard
+run opens **Hooks need review**: choose **Trust all and continue**, or open
+`/hooks` and press `t`. Codex stores the approval in
+`$CODEX_HOME/config.toml` (`~/.codex/config.toml`) under
+`[hooks.state."<key>"]`. The key names the session-flags source, not a path,
+and the stored hash covers the event and handler, so one approval covers
+every workspace and worktree until Aether's hook definitions change. Choosing
+**Continue without trusting** asks again at the next start. A swarm worker can
+be the first Standard Codex run; open its terminal to answer. If the list shows
+hooks you don't recognize, choose **Review hooks**. Inside the run,
+`aether-internal skill` says whether a hook has run yet.
+
+Aether does not bypass or pre-write this trust: `--dangerously-bypass-hook-trust`
+also skips review of your own hooks, `/etc/codex` managed hooks cannot be
+disabled and apply to the whole container, and writing `hooks.state` would
+approve on your behalf.
+
+A manual copy in `~/.codex/hooks.json` has a different key and would run
+every hook twice in a managed run. Remove it.
+
+**Manual.** For other launches (Background, taskless, or an overridden
+argv), export `codex.json`; merge into `~/.codex/hooks.json` (or
 `$CODEX_HOME/hooks.json`), alternatively `.codex/hooks.json`.
 Restart Codex, then use `/hooks` to review and trust the **exact hook
 definitions**; repeat after changing them. Project trust is not hook trust.
@@ -528,7 +561,9 @@ in the applicable `config.toml`.
 Supported events are `SessionStart`, `UserPromptSubmit`, `PostToolUse`, and
 `Stop`, filtered against child-agent events. The built-in `notify` reporter
 only reports turn completion: it neither installs these hooks nor wakes
-later-idle Codex. Use a version implementing the current
+later-idle Codex. No idle wake exists for Codex: no supported mechanism could
+be verified, so mail waits for the next hook boundary or an explicit inbox
+read. Use a version implementing the current
 [Codex hook contract](https://learn.chatgpt.com/docs/hooks).
 
 ### Native pi inbox integration
@@ -787,7 +822,9 @@ claude --dangerously-skip-permissions "<task>" \
   --settings /run/aether/claude-settings.json
 
 codex --dangerously-bypass-approvals-and-sandbox "<task>" \
-  -c 'notify=["/opt/aether/aether-server","report","codex"]'
+  -c 'notify=["/opt/aether/aether-server","report","codex"]' \
+  -c 'hooks.SessionStart=[{hooks=[{type="command",command="/usr/local/bin/aether-internal hook codex SessionStart",timeout=5}]}]'
+  # ...and the same -c for UserPromptSubmit, PostToolUse and Stop
 
 pi "<task>" -e /run/aether/status.ts
 omp --auto-approve "<task>" -e /run/aether/status.ts
@@ -1356,6 +1393,10 @@ Inside `aether terminal`, run the CLI's login command and choose the
 device-code option. Codex writes `auth.json` under `~/.codex`, which remains
 in your member home. `aether config push` never uploads known credential
 names.
+
+Your first Standard run opens Codex's **Hooks need review** screen for
+Aether's inbox hooks: choose **Trust all and continue**. See
+[Codex inbox integration](#codex-inbox-integration).
 
 `OPENAI_API_KEY` in the server environment is the API-key alternative.
 

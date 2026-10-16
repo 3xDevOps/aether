@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react'
-import { enhancedSupported, label, loginFor, ready, setupMode } from '@/components/agents/agent-copy'
+import { enhancedSupported, hookNote, label, loginFor, ready, setupMode } from '@/components/agents/agent-copy'
 import { ModeComparison, type SetupMode } from '@/components/agents/mode-comparison'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,7 @@ export function AgentSetup({
   const needsInstall = agent.installed !== true || (enhanced && agent.enhanced_installed !== true)
   const hasTerminal = caps.hasWS('terminal')
   const login = loginFor(agent)
+  const note = hookNote(agent)
   const typedInstall = enhanced ? agent.enhanced_install_script ?? agent.install_script : agent.install_script
 
   const check = async () => {
@@ -197,6 +198,7 @@ export function AgentSetup({
         {checked && agent.login_found === false && agent.installed === true && (
           <p className="text-ui-sm text-muted">Aether looks for the agent's login file in your environment; log in above, then check again.</p>
         )}
+        {note && <Callout tone="needs-you" title={note.title}>{note.text}</Callout>}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <div className="flex flex-wrap items-center gap-2">
           {checked && installed && ready(agent) ? (

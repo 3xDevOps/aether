@@ -149,7 +149,13 @@ func agentAdd(args []string) error {
 		if opts.enhanced && selected.Enhanced == "none" {
 			return fmt.Errorf("agent %s has no enhanced mode", opts.name)
 		}
-		return runShippedAgentInstall(selected, opts.enhanced)
+		if err = runShippedAgentInstall(selected, opts.enhanced); err != nil {
+			return err
+		}
+		if selected.Name == "codex" {
+			_, err = fmt.Fprintln(os.Stdout, codexHookNote)
+		}
+		return err
 	}
 	if opts.enhanced {
 		return fmt.Errorf("--enhanced installs a shipped agent's adapter; name your agent's ACP server command with --acp")
@@ -178,6 +184,13 @@ func agentAdd(args []string) error {
 		return nil
 	})
 }
+
+const codexHookNote = `Trust Aether's hooks once. Standard Codex runs load Aether's inbox hooks. Codex runs a hook
+only after you trust it, so your first Standard run opens "Hooks need review": choose
+"Trust all and continue". Codex remembers this in ~/.codex/config.toml for every workspace and
+asks again only if Aether's hooks change. If a swarm worker is your first Standard Codex run,
+open its terminal to answer. If the list shows hooks you don't recognize, choose "Review hooks"
+instead.`
 
 func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
 	script := agentInstallScript(agent, enhanced)
