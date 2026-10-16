@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { api, ApiError, type Api } from '@/lib/api'
+import { api, ApiError, type Api, type ApiErrorData } from '@/lib/api'
 import { edgeHost, errorSentence } from '@/lib/format'
 import { watchPush } from '@/lib/push'
 import { backoff, connectEvents, onWake } from '@/lib/stream'
@@ -7,6 +7,7 @@ import { redirectRoute } from '@/lib/url-state'
 import type {
   CoordMessageAckedPayload,
   CoordMessagePayload,
+  EdgePath,
   EdgeRefusal,
   Event,
   GatewayCapabilities,
@@ -70,6 +71,7 @@ const refusalHop: Record<EdgeRefusal['kind'], UnreachableKind> = {
   'not-signed-in': 'signed-out',
   'token-revoked': 'signed-out',
   'server-not-connected': 'edge-server',
+  'server-not-claimed': 'edge-not-claimed',
   'unknown-server': 'edge-refused',
   'too-many-attempts': 'edge-refused',
   'connection-limit': 'edge-refused',
@@ -105,6 +107,21 @@ function edgeHop(detail: string, refusal: EdgeRefusal | undefined, store: RootSt
   return null
 }
 
+/** Records a failed request, unless it belongs to a connection already
+ * torn down: a server switch must not inherit the old server's failure. */
+function noteUnreachable(store: RootStore, err: unknown, signal: AbortSignal | undefined): void {
+  if (signal?.aborted) return
+  const data = err instanceof ApiError ? err.data : undefined
+  store.getState().setUnreachable(classifyUnreachable(err, store), data?.refusal?.approval_code, measuredAt(store, data))
+}
+
+/** The gateway's own account of where the failure happened, or the server
+ * the link pointed at when it gives none. */
+function measuredAt(store: RootStore, data: ApiErrorData | undefined): Partial<EdgePath> | undefined {
+  if (data?.edge_path) return data.edge_path
+  const serverID = store.getState().linkStatus?.server_id
+  return serverID ? { server_id: serverID } : undefined
+}
 
 function refusalKind(err: ApiError, store: RootStore): UnreachableKind | null {
   if (err.status === 403) return 'refused'
@@ -243,7 +260,7 @@ export async function hydrate(
     // A failed re-hydration keeps existing data. Once the token is known dead,
     // its recorded recovery hint beats this raw failure.
     if (!store.getState().streamDead) {
-      s.setUnreachable(classifyUnreachable(err, store), err instanceof ApiError ? err.data?.refusal?.approval_code : undefined)
+      noteUnreachable(store, err, signal)
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
     }
     return false
@@ -443,7 +460,7 @@ export async function applyEvent(
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
       } catch (err) {
-        store.getState().setUnreachable(classifyUnreachable(err, store))
+        noteUnreachable(store, err, signal)
         return false
       }
       break
@@ -479,7 +496,7 @@ export async function applyEvent(
           // A live delete publishes its final status before run.deleted, so
           // the local removal can make this status fetch return 404.
           if (!(err instanceof ApiError && err.status === 404)) {
-            store.getState().setUnreachable(classifyUnreachable(err, store))
+            noteUnreachable(store, err, signal)
             return false
           }
         }
@@ -493,7 +510,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 404)) {
-            store.getState().setUnreachable(classifyUnreachable(err, store))
+            noteUnreachable(store, err, signal)
             return false
           }
         }
@@ -521,7 +538,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 404)) {
-            store.getState().setUnreachable(classifyUnreachable(err, store))
+            noteUnreachable(store, err, signal)
             return false
           }
         }
@@ -536,7 +553,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -549,7 +566,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -562,7 +579,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -574,7 +591,7 @@ export async function applyEvent(
         store.getState().upsertRun(await client.runGet(ev.run_id))
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 404)) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -597,7 +614,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -642,7 +659,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -675,7 +692,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -695,7 +712,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(runID))
         } catch (err) {
           // Left unresolved so the stream recovers; else the attention badge stays stale.
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           return false
         }
       }
@@ -885,7 +902,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
           })
         } catch (err) {
           if (signal.aborted || generation !== missionGeneration) return
-          store.getState().setUnreachable(classifyUnreachable(err, store))
+          noteUnreachable(store, err, signal)
           void load()
           return
         }
@@ -963,15 +980,30 @@ export function connect(store: RootStore, client: Api = api): () => void {
         // Re-hydrate when there is no cursor, when the server may have just
         // re-executed on a new version (only a fresh server.info says so), or
         // on a tailnet reconnect, which can change member even with replay.
+        // A pending retry means reads failed, which the acknowledged
+        // subscription does not disprove, so it runs now and its result is
+        // the verdict. Otherwise the acknowledgement came from the server
+        // itself and is the latest request to reach it.
         const s = store.getState()
-        if (!subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress) || s.capabilities?.gateway !== 'local') {
-          void load()
-        }
+        const stale = !subscribed || s.lastSeq === 0 || serverUpdateApplying(s.serverUpdateProgress) || s.capabilities?.gateway !== 'local'
         subscribed = true
+        if (hydrating) return
+        if (retryTimer) {
+          clearTimeout(retryTimer)
+          retryTimer = null
+          attempts = 0
+          void load()
+        } else if (stale) {
+          void load()
+        } else {
+          s.setUnreachable(null)
+        }
       },
-      onUnreachable: (kind, detail, refusal) => {
+      onUnreachable: (kind, detail, data) => {
+        if (signal.aborted) return
         const s = store.getState()
-        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code)
+        const refusal = data?.refusal
+        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code, measuredAt(store, data))
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
@@ -1019,7 +1051,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // The handshake status never reaches the stream code, so this stays the
       // reason while the stream keeps retrying.
       const { refused } = probe
-      store.getState().setUnreachable(refusalKind(refused, store), refused.data?.refusal?.approval_code)
+      store.getState().setUnreachable(refusalKind(refused, store), refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))

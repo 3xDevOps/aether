@@ -1,5 +1,5 @@
 import { ArrowUpCircle, Keyboard, User } from '@/components/icons'
-import { ConnectionDot, connectionLabel } from '@/components/shell/connection'
+import { ConnectionDot, useConnectionWord } from '@/components/shell/connection'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -47,7 +47,6 @@ export function UpdateNotice() {
 export function SidebarFooter() {
   const self = useStore((s) => s.info?.member)
   const color = useStore((s) => (s.info ? s.members[s.info.member.id]?.color : undefined))
-  const connection = useStore((s) => s.connection)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const openShortcuts = useStore((s) => s.setShortcutsOpen)
@@ -57,7 +56,7 @@ export function SidebarFooter() {
   const mobile = useIsMobile()
   const openProfile = useStore((s) => s.setProfileOpen)
   const name = self?.display_name ?? 'Not signed in'
-  const word = connectionLabel[connection]
+  const word = useConnectionWord()
 
   const themeItems = (
     <MenuRadioGroup value={theme} onValueChange={(value) => setTheme(value as Theme)}>

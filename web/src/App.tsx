@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { ConnectionError } from '@/components/connection-error'
 import { LaunchSplash } from '@/components/launch-splash'
 import { AppShell } from '@/components/shell/app-shell'
+import { currentUnreachable } from '@/components/shell/connection'
 import { TopBar } from '@/components/shell/top-bar'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { ThemeEffect } from '@/components/theme'
@@ -20,9 +21,10 @@ const toastOffset = {
 export function App() {
   const hydrationError = useStore((s) => s.hydrationError)
   const streamDead = useStore((s) => s.streamDead)
-  const unreachable = useStore((s) => s.unreachable)
+  const unreachable = useStore(currentUnreachable)
   const approvalCode = useStore((s) => s.approvalCode)
   const edge = useStore((s) => s.linkStatus?.edge_url)
+  const serverID = useStore((s) => s.unreachableAt?.server_id ?? s.linkStatus?.server_id)
   const hydrated = useStore((s) => s.hydrated)
   const gatewayRestarting = useStore((s) => s.gatewayRestarting)
   const epoch = useStore((s) => s.connectionEpoch)
@@ -101,6 +103,7 @@ export function App() {
               dead={streamDead}
               error={hydrationError}
               edge={edge}
+              serverID={serverID}
               approvalCode={approvalCode}
               onRetry={retry}
             />
