@@ -1798,6 +1798,11 @@ ALTER TABLE assistant_settings ADD COLUMN suggest_off INTEGER NOT NULL DEFAULT 0
 // reference with ON DELETE CASCADE. See applyMigration.
 var foreignKeysOffMigrations = map[int]bool{45: true, 47: true, 49: true}
 
+// SchemaVersion is the schema version this build migrates a database to.
+// A release manifest records it so an updater can refuse a downgrade that
+// would leave the database newer than the binary.
+func SchemaVersion() int { return len(migrations) }
+
 // migrate brings the schema to the current version. It is idempotent:
 // already-applied versions (tracked in schema_migrations) are skipped, so
 // it is safe on fresh and existing databases alike, and safe under

@@ -144,8 +144,9 @@ func update(ctx context.Context, baseURL, tag string, admin adminInstaller) ([]s
 // the real file is swapped rather than the link. It never asks for
 // privileges.
 //
-// Every asset is downloaded and checksum-verified before any of them is
-// replaced, so a bad tag, a network error, or a checksum mismatch leaves
+// Every asset is downloaded and verified against tag's signed manifest
+// before any of them is replaced, so a bad tag, an unsigned release, a
+// network error, or a checksum mismatch leaves
 // every binary exactly as it was - a half-updated pair is worse than no
 // update, because the CLI and the server would disagree about the
 // protocol. Only the renames at the end can leave a partial swap, and a
@@ -183,7 +184,6 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		authorize = true
 	}
 
-	assets := baseURL + "/releases/download/" + tag
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
 	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
@@ -194,6 +194,10 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		targets = append(targets, struct{ asset, dst string }{name + suffix, path})
 	}
 
+	m, err := fetchManifest(ctx, baseURL, tag)
+	if err != nil {
+		return nil, err
+	}
 	staged := make([]*Staged, 0, len(targets))
 	defer func() {
 		for _, s := range staged {
@@ -201,7 +205,7 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		}
 	}()
 	for _, t := range targets {
-		s, serr := stageIn(ctx, assets, t.asset, t.dst, stageDir)
+		s, serr := stageIn(ctx, m, t.asset, t.dst, stageDir)
 		if serr != nil {
 			return nil, serr
 		}
