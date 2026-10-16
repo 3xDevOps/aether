@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -166,6 +168,79 @@ func TestDownloadsDoNotRetryANotFound(t *testing.T) {
 	}
 	if n := hits.Load(); n != 1 {
 		t.Fatalf("dialed %d times, want 1", n)
+	}
+}
+
+func TestDownloadRestartsAnInterruptedBody(t *testing.T) {
+	retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	defer func() { retryDelays = nil }()
+	body := bytes.Repeat([]byte("0123456789"), 1000)
+	want := manifestFor("v1.3.0", map[string][]byte{"bin": body}).Assets["bin"]
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		if hits.Add(1) > 1 {
+			_, _ = w.Write(body)
+			return
+		}
+		_, _ = w.Write(body[:len(body)/2])
+		w.(http.Flusher).Flush()
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	f, err := os.CreateTemp(t.TempDir(), "bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if err = download(t.Context(), srv.URL+"/bin", f, want); err != nil {
+		t.Fatal(err)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("dialed %d times, want the cut attempt and one retry", n)
+	}
+	got, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("staged %d bytes, want exactly the %d of the full retry", len(got), len(body))
+	}
+}
+
+func TestDownloadRejectsAStreamedBodyLongerThanTheManifest(t *testing.T) {
+	retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	defer func() { retryDelays = nil }()
+	body := []byte("binary")
+	want := manifestFor("v1.3.0", map[string][]byte{"bin": body}).Assets["bin"]
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		// Flushing before the end drops Content-Length, so only the
+		// streamed byte count can catch the mismatch.
+		_, _ = w.Write(body)
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("-and-more"))
+	}))
+	defer srv.Close()
+
+	f, err := os.CreateTemp(t.TempDir(), "bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	err = download(t.Context(), srv.URL+"/bin", f, want)
+	if err == nil || !strings.Contains(err.Error(), "sent 7 bytes, the manifest says 6") {
+		t.Fatalf("err = %v, want a streamed size mismatch", err)
+	}
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("dialed %d times; a body longer than the manifest is not retried", n)
 	}
 }
 
