@@ -98,6 +98,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const workspaceNames = useStore(useShallow((s) => Object.fromEntries(Object.values(s.workspaces).map((w) => [w.id, w.name]))))
   const navigate = useStore((s) => s.navigate)
   const openDialog = useStore((s) => s.openPaletteDialog)
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
   const caps = useCapability()
   const role = useSelfRole()
   const mobile = useIsMobile()
@@ -222,7 +223,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
               onBoard={() => navigate('board')}
               emptyAction={(
                 <div className="flex flex-wrap justify-center gap-2">
-                  {canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => openDialog('launch')}>New run</Button>}
+                  {canLaunch({ cap: caps, role }) && <Button variant={mobile ? 'secondary' : 'primary'} onClick={() => { if (workspace) setActiveWorkspace(workspace); openDialog('launch') }}>New run</Button>}
                   {period !== '12m' && <Button variant="secondary" onClick={() => setPeriod('12m')}>Show the last 12 months</Button>}
                   {scope === 'mine' && <Button variant="secondary" onClick={() => setScope('everyone')}>Show everyone&apos;s runs</Button>}
                 </div>
