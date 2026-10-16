@@ -33,10 +33,6 @@ const (
 	acpConnectTimeout = time.Minute
 	acpStopGrace      = 3 * time.Second
 	acpStderrTail     = 4 << 10
-	// acpReportWait bounds how long a report waits for its run to leave
-	// provisioning: the adapter can answer before the launch marks the run
-	// running.
-	acpReportWait = 30 * time.Second
 	// acpSteerTimeout bounds a delivery, which runs under the run's
 	// admission lock and may wait on the agent's answer to a steer.
 	acpSteerTimeout = 15 * time.Second
@@ -794,9 +790,7 @@ func (d *acpDriver) record(entry *supervised, change func()) {
 	}
 }
 
-// report hands the session's state to ReportAgentState. A launch marks its
-// run running only after the session opened, so a report that arrives first
-// waits for that.
+// report hands the session's state to ReportAgentState.
 func (d *acpDriver) report(run domain.RunID, report agentstatus.Report) {
 	d.mu.Lock()
 	closed := d.closed
@@ -804,21 +798,8 @@ func (d *acpDriver) report(run domain.RunID, report agentstatus.Report) {
 	if closed {
 		return
 	}
-	deadline := time.Now().Add(acpReportWait)
-	for {
-		err := d.s.ReportAgentState(context.Background(), run, report)
-		if err == nil {
-			return
-		}
-		d.s.mu.Lock()
-		entry := d.s.runs[run]
-		provisioning := entry != nil && entry.status == domain.RunProvisioning
-		d.s.mu.Unlock()
-		if !provisioning || time.Now().After(deadline) {
-			slog.Debug("scheduler: enhanced session report not applied", "run", run, "error", err)
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+	if err := d.s.ReportAgentState(context.Background(), run, report); err != nil {
+		slog.Debug("scheduler: enhanced session report not applied", "run", run, "error", err)
 	}
 }
 

@@ -562,6 +562,7 @@ type fakeGit struct {
 	createErr         error
 	publishErr        error
 	createHook        func(run domain.RunID)
+	watchHook         func(run domain.RunID)                 // runs at the top of StartDiffWatch
 	commitHook        func(run domain.RunID, message string) // runs at the top of CommitAll
 	authors           map[domain.RunID][]domain.GitIdentity
 	signed            map[domain.RunID][]bool
@@ -707,6 +708,9 @@ func (g *fakeGit) RemoveRunHistory(_ context.Context, run domain.RunID) error {
 }
 
 func (g *fakeGit) StartDiffWatch(_ context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
+	if g.watchHook != nil {
+		g.watchHook(run)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.watching[run] = workspace

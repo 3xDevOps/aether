@@ -127,6 +127,36 @@ func TestReportedSuccessParksTUIRunAtTurnEnd(t *testing.T) {
 	}
 }
 
+// The agent starts before the launch marks its run running, so a fast agent
+// can report success and end its turn while the run is still provisioning.
+// The turn end waits for the run to be running, then parks it.
+func TestReportedSuccessParksWhenTheTurnEndsWhileProvisioning(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	turnEnd := make(chan error, 1)
+	e.git.watchHook = func(run domain.RunID) {
+		if err := e.sched.FinishReported(ctx, run, "report-1", domain.RunCompleted, time.Now().UTC()); err != nil {
+			t.Errorf("report while provisioning: %v", err)
+		}
+		go func() { turnEnd <- e.sched.ReportAgentState(ctx, run, waitingForInput) }()
+		select {
+		case err := <-turnEnd:
+			t.Errorf("turn end returned %v while the run was provisioning, want it to wait", err)
+			turnEnd <- err
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	run, _ := e.launchReporting(t)
+	if err := <-turnEnd; err != nil {
+		t.Fatalf("turn end: %v", err)
+	}
+	row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if row.Reason != reportedSuccessReason || row.Review != domain.ReviewReady {
+		t.Fatalf("row = %+v, want needs-attention because %q with review ready", row, reportedSuccessReason)
+	}
+}
+
 func TestReportedFailureParksAtDeadlineAndResumesWithoutRelaunch(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
