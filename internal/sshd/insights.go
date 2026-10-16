@@ -63,7 +63,10 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		}
 	}
 
-	q.Previous = store.Interval{Start: q.From.In(loc).AddDate(0, 0, -span), End: q.From}
+	q.Previous = store.Interval{Start: q.From.Add(-q.To.Sub(q.From)), End: q.From}
+	if q.From.Equal(first) && q.To.Equal(localDay(q.To, loc)) {
+		q.Previous.Start = first.AddDate(0, 0, -daysBetween(first, localDay(q.To, loc)))
+	}
 	bucket, days := "day", 1
 	if span > insightsMaxDayRange {
 		bucket, days = "week", 7

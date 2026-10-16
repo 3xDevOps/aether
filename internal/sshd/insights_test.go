@@ -12,7 +12,10 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	githubservice "github.com/3xDevOps/Aether/internal/github"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/runrepo"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -27,7 +30,6 @@ func TestInsightsGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	e := newTestEnv(t, func(c *Config) { c.Store = db })
 	raw, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(0)")
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +54,13 @@ func TestInsightsGet(t *testing.T) {
 		v := at(s)
 		return &v
 	}
+	gh := newGitHubRepositoryFixture()
+	gh.pr = githubservice.PullRequest{URL: "https://github.com/acme/app/pull/4", State: "merged", MergedAt: ptr("2026-03-09T08:00:00-07:00")}
+	e := newTestEnv(t, func(c *Config) {
+		c.Store = db
+		c.Services.RunRepo = goneRunRepo{}
+		c.Services.GitHub = gh
+	})
 	member := func(name string) domain.MemberID {
 		m := &domain.Member{DisplayName: name, PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#e6194b", Role: domain.RoleCollaborator}
 		if err := db.CreateMember(ctx, m); err != nil {
@@ -78,24 +87,7 @@ func TestInsightsGet(t *testing.T) {
 		}
 	}
 
-	// Alice's top-level runs. top2 starts at 23:30 PDT on 03-08, which is
-	// 03-09 in UTC; top4 ends at 01:00 PST on 03-08, before the change.
-	run("top1", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T10:00:00-08:00", ptr("2026-03-07T10:01:00-08:00"), ptr("2026-03-07T11:01:00-08:00"))
-	run("top2", alice, alpha, "codex", "gpt-5", domain.RunFailed, "", "2026-03-08T23:30:00-07:00", nil, ptr("2026-03-09T00:30:00-07:00"))
-	run("top3", alice, beta, "claude", "", domain.RunRunning, "", "2026-03-09T09:00:00-07:00", ptr("2026-03-09T09:00:00-07:00"), nil)
-	run("top4", alice, alpha, "claude", "", domain.RunAbandoned, "killed", "2026-03-06T12:00:00-08:00", ptr("2026-03-06T12:00:00-08:00"), ptr("2026-03-08T01:00:00-08:00"))
-	run("top6", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-01T12:00:00-08:00", ptr("2026-03-01T12:00:00-08:00"), nil)
-	// Alice's swarm: a failed worker, its retry, and two integrator
-	// generations; none of them is top-level.
-	run("w1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T12:00:00-08:00", ptr("2026-03-07T12:00:00-08:00"), ptr("2026-03-07T13:00:00-08:00"))
-	run("w1b", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T13:00:00-08:00", ptr("2026-03-07T13:00:00-08:00"), ptr("2026-03-07T14:00:00-08:00"))
-	run("i1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T11:30:00-08:00", ptr("2026-03-07T11:30:00-08:00"), ptr("2026-03-07T11:45:00-08:00"))
-	run("i2", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-07T11:45:00-08:00", ptr("2026-03-07T11:45:00-08:00"), nil)
-	// Bob's runs and swarm.
-	run("top5", bob, beta, "claude", "opus", domain.RunCompleted, "", "2026-03-08T09:00:00-07:00", ptr("2026-03-08T09:00:00-07:00"), ptr("2026-03-08T10:00:00-07:00"))
-	run("top7", bob, beta, "claude", "opus", domain.RunNeedsAttention, "", "2026-03-09T08:00:00-07:00", ptr("2026-03-09T08:00:00-07:00"), nil)
-	run("wb", bob, beta, "claude", "", domain.RunAbandoned, "", "2026-03-08T12:00:00-07:00", ptr("2026-03-08T12:00:00-07:00"), ptr("2026-03-08T13:00:00-07:00"))
-
+	// Swarms reserve their runs' IDs before creating them.
 	nanos := func(s string) int64 { return at(s).UnixNano() }
 	mission := func(id string, owner domain.MemberID, ws domain.WorkspaceID, phase, created string) {
 		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase)
@@ -118,6 +110,25 @@ func TestInsightsGet(t *testing.T) {
 	attempt("a3", "m2", "wb", 1)
 	// Reserved, but the launch never created the run.
 	attempt("a4", "m1", "ghost", 3)
+
+	// Alice's top-level runs. top2 starts at 23:30 PDT on 03-08, which is
+	// 03-09 in UTC; top4 ends at 01:00 PST on 03-08, before the change.
+	run("top1", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T10:00:00-08:00", ptr("2026-03-07T10:01:00-08:00"), ptr("2026-03-07T11:01:00-08:00"))
+	run("top2", alice, alpha, "codex", "gpt-5", domain.RunFailed, "", "2026-03-08T23:30:00-07:00", nil, ptr("2026-03-09T00:30:00-07:00"))
+	run("top3", alice, beta, "claude", "", domain.RunRunning, "", "2026-03-09T09:00:00-07:00", ptr("2026-03-09T09:00:00-07:00"), nil)
+	run("top4", alice, alpha, "claude", "", domain.RunAbandoned, "killed", "2026-03-06T12:00:00-08:00", ptr("2026-03-06T12:00:00-08:00"), ptr("2026-03-08T01:00:00-08:00"))
+	run("top6", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-01T12:00:00-08:00", ptr("2026-03-01T12:00:00-08:00"), nil)
+	// Alice's swarm: a failed worker, its retry, and two integrator
+	// generations; none of them is top-level.
+	run("w1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T12:00:00-08:00", ptr("2026-03-07T12:00:00-08:00"), ptr("2026-03-07T13:00:00-08:00"))
+	run("w1b", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T13:00:00-08:00", ptr("2026-03-07T13:00:00-08:00"), ptr("2026-03-07T14:00:00-08:00"))
+	run("i1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T11:30:00-08:00", ptr("2026-03-07T11:30:00-08:00"), ptr("2026-03-07T11:45:00-08:00"))
+	run("i2", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-07T11:45:00-08:00", ptr("2026-03-07T11:45:00-08:00"), nil)
+	// Bob's runs and swarm.
+	run("top5", bob, beta, "claude", "opus", domain.RunCompleted, "", "2026-03-08T09:00:00-07:00", ptr("2026-03-08T09:00:00-07:00"), ptr("2026-03-08T10:00:00-07:00"))
+	run("top7", bob, beta, "claude", "opus", domain.RunNeedsAttention, "", "2026-03-09T08:00:00-07:00", ptr("2026-03-09T08:00:00-07:00"), nil)
+	run("wb", bob, beta, "claude", "", domain.RunAbandoned, "", "2026-03-08T12:00:00-07:00", ptr("2026-03-08T12:00:00-07:00"), ptr("2026-03-08T13:00:00-07:00"))
+
 	exec(`INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, accepted_at)
 		VALUES ('s1', 'm1', 't', 1, 1, 2, 'i2', 0)`)
 
@@ -131,6 +142,11 @@ func TestInsightsGet(t *testing.T) {
 	transition("top1", "needs-attention", "running", "2026-03-07T10:36:00-08:00")
 	transition("top1", "running", "completed", "2026-03-07T11:01:00-08:00")
 	transition("top1", "completed", "merged", "2026-03-07T12:01:00-08:00")
+	// A relaunch rolled back before it ran restores the row's
+	// status_changed_at, so it sorts before the relaunch and leaves the
+	// session before it measured.
+	transition("top1", "merged", "running", "2026-03-07T12:30:00-08:00")
+	transition("top1", "running", "merged", "2026-03-07T12:01:00-08:00")
 	// Relaunched after completing: only the last session is measured.
 	transition("top4", "queued", "provisioning", "2026-03-06T11:59:00-08:00")
 	transition("top4", "provisioning", "running", "2026-03-06T12:00:00-08:00")
@@ -310,6 +326,88 @@ func TestInsightsGet(t *testing.T) {
 		t.Errorf("empty time zone = %+v, %+v; want UTC buckets", utc.TimeZone, perr)
 	}
 
+	// A range that is not midnight-aligned is compared with the 47 hours
+	// before it, which start after top6 was launched; the three local days
+	// it touches would reach back past it.
+	shifted, perr := get(alice, with(func(p *protocol.InsightsParams) {
+		p.From = "2026-03-03T13:00:00-08:00"
+		p.To = "2026-03-05T12:00:00-08:00"
+	}))
+	if perr != nil || shifted.Previous != (protocol.InsightsTotals{}) {
+		t.Errorf("previous of a non-aligned range = %+v, %+v; want none", shifted.Previous, perr)
+	}
+
+	// top2 opened a PR that merged after its container was gone.
+	pr("top2", 4, "open", "2026-03-09T00:00:00-07:00", nil, true)
+	status := func(runID string) (protocol.RunPRStatusResult, *protocol.Error) {
+		t.Helper()
+		out, statusErr := e.srv.dispatch(ctx, alice, protocol.MethodRunPRStatus, repoParams(t, protocol.RunPRStatusParams{RunID: runID}))
+		var res protocol.RunPRStatusResult
+		if statusErr == nil {
+			if err := json.Unmarshal(out, &res); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return res, statusErr
+	}
+	lookup := []string{string(alice) + " acme/app#4"}
+	observed, perr := status("top2")
+	if perr != nil || observed.PullRequest == nil || observed.PullRequest.State != "merged" || observed.Identity != "octocat" || !reflect.DeepEqual(gh.lookups, lookup) {
+		t.Errorf("run.pr.status of a finished run = %+v, %+v, lookups %v; want the merge observed with the run account", observed, perr, gh.lookups)
+	}
+	again, perr := status("top2")
+	if perr != nil || again.PullRequest.State != "merged" || !reflect.DeepEqual(gh.lookups, lookup) {
+		t.Errorf("run.pr.status of a merged PR = %+v, %+v, lookups %v; want the recorded state without asking GitHub", again, perr, gh.lookups)
+	}
+	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {
+		t.Errorf("run.pr.status without a live environment or a recorded PR: error = %+v, want invalid state", perr)
+	}
+	merged, perr := get(alice, week)
+	if perr != nil || merged.PullRequests != (protocol.InsightsPullRequests{Opened: 3, Merged: 2}) {
+		t.Errorf("pull requests after the merge was observed = %+v, %+v", merged.PullRequests, perr)
+	}
+
+	for _, table := range []string{"mission_attempts", "mission_create_receipts", "mission_integrator_replacements", "missions"} {
+		exec(`DELETE FROM ` + table)
+	}
+	unlinked, perr := get(alice, week)
+	if perr != nil || unlinked.Totals != mine.Totals || !reflect.DeepEqual(recentIDs(unlinked.Recent), recentIDs(mine.Recent)) {
+		t.Errorf("after deleting the swarm = totals %+v, recent %v, %+v; want its runs still not top-level", unlinked.Totals, recentIDs(unlinked.Recent), perr)
+	}
+
+	top5, getErr := db.GetRun(ctx, "top5")
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	restored, relaunched := *top5.StatusChangedAt, at("2026-03-10T09:00:00-07:00")
+	for _, step := range []struct {
+		status domain.RunStatus
+		at     time.Time
+	}{{domain.RunRunning, relaunched}, {domain.RunCompleted, restored}} {
+		top5.Status, top5.StatusChangedAt = step.status, &step.at
+		if err := db.UpdateRun(ctx, top5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stamps []int64
+	rows, queryErr := raw.QueryContext(ctx, `SELECT at FROM run_state_transitions WHERE run_id = 'top5' ORDER BY rowid`)
+	if queryErr != nil {
+		t.Fatal(queryErr)
+	}
+	for rows.Next() {
+		var stamp int64
+		if err := rows.Scan(&stamp); err != nil {
+			t.Fatal(err)
+		}
+		stamps = append(stamps, stamp)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []int64{relaunched.UnixNano(), restored.UnixNano()}; !reflect.DeepEqual(stamps, want) {
+		t.Errorf("UpdateRun transition times = %v, want the rows' status_changed_at %v", stamps, want)
+	}
+
 	if err := db.DeleteRun(ctx, "top1"); err != nil {
 		t.Fatal(err)
 	}
@@ -318,6 +416,13 @@ func TestInsightsGet(t *testing.T) {
 		+ (SELECT COUNT(*) FROM run_pull_requests WHERE run_id = 'top1')`).Scan(&left); err != nil || left != 0 {
 		t.Errorf("rows left after deleting the run = %d, %v; want 0", left, err)
 	}
+}
+
+type goneRunRepo struct{}
+
+func (goneRunRepo) Native() *runrepo.Service { return runrepo.New(nil) }
+func (goneRunRepo) Execution(context.Context, domain.Run) (runrepo.Execution, error) {
+	return runrepo.Execution{}, scheduler.ErrNoLiveEnvironment
 }
 
 func recentIDs(runs []protocol.InsightsRecentRun) []string {

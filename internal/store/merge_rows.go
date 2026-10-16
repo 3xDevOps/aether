@@ -76,7 +76,6 @@ var memberRefs = map[string]bool{
 	"run_account_segments.account_member_id":               false,
 	"run_cost_deletions.member_id":                         false,
 	"run_costs.member_id":                                  false,
-	"run_pull_requests.member_id":                          false,
 	"server_update_state.pending_requested_by":             false,
 	"workspace_budgets.updated_by":                         false,
 	"workspace_mirrors.github_member_id":                   false,

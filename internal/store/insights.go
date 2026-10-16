@@ -16,12 +16,15 @@ import (
 // them. See docs/insights.md for what each number means.
 type InsightsStore interface {
 	// RecordRunPullRequest stores a pull request a run opened through
-	// run.pr.create, with the run's workspace and owner. Recording the same
+	// run.pr.create, with the run's workspace. Recording the same
 	// PR again updates its observed state.
 	RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 	// ObserveRunPullRequest updates the state of a recorded pull request.
 	// A PR the run did not open through run.pr.create is not recorded.
 	ObserveRunPullRequest(ctx context.Context, pr *RunPullRequest) error
+	// RunPullRequests lists the pull requests recorded for run, newest
+	// first.
+	RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullRequest, error)
 	// Insights aggregates q in one read snapshot.
 	Insights(ctx context.Context, q InsightsQuery) (*Insights, error)
 }
@@ -139,15 +142,6 @@ type InsightsRun struct {
 	PRState     string
 }
 
-// insightsSwarmRuns names every run a swarm started: workers and every
-// integrator generation. Runs outside it are top-level.
-const insightsSwarmRuns = `swarm_runs(run_id) AS (
-	SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL AND run_id <> ''
-	UNION SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL AND current_integrator_run_id <> ''
-	UNION SELECT initial_run_id FROM mission_create_receipts WHERE initial_run_id <> ''
-	UNION SELECT run_id FROM mission_integrator_replacements WHERE run_id <> ''
-)`
-
 const (
 	insightsTerminal  = `('completed', 'merged', 'abandoned', 'failed', 'interrupted')`
 	insightsLaunched  = `r.created_at >= :from AND r.created_at < :to`
@@ -171,10 +165,9 @@ func (q InsightsQuery) ownerScope() string {
 	return where
 }
 
-// runScope filters runs r to the top-level runs in scope. A query using it
-// declares insightsSwarmRuns.
+// runScope filters runs r to the top-level runs in scope.
 func (q InsightsQuery) runScope() string {
-	return "r.id NOT IN (SELECT run_id FROM swarm_runs) AND " + q.ownerScope()
+	return "r.swarm_run = 0 AND " + q.ownerScope()
 }
 
 func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error {
@@ -183,8 +176,8 @@ func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 		return fmt.Errorf("store: record run pull request: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx,
-		`INSERT INTO run_pull_requests (run_id, workspace_id, member_id, repo, number, url, state, created_at, merged_at, checked_at)
-		 SELECT id, workspace_id, member_id, ?, ?, ?, ?, ?, ?, ? FROM runs WHERE id = ?
+		`INSERT INTO run_pull_requests (run_id, workspace_id, repo, number, url, state, created_at, merged_at, checked_at)
+		 SELECT id, workspace_id, ?, ?, ?, ?, ?, ?, ? FROM runs WHERE id = ?
 		 ON CONFLICT (run_id, repo, number) DO UPDATE SET
 		     url = excluded.url, state = excluded.state,
 		     merged_at = COALESCE(excluded.merged_at, merged_at), checked_at = excluded.checked_at`,
@@ -207,6 +200,35 @@ func (d *DB) ObserveRunPullRequest(ctx context.Context, pr *RunPullRequest) erro
 		return fmt.Errorf("store: observe run pull request: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullRequest, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT repo, number, url, state, merged_at, checked_at FROM run_pull_requests
+		 WHERE run_id = ? ORDER BY created_at DESC, rowid DESC`, run)
+	if err != nil {
+		return nil, fmt.Errorf("store: run pull requests: %w", err)
+	}
+	prs, err := collect(rows, func(row interface{ Scan(...any) error }) (*RunPullRequest, error) {
+		var (
+			pr      = RunPullRequest{RunID: run}
+			merged  *int64
+			checked int64
+		)
+		if scanErr := row.Scan(&pr.Repository, &pr.Number, &pr.URL, &pr.State, &merged, &checked); scanErr != nil {
+			return nil, scanErr
+		}
+		if merged != nil {
+			at := decodeTime(*merged)
+			pr.MergedAt = &at
+		}
+		pr.ObservedAt = decodeTime(checked)
+		return &pr, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("store: run pull requests: %w", err)
+	}
+	return prs, nil
 }
 
 func encodePullRequestTimes(pr *RunPullRequest) (int64, *int64, error) {
@@ -298,7 +320,7 @@ func (q InsightsQuery) args(intervals []Interval) ([]any, error) {
 
 func insightsCounts(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, n int) ([]InsightsCounts, error) {
 	in := func(col string) string { return "s." + col + " >= b.lo AND s." + col + " < b.hi" }
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`,
+	rows, err := tx.QueryContext(ctx, `WITH
 		b(i, lo, hi) AS (SELECT key, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(:buckets)),
 		s AS MATERIALIZED (
 			SELECT r.created_at, r.finished_at, r.status, r.reason FROM runs r
@@ -339,7 +361,7 @@ func insightsCounts(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 // insightsHeatmap counts, per day, the runs whose [started or created,
 // finished or now] interval overlaps it.
 func insightsHeatmap(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`,
+	rows, err := tx.QueryContext(ctx, `WITH
 		d(i, lo, hi) AS (SELECT key, json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(:days)),
 		a AS MATERIALIZED (
 			SELECT COALESCE(r.started_at, r.created_at) AS s, COALESCE(r.finished_at, :now) AS e FROM runs r
@@ -364,7 +386,7 @@ func insightsHeatmap(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 }
 
 func insightsByWorkspace(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
+	rows, err := tx.QueryContext(ctx, `
 		SELECT r.workspace_id, w.name, `+insightsTallyCols+`
 		FROM runs r JOIN workspaces w ON w.id = r.workspace_id
 		WHERE `+q.runScope()+` AND `+insightsInRange+`
@@ -383,7 +405,7 @@ func insightsByWorkspace(ctx context.Context, tx *sql.Tx, q InsightsQuery, args 
 }
 
 func insightsByAgent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
+	rows, err := tx.QueryContext(ctx, `
 		SELECT r.harness, r.model, `+insightsTallyCols+`
 		FROM runs r
 		WHERE `+q.runScope()+` AND `+insightsInRange+`
@@ -405,7 +427,7 @@ func insightsByAgent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 // A run is metered when any of its segments is; only metered segments add
 // cost and tokens.
 func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
+	rows, err := tx.QueryContext(ctx, `
 		SELECT r.finished_at - COALESCE(r.started_at, r.created_at),
 			COALESCE(MAX(c.metered), 0),
 			COALESCE(SUM(c.cost_usd) FILTER (WHERE c.metered = 1), 0),
@@ -448,13 +470,15 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	return nil
 }
 
-// insightsStateTimes measures each finished run's last session: from the
-// run leaving queued, or from a relaunch out of a terminal status, to its
-// next terminal status. A run whose record starts mid-session is not
-// measured. Working and waiting are per-run totals; a response is each
-// stretch of needs-attention that ended in running.
+// insightsStateTimes measures each finished run's last session that spent
+// time in running. A session runs from the run leaving queued, or from a
+// relaunch out of a terminal status, to its next terminal status, so a
+// relaunch rolled back before it ran leaves the session before it measured.
+// A run whose record starts mid-session is not measured. Working and waiting
+// are per-run totals; a response is each stretch of needs-attention that
+// ended in running.
 func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
+	rows, err := tx.QueryContext(ctx, `
 		SELECT t.run_id, t.from_status, t.to_status, t.at
 		FROM runs r JOIN run_state_transitions t ON t.run_id = r.id
 		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
@@ -463,20 +487,23 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		return fmt.Errorf("store: insights: state times: %w", err)
 	}
 	defer rows.Close() //nolint:errcheck // read-only iteration
+	type session struct {
+		working, waiting time.Duration
+		responses        []time.Duration
+		ran              bool
+	}
 	var (
 		working, waiting, responses []time.Duration
 		run                         domain.RunID
-		measured, done              bool
+		current, last               *session
 		prevTo                      domain.RunStatus
 		prevAt, waitingSince        int64
-		runWorking, runWaiting      time.Duration
-		runResponses                []time.Duration
 	)
 	flush := func() {
-		if measured {
-			working = append(working, runWorking)
-			waiting = append(waiting, runWaiting)
-			responses = append(responses, runResponses...)
+		if last != nil {
+			working = append(working, last.working)
+			waiting = append(waiting, last.waiting)
+			responses = append(responses, last.responses...)
 		}
 	}
 	for rows.Next() {
@@ -490,20 +517,20 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		}
 		if id != run {
 			flush()
-			run, measured = id, false
-		} else if measured && !done {
+			run, current, last = id, nil, nil
+		} else if current != nil {
 			switch prevTo {
 			case domain.RunRunning:
-				runWorking += time.Duration(at - prevAt)
+				current.working += time.Duration(at - prevAt)
+				current.ran = true
 			case domain.RunNeedsAttention:
-				runWaiting += time.Duration(at - prevAt)
+				current.waiting += time.Duration(at - prevAt)
 			}
 		}
 		if from == domain.RunQueued || from.Terminal() && !to.Terminal() {
-			measured, done = true, false
-			runWorking, runWaiting, runResponses, waitingSince = 0, 0, nil, -1
+			current, waitingSince = &session{}, -1
 		}
-		if !measured || done {
+		if current == nil {
 			continue
 		}
 		switch {
@@ -512,12 +539,18 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 				waitingSince = at
 			}
 		case to == domain.RunRunning && waitingSince >= 0:
-			runResponses = append(runResponses, time.Duration(at-waitingSince))
+			current.responses = append(current.responses, time.Duration(at-waitingSince))
 			waitingSince = -1
 		default:
 			waitingSince = -1
 		}
-		prevTo, prevAt, done = to, at, to.Terminal()
+		prevTo, prevAt = to, at
+		if to.Terminal() {
+			if current.ran {
+				last = current
+			}
+			current = nil
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: insights: state times: %w", err)
@@ -531,7 +564,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 }
 
 func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
+	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.title, r.workspace_id, r.status, r.reason, r.harness, r.model,
 			r.created_at, r.started_at, r.finished_at, COALESCE(p.url, ''), COALESCE(p.state, '')
 		FROM runs r

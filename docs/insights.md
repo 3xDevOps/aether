@@ -42,6 +42,12 @@ runs are counted once, under `swarms`, so a worker retry or a replaced
 integrator never adds a run of its own. `needs_you` and `pull_requests`
 count swarm runs as well.
 
+Whether a run belongs to a swarm is stored on the run (`runs.swarm_run`)
+when the run is created, so deleting the swarm does not turn its runs into
+top-level runs. Upgrading marks existing runs from the swarm records still
+in the database; the runs of a swarm deleted before the upgrade count as
+top-level.
+
 ## Numbers
 
 | Field | Meaning |
@@ -51,9 +57,9 @@ count swarm runs as well.
 | `totals.killed` | Abandoned runs whose reason is `killed`: a member stopped them. Part of `abandoned`. |
 | `totals.finished` | `completed` + `merged`. |
 | `totals.active` | Runs launched in the range that are queued, provisioning, running or waiting for you now. |
-| `previous` | The same totals for the same number of local days just before `from`. |
+| `previous` | The same totals for the period just before `from`: the same number of local days when `from` and `to` are both local midnights, otherwise the same length of time, so "the last 7 days ending now" is compared with the 168 hours before it. |
 | `bucket`, `series` | One entry per local day, or per week starting Monday when the range is over 92 days, zero-filled. `start` is the local date the bucket starts; the first and last buckets are cut at `from` and `to`. |
-| `heatmap` | The 182 local days ending on the day of the last instant before `to`, whatever `from` is. `runs` is how many runs were active that day: started (or created, if never started) before the day ended and finished (or still running) after it began. |
+| `heatmap` | The 182 local days ending on the local day of `to` minus one nanosecond, whatever `from` is: a `to` at local midnight ends it on the day before, a `to` of now ends it today. `runs` is how many runs were active that day: started (or created, if never started) before the day ended and finished (or still running) after it began. |
 | `by_workspace`, `by_agent` | Runs launched, finished (`completed` or `merged`) and failed in the range, per workspace and per agent and model, most launched first. A `model` of `""` is the agent's default model. |
 | `swarms` | Swarms created in the range, scoped by their accountable member: how many, how many are now completed or cancelled, `agents` (distinct worker and integrator runs they started that still exist) and `tasks_accepted`. |
 | `needs_you` | Runs in scope waiting for a member right now, as on the Board, swarm runs included. Ignores the range. |
@@ -72,10 +78,12 @@ count swarm runs as well.
   answer.
 
 The last three come from the status changes the server records. They
-cover a run's last session: from leaving `queued`, or from its latest
-relaunch, to finishing. A run whose record starts mid-session is left out;
-`state_runs_measured` is how many runs are in. Percentiles are nearest-rank, and every
-duration is `0` when nothing was measured.
+cover a run's last session that spent time in `running`: from leaving
+`queued`, or from a relaunch, to finishing. A relaunch that failed and was
+rolled back before the agent ran leaves the session before it measured.
+A run whose record starts mid-session is left out; `state_runs_measured`
+is how many runs are in. Percentiles are nearest-rank, and every duration
+is `0` when nothing was measured.
 
 ## Cost
 
@@ -90,19 +98,33 @@ floor.
 
 `pull_requests.opened` counts pull requests opened through `run.pr.create`
 in the range. `merged` counts those whose last observed state is merged and
-whose GitHub merge time is in the range. The server only learns a merge
-when `run.pr.status` looks the pull request up; it does not poll GitHub. A
-pull request an agent opened with `gh` directly is not counted.
+whose GitHub merge time is in the range. A pull request an agent opened
+with `gh` directly is not counted.
+
+The server learns a merge only when `run.pr.status` is called for the run;
+it does not poll GitHub, and `insights.get` never calls it. While the run's
+container is up, the call runs `gh` in it, as before. After the container
+is gone, `run.pr.status {"run_id":"<run-id>"}` answers from the recorded
+pull requests instead: each one last seen open is read again from
+`GET /repos/<owner>/<name>/pulls/<number>` with the run account's own `gh`
+login (`~/.config/gh/hosts.yml` in that member's home), and the new state is
+recorded. `target.repository` narrows it to one repository; `expected` is
+not checked. A run with nothing recorded still fails with `-32002` because
+it has no live environment. The dashboard's publish dialog calls
+`run.pr.status` only for a live run, so a pull request merged after its run
+finished stays `open` here until a client makes that call.
 
 ## Recorded from this version on
 
 Older servers kept only each run's current status and no pull requests, so
-two measurements start when the server is upgraded:
+these measurements start when the server is upgraded:
 
 - `run_state_transitions`: one row per status or reason change of a run,
   written in the same transaction as the change.
 - `run_pull_requests`: one row per pull request opened through
   `run.pr.create`, with the state the server last observed.
+- `runs.swarm_run`: set when a swarm creates the run, and at upgrade from
+  the swarm records that exist then.
 
 `coverage.state_times_since` and `coverage.pull_requests_since` are the
 oldest such rows, `""` while there are none. Numbers before those times
