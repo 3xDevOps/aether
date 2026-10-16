@@ -159,6 +159,21 @@ func TestInsightsGet(t *testing.T) {
 	// Recorded only from the middle of the run, so not measured.
 	transition("top2", "running", "failed", "2026-03-09T00:30:00-07:00")
 
+	// carol's integrator-like run parks waiting on its agents, then asks
+	// her: only the needs-you stretch is waiting on her.
+	carol := member("carol")
+	run("top8", carol, alpha, "claude", "", domain.RunCompleted, "", "2026-03-12T09:59:00-07:00", ptr("2026-03-12T10:00:00-07:00"), ptr("2026-03-12T10:50:00-07:00"))
+	step := func(from, to string, activity domain.RunActivity, when string) {
+		exec(`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, activity, at) VALUES ('top8', ?, ?, ?, '', ?, ?)`,
+			alpha, from, to, activity, nanos(when))
+	}
+	step("queued", "provisioning", "", "2026-03-12T09:59:30-07:00")
+	step("provisioning", "running", domain.ActivityWorking, "2026-03-12T10:00:00-07:00")
+	step("running", "needs-attention", domain.ActivityWaitingAgents, "2026-03-12T10:10:00-07:00")
+	step("needs-attention", "needs-attention", domain.ActivityNeedsYou, "2026-03-12T10:30:00-07:00")
+	step("needs-attention", "running", domain.ActivityWorking, "2026-03-12T10:35:00-07:00")
+	step("running", "completed", "", "2026-03-12T10:50:00-07:00")
+
 	cost := func(runID string, segment int, ws domain.WorkspaceID, payer domain.MemberID, usd float64, in, out int64, metered bool) {
 		if err := db.PutRunCost(ctx, &store.RunCost{RunID: domain.RunID(runID), Segment: segment, WorkspaceID: ws, MemberID: payer,
 			CostUSD: usd, InputTokens: in, OutputTokens: out, Metered: metered}); err != nil {
@@ -287,6 +302,14 @@ func TestInsightsGet(t *testing.T) {
 		if !reflect.DeepEqual(c.got, c.want) {
 			t.Errorf("%s = %+v, want %+v", c.name, c.got, c.want)
 		}
+	}
+
+	carols, perr := get(carol, with(func(p *protocol.InsightsParams) {
+		p.From, p.To = "2026-03-12T00:00:00-07:00", "2026-03-13T00:00:00-07:00"
+	}))
+	if want := (protocol.InsightsDurations{RunsMeasured: 1, MedianRunSeconds: 50 * 60, P90RunSeconds: 50 * 60,
+		StateRunsMeasured: 1, MedianWorkingSeconds: 45 * 60, MedianWaitingSeconds: 300, MedianResponseSeconds: 300}); perr != nil || carols.Durations != want {
+		t.Errorf("durations by activity = %+v, %+v; want %+v", carols.Durations, perr, want)
 	}
 
 	quarter, perr := get(alice, with(func(p *protocol.InsightsParams) {

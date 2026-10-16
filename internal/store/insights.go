@@ -469,18 +469,27 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	return nil
 }
 
+// insightsStretch is what the time after a transition counts as.
+type insightsStretch int
+
+const (
+	stretchNone insightsStretch = iota
+	stretchWorking
+	stretchWaiting
+)
+
 // insightsStateTimes measures each finished run's last session that spent
-// time in running. A session runs from the run leaving queued, or from a
+// time working. A session runs from the run leaving queued, or from a
 // relaunch out of a terminal status, to its next terminal status, so a
 // relaunch rolled back before it ran leaves the session before it measured.
 // A transition out of a status other than the one the session was in, such
 // as a rolled-back relaunch's, drops the session. A run whose record starts
-// mid-session is not measured. Working and waiting
-// are per-run totals; a response is each stretch of needs-attention that
-// ended in running.
+// mid-session is not measured. Working and waiting are per-run totals of
+// their stretches; a response is each run of waiting stretches that ended
+// in a working one.
 func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT t.run_id, t.from_status, t.to_status, t.at
+		SELECT t.run_id, t.from_status, t.to_status, t.activity, t.at
 		FROM runs r JOIN run_state_transitions t ON t.run_id = r.id
 		WHERE `+q.runScope()+` AND `+insightsFinishedIn+`
 		ORDER BY t.run_id, t.at, t.rowid`, args...)
@@ -498,6 +507,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		run                         domain.RunID
 		current, last               *session
 		prevTo                      domain.RunStatus
+		prevStretch                 insightsStretch
 		prevAt, waitingSince        int64
 	)
 	flush := func() {
@@ -511,9 +521,10 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		var (
 			id       domain.RunID
 			from, to domain.RunStatus
+			activity domain.RunActivity
 			at       int64
 		)
-		if err := rows.Scan(&id, &from, &to, &at); err != nil {
+		if err := rows.Scan(&id, &from, &to, &activity, &at); err != nil {
 			return fmt.Errorf("store: insights: state times: %w", err)
 		}
 		if id != run {
@@ -522,11 +533,11 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		} else if current != nil && from != prevTo {
 			current = nil
 		} else if current != nil {
-			switch prevTo {
-			case domain.RunRunning:
+			switch prevStretch {
+			case stretchWorking:
 				current.working += time.Duration(at - prevAt)
 				current.ran = true
-			case domain.RunNeedsAttention:
+			case stretchWaiting:
 				current.waiting += time.Duration(at - prevAt)
 			}
 		}
@@ -536,18 +547,32 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		if current == nil {
 			continue
 		}
+		stretch := stretchNone
+		switch activity {
+		case "":
+			switch to {
+			case domain.RunRunning:
+				stretch = stretchWorking
+			case domain.RunNeedsAttention:
+				stretch = stretchWaiting
+			}
+		case domain.ActivityWorking, domain.ActivityWaitingAgents, domain.ActivityWaitingTools:
+			stretch = stretchWorking
+		case domain.ActivityNeedsYou:
+			stretch = stretchWaiting
+		}
 		switch {
-		case to == domain.RunNeedsAttention:
+		case stretch == stretchWaiting:
 			if waitingSince < 0 {
 				waitingSince = at
 			}
-		case to == domain.RunRunning && waitingSince >= 0:
+		case stretch == stretchWorking && waitingSince >= 0:
 			current.responses = append(current.responses, time.Duration(at-waitingSince))
 			waitingSince = -1
 		default:
 			waitingSince = -1
 		}
-		prevTo, prevAt = to, at
+		prevTo, prevStretch, prevAt = to, stretch, at
 		if to.Terminal() {
 			if current.ran {
 				last = current
