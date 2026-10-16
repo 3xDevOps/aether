@@ -378,10 +378,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     // Leaves Needs you only on Mark complete or Not yet; opening the run does not answer it.
     holds: (run) => run.review === 'ready' && awaitsCompletion(run),
     resolvers: (run) => [run.member_id],
-    reason: (run) =>
-      run.reason && !isTerminal(run.status) && run.reason !== 'agent reported success'
-        ? plainReason(run.reason)
-        : 'Your agent reports this task is finished',
+    reason: () => 'Your agent reports this task is finished',
     action: () => ({ kind: 'open', label: 'Review' }),
     since: (run) => run.review_changed_at,
   }),

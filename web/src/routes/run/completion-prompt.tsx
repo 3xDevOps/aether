@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { runCommands, useCommandRunner } from '@/lib/commands'
-import { plainReason } from '@/lib/reasons'
+import { api } from '@/lib/api'
+import { runCommands, useCommandRunner, type Command } from '@/lib/commands'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
-import { isTerminal, type RunRecord } from '@/store/runs'
+import { messageScopeKey, useMessageList } from '@/store/messages'
+import type { RunRecord } from '@/store/runs'
 
 /** Asks the owner to accept a reported success; Not yet hides it until the agent reports success again. */
 export function CompletionPrompt({ run, className }: { run: RunRecord; className?: string }) {
@@ -13,13 +14,26 @@ export function CompletionPrompt({ run, className }: { run: RunRecord; className
   const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
   const cap = useCapability()
   const self = useSelf()
-  const perform = useCommandRunner()
   if (run.review !== 'ready') return null
   const commands = runCommands({ run, paused, cap, members, self, steerOthers })
   const complete = commands.find((command) => command.id === 'complete')
   const later = commands.find((command) => command.id === 'not-yet')
   if (!complete || !later) return null
-  const summary = run.reason && run.reason !== 'agent reported success' && !isTerminal(run.status) ? plainReason(run.reason) : undefined
+  return <Ask run={run} complete={complete} later={later} className={className} />
+}
+
+function Ask({ run, complete, later, className }: { run: RunRecord; complete: Command; later: Command; className?: string }) {
+  const perform = useCommandRunner()
+  const scope = { kind: 'run', workspaceID: run.workspace_id, runID: run.id } as const
+  useMessageList(useStore, api, scope)
+  const summary = useStore((s) => {
+    const ids = s.messageLists[messageScopeKey(scope)]?.ids ?? []
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const message = s.runMessages[ids[i]]
+      if (message?.kind === 'report' && message.from_run_id === run.id && message.outcome === 'success') return message.summary || message.body
+    }
+    return undefined
+  })
   return (
     <div className={className}>
       <Callout

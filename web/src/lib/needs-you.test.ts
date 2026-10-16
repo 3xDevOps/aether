@@ -169,9 +169,9 @@ const rows: {
   },
   {
     id: 'ready',
-    run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'finished', reason: 'checkout rewritten', review: 'ready' }),
+    run: record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'finished', reason: 'agent reported success', review: 'ready' }),
     ctx: {},
-    reason: 'checkout rewritten',
+    reason: 'Your agent reports this task is finished',
     state: 'ready',
   },
   {

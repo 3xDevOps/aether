@@ -41,11 +41,17 @@ beforeEach(() => {
 })
 
 describe('CompletionPrompt', () => {
-  it('asks while the reported success is ready, with the agent’s summary', () => {
-    seed({ reason: 'checkout rewritten and tested' })
+  it('asks while the reported success is ready, with the agent’s summary', async () => {
+    seed()
+    vi.mocked(api.coordMessagesList).mockResolvedValueOnce({
+      messages: [{
+        id: 'msg_report', workspace_id: 'wsp_1', from_run_id: 'run_1', to_run_id: '', kind: 'report',
+        body: 'Outcome: success', outcome: 'success', summary: 'checkout rewritten and tested', created_at: '2026-08-14T10:10:00Z',
+      }],
+    })
     render(<Prompt />)
+    await waitFor(() => expect(banner()?.textContent).toContain('checkout rewritten and tested'))
     expect(banner()?.textContent).toContain('Your agent reports this task is finished. Mark it complete?')
-    expect(banner()?.textContent).toContain('checkout rewritten and tested')
     expect(screen.getByRole('button', { name: 'Mark complete' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Not yet' })).toBeDefined()
   })

@@ -1419,7 +1419,7 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you` with an Enhanced `turn interrupted` or `turn ended: <stop reason>` reason | owner | Turn interrupted · reply to continue / Stopped: the reply reached its token limit · reply to continue, with **Reply** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
-| `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished / the agent's summary |
+| `review` `ready` on a live `finished` or a `completed` run (labelled Ready for review) | owner | Your agent reports this task is finished |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
@@ -1531,8 +1531,9 @@ change it, so the run stays in Needs you. While the open run is `ready`,
 `CompletionPrompt` (`src/routes/run/completion-prompt.tsx`) shows an inline
 callout above the Session composer, or at the foot of any other run view:
 "Your agent reports this task is
-finished. Mark it complete?", the agent's summary when its reason carries
-one, **Mark complete** and **Not yet**. Both are run commands
+finished. Mark it complete?", the summary of the run's latest success
+report when its agent messages are loaded, **Mark complete** and **Not
+yet**. Both are run commands
 (`src/lib/commands.ts`) that follow [Actions](#actions): **Mark complete**
 sends `run.review {action: "complete"}` and predicts `review` `accepted`
 and, for a live run, status `completed`; **Not yet** sends `action:
