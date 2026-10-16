@@ -139,11 +139,11 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await box.fill('release background')
   await box.press('Enter')
   await expect(log.getByText('background done: mock-held-task')).toBeVisible({ timeout: 30_000 })
-  await expect.poll(() => status(), { timeout: 30_000 }).toMatchObject({ status: 'needs-attention', reason: 'agent idle' })
+  await expect.poll(() => status(), { timeout: 30_000 }).toMatchObject({ status: 'needs-attention', reason: 'turn ended without a report' })
   // The release turn, the task's end and its follow-up turn settle once.
   await page.waitForTimeout(3_000)
   const parked = (await statuses()).filter((event) => event.seq > released && event.payload.to === 'needs-attention')
-  expect(parked.map((event) => event.payload.reason)).toEqual(['agent idle'])
+  expect(parked.map((event) => event.payload.reason)).toEqual(['turn ended without a report'])
   await expect(header.getByText('Turn ended without a report')).toBeVisible()
   await expect(runs.getByRole('button', { name: /^Waiting · / })).toBeVisible()
 
