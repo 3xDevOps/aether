@@ -5051,8 +5051,10 @@ update Aether.`, and the CLI prompt is `src/components/app-update-banner.tsx`
 instead: the new version, the running one, and a button that asks the shell's
 `window.aetherAndroid` bridge (`android/.../UpdateBridge.kt`) to open the page
 that installs it. `updateSource()` answers `play` for a Google Play install,
-whose button is **Open Google Play** beside a **Release notes** link, and
-`release` for anything else, whose button is **Open release page**.
+whose button is **Open Google Play** beside a **Release notes** link,
+`release` for anything else, whose button is **Open release page**, and
+`debug` for a debuggable build, which gets the same button and says the
+release APK cannot install over it.
 `openUpdate(tag)` returns `""` once the page opened, or the shell's own error,
 which the prompt shows verbatim. It has no **Update now**: nothing is
 downloaded or installed from the dashboard. Dismissal is the CLI prompt's,

@@ -3,6 +3,7 @@ package io.aether.android
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.webkit.JavascriptInterface
 
@@ -17,10 +18,14 @@ import android.webkit.JavascriptInterface
  */
 class UpdateBridge(private val activity: Activity) {
     private val source = installSourceFor(installerPackage(activity))
+    private val debuggable = activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
-    /** `play` or `release`. */
+    /**
+     * `play`, `release`, or `debug` for a `make android-debug` build, which
+     * the release APK cannot install over: its signing key differs.
+     */
     @JavascriptInterface
-    fun updateSource(): String = source.name.lowercase()
+    fun updateSource(): String = if (debuggable) "debug" else source.name.lowercase()
 
     /** Opens the page that updates to [tag]; returns why it could not, or "" when it opened. */
     @JavascriptInterface

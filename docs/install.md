@@ -928,11 +928,16 @@ before):
 
 - Installed by Google Play: **Open Google Play** opens the app's listing in
   Play (`market://details?id=io.aether.android`), or in the browser when no
-  app takes `market://`. **Release notes** opens the GitHub release.
+  app takes `market://`. **Release notes** opens the GitHub release. The
+  notice follows the GitHub release, so Play may not offer the update until
+  that release reaches Play.
 - Installed any other way, such as the APK from a release page: **Open
   release page** opens that release in the browser. Download
   `aether-android.apk` and open it; it installs over the app and keeps its
   data, because every release is signed with the same key.
+- A `make android-debug` build: **Open release page** too, but the release
+  APK is signed with another key and Android will not install it over the
+  debug app. Uninstall it first, which deletes its data, or rebuild.
 
 If neither page opens, the dialog shows Android's own error. Dismissing the
 prompt silences that version only, on this phone; the next release shows it

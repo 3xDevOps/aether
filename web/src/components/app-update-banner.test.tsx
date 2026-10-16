@@ -68,6 +68,15 @@ describe('the Android app update notice', () => {
     expect(phone.aetherAndroid.openUpdate).toHaveBeenCalledWith('v1.3.0')
   })
 
+  test('a debug build is told the release APK will not install over it', async () => {
+    phone.aetherAndroid = bridge('debug')
+    await show(packagedStatus())
+
+    expect(screen.getByText(/signed with another key/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open release page' }))
+    expect(phone.aetherAndroid.openUpdate).toHaveBeenCalledWith('v1.3.0')
+  })
+
   test('a page that would not open shows the shell’s own error', async () => {
     const why = 'could not open market://details?id=io.aether.android: No Activity found to handle Intent'
     phone.aetherAndroid = bridge('play', why)

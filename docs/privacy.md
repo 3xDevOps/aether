@@ -77,8 +77,9 @@ device-to-device transfer (`allowBackup=false` and
   encrypted end to end between the phone and your server. The GitHub sign-in
   happens in the phone's browser, under GitHub's own policy. While the
   dashboard is open, the CLI asks `github.com` for the tag of the newest
-  Aether release, at most once an hour, so the dashboard can say an update
-  exists; GitHub sees the phone's IP address and that request, nothing about
+  Aether release so the dashboard can say an update exists. An answer is
+  reused for an hour; a failed request is retried after five minutes at the
+  soonest; GitHub sees the phone's IP address and that request, nothing about
   you or your server. It never downloads the release: you install it from
   Google Play or the release page. The CLI resolves host names with plain DNS over port 53 to the active
   network's DNS servers, bypassing Android Private DNS (DNS-over-TLS), so that

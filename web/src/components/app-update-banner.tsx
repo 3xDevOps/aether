@@ -22,7 +22,7 @@ import { useStore } from '@/store'
 
 /** `window.aetherAndroid`, android/app/src/main/kotlin/io/aether/android/UpdateBridge.kt. */
 export interface AetherAndroid {
-  /** `play` for a Google Play install, `release` for anything else. */
+  /** `play` for a Google Play install, `debug` for a debug build, `release` for anything else. */
   updateSource(): string
   /** Opens the page that updates to the tag; "" once it opened, else why not. */
   openUpdate(tag: string): string
@@ -39,7 +39,8 @@ export function AppUpdateBanner({ update }: { update: UpdateStatus }) {
   if (!update.cli.update_available || !latest || dismissed === latest) return null
 
   const bridge = androidBridge()
-  const play = bridge?.updateSource() === 'play'
+  const source = bridge?.updateSource()
+  const play = source === 'play'
   const open = () => {
     try {
       setError(bridge?.openUpdate(latest) ?? '')
@@ -62,8 +63,10 @@ export function AppUpdateBanner({ update }: { update: UpdateStatus }) {
           {!bridge
             ? packagedLine(packaged)
             : play
-              ? 'Google Play installs it. Nothing is downloaded until you update there.'
-              : 'Download aether-android.apk from the release page and open it to install over this app. Your settings and sign-in stay.'}
+              ? 'Google Play installs it once the release reaches Play; until then Play offers no update. Nothing is downloaded until you update there.'
+              : source === 'debug'
+                ? 'This is a debug build. The release APK is signed with another key, so Android will not install it over this app: uninstall this one first, which deletes its data, or rebuild with make android-debug.'
+                : 'Download aether-android.apk from the release page and open it to install over this app. Your settings and sign-in stay.'}
         </p>
         {error && <p className={cn(verbatim, 'text-state-failed')}>{error}</p>}
       </div>
