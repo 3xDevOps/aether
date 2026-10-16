@@ -920,18 +920,21 @@ Removal also repairs the selection and open route before any refresh awaits.
   and a successful hydration clears. A subscription the server acknowledged
   also clears it, including a replay reconnect that skips hydration, unless
   a hydration retry is pending: then the retry runs at once and its result
-  decides, because a live stream does not prove reads reach the server.
-  A failure recorded by a connection that was torn down (a retry, or a
-  switch to another server) is dropped. While `unreachable` is set the
-  footer says `Unreachable` rather than `Live`, and the connection line
-  names the layer that failed - client to edge, authorization, server
-  registration, or end-to-end - with the server id and the next command.
-  When the gateway's error carries `data.edge_path`, its `layer`,
-  `server_id` and `edge` are used as given, and its `online` list, sent on
-  a server-registration failure, is named as the servers the edge does see
-  online beside the server id the dashboard is linked to. Each failure is stored with the
-  server id it was measured on, and is not shown once the link points at
-  another server.
+  decides, because a live stream does not prove reads reach the server. A
+  failure recorded by a connection that was torn down (a retry, or a switch
+  to another server) is dropped. While `unreachable` is set the footer says
+  `Unreachable` rather than `Live`, and the connection line names the layer
+  that failed - client to edge, authorization, server registration, or
+  end-to-end - with the server id and the next command. When the gateway's
+  error carries `data.edge_path`, its `layer`, `server_id` and `edge` are
+  used as given, and its `online` list, sent on a server-registration
+  failure, is named as the servers the edge does see online beside the
+  server id the dashboard is linked to. Each failure is stored with the
+  server id it was measured on. A failure measured on another server than
+  the linked one means the gateway followed a re-link (`aether link
+  --from-edge`): the dashboard re-reads the link status, resets the
+  connection as for any server switch, and shows the failure under the new
+  server's id.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop

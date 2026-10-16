@@ -109,10 +109,37 @@ function edgeHop(detail: string, refusal: EdgeRefusal | undefined, store: RootSt
 
 /** Records a failed request, unless it belongs to a connection already
  * torn down: a server switch must not inherit the old server's failure. */
-function noteUnreachable(store: RootStore, err: unknown, signal: AbortSignal | undefined): void {
+function noteUnreachable(store: RootStore, client: Api, err: unknown, signal: AbortSignal | undefined): void {
   if (signal?.aborted) return
   const data = err instanceof ApiError ? err.data : undefined
-  store.getState().setUnreachable(classifyUnreachable(err, store), data?.refusal?.approval_code, measuredAt(store, data))
+  recordUnreachable(store, client, classifyUnreachable(err, store), data?.refusal?.approval_code, measuredAt(store, data))
+}
+
+/** A failure measured on another server than the linked one means the
+ * gateway followed a re-link (`aether link --from-edge`) without telling
+ * the page. The link is re-read, and a moved link resets the connection
+ * like any server switch, keeping the failure: it is the new server's. */
+function recordUnreachable(
+  store: RootStore,
+  client: Api,
+  kind: UnreachableKind | null,
+  approvalCode: string | undefined,
+  at: Partial<EdgePath> | undefined,
+): void {
+  store.getState().setUnreachable(kind, approvalCode, at)
+  const linked = store.getState().linkStatus?.server_id
+  if (!at?.server_id || !linked || at.server_id === linked) return
+  if (!store.getState().capabilities?.local?.includes('link.status')) return
+  void client
+    .localLinkStatus()
+    .then((status) => {
+      const s = store.getState()
+      if (status.server_id === s.linkStatus?.server_id) return
+      s.setLinkStatus(status)
+      s.reconnect()
+      if (status.server_id === at.server_id) s.setUnreachable(kind, approvalCode, at)
+    })
+    .catch(ignore)
 }
 
 /** The gateway's own account of where the failure happened, or the server
@@ -260,7 +287,7 @@ export async function hydrate(
     // A failed re-hydration keeps existing data. Once the token is known dead,
     // its recorded recovery hint beats this raw failure.
     if (!store.getState().streamDead) {
-      noteUnreachable(store, err, signal)
+      noteUnreachable(store, client, err, signal)
       s.setHydrated(s.hydrated, err instanceof Error ? err.message : String(err))
     }
     return false
@@ -460,7 +487,7 @@ export async function applyEvent(
       try {
         store.getState().setWorkspaces(await client.workspaceListFull())
       } catch (err) {
-        noteUnreachable(store, err, signal)
+        noteUnreachable(store, client, err, signal)
         return false
       }
       break
@@ -496,7 +523,7 @@ export async function applyEvent(
           // A live delete publishes its final status before run.deleted, so
           // the local removal can make this status fetch return 404.
           if (!(err instanceof ApiError && err.status === 404)) {
-            noteUnreachable(store, err, signal)
+            noteUnreachable(store, client, err, signal)
             return false
           }
         }
@@ -510,7 +537,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 404)) {
-            noteUnreachable(store, err, signal)
+            noteUnreachable(store, client, err, signal)
             return false
           }
         }
@@ -538,7 +565,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 404)) {
-            noteUnreachable(store, err, signal)
+            noteUnreachable(store, client, err, signal)
             return false
           }
         }
@@ -553,7 +580,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -566,7 +593,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -579,7 +606,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -591,7 +618,7 @@ export async function applyEvent(
         store.getState().upsertRun(await client.runGet(ev.run_id))
       } catch (err) {
         if (!(err instanceof ApiError && err.status === 404)) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -614,7 +641,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -659,7 +686,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -692,7 +719,7 @@ export async function applyEvent(
         try {
           store.getState().upsertRun(await client.runGet(ev.run_id))
         } catch (err) {
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -712,7 +739,7 @@ export async function applyEvent(
           store.getState().upsertRun(await client.runGet(runID))
         } catch (err) {
           // Left unresolved so the stream recovers; else the attention badge stays stale.
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           return false
         }
       }
@@ -902,7 +929,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
           })
         } catch (err) {
           if (signal.aborted || generation !== missionGeneration) return
-          noteUnreachable(store, err, signal)
+          noteUnreachable(store, client, err, signal)
           void load()
           return
         }
@@ -1003,7 +1030,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
         if (signal.aborted) return
         const s = store.getState()
         const refusal = data?.refusal
-        s.setUnreachable(kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code, measuredAt(store, data))
+        recordUnreachable(store, client, kind === 'server' ? edgeHop(detail, refusal, store) ?? kind : kind, refusal?.approval_code, measuredAt(store, data))
         // A refused subscribe never goes live, so nothing else records this.
         // A dead token already recorded is more precise than a dead hop.
         if (!s.hydrated && !s.streamDead) s.setHydrated(false, detail)
@@ -1051,7 +1078,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
       // The handshake status never reaches the stream code, so this stays the
       // reason while the stream keeps retrying.
       const { refused } = probe
-      store.getState().setUnreachable(refusalKind(refused, store), refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
+      recordUnreachable(store, client, refusalKind(refused, store), refused.data?.refusal?.approval_code, measuredAt(store, refused.data))
       // The client prefixes its own request path; the gateway's words are
       // what the page shows.
       store.getState().setHydrated(false, refused.message.replace(/^[^\s:]+: /, ''))

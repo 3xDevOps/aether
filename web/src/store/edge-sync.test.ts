@@ -231,6 +231,25 @@ describe('the connection state on a link through an edge', () => {
     stop()
   })
 
+  it('follows a re-link that a failure reveals, and shows the failure for the new server', async () => {
+    const relinked = { ...edgeLink, server_id: 'srvnew' }
+    let link = edgeLink
+    const client = fakeApi({ ...localEdge, localLinkStatus: vi.fn(async () => link) })
+    const { store, stop } = await live(client)
+    const epoch = store.getState().connectionEpoch
+    link = relinked
+
+    const path = { layer: 'server-registration', server_id: 'srvnew', edge: 'edge.example.test' }
+    ;(await reopen()).onmessage?.({ data: JSON.stringify({ ...notConnected, data: { ...notConnected.data, edge_path: path } }) })
+
+    await vi.waitFor(() => expect(store.getState().linkStatus?.server_id).toBe('srvnew'))
+    expect(store.getState().connectionEpoch).toBe(epoch + 1)
+    expect(store.getState().hydrated).toBe(false)
+    expect(store.getState().unreachable).toBe('edge-server')
+    expect(store.getState().unreachableAt).toEqual(path)
+    stop()
+  })
+
   it('drops a failure that lands after the connection was switched away', async () => {
     const pending = Promise.withResolvers<never>()
     const client = fakeApi({ ...localEdge, runGet: vi.fn(() => pending.promise) })

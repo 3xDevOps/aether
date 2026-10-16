@@ -61,15 +61,17 @@ describe('where the gateway says the failure happened', () => {
     )
   })
 
-  it('does not show a failure measured on the server linked before', () => {
+  it('shows a failure measured on another server than the linked one, named by its own id', () => {
     useStore.setState({
       connection: 'live',
-      linkStatus: { ...edgeLink, server_id: 'srvB' },
+      linkStatus: { ...edgeLink, server_id: 'srvA' },
       unreachable: 'edge-server',
-      unreachableAt: { server_id: 'srvA' },
+      unreachableAt: { server_id: 'srvB' },
     })
-    expect(renderHook(useConnectionProblem).result.current).toBeNull()
-    expect(renderHook(useConnectionWord).result.current).toBe('Live')
+    expect(renderHook(useConnectionProblem).result.current).toBe(
+      'Server registration failed · edge.example.test has no live registration for server srvB - compare with sudo aether-server edge status on that host',
+    )
+    expect(renderHook(useConnectionWord).result.current).toBe('Unreachable')
   })
 })
 

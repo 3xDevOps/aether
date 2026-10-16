@@ -4,7 +4,7 @@ import { isApprovalCode, shellQuote } from '@/lib/shell'
 import type { ConnectionState } from '@/lib/stream'
 import type { EdgePath, LinkStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { useStore, type RootState } from '@/store'
+import { useStore } from '@/store'
 import type { UnreachableKind } from '@/store/server'
 
 export const connectionLabel: Record<ConnectionState, string> = {
@@ -47,15 +47,6 @@ const pathLayer: Record<EdgePath['layer'], string> = {
   authorization: 'Authorization',
   'server-registration': 'Server registration',
   'end-to-end': 'End-to-end',
-}
-
-/** The latest failure, or null when it was measured on another server than
- * the one linked now: a re-link must not inherit the old server's failure. */
-export function currentUnreachable(s: Pick<RootState, 'unreachable' | 'unreachableAt' | 'linkStatus'>): UnreachableKind | null {
-  const measured = s.unreachableAt?.server_id
-  const linked = s.linkStatus?.server_id
-  if (measured && linked && measured !== linked) return null
-  return s.unreachable
 }
 
 /** What failed, on which server, and the command that comes next. */
@@ -125,7 +116,7 @@ function kindSentence(
  * reads reach the server, so the latest failure is shown on its own. */
 export function useConnectionProblem(): string | null {
   const connection = useStore((s) => s.connection)
-  const unreachable = useStore(currentUnreachable)
+  const unreachable = useStore((s) => s.unreachable)
   const at = useStore((s) => s.unreachableAt)
   const approvalCode = useStore((s) => s.approvalCode)
   const link = useStore((s) => s.linkStatus)
@@ -141,7 +132,7 @@ export function useConnectionProblem(): string | null {
 /** The footer's one word: a failed request is never called Live. */
 export function useConnectionWord(): string {
   const connection = useStore((s) => s.connection)
-  const unreachable = useStore((s) => currentUnreachable(s) !== null)
+  const unreachable = useStore((s) => s.unreachable !== null)
   return unreachable ? 'Unreachable' : connectionLabel[connection]
 }
 
@@ -167,6 +158,6 @@ export function ConnectionAnnouncer() {
 
 export function ConnectionDot({ className }: { className?: string }) {
   const connection = useStore((s) => s.connection)
-  const unreachable = useStore((s) => currentUnreachable(s) !== null)
+  const unreachable = useStore((s) => s.unreachable !== null)
   return <span aria-hidden className={cn('size-2 shrink-0 rounded-full', unreachable ? connectionDot.offline : connectionDot[connection], className)} />
 }
