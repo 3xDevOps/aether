@@ -80,6 +80,9 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	if event == "wake" && !claudeWaiter {
 		return hookWake(ctx, cfg)
 	}
+	if harness == "claude" && event == "Stop" && os.Getenv(coordtransport.ManagedHooksEnv) == "1" {
+		return ExitOK, nil
+	}
 	if _, err := os.Stat(cfg.Socket); errors.Is(err, fs.ErrNotExist) {
 		return ExitOK, nil
 	} else if err != nil {

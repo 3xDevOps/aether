@@ -173,6 +173,27 @@ func TestEnhancedRunHooksStaySilent(t *testing.T) {
 	}
 }
 
+// A manual claude.json copy in a home shared with Background runs re-adds
+// the inbox Stop hook, which would race the status reporter of a managed
+// launch.
+func TestClaudeStopIsInertOnlyInManagedLaunch(t *testing.T) {
+	_, db, socket, run := hookMailbox(t)
+	for _, managed := range []string{"1", ""} {
+		t.Setenv(coordtransport.ManagedHooksEnv, managed)
+		var out bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", "claude", "Stop"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out})
+		if err != nil || code != ExitOK {
+			t.Fatalf("managed=%q: hook = %d, %v", managed, code, err)
+		}
+		if blocked := strings.Contains(out.String(), `"decision":"block"`); blocked != (managed == "") {
+			t.Fatalf("managed=%q: Stop output = %q", managed, out.String())
+		}
+	}
+	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 1 {
+		t.Fatalf("Stop hook consumed mail: %d, %v", count, err)
+	}
+}
+
 func TestHookDoesNotContinueAbortedOrRepeatedStops(t *testing.T) {
 	_, db, socket, run := hookMailbox(t)
 	for _, tc := range []struct{ harness, event, input string }{

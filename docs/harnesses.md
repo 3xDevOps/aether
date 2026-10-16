@@ -410,7 +410,8 @@ except `Stop`, and the [idle-wake waiter](#claude-code-inbox-integration). No us
 settings file changes. Claude Code runs an identical command hook from several
 settings sources once, so an unmodified manual `claude.json` does not double
 the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
-too. Taskless launches keep the status-only document; Background and Enhanced
+too. A manual copy's `Stop` hook does nothing inside a managed launch, which
+sets `AETHER_MANAGED_HOOKS=1`. Taskless launches keep the status-only document; Background and Enhanced
 launches load neither.
 
 Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
@@ -520,8 +521,12 @@ refresh.
 
 The managed document leaves out the inbox `Stop` hook. Claude Code runs
 `Stop` hooks in parallel, so its block for unread mail would continue a turn
-the status reporter already ended; the waiter below carries that mail into a
-new turn instead. `SessionStart` has no matcher, so it fires at startup,
+the status reporter already ended. Instead, at turn end the waiter below waits
+for mail no hook has announced and wakes a new turn for it. The `Stop` hook of
+a manual `claude.json` copy exits without output when `AETHER_MANAGED_HOOKS=1`,
+so it does nothing inside a managed launch and still checks mail at turn end
+in a Background `claude -p` run that shares the same `~/.claude`.
+`SessionStart` has no matcher, so it fires at startup,
 resume, compaction and clear. The launch's system prompt carries the role
 card, so the hook prints only the pending notices, all of them again after
 compaction or clear.
