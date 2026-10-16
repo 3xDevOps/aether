@@ -299,7 +299,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
-	activity, err := s.activityLocked(ctx, run, workspace, s.runs[run], to, public)
+	activity, err := s.activityLocked(ctx, run, workspace, s.runs[run], to, reason)
 	if err != nil {
 		return err
 	}
@@ -399,6 +399,7 @@ type sidecar struct {
 	AgentTools          bool                     `json:"agent_tools,omitempty"`
 	AgentUsageLimit     bool                     `json:"agent_usage_limit,omitempty"`
 	TurnStartedAt       *time.Time               `json:"turn_started_at,omitempty"`
+	BetweenTurns        bool                     `json:"between_turns,omitempty"`
 	PendingInputs       []domain.RunInputRequest `json:"pending_inputs,omitempty"`
 	InputStartedAt      *time.Time               `json:"input_started_at,omitempty"`
 	InputPublishPending bool                     `json:"input_publish_pending,omitempty"`
@@ -475,6 +476,7 @@ func (e *supervised) sidecar() sidecar {
 		AgentTools:          e.agentReport.Tools,
 		AgentUsageLimit:     e.agentReport.UsageLimit,
 		TurnStartedAt:       turnStartedAt,
+		BetweenTurns:        e.betweenTurns,
 		PendingInputs:       pendingInputs,
 		InputStartedAt:      inputStartedAt,
 		InputPublishPending: inputPublishPending,

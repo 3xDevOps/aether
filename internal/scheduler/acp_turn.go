@@ -57,6 +57,7 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	case st.Working && st.Reason == "background":
 		report.Reason, report.Tools = agentstatus.BackgroundReason(st.Tasks), st.Tasks > 0 && st.Agents == 0
 	case st.Working:
+		report.TurnStart = true
 	case st.Failed != nil:
 		// Not a turn end: a waiting outcome report must not finish the run
 		// on a turn that failed.

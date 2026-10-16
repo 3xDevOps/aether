@@ -103,9 +103,9 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 	unshows := parks && !showsIdle && reason != entry.idleReason &&
 		entry.idleShown && entry.asks() && entry.launchMode == domain.LaunchACP
 	now := time.Now().UTC()
-	turnStarts := execution.State == agentstatus.Working && entry.agentReport.State != agentstatus.Working
+	turnStarts := execution.State == agentstatus.Working && (report.TurnStart || entry.agentReport.State != agentstatus.Working)
 	var oldSidecar sidecar
-	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows
+	persist := inputsChanged || reportChanged || showsIdle || clearsIdle || unshows || turnStarts
 	if persist {
 		oldSidecar = entry.sidecar()
 		next := oldSidecar

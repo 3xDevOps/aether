@@ -78,6 +78,9 @@ type Report struct {
 	// Subagent marks a subagent's activity: it keeps the run from stalling
 	// and says nothing about the main agent's turn.
 	Subagent bool `json:"subagent,omitempty"`
+	// TurnStart marks a Working report sent as a prompt starts a turn, also
+	// one that arrives while the agent already works.
+	TurnStart bool `json:"turn_start,omitempty"`
 }
 
 const ReporterCommand = coordtransport.BinaryPath
@@ -152,7 +155,7 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 	}
 	switch hook.Event {
 	case "UserPromptSubmit":
-		return Report{State: Working}, true
+		return Report{State: Working, TurnStart: true}, true
 	case "SubagentStart":
 		return Report{Subagent: true}, true
 	case "PreToolUse":

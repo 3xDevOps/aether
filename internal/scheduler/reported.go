@@ -26,7 +26,7 @@ const (
 	reportedFailureReason         = "agent reported failure"
 	reportedSuccessRetainedReason = reportedSuccessReason + "; retained container"
 	reportedFailureRetainedReason = reportedFailureReason + "; retained container"
-	blockedReasonPrefix           = "blocked: "
+	blockedReasonPrefix           = domain.BlockedReasonPrefix
 	needsInputReasonPrefix        = "needs input: "
 	exitedCompletedReason         = "agent exited; results committed"
 	exitedFailedReasonPrefix      = "agent exited "

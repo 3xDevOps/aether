@@ -124,11 +124,12 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"waiting reported", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
-			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "waiting on 3 workers", time.Now()); err != nil {
+			// The summary is the agent's text, never a reason Aether wrote.
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "blocked: on 3 workers", time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			report(idle)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 3 workers"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "blocked: on 3 workers"},
 		{"the wait outlived three stall thresholds", func() {
 			// A live worker would hold the run in waiting-agents again.
 			integrator.workers.Store(true)
@@ -140,7 +141,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			integrator.workers.Store(false)
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
-			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "waiting on 2 workers", time.Now()); err != nil {
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "waited 2m on 2 workers", time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			e.sched.mu.Lock()
@@ -149,7 +150,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 2 workers"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waited 2m on 2 workers"},
 		{"background subagents held after the turn", func() {
 			report(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(2)})
 		}, domain.RunRunning, domain.ActivityWaitingAgents, agentstatus.BackgroundReason(2)},
@@ -229,6 +230,40 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	e.sched.mu.Unlock()
 	if !refreshed {
 		t.Fatal("a subagent's activity did not count as the run's")
+	}
+}
+
+// TestEveryTurnStartIsRecorded: worker mail is new to an integrator when it
+// arrived after its last turn started, so a prompt that starts a turn while
+// the agent still works counts as a start too.
+func TestEveryTurnStartIsRecorded(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	started := func() time.Time {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		return e.sched.runs[run.ID].turnStartedAt
+	}
+	prompt := agentstatus.Report{State: agentstatus.Working, TurnStart: true}
+	if err := e.sched.ReportAgentState(ctx, run.ID, prompt); err != nil {
+		t.Fatal(err)
+	}
+	first := started()
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Working}); err != nil {
+		t.Fatal(err)
+	}
+	if !started().Equal(first) {
+		t.Fatal("a tool call inside the turn moved its start")
+	}
+	time.Sleep(time.Millisecond)
+	if err := e.sched.ReportAgentState(ctx, run.ID, prompt); err != nil {
+		t.Fatal(err)
+	}
+	if first.IsZero() || !started().After(first) {
+		t.Fatalf("turn starts %v then %v, want the second prompt to move it", first, started())
 	}
 }
 

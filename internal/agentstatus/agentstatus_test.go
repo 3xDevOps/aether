@@ -55,6 +55,9 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 			t.Errorf("uncorrelated callback %s produced %+v", payload, got)
 		}
 	}
+	if got, ok := FromClaudeHook([]byte(`{"hook_event_name":"UserPromptSubmit","session_id":"root"}`)); !ok || got.State != Working || !got.TurnStart {
+		t.Errorf("a prompt must start a turn: %+v", got)
+	}
 	for _, event := range []string{"Stop", "StopFailure"} {
 		got, ok := FromClaudeHook([]byte(`{"hook_event_name":"` + event + `","session_id":"root"}`))
 		if !ok || got.State != Idle || len(got.InputUpdates) != 0 {

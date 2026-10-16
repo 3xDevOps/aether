@@ -658,7 +658,10 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				// the next quiet threshold parks it as a stall again - and
 				// a restart must not resurrect the report this clears.
 				old := e.sidecar()
-				oldParked, oldActivity := e.parkedAt, e.postParkActivity
+				oldParked, oldActivity, oldTurn := e.parkedAt, e.postParkActivity, e.turnStartedAt
+				// The resumed activity is the next turn's start: a turn-end
+				// reporter sends none.
+				e.turnStartedAt = activity
 				reason := "activity resumed"
 				if heldByTasks(e.agentReport) {
 					// The tasks still run, and the session sends no new
@@ -678,7 +681,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				}
 				if err != nil {
 					e.agentReport = old.agentReport()
-					e.parkedAt, e.postParkActivity = oldParked, oldActivity
+					e.parkedAt, e.postParkActivity, e.turnStartedAt = oldParked, oldActivity, oldTurn
 					e.idleReason, e.idleShown = old.IdleReason, old.IdleShown
 					err = errors.Join(err, s.writeSidecar(old))
 				}

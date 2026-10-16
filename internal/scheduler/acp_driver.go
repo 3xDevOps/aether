@@ -519,11 +519,13 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	if task == "" && systemPrompt == "" && (fresh || !acphost.Answered(sess.Log())) {
 		r.instructions = d.s.runInstructions(entry.missionAssigned, oneShot)
 	}
-	d.setRun(runID, r)
-	go d.watch(entry, r)
 	if !oneShot {
+		// Before the watch starts, so its first turn state is not
+		// overwritten.
 		d.reconnected(entry)
 	}
+	d.setRun(runID, r)
+	go d.watch(entry, r)
 	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
 		c.svc.EnhancedSessionOpened(ctx, runID)
 	}

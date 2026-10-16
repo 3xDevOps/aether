@@ -91,30 +91,50 @@ func (e *supervised) waits() bool {
 	return strings.HasPrefix(e.idleReason, waitingReasonPrefix)
 }
 
-// activityLocked derives the activity of run moving to status to with the
-// public reason. entry is the run's supervised state, nil when it has none.
-// Caller holds s.mu.
+// asksMember reports whether a pending input request waits on a member. A
+// Background run has no terminal to answer a question in. The caller must
+// hold s.mu.
+func (e *supervised) asksMember() bool {
+	for _, request := range e.pendingInputs {
+		if request.Kind == "permission" || e.launchMode != domain.LaunchHeadless {
+			return true
+		}
+	}
+	return false
+}
+
+// activityLocked derives the activity of run moving to status to with
+// reason, raw or public. entry is the run's supervised state, nil when it
+// has none. Caller holds s.mu.
 func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, entry *supervised, to domain.RunStatus, reason string) (domain.RunActivity, error) {
 	if !to.Live() {
 		return "", nil
 	}
+	// A waiting summary is the agent's free text: none of it is read as a
+	// reason Aether wrote.
+	waiting := strings.HasPrefix(strings.TrimSpace(reason), waitingReasonPrefix) ||
+		(entry != nil && entry.waits() && publicRunStatusReason(reason) == publicRunStatusReason(entry.idleReason))
+	written := publicRunStatusReason(reason)
+	if waiting {
+		written = ""
+	}
 	parked := to == domain.RunNeedsAttention
-	stalled := strings.HasPrefix(reason, stalledReasonPrefix)
-	waitedOut := strings.HasPrefix(reason, waitedReasonPrefix)
+	stalled := strings.HasPrefix(written, stalledReasonPrefix)
+	waitedOut := strings.HasPrefix(written, waitedReasonPrefix)
 	f := activityFacts{
-		status:       to,
-		disconnected: disconnectedReason(reason),
-		human:        parked && humanReason(reason),
-		failed:       parked && failedReason(reason),
-		finished:     parked && reason == reportedSuccessReason,
+		status:        to,
+		disconnected:  disconnectedReason(written),
+		human:         parked && humanReason(written),
+		failed:        parked && failedReason(written),
+		finished:      parked && written == reportedSuccessReason,
+		waitingAgents: waiting,
 	}
 	if entry != nil {
 		held := !stalled && heldByTasks(entry.agentReport) && (!entry.acp || entry.betweenTurns)
 		f.disconnected = f.disconnected || (entry.agentReport.State == agentstatus.Idle && disconnectedReason(entry.agentReport.Reason))
-		f.human = f.human || entry.atPrompt() || (entry.idleShown && humanReason(entry.idleReason)) ||
+		f.human = f.human || entry.asksMember() || (entry.idleShown && !entry.waits() && humanReason(entry.idleReason)) ||
 			(parked && entry.agentReport.State == agentstatus.Idle && entry.agentReport.UsageLimit)
-		f.waitingAgents = !waitedOut && ((entry.waits() && reason == publicRunStatusReason(entry.idleReason)) ||
-			(held && !entry.agentReport.Tools))
+		f.waitingAgents = !waitedOut && (waiting || (held && !entry.agentReport.Tools))
 		f.waitingTools = held && entry.agentReport.Tools
 	}
 	if !f.human {
