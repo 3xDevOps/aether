@@ -917,10 +917,33 @@ gateway exits, until the restarted gateway prints its new URL. Pages the
 dashboard opens in a new window, such as the sign-in verification page, open
 in the phone's browser.
 
-The bundled CLI never checks GitHub for releases (`AETHER_PACKAGED` is set to
-`Android app`): it updates when the app does. The dashboard's update notice
-says `Updates come from the Android app: install its new version to update
-Aether.`, and `aether update` refuses with `this aether is part of the Android
+**Updates.** The app never downloads or installs an update itself; you do,
+from the page it opens. The bundled CLI is built from the same tag as the
+app, so in Edge mode its release check is the app's: when a newer release is
+out, the sidebar shows `Aether <version> is available · Update`, and
+**Update** opens the Updates dialog with the new version, the one you run and
+one button. Which button depends on where Android says the app came from
+(`getInstallSourceInfo` on Android 11 and newer, `getInstallerPackageName`
+before):
+
+- Installed by Google Play: **Open Google Play** opens the app's listing in
+  Play (`market://details?id=io.aether.android`), or in the browser when no
+  app takes `market://`. **Release notes** opens the GitHub release.
+- Installed any other way, such as the APK from a release page: **Open
+  release page** opens that release in the browser. Download
+  `aether-android.apk` and open it; it installs over the app and keeps its
+  data, because every release is signed with the same key.
+
+If neither page opens, the dialog shows Android's own error. Dismissing the
+prompt silences that version only, on this phone; the next release shows it
+again. A check that fails, offline for example, shows nothing and is retried
+on the dashboard's next read (every half hour, and when you return to the
+app). Tailscale mode shows the server's dashboard, which runs no release
+check for the app, so update it from the release page or Play as above.
+
+The app does not hold `REQUEST_INSTALL_PACKAGES`, and the CLI never replaces
+itself (`AETHER_PACKAGED` is set to `Android app`): `aether update` and the
+gateway's `update.apply` refuse with `this aether is part of the Android
 app, which installs its updates; update the Android app instead`. The gateway
 also omits the verbs that need a git checkout, a service manager or local
 agents ([local-gateway.md](local-gateway.md#get-apiv1capabilities)).

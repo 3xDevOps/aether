@@ -96,6 +96,12 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 // dialog on screen with the password authorizing nothing. Closing the tab
 // or the app cancels the request, which kills the wait.
 func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Error) {
+	// Refused from the config, before any lookup: a packaged binary is
+	// replaced only by its app, whether or not GitHub answers.
+	if app := g.cfg.Packaged; app != "" {
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "this aether is part of the " + app + ", which installs its updates; update the " + app + " instead"}
+	}
 	// One install at a time: a second click from another tab while the
 	// dialog is up would stack a second dialog and a second copy. Claimed
 	// before the release lookup, so the loser does not pay for a dial.
@@ -109,9 +115,6 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 		return nil, perr
 	}
 	switch {
-	case check.Packaged != "":
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
-			Message: "this aether is part of the " + check.Packaged + ", which installs its updates; update the " + check.Packaged + " instead"}
 	case check.Dev:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "this is a dev build with no release to update to; rebuild it with `make build`"}

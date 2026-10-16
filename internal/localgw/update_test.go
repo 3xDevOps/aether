@@ -193,10 +193,24 @@ func TestUpdateApplyRefusesDevBuild(t *testing.T) {
 	}
 }
 
+// TestUpdateApplyRefusesPackagedBuild covers the Android app's sidecar: the
+// APK is the update unit, so the gateway refuses before any release lookup,
+// even with a newer release published and GitHub unreachable.
 func TestUpdateApplyRefusesPackagedBuild(t *testing.T) {
 	pinVersion(t)
 	t.Setenv(selfupdate.PackagedEnv, "Android app")
-	g := updateGateway(t, &verbStubBackend{}, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("a packaged build must not look up a release to install")
+	}))
+	t.Cleanup(srv.Close)
+	g, err := New(Config{
+		Backend:  &verbStubBackend{},
+		Update:   selfupdate.NewChecker(srv.URL, time.Hour),
+		Packaged: "Android app",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	stubApply(t, func(context.Context, string, string) ([]string, error) {
 		t.Fatal("a packaged build must not reach the binary swap")
 		return nil, nil
@@ -207,6 +221,35 @@ func TestUpdateApplyRefusesPackagedBuild(t *testing.T) {
 	want := "this aether is part of the Android app, which installs its updates; update the Android app instead"
 	if perr.Code != protocol.CodeInvalidState || perr.Message != want {
 		t.Fatalf("error = %d %q, want %d %q", perr.Code, perr.Message, protocol.CodeInvalidState, want)
+	}
+}
+
+// TestUpdateCheckReportsReleaseToPackagedBuild is what the Android app's
+// update notice reads: the newest release and its page, with no asset to
+// download and no self-update.
+func TestUpdateCheckReportsReleaseToPackagedBuild(t *testing.T) {
+	pinVersion(t)
+	t.Setenv(selfupdate.PackagedEnv, "Android app")
+	checker, _ := releaseChecker(t)
+	g, err := New(Config{Backend: &verbStubBackend{}, Update: checker, Packaged: "Android app"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec := do(g, http.MethodPost, "/local/v1/update.check", "{}", true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		CLI selfupdate.Check `json:"cli"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	cli := got.CLI
+	if cli.Packaged != "Android app" || !cli.UpdateAvailable || cli.Latest != releaseTag ||
+		cli.CanSelfUpdate || cli.Asset != "" || !strings.HasSuffix(cli.ReleaseURL, "/releases/tag/"+releaseTag) {
+		t.Fatalf("cli = %+v, want %s available from its release page with no asset and no self-update", cli, releaseTag)
 	}
 }
 

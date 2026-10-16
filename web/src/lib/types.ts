@@ -1586,15 +1586,16 @@ export interface UpdateCheck {
   /** The newest release tag; empty when nothing was checked. */
   latest?: string
   update_available: boolean
-  /** The release asset for this platform, aether-<goos>-<goarch>. */
+  /** The release asset for this platform, aether-<goos>-<goarch>; absent
+   * when packaged. */
   asset?: string
   release_url?: string
   dev: boolean
   disabled: boolean
   /** False on Windows, where the binary cannot replace itself. */
   can_self_update: boolean
-  /** The app that installs and updates this CLI, e.g. "Android app"; no
-   * release check ran. */
+  /** The app that installs and updates this CLI, e.g. "Android app". The
+   * release is still reported, with no asset and no self-update. */
   packaged?: string
   checked_at: string
 }

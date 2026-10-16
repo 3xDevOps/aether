@@ -78,13 +78,14 @@ func runGUI(args []string) error {
 	// One checker serves both the startup nudge and the update verbs, so
 	// the dashboard reads the answer the banner already paid for.
 	checker := selfupdate.DefaultChecker()
+	packaged := os.Getenv(selfupdate.PackagedEnv)
 	gw, err := localgw.New(localgw.Config{
 		Port:    *port,
 		Backend: localgw.NewSSHBackend(cfg),
 		CLI:     cfg,
 		Update:  checker,
 		// The Android app sets it and installs this binary's updates.
-		Packaged: os.Getenv(selfupdate.PackagedEnv),
+		Packaged: packaged,
 		// The desktop shell spawns `aether gui --json` and restarts it,
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,
@@ -115,7 +116,11 @@ func runGUI(args []string) error {
 			openBrowser(url)
 		}
 	}
-	go nudgeUpdate(checker)
+	// Its command is one a packaged binary refuses; the app's own notice
+	// is the dashboard's.
+	if packaged == "" {
+		go nudgeUpdate(checker)
+	}
 	waitForExit(ctx, gw.Exit())
 	if code := gw.ExitCode(); code != 0 {
 		// localgw.ExitRelaunch: update.apply rebuilt the desktop app, so

@@ -23,6 +23,7 @@ import {
   bannerContent,
   bannerIcon,
   Dismiss,
+  packagedLine,
   verbatim,
 } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
@@ -41,10 +42,6 @@ import type { RunRecord } from '@/store/runs'
 import type { UpdateKind } from '@/store/ui'
 
 export const RECHECK_MS = 30 * 60 * 1000
-
-export function packagedLine(packaged: string): string {
-  return `Updates come from the ${packaged}: install its new version to update Aether.`
-}
 
 function shellIsStale(cliVersion: string | undefined): boolean {
   const shell = desktopBridge()?.shellVersion

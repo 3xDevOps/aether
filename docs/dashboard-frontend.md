@@ -5046,9 +5046,18 @@ and shell prompts read `update.check` from the local gateway, because the
 dashboard can update only the machine running `aether gui`. The server prompt
 asks the linked server about itself and appears wherever the member is an
 admin. When the gateway reports the CLI as `packaged` (the Android app), the
-CLI prompt is gone and the dialog says `Updates come from the Android app:
-install its new version to update Aether.`; the workspace repository panel
-hides **Local clone** because the gateway has no `link.repo`.
+dialog says `Updates come from the Android app: install its new version to
+update Aether.`, and the CLI prompt is `src/components/app-update-banner.tsx`
+instead: the new version, the running one, and a button that asks the shell's
+`window.aetherAndroid` bridge (`android/.../UpdateBridge.kt`) to open the page
+that installs it. `updateSource()` answers `play` for a Google Play install,
+whose button is **Open Google Play** beside a **Release notes** link, and
+`release` for anything else, whose button is **Open release page**.
+`openUpdate(tag)` returns `""` once the page opened, or the shell's own error,
+which the prompt shows verbatim. It has no **Update now**: nothing is
+downloaded or installed from the dashboard. Dismissal is the CLI prompt's,
+per version. The workspace repository panel hides **Local clone** because the
+gateway has no `link.repo`.
 
 - **Two reads.** The host reads `update.check` on mount, again every half
   hour, and again whenever the window comes back to the front, on `focus` and

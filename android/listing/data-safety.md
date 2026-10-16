@@ -82,6 +82,9 @@ The GitHub sign-in itself happens in the phone's browser, not in the app.
 Everything is encrypted in transit. Deletion: the edge's Account page, linked
 from the privacy policy. The permission `ACCESS_NETWORK_STATE` reads the
 active network's DNS servers into `resolv.conf`; they are not sent anywhere.
+In Edge mode the bundled CLI asks `github.com` for the newest release's tag at
+most once an hour; the request carries no user data, and nothing is
+downloaded or installed.
 
 ## Other declarations on the same page
 

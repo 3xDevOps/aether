@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
     private var mode = ConnectionMode.TAILSCALE
     private var gateway: Gateway? = null
+    private val updates by lazy { UpdateBridge(this) }
 
     /** The running gateway's address, once it has printed it. */
     private var gatewayUrl: String? = null
@@ -411,9 +412,17 @@ class MainActivity : ComponentActivity() {
      * bind it and serve the open page a cached chunk or new script that reads
      * its tokens. Nothing from that origin is cached, no service worker may
      * keep a copy, and the page is blanked whenever the CLI exits.
+     *
+     * The update bridge exists only there: the gateway's update notice is
+     * its one caller, and a Tailscale-mode page is the server's to write.
      */
     private fun applyModeSettings() {
         val edge = mode == ConnectionMode.EDGE
+        if (edge) {
+            web.addJavascriptInterface(updates, UpdateBridge.NAME)
+        } else {
+            web.removeJavascriptInterface(UpdateBridge.NAME)
+        }
         web.settings.cacheMode = if (edge) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
         web.settings.setSupportMultipleWindows(edge)
         ServiceWorkerController.getInstance().serviceWorkerWebSettings.apply {

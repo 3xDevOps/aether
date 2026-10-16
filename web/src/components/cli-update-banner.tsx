@@ -5,6 +5,7 @@
 // hands over the sudo command rather than a button that could not work.
 
 import { useEffect, useState } from 'react'
+import { AppUpdateBanner } from '@/components/app-update-banner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { CircleCheck, Download, LoaderCircle, TriangleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -261,7 +262,7 @@ export function CliBanner({
   // it and answers `update_available: false` from the next read onwards, so
   // what the install said has to outlive it.
   const installed = apply.name === 'done' ? apply.result.version : ''
-  if (update.cli.packaged) return null
+  if (update.cli.packaged) return <AppUpdateBanner update={update} />
   if (!current && !installed && (!update.cli.update_available || !latest)) {
     return null
   }
