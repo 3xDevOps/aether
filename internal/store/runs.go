@@ -105,13 +105,17 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp,
-		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model, swarm_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?,
+		         ? AND ? IN (SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL
+		                     UNION ALL SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL
+		                     UNION ALL SELECT initial_run_id FROM mission_create_receipts
+		                     UNION ALL SELECT run_id FROM mission_integrator_replacements))`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt,
-		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model,
+		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model, reserved, id,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -320,7 +324,22 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: update run: status changed at: %w", err)
 	}
-	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
+	changed, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("store: update run: %w", err)
+	}
+	if statusChangedAt != nil {
+		changed = *statusChangedAt
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: update run: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = recordTransition(ctx, tx, r.ID, r.Status, r.Reason, changed); err != nil {
+		return fmt.Errorf("store: update run: %w", err)
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
@@ -338,10 +357,29 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		r.Status, r.Reason, r.Status.Terminal(),
 		r.Status, r.Reason, statusChangedAt, r.ID,
 	))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
+	if errors.Is(err, ErrNotFound) {
+		return err
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: update run: commit: %w", err)
+	}
+	return nil
+}
+
+// recordTransition keeps a change of the run's status or reason in
+// run_state_transitions. The caller writes the new status in the same
+// transaction afterwards.
+func recordTransition(ctx context.Context, tx *sql.Tx, id domain.RunID, status domain.RunStatus, reason string, at int64) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, at)
+		 SELECT id, workspace_id, status, ?, ?, ? FROM runs WHERE id = ? AND (status <> ? OR reason <> ?)`,
+		status, reason, at, id, status, reason); err != nil {
+		return fmt.Errorf("record transition: %w", err)
+	}
+	return nil
 }
 
 // ClearRunWorktree clears only a checkout path that still has the expected
@@ -450,7 +488,15 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	if err != nil {
 		return fmt.Errorf("store: update run status: %w", err)
 	}
-	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: update run status: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = recordTransition(ctx, tx, id, status, reason, changed); err != nil {
+		return fmt.Errorf("store: update run status: %w", err)
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx,
 		`UPDATE runs SET status = ?, reason = ?,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
@@ -461,10 +507,16 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		status, reason, started, finished, reported, status, reason,
 		reported, byMember, status, reason, status.Terminal(),
 		status, reason, changed, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: update run status: %w", err)
+	if errors.Is(err, ErrNotFound) {
+		return err
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("store: update run status: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: update run status: commit: %w", err)
+	}
+	return nil
 }
 
 // TransferRun reassigns a run's owner. Existence of the new owner is

@@ -33,6 +33,8 @@ import type {
   GitHubRepositoryListResult,
   GitHubProbeResult,
   GitIdentity,
+  InsightsParams,
+  InsightsResult,
   Invitation,
   InvitationResult,
   LinkApplyResult,
@@ -451,6 +453,7 @@ export const api = {
   accountList: () => call<AccountAccess>('account.list'),
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
     call<UsageResult>('account.usage', params),
+  insightsGet: (params: InsightsParams) => call<InsightsResult>('insights.get', params),
   accountShare: (memberID: string) =>
     call<unknown>('account.share', { member_id: memberID }),
   accountRevoke: (memberID: string) =>

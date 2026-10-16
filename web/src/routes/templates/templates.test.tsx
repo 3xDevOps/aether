@@ -7,9 +7,9 @@ import { reopen } from '@/components/failure'
 import { TemplatesRoute } from '@/routes/templates'
 import { useStore, type RootState } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
-import { alice, fakeApi, otherWorkspace, serverInfo, template, workspace } from '@/test/fixtures'
+import { agentInfo, alice, fakeApi, otherWorkspace, serverInfo, template, workspace } from '@/test/fixtures'
 import { chooseModel } from '@/test/model'
-import { pickOption } from '@/test/select'
+import { openSelect, pickOption } from '@/test/select'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(() => 'toast'), dismiss: vi.fn() },
@@ -26,6 +26,7 @@ const schedule: Schedule = {
 }
 
 function seed(extra: Partial<RootState> = {}) {
+  vi.spyOn(api, 'agentList').mockResolvedValue([agentInfo({ display_name: 'Claude Code' }), agentInfo({ name: 'copilot', display_name: 'GitHub Copilot CLI' })])
   vi.spyOn(api, 'agentModels').mockResolvedValue({ models: [], source: 'none' })
   useStore.setState({
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
@@ -147,6 +148,35 @@ describe('templates view', () => {
     expect(client.templateSave).toHaveBeenCalledWith(
       expect.objectContaining({ name: `${template.name} copy`, task: template.task, harness: template.harness, mode: template.mode }),
     )
+  })
+
+  it('lists the agents the server reports and keeps a saved harness it omits', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []), templateList: vi.fn(async () => [{ ...template, harness: 'custom' }]) })
+    seed()
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    await rowAction('Edit')
+    const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
+    const agent = dialog.getByLabelText(/^Agent$/)
+    expect(agent.textContent).toContain('custom')
+    await openSelect(agent)
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Claude Code', 'GitHub Copilot CLI', 'custom'])
+  })
+
+  it('offers the deployment custom agent and a retry when the agent list fails', async () => {
+    const client = fakeApi({ scheduleList: vi.fn(async () => []), templateList: vi.fn(async () => []) })
+    seed()
+    vi.spyOn(api, 'agentList').mockRejectedValueOnce(new Error('control channel closed'))
+    render(<TemplatesRoute params={{}} client={client} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'New template' }))
+    expect((await dialog.findByRole('alert')).textContent).toContain('control channel closed')
+    await openSelect(dialog.getByLabelText(/^Agent$/))
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['claude', 'custom'])
+    await userEvent.keyboard('{Escape}')
+    fireEvent.click(dialog.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(dialog.queryByRole('alert')).toBeNull())
   })
 
   it('schedules from a dialog and shows the next launch the server returned', async () => {

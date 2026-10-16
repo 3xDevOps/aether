@@ -145,6 +145,7 @@ See [per-agent setup and limits](docs/harnesses.md) and
 | [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
 | [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
 | [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
+| [Insights](docs/insights.md) | What the run statistics count and what the server records for them. |
 | [Agents](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
 | [Enhanced runs](docs/enhanced-runs.md) | Driving an agent over the Agent Client Protocol: launch, permissions, restarts, the session log. |
 | [Agent integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |

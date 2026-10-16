@@ -169,8 +169,8 @@ rewrites it, so a recipient's run can also overwrite it, log out (`/logout` in
 Claude Code and `codex logout` revoke the owner's session at the vendor), or
 replace it: `/login` in Claude Code or `codex login` in a shared run writes
 the recipient's own login into the owner's file. For the file logins
-(`claude`, `codex`, `pi`, `opencode`) that is loss of the login, not access to
-anything else in the owner's home. For `omp`, see above.
+(`claude`, `codex`, `pi`, `opencode`, `copilot`, `gemini`, `cursor`) that is
+loss of the login, not access to anything else in the owner's home. For `omp`, see above.
 
 **How the path is mounted.** The owner's own containers control every path
 inside the owner's home, so a plain bind of a path in it could be swapped for
@@ -225,6 +225,12 @@ state cannot be read, **Profile** says so and offers **Stop environment**;
 the login at Anthropic and reports success but cannot delete the file; the
 dead tokens are cleared on the next refresh. Members who share nothing are
 unaffected.
+
+**Gemini's login file.** Gemini CLI replaces `~/.gemini/oauth_creds.json` by
+rename too, and rewrites it in place when the rename fails, so Aether mounts
+it in place on the same terms as Claude's file above, and the same
+stop-and-reopen applies. `~/.gemini/.env` is shared but not pinned: Gemini
+only reads it. A share of `gemini` hands over a `GEMINI_API_KEY` kept there.
 
 **Non-root images.** With a non-root image, a run hands the login path to its
 own uid before it starts. For `omp` that is the whole `~/.omp/agent`, so a

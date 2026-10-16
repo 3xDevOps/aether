@@ -29,6 +29,8 @@ type PullRequest struct {
 	Draft  bool     `json:"draft"`
 	Head   string   `json:"head"`
 	Target PRTarget `json:"target"`
+	// MergedAt is GitHub's merge time, nil while the PR is not merged.
+	MergedAt *time.Time `json:"merged_at,omitempty"`
 }
 
 type PRResult struct {
@@ -92,7 +94,13 @@ func (pr githubPR) public(target PRTarget) *PullRequest {
 	if pr.Merged || pr.MergedAt != nil {
 		state = "merged"
 	}
-	return &PullRequest{Number: pr.Number, URL: pr.URL, State: state, Title: pr.Title, Draft: pr.Draft, Head: pr.Head.SHA, Target: target}
+	var mergedAt *time.Time
+	if pr.MergedAt != nil {
+		if at, err := time.Parse(time.RFC3339, *pr.MergedAt); err == nil {
+			mergedAt = &at
+		}
+	}
+	return &PullRequest{Number: pr.Number, URL: pr.URL, State: state, Title: pr.Title, Draft: pr.Draft, Head: pr.Head.SHA, Target: target, MergedAt: mergedAt}
 }
 
 func validRepository(repo string) bool {

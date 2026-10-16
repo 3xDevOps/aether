@@ -1733,7 +1733,45 @@ CREATE TABLE assistant_settings (
 `,
 	// v67: share_view sends the assistant the member's dashboard view context.
 	`ALTER TABLE assistant_settings ADD COLUMN share_view INTEGER NOT NULL DEFAULT 1;`,
-	// v68: when to suggest turning auto-approval on. manual_approvals counts
+	// v68: insights. Every run status or reason change is kept as a
+	// transition, and every pull request a run opened through run.pr.create
+	// with the state Aether last observed; both go with their run.
+	// swarm_run marks a swarm's worker and integrator runs on the run itself,
+	// so they stay out of top-level counts after their swarm is deleted.
+	`
+CREATE TABLE run_state_transitions (
+	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	from_status  TEXT NOT NULL,
+	to_status    TEXT NOT NULL,
+	reason       TEXT NOT NULL,
+	at           INTEGER NOT NULL
+);
+CREATE INDEX idx_run_state_transitions_run ON run_state_transitions(run_id, at);
+CREATE TABLE run_pull_requests (
+	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	repo         TEXT NOT NULL,
+	number       INTEGER NOT NULL,
+	url          TEXT NOT NULL,
+	state        TEXT NOT NULL,
+	created_at   INTEGER NOT NULL,
+	merged_at    INTEGER,
+	checked_at   INTEGER NOT NULL,
+	PRIMARY KEY (run_id, repo, number)
+);
+CREATE INDEX idx_runs_member_created ON runs(member_id, created_at);
+CREATE INDEX idx_runs_workspace_created ON runs(workspace_id, created_at);
+CREATE INDEX idx_runs_member_finished ON runs(member_id, finished_at);
+CREATE INDEX idx_runs_workspace_finished ON runs(workspace_id, finished_at);
+ALTER TABLE runs ADD COLUMN swarm_run INTEGER NOT NULL DEFAULT 0;
+UPDATE runs SET swarm_run = 1 WHERE id IN (
+	SELECT run_id FROM mission_attempts
+	UNION SELECT current_integrator_run_id FROM missions
+	UNION SELECT initial_run_id FROM mission_create_receipts
+	UNION SELECT run_id FROM mission_integrator_replacements);
+`,
+	// v69: when to suggest turning auto-approval on. manual_approvals counts
 	// cards approved by hand since the last decline, timeout or answer to
 	// the suggestion; suggest_after is the unix time a "later" answer
 	// snoozes it until; suggest_off stops it for good.

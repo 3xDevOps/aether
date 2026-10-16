@@ -414,6 +414,93 @@ export interface UsageResult {
 }
 
 
+/** insights.get: one period's outcomes for the caller or everyone. */
+export interface InsightsParams {
+  workspace_id: string
+  scope: 'mine' | 'everyone'
+  from: string
+  to: string
+  time_zone: string
+}
+
+export interface InsightsTotals {
+  launched: number
+  completed: number
+  merged: number
+  failed: number
+  interrupted: number
+  abandoned: number
+  /** A subset of abandoned. */
+  killed: number
+  active: number
+  /** completed + merged. */
+  finished: number
+}
+
+export interface InsightsBucket {
+  /** A local date, YYYY-MM-DD. */
+  start: string
+  launched: number
+  completed: number
+  merged: number
+  failed: number
+  interrupted: number
+  abandoned: number
+}
+
+export interface InsightsBreakdown {
+  launched: number
+  finished: number
+  failed: number
+}
+
+export interface InsightsRun {
+  run_id: string
+  title: string
+  workspace_id: string
+  status: RunStatus
+  reason: string
+  harness: string
+  model: string
+  created_at: string
+  finished_at: string
+  duration_seconds: number
+  mission_id: string
+  pr_url: string
+  pr_state: string
+}
+
+export interface InsightsResult {
+  generated_at: string
+  from: string
+  to: string
+  time_zone: string
+  bucket: 'day' | 'week'
+  totals: InsightsTotals
+  previous: InsightsTotals
+  series: InsightsBucket[]
+  heatmap: { date: string; runs: number }[]
+  by_workspace: (InsightsBreakdown & { workspace_id: string; name: string })[]
+  /** model "" is the agent's default model. */
+  by_agent: (InsightsBreakdown & { harness: string; model: string })[]
+  swarms: { launched: number; completed: number; cancelled: number; agents: number; tasks_accepted: number }
+  durations: {
+    runs_measured: number
+    median_run_seconds: number
+    p90_run_seconds: number
+    state_runs_measured: number
+    median_working_seconds: number
+    median_waiting_seconds: number
+    median_response_seconds: number
+  }
+  cost: { metered_runs: number; unmetered_runs: number; cost_usd: number; input_tokens: number; output_tokens: number }
+  pull_requests: { opened: number; merged: number }
+  recent: InsightsRun[]
+  needs_you: number
+  /** "" until Aether has recorded one. */
+  coverage: { state_times_since: string; pull_requests_since: string }
+}
+
 export interface ServerInfo {
   server_version: string
   protocol_version: string

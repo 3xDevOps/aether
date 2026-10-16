@@ -64,7 +64,8 @@ func TestACPRegistryPins(t *testing.T) {
 func TestEnhancedSupport(t *testing.T) {
 	want := map[string]Enhanced{
 		"claude": EnhancedAdapter, "codex": EnhancedAdapter, "pi": EnhancedAdapter,
-		"omp": EnhancedNative, "opencode": EnhancedNative, "custom": EnhancedNone,
+		"omp": EnhancedNative, "opencode": EnhancedNative, "copilot": EnhancedNative, "gemini": EnhancedNative,
+		"cursor": EnhancedNative, "custom": EnhancedNone,
 	}
 	for _, p := range Profiles() {
 		if got := p.EnhancedSupport(); got != want[p.Name] {

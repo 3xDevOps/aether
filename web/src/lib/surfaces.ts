@@ -1,5 +1,6 @@
 import {
   Bot,
+  ChartColumn,
   Compass,
   FileText,
   FolderGit2,
@@ -35,6 +36,8 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'missions', label: 'Swarms', Icon: Waypoints, place: 'nav' })
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
+  if (cap.hasMethod('insights.get'))
+    list.push({ name: 'insights', label: 'Insights', Icon: ChartColumn, place: 'nav', keywords: 'Statistics outcomes' })
   if (cap.hasMethod('files.tree') || cap.hasMethod('home.tree'))
     list.push({ name: 'files', label: 'Files', Icon: FolderTree, place: 'nav' })
   if (cap.hasWS('terminal'))

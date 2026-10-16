@@ -235,3 +235,30 @@ func TestEnhancedRunOfACustomAgentNamedApartFromItsCommand(t *testing.T) {
 		t.Fatalf("AETHER_HARNESS = %q, want the agent's name mycursor", got)
 	}
 }
+
+func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
+	t.Parallel()
+	e, rt := newACPEnv(t)
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchACP, "gpt-5"); err != nil {
+		t.Fatalf("ValidateMissionLaunch of an Enhanced cursor worker with a model: %v", err)
+	}
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "cursor-enhanced-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "say pong",
+		Harness: "cursor", Mode: domain.LaunchACP, Model: "gpt-5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
+	exec := rt.all()[0]
+	if !slices.Equal(exec.argv, []string{"agent", "--force", "acp"}) {
+		t.Fatalf("agent exec argv = %v, want [agent --force acp]", exec.argv)
+	}
+	if got := exec.wire.setMode(t); len(got) != 0 {
+		t.Fatalf("session/set_mode sent %v, want none: --force already approves everything", got)
+	}
+	if got := rt.byName(string(run.ID)).spec.Env["AETHER_HARNESS"]; got != "cursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want cursor", got)
+	}
+}

@@ -22,12 +22,15 @@ func TestLiveEnhancedRunsWithoutPermissionPrompts(t *testing.T) {
 	if os.Getenv("ACP_LIVE") != "1" {
 		t.Skip("set ACP_LIVE=1 to run the real agents")
 	}
-	for _, name := range []string{"claude", "omp"} {
+	for _, name := range []string{"claude", "omp", "copilot", "gemini", "cursor"} {
 		t.Run(name, func(t *testing.T) {
 			p, _ := Lookup(name)
 			agent := liveAgents[name]
 			if _, err := exec.LookPath(agent.acp[0]); err != nil {
 				t.Skipf("%s is not on PATH", agent.acp[0])
+			}
+			for key, value := range p.Env {
+				t.Setenv(key, value)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 			defer cancel()

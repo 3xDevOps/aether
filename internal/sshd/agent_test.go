@@ -526,3 +526,53 @@ func TestAgentListCustomAgentNamedApartFromItsCommand(t *testing.T) {
 		t.Errorf("withlogin with the login file = %+v, want login_found true", a)
 	}
 }
+
+// Cursor's CLI runs as agent, so the shipped cursor agent is installed, and
+// Enhanced with it, once ~/.local/bin/agent is.
+func TestAgentListFindsCursorAsAgent(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := func() protocol.AgentInfo {
+		result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+		if rpcErr != nil {
+			t.Fatalf("agentList: %+v", rpcErr)
+		}
+		for _, a := range result.(protocol.AgentListResult).Agents {
+			if a.Name == "cursor" {
+				return a
+			}
+		}
+		t.Fatal("agent.list does not list cursor")
+		return protocol.AgentInfo{}
+	}
+	if a := cursor(); a.Installed || a.Executable != "agent" || a.DisplayName != "Cursor CLI" {
+		t.Fatalf("cursor before install = %+v, want not installed, executable agent", a)
+	}
+	write := func(rel string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, rel)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, rel), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".local/bin/agent")
+	a := cursor()
+	if !a.Installed || !a.EnhancedInstalled || a.Enhanced != "native" || a.DefaultMode != "acp" || a.LoginFound == nil || *a.LoginFound {
+		t.Fatalf("cursor with ~/.local/bin/agent = %+v, want installed, enhanced by default, no login found", a)
+	}
+	write(".config/cursor/auth.json")
+	if a := cursor(); a.LoginFound == nil || !*a.LoginFound {
+		t.Fatalf("cursor with ~/.config/cursor/auth.json = %+v, want login found", a)
+	}
+}

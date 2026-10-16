@@ -375,3 +375,32 @@ func TestMissionWorkerOfAnAgentNamedApartFromItsCommand(t *testing.T) {
 		t.Fatalf("worker command = %q, want the agent executable with the task", container.spec.Command)
 	}
 }
+
+// The shipped cursor agent runs as agent, and its worker's AETHER_HARNESS is
+// still cursor, the name coordination keys on.
+func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
+	e := newTestEnv(t, nil)
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchTUI, "gpt-5"); err != nil {
+		t.Fatalf("ValidateMissionLaunch of a Standard cursor worker with a model: %v", err)
+	}
+	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "cursor-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+		Harness: "cursor", Mode: domain.LaunchTUI, Model: "gpt-5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := e.rt.byName(string(run.ID))
+	if container == nil {
+		t.Fatal("worker container not created")
+	}
+	if got := container.spec.Env["AETHER_HARNESS"]; got != "cursor" {
+		t.Fatalf("AETHER_HARNESS = %q, want cursor", got)
+	}
+	// The run supervisor's sh -c script comes first.
+	want := []string{"aether-run-supervisor", "agent", "--force", "--trust", "--model", "gpt-5", "do the work"}
+	if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
+		t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
+	}
+}

@@ -462,7 +462,7 @@ that omit the fields get a flat list.
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
 Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
-**Swarms**, **Activity**, **Files**, **Environment**, **Agents** and
+**Swarms**, **Activity**, **Insights**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
@@ -628,8 +628,8 @@ seconds. A phone gets the web push the server sends for the same notice.
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
 component mounted in one place at a time: the sidebar's **New run** row (a secondary
 icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
-the phone toolbar under 768px; keeping it out of the top bar's row keeps every
-header destination visible at 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
+the phone toolbar under 768px; keeping it out of the top bar's row leaves that
+row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
 
@@ -3837,6 +3837,72 @@ questions and queued messages stay contextual to their run, in its Details
   it onto the stored `server.info`, which is what fills the disk gauge in
   Settings > Server.
 
+## Insights
+
+`src/routes/insights/` is **Insights** (`?page=insights`), what a member's
+agents finished over a period. It is in the header navigation after
+**Activity** when the gateway offers `insights.get`, and reads that one
+method, and the server computes every number. The page re-reads when its
+controls change and
+when the event stream comes back live, dropping answers to an older request.
+
+- **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
+  months), **Workspace** (All workspaces or one; shown with more than one
+  workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
+  period ends at the next local midnight, so today counts; 12 months starts
+  on the Monday on or before, where weekly buckets start. The request
+  carries the browser's IANA time zone for day buckets, or "" (UTC) when the
+  browser reports none, which the page then says. The choices last while the
+  page is open; they are not in the address. On a phone the controls wrap
+  above the content instead of sitting in the header.
+- **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
+  completed across 3 workspaces." Runs in **Needs you** follow as a link to
+  the Board.
+- **Tiles.** Runs finished, success rate (finished of runs that ended, with
+  both counts, rounded down so 100% means nothing failed), swarms completed
+  (with agents and tasks accepted) and pull requests Aether opened. Runs
+  finished and success rate compare with the period before in raw numbers
+  ("Up from 8 the 7 days before"). Pull requests show a dash and say none
+  are recorded until the server reports `coverage.pull_requests_since`.
+- **Activity chart.** Per day (per week past 92 days): launched runs as the
+  outlined left bar, runs that ended as the right bar stacked Done, Failed
+  (failed and interrupted) and Abandoned, with a text legend. The chart is
+  one tab stop; arrow keys, **Home** and **End** move between bars, and
+  **Enter**, **Space** or a click selects one, and **Finished work** reads
+  `insights.get` again for that bucket alone, since the period's list holds
+  only its newest 50 runs. "Show every day" clears it. On a phone more than
+  30 daily bars fold into weeks, and on a coarse pointer each bar is at
+  least 44px wide, the chart scrolling sideways from the newest end.
+- **Finished work.** The server's 50 most recent runs that ended, ten shown
+  until **Show all**: title, outcome badge, workspace, agent and model
+  ("default model" when the run used the agent's own), duration, pull
+  request link and relative end time. A row opens the run. The server
+  learns a merge only when `run.pr.status` is called for the run, so after
+  each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
+  another for up to ten listed runs whose pull request is recorded `open`,
+  then reads `insights.get` again once if any state changed. A failed call
+  leaves the row as it was and puts the error in the pull request link's
+  tooltip; a failed second read is shown above the page, which keeps the
+  first.
+- **Last 26 weeks.** A calendar heatmap of runs active each day in one
+  accent hue, with a Fewer to More scale. It is one tab stop; arrow keys
+  move by day and week, and each day is labelled with its date and count.
+- **Breakdown.** By workspace and by agent: launched, finished and failed as
+  numbers beside a bar.
+- **Time.** Median and slowest-10% run time, and, from the server's state
+  record, median time working, waiting on you and your response time. When
+  fewer runs have state times than run times it says "measured for N of M
+  runs; Aether records this from <date> on."
+- **Usage**, collapsed: cost as a floor ("at least $4.12") with how many
+  runs reported it, tokens, and a link to **Settings › Usage** for
+  subscription quota. Cost never stops a run.
+
+A failed read shows the server's error with **Retry**; a server without
+`insights.get` gets a neutral line asking for an update. Until the event
+stream is live the page names the connection problem instead of loading. An
+empty period offers **New run**, the last 12 months, and everyone's runs
+from **Mine**.
+
 ## Files
 
 `src/routes/files/` is the Files explorer and editor. It combines each visible
@@ -4062,8 +4128,10 @@ the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
 **Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
 the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
-`<name> copy`. With no templates the view says what one is and offers **New
-template**.
+`<name> copy`. The form's agent select lists the agents from `agent.list` by
+display name and keeps the template's current agent as an extra option when
+the list omits it. With no templates the view says what one is and offers
+**New template**.
 
 Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
 closes on Save or Delete and the list shows the result at once; a saved
@@ -4121,7 +4189,9 @@ render the same parts from `src/components/agents/`, so this section covers
 both. The page header has **Add agent…** where the gateway serves
 `agent.register`, and a sub-screen there shows **All agents** to go back.
 
-`AgentList` rows show the agent's coloured `AgentGlyph`, its display name,
+`AgentList` rows show the agent's coloured `AgentGlyph` (`ui/agent-glyph.tsx`
+maps each shipped name to an icon and its `--agent-*` colour token), its
+display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
 login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
