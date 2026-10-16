@@ -67,10 +67,12 @@ const stateReasons: Record<LiveState, string> = {
   running: 'Running',
 }
 
+const nudge = 'The agent checks back on its next turn; send a message to nudge it.'
+
 const stateNext: Partial<Record<PresentationState, string>> = {
-  'waiting-agents': 'It continues when they report back.',
-  'waiting-ci': 'It continues when CI finishes.',
-  'waiting-tools': 'It continues when the process finishes.',
+  'waiting-agents': 'Mail from its agents can wake it; send a message to nudge it.',
+  'waiting-ci': nudge,
+  'waiting-tools': nudge,
   waiting: 'Send a message to continue.',
   ready: 'Mark it complete, or send a message to keep going.',
 }
@@ -89,6 +91,8 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
   if (state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
+  // Only Claude Code reports held background tasks, and it starts a turn when one ends.
+  if (run.reason?.startsWith('working in background: ')) return { state, reason, next: 'Claude Code resumes it when a background task ends.' }
   return { state, reason, next: stateNext[state] }
 }
 

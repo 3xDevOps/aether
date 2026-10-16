@@ -94,10 +94,14 @@ describe('run presentation', () => {
 
   it('gives each waiting state the reason the agent reported and what happens next', () => {
     expect(shown({ status: 'running', state: 'waiting-ci', reason: 'waiting for the PR checks' })).toEqual({
-      state: 'waiting-ci', reason: 'waiting for the PR checks', next: 'It continues when CI finishes.',
+      state: 'waiting-ci', reason: 'waiting for the PR checks', next: 'The agent checks back on its next turn; send a message to nudge it.',
     })
+    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'deploy running' }).next).toBe('The agent checks back on its next turn; send a message to nudge it.')
     expect(shown({ status: 'running', state: 'waiting-agents' })).toEqual({
-      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'It continues when they report back.',
+      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents can wake it; send a message to nudge it.',
+    })
+    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'working in background: 1 task' })).toEqual({
+      state: 'waiting-tools', reason: 'Working in background: 1 task', next: 'Claude Code resumes it when a background task ends.',
     })
     expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 12m' }).reason).toBe('No update for 12m')
   })
