@@ -63,7 +63,7 @@ describe('insights page', () => {
   it('reads the chosen bar on its own and clears it', async () => {
     seed()
     const older = insightsRun({ run_id: 'run_9', title: 'Older run past the newest 50', finished_at: '2026-10-14T03:00:00Z' })
-    const insightsGet = vi.fn(async (params: InsightsParams) => params.from === rfc3339(new Date(2026, 9, 14)) ? insights({ recent: [older] }) : insights())
+    const insightsGet = vi.fn(async (params: InsightsParams) => params.from === rfc3339(new Date(Date.UTC(2026, 9, 14))) ? insights({ recent: [older] }) : insights())
     render(<InsightsRoute params={{}} client={fakeApi({ insightsGet })} />)
     const list = await screen.findByRole('region', { name: 'Finished work' })
     expect(within(list).getAllByRole('article')).toHaveLength(3)
@@ -74,13 +74,13 @@ describe('insights page', () => {
     expect(await within(list).findByRole('button', { name: 'Older run past the newest 50' })).toBeDefined()
     expect(within(list).getAllByRole('article')).toHaveLength(1)
     expect(within(list).getByText('Showing runs that ended on Wed, Oct 14.')).toBeDefined()
-    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(2026, 9, 14)), to: rfc3339(new Date(2026, 9, 15)), scope: 'mine' }))
+    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(Date.UTC(2026, 9, 14))), to: rfc3339(new Date(Date.UTC(2026, 9, 15))), scope: 'mine' }))
 
     fireEvent.keyDown(bar, { key: 'ArrowRight' })
     const next = screen.getByRole('button', { name: /^Thu, Oct 15:/ })
     expect(document.activeElement).toBe(next)
     fireEvent.keyDown(next, { key: 'Enter' })
-    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(2026, 9, 15)), to: rfc3339(new Date(2026, 9, 16)) }))
+    expect(insightsGet).toHaveBeenLastCalledWith(expect.objectContaining({ from: rfc3339(new Date(Date.UTC(2026, 9, 15))), to: rfc3339(new Date(Date.UTC(2026, 9, 16))) }))
 
     fireEvent.click(within(list).getByRole('button', { name: 'Show every day' }))
     expect(within(list).getAllByRole('article')).toHaveLength(3)

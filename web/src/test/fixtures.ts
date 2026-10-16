@@ -425,7 +425,7 @@ export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
       insightsRun(),
     ],
     needs_you: 2,
-    coverage: { state_times_since: '2026-10-12T00:00:00Z', pull_requests_since: '2026-10-12T00:00:00Z' },
+    coverage: { state_times_since: '2026-10-12T12:00:00Z', pull_requests_since: '2026-10-12T12:00:00Z' },
     ...over,
   }
 }
