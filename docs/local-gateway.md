@@ -245,7 +245,9 @@ layer that failed, so the dashboard never reports one layer as another:
 ```json
 {"refusal":{"kind":"server-not-connected","refusal":"server is not connected to the edge"},
  "edge_path":{"layer":"server-registration","server_id":"<server id>","edge":"edge.onaether.dev",
-              "account":"github account dana","online":[{"id":"<other id>","name":"prod","online":true}]}}
+                            "account":"github account dana",
+              "online":[{"id":"<other id>","name":"prod","online":true,"role":"admin",
+                         "access_policy":"approved-devices","kind":"self-hosted"}]}}
 ```
 
 | `layer` | What failed | Typical cause |
@@ -260,11 +262,14 @@ with the refusal's `kind`. `server_id` is the server the gateway dialed and
 `edge` the edge host it dialed through; `account` is the account this
 device is signed in to that edge as. `online`, only for
 `server-registration`, lists the other servers of that account the edge
-sees online: a server reinstalled under a new id shows up there while the
-link still names the old one, and the message names
-`aether link --from-edge <id>`. A link with an address as well as an edge
-names no `edge` for a connection that fails once open, since it may run
-over either path; a link with an address only carries no `edge_path`.
+sees online, each as the edge's server list reports it: a server
+reinstalled under a new id shows up there while the link still names the
+old one, and the message names `aether link --from-edge <id>`.
+
+A link with an address carries `edge_path` only when a dial fails on both
+paths, with the edge path's layer. A failure on a connection already open
+carries no `edge_path`, since that connection may run over either path; a
+link with an address and no edge never carries one.
 
 The server gateway performs the equivalent identity lookup on each request.
 WhoIs failures are refused before dispatch; a tagged node is denied and an
