@@ -5,7 +5,9 @@
 import type { ReactNode } from 'react'
 import { X, type LucideIcon } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import type { UpdateStatus } from '@/lib/types'
+import { cn, focusRing } from '@/lib/utils'
+import { releasePage } from '@/lib/version'
 import { useStore } from '@/store'
 import type { UpdateKind } from '@/store/ui'
 
@@ -79,5 +81,42 @@ export function StatusRow({
       </div>
       {action && <div className={bannerActions}>{action}</div>}
     </div>
+  )
+}
+
+export function packagedLine(packaged: string, target = ''): string {
+  return `Updates come from the ${packaged}: install its ${target ? `${target} release` : 'new version'} to update Aether.`
+}
+
+/** What to do instead where update.apply cannot replace this binary. */
+export function manualInstallLine(update: UpdateStatus, target: string): string {
+  const release = target || 'the new release'
+  if (update.cli.packaged) return packagedLine(update.cli.packaged, target)
+  if (update.cli.dev) return `A development build cannot update itself. Install ${release} from its release page.`
+  if (!update.cli.can_self_update) {
+    return `Self-update is not supported on Windows. Close Aether, then rerun install.ps1 to install ${release}.`
+  }
+  return `This aether cannot update itself. Install ${release} from its release page.`
+}
+
+export function ManualInstall({ update, target }: { update: UpdateStatus; target: string }) {
+  const href = update.cli.packaged ? '' : releasePage(target)
+  return (
+    <p className="text-ui-sm leading-5 text-muted">
+      {manualInstallLine(update, target)}
+      {href && (
+        <>
+          {' '}
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(focusRing, 'underline underline-offset-2 hover:text-text')}
+          >
+            Release {target}
+          </a>
+        </>
+      )}
+    </p>
   )
 }

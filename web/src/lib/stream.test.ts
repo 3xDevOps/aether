@@ -85,7 +85,6 @@ describe('connectEvents', () => {
         client_version: 'v1.2.3',
         server_version: 'v1.3.0',
         min_client_version: 'v1.3.0',
-        command: 'aether update',
       },
     ])
     expect(StubSocket.opened).toHaveLength(1)

@@ -66,3 +66,11 @@ export function compareVersions(a: string, b: string): number | null {
   }
   return x.ahead === y.ahead ? 0 : x.ahead ? 1 : -1
 }
+
+const releaseTag = /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$/
+
+/** The GitHub release page of a tag; empty for anything that is not a
+ * release tag, so a gateway's answer cannot steer the link elsewhere. */
+export function releasePage(tag: string): string {
+  return releaseTag.test(tag) ? `https://github.com/3xDevOps/Aether/releases/tag/${tag}` : ''
+}

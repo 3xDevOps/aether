@@ -306,6 +306,7 @@ export function updateStatus(over: Partial<UpdateStatus> = {}): UpdateStatus {
     supervised: true,
     cli_path: '/home/user/.local/bin/aether',
     install_method: 'direct',
+    can_self_update: true,
     ...over,
   }
 }

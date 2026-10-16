@@ -1,5 +1,5 @@
-import { packagedLine, useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/components/update-banner'
-import { checkedTime, verbatim } from '@/components/update-banner-shared'
+import { useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/components/update-banner'
+import { checkedTime, packagedLine, verbatim } from '@/components/update-banner-shared'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code'

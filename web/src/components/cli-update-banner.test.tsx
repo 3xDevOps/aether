@@ -3,7 +3,7 @@ import { UpdateHost } from '@/test/update-host'
 import { ApiError } from '@/lib/api'
 import type { UpdateApplyResult } from '@/lib/types'
 import { useStore } from '@/store'
-import { bob, fakeApi, updateStatus } from '@/test/fixtures'
+import { bob, fakeApi, serverUpdateStatus, updateStatus } from '@/test/fixtures'
 import {
   cachedUntilRefreshed,
   RECHECK_PERIOD,
@@ -47,22 +47,71 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
 })
 
-// Windows cannot replace a running binary, so the button would only ever
-// fail: the banner names the release page instead.
-test('offers no button where the CLI cannot update itself', async () => {
+// Windows cannot replace a running binary, so the button and `aether
+// update` would only ever fail: the banner names the installer instead.
+test('offers no button or command where the CLI cannot update itself', async () => {
   const status = updateStatus()
   const client = fakeApi({
     localUpdateCheck: vi.fn(async () => ({
       ...status,
+      can_self_update: false,
+      target_version: 'v1.3.0',
       cli: { ...status.cli, can_self_update: false },
     })),
   })
   seed()
   render(<UpdateHost client={client} />)
 
-  expect(await screen.findByText(/Self-update is not supported/)).toBeTruthy()
+  expect(
+    await screen.findByText(/Self-update is not supported on Windows\. Close Aether, then rerun install\.ps1 to install v1\.3\.0\./),
+  ).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
+    'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
+  )
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
-  expect(screen.getByRole('link', { name: 'Release notes' })).toBeTruthy()
+  expect(screen.queryByText(/aether update/)).toBeNull()
+})
+
+describe('a server that must update first', () => {
+  // The gateway refuses update.apply with server_first, so the button would
+  // only ever fail.
+  test('an admin is sent to the server row instead of Update now', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true, server_first: true })),
+    })
+    seed()
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText(/Update the server first, from its row above or with aether server update/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  })
+
+  test('a member is told to ask an admin', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true, server_first: true })),
+    })
+    seed({ self: bob })
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText(/Update the server first: ask an admin to run aether server update\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+  })
+
+  // The server's own release check failed, so its row cannot say
+  // `available`; update.check still knows the server is behind.
+  test('the admin hint stays when the server release check failed', async () => {
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () => updateStatus({ server_version: 'v1.2.9', server_behind: true })),
+      serverUpdateStatus: vi.fn(async () =>
+        serverUpdateStatus({ server_version: 'v1.2.9', latest: '', update_available: false, check_error: 'github: 503' }),
+      ),
+    })
+    seed()
+    render(<UpdateHost client={client} />)
+
+    expect(await screen.findByText('github: 503')).toBeTruthy()
+    expect(await screen.findByText(/Update the server first, from its row above/)).toBeTruthy()
+  })
 })
 
 // An app-packaged CLI is updated by installing the app's new version, so

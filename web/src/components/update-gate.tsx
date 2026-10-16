@@ -4,15 +4,14 @@ import { CopyableCommand } from '@/components/copyable-command'
 import { ArrowUpCircle, CircleAlert, LoaderCircle } from '@/components/icons'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
-import { packagedLine } from '@/components/update-banner'
-import { verbatim } from '@/components/update-banner-shared'
+import { ManualInstall, manualInstallLine, verbatim } from '@/components/update-banner-shared'
 import { api, type Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { message } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
-import { applyClientUpdate, clientTarget, manualCommand } from '@/store/updates'
+import { applyClientUpdate, clientTarget, installTarget, manualCommand } from '@/store/updates'
 
 const buildStep: Record<string, string> = {
   unpacking: 'Unpacking the desktop app…',
@@ -46,13 +45,10 @@ export function UpdateGate({ client = api }: { client?: Api }) {
   const reason =
     required?.message ||
     `this aether is ${clientVersion} and the server runs ${serverVersion}; update this client first, then retry`
-  const packaged = update?.cli.packaged
-  const command = manualCommand(update, required)
-  const canApply =
-    !packaged &&
-    caps.hasLocal('update.apply') &&
-    update?.cli.can_self_update !== false &&
-    update?.install_method !== 'manual'
+  const command = manualCommand(update)
+  const cannotSelfUpdate = update !== null && update.can_self_update !== true
+  const release = installTarget(update, true)
+  const canApply = !cannotSelfUpdate && caps.hasLocal('update.apply') && update?.install_method !== 'manual'
   // The running gateway keeps the binary it started with until it restarts.
   const desktop = desktopBridge() !== undefined
   const afterTerminal: ReactNode = desktop ? (
@@ -76,7 +72,7 @@ export function UpdateGate({ client = api }: { client?: Api }) {
     `This client: ${clientVersion}`,
     `Server version: ${serverVersion}`,
     `Minimum client: ${minimum}`,
-    packaged ? packagedLine(packaged) : `Manual command: ${command}`,
+    update && cannotSelfUpdate ? manualInstallLine(update, release) : `Manual command: ${command}`,
     ...(error ? [`Update error: ${error}`] : []),
     ...(cancelled ? [`Update cancelled: ${cancelled}`] : []),
   ].join('\n')
@@ -130,8 +126,8 @@ export function UpdateGate({ client = api }: { client?: Api }) {
                 </>
               )}
             </div>
-          ) : packaged ? (
-            <p className="text-ui-sm text-muted">{packagedLine(packaged)}</p>
+          ) : update && cannotSelfUpdate ? (
+            <ManualInstall update={update} target={release} />
           ) : (
             <div className="space-y-2">
               {canApply && (

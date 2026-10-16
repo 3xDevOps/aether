@@ -285,13 +285,14 @@ export const codeNotFound = -32000
 export const codeInvalidState = -32002
 export const codeUpgradeRequired = -32005
 
-/** The data of a -32005: this client is older than the server's release. */
+/** The data of a -32005: this client is older than the server's release.
+ * Its `command` is dropped: a server must not choose what the dashboard
+ * offers to paste into a terminal. */
 export interface UpgradeRequired {
   message: string
   client_version: string
   server_version: string
   min_client_version: string
-  command: string
 }
 
 /** Gateways answer a -32005 with HTTP 426; either one marks the refusal. */
@@ -310,7 +311,6 @@ export function upgradeFrom(message: string, data: ApiErrorData = {}): UpgradeRe
     client_version: text('client_version'),
     server_version: text('server_version'),
     min_client_version: text('min_client_version'),
-    command: text('command') || 'aether update',
   }
 }
 

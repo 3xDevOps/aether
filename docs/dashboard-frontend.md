@@ -5363,8 +5363,13 @@ that runs a newer release than a client refuses that client
       A server without `server.update_status` falls back to
       `update.check`'s `server_behind`.
 
-    While the server is behind, the client row adds *Update the server
-    first; this client updates after it.*
+    While the server is behind (its row says *available*, or
+    `update.check` reports `server_behind` because the server's own
+    release check failed), the client row adds *Update the server first,
+    from its row above or with aether server update; this client updates
+    after it.* When `update.check` reports `server_first`, `update.apply`
+    would refuse, so the client row drops **Update now**; a member is told
+    to ask an admin to run `aether server update`.
   - **Members** see *Server X is available.* and *Ask an admin to run
     `aether server update`; this client updates after it.*, with no
     buttons. A failed update shows the server's error and says to ask an
@@ -5413,14 +5418,23 @@ that runs a newer release than a client refuses that client
     The dialog is labelled osascript, the tool Aether asks through. Aether
     never sees your password.*
   - *manual*: no button. The row shows `sudo aether update` with a copy
-    button, or the release link where the platform has no self-update.
+    button.
+
+  When `update.check`'s top-level `can_self_update` is not `true` (Windows,
+  a packaged or a development build), there is no button and no
+  `aether update`. One line names `target_version` and the platform's way
+  to install it, such as *Self-update is not supported on Windows. Close
+  Aether, then rerun install.ps1 to install vX.*, followed by a link to
+  that tag's GitHub release page. The link appears only when the tag has
+  the `vMAJOR.MINOR.PATCH[-PRERELEASE]` form.
 
   `applyClientUpdate` in `src/store/updates.ts` runs the click, shared with
   the gate:
   1. It re-reads `update.check` with `refresh: true`. A fresh answer that
      finds this machine current installs nothing and says *Aether vX is the
      newest release. Nothing was downloaded.* A fresh `cli_error` is the
-     click's error.
+     click's error, except on a gated client whose `target_version` is
+     set: the server's release was found anyway, so the install goes on.
   2. It calls `update.apply`. While a desktop-app rebuild runs, it polls
      `update.status` every second.
 
@@ -5465,13 +5479,16 @@ that runs a newer release than a client refuses that client
   and shows that error. Progress, the real error and a cancelled
   administrator prompt share one status live region. The manual command
   (`aether update`, or `sudo aether update` for a *manual* install) is
+  chosen by the dashboard; the `command` a -32005 carries is ignored, so a
+  server cannot choose what a member pastes into a terminal. It is
   followed by what makes it take effect: *Then restart `aether gui` and
   reload this page.*, or in the desktop shell *Then quit and reopen the
   desktop app.*, because the running gateway keeps the binary it started
-  with. A *packaged* client (the Android app) gets neither button nor
-  command, only *Updates come from the Android app: install its new
-  version to update Aether.* What follows a finished update depends on
-  the gateway:
+  with. A client that cannot update itself gets neither button nor
+  command, only the line and release link the client row shows; a
+  *packaged* one (the Android app) reads *Updates come from the Android
+  app: install its vX release to update Aether.* What follows a finished
+  update depends on the gateway:
   - under the desktop shell, the gateway relaunches and the page comes
     back on the new version;
   - in a browser tab, the gate says *Aether X is installed.*, says to

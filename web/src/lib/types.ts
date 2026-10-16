@@ -1731,13 +1731,19 @@ export interface UpdateStatus {
   client_update_required?: boolean
   min_client_version?: string
   /** The release update.apply would install: the server's own release
-   * while client_update_required, otherwise the latest. Empty while gated
-   * means no installable release matches the server; absent on older
-   * gateways. */
+   * while client_update_required, otherwise the latest, whether or not
+   * this binary can install it. Empty while gated means no installable
+   * release matches the server; absent on older gateways. */
   target_version?: string
   /** The release lookup failed, verbatim. `cli` then carries only what the
    * binary knows about itself: no latest, no asset. */
   cli_error?: string
+  /** update.apply would refuse: the linked server is behind and must update
+   * first. */
+  server_first?: boolean
+  /** update.apply can replace this binary: false on Windows and for a
+   * packaged or development build. */
+  can_self_update?: boolean
 }
 
 /** update.apply: what the self-update replaced and what happens next. */

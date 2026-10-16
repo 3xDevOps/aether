@@ -18,13 +18,15 @@ import {
   bannerContent,
   bannerIcon,
   Dismiss,
+  ManualInstall,
   verbatim,
 } from '@/components/update-banner-shared'
 import type { Api } from '@/lib/api'
 import type { UpdateApplyResult, UpdateBuildStatus, UpdateStatus } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
-import { applyClientUpdate, type ClientApply } from '@/store/updates'
+import { useIsAdmin } from '@/store/hooks'
+import { applyClientUpdate, installTarget, type ClientApply } from '@/store/updates'
 
 /**
  * What the button, and everything above it, show. Derived from the apply
@@ -103,14 +105,9 @@ function Applied({ result, note }: { result: UpdateApplyResult; note?: string })
  * absent and the banner then reads as it did before the probe existed.
  */
 function HowItInstalls({ update }: { update: UpdateStatus }) {
-  const { cli, cli_path: path, install_method: method } = update
-  if (!cli.can_self_update) {
-    return (
-      <p className="text-ui-sm leading-5 text-muted">
-        Self-update is not supported on Windows. Download {cli.latest} from the
-        release page and replace the binary yourself.
-      </p>
-    )
+  const { cli_path: path, install_method: method } = update
+  if (update.can_self_update !== true) {
+    return <ManualInstall update={update} target={installTarget(update, false)} />
   }
   if (method === 'manual') {
     return (
@@ -159,13 +156,13 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
 export function CliBanner({
   update,
   client,
-  serverFirst,
+  serverBehind,
 }: {
   update: UpdateStatus
   client: Api
-  /** An admin whose server is behind updates that first. */
-  serverFirst: boolean
+  serverBehind: boolean
 }) {
+  const isAdmin = useIsAdmin()
   const latest = update.cli.latest ?? ''
   const dismissed = useStore((s) => s.dismissedUpdates.cli)
   const apply = useStore((s) => s.clientApply)
@@ -195,9 +192,19 @@ export function CliBanner({
   // block, so they carry the lead instead.
   const installLead =
     installed !== '' && flow.name !== 'applied' && flow.name !== 'rebuilt'
+  // The gateway refuses update.apply while server_first is set.
+  const serverFirst = update.server_first === true
+  const serverHint = isAdmin
+    ? serverFirst || serverBehind
+      ? 'Update the server first, from its row above or with aether server update; this client updates after it.'
+      : ''
+    : serverFirst
+      ? 'Update the server first: ask an admin to run aether server update. This client updates after it.'
+      : ''
   const offerButton =
     !current &&
-    update.cli.can_self_update &&
+    !serverFirst &&
+    update.can_self_update === true &&
     update.install_method !== 'manual' &&
     flow.name !== 'applied' &&
     flow.name !== 'rebuilt' &&
@@ -251,9 +258,7 @@ export function CliBanner({
               <p className="font-medium">Aether {version} is available.</p>
               <p className="text-ui-sm text-muted">You are running {update.cli.version}.</p>
             </div>
-            {serverFirst && (
-              <p className="text-ui-sm text-muted">Update the server first; this client updates after it.</p>
-            )}
+            {serverHint && <p className="text-ui-sm text-muted">{serverHint}</p>}
             <HowItInstalls update={update} />
           </>
         )}

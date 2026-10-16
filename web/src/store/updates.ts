@@ -69,7 +69,7 @@ function gatedBy(s: Pick<RootState, 'updateRequired'>, update: UpdateStatus | nu
 }
 
 /** The release update.apply would install: a gated gateway names the server's. */
-function installTarget(update: UpdateStatus | null, gated: boolean): string {
+export function installTarget(update: UpdateStatus | null, gated: boolean): string {
   return (gated && update?.target_version) || update?.cli.latest || ''
 }
 
@@ -173,7 +173,8 @@ export async function applyClientUpdate(store: Store, client: Api): Promise<void
     const required = store.getState().updateRequired
     const gated = gatedBy(store.getState(), fresh)
     version = installTarget(fresh, gated)
-    if (fresh.cli_error) {
+    // A gated gateway found the server's release despite a failed latest lookup.
+    if (fresh.cli_error && !(gated && fresh.target_version)) {
       store.setState({ clientApply: { name: 'failed', detail: fresh.cli_error, version } })
       return
     }
@@ -229,9 +230,8 @@ export async function applyClientUpdate(store: Store, client: Api): Promise<void
 }
 
 /** What the gate offers in place of a button that could not work. */
-export function manualCommand(update: UpdateStatus | null, required?: UpgradeRequired | null): string {
-  if (update?.install_method === 'manual') return 'sudo aether update'
-  return required?.command || 'aether update'
+export function manualCommand(update: UpdateStatus | null): string {
+  return update?.install_method === 'manual' ? 'sudo aether update' : 'aether update'
 }
 
 export function clientTarget(s: RootState): UpdateTarget {
@@ -258,7 +258,6 @@ export function clientTarget(s: RootState): UpdateTarget {
       client_version: update.cli.version,
       server_version: serverVersion,
       min_client_version: update.min_client_version ?? '',
-      command: 'aether update',
     }
   }
   if (s.clientChecking) return { state: 'checking', version: update?.cli.version }

@@ -26,6 +26,7 @@ import {
   bannerIcon,
   checkedTime,
   Dismiss,
+  packagedLine,
   StatusRow,
   verbatim,
 } from '@/components/update-banner-shared'
@@ -45,10 +46,6 @@ import { useCapability, useIsAdmin } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { UpdateKind } from '@/store/ui'
 import { checkForUpdates, clientTarget, serverTarget, type UpdateTarget } from '@/store/updates'
-
-export function packagedLine(packaged: string): string {
-  return `Updates come from the ${packaged}: install its new version to update Aether.`
-}
 
 /** A shell built by another release than the CLI serving it, in either
  * direction; a dev shell's "0.1.0" counts, two builds of one tag do not. */
@@ -117,7 +114,7 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
         </DialogHeader>
         <div className="min-w-0">
           <ServerRow client={client} target={server} />
-          {serves && !packaged && <ClientRow client={client} target={cli} serverFirst={server.state === 'available'} />}
+          {serves && !packaged && <ClientRow client={client} target={cli} serverBehind={server.state === 'available' || !!update?.server_behind} />}
           {serves && <ShellBanner />}
         </div>
         <DialogFooter>
@@ -130,12 +127,11 @@ export function UpdateCenter({ client = api }: { client?: Api } = {}) {
   )
 }
 
-function ClientRow({ client, target, serverFirst }: { client: Api; target: UpdateTarget; serverFirst: boolean }) {
+function ClientRow({ client, target, serverBehind }: { client: Api; target: UpdateTarget; serverBehind: boolean }) {
   const update = useStore((s) => s.update)
   const answered = useStore((s) => s.clientApply.name !== 'idle')
-  const isAdmin = useIsAdmin()
   // A click's own answer, a cancel or "already current", stays on screen.
-  if (answered && update) return <CliBanner update={update} client={client} serverFirst={serverFirst && isAdmin} />
+  if (answered && update) return <CliBanner update={update} client={client} serverBehind={serverBehind} />
   if (target.state === 'checking') {
     return <StatusRow Icon={LoaderCircle} spin headline="Checking for a new Aether release…" />
   }
@@ -161,7 +157,7 @@ function ClientRow({ client, target, serverFirst }: { client: Api; target: Updat
     )
   }
   if (!update) return null
-  return <CliBanner update={update} client={client} serverFirst={serverFirst && isAdmin} />
+  return <CliBanner update={update} client={client} serverBehind={serverBehind} />
 }
 
 /** A server update already moving is named even when dismissed: it is about to restart the server. */
