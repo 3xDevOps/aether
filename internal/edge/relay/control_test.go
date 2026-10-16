@@ -153,6 +153,96 @@ func TestOpenFollowsAReplacedRegistration(t *testing.T) {
 	}
 }
 
+// TestOpenFollowsARegistrationReplacedBeforeTheSend replaces the
+// registration after the relay picked it for an open and before it sent
+// the open there: the open goes to the new registration instead of
+// failing as not connected.
+func TestOpenFollowsARegistrationReplacedBeforeTheSend(t *testing.T) {
+	e := newEnv(t)
+	signer := newSigner(t)
+	id := edgeproto.ServerID(signer.PublicKey())
+	e.dir.mu.Lock()
+	e.dir.owners[id] = true
+	e.dir.mu.Unlock()
+	old := enroll(t, e, signer)
+	go old.run()
+	acct := account("1")
+	e.dir.addMember(id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+
+	// Authenticate runs again once the connection holds old's registration.
+	authenticating, release := make(chan struct{}), make(chan struct{})
+	e.dir.mu.Lock()
+	e.dir.admitHook = func() {
+		e.dir.mu.Lock()
+		e.dir.authHook = func() {
+			close(authenticating)
+			<-release
+		}
+		e.dir.mu.Unlock()
+	}
+	e.dir.mu.Unlock()
+	dialed := make(chan error, 1)
+	go func() {
+		ws, _, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.ConnectPath(id), &websocket.DialOptions{
+			HTTPHeader: bearerHeader(token),
+		})
+		if err == nil {
+			_ = ws.CloseNow()
+		}
+		dialed <- err
+	}()
+	<-authenticating
+	fresh := enroll(t, e, signer)
+	fresh.attach = true
+	go fresh.run()
+	if err := old.closedWith(t); !strings.Contains(err.Error(), errReplaced.Error()) {
+		t.Fatalf("old control channel closed with %v", err)
+	}
+	close(release)
+	if err := <-dialed; err != nil {
+		t.Fatalf("connection opened across the replacement: %v", err)
+	}
+}
+
+// TestOpenWaitsForReady opens a connection on a registration the relay
+// published but has not sent Ready on yet: the open follows Ready, which
+// the server expects first.
+func TestOpenWaitsForReady(t *testing.T) {
+	e := newEnv(t)
+	a := claimedAgent(t, e)
+	acct := account("1")
+	e.dir.addMember(a.id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+	ready := make(chan struct{})
+	e.r.mu.Lock()
+	e.r.servers[a.id].ready = ready
+	e.r.mu.Unlock()
+
+	dialed := make(chan error, 1)
+	go func() {
+		ws, _, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.ConnectPath(a.id), &websocket.DialOptions{
+			HTTPHeader: bearerHeader(token),
+		})
+		if err == nil {
+			_ = ws.CloseNow()
+		}
+		dialed <- err
+	}()
+	select {
+	case m := <-a.msgs:
+		t.Fatalf("server got %T before Ready", m)
+	case err := <-dialed:
+		t.Fatalf("connection finished before Ready: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(ready)
+	next[edgeproto.Open](t, a)
+	if err := <-dialed; err != nil {
+		t.Fatalf("connection after Ready: %v", err)
+	}
+}
+
 func TestUnclaimedServerIsNotRelayed(t *testing.T) {
 	e := newEnv(t)
 	a := enroll(t, e, newSigner(t))

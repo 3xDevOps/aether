@@ -38,6 +38,9 @@ type registration struct {
 	// turn holds the one throttled read this server's connections may
 	// have waiting.
 	turn chan struct{}
+	// ready is closed once Ready is sent: the server takes no other
+	// message before it, and opens can find reg in Relay.servers sooner.
+	ready chan struct{}
 	// claimed, directory and hasDirectory are guarded by Relay.mu.
 	// directory is the latest directory an unclaimed server pushed: it
 	// pushes one as it accepts a claim, which may arrive before the edge
@@ -161,7 +164,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, policy: policy, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1)}
+	reg := &registration{id: id, name: hello.Name, policy: policy, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
 	if r.closing {
@@ -189,6 +192,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		r.unregister(reg, err)
 		return nil, err
 	}
+	close(reg.ready)
 	return reg, nil
 }
 
