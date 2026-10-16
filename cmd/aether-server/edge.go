@@ -185,8 +185,12 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	case stale != nil:
 		_, _ = fmt.Fprintf(tw, "connection\tstale: reported connected since %s, but %v\n", status.Since.Local().Format(time.DateTime), stale)
 		_, _ = fmt.Fprintln(tw, "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50")
+	case status.Connected && status.Heartbeat.IsZero():
+		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s, unchecked: the running server records no heartbeat, so it predates this version\n",
+			status.Since.Local().Format(time.DateTime))
+		_, _ = fmt.Fprintln(tw, "next\tsudo systemctl restart aether-server")
 	case status.Connected:
-		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s; the edge answered a ping %s ago\n",
+		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s; the edge last answered %s ago\n",
 			status.Since.Local().Format(time.DateTime), now.Sub(status.Heartbeat).Round(time.Second))
 	default:
 		_, _ = fmt.Fprintf(tw, "connection\tdisconnected since %s: %s\n", status.Since.Local().Format(time.DateTime), status.Error)

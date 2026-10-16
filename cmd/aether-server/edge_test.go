@@ -90,11 +90,13 @@ func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
 		want   []string
 	}{
 		{"fresh", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-5 * time.Second)},
-			[]string{"connection   connected since", "the edge answered a ping 5s ago"}},
+			[]string{"connection   connected since", "the edge last answered 5s ago"}},
 		{"hung", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-3 * time.Minute)},
-			[]string{"connection   stale: reported connected since", "no ping answered for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}},
+			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}},
 		{"killed", edgeagent.Status{Connected: true, Since: since, PID: gone.Process.Pid, Heartbeat: now},
 			[]string{"stale: reported connected since", fmt.Sprintf("server process %d is not running", gone.Process.Pid)}},
+		{"before heartbeats", edgeagent.Status{Connected: true, Since: since},
+			[]string{"connected since", "unchecked: the running server records no heartbeat", "next         sudo systemctl restart aether-server"}},
 		{"stopped", edgeagent.Status{Error: "server stopped", Since: since},
 			[]string{"disconnected since", "server stopped"}},
 	}

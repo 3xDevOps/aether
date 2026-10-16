@@ -54,7 +54,7 @@ func OpenState(dataDir string) *State { return &State{dir: StateDir(dataDir)} }
 
 // Status is what the agent last reported about its control connection.
 // While Connected, PID is the server process and Heartbeat the last time
-// the edge answered one of its pings.
+// the edge answered: its Ready at enrollment, then each Pong.
 type Status struct {
 	Edge      string    `json:"edge"`
 	Connected bool      `json:"connected"`
@@ -73,7 +73,8 @@ const HeartbeatMaxAge = 2 * edgeproto.PingInterval
 // it names is gone, which a stop without the agent's clean shutdown
 // leaves, or no ping was answered within HeartbeatMaxAge, as when the
 // server hangs or the edge dropped the connection unnoticed. Nil while it
-// holds.
+// holds, and for a status without a Heartbeat, which a server older than
+// heartbeats wrote and nothing here can check.
 func (st Status) Stale(now time.Time) error {
 	if !st.Connected {
 		return nil
@@ -81,8 +82,11 @@ func (st Status) Stale(now time.Time) error {
 	if st.PID > 0 && !processRunning(st.PID) {
 		return fmt.Errorf("server process %d is not running; it stopped without closing the connection", st.PID)
 	}
+	if st.Heartbeat.IsZero() {
+		return nil
+	}
 	if age := now.Sub(st.Heartbeat); age > HeartbeatMaxAge {
-		return fmt.Errorf("no ping answered for %s (limit %s); the server is hung or the connection is dead and not yet detected",
+		return fmt.Errorf("no answer from the edge for %s (limit %s); the server is hung or the connection is dead and not yet detected",
 			age.Round(time.Second), HeartbeatMaxAge)
 	}
 	return nil

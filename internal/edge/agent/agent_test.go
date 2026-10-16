@@ -580,7 +580,7 @@ func TestHeartbeatFollowsAnsweredPings(t *testing.T) {
 	if st, _, err := a.state.Status(); err != nil || !st.Heartbeat.Equal(answered.Heartbeat) {
 		t.Fatalf("heartbeat moved without a pong: %+v, %v", st, err)
 	}
-	if err := answered.Stale(answered.Heartbeat.Add(HeartbeatMaxAge + time.Second)); err == nil || !strings.Contains(err.Error(), "no ping answered") {
+	if err := answered.Stale(answered.Heartbeat.Add(HeartbeatMaxAge + time.Second)); err == nil || !strings.Contains(err.Error(), "no answer from the edge") {
 		t.Fatalf("Stale after HeartbeatMaxAge without a pong = %v", err)
 	}
 }
