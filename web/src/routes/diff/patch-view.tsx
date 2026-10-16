@@ -40,7 +40,7 @@ export function Counts({ additions, deletions }: { additions: number; deletions:
   )
 }
 
-/** The run whose review a file's lines join, and the diff on screen: '' for the current one, else an interval key. */
+/** The run whose review a file's lines join, and the comparison on screen: '' for All changes, else its scope. */
 export interface ReviewTarget {
   runID: string
   scope: string

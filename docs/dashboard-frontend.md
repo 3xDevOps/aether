@@ -238,7 +238,7 @@ from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
 30-second interval for the whole app, running only while something
 subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
 board card, a run list row, a feed entry, an approval, the members and
-devices views or the Changes interval menu keeps moving without re-rendering
+devices views or the Changes Compare menu keeps moving without re-rendering
 the row. `compact` renders `compactAge` instead: the same steps as `timeAgo`
 in a few characters ("now" under a minute, then "15m", "3h", "2d", "1w",
 "2mo", "1y"). A sidebar run row reads the clock itself as well, because its
@@ -2099,7 +2099,7 @@ Transcript rows retain their 736px reading width.
 
 The changes bar (`changes-bar.tsx`) sits above the composer: one line,
 "14 files changed +612 −140" and **Review**. It counts the run's whole
-worktree against its fork point, the Changes view's **Current diff**, so
+worktree against its base, the Changes view's **All changes**, so
 edits made by shell commands count too. Its source is the newest `run.diff`
 stat set. Until the page has received one live, it reads the newest with
 `workspace.timeline` (`types: ["run.diff"]`, `newest: true`, `limit: 1`)
@@ -2108,7 +2108,7 @@ no replay cursor yet; after that, a resumed event stream replays any it
 missed. It starts collapsed and stays expanded per run
 once opened. Expanded, it lists each file with its status letter and
 `+a −d`, at most 192px tall (30% of the viewport on a phone). A file opens
-the Changes view at that file; **Review** opens its **Current diff**. A
+the Changes view at that file; **Review** opens its **All changes**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the run is merged or
 abandoned, which removes its checkout; a
@@ -2776,7 +2776,7 @@ re-reads them when the dark class on `<html>` changes.
 both what it renders and the overlap set the conflict chips read.
 
 - **One strip, then the files.** A 32px strip (`strip.tsx`) holds the file
-  count and `+a −d` totals, the interval menu, the conflict chips, and on the
+  count and `+a −d` totals, the Compare menu, the conflict chips, and on the
   right **Wrap lines**, **Refresh**, **More** (**Expand all files**,
   **Collapse all files**, **Review locally…**) and **Publish…**. Below it a
   file list (`file-list.tsx`: status letter, name, folder, `+a −d`) sits
@@ -2788,7 +2788,7 @@ both what it renders and the overlap set the conflict chips read.
   on this machine.
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no patch text, so a snapshot bumps the run's `revision`
-  and the view re-fetches the current diff from `GET /api/v1/run/<id>/patch`
+  and the view re-fetches the chosen comparison from `GET /api/v1/run/<id>/patch`
   (`docs/local-gateway.md`) whenever that has moved past the `fetched`
   revision the stored patch answers for. Counters rather than a stale flag,
   because a snapshot landing *during* a request would write true over true
@@ -2799,7 +2799,10 @@ both what it renders and the overlap set the conflict chips read.
   run is in flight at a time, even across a remount of the view. A stored
   patch over 1 MiB is not re-fetched on a snapshot, so a reader is never
   frozen or reshuffled mid-read: the strip's button becomes **New changes ·
-  Refresh** and loads them on click.
+  Refresh** and loads them on click. The store keeps one patch per run and
+  records which comparison it answers for (`from`); choosing another
+  comparison shows a loading state and fetches at once, never the previous
+  comparison's text.
 - **Files are split by scanning, then parsed when read.** `parsePatch`
   (`parse.ts`) finds each `diff --git` boundary and counts a file's
   additions, deletions and content lines without allocating a row per line,
@@ -2808,22 +2811,31 @@ both what it renders and the overlap set the conflict chips read.
   split into lines. A refetch hands the previous files back in, and a file
   whose text is unchanged is the same object, so its memoised rows and placed
   review comments are not redone.
-- **An interval is a menu row.** The interval menu lists **Current diff**
-  (against the fork point) and then the `run.diff` snapshots, newest first,
-  as "What changed 5 min ago" with their file count and totals, or the file
-  count alone for a `truncated` snapshot. Choosing one
-  fetches `GET /api/v1/run/<id>/patch?from=<parent_tree>&to=<tree>`, the diff
-  between the two trees, which is what the run changed in that interval. An
-  interval is addressed by two tree ids and so never changes: each fetched
-  one is kept and never asked for again. The selection keys on the snapshot's
-  timestamp, so a new snapshot never retargets it. A snapshot with no tree -
-  from a server that predates them - is a disabled row whose description says
-  why. The list is capped at 40 per run and starts empty on every page load:
-  it holds only the snapshots this page received.
-  `history_gap` marks a missing interval or a successful interval spanning
-  missed snapshots; `snapshot_error` gives its safe cause. Neither is shown
-  as a normal complete interval. Expired snapshot ranges show the server's
-  unavailable error; **Current diff** stays a distinct cumulative choice.
+- **Compare is a menu.** The Compare menu chooses what the patch is measured
+  against, and its trigger names the choice. **All changes** (the default)
+  is the cumulative diff against the run's effective base, described as
+  "Against main @ 1a2b3c4" with the base branch and the short sha the patch
+  response names. **Since the run started** appears only when that base
+  differs from the fork point on the run record (`base_commit`), meaning the
+  run merged upstream work: it requests `?from=<fork_tree>`, so it also
+  counts that upstream work. Under **Changes since a checkpoint** every
+  recorded `run.diff` snapshot is a row, newest first, labelled with its local
+  time (with the date when not today) and its age. Its description is the
+  commit subject when `head` moved since the next older checkpoint, otherwise
+  the file count and `+a −d` totals, or the count alone for a `truncated`
+  snapshot. Choosing a row requests `?from=<tree>`: everything that changed
+  since that checkpoint up to now, which grows as the run goes on and
+  re-fetches on each new snapshot like the whole diff. The newest 50
+  checkpoints load from `workspace.timeline` (`types: ["run.diff"]`,
+  `newest: true`) when the view first opens for a run on this page, live
+  snapshots join them, one row per tree, and **Show older checkpoints** pages
+  back with `before_seq` while the timeline says `more`. A checkpoint keeps
+  only its time, tree, head, subject and counts, never its file list. A
+  snapshot with no tree - from a server that predates them, or one whose
+  capture failed with `snapshot_error` - is a disabled row whose description
+  says why; a `history_gap` before a recorded tree does not disable it. A
+  failed history read shows the server's error with **Retry**. A link
+  with `file` or `diff: 'current'` selects **All changes**.
 - **Big files start closed.** Each file (`patch-view.tsx`, `FilePatch`) has a
   sticky header with a chevron, its path, a status word and `+a −d`. A file
   over 500 lines or 256 KiB of patch text, a binary file and a deleted file
@@ -2843,9 +2855,9 @@ both what it renders and the overlap set the conflict chips read.
   without leaving the run. It needs a run that has a Files view. Binary files
   and files the current diff shows as deleted have no link.
 - **A link can name a file.** A navigation to the run route with
-  `view: 'changes'` and `file: <path>` selects **Current diff**, expands that
+  `view: 'changes'` and `file: <path>` selects **All changes**, expands that
   file and scrolls to it once the diff has it; `diff: 'current'` selects
-  **Current diff** alone. The Session view's changes bar navigates these
+  **All changes** alone. The Session view's changes bar navigates these
   ways. `file` is not written to the
   address.
 - **Lines take comments.** A review comment is a note on one line or a range
@@ -2924,15 +2936,16 @@ both what it renders and the overlap set the conflict chips read.
   store in `review.ts`, keyed by run, for the reason composer drafts do. They
   survive switching views, opening another page and every diff refresh, and
   end with the page, a deleted run or another identity. A comment stores the
-  lines it was written on - kind, text, old and new numbers - and which diff
-  that was, the current one or an interval. `locate` finds those lines in the
+  lines it was written on - kind, text, old and new numbers - and which
+  comparison that was: `''` for All changes, `start` for Since the run
+  started, `since:<tree>` for a checkpoint. `locate` finds those lines in the
   diff on screen: at the same numbers first, otherwise where the same block
   appears exactly once. A comment therefore follows code that moved, and is
   never pinned to one of two identical blocks by guess. A comment whose lines
   the diff no longer shows is kept and marked **Outdated** with its quote, at
   the top of its file, or above the files when the file left the diff; it is
   sent with that quote and a note that the lines changed. A comment written
-  on another interval shows wherever its lines appear and is counted
+  on another comparison shows wherever its lines appear and is counted
   otherwise.
 - **Colour is the whole of the highlighting.** Added and removed lines use the
   `diff-add` and `diff-del` tokens. The dashboard never edits code, so there

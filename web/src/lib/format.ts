@@ -40,6 +40,14 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return step ? relative.format(...step) : ''
 }
 
+/** The local wall-clock time of `iso`, with the date when it is not today. */
+export function clockTime(iso: string, now = Date.now()): string {
+  const when = new Date(iso)
+  const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (when.toDateString() === new Date(now).toDateString()) return time
+  return `${when.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}
+
 const compactUnits: Partial<Record<Intl.RelativeTimeFormatUnit, string>> = {
   minute: 'm',
   hour: 'h',

@@ -974,6 +974,12 @@ export interface RunDiffPayload {
   /** The run holds more untracked content than a stat set reads: every
    * changed path is in `files`, but the counts sum to a floor. */
   truncated?: boolean
+  /** The commit `files` is measured against: the newest upstream commit the
+   * run contains. Absent from servers that predate it. */
+  base?: string
+  /** The checkout's HEAD commit at this snapshot, and its subject line. */
+  head?: string
+  head_subject?: string
   /** The git tree of the whole worktree at this snapshot. */
   tree?: string
   /** The previous snapshot's tree, or the fork-point tree for the first one.
@@ -1009,6 +1015,9 @@ export interface RunPatch {
   patch: string
   truncated: boolean
   recorded?: boolean
+  /** The tree of the commit the run forked from; present on renders without
+   * `from`. Passed as `from` it diffs the run's current state against its start. */
+  fork_tree?: string
 }
 
 /** One immediate child returned by files.tree or home.tree. Only home.tree

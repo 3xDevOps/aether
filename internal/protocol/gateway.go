@@ -11,8 +11,9 @@ const (
 )
 
 // RunPatchParams asks for one run's patch. From and To are snapshot
-// trees from run.diff events; both empty asks for the run's current
-// diff against its fork point.
+// trees from run.diff events. Both empty asks for the run's current diff
+// against its effective base; From alone for everything that changed since
+// that snapshot; both for what that one interval changed. To alone is invalid.
 type RunPatchParams struct {
 	RunID string `json:"run_id"`
 	From  string `json:"from,omitempty"`
@@ -24,8 +25,8 @@ type RunPatchParams struct {
 // tree when a snapshot range was asked for.
 type RunPatchResult struct {
 	RunID string `json:"run_id"`
-	// Base is what the diff is taken against: the fork-point commit for a
-	// cumulative render, the requested from tree for an interval render.
+	// Base is what the diff is taken against: the effective base commit for a
+	// cumulative render, the requested from tree otherwise.
 	Base string `json:"base"`
 	// Patch is the unified diff text, empty when nothing changed.
 	Patch string `json:"patch"`
@@ -33,6 +34,10 @@ type RunPatchResult struct {
 	// last whole line that fit. Dashboard renders are complete.
 	Truncated bool `json:"truncated"`
 	Recorded  bool `json:"recorded,omitempty"`
+	// ForkTree is the tree of the commit the run forked from, on renders
+	// without From. Passed as From it diffs the run's current state against
+	// its starting point.
+	ForkTree string `json:"fork_tree,omitempty"`
 }
 
 // ServerDiskResult keeps whole-filesystem headroom separate from Aether's

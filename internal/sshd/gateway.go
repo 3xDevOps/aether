@@ -19,7 +19,8 @@ func init() {
 }
 
 // RunPatcher renders a run checkout's diff: against its effective base
-// commit, or between two diff-snapshot trees. The git engine implements it.
+// commit, from a diff-snapshot tree to the current state, or between two
+// diff-snapshot trees. The git engine implements it.
 type RunPatcher interface {
 	RunPatch(ctx context.Context, run domain.RunID, req gitengine.PatchRequest) (gitengine.Patch, error)
 }
@@ -53,7 +54,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	})
 	switch {
 	case errors.Is(err, gitengine.ErrInvalidObjectID):
-		return nil, invalidParams("run.patch: from and to must both be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit), or both empty")
+		return nil, invalidParams("run.patch: from, or from and to, must be tree ids taken from a run.diff event (full lowercase hex, naming a tree and not a commit); to alone is not allowed")
 	case errors.Is(err, gitengine.ErrSnapshotTreeMissing):
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "run.patch: retained snapshot history has expired or is unavailable"}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
@@ -71,6 +72,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 		Patch:     p.Text,
 		Truncated: p.Truncated,
 		Recorded:  p.Recorded,
+		ForkTree:  p.ForkTree,
 	}, nil
 }
 

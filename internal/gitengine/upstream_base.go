@@ -3,6 +3,7 @@ package gitengine
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -16,15 +17,12 @@ const snapshotUpstreamRef = "refs/aether/upstream"
 // result never precedes forkPoint: whenever the merge base is not a
 // descendant of it, or any input is missing or invalid, forkPoint is used.
 //
-// The tracking ref and HEAD are read as inert data and validated in the
+// head is the checkout's validated HEAD commit, empty when it could not be
+// read. The tracking ref is read as inert data and validated in the
 // server-owned scratch store; Git never reads the checkout's own repository.
-func (e *Engine) effectiveBase(ctx context.Context, run domain.RunID, checkout, forkPoint, baseBranch string) string {
+func (e *Engine) effectiveBase(ctx context.Context, run domain.RunID, checkout, head, forkPoint, baseBranch string) string {
 	tip := e.upstreamTip(checkout, baseBranch)
-	if tip == "" {
-		return forkPoint
-	}
-	head, err := e.checkoutHead(ctx, run, checkout)
-	if err != nil {
+	if tip == "" || head == "" {
 		return forkPoint
 	}
 	store, err := e.snapshotStorePath(run)
@@ -72,4 +70,28 @@ func (e *Engine) publishedBaseTree(ctx context.Context, run domain.RunID) string
 		}
 	}
 	return ""
+}
+
+// maxHeadSubjectBytes bounds the commit subject a run.diff event carries.
+const maxHeadSubjectBytes = 200
+
+// headSubject reads the subject line of a validated commit in the run's
+// snapshot store, cut to maxHeadSubjectBytes on a rune boundary.
+func (e *Engine) headSubject(ctx context.Context, run domain.RunID, head string) (string, error) {
+	store, err := e.snapshotStorePath(run)
+	if err != nil {
+		return "", err
+	}
+	subject, err := e.git(ctx, store, "log", "-1", "--format=%s", head)
+	if err != nil {
+		return "", err
+	}
+	if len(subject) <= maxHeadSubjectBytes {
+		return subject, nil
+	}
+	cut := maxHeadSubjectBytes
+	for cut > 0 && !utf8.RuneStart(subject[cut]) {
+		cut--
+	}
+	return subject[:cut], nil
 }

@@ -959,8 +959,9 @@ export const api = {
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
-  // diff against the fork point; with one, `base` is the `from` tree.
-  runPatch: (runID: string, range?: { from: string; to: string }) =>
+  // diff against the run's effective base; with `from`, everything since that
+  // snapshot tree, and `base` is the `from` tree.
+  runPatch: (runID: string, range?: { from: string }) =>
     get<RunPatch>(
       `/run/${encodeURIComponent(runID)}/patch` +
         (range ? `?${new URLSearchParams(range).toString()}` : ''),
