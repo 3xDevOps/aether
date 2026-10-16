@@ -109,8 +109,10 @@ class SetupActivity : ComponentActivity() {
         var targets = emptyList<UpdateTarget>()
         get.setOnClickListener { openUpdate(this, targets, openError) }
 
-        fun render(stored: StoredUpdate, facts: InstallFacts?) {
+        fun render(stored: StoredUpdate, facts: InstallFacts) {
             if (stored.checkedAt == 0L || (stored.line == null && stored.error == null)) return
+            // A check from before this app was installed judged another version.
+            if (stored.checkedAt < facts.updatedAt) return
             val time = DateFormat.getTimeFormat(this).format(Date(stored.checkedAt))
             val check = stored.line?.takeIf { stored.error == null }?.let(::parseUpdateCheck)
             val tag = check?.latest?.takeIf { check.updateAvailable && isReleaseTag(it) }
@@ -123,12 +125,19 @@ class SetupActivity : ComponentActivity() {
                 }
             status.setTextColor(getColor(if (check == null) R.color.error_text else R.color.text))
             status.visibility = View.VISIBLE
-            targets = if (tag != null && facts != null) updateTargets(facts.source, packageName, tag).orEmpty() else emptyList()
-            get.setText(if (facts?.source == InstallSource.PLAY) R.string.update_open_play else R.string.update_download)
+            targets = if (tag != null) updateTargets(facts.source, packageName, tag).orEmpty() else emptyList()
+            get.setText(if (facts.source == InstallSource.PLAY) R.string.update_open_play else R.string.update_download)
             get.visibility = if (targets.isEmpty()) View.GONE else View.VISIBLE
         }
 
-        render(storedUpdate(), null)
+        Thread {
+                val facts = installFacts(applicationContext)
+                runOnUiThread {
+                    // A check the member started since owns the status.
+                    if (!isDestroyed && button.isEnabled) render(storedUpdate(), facts)
+                }
+            }
+            .start()
         button.setOnClickListener {
             button.isEnabled = false
             status.setText(R.string.update_checking)

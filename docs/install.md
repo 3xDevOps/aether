@@ -926,7 +926,8 @@ so the release lookup and version order are the desktop's. **Check for
 updates** on the Connection screen (long-press the launcher icon, or
 **Connection** on a failed load) runs one now and always answers: `You're up
 to date (v0.8.0). Checked 14:05.`, the newer version with its button, or the
-CLI's error verbatim. A background check that fails stays quiet until the
+CLI's error verbatim; a result saved before the app was last installed or
+updated is not shown. A background check that fails stays quiet until the
 last answer is 24 hours old; from then on the banner shows `Could not check
 for updates: <error>` as one muted line until a check succeeds or you dismiss
 it.
