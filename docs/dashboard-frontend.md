@@ -3993,8 +3993,10 @@ the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
 **Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
 the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
-`<name> copy`. With no templates the view says what one is and offers **New
-template**.
+`<name> copy`. The form's agent select lists the agents from `agent.list` by
+display name and keeps the template's current agent as an extra option when
+the list omits it. With no templates the view says what one is and offers
+**New template**.
 
 Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
 closes on Save or Delete and the list shows the result at once; a saved
@@ -4052,7 +4054,9 @@ render the same parts from `src/components/agents/`, so this section covers
 both. The page header has **Add agent…** where the gateway serves
 `agent.register`, and a sub-screen there shows **All agents** to go back.
 
-`AgentList` rows show the agent's coloured `AgentGlyph`, its display name,
+`AgentList` rows show the agent's coloured `AgentGlyph` (`ui/agent-glyph.tsx`
+maps each shipped name to an icon and its `--agent-*` colour token), its
+display name,
 "Not installed", "Installed", "Installed · Login found" or "Installed · No
 login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while

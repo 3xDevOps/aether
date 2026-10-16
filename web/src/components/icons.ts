@@ -15,6 +15,7 @@ import {
   Folder as LucideFolder,
   FolderGit2 as LucideFolderGit2,
   GitBranch as LucideGitBranch,
+  Github as LucideGithub,
   GitPullRequest as LucideGitPullRequest,
   History as LucideHistory,
   Keyboard as LucideKeyboard,
@@ -31,6 +32,7 @@ import {
   Search as LucideSearch,
   Settings as LucideSettings,
   Shield as LucideShield,
+  Sparkle as LucideSparkle,
   Sparkles as LucideSparkles,
   Square as LucideSquare,
   SquarePi as LucideSquarePi,
@@ -156,6 +158,7 @@ export const Ellipsis = icon(LucideEllipsis)
 export const FileText = icon(LucideFileText)
 export const FolderGit2 = icon(LucideFolderGit2)
 export const GitBranch = icon(LucideGitBranch)
+export const Github = icon(LucideGithub)
 export const GitPullRequest = icon(LucideGitPullRequest)
 export const History = icon(LucideHistory)
 export const Keyboard = icon(LucideKeyboard)
@@ -172,6 +175,7 @@ export const RefreshCw = icon(LucideRefreshCw)
 export const Search = icon(LucideSearch)
 export const Settings = icon(LucideSettings)
 export const Shield = icon(LucideShield)
+export const Sparkle = icon(LucideSparkle)
 /** Interrupt. */
 export const Sparkles = icon(LucideSparkles)
 export const Square = icon(LucideSquare)

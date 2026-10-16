@@ -674,3 +674,24 @@ func TestCLISkillForAnAgentNamedApartFromItsCommand(t *testing.T) {
 		t.Fatalf("skill hook summary = %s", raw)
 	}
 }
+
+// The shipped cursor agent runs as agent, but AETHER_HARNESS carries its
+// name, so the skill reports Cursor's packaged hooks.
+func TestCLISkillForCursorReportsCursorHooks(t *testing.T) {
+	t.Setenv("AETHER_HARNESS", "cursor")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CURSOR_CONFIG_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	status := protocol.CoordStatusResult{
+		RunID:        "run-current",
+		Capabilities: []string{protocol.MethodCoordInbox},
+		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
+	}
+	var out bytes.Buffer
+	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
+		t.Fatalf("skill = %d, %v", code, err)
+	}
+	if raw := out.String(); !strings.Contains(raw, "Inbox hooks (cursor): missing") || strings.Contains(raw, "no packaged integration") {
+		t.Fatalf("skill hook summary = %s", raw)
+	}
+}

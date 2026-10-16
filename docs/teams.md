@@ -1367,8 +1367,8 @@ mix models per agent. `-` in place of the
 objective reads it from stdin. An enhanced integrator or worker is prompted
 when mail reaches its idle session, so worker reports reach an enhanced
 integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
-`:background` `codex`, `omp` or `opencode` worker whose ACP server is
-installed runs its task as one ACP turn
+`:background` `codex`, `omp`, `opencode`, `copilot`, `gemini` or `cursor`
+worker whose ACP server is installed runs its task as one ACP turn
 ([enhanced-runs.md](enhanced-runs.md#background-runs)).
 
 In the dashboard, **Swarms** lists each swarm with its phase, integrator and

@@ -87,6 +87,9 @@ describe('the Standard and Enhanced comparison', () => {
     ['omp', 'Runs with full permissions; its ACP mode has no asking option.'],
     ['pi', 'pi never asks for permission.'],
     ['opencode', "Runs with full permissions through its config; a workspace's own permission rules still apply."],
+    ['copilot', 'Runs with full permissions through --allow-all, which a run cannot take back.'],
+    ['gemini', 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'],
+    ['cursor', "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the run for read-only."],
   ])('says how %s handles permissions in Enhanced', (name, note) => {
     render(<ModeComparison agent={{ ...codex, name }} value="acp" onChange={vi.fn()} />)
     expect(screen.getByRole('radio', { name: 'Enhanced' }).textContent).toContain(note)
@@ -203,6 +206,11 @@ describe('agent setup', () => {
     setUp({ ...claude, installed: true })
     expect(screen.getByText(/Start Claude Code, then type \/login/)).toBeDefined()
     expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nclaude')
+  })
+
+  it('types the Cursor login command with its agent executable', () => {
+    setUp(agentInfo({ name: 'cursor', display_name: 'Cursor CLI', executable: 'agent', enhanced: 'native' }))
+    expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nNO_OPEN_BROWSER=1 agent login')
   })
 
   it('types the install command on a gateway without agent.install', () => {

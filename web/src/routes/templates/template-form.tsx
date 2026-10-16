@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { FormField } from '@/components/ui/form-field'
@@ -20,9 +21,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import type { Template } from '@/lib/types'
+import { useAgentList } from '@/routes/agents/use-agents'
 import type { Outcome } from '@/store/optimistic'
-
-const harnesses = ['claude', 'codex', 'pi', 'omp', 'opencode', 'custom']
 
 export type FormMode = { kind: 'new' } | { kind: 'edit'; template: Template } | { kind: 'duplicate'; template: Template }
 
@@ -53,9 +53,15 @@ export function TemplateForm({
   const editing = form.kind === 'edit'
   const [name, setName] = useState(form.kind === 'duplicate' && !form.draft ? `${form.template.name} copy` : (source?.name ?? ''))
   const [task, setTask] = useState(source?.task ?? '')
-  const [harness, setHarness] = useState(source?.harness ?? harnesses[0])
+  const [harness, setHarness] = useState(source?.harness ?? 'claude')
   const [mode, setMode] = useState(source?.mode ?? 'headless')
   const [model, setModel] = useState(source?.model ?? '')
+  const { agents, error: agentsError, reload: reloadAgents } = useAgentList()
+  const options = (agents ?? []).map((agent) => ({ value: agent.name, label: agent.display_name || agent.name }))
+  // agent.list leaves out the deployment's `custom` agent, which a template may still name.
+  for (const value of [harness, 'custom']) {
+    if (!options.some((option) => option.value === value)) options.push({ value, label: value })
+  }
   const chosenModel = model.trim()
   const draft = { name: name.trim(), task: task.trim(), harness, mode, ...(chosenModel ? { model: chosenModel } : {}) }
 
@@ -86,6 +92,11 @@ export function TemplateForm({
               onEdit()
             }} />
           </FormField>
+          {agentsError && (
+            <Callout tone="failed" role="alert" actions={<Button type="button" size="sm" variant="secondary" onClick={reloadAgents}>Retry</Button>}>
+              Agents did not load: {agentsError}
+            </Callout>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
               <Label htmlFor="template-harness">Agent</Label>
@@ -97,9 +108,9 @@ export function TemplateForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {harnesses.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h}
+                  {options.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

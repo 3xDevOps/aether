@@ -56,6 +56,8 @@ func TestNPMUpdateScripts(t *testing.T) {
 	}{
 		{"codex", "@openai/codex", "codex-cli %s"},
 		{"pi", "@earendil-works/pi-coding-agent", "%s"},
+		{"copilot", "@github/copilot", "GitHub Copilot CLI %s."},
+		{"gemini", "@google/gemini-cli", "%s"},
 	} {
 		profile, _ := Lookup(tc.name)
 		fixture := func(t *testing.T, installed string) string {

@@ -18,6 +18,9 @@ run.
 | `pi` | adapter `pi-acp` | nothing: pi never asks |
 | `omp` | `omp acp --auto-approve` | the `--auto-approve` flag |
 | `opencode` | `opencode acp` | `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT` |
+| `copilot` | `copilot --acp --allow-all` | the `--allow-all` flag, which the run cannot take back |
+| `gemini` | `gemini --acp` | session mode `yolo` |
+| `cursor` | `agent --force acp` | the `--force` flag |
 | custom | the definition's `ACPArgs` / `acp_args` / `--acp` | the session mode in `ACPMode` / `acp_mode` / `--acp-mode`, else whatever the definition passes |
 
 Like Standard, an Enhanced run acts without asking by default. The session
@@ -44,7 +47,7 @@ agent's terminal, **Enhanced** shows it as a tool line among the messages.
 | --- | --- | --- |
 | What you see | The agent's own terminal, exactly as on your machine | Messages, tool activity, file changes, approvals and progress as native controls |
 | Trade-off | No structured view; the agent acts without asking, and anything it asks is answered in the terminal | Runs through an adapter, not the agent's own screen; some agent-specific commands and screens are missing; starts a few seconds slower |
-| Permissions | Never asks | Never asks by default; for Claude Code and Codex, switch the session's mode in the run to be asked. The card's note says how the chosen agent runs without asking |
+| Permissions | Never asks | Never asks by default; for Claude Code, Codex and Gemini, switch the session's mode in the run to be asked. The card's note says how the chosen agent runs without asking |
 
 Under the cards one line each comes from `agent.list`: how the agent serves
 ACP (`enhanced`), whether its adapter is installed (`enhanced_installed`),
@@ -53,9 +56,9 @@ when the run starts"), what a failed adapter start does, and for Claude Code
 that it uses your Claude login through the Claude Agent SDK. An agent whose
 `enhanced` is `none` shows the Enhanced card disabled with the reason. The
 selection starts on the mode last chosen for the agent, else Enhanced for an
-agent with `enhanced_default` (Codex, oh-my-pi and OpenCode, before their
-adapter is installed too), else `default_mode`, and becomes that agent's
-default in **New run**; **Install <agent>** with Enhanced selected installs
+agent with `enhanced_default` (Codex, oh-my-pi, OpenCode, Copilot, Gemini and
+Cursor, before their ACP server is installed too), else `default_mode`, and
+becomes that agent's default in **New run**; **Install <agent>** with Enhanced selected installs
 the adapter in the same `agent.install` call. The **Agents** page keeps a
 **Default mode** per agent.
 
@@ -441,8 +444,8 @@ Limits:
   no task live, an autonomous turn that sends nothing for `--stall-threshold`
   parks the run `stalled:` until the agent sends something again; the turn
   itself ends after at most 15 minutes of quiet.
-- Other agents (Codex, pi, omp, opencode, custom) report no background tasks
-  and get no autonomous turns: output they send with no prompt open is
+- Other agents (Codex, pi, omp, opencode, copilot, gemini, cursor, custom)
+  report no background tasks and get no autonomous turns: output they send with no prompt open is
   logged under their last turn and changes no state.
 
 ### Run instructions
@@ -739,11 +742,11 @@ settles a switch whose row failed to save or whose rollback failed.
 ## Background runs
 
 A background run (`--mode background`, wire name `headless`) of `codex`,
-`omp` or `opencode` uses the agent's ACP server when it is installed in the
-home the launch uses (`agent.list` reports `enhanced_installed`). The run
-row and the wire carry `acp: true`. Every other agent, and these three
-without the server, use the agent's headless command line. Claude stays on
-`claude -p` because its adapter runs on the Claude Agent SDK, whose terms
+`omp`, `opencode`, `copilot`, `gemini` or `cursor` uses the agent's ACP
+server when it is installed in the home the launch uses (`agent.list`
+reports `enhanced_installed`). The run row and the wire carry `acp: true`.
+Every other agent, and these six without the server, use the agent's
+headless command line. Claude stays on `claude -p` because its adapter runs on the Claude Agent SDK, whose terms
 favour API keys over the subscription login a member shares.
 
 Such a run has the enhanced container shape and session item log, and
