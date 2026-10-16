@@ -10,9 +10,11 @@ import { RequestCard } from '@/components/ui/request-card'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
+import { useClock } from '@/lib/clock'
 import { isRetainedRun } from '@/lib/commands'
 import { formatBytes } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
+import { needsYou } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
 import type { RoomMessage } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -28,6 +30,7 @@ import { useRunPresentation } from '@/store/hooks'
 import { useShallow } from 'zustand/react/shallow'
 import { loadMessagePage, messageScopeKey, useMessageList, type MessageScope } from '@/store/messages'
 import { isTerminal, type RunRecord } from '@/store/runs'
+import { stateContextOf } from '@/store/selectors'
 
 const emptyMessages: RoomMessage[] = []
 
@@ -210,9 +213,11 @@ function Facts({ run, agent, agentName, inset }: { run: RunRecord; agent: AgentT
 }
 
 function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunView; agent: AgentTerminal; nav: RunNavigation }) {
+  const now = useClock()
+  const waiting = useStore((s) => needsYou(run, stateContextOf(s, now)) !== undefined)
   const presented = useRunPresentation(run)
   const primary = usePrimaryAction(run, view, agent, nav)
-  if (presented.state !== 'needs-you') return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
+  if (!waiting) return <p className="text-ui-sm text-muted">Nothing is waiting on you.</p>
   return (
     <RequestCard
       title={presented.reason}

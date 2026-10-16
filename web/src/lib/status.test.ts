@@ -1,6 +1,7 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateLabel } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateLabel, stateTone } from '@/lib/status'
+import type { RunActivity } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
 import { run, stateContext } from '@/test/fixtures'
 
@@ -69,9 +70,12 @@ describe('run presentation', () => {
     }
   })
 
-  it('labels a live run without a state by its status, never Working', () => {
+  it('labels a live run without a known state by its status, never Working', () => {
     expect(shown({ status: 'running', state: '' })).toEqual({ state: 'running', reason: 'Running' })
     expect(shown({ status: 'needs-attention', state: undefined, reason: 'agent idle' })).toEqual({ state: 'needs-attention', reason: 'Agent idle' })
+    const future = shown({ status: 'running', state: 'compacting' as RunActivity })
+    expect(future).toEqual({ state: 'running', reason: 'Running' })
+    expect(stateTone[future.state]).toBe('neutral')
   })
 
   it('reads what the agent is doing from its tool activity while it works', () => {

@@ -11,7 +11,7 @@ Element.prototype.scrollIntoView = vi.fn()
 
 const runs = [
   run(),
-  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention', state: 'needs-you' }),
+  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which schema?' }),
   run({ id: 'run_3', task: 'ship the invoice export', status: 'needs-attention', state: 'failed', outcome_unseen: true, workspace_id: otherWorkspace.id }),
   run({ id: 'run_4', task: 'tidy the readme', status: 'merged' }),
 ]
@@ -369,7 +369,7 @@ describe('run rows', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 
-  it('replies to an idle run from its Session composer', () => {
+  it("replies to an agent's question from its Session composer", () => {
     render(<AppShell />)
 
     const row = runList().getByRole('button', { name: /^Needs you · answer the schema question/ })

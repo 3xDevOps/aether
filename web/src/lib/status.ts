@@ -35,9 +35,9 @@ export function backgroundReason(tasks: BackgroundTask[]): string {
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-/** The server sends no state for a run, or a stored event, from before it derived one. */
-export function liveStateOf(status: 'running' | 'needs-attention', state: RunActivity | '' | undefined): LiveState {
-  return state || status
+/** A run or stored event from before the server derived a state, or one with a state this dashboard does not know, is shown by its status. */
+export function liveStateOf(status: 'running' | 'needs-attention', state: string | undefined): LiveState {
+  return state && state !== status && state in stateReasons ? (state as RunActivity) : status
 }
 
 const stateReasons: Record<LiveState, string> = {

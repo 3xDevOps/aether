@@ -29,7 +29,14 @@ export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
         finished_at: previous.finished_at,
         status_changed_at: undefined,
       }
-    : snapshot
+    : previous && snapshot.status_seq === previous.status_seq
+      // Only a status change sets an outcome flag; a read from before the owner opened the run must not set it again.
+      ? {
+          ...snapshot,
+          outcome_unseen: snapshot.outcome_unseen === true && previous.outcome_unseen === true,
+          finish_unopened: snapshot.finish_unopened === true && previous.finish_unopened === true,
+        }
+      : snapshot
   const { status_changed_at: snapshotAt, ...wire } = run
   const carry = previous && previous.status === run.status
   // A snapshot can be older than the events already applied, so it never moves

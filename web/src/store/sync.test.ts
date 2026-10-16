@@ -973,6 +973,11 @@ describe('applyEvent', () => {
     expect(finished).toMatchObject({ status: 'failed', state: undefined, finish_unopened: true, finished_at: '2026-08-14T11:00:00Z' })
     store.getState().setRuns([run({ state: 'failed', status: 'needs-attention', status_seq: 4, outcome_unseen: true })])
     expect(flags()).toEqual(finished)
+
+    store.getState().applyOutcomeSeen('run_1')
+    store.getState().applyFinishOpened('run_1')
+    store.getState().upsertRun(run({ status: 'failed', status_seq: 5, outcome_unseen: true, finish_unopened: true }))
+    expect(flags()).toMatchObject({ status_seq: 5, outcome_unseen: false, finish_unopened: false })
   })
 
   it('takes the status-change time from the wire and moves it only when the server does', async () => {

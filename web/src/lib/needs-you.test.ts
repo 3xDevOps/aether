@@ -217,7 +217,10 @@ describe('needs you conditions', () => {
     ['a paused disconnect', { state: 'disconnected', paused: true }, undefined],
     ['a usage limit Aether resumes', { state: 'idle', reason: "Usage limit reached on Alice's account; moving to Bob's account" }, undefined],
     ['a usage limit Aether cannot resume', { state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'needs-input'],
-    ['a Background request', { mode: 'headless', state: 'needs-you' }, 'needs-input'],
+    ['a Background question', { mode: 'headless', state: 'needs-you', reason: 'needs input: Which port?' }, 'needs-input'],
+    ['a Background request push does not announce', { mode: 'headless', state: 'needs-you' }, undefined],
+    ['a Background disconnect', { mode: 'headless', state: 'disconnected' }, 'disconnected'],
+    ['a Background failure', { mode: 'headless', state: 'failed', outcome_unseen: true }, undefined],
     ['a finished run with its outcome unseen', { status: 'failed', state: '', outcome_unseen: true }, undefined],
     ['a live run with no state', { state: '' }, undefined],
   ] satisfies [string, Partial<Run>, NeedsYouID | undefined][])('attention for %s: %s', (_, fields, want) => {
@@ -286,12 +289,20 @@ describe('needs you conditions', () => {
   it.each([
     [{ pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Open terminal'],
     [{ acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'question' }] }, 'Answer'],
-    [{ status: 'needs-attention', state: 'needs-you' }, 'Reply'],
-    [{ mode: 'headless', status: 'needs-attention', state: 'needs-you' }, 'Open'],
+    [{ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' }, 'Reply'],
+    [{ mode: 'headless', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' }, 'Open'],
+    [{ status: 'needs-attention', state: 'needs-you', reason: "Usage limit reached on Alice's account; no fallback has usage left" }, 'Open'],
     [{ status: 'needs-attention', state: 'failed', outcome_unseen: true }, 'Review'],
   ] satisfies [Partial<Run>, string][])('gives %o the primary action %s', (fields, label) => {
     const shown = record(fields)
     expect(needsYou(shown, stateContext())?.action(shown, undefined).label).toBe(label)
+  })
+
+  it('shows a request whose approval has not loaded as a plain Needs you', () => {
+    const parked = record({ status: 'needs-attention', state: 'needs-you', reason: 'agent idle' })
+    const shown = presentRun(parked, stateContext())
+    expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the run to see its request' })
+    expect(shown.needsYou?.action(parked, undefined)).toEqual({ kind: 'open', label: 'Open' })
   })
 })
 
@@ -391,6 +402,18 @@ describe('viewer scoping', () => {
     const theirs = record({ ...integrator, member_id: bob.id })
     expect(needsYou(theirs, stateContext(ctx))?.id).toBe('swarm-question')
     expect(needsYou(theirs, stateContext({ ...ctx, viewerID: 'mem_carol', viewerRole: 'collaborator' }))).toBeUndefined()
+  })
+
+  it("keeps a paused integrator's open swarm question", () => {
+    const ctx = stateContext({
+      missions: { mission_1: mission() },
+      missionDetails: { mission_1: detail({ questions: [missionQuestion()] }) },
+      pausedRuns: { [integrator.id]: true },
+    })
+    expect(needsYou(integrator, ctx)?.id).toBe('swarm-question')
+    expect(needsYou(record({ ...integrator, status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which flow?' }), {
+      ...ctx, missionDetails: {},
+    })).toBeUndefined()
   })
 
   it('needs nobody before the viewer is known', () => {

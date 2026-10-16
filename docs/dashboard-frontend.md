@@ -1269,7 +1269,8 @@ A run shows one state and one plain-words reason line, derived in
 `src/lib/status.ts` (`presentRun`). A live run's state is the server's
 `state` field: the scheduler derives it, so the dashboard never infers a wait
 from a reason string. A live run or stored `run.status` event from before the
-server derived one has no `state`; it reads **Running** or **Parked** from its
+server derived one has no `state`, and a newer server may send a `state`
+this dashboard does not know; either reads **Running** or **Parked** from its
 wire status, with a neutral dot, never Working. The reason line is the server's `status_reason`
 (`reason` on the wire) in plain words, such as "waiting on 3 workers".
 Details lists the raw `reason` as **Last reason**.
@@ -1301,16 +1302,24 @@ reason or outcome flags. `applyRunStatus` in `src/store/runs.ts` drops a
 and `toRecord` keeps every field such an event set (status, reason, state,
 `status_seq`, `outcome_unseen`, `finish_unopened`, `finished_at`) when a
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
-run back. A kill's prediction clears `state` with the status.
+run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
+`finish_unopened` again once `run.outcome_seen` or opening the run cleared it.
+A kill's prediction clears `state` with the status.
 
-The Needs you group, its counts and badges follow the attention rule push
-notifications, assistant follow and `aether runs --needs-you` share
-([failure-handling.md](failure-handling.md)): a live run (`running` or
+The Needs you group, its counts and badges follow the run-state attention
+rule push notifications, assistant follow and `aether runs --needs-you`
+share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
 `disconnected`, or `failed` while `outcome_unseen`. Finished, Idle, Waiting
 and Working never count. The request rows below need a live, unpaused run
 too; only the two swarm rows, an open swarm question and a stopped
-integrator, hold whatever the integrator run's status. Needs you means the viewer can resolve it.
+integrator, hold whatever the integrator run's status, paused included.
+Needs you means the viewer can resolve it.
+
+The queued message, teammate question, swarm question, stopped integrator
+and control hold rows are the dashboard's own: they come from the room and
+the swarm, which the run's `state` does not cover, so push and
+`aether runs --needs-you` do not announce them.
 `src/lib/needs-you.ts` holds the conditions as one table, checked in order;
 `needsYou(run, ctx)` returns the first that applies:
 
@@ -1325,8 +1334,10 @@ integrator, hold whatever the integrator run's status. Needs you means the viewe
 | Worker under a control hold | the member holding it | You hold control of worker 3 |
 | `state` `disconnected` (labelled Disconnected) | owner | the reason: Agent disconnected: … / Enhanced could not start: … |
 | `state` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
-| `state` `needs-you`, any other reason, a usage limit Aether will not resume included | owner | the reason: Agent asks: … / Usage limit reached on … |
-| `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
+| `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
+| `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
+| `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
+| `state` `failed` with `outcome_unseen` (labelled Failed), not Background | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
 Needs you row does.
@@ -1364,9 +1375,11 @@ blocked report: the integrator handles its stops and requests, and the worker
 reads Waiting on agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
-Background (`headless`) run reaches Needs you only through a pending Aether
-approval, the swarm rows, or its `needs-you`, `failed` or `disconnected`
-state; it takes no input, so its row offers **Open**, not **Reply**. A Working run's reason is what its agent is
+Background (`headless`) run reaches Needs you, as in push, only through a
+pending permission, the swarm rows, a control hold, `disconnected`, or
+`needs-you` with a reported question, blocker or usage limit; its failures
+list under Finished. It takes no input, so its row offers **Open**, not
+**Reply**. A Working run's reason is what its agent is
 doing ("Reading src/auth.ts", from `run.agent`), else "Agent working". A
 reported success, unreviewed or not, is Finished and never lists in Needs
 you.
@@ -2010,7 +2023,8 @@ session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
 `finished`, and while the run works with no pending input a `live` row (the
 run's `toolActivity`, "Reading src/billing.js", else its state label such as
-"Working" or "Waiting on agents") and a
+"Working" or "Waiting on agents", with that state's dot, which pulses only
+while Working) and a
 `terminal-note` row, **Live detail is in the Terminal.** with **Open
 terminal**. An "Agent report" event is dropped while the report's agent
 message is shown. Request titles and that copy live in `lib/run-requests.ts`, shared

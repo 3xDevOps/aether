@@ -1,5 +1,5 @@
 import { memberName as storeMemberName } from '@/lib/member-name'
-import { plainReason } from '@/lib/reasons'
+import { needsInputPrefix, plainReason } from '@/lib/reasons'
 import type {
   Approval,
   Device,
@@ -87,8 +87,7 @@ const isLive = (run: Pick<Run, 'status'>) => run.status === 'running' || run.sta
 
 function condition(spec: Spec): NeedsYouCondition {
   const holds = (run: RunRecord, ctx: StateContext) =>
-    (spec.swarm || isLive(run)) &&
-    !isPaused(run, ctx) &&
+    (spec.swarm || (isLive(run) && !isPaused(run, ctx))) &&
     (spec.background || run.mode !== 'headless') &&
     (spec.supervised || !supervised(run, ctx)) &&
     spec.holds(run, ctx)
@@ -225,8 +224,11 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
+// Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
+const usageLimitPrefix = 'Usage limit reached on '
 
-const reasonOf = (run: RunRecord, fallback: string) => (run.reason ? plainReason(run.reason) : fallback)
+const asks = (run: RunRecord) => run.reason?.startsWith(needsInputPrefix) === true
+const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
 
 // Checked in order; the specific requests precede the agent's own `needs-you`.
 export const needsYouConditions: NeedsYouCondition[] = [
@@ -339,7 +341,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     background: true,
     holds: (run) => run.state === 'disconnected',
     resolvers: (run) => [run.member_id],
-    reason: (run) => reasonOf(run, 'Agent disconnected'),
+    reason: (run) => (run.reason ? plainReason(run.reason) : 'Agent disconnected'),
     action: () => terminalAction,
   }),
   condition({
@@ -357,17 +359,17 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'needs-input',
     target: 'run',
     background: true,
-    holds: (run) => run.state === 'needs-you',
+    // Any other needs-you is a request not loaded here yet, so it reads neutrally. A Background run, as in push, shows only a reported question or a usage limit.
+    holds: (run) => run.state === 'needs-you' && (run.mode !== 'headless' || asks(run) || usageLimited(run)),
     resolvers: (run) => [run.member_id],
-    reason: (run) => reasonOf(run, 'The agent needs you'),
+    reason: (run) => (asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'),
     // A Background run takes no input.
-    action: (run) => (run.mode === 'headless' ? openAction : { kind: 'reply', label: 'Reply' }),
+    action: (run) => (asks(run) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction),
   }),
   condition({
     id: 'failed',
     state: 'failed',
     target: 'changes',
-    background: true,
     holds: (run) => run.state === 'failed' && run.outcome_unseen === true,
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),

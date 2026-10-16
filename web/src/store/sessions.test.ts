@@ -96,12 +96,12 @@ describe('session rows', () => {
   it('ends a working run with what the agent is doing and where to watch it live', () => {
     const working = { ...toRecord(run()), toolActivity: { verb: 'Reading', target: 'src/billing.js', at: '2026-08-14T10:03:00Z', running: {} } }
     expect(rows({ run: working, events: [], room: [], memberName, paused: false }).slice(-2)).toEqual([
-      { kind: 'live', label: 'Reading src/billing.js' },
+      { kind: 'live', label: 'Reading src/billing.js', tone: 'working' },
       { kind: 'terminal-note' },
     ])
-    expect(rows({ run: toRecord(run()), events: [], room: [], memberName, paused: false }).at(-2)).toEqual({ kind: 'live', label: 'Working' })
+    expect(rows({ run: toRecord(run()), events: [], room: [], memberName, paused: false }).at(-2)).toEqual({ kind: 'live', label: 'Working', tone: 'working' })
     expect(rows({ run: toRecord(run({ state: 'waiting-agents' })), events: [], room: [], memberName, paused: false }).at(-2))
-      .toEqual({ kind: 'live', label: 'Waiting on agents' })
+      .toEqual({ kind: 'live', label: 'Waiting on agents', tone: 'waiting' })
     expect(rows({ run: working, events: [], room: [], memberName, paused: true }).at(-1)).toEqual({ kind: 'event', text: 'Run started' })
   })
 

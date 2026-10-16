@@ -448,6 +448,15 @@ describe('run details', () => {
     expect(useStore.getState().route.params.view).toBe('session')
   })
 
+  it('shows a Failed run that needs review as its card', async () => {
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [] })
+    open({ status: 'needs-attention', state: 'failed', reason: 'enhanced turn failed: EOF', outcome_unseen: true }, 'terminal')
+    const section = within((await details()).getByRole('region', { name: 'Needs you' }))
+    expect(section.queryByText('Nothing is waiting on you.')).toBeNull()
+    expect(section.getByText('Turn failed: EOF')).toBeDefined()
+    expect(section.getByRole('button', { name: 'Review' })).toBeDefined()
+  })
+
   it('lets only the controller decide a teammate message, with its lease', async () => {
     const queued = roomMessage({
       id: 'steer_1', kind: 'steer_request', state: 'queued', actor_id: bob.id, body: 'add a test',

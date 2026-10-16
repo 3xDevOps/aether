@@ -207,7 +207,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
     case 'subagents':
       return <SubagentGroup runID={ctx.runID} rowID={row.id} ids={row.ids} />
     case 'live':
-      return <LiveActivityRow waiting={row.waiting}>{row.label}</LiveActivityRow>
+      return <LiveActivityRow tone={row.tone}>{row.label}</LiveActivityRow>
     case 'terminal-note':
       return (
         <p className="flex min-h-6 items-center gap-1 pl-4 text-ui-sm text-muted">

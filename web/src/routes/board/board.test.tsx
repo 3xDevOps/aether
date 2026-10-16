@@ -88,7 +88,7 @@ function cardOf(task: string) {
   return within(title.closest('article')!)
 }
 
-const stopped = run({ id: 'run_stopped', task: 'waiting on you', status: 'needs-attention', state: 'needs-you' })
+const stopped = run({ id: 'run_stopped', task: 'waiting on you', status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' })
 const working = run({ id: 'run_working', task: 'still going', status: 'running' })
 const queued = run({
   id: 'run_queued',
@@ -406,7 +406,7 @@ describe('Needs you actions', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: merged.id, view: 'changes' } })
   })
 
-  it('replies to an idle agent from a popover anchored to the card', async () => {
+  it("replies to an agent's question from a popover anchored to the card", async () => {
     seed([stopped])
     renderBoard()
 
