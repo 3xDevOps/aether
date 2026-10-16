@@ -51,27 +51,31 @@ export function AutoApproveSuggestion({ busy, hasRows }: { busy: boolean; hasRow
   const [sending, setSending] = useState<Answer | null>(null)
   const [error, setError] = useState<string | null>(null)
   const alert = useRef<HTMLParagraphElement>(null)
+  const turn = useRef(0)
 
   useEffect(() => {
-    if (busy || !hasRows) setAnswered(null)
+    if (!busy && hasRows) return
+    turn.current++
+    setAnswered(null)
   }, [busy, hasRows])
   useEffect(() => {
     if (error) alert.current?.focus()
   }, [error])
 
-  if (answered) return hasRows ? <Answered answer={answered} /> : null
+  if (answered) return hasRows && !busy ? <Answered answer={answered} /> : null
   if (status?.suggest_auto_approve !== true || status.state !== 'idle' || busy || !hasRows) return null
 
   const answer = (choice: Answer) => {
     const identity = useStore.getState().identityKey
     const current = () => useStore.getState().identityKey === identity
+    const asked = turn.current
     setSending(choice)
     setError(null)
     api.assistantSettings(answers[choice]).then((s: AssistantSettings) => {
       if (!current()) return
       const latest = useStore.getState().assistantStatus
       if (latest) useStore.getState().setAssistantStatus({ ...latest, ...s })
-      setAnswered(choice === 'later' && s.suggestion_off ? 'never' : choice)
+      if (turn.current === asked) setAnswered(choice === 'later' && s.suggestion_off ? 'never' : choice)
     }, (err: unknown) => {
       if (current()) setError(errorSentence(err))
     }).finally(() => setSending(null))

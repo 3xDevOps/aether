@@ -24,7 +24,9 @@ const scope: [string, string][] = [
 
 export function AssistantSection({ client }: { client: Api }) {
   const available = useAssistantAvailable()
-  const [on, setOn] = useState<boolean | null>(null)
+  const [loaded, setLoaded] = useState<boolean | null>(null)
+  const stored = useStore((s) => s.assistantStatus?.auto_approve)
+  const on = loaded === null ? null : (stored ?? loaded)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,7 +40,7 @@ export function AssistantSection({ client }: { client: Api }) {
     if (!available) return
     let live = true
     client.assistantSettings().then(
-      (s) => live && setOn(s.auto_approve),
+      (s) => live && setLoaded(s.auto_approve),
       (err: unknown) => live && setError(errorSentence(err)),
     )
     return () => {
@@ -49,7 +51,7 @@ export function AssistantSection({ client }: { client: Api }) {
   if (!available) return null
 
   const show = (s: AssistantSettings) => {
-    setOn(s.auto_approve)
+    setLoaded(s.auto_approve)
     const status = useStore.getState().assistantStatus
     if (status) useStore.getState().setAssistantStatus({ ...status, ...s })
   }

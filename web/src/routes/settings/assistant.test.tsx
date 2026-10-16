@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes/settings/assistant'
@@ -48,6 +48,21 @@ describe('assistant settings', () => {
     expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: true })
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('true'))
     expect(screen.queryByRole('alertdialog')).toBeNull()
+
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
+    await user.click(toggle())
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: false })
+    await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('follows auto-approval turned on from the assistant', async () => {
+    const user = userEvent.setup()
+    const client = show()
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [], confirmations: [], auto_approve: false, suggest_auto_approve: true }))
+    await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))
+    act(() => useStore.getState().setAssistantStatus({ ...useStore.getState().assistantStatus!, auto_approve: true, suggest_auto_approve: false }))
+    expect(toggle().getAttribute('aria-checked')).toBe('true')
 
     vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
     await user.click(toggle())

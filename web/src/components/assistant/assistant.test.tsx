@@ -510,6 +510,23 @@ describe('the auto-approval suggestion', () => {
     expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull()
   })
 
+  it('drops an answer that resolves after the next turn started', async () => {
+    let resolve: (s: AssistantSettings) => void = () => {}
+    vi.mocked(api.assistantSettings).mockReturnValue(new Promise((r) => { resolve = r }))
+    const aside = await openPanel()
+    acpOpen(conversation())
+    assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
+    await userEvent.click(within(await within(aside).findByRole('group', { name: title })).getByRole('button', { name: 'Turn on auto-approval' }))
+    assistantSocket().send({ status: status({ state: 'running' }) }).items(item('turn_start', 2))
+    await waitFor(() => expect(within(aside).queryByRole('button', { name: 'Stop' })).not.toBeNull())
+    await act(async () => resolve({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false }))
+    expect(useStore.getState().assistantStatus?.auto_approve).toBe(true)
+    expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull()
+    assistantSocket().send({ status: status({ auto_approve: true }) }).items(item('turn_end', 2, { stop_reason: 'end_turn' }))
+    await waitFor(() => expect(within(aside).queryByRole('button', { name: 'Stop' })).toBeNull())
+    expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull()
+  })
+
   it('keeps the notice and shows the error when the answer fails', async () => {
     vi.mocked(api.assistantSettings).mockRejectedValue(new Error('assistant.settings: store: put assistant settings: disk I/O error'))
     const aside = await openPanel()
