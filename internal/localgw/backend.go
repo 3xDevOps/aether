@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -27,6 +28,9 @@ type sshBackend struct {
 	// dialing is the dial every caller without a connection waits on.
 	dialing *dialAttempt
 	closed  bool
+	// silent is the last connection the keepalive dropped. A call that
+	// failed on it may have reached the server, so it is not replayed.
+	silent *cli.Conn
 	// The keepalive's own copy, taken at construction, so a goroutine of
 	// a closed backend never reads a setting a test changes.
 	keepaliveInterval time.Duration
@@ -58,6 +62,7 @@ var (
 var (
 	errClosed   = errors.New("the gateway is closing")
 	errRelinked = errors.New("the gateway moved to another server while connecting")
+	errSilent   = errors.New("the server stopped answering keepalives")
 )
 
 // NewSSHBackend returns a Backend that redials once when the connection drops
@@ -176,6 +181,9 @@ func (b *sshBackend) keepalive(conn *cli.Conn) {
 			return
 		}
 		if !b.alive(conn) {
+			b.mu.Lock()
+			b.silent = conn
+			b.mu.Unlock()
 			b.invalidate(conn)
 			return
 		}
@@ -289,10 +297,19 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 		return nil, err
 	}
 	b.invalidate(conn)
-	if errors.Is(err, errWedged) {
+	b.mu.Lock()
+	silent := b.silent == conn
+	b.mu.Unlock()
+	switch {
+	case errors.Is(err, errWedged):
 		// Coded so Call does not retry: a second wait on a wedged path
 		// doubles the worst case.
 		return nil, unreachableError(err)
+	case silent:
+		// Coded so Call does not retry: the request may have reached the
+		// server before the network went away, and a replayed run.launch
+		// starts a second run.
+		return nil, unreachableError(fmt.Errorf("%w: %w", errSilent, err))
 	}
 	return nil, err
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,7 @@ func TestSSHBackendRedialsASilentConnection(t *testing.T) {
 	shortenKeepalive(t, 100*time.Millisecond, 200*time.Millisecond)
 	home := testhome.Isolate(t)
 	server := listen(t)
-	connections := serveControl(t, server)
+	connections := serveControl(t, server, nil)
 	path := newSilencer(t, server.Addr().String())
 	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
 	t.Cleanup(func() { _ = b.Close() })
@@ -46,10 +47,43 @@ func TestSSHBackendRedialsASilentConnection(t *testing.T) {
 	}
 }
 
+// A call whose connection went silent after the request left may have
+// reached the server. It fails without a replay: run.launch carries no
+// request key, and a replay would start a second run.
+func TestSSHBackendDoesNotReplayACallLostOnASilentConnection(t *testing.T) {
+	shortenKeepalive(t, 100*time.Millisecond, 200*time.Millisecond)
+	home := testhome.Isolate(t)
+	server := listen(t)
+	var path *silencer
+	var launches atomic.Int32
+	serveControl(t, server, func(method string) bool {
+		if method != protocol.MethodRunLaunch {
+			return true
+		}
+		launches.Add(1)
+		path.silence()
+		return false
+	})
+	path = newSilencer(t, server.Addr().String())
+	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, perr := b.Call(ctx, protocol.MethodRunLaunch, nil)
+	if perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "stopped answering keepalives") {
+		t.Fatalf("launch on a connection gone silent = %v, want unavailable without a replay", perr)
+	}
+	if got := launches.Load(); got != 1 {
+		t.Fatalf("server received %d launches, want 1", got)
+	}
+}
+
 // A dial in progress holds no lock: Relink and Close return at once, a
 // request whose context ends stops waiting, and concurrent requests share
 // the one dial instead of queueing a dial each.
 func TestSSHBackendDialBlocksNothing(t *testing.T) {
+	home := testhome.Isolate(t)
 	ln := listen(t)
 	var accepted atomic.Int32
 	go func() {
@@ -63,7 +97,7 @@ func TestSSHBackendDialBlocksNothing(t *testing.T) {
 			t.Cleanup(func() { _ = conn.Close() })
 		}
 	}()
-	b := NewSSHBackend(cli.Config{Addr: ln.Addr().String(), KnownHosts: filepath.Join(t.TempDir(), "known_hosts")})
+	b := NewSSHBackend(cli.Config{Addr: ln.Addr().String(), KnownHosts: filepath.Join(home, "known_hosts")})
 
 	var waiting sync.WaitGroup
 	for range 3 {
@@ -77,6 +111,11 @@ func TestSSHBackendDialBlocksNothing(t *testing.T) {
 		})
 	}
 	within(t, "calls during a stuck dial", 5*time.Second, waiting.Wait)
+	within(t, "the shared dial to connect", 5*time.Second, func() {
+		for accepted.Load() == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 	if got := accepted.Load(); got != 1 {
 		t.Fatalf("server accepted %d connections, want 1 shared dial", got)
 	}
@@ -114,9 +153,10 @@ func listen(t *testing.T) net.Listener {
 	return ln
 }
 
-// serveControl serves SSH on ln, answering keepalives and every control
-// call with an empty result, and counts the connections it accepts.
-func serveControl(t *testing.T, ln net.Listener) *atomic.Int32 {
+// serveControl serves SSH on ln, answering keepalives and each control
+// call answer allows, every call when answer is nil, with an empty result.
+// It counts the connections it accepts.
+func serveControl(t *testing.T, ln net.Listener, answer func(method string) bool) *atomic.Int32 {
 	t.Helper()
 	signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
 	if err != nil {
@@ -159,6 +199,9 @@ func serveControl(t *testing.T, ln net.Listener) *atomic.Int32 {
 							go ssh.DiscardRequests(requests)
 							var rpc protocol.Request
 							if json.NewDecoder(channel).Decode(&rpc) != nil {
+								return
+							}
+							if answer != nil && !answer(rpc.Method) {
 								return
 							}
 							_ = json.NewEncoder(channel).Encode(protocol.Response{JSONRPC: "2.0", ID: rpc.ID, Result: json.RawMessage(`{}`)})

@@ -74,6 +74,9 @@ func dial(ctx context.Context, cfg Config, user string, requireAuth bool) (*Conn
 	}
 	auth := ResolveAuth(cfg)
 	defer auth.Close()
+	// An agent waiting for the person to confirm a key holds the handshake
+	// until its own connection closes.
+	defer context.AfterFunc(ctx, auth.Close)()
 	if requireAuth && !auth.Offered() {
 		return nil, auth.Missing()
 	}

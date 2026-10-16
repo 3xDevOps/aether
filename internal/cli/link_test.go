@@ -237,6 +237,8 @@ func TestLinkEndsWhenServerInfoIsNeverAnswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	go func() {
 		raw, acceptErr := listener.Accept()
 		if acceptErr != nil {
@@ -259,19 +261,16 @@ func TestLinkEndsWhenServerInfoIsNeverAnswered(t *testing.T) {
 			go func() {
 				for request := range requests {
 					_ = request.Reply(true, nil)
+					if request.Type == "subsystem" {
+						cancel()
+					}
 				}
 			}()
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	start := time.Now()
 	_, err = Link(ctx, LinkOptions{Addr: listener.Addr().String()}, Config{})
-	if err == nil || !strings.Contains(err.Error(), "server.info: context deadline exceeded") {
+	if err == nil || !strings.Contains(err.Error(), "server.info: context canceled") {
 		t.Fatalf("Link = %v, want server.info ended by the context", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("Link took %v", elapsed)
 	}
 }
