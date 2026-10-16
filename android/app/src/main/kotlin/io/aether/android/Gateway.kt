@@ -20,7 +20,7 @@ data class Handshake(val url: String, val addr: String)
 // general parser would accept values this shell must not follow, so the line
 // is matched against that shape. A backslash anywhere is not the shape.
 private val HANDSHAKE_LINE =
-    Regex("^\\s*\\{\\s*\"url\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*,\\s*\"addr\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*}\\s*$")
+    Regex("^\\s*\\{\\s*\"url\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*,\\s*\"addr\"\\s*:\\s*\"([^\"\\\\]*)\"\\s*\\}\\s*$")
 private val HANDSHAKE_URL = Regex("^http://127\\.0\\.0\\.1:(\\d{1,5})/\\?token=[A-Za-z0-9_-]+$")
 private val HANDSHAKE_ADDR = Regex("^127\\.0\\.0\\.1:(\\d{1,5})$")
 
