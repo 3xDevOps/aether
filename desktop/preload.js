@@ -27,6 +27,9 @@ const controls =
         minimize: () => ipcRenderer.send('window:minimize'),
         toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
         close: () => ipcRenderer.send('window:close'),
+        // x and y are the CSS pixel client coordinates of a right-click on
+        // the SPA's title bar; there is no native window menu to open instead.
+        showMenu: (x, y) => ipcRenderer.send('window:menu', { x, y }),
         isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
         onMaximizedChange: (cb) => {
           const listener = (_event, maximized) => cb(maximized)
@@ -47,6 +50,14 @@ contextBridge.exposeInMainWorld('aetherDesktop', {
     ipcRenderer.on('dialog:folder-chosen', listener)
     return () => ipcRenderer.removeListener('dialog:folder-chosen', listener)
   },
+  // The shell's Check for Updates… menu item.
+  onCheckForUpdates: (cb) => {
+    const listener = () => cb()
+    ipcRenderer.on('updates:check', listener)
+    return () => ipcRenderer.removeListener('updates:check', listener)
+  },
+  // An OS notification for an available update while the window is unfocused.
+  notifyUpdate: (update) => ipcRenderer.send('updates:notify', update),
   ...(shellVersion ? { shellVersion } : {}),
   ...(controls ? { controls } : {}),
 })

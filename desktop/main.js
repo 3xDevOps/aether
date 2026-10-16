@@ -239,8 +239,33 @@ function main() {
       return
     }
     Menu.setApplicationMenu(
-      Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]),
+      Menu.buildFromTemplate([
+        {
+          role: 'appMenu',
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            { label: 'Check for Updates…', click: checkForUpdates },
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        },
+        { role: 'editMenu' },
+        { role: 'windowMenu' },
+      ]),
     )
+  }
+
+  // The SPA owns the update check and its result; the shell only asks it.
+  function checkForUpdates() {
+    focusWindow()
+    if (win && !win.isDestroyed()) win.webContents.send('updates:check')
   }
 
   // Window controls for the SPA's title bar. The window is resolved from the
@@ -264,6 +289,34 @@ function main() {
     senderWindow(event)?.close()
   })
   ipcMain.handle('window:is-maximized', (event) => senderWindow(event)?.isMaximized() ?? false)
+
+  // win32/linux have no application menu, so a right-click on the SPA's
+  // title bar opens this one in its place.
+  function popupWindowMenu(target, x, y) {
+    Menu.buildFromTemplate([
+      { label: 'Check for Updates…', click: () => !target.isDestroyed() && target.webContents.send('updates:check') },
+      { type: 'separator' },
+      { label: 'Minimize', click: () => target.minimize() },
+      target.isMaximized()
+        ? { label: 'Restore', click: () => target.unmaximize() }
+        : { label: 'Maximize', click: () => target.maximize() },
+      { type: 'separator' },
+      { label: 'Close', click: () => target.close() },
+    ]).popup({ window: target, x: Math.round(x), y: Math.round(y) })
+  }
+
+  ipcMain.on('window:menu', (event, point) => {
+    const target = senderWindow(event)
+    if (!target || !Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return
+    popupWindowMenu(target, point.x, point.y)
+  })
+
+  ipcMain.on('updates:notify', (_event, update) => {
+    const { version, title, body } = update || {}
+    if (typeof version !== 'string' || !version || version.length > 64) return
+    if (typeof title !== 'string' || typeof body !== 'string') return
+    notify.showUpdate({ version, title, body }, checkForUpdates)
+  })
 
   // KDE's portal backend shows nothing for the x11: parent handle Chromium sends
   // when Electron draws on X11 under Wayland, which it does unless the user sets
@@ -382,6 +435,14 @@ function main() {
     }
     created.on('maximize', sendMaximized(true))
     created.on('unmaximize', sendMaximized(false))
+    // A right-click on a drag region never reaches the page on Windows;
+    // the OS reports it here instead, in window coordinates.
+    if (process.platform !== 'darwin') {
+      created.on('system-context-menu', (event, point) => {
+        event.preventDefault()
+        popupWindowMenu(created, point.x, point.y)
+      })
+    }
 
     // The window is a browser locked to the gateway origin: anything else
     // opens in the user's real browser, never in this privileged shell.

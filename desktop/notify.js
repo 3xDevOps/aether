@@ -5,7 +5,7 @@
 
 'use strict'
 
-const { app, Notification } = require('electron')
+const { app, BrowserWindow, Notification } = require('electron')
 
 // Runs that need the member now, with the need's key and notification; its
 // size is the dock/taskbar badge.
@@ -321,6 +321,25 @@ function updateBadge() {
   }
 }
 
+// Versions already announced. Not cleared by start(): a sidecar respawn must
+// not announce the same update again.
+const announcedVersions = new Set()
+
+/**
+ * Announce an available update, once per version, when no app window has
+ * focus; a focused window already shows it in the dashboard.
+ * @param {{ version: string, title: string, body: string }} update
+ * @param {() => void} onClick
+ */
+function showUpdate({ version, title, body }, onClick) {
+  if (announcedVersions.has(version) || BrowserWindow.getFocusedWindow() !== null) return
+  if (!Notification.isSupported()) return
+  announcedVersions.add(version)
+  const notification = new Notification({ title: clip(title, 120), body: clip(body, 240) })
+  notification.on('click', onClick)
+  notification.show()
+}
+
 function stop() {
   stopped = true
   if (reconnectTimer) {
@@ -340,4 +359,4 @@ function stop() {
   updateBadge()
 }
 
-module.exports = { start, stop }
+module.exports = { start, stop, showUpdate }

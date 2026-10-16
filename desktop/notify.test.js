@@ -6,16 +6,21 @@ const { test, beforeEach } = require('node:test')
 
 const shown = []
 let badge = 0
+let supported = true
+let focused = null
 
 class FakeNotification {
   static isSupported() {
-    return true
+    return supported
   }
   constructor(options) {
     this.options = options
     this.closed = false
+    this.handlers = {}
   }
-  on() {}
+  on(name, handler) {
+    this.handlers[name] = handler
+  }
   show() {
     shown.push(this)
   }
@@ -27,7 +32,11 @@ class FakeNotification {
 const load = Module._load
 Module._load = function (request, ...rest) {
   if (request === 'electron') {
-    return { app: { setBadgeCount: (n) => { badge = n } }, Notification: FakeNotification }
+    return {
+      app: { setBadgeCount: (n) => { badge = n } },
+      BrowserWindow: { getFocusedWindow: () => focused },
+      Notification: FakeNotification,
+    }
   }
   return load.call(this, request, ...rest)
 }
@@ -78,6 +87,8 @@ function lead(id) {
 beforeEach(() => {
   shown.length = 0
   readFails = false
+  supported = true
+  focused = null
   notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
 })
 
@@ -166,4 +177,37 @@ test('a failed read announces nothing, and the next read announces the need once
   assert.equal(badge, 1)
   await status(run, {})
   assert.equal(shown.length, 1)
+})
+
+test('an update notifies once per version, across a sidecar respawn', () => {
+  let clicks = 0
+  const update = { version: '1.2.0', title: 'Aether 1.2.0 is available', body: 'Run aether update' }
+  notify.showUpdate(update, () => clicks++)
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.title, 'Aether 1.2.0 is available')
+  assert.equal(shown[0].options.body, 'Run aether update')
+  shown[0].handlers.click()
+  assert.equal(clicks, 1)
+
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 1)
+  notify.showUpdate({ ...update, version: '1.3.0' }, () => {})
+  assert.equal(shown.length, 2)
+})
+
+test('a focused window gets no update notification, and a later unfocused call still does', () => {
+  const update = { version: '2.0.0', title: 'Aether 2.0.0 is available', body: '' }
+  focused = {}
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 0)
+  focused = null
+  notify.showUpdate(update, () => {})
+  assert.equal(shown.length, 1)
+})
+
+test('no update notification where notifications are unsupported', () => {
+  supported = false
+  notify.showUpdate({ version: '3.0.0', title: 'Aether 3.0.0 is available', body: '' }, () => {})
+  assert.equal(shown.length, 0)
 })
