@@ -243,7 +243,9 @@ are four ways to notice mail:
    installed Claude Code `claude.json` and the Codex, Copilot CLI, Gemini CLI,
    and Cursor CLI command hooks do not watch an already-idle session. Mail
    arriving after their last hook waits for the next supported boundary or
-   explicit inbox read.
+   explicit inbox read. Managed Standard Codex runs load their hooks
+   automatically, but Codex runs them only after you [trust them
+   once](harnesses.md#codex-inbox-integration).
 4. **An Enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox

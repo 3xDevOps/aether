@@ -572,7 +572,12 @@ account, not to one workspace. **Set up** opens three numbered steps:
 3. **Check** reads `agent.list` again and shows **Installed**, **Enhanced
    installed**, and **Login found** or **No login found**. Aether only looks
    for the agent's login file; the agent itself proves the login when it
-   starts. **Done** returns to the list, where **Run** starts the agent.
+   starts. **Done** returns to the list, where **Run** starts the agent. For
+   Codex, **Check** also shows **Trust Aether's hooks once**: your first
+   Standard run opens Codex's **Hooks need review** screen, where you choose
+   **Trust all and continue**. Codex remembers it in `~/.codex/config.toml`
+   and asks again only if Aether's hooks change. `aether agent add codex`
+   prints the same note.
 
 From the CLI:
 
@@ -772,7 +777,9 @@ OpenCode integrations can wake an eligible live idle session without terminal
 keystrokes. Native wake respects human protection, takeover, and Stop.
 Manually installed Claude Code hooks and the Codex, Copilot CLI, Gemini CLI,
 and Cursor CLI command hooks instead announce new messages at their next
-supported lifecycle boundary. Neither path restarts an exited run.
+supported lifecycle boundary. Managed Standard Codex launches load their
+hooks automatically, but Codex runs them only after you [trust them
+once](harnesses.md#codex-inbox-integration). Neither path restarts an exited run.
 
 Inside a run, `aether-internal skill --hooks` checks configuration and prints
 setup instructions. **Configured is not loaded, trusted, or executed**:

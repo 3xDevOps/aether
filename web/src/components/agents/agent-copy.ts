@@ -62,6 +62,14 @@ export function loginFor(agent: AgentInfo): { command: string; hint: string } | 
   return agent.source === 'shipped' ? logins[agent.name] ?? null : null
 }
 
+export function hookNote(agent: AgentInfo): { title: string; text: string } | null {
+  if (agent.source !== 'shipped' || agent.name !== 'codex') return null
+  return {
+    title: "Trust Aether's hooks once",
+    text: "Standard Codex runs load Aether's inbox hooks. Codex runs a hook only after you trust it, so your first Standard run opens Hooks need review: choose Trust all and continue. Codex remembers this in ~/.codex/config.toml for every workspace and asks again only if Aether's hooks change. If a swarm worker is your first Standard Codex run, open its terminal to answer. If the list shows hooks you don't recognize, choose Review hooks instead.",
+  }
+}
+
 export function ready(agent: AgentInfo): boolean {
   return agent.installed === true && agent.login_found !== false
 }
