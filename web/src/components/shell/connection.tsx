@@ -88,7 +88,7 @@ function kindSentence(
     case 'edge-server':
       return `${edge ?? 'the edge'} has no live registration for ${server} - compare with sudo aether-server edge status on that host`
     case 'edge-not-claimed':
-      return `${server} is connected to ${edge ?? 'the edge'} but not claimed - run sudo aether-server edge claim-code on that host`
+      return `${server} is connected to ${edge ?? 'the edge'} and is finishing its claim - retrying`
     case 'edge-refused':
       return `${edge ?? 'the edge'} refused the connection to ${server}`
     case 'signed-out':

@@ -951,9 +951,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   `src/store/sync.ts` maps its `kind` to a class, never its wording:
   `edge-server` (the edge holds no live registration for the server id;
   `aether-server edge status` on that host reports the server's side of the
-  same connection and can disagree), `edge-not-claimed` (the server is
-  registered but nobody claimed it; gives `sudo aether-server edge
-  claim-code`), `edge-refused`
+  same connection and can disagree), `edge-not-claimed` (the edge
+  recorded the server's owner, and the server has not applied the claim to
+  its live connection yet; says to retry), `edge-refused`
   (the edge's other refusals), `signed-out` (no valid device token; gives
   the `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.

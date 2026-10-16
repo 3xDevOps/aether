@@ -115,12 +115,12 @@ function copyFor({ kind, dead, edge, serverID, approvalCode }: ConnectionErrorPr
     return {
       icon: ServerOff,
       eyebrow: 'Server registration',
-      title: 'Your server is connected to the edge but not claimed',
+      title: 'Your server is finishing its claim',
       description: (
         <>
-          The edge holds a live connection from server <Cmd>{serverID ?? 'unknown'}</Cmd>, and no
-          account has claimed it, so the edge admits nobody to it. On that host run{' '}
-          <Cmd>sudo aether-server edge claim-code</Cmd> and open the link it prints.
+          The edge holds a live connection from server <Cmd>{serverID ?? 'unknown'}</Cmd> and has
+          recorded its owner, and the server has not applied the claim to that connection yet. This
+          takes a moment; retry.
         </>
       ),
       action: 'Retry connection',

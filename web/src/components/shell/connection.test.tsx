@@ -32,10 +32,10 @@ describe('a failed request on a link through an edge', () => {
     expect(renderHook(useConnectionWord).result.current).toBe('Unreachable')
   })
 
-  it('tells a server nobody claimed to issue a claim code', () => {
+  it('says a server mid-claim is finishing its claim, not to issue a claim code', () => {
     useStore.setState({ connection: 'reconnecting', linkStatus: edgeLink, unreachable: 'edge-not-claimed' })
     expect(renderHook(useConnectionProblem).result.current).toBe(
-      'Server registration failed · server srv123 is connected to edge.example.test but not claimed - run sudo aether-server edge claim-code on that host',
+      'Server registration failed · server srv123 is connected to edge.example.test and is finishing its claim - retrying',
     )
   })
 
