@@ -915,6 +915,27 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
+- **The latest request to the server decides the connection state.** The
+  failure class lives in `unreachable`, which every failed server read sets
+  and a successful hydration clears. A subscription the server acknowledged
+  also clears it, including a replay reconnect that skips hydration, unless
+  a hydration retry is pending: then the retry runs at once and its result
+  decides, because a live stream does not prove reads reach the server. A
+  failure recorded by a connection that was torn down (a retry, or a switch
+  to another server) is dropped. While `unreachable` is set the footer says
+  `Unreachable` rather than `Live`, and the connection line names the layer
+  that failed - client to edge, authorization, server registration, or
+  end-to-end - with the server id and the next command. When the gateway's
+  error carries `data.edge_path`, its `layer`, `server_id` and `edge` are
+  used as given, and its `online` list, sent on a server-registration
+  failure, is named as the servers the edge does see online beside the
+  server id the dashboard is linked to. Each failure is stored with the
+  server id it was measured on. A failure measured on another server than
+  the linked one means the gateway followed a re-link (`aether link
+  --from-edge`): the dashboard re-reads the link status, resets the
+  connection as for any server switch, and shows the failure under the new
+  server's id. An offline computer is the client-to-edge layer on a link
+  through an edge and client-to-server on a direct SSH link.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
@@ -929,7 +950,11 @@ Removal also repairs the selection and open route before any refresh awaits.
   process to blame and no wifi advice to give. A refusal on the edge path
   arrives as `data.refusal` on the gateway's `503`, and `refusalHop` in
   `src/store/sync.ts` maps its `kind` to a class, never its wording:
-  `edge-server` (the server is not connected to the edge), `edge-refused`
+  `edge-server` (the edge holds no live registration for the server id;
+  `aether-server edge status` on that host reports the server's side of the
+  same connection and can disagree), `edge-not-claimed` (the edge
+  recorded the server's owner, and the server has not applied the claim to
+  its live connection yet; says to retry), `edge-refused`
   (the edge's other refusals), `signed-out` (no valid device token; gives
   the `aether login --edge` command), `not-member`, `device-revoked`,
   `device-pending`, and `server-refused` for the server's other refusals.

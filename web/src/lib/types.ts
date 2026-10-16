@@ -1267,6 +1267,7 @@ export interface EdgeRefusal {
     | 'not-signed-in'
     | 'token-revoked'
     | 'server-not-connected'
+    | 'server-not-claimed'
     | 'unknown-server'
     | 'too-many-attempts'
     | 'connection-limit'
@@ -1291,6 +1292,19 @@ export interface EdgeRefusal {
   principal?: string
   refusal?: string
   detail?: string
+}
+
+/** Where on the edge path a gateway failure happened, which `aether gui`
+ * reports beside `refusal`: the layer that failed, the server id it dialed,
+ * the edge's host, and the account signed in there when known. `online`,
+ * on a server-registration failure only, lists the account's other servers
+ * the edge sees online. */
+export interface EdgePath {
+  layer: 'client-edge' | 'authorization' | 'server-registration' | 'end-to-end'
+  server_id: string
+  edge?: string
+  account?: string
+  online?: EdgeServer[]
 }
 
 /** server.edge: the server's edge. `edge_url` is empty while the edge is
