@@ -3,6 +3,7 @@ package push
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -42,7 +43,8 @@ func TestNeedOf(t *testing.T) {
 		{name: "terminal permission", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunRunning, Activity: needsYou}, inputs: permission, want: "Permission: answer in the terminal"},
 		{name: "enhanced question while working", run: &domain.Run{Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning, Activity: needsYou}, inputs: question, want: "Question from the agent"},
 		{name: "terminal question", run: parked(needsYou, "agent idle"), inputs: question, want: "Question: answer in the terminal"},
-		{name: "background question", run: parked(needsYou, "agent idle", background), inputs: question},
+		{name: "background question", run: parked(idle, "agent idle", background), inputs: question},
+		{name: "background turn failed", run: parked(domain.ActivityFailed, "enhanced turn failed: overloaded", background, unseen), want: "Turn failed: overloaded"},
 		{name: "worker request", run: parked(needsYou, "agent idle", worker), approval: approval, inputs: permission},
 		{name: "idle", run: parked(idle, "agent idle")},
 		{name: "enhanced turn ended", run: parked(idle, "agent idle", enhanced)},
@@ -82,16 +84,20 @@ func TestNeedOf(t *testing.T) {
 }
 
 // The key is what makes a standing state announce once and a new one
-// announce again: a status change that lands in the same activity keeps no
-// key of its own, a later transition into it does.
+// announce again: opening the run bumps status_seq and keeps the key, a
+// later transition into the same state does not.
 func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 	t.Parallel()
+	at := time.Date(2026, 10, 16, 6, 0, 0, 0, time.UTC)
+	later := at.Add(time.Minute)
 	blocked := &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunNeedsAttention, Activity: domain.ActivityNeedsYou,
-		Reason: "blocked: need a key", StatusSeq: 4}
+		Reason: "blocked: need a key", StatusSeq: 4, StatusChangedAt: &at}
+	opened := *blocked
+	opened.StatusSeq, opened.FinishUnopened = 5, false
 	again := *blocked
-	again.StatusSeq = 6
+	again.StatusSeq, again.StatusChangedAt = 7, &later
 	asked := *blocked
-	asked.Reason, asked.StatusSeq = "needs input: which key?", 5
+	asked.Reason, asked.StatusSeq = "needs input: which key?", 6
 	first := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	second := []domain.RunInputRequest{{ID: "q2", SessionID: "s1", Kind: "question"}}
 
@@ -105,11 +111,24 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 			t.Errorf("%s has the key of the first block, %q", name, same)
 		}
 	}
-	if repeat := needOf(blocked, nil, nil, false).key; repeat != same {
-		t.Errorf("the same block has keys %q and %q", same, repeat)
+	if repeat := needOf(&opened, nil, nil, false).key; repeat != same {
+		t.Errorf("opening the block changed its key from %q to %q", same, repeat)
 	}
 	if needOf(blocked, nil, first, false).key == needOf(blocked, nil, second, false).key {
 		t.Error("two different questions share a key")
+	}
+
+	finished := *blocked
+	finished.Activity, finished.Reason, finished.OutcomeUnseen = domain.ActivityFinished, "agent reported success", true
+	failed := finished
+	failed.Activity, failed.Reason = domain.ActivityFailed, "agent reported failure"
+	for _, tc := range []struct {
+		run  *domain.Run
+		want string
+	}{{blocked, urgencyHigh}, {&failed, urgencyHigh}, {&finished, urgencyNormal}} {
+		if got := needOf(tc.run, nil, nil, false).urgency; got != tc.want {
+			t.Errorf("%s: urgency = %q, want %q", tc.run.Activity, got, tc.want)
+		}
 	}
 }
 

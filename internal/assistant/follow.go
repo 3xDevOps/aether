@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +31,7 @@ type RunState interface {
 	Paused(run domain.RunID) bool
 }
 
-type Notifier func(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, flush <-chan struct{}, current func(context.Context) bool) error
+type Notifier func(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, urgent bool, flush <-chan struct{}, current func(context.Context) bool) error
 
 var (
 	sessionEndWait = 5 * time.Second
@@ -48,6 +47,9 @@ type notice struct {
 	title    string
 	body     string
 	key      string
+	// since is when the run entered the standing status the notice is
+	// about, zero for a request.
+	since time.Time
 }
 
 type follower struct {
@@ -57,6 +59,9 @@ type follower struct {
 
 	mu     sync.Mutex
 	queued map[[2]string]string
+	// started is when following started. A run standing in a need it entered
+	// before then was announced, if at all, by the server before this one.
+	started time.Time
 }
 
 func (f *follower) read(ctx context.Context, id domain.RunID) (*notice, error) {
@@ -113,6 +118,10 @@ func (f *follower) due(ctx context.Context, id domain.RunID, finishedOnly bool) 
 		case f.queued[slot] == n.key:
 		case follow.NotifiedKey == n.key:
 			f.end(ctx, n, follow.MemberID)
+		case !n.since.IsZero() && n.since.Before(f.started):
+			if err := f.store.SetAssistantFollowNotified(ctx, follow.MemberID, id, n.key); err != nil {
+				slog.Warn("assistant: record the standing state", "run", id, "member", follow.MemberID, "error", err)
+			}
 		default:
 			f.queued[slot] = n.key
 			mine := *n
@@ -155,6 +164,8 @@ func (f *follower) finish(n notice, announced bool) {
 func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphost.Request, approval *store.Approval, paused bool) *notice {
 	n := &notice{run: run, severity: "warning"}
 	label := fmt.Sprintf("Run %q", push.RunTitle(run))
+	// A swarm worker's integrator answers its requests (domain.Run.NeedsAttention).
+	worker := run.MissionRole == "worker"
 	switch {
 	case paused && !run.Status.Terminal():
 		return nil
@@ -165,32 +176,30 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 			domain.RunAbandoned: " was stopped", domain.RunInterrupted: " was interrupted",
 		}[run.Status]
 		n.body = run.Reason
-	case len(inputs) > 0:
+	case len(inputs) > 0 && !worker:
 		n.kind, n.title = events.AssistantNoticeNeedsInput, label+" needs your input"
 		n.key = "input:" + inputs[0].SessionID + "|" + inputs[0].Kind + "|" + inputs[0].ID
 		n.body = inputBody(inputs[0], pending)
-	case approval != nil:
+	case approval != nil && !worker:
 		n.kind, n.title = events.AssistantNoticeNeedsApproval, label+" needs your approval"
 		n.key, n.body = "approval:"+approval.ID, approval.Action
-	case run.Activity == domain.ActivityFinished:
-		// Keyed by the park, not status_seq: opening the run changes that.
-		changed := ""
-		if run.StatusChangedAt != nil {
-			changed = strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
-		}
+	case run.Activity == domain.ActivityFinished && !worker:
 		n.kind, n.severity, n.title = events.AssistantNoticeFinished, "info", label+" finished"
-		n.key, n.body = "finished:parked|"+changed, run.Reason
-	case run.Activity.NeedsAttention(run.OutcomeUnseen, false):
+		n.key, n.body = "finished:"+run.NeedKey(), run.Reason
+	case run.NeedsAttention(false):
 		n.kind, n.title = events.AssistantNoticeNeedsAttention, label+map[domain.RunActivity]string{
 			domain.ActivityNeedsYou: " needs your attention", domain.ActivityFailed: " failed",
 			domain.ActivityDisconnected: " disconnected",
 		}[run.Activity]
-		n.key = "attention:" + string(run.Activity) + "|" + strconv.FormatInt(run.StatusSeq, 10)
+		n.key = "attention:" + run.NeedKey()
 		if n.body = push.AttentionBody(run); n.body == "" {
 			n.body = run.Reason
 		}
 	default:
 		return nil
+	}
+	if !run.Status.Terminal() && n.kind != events.AssistantNoticeNeedsInput && n.kind != events.AssistantNoticeNeedsApproval && run.StatusChangedAt != nil {
+		n.since = *run.StatusChangedAt
 	}
 	n.body = truncate(n.body, maxNoticeBodyRunes)
 	return n
@@ -228,7 +237,7 @@ func (s *Service) StartFollowing(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
-		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval,
+		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval, events.TypeTimeline,
 	}}})
 	if err != nil {
 		return fmt.Errorf("assistant: subscribe to run events: %w", err)
@@ -241,8 +250,15 @@ func (s *Service) StartFollowing(ctx context.Context) error {
 	s.mu.Lock()
 	s.sub = sub
 	s.mu.Unlock()
+	s.follower.mu.Lock()
+	s.follower.started = time.Now()
+	s.follower.mu.Unlock()
 	s.wg.Go(func() {
 		for e := range sub.Events() {
+			// A paused run announces nothing, so its resume rechecks it.
+			if t, ok := e.Payload.(events.TimelinePayload); ok && t.Kind != events.TimelineResume {
+				continue
+			}
 			if e.RunID != "" {
 				s.follower.check(s.ctx, e.RunID, false)
 			}
@@ -354,7 +370,8 @@ func (s *Service) deliver(n notice) bool {
 					return err == nil && now != nil && now.key == n.key
 				}
 			}
-			if err := s.notify(s.pushCtx, n.member, n.title, n.body, n.run.ID, s.flush, current); err != nil {
+			urgent := n.kind != events.AssistantNoticeFinished || n.run.Status == domain.RunFailed
+			if err := s.notify(s.pushCtx, n.member, n.title, n.body, n.run.ID, urgent, s.flush, current); err != nil {
 				slog.Warn("assistant: push the notice", "member", n.member, "run", n.run.ID, "error", err)
 			}
 		})

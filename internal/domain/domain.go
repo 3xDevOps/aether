@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -119,19 +120,37 @@ const (
 	ActivityDisconnected  RunActivity = "disconnected"
 )
 
-// NeedsAttention is the one rule for whether a live run with this activity
-// needs a member, which push notifications, assistant follow notices,
-// aether runs --needs-you and the dashboard's Needs you list share: an open
-// human request, a disconnected agent, or a failure nobody has seen. A
-// paused run never does.
-func (a RunActivity) NeedsAttention(outcomeUnseen, paused bool) bool {
+// BlockedReasonPrefix starts the reason of a run whose agent reported
+// itself blocked.
+const BlockedReasonPrefix = "blocked: "
+
+// NeedsAttention is the one rule for whether a run needs a member, which
+// push notifications, assistant follow notices, aether runs --needs-you and
+// the dashboard's Needs you list share: a live run with an open human
+// request, a disconnected agent, or a failure nobody has seen. A paused run
+// never does. A swarm worker's integrator answers for it, so a worker needs
+// a member only while it reports itself blocked.
+func (r *Run) NeedsAttention(paused bool) bool {
 	switch {
-	case paused:
+	case paused || !r.Status.Live():
 		return false
-	case a == ActivityNeedsYou, a == ActivityDisconnected:
+	case r.MissionRole == "worker":
+		return r.Activity == ActivityNeedsYou && strings.HasPrefix(r.Reason, BlockedReasonPrefix)
+	case r.Activity == ActivityNeedsYou, r.Activity == ActivityDisconnected:
 		return true
 	}
-	return a == ActivityFailed && outcomeUnseen
+	return r.Activity == ActivityFailed && r.OutcomeUnseen
+}
+
+// NeedKey identifies the standing the run is in: its status, state and
+// reason, and when it entered them. Opening the run keeps it, so a need is
+// announced once.
+func (r *Run) NeedKey() string {
+	changed := ""
+	if r.StatusChangedAt != nil {
+		changed = strconv.FormatInt(r.StatusChangedAt.UnixNano(), 10)
+	}
+	return string(r.Status) + "|" + string(r.Activity) + "|" + r.Reason + "|" + changed
 }
 
 // LaunchMode is how the agent process is hosted inside a run.

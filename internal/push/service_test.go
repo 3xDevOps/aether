@@ -51,6 +51,7 @@ type device struct {
 	service  *httptest.Server
 	received chan notification
 	topic    atomic.Value
+	urgency  atomic.Value
 	answer   atomic.Int32
 	// While slow is set, the push service takes a message and answers only
 	// once release is closed.
@@ -71,6 +72,8 @@ type harness struct {
 	ada  *domain.Member
 	bob  *domain.Member
 	keys int
+
+	keyPath string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -93,24 +96,28 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.ada, h.bob = h.member("Ada"), h.member("Bob")
 
+	h.keyPath = filepath.Join(t.TempDir(), "push", "vapid_key.pem")
+	h.start()
+	return h
+}
+
+// start runs a new Service on the harness's store, as a server start does.
+func (h *harness) start() {
+	h.t.Helper()
 	// The fake push services are loopback, which the real client refuses,
 	// and each presents its own self-signed certificate.
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	h.svc, err = New(Config{
-		Store: db, Bus: bus, Runs: h.runs,
-		KeyPath: filepath.Join(t.TempDir(), "push", "vapid_key.pem"),
-		Client:  insecure, Quiet: testQuiet,
-	})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		h.t.Fatalf("New: %v", err)
 	}
-	if err = h.svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if err = svc.Start(h.ctx); err != nil {
+		h.t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() { _ = h.svc.Close() })
-	return h
+	h.t.Cleanup(func() { _ = svc.Close() })
+	h.svc = svc
 }
 
 func (h *harness) member(name string) *domain.Member {
@@ -145,6 +152,7 @@ func (h *harness) subscribe(member *domain.Member) *device {
 			return
 		}
 		d.topic.Store(r.Header.Get("Topic"))
+		d.urgency.Store(r.Header.Get("Urgency"))
 		d.received <- n
 		if d.slow.Load() {
 			<-d.release
@@ -293,6 +301,64 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	}
 	h.publish(closed, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunAbandoned})
 	phone.expectNone(t, testQuiet)
+}
+
+// Opening a run bumps its status_seq, not its need: a teammate opening a
+// failure, and a later event, must not push it to the owner again. A
+// finished result does not wake the device; a failure does.
+func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	id := string(run.ID)
+
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported failure, review the result", Run: id})
+	if got := phone.urgency.Load(); got != urgencyHigh {
+		t.Errorf("failure urgency = %v, want %s", got, urgencyHigh)
+	}
+
+	if _, err := h.db.ClearRunFinishUnopened(h.ctx, run.ID); err != nil {
+		t.Fatalf("ClearRunFinishUnopened: %v", err)
+	}
+	h.publish(run, events.RunOutcomeSeenPayload{})
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineSteer, Message: "look again"})
+	phone.expectNone(t, testQuiet)
+
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	if got := phone.urgency.Load(); got != urgencyNormal {
+		t.Errorf("finished urgency = %v, want %s", got, urgencyNormal)
+	}
+}
+
+// A need that stood before the server started, such as one the first start
+// after an upgrade backfills a state for, was announced by the server before.
+func TestARestartDoesNotAnnounceStandingNeeds(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)})
+
+	if err := h.svc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	h.start()
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityNeedsYou, Reason: "needs input: which region?"})
+	phone.expectNone(t, testQuiet)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Blocked: need the staging API key", Run: string(run.ID)})
 }
 
 // Every notification for a run replaces the last one on a device, so an
@@ -537,7 +603,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
@@ -552,7 +618,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
@@ -567,7 +633,7 @@ func TestNotifyReturnsTheDeviceError(t *testing.T) {
 	gone := h.subscribe(h.ada)
 	gone.answer.Store(http.StatusGone)
 	run := h.run(h.ada, "Task", domain.LaunchACP)
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, nil); !errors.Is(err, ErrDelivery) {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, true, nil, nil); !errors.Is(err, ErrDelivery) {
 		t.Fatalf("Notify = %v, want ErrDelivery", err)
 	}
 }
@@ -579,7 +645,7 @@ func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
 	run := h.run(h.ada, "Task", domain.LaunchACP)
 	h.svc.Active(h.ada.ID)
 	var asked atomic.Bool
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, func(context.Context) bool {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, true, nil, func(context.Context) bool {
 		asked.Store(true)
 		return false
 	}); err != nil {
@@ -599,9 +665,9 @@ func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	flush := make(chan struct{})
 	done := make(chan error, 2)
-	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, flush, nil) }()
+	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, true, flush, nil) }()
 	go func() {
-		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, flush, func(context.Context) bool { return false })
+		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, true, flush, func(context.Context) bool { return false })
 	}()
 	phone.expectNone(t, testQuiet/3)
 	start := time.Now()

@@ -880,7 +880,7 @@ published change of the run's status, reason, state or outcome flags; each
 | `working` | A turn is in progress. |
 | `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting` report this turn. |
 | `waiting-tools` | No turn runs, and the agent waits on a background tool, such as a Claude monitor. A backgrounded shell such as a dev server does not count. |
-| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, or a usage limit Aether will not continue from on another account. |
+| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, or a usage limit Aether will not continue from on another account. A Background run's question does not count: it has no terminal to answer it in. |
 | `idle` | The turn ended with none of the above, including a stall. |
 | `finished` | An interactive run reported `success` and is parked for review. |
 | `failed` | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
@@ -905,7 +905,15 @@ apply it:
 | any state while paused | no | no |
 
 A swarm worker's requests go to its integrator, so only its `blocked`
-report reaches its owner.
+report needs its owner.
+
+A notice is keyed on the need itself: the run's status, state and reason
+and when it entered them. Opening the run moves `status_seq` but not the
+need, so it is not announced again. Push sends every need with `Urgency: high`
+and a `finished` notice with `Urgency: normal`. A need
+that stood before the server started, including one the first start after an
+upgrade backfills a state for, is not announced again. A paused run is
+rechecked when it resumes.
 
 A `waiting` report (`aether-internal report --outcome waiting --summary
 'waiting on 3 workers'`) shows `waiting-agents` with the summary as its

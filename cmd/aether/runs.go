@@ -24,9 +24,13 @@ func init() {
 }
 
 // needsYou selects the runs that need a member, by the rule push
-// notifications and the dashboard share (domain.RunActivity.NeedsAttention).
+// notifications and the dashboard share (domain.Run.NeedsAttention).
 func needsYou(r protocol.Run) bool {
-	return domain.RunActivity(r.Activity).NeedsAttention(r.OutcomeUnseen, r.Paused)
+	run := domain.Run{
+		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
+		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole,
+	}
+	return run.NeedsAttention(r.Paused)
 }
 
 // plural renders a count with its noun, so the notice reads as a sentence
@@ -69,17 +73,21 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 	return tw.Flush()
 }
 
-// displayStatus is a live run's state, else its status.
+// displayStatus is a live run's state, else its status. A result parked for
+// review is marked open, unlike the terminal status of the same name.
 func displayStatus(r protocol.Run) string {
-	if r.Activity != "" {
-		return r.Activity
+	switch domain.RunActivity(r.Activity) {
+	case "":
+		return r.Status
+	case domain.ActivityFailed, domain.ActivityFinished:
+		return r.Activity + " (open)"
 	}
-	return r.Status
+	return r.Activity
 }
 
 func runRuns(args []string) error {
 	fs := flag.NewFlagSet("runs", flag.ExitOnError)
-	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, or an unseen failure; never paused)")
+	onlyNeedsYou := fs.Bool("needs-you", false, "list only runs that need you (state needs-you or disconnected, or an unseen failure; never paused, and a swarm worker only when blocked)")
 	archived := fs.Bool("archived", false, "list only archived runs")
 	if err := fs.Parse(args); err != nil {
 		return err
