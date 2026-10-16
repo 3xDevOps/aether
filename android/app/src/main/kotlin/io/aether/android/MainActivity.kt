@@ -32,6 +32,7 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
 import java.io.ByteArrayInputStream
 
 /**
@@ -70,6 +71,12 @@ class MainActivity : ComponentActivity() {
     /** A deep link's suffix held until the gateway has an address to append it to. */
     private var pendingSuffix = ""
     private var fileChooser: ValueCallback<Array<Uri>>? = null
+
+    /** Set when the dashboard's renderer was reclaimed, until it is reloaded. */
+    private var reloadOnStart = false
+
+    /** Set while the failure panel shows a renderer crash rather than the gateway's. */
+    private var rendererCrashed = false
 
     /**
      * Whether the platform backgrounds this window itself when back is
@@ -132,7 +139,15 @@ class MainActivity : ComponentActivity() {
         connection = findViewById(R.id.connection)
         connection.setOnClickListener { openSetup() }
         gatewayError = findViewById(R.id.gateway_error)
-        findViewById<Button>(R.id.gateway_retry).setOnClickListener { startGateway() }
+        findViewById<Button>(R.id.gateway_retry).setOnClickListener {
+            if (rendererCrashed) {
+                rendererCrashed = false
+                gatewayError.visibility = View.GONE
+                loaded?.let(web::loadUrl)
+            } else {
+                startGateway()
+            }
+        }
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
 
         pickFiles =
@@ -179,6 +194,11 @@ class MainActivity : ComponentActivity() {
             stopGateway()
         }
         connect(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        reloadReclaimed()
     }
 
     override fun onResume() {
@@ -365,7 +385,25 @@ class MainActivity : ComponentActivity() {
                 // Android reclaims the renderer of an app in the background,
                 // as while the member signs in to Edge in the browser.
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                    replaceWebView()
+                    val parent = view.parent as ViewGroup
+                    val index = parent.indexOfChild(view)
+                    val params = view.layoutParams
+                    parent.removeView(view)
+                    view.destroy()
+                    web = WebView(this@MainActivity).apply { id = R.id.web }
+                    parent.addView(web, index, params)
+                    configureWebView()
+                    syncBackCallback()
+                    // A crash would come back on the same page, so only a
+                    // renderer Android reclaimed is reloaded unasked, and not
+                    // until the window is on screen again.
+                    if (detail.didCrash()) {
+                        rendererCrashed = true
+                        showFailure(getString(R.string.renderer_crashed), "")
+                    } else {
+                        reloadOnStart = true
+                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) reloadReclaimed()
+                    }
                     return true
                 }
             }
@@ -411,23 +449,6 @@ class MainActivity : ComponentActivity() {
                     window.destroy()
                 }
             }
-    }
-
-    /**
-     * Puts a new WebView where the one whose renderer is gone was, and loads
-     * the dashboard into it. The old one can do nothing but be destroyed.
-     */
-    private fun replaceWebView() {
-        val parent = web.parent as ViewGroup
-        val index = parent.indexOfChild(web)
-        val params = web.layoutParams
-        parent.removeView(web)
-        web.destroy()
-        web = WebView(this).apply { id = R.id.web }
-        parent.addView(web, index, params)
-        configureWebView()
-        syncBackCallback()
-        loaded?.let(web::loadUrl)
     }
 
     /**
@@ -571,11 +592,23 @@ class MainActivity : ComponentActivity() {
                 onFailed = { message ->
                     gatewayUrl = null
                     loaded = null
-                    findViewById<TextView>(R.id.gateway_error_text).text = message
-                    gatewayError.visibility = View.VISIBLE
+                    rendererCrashed = false
+                    showFailure(getString(R.string.gateway_stopped), message)
                 },
             )
         gateway?.start()
+    }
+
+    private fun reloadReclaimed() {
+        if (!reloadOnStart) return
+        reloadOnStart = false
+        loaded?.let(web::loadUrl)
+    }
+
+    private fun showFailure(title: String, message: String) {
+        findViewById<TextView>(R.id.gateway_error_title).text = title
+        findViewById<TextView>(R.id.gateway_error_text).text = message
+        gatewayError.visibility = View.VISIBLE
     }
 
     private fun stopGateway() {

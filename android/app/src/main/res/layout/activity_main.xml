@@ -2,8 +2,9 @@
 <!-- The WebView fills the window edge to edge; the dashboard pads itself back
      out of the cutout and the navigation bar with env(safe-area-inset-*). The
      button is the way back to the setup screen when a load fails, and sits
-     over the WebView's own error page rather than replacing it. The gateway
-     panel covers the WebView when the Edge sidecar gives up. -->
+     over the WebView's own error page rather than replacing it. The failure
+     panel covers the WebView when the Edge sidecar gives up or the renderer
+     crashes. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
@@ -34,6 +35,7 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/gateway_error_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/gateway_stopped"

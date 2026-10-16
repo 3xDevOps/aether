@@ -30,5 +30,6 @@
 
     <string name="gateway_stopped">The local gateway stopped</string>
     <string name="gateway_retry">Retry</string>
+    <string name="renderer_crashed">The dashboard\'s renderer crashed</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
 </resources>
