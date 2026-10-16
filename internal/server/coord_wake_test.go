@@ -297,7 +297,7 @@ func TestCoordWakeAdmissionFailsClosedForUnavailableAndFinishedRuns(t *testing.T
 					return scheduler.MissionRunObservation{State: scheduler.MissionRunStopped}, nil
 				}
 			case "terminal":
-				if err := f.db.UpdateRunStatus(context.Background(), f.run.ID, domain.RunCompleted, "", nil, nil); err != nil {
+				if _, err := f.db.UpdateRunStatus(context.Background(), f.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
 					t.Fatal(err)
 				}
 			case "submitted":
@@ -574,7 +574,7 @@ func TestCoordWakeDefersToWorkerCancellationBeforeSynchronousCleanup(t *testing.
 		cancelled <- err
 	}()
 	awaitWakeBarrier(t, canceller.ready) // workerCancel owns AuthorizationMu and Control.
-	if err := f.db.UpdateRunStatus(ctx, f.run.ID, domain.RunCompleted, "retained", nil, nil); err != nil {
+	if _, err := f.db.UpdateRunStatus(ctx, f.run.ID, domain.RunCompleted, "retained", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	resumeWake()

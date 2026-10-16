@@ -98,7 +98,7 @@ its turn with the vendor's error.
 | `pi` | pi | `~/.pi/agent/auth.json` | `~/.pi` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, npm | adapter `pi-acp@0.0.34` | no |
 | `omp` | oh-my-pi | `~/.omp/agent` (directory) | `~/.omp` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | extension (`-e`) | PTY | yes, vendor script | native (`omp acp`) | yes |
 | `opencode` | opencode | `~/.local/share/opencode/auth.json` | `~/.config/opencode` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | - | plugin (V1 inline config / V2 discovery) | PTY (`\r\r`) | yes, vendor script | native (`opencode acp`) | no |
-| `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | - | PTY | yes, npm | native (`copilot --acp`) | no |
+| `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | plugin (`--plugin-dir`) | PTY | yes, npm | native (`copilot --acp`) | no |
 | `gemini` | Gemini CLI | `~/.gemini/oauth_creds.json`, `~/.gemini/.env` | - | `GEMINI_API_KEY` | `GEMINI_CLI_TRUST_WORKSPACE=true` | - | PTY | yes, npm | native (`gemini --acp`) | no |
 | `cursor` | Cursor CLI (runs as `agent`) | `~/.config/cursor/auth.json` | - | `CURSOR_API_KEY` | - | - | PTY | yes, vendor script | native (`agent acp`) | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
@@ -312,7 +312,7 @@ through the same native extension/plugin mechanism.
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
 | OpenCode V1 | `opencode` | yes | yes, selected root only | yes | `opencode-v1.js` |
 | OpenCode V2 | `opencode` | yes, V2 API only | yes, selected root only | yes | `opencode-v2.js` |
-| Copilot CLI | `copilot` | yes, once installed by hand | no | yes | `copilot.json` |
+| Copilot CLI | `copilot` | yes, managed Standard launches | no | yes | `copilot.json` |
 | Gemini CLI | `gemini` | yes, once installed by hand | no | yes | `gemini.json` |
 | Cursor CLI | `cursor` | yes, once installed by hand | no | yes | `cursor.json` |
 | Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
@@ -391,8 +391,9 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `claude`, `codex`, `pi`, `omp`, and `opencode` agents, Aether
-loads native mailbox hooks for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `codex`, `copilot`, `pi`, `omp`, and `opencode`
+agents, Aether loads native mailbox hooks for **coordinated, task-bearing
+Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
@@ -413,6 +414,21 @@ Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
 `hooks.UserPromptSubmit`, `hooks.PostToolUse` and `hooks.Stop`, each a TOML
 inline table passed as one argv element. They are active only after the user
 trusts them once; see [Codex inbox integration](#codex-inbox-integration).
+
+Copilot CLI loads hooks from a plugin directory, so the server stages
+`/run/aether/plugin.json` (a manifest named `aether-inbox`) beside
+`/run/aether/copilot-hooks.json`, the `copilot.json` hooks, and adds
+`--plugin-dir /run/aether`. No user or
+project file changes. Copilot reads the hooks only in a trusted folder; the
+profile's `COPILOT_ALLOW_ALL=true` trusts the working directory, so no
+trust dialog appears.
+
+Gemini CLI and Cursor CLI stay manual. Gemini has no per-launch path:
+`GEMINI_CLI_SYSTEM_DEFAULTS_PATH` replaces the image's system-defaults
+file, Gemini skips system files not owned by root, and extensions load
+only from `~/.gemini/extensions`. Cursor's `--plugin-dir` loads only when
+logged in and needs a path at least three directories deep; it is not
+verified live, so it stays manual for now.
 
 Every managed launch, whether it loads a file or arguments, sets
 `AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
@@ -715,8 +731,11 @@ session event.
 
 ### Copilot CLI inbox integration
 
-`copilot` does not load this file on its own in Standard mode; install it
-by hand. Export `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`copilot` loads the inbox hooks through `--plugin-dir /run/aether`
+([managed loading](#managed-native-loading)). Nothing needs installing.
+
+**Manual.** Export `copilot.json`; merge into `~/.copilot/hooks/aether.json` (or
 `$COPILOT_HOME/hooks/aether.json`), alternatively
 `.github/hooks/aether.json`. Quit and restart in the intended trusted
 repository. Honor `disableAllHooks`, `allowManagedHooksOnly`, enterprise
@@ -889,7 +908,7 @@ use the existing terminal or native approval/question surface.
 
 | Reporter | Execution evidence | Input request evidence and limits |
 | --- | --- | --- |
-| Claude command hooks | `UserPromptSubmit`, ordinary tool activity, and `SubagentStart` report Working. Root `Stop` reports waiting unless `background_tasks` is nonempty. `StopFailure` reports waiting, not an input request: with `usage_limit` and the agent's message as the reason when `error` is `rate_limit` and the message is a usage limit ([usage fallback](teams.md#usage-fallback)), else with the reason `agent failed`. | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
+| Claude command hooks | `UserPromptSubmit` and the main agent's tool activity report Working. A subagent's tool hooks (`agent_id` set) and `SubagentStart` report `subagent` only: they keep the run from stalling and change no execution state; `SubagentStop` reports nothing. Root `Stop` reports waiting unless `background_tasks` holds a task other than a `local_bash` shell, which reports Working with `working in background: <n> tasks` counting those tasks: state `waiting-agents` when one is a subagent, workflow or teammate, else `waiting-tools` with `tools`. `StopFailure` reports waiting, not an input request: with `usage_limit` and the agent's message as the reason when `error` is `rate_limit` and the message is a usage limit ([usage fallback](teams.md#usage-fallback)), else with the reason `agent failed` (state `failed`). | `AskUserQuestion` opens by `tool_use_id`; matching completion/failure closes it. MCP `Elicitation`/`ElicitationResult` open/close a form **only when `elicitation_id` is present**. Child identity includes `agent_id`. `SessionEnd` clears the terminated scope; ordinary Stop/SubagentStop does not clear requests. |
 | OpenCode V1 1.18.32 | Tracks all native busy sessions; one child becoming idle cannot park another active session. | `permission.asked`/`question.asked` preserve `id` and `sessionID`; replies/rejections close the matching `requestID`. Idle reconciles that session's known requests with the released `/permission` and `/question` lists, including interruption cleanup without a reply event. |
 | OpenCode V2 2.0.18 | Tracks `session.execution.started` until succeeded, failed, interrupted, or session deletion. | `permission.asked/replied` and released `form.created/replied/cancelled` preserve request and session IDs. Terminal execution and permission replies reconcile known permissions through `ctx.permission.list`. Session deletion removes only that session's requests. |
 | pi 0.87.1 | Starts report Working; `agent_settled` or confirmed idle after `agent_end` reports waiting. A late finalized message cannot restart settled execution. | Named `ask`/`AskUserQuestion` tools retain `toolCallId` until tool execution ends. The documented `ui_prompt_start/end` pair tracks blocking extension UI with one process/session-scoped ID; Pi emits this pair around the outermost dialog, including dismissal/rejection. Titles and answers are discarded. |
@@ -1195,7 +1214,8 @@ vendor's own answer is to run the container as a non-root user. It is a
 stopgap until the standard image ships one. The Environment launches no
 agent, so it gets none of this.
 
-Every `copilot` run gets `COPILOT_ALLOW_ALL=true` and every `gemini` run
+A managed `copilot` Standard launch appends `--plugin-dir /run/aether` to
+that argv. Every `copilot` run gets `COPILOT_ALLOW_ALL=true` and every `gemini` run
 `GEMINI_CLI_TRUST_WORKSPACE=true`. `--allow-all` leaves Copilot's "Confirm
 folder trust" dialog up; the variable, set to exactly `true`, also trusts the
 working directory. Gemini in a folder it does not trust silently drops

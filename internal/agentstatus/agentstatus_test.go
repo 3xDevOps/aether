@@ -55,19 +55,66 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 			t.Errorf("uncorrelated callback %s produced %+v", payload, got)
 		}
 	}
+	if got, ok := FromClaudeHook([]byte(`{"hook_event_name":"UserPromptSubmit","session_id":"root"}`)); !ok || got.State != Working || !got.TurnStart {
+		t.Errorf("a prompt must start a turn: %+v", got)
+	}
 	for _, event := range []string{"Stop", "StopFailure"} {
 		got, ok := FromClaudeHook([]byte(`{"hook_event_name":"` + event + `","session_id":"root"}`))
 		if !ok || got.State != Idle || len(got.InputUpdates) != 0 {
 			t.Errorf("%s must only end execution: %+v", event, got)
 		}
 	}
-	got, ok := FromClaudeHook([]byte(`{"hook_event_name":"Stop","background_tasks":[{"id":"child","description":"private"}]}`))
-	if !ok || got.State != Working || len(got.InputUpdates) != 0 {
-		t.Fatalf("background execution was parked: %+v", got)
+	for _, tc := range []struct {
+		tasks string
+		want  Report
+	}{
+		{`[{"id":"a","type":"local_agent"},{"id":"m","type":"monitor_mcp"},{"id":"s","type":"local_bash"}]`, Report{State: Working, Reason: "working in background: 2 tasks"}},
+		{`[{"id":"w","type":"local_workflow"}]`, Report{State: Working, Reason: "working in background: 1 task"}},
+		{`[{"id":"m","type":"monitor_mcp"}]`, Report{State: Working, Reason: "working in background: 1 task", Tools: true}},
+		{`[{"id":"s","type":"local_bash","description":"dev server"}]`, Report{State: Idle, Reason: ReasonIdle}},
+	} {
+		got, ok := FromClaudeHook([]byte(`{"hook_event_name":"Stop","background_tasks":` + tc.tasks + `}`))
+		if !ok || got.State != tc.want.State || got.Reason != tc.want.Reason || got.Tools != tc.want.Tools || len(got.InputUpdates) != 0 {
+			t.Errorf("Stop with background tasks %s = %+v, want %+v", tc.tasks, got, tc.want)
+		}
 	}
-	got, ok = FromClaudeHook([]byte(`{"hook_event_name":"SessionEnd","session_id":"root"}`))
+	got, ok := FromClaudeHook([]byte(`{"hook_event_name":"SessionEnd","session_id":"root"}`))
 	if !ok || len(got.InputUpdates) != 1 || got.InputUpdates[0].Operation != "replace" || got.InputUpdates[0].Requests == nil {
 		t.Fatalf("terminated session did not clear its request snapshot: %+v", got)
+	}
+}
+
+// A subagent's hooks, including a background one's after the main turn
+// ended, never say the main agent works: the run would flap between running
+// and its turn end. They only keep the run alive. Its question still opens in
+// its own scope.
+func TestClaudeSubagentHooksLeaveTheTurnAlone(t *testing.T) {
+	for _, payload := range []string{
+		`{"hook_event_name":"SubagentStart","session_id":"root","agent_id":"child"}`,
+		`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
+		`{"hook_event_name":"PostToolUse","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
+		`{"hook_event_name":"PostToolUseFailure","tool_name":"Bash","session_id":"root","agent_id":"child","tool_use_id":"t"}`,
+	} {
+		if got, ok := FromClaudeHook([]byte(payload)); !ok || got.State != "" || !got.Subagent {
+			t.Errorf("subagent hook %s reported %+v, want liveness only", payload, got)
+		}
+	}
+	for _, payload := range []string{
+		`{"hook_event_name":"SubagentStop","session_id":"root","agent_id":"child"}`,
+		`{"hook_event_name":"SubagentStop","session_id":"root"}`,
+		`{"hook_event_name":"Stop","session_id":"root","agent_id":"child"}`,
+	} {
+		if got, ok := FromClaudeHook([]byte(payload)); ok {
+			t.Errorf("subagent stop %s reported %+v", payload, got)
+		}
+	}
+	got, ok := FromClaudeHook([]byte(`{"hook_event_name":"PostToolUse","tool_name":"AskUserQuestion","session_id":"root","agent_id":"child","tool_use_id":"q"}`))
+	if !ok || got.State != "" || len(got.InputUpdates) != 1 || got.InputUpdates[0].Operation != "close" {
+		t.Fatalf("subagent's answered question = %+v, want only its close", got)
+	}
+	got, ok = FromClaudeHook([]byte(`{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"root","tool_use_id":"t"}`))
+	if !ok || got.State != Working {
+		t.Fatalf("main agent tool use = %+v, want working", got)
 	}
 }
 

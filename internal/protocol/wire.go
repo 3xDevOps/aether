@@ -26,6 +26,9 @@ type Run struct {
 	ACP             bool   `json:"acp,omitempty"`
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
+	// Activity is the live run's state on the wire; see domain.RunActivity.
+	Activity  string `json:"state,omitempty"`
+	StatusSeq int64  `json:"status_seq"`
 	// RequestedAccountMemberID is the account the launcher asked for, set
 	// only when its usage was exhausted and the run launched on
 	// AccountMemberID instead.
@@ -156,6 +159,8 @@ func RunFromDomain(r *domain.Run) Run {
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
 		Reason:              r.Reason,
+		Activity:            string(r.Activity),
+		StatusSeq:           r.StatusSeq,
 		PendingInputs:       []domain.RunInputRequest{},
 		Branch:              r.Branch,
 		LastCommit:          r.LastCommit,

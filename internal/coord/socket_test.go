@@ -245,7 +245,7 @@ func TestRestartRecovery(t *testing.T) {
 				t.Fatalf("Provision(%s): %v", r, err)
 			}
 		}
-		if err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, "", nil, nil); err != nil {
+		if _, err := h.db.UpdateRunStatus(ctx, finished, domain.RunAbandoned, "", "", nil, nil); err != nil {
 			t.Fatalf("finish run: %v", err)
 		}
 		socket := filepath.Join(h.dir, "coord", string(alive), coordtransport.SocketName)
@@ -297,7 +297,7 @@ func TestRestartRecovery(t *testing.T) {
 			t.Fatalf("Send(expired): %v", err)
 		}
 		for _, r := range []domain.RunID{retained, expired} {
-			if err := h.db.UpdateRunStatus(ctx, r, domain.RunMerged, "", nil, nil); err != nil {
+			if _, err := h.db.UpdateRunStatus(ctx, r, domain.RunMerged, "", "", nil, nil); err != nil {
 				t.Fatalf("finish run %s: %v", r, err)
 			}
 		}

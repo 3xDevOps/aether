@@ -194,14 +194,14 @@ func TestInteractiveReportedOutcomeKeepsRunUnfinished(t *testing.T) {
 	member := mustCreateMember(t, db)
 	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
 	for _, reason := range []string{"agent reported success", "agent reported failure"} {
-		if err := db.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, nil, nil); err != nil {
+		if _, err := db.FinishRunReported(ctx, run.ID, domain.RunNeedsAttention, reason, "", nil, nil); err != nil {
 			t.Fatalf("record outcome: %v", err)
 		}
 		got, err := db.GetRun(ctx, run.ID)
 		if err != nil || got.Status != domain.RunNeedsAttention || got.Reason != reason || !got.OutcomeUnseen || got.FinishedAt != nil {
 			t.Fatalf("parked run = %+v, %v; want unseen unfinished outcome", got, err)
 		}
-		if err = db.UpdateRunStatus(ctx, run.ID, domain.RunRunning, "agent working", nil, nil); err != nil {
+		if _, err = db.UpdateRunStatus(ctx, run.ID, domain.RunRunning, "agent working", "", nil, nil); err != nil {
 			t.Fatalf("resume: %v", err)
 		}
 		got, err = db.GetRun(ctx, run.ID)
@@ -230,7 +230,7 @@ func TestRunOutcomeUnseenFollowsIdleReason(t *testing.T) {
 				workspace := mustCreateWorkspace(t, db)
 				member := mustCreateMember(t, db)
 				run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
-				if err := db.FinishRunReported(ctx, run.ID, tc.status, "agent reported success", nil, nil); err != nil {
+				if _, err := db.FinishRunReported(ctx, run.ID, tc.status, "agent reported success", "", nil, nil); err != nil {
 					t.Fatalf("record outcome: %v", err)
 				}
 				if snapshot {
@@ -242,7 +242,7 @@ func TestRunOutcomeUnseenFollowsIdleReason(t *testing.T) {
 					if err := db.UpdateRun(ctx, row); err != nil {
 						t.Fatalf("update run: %v", err)
 					}
-				} else if err := db.UpdateRunStatus(ctx, run.ID, tc.status, tc.reason, nil, nil); err != nil {
+				} else if _, err := db.UpdateRunStatus(ctx, run.ID, tc.status, tc.reason, "", nil, nil); err != nil {
 					t.Fatalf("update status: %v", err)
 				}
 				got, err := db.GetRun(ctx, run.ID)

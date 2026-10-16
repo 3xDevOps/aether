@@ -51,6 +51,7 @@ type device struct {
 	service  *httptest.Server
 	received chan notification
 	topic    atomic.Value
+	urgency  atomic.Value
 	answer   atomic.Int32
 	// While slow is set, the push service takes a message and answers only
 	// once release is closed.
@@ -71,6 +72,8 @@ type harness struct {
 	ada  *domain.Member
 	bob  *domain.Member
 	keys int
+
+	keyPath string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -93,24 +96,28 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.ada, h.bob = h.member("Ada"), h.member("Bob")
 
+	h.keyPath = filepath.Join(t.TempDir(), "push", "vapid_key.pem")
+	h.start()
+	return h
+}
+
+// start runs a new Service on the harness's store, as a server start does.
+func (h *harness) start() {
+	h.t.Helper()
 	// The fake push services are loopback, which the real client refuses,
 	// and each presents its own self-signed certificate.
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	h.svc, err = New(Config{
-		Store: db, Bus: bus, Runs: h.runs,
-		KeyPath: filepath.Join(t.TempDir(), "push", "vapid_key.pem"),
-		Client:  insecure, Quiet: testQuiet,
-	})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		h.t.Fatalf("New: %v", err)
 	}
-	if err = h.svc.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
+	if err = svc.Start(h.ctx); err != nil {
+		h.t.Fatalf("Start: %v", err)
 	}
-	t.Cleanup(func() { _ = h.svc.Close() })
-	return h
+	h.t.Cleanup(func() { _ = svc.Close() })
+	h.svc = svc
 }
 
 func (h *harness) member(name string) *domain.Member {
@@ -145,6 +152,7 @@ func (h *harness) subscribe(member *domain.Member) *device {
 			return
 		}
 		d.topic.Store(r.Header.Get("Topic"))
+		d.urgency.Store(r.Header.Get("Urgency"))
 		d.received <- n
 		if d.slow.Load() {
 			<-d.release
@@ -171,12 +179,12 @@ func (h *harness) run(owner *domain.Member, task string, mode domain.LaunchMode)
 }
 
 // status moves the run the way the scheduler does: the row, then the event.
-func (h *harness) status(run *domain.Run, to domain.RunStatus, reason string) {
+func (h *harness) status(run *domain.Run, to domain.RunStatus, activity domain.RunActivity, reason string) {
 	h.t.Helper()
-	if err := h.db.UpdateRunStatus(h.ctx, run.ID, to, reason, nil, nil); err != nil {
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, to, reason, activity, nil, nil); err != nil {
 		h.t.Fatalf("UpdateRunStatus: %v", err)
 	}
-	h.publish(run, events.RunStatusPayload{To: to, Reason: reason})
+	h.publish(run, events.RunStatusPayload{To: to, Reason: reason, Activity: activity})
 }
 
 func (h *harness) publish(run *domain.Run, payload events.Payload) {
@@ -212,18 +220,25 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	h := newHarness(t)
 	phone, laptop, bobs := h.subscribe(h.ada), h.subscribe(h.ada), h.subscribe(h.bob)
 	run := h.run(h.ada, "Fix the login redirect\n\nIt loops on Safari.", domain.LaunchACP)
-	want := notification{Title: "Fix the login redirect", Body: "Waiting for your reply", Run: string(run.ID)}
+	want := notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)}
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	// A turn end, a stall and a wait on workers need nobody.
+	h.status(run, domain.RunNeedsAttention, domain.ActivityIdle, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityIdle, "stalled: no output or file changes for 10m0s")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting on 3 workers")
+	h.status(run, domain.RunRunning, domain.ActivityWaitingTools, "working in background: 1 task")
+	phone.expectNone(t, testQuiet)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, want)
 	laptop.expect(t, want)
 
 	// The same standing state, published again.
-	h.publish(run, events.RunStatusPayload{From: domain.RunNeedsAttention, To: domain.RunNeedsAttention, Reason: "agent idle"})
+	h.publish(run, events.RunStatusPayload{From: domain.RunNeedsAttention, To: domain.RunNeedsAttention, Reason: "needs input: which region?"})
 	phone.expectNone(t, testQuiet)
 
-	h.status(run, domain.RunRunning, "agent resumed")
-	h.status(run, domain.RunNeedsAttention, "blocked: need the staging API key")
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
 	want.Body = "Blocked: need the staging API key"
 	phone.expect(t, want)
 
@@ -234,9 +249,9 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	}
 	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
 	bobs.expect(t, want)
-	h.status(run, domain.RunRunning, "agent resumed")
-	h.status(run, domain.RunNeedsAttention, "agent idle")
-	want.Body = "Waiting for your reply"
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	want.Body = "which region?"
 	bobs.expect(t, want)
 	phone.expectNone(t, testQuiet)
 }
@@ -255,8 +270,8 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	// Answered, then the turn ends: one notification, for the new need.
 	h.runs.set(run.ID)
 	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
-	h.status(run, domain.RunNeedsAttention, "agent idle")
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: id})
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: id})
 
 	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
 	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
@@ -271,9 +286,9 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	// Deciding it leaves the idle park it interrupted, which was announced.
 	phone.expectNone(t, testQuiet)
 
-	h.status(run, domain.RunRunning, "agent resumed")
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	finished := time.Now().UTC()
-	if err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", nil, &finished); err != nil {
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &finished); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted, OutcomeUnseen: true})
@@ -281,11 +296,69 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 
 	// A member closing a run of their own is not news to them.
 	closed := h.run(h.ada, "Try the other approach", domain.LaunchTUI)
-	if err := h.db.FinishRunByMember(h.ctx, closed.ID, domain.RunAbandoned, "", nil, &finished); err != nil {
+	if _, err := h.db.FinishRunByMember(h.ctx, closed.ID, domain.RunAbandoned, "", "", nil, &finished); err != nil {
 		t.Fatalf("FinishRunByMember: %v", err)
 	}
 	h.publish(closed, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunAbandoned})
 	phone.expectNone(t, testQuiet)
+}
+
+// Opening a run bumps its status_seq, not its need: a teammate opening a
+// failure, and a later event, must not push it to the owner again. A
+// finished result does not wake the device; a failure does.
+func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	id := string(run.ID)
+
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, "agent reported failure", domain.ActivityFailed, nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFailed, OutcomeUnseen: true})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported failure, review the result", Run: id})
+	if got := phone.urgency.Load(); got != urgencyHigh {
+		t.Errorf("failure urgency = %v, want %s", got, urgencyHigh)
+	}
+
+	if _, err := h.db.ClearRunFinishUnopened(h.ctx, run.ID); err != nil {
+		t.Fatalf("ClearRunFinishUnopened: %v", err)
+	}
+	h.publish(run, events.RunOutcomeSeenPayload{})
+	h.publish(run, events.TimelinePayload{Kind: events.TimelineSteer, Message: "look again"})
+	phone.expectNone(t, testQuiet)
+
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished, OutcomeUnseen: true})
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Agent reported success, review the result", Run: id})
+	if got := phone.urgency.Load(); got != urgencyNormal {
+		t.Errorf("finished urgency = %v, want %s", got, urgencyNormal)
+	}
+}
+
+// A need that stood before the server started, such as one the first start
+// after an upgrade backfills a state for, was announced by the server before.
+func TestARestartDoesNotAnnounceStandingNeeds(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)})
+
+	if err := h.svc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	h.start()
+	h.publish(run, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityNeedsYou, Reason: "needs input: which region?"})
+	phone.expectNone(t, testQuiet)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Blocked: need the staging API key", Run: string(run.ID)})
 }
 
 // Every notification for a run replaces the last one on a device, so an
@@ -297,10 +370,10 @@ func TestANewerNeedIsNeverOvertakenByAnOlderOne(t *testing.T) {
 	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
-	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
 	permission := notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: string(run.ID)}
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	// The first device's push service has not answered yet when the run
 	// asks for a permission.
@@ -327,9 +400,9 @@ func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
 	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
-	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
 	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
@@ -358,9 +431,9 @@ func TestAHandedOffRunNotifiesOnlyItsNewOwner(t *testing.T) {
 	slow, phone, bobs := h.subscribe(h.ada), h.subscribe(h.ada), h.subscribe(h.bob)
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
-	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	if err := h.db.TransferRun(h.ctx, run.ID, h.bob.ID); err != nil {
 		t.Fatalf("TransferRun: %v", err)
@@ -383,9 +456,9 @@ func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
 	slow, phone := h.subscribe(h.ada), h.subscribe(h.ada)
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
-	idle := notification{Title: "Upgrade the linter", Body: "Waiting for your reply", Run: string(run.ID)}
+	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	h.svc.Active(h.ada.ID)
 	slow.slow.Store(false)
@@ -397,7 +470,8 @@ func TestAnOwnerWhoCameBackIsNotInterruptedBehindASlowSend(t *testing.T) {
 	slow.expectNone(t, testQuiet)
 }
 
-// A paused run waits on nobody; resumed, it needs its owner again.
+// A paused run needs nobody, even with a question open; resumed, it needs
+// its owner again.
 func TestAResumedRunIsAnnounced(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -405,11 +479,11 @@ func TestAResumedRunIsAnnounced(t *testing.T) {
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
 
 	h.runs.paused.Store(true)
-	h.status(run, domain.RunNeedsAttention, "agent idle")
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
 	phone.expectNone(t, testQuiet)
 	h.runs.paused.Store(false)
 	h.publish(run, events.TimelinePayload{Kind: events.TimelineResume})
-	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Agent idle", Run: string(run.ID)})
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Blocked: need the staging API key", Run: string(run.ID)})
 }
 
 func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {
@@ -420,13 +494,13 @@ func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {
 	answered := h.run(h.ada, "Answered straight away", domain.LaunchTUI)
 
 	h.svc.Active(h.ada.ID)
-	h.status(stopped, domain.RunNeedsAttention, "agent idle")
-	h.status(answered, domain.RunNeedsAttention, "agent idle")
+	h.status(stopped, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
+	h.status(answered, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
 	phone.expectNone(t, testQuiet/2)
 	// Cleared before the owner went quiet: never sent.
-	h.status(answered, domain.RunRunning, "agent resumed")
+	h.status(answered, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 
-	phone.expect(t, notification{Title: "Stopped by hand", Body: "Agent idle", Run: string(stopped.ID)})
+	phone.expect(t, notification{Title: "Stopped by hand", Body: "Blocked: need a key", Run: string(stopped.ID)})
 	phone.expectNone(t, testQuiet)
 }
 
@@ -437,8 +511,8 @@ func TestGoneSubscriptionIsForgotten(t *testing.T) {
 	gone.answer.Store(http.StatusGone)
 	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
 
-	h.status(run, domain.RunNeedsAttention, "agent idle")
-	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Agent idle", Run: string(run.ID)})
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		subscribed, err := h.svc.Subscribed(h.ctx, h.ada.ID, gone.endpoint())
@@ -529,7 +603,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	started := time.Now()
 
-	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
@@ -539,12 +613,12 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	other.expectNone(t, testQuiet/2)
 
 	// The topic is the one needOf notifications use, so a device collapses them.
-	h.status(run, domain.RunNeedsAttention, "agent idle")
-	phone.expect(t, notification{Title: "Fix the login redirect", Body: "Waiting for your reply", Run: string(run.ID)})
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
 	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, nil, nil); err != nil {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
@@ -559,7 +633,7 @@ func TestNotifyReturnsTheDeviceError(t *testing.T) {
 	gone := h.subscribe(h.ada)
 	gone.answer.Store(http.StatusGone)
 	run := h.run(h.ada, "Task", domain.LaunchACP)
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, nil); !errors.Is(err, ErrDelivery) {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, true, nil, nil); !errors.Is(err, ErrDelivery) {
 		t.Fatalf("Notify = %v, want ErrDelivery", err)
 	}
 }
@@ -571,7 +645,7 @@ func TestNotifySkipsANeedThatClearedWhileItWaited(t *testing.T) {
 	run := h.run(h.ada, "Task", domain.LaunchACP)
 	h.svc.Active(h.ada.ID)
 	var asked atomic.Bool
-	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, nil, func(context.Context) bool {
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "t", "b", run.ID, true, nil, func(context.Context) bool {
 		asked.Store(true)
 		return false
 	}); err != nil {
@@ -591,9 +665,9 @@ func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
 	h.svc.Active(h.ada.ID)
 	flush := make(chan struct{})
 	done := make(chan error, 2)
-	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, flush, nil) }()
+	go func() { done <- h.svc.Notify(h.ctx, h.ada.ID, "kept", "b", run.ID, true, flush, nil) }()
 	go func() {
-		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, flush, func(context.Context) bool { return false })
+		done <- h.svc.Notify(h.ctx, h.ada.ID, "dropped", "b", run.ID, true, flush, func(context.Context) bool { return false })
 	}()
 	phone.expectNone(t, testQuiet/3)
 	start := time.Now()

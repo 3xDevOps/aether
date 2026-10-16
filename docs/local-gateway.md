@@ -494,6 +494,16 @@ finished run, leaves it alone. It is absent on a run whose status last
 changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
+A live run (`running` or `needs-attention`) carries `state`: `working`,
+`waiting-agents`, `waiting-tools`, `needs-you`, `idle`, `finished`, `failed`
+or `disconnected` ([run activity](failure-handling.md#run-activity)); it is
+absent on any other status. `status_seq` is always present, starts at 1 and
+increases on every published change of status, reason, state,
+`outcome_unseen` or `finish_unopened`. Every `run.status` payload carries the
+run's `state` and `status_seq` after it; ignore one whose `status_seq` is not
+greater than the one you hold. A `run.status` event stored before the server
+had `status_seq` carries `0` and no `state`: label it by its status alone.
+
 `run.launch`, `template.save` and `worker.start` take an optional `model`,
 and `mission.create` takes one on the integrator and on each of
 `execution_choices`; it is passed to the agent as is, and empty keeps the

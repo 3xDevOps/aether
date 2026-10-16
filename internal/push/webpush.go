@@ -39,6 +39,11 @@ const (
 	// padding delimiter and the 16-octet tag.
 	maxPayload = recordSize - 86 - 1 - 16
 
+	// urgencyHigh wakes a device for a need; urgencyNormal leaves a
+	// finished result to the device's own schedule (RFC 8030 section 5.3).
+	urgencyHigh   = "high"
+	urgencyNormal = "normal"
+
 	// messageTTL is how long a push service keeps a message for a device it
 	// cannot reach.
 	messageTTL = 24 * time.Hour
@@ -220,7 +225,7 @@ func seal(payload []byte, to *target, sender *ecdh.PrivateKey, salt []byte) ([]b
 
 // send posts one message. topic, when set, replaces an undelivered message
 // with the same topic at the push service.
-func (k *vapidKey) send(ctx context.Context, client *http.Client, to *target, payload []byte, topic string) error {
+func (k *vapidKey) send(ctx context.Context, client *http.Client, to *target, payload []byte, topic, urgency string) error {
 	body, err := encrypt(payload, to)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
@@ -239,7 +244,7 @@ func (k *vapidKey) send(ctx context.Context, client *http.Client, to *target, pa
 	req.Header.Set("Content-Encoding", "aes128gcm")
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("TTL", strconv.Itoa(int(messageTTL/time.Second)))
-	req.Header.Set("Urgency", "high")
+	req.Header.Set("Urgency", urgency)
 	if topic != "" {
 		req.Header.Set("Topic", topic)
 	}

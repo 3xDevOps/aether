@@ -82,6 +82,7 @@ const (
 	CoordOutcomeBlocked = "blocked"
 	// CoordOutcomeNeedsInput is nonterminal and never stored as a durable report.
 	CoordOutcomeNeedsInput = "needs-input"
+	CoordOutcomeWaiting    = "waiting"
 )
 
 // Peer authorization states.
@@ -303,7 +304,8 @@ type CoordReportResult struct {
 }
 
 // RunReportParams carries independent execution and correlated input updates.
-// Empty State preserves execution and requires at least one input update. The
+// Empty State preserves execution and requires at least one input update or
+// Subagent. The
 // run identity comes from its socket, never a parameter.
 type RunReportParams struct {
 	State        string                  `json:"state,omitempty"`
@@ -313,6 +315,13 @@ type RunReportParams struct {
 	// UsageLimit marks an idle report whose turn stopped on the account's
 	// subscription usage limit; Reason is the agent's message for it.
 	UsageLimit bool `json:"usage_limit,omitempty"`
+	// Tools marks a working report whose background tasks are all tools the
+	// agent waits on. Subagent marks a subagent's activity, which carries no
+	// State and only keeps the run from stalling. TurnStart marks a working
+	// report sent as a prompt starts a turn.
+	Tools     bool `json:"tools,omitempty"`
+	Subagent  bool `json:"subagent,omitempty"`
+	TurnStart bool `json:"turn_start,omitempty"`
 }
 
 // RunReportResult is the result of run.report. It is empty: the caller is

@@ -161,7 +161,7 @@ func TestSendIsAStandardWebPushRequest(t *testing.T) {
 		t.Fatalf("parseTarget: %v", err)
 	}
 	payload := []byte(`{"title":"Fix the login redirect","body":"Waiting for your reply","run":"run-7k2m9q4xbd"}`)
-	if err = key.send(context.Background(), service.Client(), to, payload, "topic-1"); err != nil {
+	if err = key.send(context.Background(), service.Client(), to, payload, "topic-1", urgencyHigh); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	got := <-requests
@@ -244,16 +244,16 @@ func TestSendReportsWhatThePushServiceSaid(t *testing.T) {
 	}
 	host := strings.TrimPrefix(service.URL, "https://")
 
-	if err = key.send(context.Background(), service.Client(), to, []byte("{}"), ""); !errors.Is(err, errGone) {
+	if err = key.send(context.Background(), service.Client(), to, []byte("{}"), "", urgencyHigh); !errors.Is(err, errGone) {
 		t.Fatalf("send to a 410 = %v, want errGone", err)
 	}
 	status = http.StatusForbidden
-	err = key.send(context.Background(), service.Client(), to, []byte("{}"), "")
+	err = key.send(context.Background(), service.Client(), to, []byte("{}"), "", urgencyHigh)
 	if want := host + ` answered 403 Forbidden: {"reason":"BadJwtToken"}`; err == nil || err.Error() != want {
 		t.Fatalf("send to a 403 = %v, want %q", err, want)
 	}
 	service.Close()
-	err = key.send(context.Background(), service.Client(), to, []byte("{}"), "")
+	err = key.send(context.Background(), service.Client(), to, []byte("{}"), "", urgencyHigh)
 	if err == nil || !strings.HasPrefix(err.Error(), host+": dial tcp") || strings.Contains(err.Error(), "/send/abc") {
 		t.Fatalf("send to a closed service = %v, want the dial error without the subscription's path", err)
 	}

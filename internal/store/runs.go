@@ -136,7 +136,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		fallbackOrder         string
 	)
 	if err := row.Scan(&r.ID, &r.WorkspaceID, &r.MemberID, &r.AccountMemberID, &r.HomeMemberID, &r.Task, &r.Harness,
-		&r.Mode, &r.Status, &r.Reason, &r.Branch, &r.Worktree, &r.Protected,
+		&r.Mode, &r.Status, &r.Reason, &r.Activity, &r.StatusSeq, &r.Branch, &r.Worktree, &r.Protected,
 		&createdAt, &startedAt, &finishedAt, &r.ProfileSnapshotID, &r.Title,
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt, &r.ACP,
@@ -163,7 +163,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 }
 
 const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member_id, COALESCE(runs.home_member_id, ''), runs.task, runs.harness, runs.mode, runs.status,
-	runs.reason, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
+	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at, runs.acp,
 	COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model`
@@ -298,7 +298,9 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 // finish_unopened to whether the new status is terminal, as UpdateRunStatus
 // does. That same change is the only one that writes status_changed_at, from
 // the snapshot, so a caller that moves the status sets it and a rollback
-// restores it.
+// restores it. Activity is written only on a live status, and status_seq
+// increases when status, reason or activity changes; r.StatusSeq is set to
+// the stored value.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err := validateRun(r, "update"); err != nil {
 		return err
@@ -324,6 +326,10 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err != nil {
 		return fmt.Errorf("store: update run: status changed at: %w", err)
 	}
+	activity := r.Activity
+	if !r.Status.Live() {
+		activity = ""
+	}
 	changed, err := encodeTime(time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("store: update run: %w", err)
@@ -339,26 +345,28 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	if err = recordTransition(ctx, tx, r.ID, r.Status, r.Reason, changed); err != nil {
 		return fmt.Errorf("store: update run: %w", err)
 	}
-	err = notFoundOnZeroRows(tx.ExecContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`UPDATE runs SET workspace_id = ?, member_id = ?, account_member_id = ?, task = ?, harness = ?,
 		     mode = ?, status = ?, reason = ?, branch = ?, worktree = ?,
 		     protected = ?, started_at = ?, finished_at = ?,
 		     profile_snapshot_id = ?, title = ?, last_commit = ?, last_commit_at = ?,
 		     harness_session_id = ?, base_commit = ?, base_branch = ?, base_source = ?,
-		     base_checked_at = ?,
+		     base_checked_at = ?, activity = ?,
+		     status_seq = status_seq + CASE WHEN status = ? AND reason = ? AND activity = ? THEN 0 ELSE 1 END,
 		     outcome_unseen = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
 		     finish_unopened = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
 		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
-		 WHERE id = ?`,
+		 WHERE id = ? RETURNING status_seq`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
-		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.Status, r.Reason,
+		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, activity,
+		r.Status, r.Reason, activity, r.Status, r.Reason,
 		r.Status, r.Reason, r.Status.Terminal(),
 		r.Status, r.Reason, statusChangedAt, r.ID,
-	))
-	if errors.Is(err, ErrNotFound) {
-		return err
+	).Scan(&r.StatusSeq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("store: update run: %w", mapConstraint(err, ErrNotFound))
@@ -449,21 +457,21 @@ func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) err
 	return err
 }
 
-func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false, false)
+func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error) {
+	return d.updateRunStatus(ctx, id, status, reason, activity, startedAt, finishedAt, false, false)
 }
 
 // FinishRunReported records an agent's success/failure outcome, either
 // parking an interactive run or finishing a background run, and marks it
 // unseen and unopened.
-func (d *DB) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, true, false)
+func (d *DB) FinishRunReported(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error) {
+	return d.updateRunStatus(ctx, id, status, reason, activity, startedAt, finishedAt, true, false)
 }
 
 // FinishRunByMember records a close or kill a member asked for. The member
 // has dealt with the run, so it ends opened whatever it was before.
-func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time) error {
-	return d.updateRunStatus(ctx, id, status, reason, startedAt, finishedAt, false, true)
+func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error) {
+	return d.updateRunStatus(ctx, id, status, reason, activity, startedAt, finishedAt, false, true)
 }
 
 // updateRunStatus sets outcome_unseen when reported, keeps it for the same
@@ -471,52 +479,65 @@ func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status doma
 // retention relabels keep it. finish_unopened follows the same rule, except
 // that byMember clears it and any other change into a terminal status sets
 // it. status_changed_at moves to now on the changes that do not keep the
-// flags. SET expressions see the row before the update.
-func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, reported, byMember bool) error {
+// flags. Every write increases status_seq, since each is published. SET
+// expressions see the row before the update.
+func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time, reported, byMember bool) (RunStatusStamp, error) {
 	if !status.Valid() {
-		return fmt.Errorf("store: update run status: invalid status %q", status)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: invalid status %q", status)
+	}
+	if activity != "" && !status.Live() {
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: activity %q on a %s run", activity, status)
 	}
 	started, err := encodeTimePtr(startedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run status: started at: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: started at: %w", err)
 	}
 	finished, err := encodeTimePtr(finishedAt)
 	if err != nil {
-		return fmt.Errorf("store: update run status: finished at: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: finished at: %w", err)
 	}
 	changed, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("store: update run status: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: update run status: begin: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err = recordTransition(ctx, tx, id, status, reason, changed); err != nil {
-		return fmt.Errorf("store: update run status: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
-	err = notFoundOnZeroRows(tx.ExecContext(ctx,
-		`UPDATE runs SET status = ?, reason = ?,
+	var stamp RunStatusStamp
+	err = tx.QueryRowContext(ctx,
+		`UPDATE runs SET status = ?, reason = ?, activity = ?, status_seq = status_seq + 1,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
 		     outcome_unseen = CASE WHEN ? THEN 1 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
 		     finish_unopened = CASE WHEN ? THEN 1 WHEN ? THEN 0 WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
 		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END
-		 WHERE id = ?`,
-		status, reason, started, finished, reported, status, reason,
+		 WHERE id = ? RETURNING status_seq, outcome_unseen, finish_unopened`,
+		status, reason, activity, started, finished, reported, status, reason,
 		reported, byMember, status, reason, status.Terminal(),
-		status, reason, changed, id))
-	if errors.Is(err, ErrNotFound) {
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("store: update run status: %w", err)
+		status, reason, changed, id).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return RunStatusStamp{}, ErrNotFound
+	case err != nil:
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: update run status: commit: %w", err)
+		return RunStatusStamp{}, fmt.Errorf("store: update run status: commit: %w", err)
 	}
-	return nil
+	return stamp, nil
+}
+
+// RunStatusStamp is a run's status_seq and outcome flags as a status write
+// left them, for the event that announces the write.
+type RunStatusStamp struct {
+	StatusSeq      int64
+	OutcomeUnseen  bool
+	FinishUnopened bool
 }
 
 // TransferRun reassigns a run's owner. Existence of the new owner is
@@ -609,7 +630,7 @@ func (d *DB) SetRunArchived(ctx context.Context, id domain.RunID, at *time.Time)
 // with a nil error also covers a run that does not exist.
 func (d *DB) ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner domain.MemberID) (bool, error) {
 	result, err := d.db.ExecContext(ctx,
-		`UPDATE runs SET outcome_unseen = 0 WHERE id = ? AND member_id = ? AND outcome_unseen = 1`, id, owner)
+		`UPDATE runs SET outcome_unseen = 0, status_seq = status_seq + 1 WHERE id = ? AND member_id = ? AND outcome_unseen = 1`, id, owner)
 	if err != nil {
 		return false, fmt.Errorf("store: clear run outcome unseen: %w", err)
 	}
@@ -625,7 +646,7 @@ func (d *DB) ClearRunOutcomeUnseen(ctx context.Context, id domain.RunID, owner d
 // does not exist.
 func (d *DB) ClearRunFinishUnopened(ctx context.Context, id domain.RunID) (bool, error) {
 	result, err := d.db.ExecContext(ctx,
-		`UPDATE runs SET finish_unopened = 0 WHERE id = ? AND finish_unopened = 1`, id)
+		`UPDATE runs SET finish_unopened = 0, status_seq = status_seq + 1 WHERE id = ? AND finish_unopened = 1`, id)
 	if err != nil {
 		return false, fmt.Errorf("store: clear run finish unopened: %w", err)
 	}

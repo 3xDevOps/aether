@@ -367,14 +367,15 @@ func (s *Scheduler) continueStandard(entry *supervised, message string) {
 		return
 	}
 	s.clearUsageLimit(entry)
-	report := agentstatus.Report{State: agentstatus.Idle, Reason: message}
+	report := agentstatus.Report{State: agentstatus.Idle, Reason: message, UsageLimit: true}
 	switch outcome {
 	case usageEnded:
 		return
 	case usageNoFallback:
-		report.Reason = stopped
+		report.Reason, report.UsageLimit = stopped, false
 	}
-	if err := s.ReportAgentState(context.Background(), entry.runID, report); err != nil {
+	// Applied directly: this run already had its move.
+	if _, err := s.applyAgentReport(context.Background(), entry.runID, report); err != nil {
 		slog.Warn("scheduler: report the exhausted account", "run", entry.runID, "error", err)
 	}
 }
