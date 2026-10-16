@@ -580,9 +580,9 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	return true, nil
 }
 
-// pinnedLogins mounts each login file of a PinLogin harness in member's own
-// home over itself once member shares their account, except where the plan
-// already mounts another member's login. A login path that is a directory or
+// pinnedLogins mounts each harness's PinnedLogins in member's own home over
+// itself once member shares their account, except where the plan already
+// mounts another member's login. A login path that is a directory or
 // cannot be shared is left unpinned rather than refused: it cannot be shared
 // either, and refusing would keep the member from the terminal that fixes it.
 // A grantee still pending approval counts: approval takes effect while this
@@ -597,14 +597,7 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 	}
 	var pins []runtime.Mount
 	for _, profile := range harness.Profiles() {
-		if !profile.PinLogin {
-			continue
-		}
-		paths, err := profile.LoginPaths()
-		if err != nil {
-			return nil, fmt.Errorf("scheduler: %w", err)
-		}
-		for _, rel := range paths {
+		for _, rel := range profile.PinnedLogins {
 			target := path.Join(home, rel)
 			if slices.ContainsFunc(planned, func(m runtime.Mount) bool { return m.ContainerPath == target }) {
 				continue

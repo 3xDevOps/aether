@@ -13,6 +13,15 @@ const logins: Record<string, { command: string; hint: string }> = {
   pi: { command: 'pi', hint: 'Start pi, then type /login.' },
   omp: { command: 'omp', hint: 'Start oh-my-pi and follow its login.' },
   opencode: { command: 'opencode auth login', hint: 'Pick your provider.' },
+  copilot: {
+    command: 'copilot login --device-code',
+    hint: 'Open the printed URL and enter the code. The Environment has no keychain, so answer y to store the token in ~/.copilot/config.json.',
+  },
+  gemini: {
+    command: 'NO_BROWSER=true gemini',
+    hint: 'Gemini CLI needs a paid Gemini API key or Gemini Code Assist Standard or Enterprise. For a key, put GEMINI_API_KEY=<key> in ~/.gemini/.env instead. Google sign-in works only with Code Assist Standard or Enterprise; personal Google accounts moved to Antigravity CLI on 2026-06-18.',
+  },
+  cursor: { command: 'NO_OPEN_BROWSER=1 agent login', hint: 'Cursor CLI runs as agent. Open the printed URL in your browser.' },
 }
 
 const switchToAsk = 'Runs with full permissions by default, like Standard; switch its mode in the run to be asked.'
@@ -23,6 +32,9 @@ const permissionNotes: Record<string, string> = {
   omp: 'Runs with full permissions; its ACP mode has no asking option.',
   pi: 'pi never asks for permission.',
   opencode: "Runs with full permissions through its config; a workspace's own permission rules still apply.",
+  copilot: 'Runs with full permissions through --allow-all, which a run cannot take back.',
+  gemini: switchToAsk,
+  cursor: "Runs with full permissions through --force, unless your Cursor team's auto-run controls forbid it; switch to plan or ask in the run for read-only.",
 }
 
 export function label(agent: AgentInfo): string {

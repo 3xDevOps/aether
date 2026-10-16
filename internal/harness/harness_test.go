@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"os"
@@ -10,8 +11,8 @@ import (
 	"testing"
 )
 
-func TestRegistryShipsSixProfiles(t *testing.T) {
-	want := []string{"claude", "codex", "custom", "omp", "opencode", "pi"}
+func TestRegistryShipsNineProfiles(t *testing.T) {
+	want := []string{"claude", "codex", "copilot", "cursor", "custom", "gemini", "omp", "opencode", "pi"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -22,20 +23,23 @@ func TestRegistryShipsSixProfiles(t *testing.T) {
 }
 
 // Every harness with a command must carry the task placeholder in both
-// modes; login-flow harnesses must declare their credential paths.
+// modes and run its executable, which need not be its name; login-flow
+// harnesses must declare their credential paths.
 func TestProfileDefaults(t *testing.T) {
-	for _, name := range []string{"claude", "codex", "omp", "opencode", "pi"} {
+	executables := map[string]string{"cursor": "agent"}
+	for _, name := range []string{"claude", "codex", "copilot", "cursor", "gemini", "omp", "opencode", "pi"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
 		}
+		executable := cmp.Or(executables[name], name)
 		for mode, argv := range map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs} {
 			if len(argv) == 0 {
 				t.Errorf("%s %s: no argv", name, mode)
 				continue
 			}
-			if argv[0] != name {
-				t.Errorf("%s %s argv[0] = %q", name, mode, argv[0])
+			if argv[0] != executable {
+				t.Errorf("%s %s argv[0] = %q, want %q", name, mode, argv[0], executable)
 			}
 			if !slices.ContainsFunc(argv, func(a string) bool {
 				return strings.Contains(a, TaskPlaceholder)
@@ -43,11 +47,19 @@ func TestProfileDefaults(t *testing.T) {
 				t.Errorf("%s %s argv %v missing task placeholder", name, mode, argv)
 			}
 		}
+		if p.EnhancedSupport() == EnhancedNative && p.ACPArgs[0] != executable {
+			t.Errorf("%s native acp argv[0] = %q, want %q", name, p.ACPArgs[0], executable)
+		}
 		if len(p.CredentialPaths) == 0 {
 			t.Errorf("%s: no credential paths", name)
 		}
 		if logins, err := p.LoginPaths(); err != nil || !slices.Equal(logins, p.CredentialPaths) {
 			t.Errorf("%s login paths = %v, %v; want the home-relative %v", name, logins, err, p.CredentialPaths)
+		}
+		for _, pinned := range p.PinnedLogins {
+			if !slices.Contains(p.CredentialPaths, pinned) {
+				t.Errorf("%s pins %q, which is not a login path", name, pinned)
+			}
 		}
 	}
 }
@@ -155,6 +167,9 @@ func TestStatusReporters(t *testing.T) {
 		"omp":      ReporterFull,
 		"pi":       ReporterFull,
 		"opencode": ReporterFull,
+		"copilot":  ReporterNone,
+		"gemini":   ReporterNone,
+		"cursor":   ReporterNone,
 		"custom":   ReporterNone,
 	}
 	for name, reporter := range want {
@@ -522,7 +537,7 @@ func TestUpdateScripts(t *testing.T) {
 			t.Errorf("%s has an update script but no install script or TUI argv", p.Name)
 		}
 	}
-	if want := []string{"claude", "codex", "omp", "pi"}; !slices.Equal(updated, want) {
+	if want := []string{"claude", "codex", "copilot", "cursor", "gemini", "omp", "pi"}; !slices.Equal(updated, want) {
 		t.Fatalf("profiles with an update script = %v, want %v", updated, want)
 	}
 	if pi, _ := Lookup("pi"); strings.Contains(pi.UpdateScript, "update --self") {

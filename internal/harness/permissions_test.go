@@ -17,6 +17,9 @@ type noPrompt struct {
 	acpMode       string
 	permissionEnv map[string]string
 	optOut        bool
+	// modes are the ACP session modes, for an agent whose session cannot
+	// be recorded without a login; others come from acpmock's fixture.
+	modes []string
 }
 
 var noPromptSettings = map[string]noPrompt{
@@ -34,6 +37,19 @@ var noPromptSettings = map[string]noPrompt{
 		permissionEnv: map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":"allow"}`},
 	},
 	"pi": {optOut: true},
+	"copilot": {
+		flag:  "--allow-all",
+		inACP: true,
+		env:   map[string]string{"COPILOT_ALLOW_ALL": "true"},
+	},
+	// buildAvailableModes in gemini-cli 0.64.0.
+	"gemini": {
+		flag:    "--approval-mode=yolo",
+		env:     map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
+		acpMode: "yolo",
+		modes:   []string{"default", "autoEdit", "yolo", "plan"},
+	},
+	"cursor": {flag: "--force", inACP: true},
 }
 
 func TestEveryShippedAgentRunsWithoutPermissionPrompts(t *testing.T) {
@@ -75,8 +91,15 @@ func TestEveryShippedAgentRunsWithoutPermissionPrompts(t *testing.T) {
 			if p.ACPMode != want.acpMode {
 				t.Errorf("ACPMode = %q, want %q", p.ACPMode, want.acpMode)
 			}
-			if want.acpMode != "" && !slices.Contains(recordedModes(t, p.Name), want.acpMode) {
-				t.Errorf("the recorded %s adapter does not offer mode %q", p.Name, want.acpMode)
+			if want.acpMode == "" {
+				return
+			}
+			modes := want.modes
+			if modes == nil {
+				modes = recordedModes(t, p.Name)
+			}
+			if !slices.Contains(modes, want.acpMode) {
+				t.Errorf("%s does not offer mode %q", p.Name, want.acpMode)
 			}
 		})
 	}
