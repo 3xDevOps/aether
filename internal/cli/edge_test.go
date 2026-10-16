@@ -315,6 +315,58 @@ func TestDialLinkedRefusesWrongKeyOnBothPaths(t *testing.T) {
 	}
 }
 
+// Every failure through the edge names the layer that failed, the server
+// dialed, the edge host and the signed-in account; an edge answering 409
+// for a connected server it holds as unclaimed is the server's
+// registration, not this device's authorization.
+func TestDialLinkedNamesTheFailedLayer(t *testing.T) {
+	cases := []struct {
+		refusal edgeproto.Refusal
+		banner  bool
+		layer   string
+	}{
+		{refusal: edgeproto.RefusalNotClaimed, layer: LayerRegistration},
+		{refusal: edgeproto.RefusalNotConnected, layer: LayerRegistration},
+		{refusal: edgeproto.RefusalUnknownServer, layer: LayerRegistration},
+		{refusal: edgeproto.RefusalNotAttached, layer: LayerRegistration},
+		{refusal: edgeproto.RefusalTokenRevoked, layer: LayerAuthorization},
+		{refusal: edgeproto.RefusalNotMember, layer: LayerAuthorization},
+		{refusal: edgeproto.RefusalConnLimit, layer: LayerClientEdge},
+		{banner: true, layer: LayerAuthorization},
+	}
+	for _, c := range cases {
+		t.Run(string(c.refusal)+c.layer, func(t *testing.T) {
+			w := newEdgeWorld(t)
+			if c.banner {
+				w.refusal = (&edgeproto.Refused{Kind: edgeproto.RefusedDeviceRevoked, Device: "laptop"}).Banner()
+			}
+			edge := w.edge(t, c.refusal)
+			w.signIn(t, edge.URL)
+			_, err := DialLinked(context.Background(), Config{ServerID: w.serverID(), EdgeURL: edge.URL}, "aether")
+			var path *EdgePathError
+			if !errors.As(err, &path) {
+				t.Fatalf("DialLinked = %v, want an *EdgePathError", err)
+			}
+			if path.Layer != c.layer || path.ServerID != w.serverID() || path.Edge != strings.TrimPrefix(edge.URL, "http://") ||
+				path.Account != "github account octo" {
+				t.Fatalf("DialLinked failed with %+v, want layer %s: %v", *path, c.layer, err)
+			}
+		})
+	}
+	w := newEdgeWorld(t)
+	_, err := DialLinked(context.Background(), Config{ServerID: w.serverID(), EdgeURL: "http://" + closedAddr(t)}, "aether")
+	var path *EdgePathError
+	if !errors.As(err, &path) || path.Layer != LayerAuthorization || path.Account != "" {
+		t.Fatalf("not signed in: %v", err)
+	}
+	down := "http://" + closedAddr(t)
+	w.signIn(t, down)
+	_, err = DialLinked(context.Background(), Config{ServerID: w.serverID(), EdgeURL: down}, "aether")
+	if !errors.As(err, &path) || path.Layer != LayerClientEdge {
+		t.Fatalf("edge down: %v", err)
+	}
+}
+
 func TestEdgeSSHCommandNamesThePathEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks needs a privilege on Windows")
