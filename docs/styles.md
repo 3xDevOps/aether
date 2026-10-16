@@ -148,6 +148,20 @@ their touch target to 44px. An `icon`, `icon-sm` or `round` button requires
 `label`, which becomes its accessible name and tooltip; `hint` puts a tooltip
 on any button.
 
+## Charts
+
+Charts are hand-drawn SVG; the dashboard has no chart library. Marks use
+`fill-*` and `stroke-*` token utilities or `currentColor`, never inline
+colours. Outcomes use the run state tokens (`state-done`, `state-failed`,
+`state-paused`); a neutral count such as runs launched uses `icon-faint`; a
+sequential scale steps one hue, `fill-accent` at 25%, 50%, 75% and 100% over
+`fill-chrome` for zero. Every colour has a text legend, and every mark is
+named by its own label or a summary, so nothing depends on colour alone.
+Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in `text-muted`;
+bars carry no gradients, shadows or animation. A chart scaled with
+`preserveAspectRatio="none"` draws strokes with
+`vector-effect: non-scaling-stroke`.
+
 ## Enforcement
 
 `web/src/design-system.test.ts` scans every non-test source file under

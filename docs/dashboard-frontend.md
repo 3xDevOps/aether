@@ -462,7 +462,7 @@ that omit the fields get a flat list.
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
 Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
-**Swarms**, **Activity**, **Files**, **Environment**, **Agents** and
+**Swarms**, **Activity**, **Insights**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
@@ -3750,6 +3750,57 @@ questions and queued messages stay contextual to their run, in its Details
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write
   it onto the stored `server.info`, which is what fills the disk gauge in
   Settings > Server.
+
+## Insights
+
+`src/routes/insights/` is **Insights** (`?page=insights`), what a member's
+agents finished over a period. It is in the header navigation after
+**Activity** when the gateway offers `insights.get`, and reads that one
+method, and the server computes every number. The page re-reads when its controls change and
+when the event stream comes back live, dropping answers to an older request.
+
+- **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
+  months), **Workspace** (All workspaces or one; shown with more than one
+  workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
+  period ends at the next local midnight, so today counts, and the request
+  carries the browser's IANA time zone for day buckets. The choices last
+  while the page is open; they are not in the address. On a phone the
+  controls wrap above the content instead of sitting in the header.
+- **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
+  completed across 3 repositories." Runs in **Needs you** follow as a link to
+  the Board.
+- **Tiles.** Runs finished, success rate (finished of runs that ended, with
+  both counts), swarms completed (with agents and tasks accepted) and pull
+  requests Aether opened. Runs finished and success rate compare with the
+  period before in raw numbers ("Up from 8 the 7 days before"). Pull
+  requests show a dash and say none are recorded until the server reports
+  `coverage.pull_requests_since`.
+- **Activity chart.** Per day (per week past 92 days): launched runs as the
+  left bar, runs that ended as the right bar stacked Done, Failed (failed and
+  interrupted) and Abandoned, with a text legend. The chart is one tab stop;
+  arrow keys, **Home** and **End** move between bars, and **Enter**, **Space**
+  or a click selects one, which narrows **Finished work** to runs that ended
+  then. "Show every day" clears it.
+- **Finished work.** The server's 50 most recent runs that ended: title,
+  outcome badge, repository, agent and model ("default model" when the run
+  used the agent's own), duration, pull request link and relative end time.
+  A row opens the run.
+- **Last 26 weeks.** A calendar heatmap of runs active each day in one accent
+  hue, with a Fewer to More scale. It is one tab stop; arrow keys move by day
+  and week, and each day is labelled with its date and count.
+- **Breakdown.** By repository and by agent: launched, finished and failed as
+  numbers beside a bar.
+- **Time.** Median and slowest-10% run time, and, from the server's state
+  record, median time working, waiting on you and your response time. When
+  fewer runs have state times than run times it says "measured for N of M
+  runs; Aether records this from <date> on."
+- **Usage**, collapsed: cost as a floor ("at least $4.12") with how many runs
+  reported it, tokens, and a link to **Settings › Usage** for subscription
+  quota. Cost never stops a run.
+
+A failed read shows the server's error with **Retry**; a server without
+`insights.get` gets a neutral line asking for an update. An empty period
+offers **New run**, the last 12 months, and everyone's runs from **Mine**.
 
 ## Files
 
