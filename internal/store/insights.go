@@ -448,9 +448,10 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	return nil
 }
 
-// insightsStateTimes measures the finished runs whose recorded transitions
-// start at queued, so the record covers the whole run. Working and waiting
-// are per-run totals up to the first terminal status; a response is each
+// insightsStateTimes measures each finished run's last session: from the
+// run leaving queued, or from a relaunch out of a terminal status, to its
+// next terminal status. A run whose record starts mid-session is not
+// measured. Working and waiting are per-run totals; a response is each
 // stretch of needs-attention that ended in running.
 func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	rows, err := tx.QueryContext(ctx, `WITH `+insightsSwarmRuns+`
@@ -467,14 +468,15 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		run                         domain.RunID
 		measured, done              bool
 		prevTo                      domain.RunStatus
-		prevAt                      int64
-		waitingSince                int64
+		prevAt, waitingSince        int64
 		runWorking, runWaiting      time.Duration
+		runResponses                []time.Duration
 	)
 	flush := func() {
 		if measured {
 			working = append(working, runWorking)
 			waiting = append(waiting, runWaiting)
+			responses = append(responses, runResponses...)
 		}
 	}
 	for rows.Next() {
@@ -488,8 +490,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 		}
 		if id != run {
 			flush()
-			run, measured, done = id, from == domain.RunQueued, false
-			runWorking, runWaiting, waitingSince = 0, 0, -1
+			run, measured = id, false
 		} else if measured && !done {
 			switch prevTo {
 			case domain.RunRunning:
@@ -497,6 +498,10 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 			case domain.RunNeedsAttention:
 				runWaiting += time.Duration(at - prevAt)
 			}
+		}
+		if from == domain.RunQueued || from.Terminal() && !to.Terminal() {
+			measured, done = true, false
+			runWorking, runWaiting, runResponses, waitingSince = 0, 0, nil, -1
 		}
 		if !measured || done {
 			continue
@@ -507,7 +512,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 				waitingSince = at
 			}
 		case to == domain.RunRunning && waitingSince >= 0:
-			responses = append(responses, time.Duration(at-waitingSince))
+			runResponses = append(runResponses, time.Duration(at-waitingSince))
 			waitingSince = -1
 		default:
 			waitingSince = -1
@@ -561,7 +566,8 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 }
 
 // insightsSwarms reports the swarms created in range, scoped by their
-// accountable human. Agents are the distinct runs they started.
+// accountable human. Agents are the distinct runs they started; a reserved
+// run ID whose launch never created the run is not one.
 func insightsSwarms(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	where := "created_at >= :from AND created_at < :to"
 	if q.Member != "" {
@@ -581,7 +587,7 @@ func insightsSwarms(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 		SELECT (SELECT COUNT(*) FROM m),
 			(SELECT COUNT(*) FROM m WHERE phase = 'completed'),
 			(SELECT COUNT(*) FROM m WHERE phase = 'cancelled'),
-			(SELECT COUNT(*) FROM agents),
+			(SELECT COUNT(*) FROM agents WHERE run_id IN (SELECT id FROM runs)),
 			(SELECT COUNT(*) FROM mission_acceptances WHERE mission_id IN (SELECT id FROM m))`, args...,
 	).Scan(&out.Swarms.Launched, &out.Swarms.Completed, &out.Swarms.Cancelled, &out.Swarms.Agents, &out.Swarms.TasksAccepted)
 	if err != nil {

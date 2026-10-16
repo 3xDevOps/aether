@@ -1734,7 +1734,8 @@ CREATE TABLE assistant_settings (
 	// v67: insights. Every run status or reason change is kept as a
 	// transition, and every pull request a run opened through run.pr.create
 	// with the state Aether last observed. member_id is the run's owner when
-	// the PR was opened. Both go with their run.
+	// the PR was opened, kept as history that does not block removing that
+	// member. Both go with their run.
 	`
 CREATE TABLE run_state_transitions (
 	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -1748,7 +1749,7 @@ CREATE INDEX idx_run_state_transitions_run ON run_state_transitions(run_id, at);
 CREATE TABLE run_pull_requests (
 	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
 	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-	member_id    TEXT NOT NULL REFERENCES members(id),
+	member_id    TEXT NOT NULL,
 	repo         TEXT NOT NULL,
 	number       INTEGER NOT NULL,
 	url          TEXT NOT NULL,

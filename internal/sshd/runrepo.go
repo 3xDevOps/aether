@@ -269,9 +269,12 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 }
 
 // recordPR keeps the PR a run opened, or the state of one it opened before,
-// for insights. A failure is only logged: the GitHub side already happened
+// for insights. It outlives a cancelled request, since CreatePR can confirm
+// a PR after one. A failure is only logged: the GitHub side already happened
 // and must not be reported as failed.
 func (s *Server) recordPR(ctx context.Context, run string, pr *runrepo.PullRequest, opened bool) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	record := s.cfg.Store.ObserveRunPullRequest
 	if opened {
 		record = s.cfg.Store.RecordRunPullRequest

@@ -55,7 +55,7 @@ count swarm runs as well.
 | `bucket`, `series` | One entry per local day, or per week starting Monday when the range is over 92 days, zero-filled. `start` is the local date the bucket starts; the first and last buckets are cut at `from` and `to`. |
 | `heatmap` | The 182 local days ending on the day of the last instant before `to`, whatever `from` is. `runs` is how many runs were active that day: started (or created, if never started) before the day ended and finished (or still running) after it began. |
 | `by_workspace`, `by_agent` | Runs launched, finished (`completed` or `merged`) and failed in the range, per workspace and per agent and model, most launched first. A `model` of `""` is the agent's default model. |
-| `swarms` | Swarms created in the range, scoped by their accountable member: how many, how many are now completed or cancelled, `agents` (distinct worker and integrator runs they started) and `tasks_accepted`. |
+| `swarms` | Swarms created in the range, scoped by their accountable member: how many, how many are now completed or cancelled, `agents` (distinct worker and integrator runs they started that still exist) and `tasks_accepted`. |
 | `needs_you` | Runs in scope waiting for a member right now, as on the Board, swarm runs included. Ignores the range. |
 | `recent` | Up to 50 runs that finished in the range, newest first, with the last pull request the run recorded. |
 
@@ -71,9 +71,10 @@ count swarm runs as well.
   with the run going back to `running`, so how long a run waited for an
   answer.
 
-The last three come from the status changes the server records, so they
-cover only runs whose record starts when the run left `queued`.
-`state_runs_measured` is how many. Percentiles are nearest-rank, and every
+The last three come from the status changes the server records. They
+cover a run's last session: from leaving `queued`, or from its latest
+relaunch, to finishing. A run whose record starts mid-session is left out;
+`state_runs_measured` is how many runs are in. Percentiles are nearest-rank, and every
 duration is `0` when nothing was measured.
 
 ## Cost

@@ -116,6 +116,8 @@ func TestInsightsGet(t *testing.T) {
 	attempt("a1", "m1", "w1", 1)
 	attempt("a2", "m1", "w1b", 2)
 	attempt("a3", "m2", "wb", 1)
+	// Reserved, but the launch never created the run.
+	attempt("a4", "m1", "ghost", 3)
 	exec(`INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, accepted_at)
 		VALUES ('s1', 'm1', 't', 1, 1, 2, 'i2', 0)`)
 
@@ -129,6 +131,13 @@ func TestInsightsGet(t *testing.T) {
 	transition("top1", "needs-attention", "running", "2026-03-07T10:36:00-08:00")
 	transition("top1", "running", "completed", "2026-03-07T11:01:00-08:00")
 	transition("top1", "completed", "merged", "2026-03-07T12:01:00-08:00")
+	// Relaunched after completing: only the last session is measured.
+	transition("top4", "queued", "provisioning", "2026-03-06T11:59:00-08:00")
+	transition("top4", "provisioning", "running", "2026-03-06T12:00:00-08:00")
+	transition("top4", "running", "completed", "2026-03-06T14:00:00-08:00")
+	transition("top4", "completed", "running", "2026-03-07T23:00:00-08:00")
+	transition("top4", "running", "needs-attention", "2026-03-07T23:30:00-08:00")
+	transition("top4", "needs-attention", "abandoned", "2026-03-08T01:00:00-08:00")
 	// Recorded only from the middle of the run, so not measured.
 	transition("top2", "running", "failed", "2026-03-09T00:30:00-07:00")
 
@@ -230,7 +239,7 @@ func TestInsightsGet(t *testing.T) {
 		}},
 		{"swarms", mine.Swarms, protocol.InsightsSwarms{Launched: 1, Completed: 1, Agents: 4, TasksAccepted: 1}},
 		{"durations", mine.Durations, protocol.InsightsDurations{RunsMeasured: 3, MedianRunSeconds: 3600, P90RunSeconds: 37 * 3600,
-			StateRunsMeasured: 1, MedianWorkingSeconds: 55 * 60, MedianWaitingSeconds: 300, MedianResponseSeconds: 300}},
+			StateRunsMeasured: 2, MedianWorkingSeconds: 30 * 60, MedianWaitingSeconds: 300, MedianResponseSeconds: 300}},
 		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150}},
 		{"pull requests", mine.PullRequests, protocol.InsightsPullRequests{Opened: 2, Merged: 1}},
 		{"recent order", recentIDs(mine.Recent), []string{"top2", "top4", "top1"}},
