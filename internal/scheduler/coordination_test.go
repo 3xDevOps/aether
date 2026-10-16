@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -445,14 +446,142 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 				}
 				return
 			}
-			// Native discovery is still launch-scoped; no fake user task or
-			// lifecycle callback may be substituted to get the hint delivered.
-			for _, arg := range profile.DiscoveryLaunchArgs(coordtransport.MountDir) {
+			// Instructions are still launch-scoped; no fake user task or
+			// lifecycle callback may be substituted to get them delivered.
+			card := e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID)})
+			if strings.Contains(card, "--outcome") {
+				t.Fatalf("instructions without lifecycle reporting carry the report rule: %q", card)
+			}
+			for _, arg := range profile.InstructionLaunchArgs(coordtransport.MountDir, card) {
 				if !slices.Contains(spec.Command, arg) {
-					t.Fatalf("native discovery argument %q missing from %v", arg, spec.Command)
+					t.Fatalf("instruction argument %q missing from %v", arg, spec.Command)
 				}
 			}
 		})
+	}
+}
+
+// Every launch that does not speak ACP carries the role card: in the
+// system prompt where the agent takes one, else after the task.
+func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "fake"} {
+		for _, tc := range []struct {
+			mode domain.LaunchMode
+			task string
+		}{{domain.LaunchTUI, ""}, {domain.LaunchTUI, "fix the login"}, {domain.LaunchHeadless, "fix the login"}} {
+			t.Run(name+"/"+string(tc.mode)+"/"+map[bool]string{false: "taskless", true: "task"}[tc.task != ""], func(t *testing.T) {
+				e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "role card cli")))
+				root := t.TempDir()
+				coord := &recordingCoordinator{
+					fakeCoordinator: fakeCoordinator{root: filepath.Join(root, "coord")},
+					files:           make(map[domain.RunID]map[string][]byte),
+				}
+				e.sched.UseCoordination(coord, filepath.Join(root, "bin"), true)
+				const memberInstructions = "Prefer small diffs."
+				if name == "codex" {
+					home, err := e.cfg.Homes.Path(e.member.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("developer_instructions = \""+memberInstructions+"\"\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, tc.task, name, tc.mode)
+				if err != nil {
+					t.Fatal(err)
+				}
+				g := coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive}
+				if tc.mode == domain.LaunchHeadless {
+					g.Role, g.Background = coordhooks.RoleBackground, true
+				}
+				command := strings.Join(e.rt.byName(string(run.ID)).spec.Command, "\x00")
+				profile, _ := harness.Lookup(name)
+				env := e.rt.byName(string(run.ID)).spec.Env
+				if background := env[coordtransport.BackgroundEnv] == "1"; background != g.Background {
+					t.Fatalf("%s = %q in a %s launch", coordtransport.BackgroundEnv, env[coordtransport.BackgroundEnv], tc.mode)
+				}
+				g.Wake = env[coordtransport.WakeEnv] == "1"
+				// Codex loads its inbox hooks too, but none of them wakes an idle session.
+				if native := profile.NativeCoordination && name != "codex" && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
+					t.Fatalf("%s = %q, want it only on a native launch (%v)", coordtransport.WakeEnv, env[coordtransport.WakeEnv], native)
+				}
+				if !profile.CarriesInstructions() {
+					if tc.task == "" {
+						if strings.Contains(command, "You are Aether run") || env[coordtransport.RoleCardEnv] != "" {
+							t.Fatalf("taskless launch %q gained a seeded prompt", command)
+						}
+						return
+					}
+					if want := withInstructions(tc.task, e.sched.runInstructions(coordhooks.Guide{Role: g.Role, Background: g.Background})); !strings.Contains(command, want) {
+						t.Fatalf("command %q lacks the task with the role card", command)
+					}
+					return
+				}
+				if env[coordtransport.RoleCardEnv] != "1" {
+					t.Fatalf("a launch carrying the card in its system prompt lacks %s", coordtransport.RoleCardEnv)
+				}
+				card := e.sched.runInstructions(g)
+				if !strings.Contains(card, string(run.ID)) || !strings.Contains(card, "waiting") || !strings.Contains(card, coordhooks.PeerRule) {
+					t.Fatalf("role card %q lacks the run, the waiting outcome or the peer rule", card)
+				}
+				if strings.Contains(card, "- waiting:") != g.Wake || strings.Contains(card, "- needs-input:") == g.Background {
+					t.Fatalf("role card %q offers outcomes this %s launch cannot use (wake %v)", card, tc.mode, g.Wake)
+				}
+				if name == "codex" {
+					card = memberInstructions + "\n\n" + card
+				}
+				if strings.Contains(command, "\x00"+tc.task+"\n\n") {
+					t.Fatalf("command %q repeats the instructions after the task", command)
+				}
+				if file := coord.file(run.ID, harness.InstructionsFileName); file != nil {
+					if string(file) != card+"\n" {
+						t.Fatalf("instructions file = %q, want the role card", file)
+					}
+					var config struct {
+						Instructions []string `json:"instructions"`
+					}
+					if err := json.Unmarshal([]byte(env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil || !slices.Contains(config.Instructions, coordtransport.MountDir+"/"+harness.InstructionsFileName) {
+						t.Fatalf("OPENCODE_CONFIG_CONTENT %q does not load the instructions file: %v", env["OPENCODE_CONFIG_CONTENT"], err)
+					}
+					return
+				}
+				if args := strings.Join(profile.InstructionLaunchArgs(coordtransport.MountDir, card), "\x00"); !strings.Contains(command, args) {
+					t.Fatalf("command %q lacks the instruction arguments %q", command, args)
+				}
+			})
+		}
+	}
+}
+
+func TestCodexLaunchesPastALinkedConfig(t *testing.T) {
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "linked codex config")))
+	root := t.TempDir()
+	e.sched.UseCoordination(&fakeCoordinator{root: filepath.Join(root, "coord")}, filepath.Join(root, "bin"), true)
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(root, "config.toml")
+	if err = os.WriteFile(shared, []byte(`developer_instructions = "Prefer small diffs."`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(shared, filepath.Join(home, ".codex", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "fix the login", "codex", domain.LaunchTUI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := strings.Join(e.rt.byName(string(run.ID)).spec.Command, " ")
+	if !strings.Contains(command, "developer_instructions=") || strings.Contains(command, "Prefer small diffs.") {
+		t.Fatalf("command %q, want the role card without the linked config's instructions", command)
 	}
 }
 
@@ -483,7 +612,7 @@ func TestOpenCodeDiscoveryReferencesOnlyProvisionedAssets(t *testing.T) {
 				t.Fatalf("discovery and status overlays dropped the permission setting: %q", config.Permission)
 			}
 			if len(config.Instructions) != 1 {
-				t.Fatalf("discovery instruction files = %v", config.Instructions)
+				t.Fatalf("instruction files = %v", config.Instructions)
 			}
 			wantPlugins := 0
 			if enabled {

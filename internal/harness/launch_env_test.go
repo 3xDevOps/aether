@@ -8,17 +8,17 @@ import (
 func TestMergeEnvCombinesConfigVariables(t *testing.T) {
 	env := map[string]string{
 		"OPENCODE_CONFIG_CONTENT": `{"model":"m", // the member's
-"permission":{"bash":"ask"}}`,
+"permission":{"bash":"ask"},"instructions":["STYLE.md"],"plugin":["mine"]}`,
 		"KEEP": "1",
 	}
 	if err := MergeEnv(env, map[string]string{
-		"OPENCODE_CONFIG_CONTENT": `{"permission":"allow","plugin":["file:///run/aether/p.js"]}`,
+		"OPENCODE_CONFIG_CONTENT": `{"permission":"allow","plugin":["file:///run/aether/p.js"],"instructions":["/run/aether/instructions.md"]}`,
 		"ADDED":                   "2",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"OPENCODE_CONFIG_CONTENT": `{"model":"m","permission":"allow","plugin":["file:///run/aether/p.js"]}`,
+		"OPENCODE_CONFIG_CONTENT": `{"instructions":["STYLE.md","/run/aether/instructions.md"],"model":"m","permission":"allow","plugin":["mine","file:///run/aether/p.js"]}`,
 		"KEEP":                    "1",
 		"ADDED":                   "2",
 	}

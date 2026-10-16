@@ -199,7 +199,7 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	}
 	e.sched.UseCoordination(coord, filepath.Join(dir, "runtime", "bin"))
 	const workspaceConfig = `{"model":"anthropic/claude-sonnet-4-5"}`
-	const launchConfig = `{"model":"anthropic/claude-sonnet-4-5","permission":"allow"}`
+	const launchConfig = `{"instructions":["/run/aether/instructions.md"],"model":"anthropic/claude-sonnet-4-5","permission":"allow"}`
 	e.ws.Environment.Variables["OPENCODE_CONFIG_CONTENT"] = workspaceConfig
 	if err := e.db.UpdateWorkspace(t.Context(), e.ws); err != nil {
 		t.Fatalf("UpdateWorkspace: %v", err)
@@ -216,8 +216,8 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 	if got := spec.Env["OPENCODE_CONFIG_CONTENT"]; got != launchConfig {
 		t.Fatalf("inline config before version selection = %q, want the workspace value with permissions allowed %q", got, launchConfig)
 	}
-	if got := string(coord.file(tui.ID, "opencode-native-v1.json")); !strings.Contains(got, `"permission":"allow"`) {
-		t.Fatalf("V1 inline config %s lost the permission setting", got)
+	if got := string(coord.file(tui.ID, "opencode-native-v1.json")); !strings.Contains(got, `"permission":"allow"`) || !strings.Contains(got, `"/run/aether/instructions.md"`) {
+		t.Fatalf("V1 inline config %s lost the permission setting or the run instructions", got)
 	}
 	for id, file := range map[string]string{
 		"aether-mailbox": "opencode-v2.js",

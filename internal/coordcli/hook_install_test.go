@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 )
 
 func hookInstallFixture(t *testing.T, path, content string) {
@@ -224,5 +226,25 @@ func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 				t.Fatalf("installation = %q", full.String())
 			}
 		})
+	}
+}
+
+// Claude Code runs Stop hooks in parallel, so a manual inbox Stop hook races
+// the status reporter a managed launch loads.
+func TestHookInstallationFlagsManualStopBesideManagedLaunch(t *testing.T) {
+	asset, err := coordhooks.Files.ReadFile("claude.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := filepath.Join(t.TempDir(), "settings.json")
+	hookInstallFixture(t, user, string(asset))
+	for _, managed := range []bool{false, true} {
+		result, err := inspectHookInstallation(hookInstallPlan{id: "claude", managed: managed, assets: []string{"claude.json"}, paths: []string{user}})
+		if err != nil || result.state != "configured" {
+			t.Fatalf("managed=%v: %+v, %v", managed, result, err)
+		}
+		if flagged := strings.Contains(strings.Join(result.details, "; "), "remove the Stop hook from "+user); flagged != managed {
+			t.Errorf("managed=%v: details = %v", managed, result.details)
+		}
 	}
 }

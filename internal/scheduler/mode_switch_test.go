@@ -228,6 +228,7 @@ func TestSwitchEnhancedRunToStandardAndBack(t *testing.T) {
 	}
 	bodies := e.sup.ran()
 	if len(bodies) != 1 || !strings.Contains(bodies[0], "unset "+coordtransport.EnhancedEnv+"\n") ||
+		!strings.Contains(bodies[0], "export "+coordtransport.WakeEnv+"='1'\n") ||
 		!strings.Contains(bodies[0], "exec 'omp' '--auto-approve' '--resume="+session+"' '-e' '/run/aether/status.ts'") {
 		t.Fatalf("supervisor ran %q", bodies)
 	}
@@ -671,5 +672,45 @@ func TestReportedSessionsReachTheRowInReportOrder(t *testing.T) {
 	}
 	if row, _ := e.db.GetRun(t.Context(), run.ID); row.HarnessSessionID != "s2" {
 		t.Fatalf("harness_session_id %q, want the later report's s2", row.HarnessSessionID)
+	}
+}
+
+// OpenCode is not Switchable yet, so this drives the Standard command a
+// switch would write.
+func TestStandardCommandKeepsTheOpenCodeConfig(t *testing.T) {
+	t.Parallel()
+	e := newSwitchEnv(t)
+	installInHome(t, e.testEnv, "opencode")
+	if err := e.db.SetWorkspaceEnvironment(t.Context(), e.ws.ID, domain.WorkspaceEnvironment{
+		Variables: map[string]string{"OPENCODE_CONFIG_CONTENT": `{"theme":"night","instructions":["team.md"]}`},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.sched.LaunchWithOptions(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "opencode", domain.LaunchACP, domain.LaunchOptions{Model: "anthropic/opus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the task's turn", assistantSaid("pong"))
+	profile, _, err := e.sched.launchProfile(t.Context(), run.MemberID, run.AccountMember(), run.Harness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	sw := modeSwitch{s: e.sched, c: e.sched.coordinationSeam(), entry: entry, run: run, profile: profile, session: "ses_1"}
+	if _, _, err := sw.writeTerminal(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var config string
+	for line := range strings.Lines(e.coord.fileBody(run.ID, coordtransport.NextCommandName)) {
+		if value, ok := strings.CutPrefix(line, "export OPENCODE_CONFIG_CONTENT="); ok {
+			config = value
+		}
+	}
+	for _, want := range []string{`"permission":"allow"`, `"theme":"night"`, `"model":"anthropic/opus"`, `"team.md"`, harness.InstructionsFileName} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("OPENCODE_CONFIG_CONTENT %s lacks %s", config, want)
+		}
 	}
 }

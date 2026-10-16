@@ -11,7 +11,10 @@ import (
 )
 
 // Claude Code takes one --settings value, so the status reporter, the inbox
-// hooks and the idle-wake waiter share a single document.
+// hooks and the idle-wake waiter share a single document. It leaves out the
+// inbox Stop hook: Claude Code runs Stop hooks in parallel, so its block for
+// unread mail would continue a turn the reporter already ended. The waiter
+// carries that mail into a new turn instead.
 func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 	inbox, err := coordhooks.Files.ReadFile("claude.json")
 	if err != nil {
@@ -25,6 +28,7 @@ func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 	if err != nil {
 		return NativeLaunch{}, fmt.Errorf("decode claude native coordination asset: %w", err)
 	}
+	delete(extra, "Stop")
 	for event, entries := range extra {
 		merged[event] = append(merged[event], entries...)
 	}

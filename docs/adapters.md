@@ -31,7 +31,7 @@ one entry to the `profiles` map:
 | `LocalRoot` | Home-relative configuration root, the same path on the member's computer and in the member home. `aether config push` uploads from it, the **Files** editor edits it, and the explicit `profile` CLI commands read it. Empty means the agent has no configuration root. |
 | `DenyNames` | Credential/token/keychain names, matched case-insensitively in every path component. `config.roots.credential_names` combines these with shared denials so `aether config push` leaves them out before reading them. The server and manual profile path enforce the same names; `*.pem`, `.env`, and `.env.*` are always denied. |
 | `User` | An explicit numeric `uid:gid` for images whose configured user is a name. Usually leave empty. |
-| `DiscoveryArgs`, `DiscoveryEnv`, `DiscoveryFiles` | Vendor-native, per-launch startup guidance for taskless TUI runs. Files are staged read-only in `/run/aether`; nothing is written to the member home or repository. |
+| `InstructionArgs`, `InstructionEnv` | How a non-ACP launch appends the run's [agent instructions](coordination.md#agent-instructions) to the agent's system prompt. `InstructionArgs` takes `{instructions}` (the raw text) or `{instructions_quoted}` (a JSON-quoted string, for Codex's `-c developer_instructions=`). `InstructionEnv` is for an agent with no flag for it and points at `/run/aether/instructions.md`, which the server writes read-only. Nothing is written to the member home or repository. Without either, the instructions follow the task prompt. |
 
 Rules that are easy to get wrong:
 
@@ -74,12 +74,13 @@ Rules that are easy to get wrong:
   provenance, not an isolated writable copy. Manual profile push and rollback
   overlay snapshot files into the same shared HOME; absent paths are not
   deleted, so rollback is not an exact-tree restore.
-- **Taskless discovery is runtime-scoped.** Use the vendor's documented startup
-  instruction mechanism and keep the hint short; `aether-internal skill`
+- **Instructions go in the system prompt.** Use the vendor's documented
+  mechanism for appending to it, never one that replaces the built-in
+  prompt, so the instructions survive compaction; `aether-internal skill`
   fetches the assignment-specific details from the run socket.
 
 - **An argv override must stay verbatim.** The scheduler drops the shipped
-  taskless discovery and status wiring when a definition replaces a shipped
+  instruction and status wiring when a definition replaces a shipped
   agent, because nothing checks that the override is still that CLI.
 
 Then add coverage in `internal/harness/harness_test.go` alongside the existing
@@ -88,7 +89,7 @@ table-driven cases, and a row in the tables in
 until the doc is fixed.
 
 That is the whole agent change. The scheduler resolves argv, mounts, run user
-and per-launch discovery/status assets from the profile; nothing else needs
+and per-launch instruction/status assets from the profile; nothing else needs
 editing.
 
 ---

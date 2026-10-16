@@ -2,6 +2,7 @@ package harness
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
@@ -9,6 +10,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/pelletier/go-toml/v2"
 )
 
 func TestRegistryShipsNineProfiles(t *testing.T) {
@@ -215,39 +219,100 @@ func TestStatusReporters(t *testing.T) {
 	}
 }
 
-// Supported interactive profiles load discovery through a vendor-native
-// per-launch mechanism. The assets and pointers are runtime-scoped and never
-// require a member-home or repository instruction file.
-func TestDiscoveryMechanisms(t *testing.T) {
+// Every shipped CLI carries run instructions in its system prompt through a
+// per-launch mechanism, never a member-home or repository instruction file.
+func TestInstructionMechanisms(t *testing.T) {
+	const text = "line one\nsay \"<hi>\""
 	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
 		}
-		args := p.DiscoveryLaunchArgs("/run/aether")
-		env := p.DiscoveryLaunchEnv("/run/aether")
-		if len(args) == 0 && len(env) == 0 {
-			t.Errorf("%s has no taskless discovery mechanism", name)
+		if !p.CarriesInstructions() {
+			t.Fatalf("%s has no system prompt mechanism", name)
 		}
+		args := p.InstructionLaunchArgs("/run/aether", text)
+		env := p.InstructionLaunchEnv("/run/aether")
 		for _, arg := range args {
-			if strings.Contains(arg, CoordPlaceholder) {
-				t.Errorf("%s discovery args kept placeholder: %v", name, args)
+			if strings.Contains(arg, "{") {
+				t.Errorf("%s instruction args kept a placeholder: %v", name, args)
 			}
 		}
 		for key, value := range env {
-			if strings.Contains(value, CoordPlaceholder) {
-				t.Errorf("%s discovery env %s kept placeholder: %q", name, key, value)
+			if !strings.Contains(value, "/run/aether/"+InstructionsFileName) {
+				t.Errorf("%s instruction env %s = %q, want the instructions file", name, key, value)
 			}
 		}
-		for file, body := range p.DiscoveryFiles {
-			if len(body) == 0 {
-				t.Errorf("%s ships empty discovery file %q", name, file)
+		switch name {
+		case "codex":
+			var config struct {
+				DeveloperInstructions string `toml:"developer_instructions"`
+			}
+			if len(args) != 2 || toml.Unmarshal([]byte(args[1]), &config) != nil || config.DeveloperInstructions != text {
+				t.Errorf("codex instruction args %q do not decode to the text", args)
+			}
+		case "opencode":
+			if len(env) == 0 {
+				t.Errorf("opencode has no instruction env")
+			}
+		default:
+			if !slices.Equal(args, []string{"--append-system-prompt", text}) {
+				t.Errorf("%s instruction args = %q", name, args)
 			}
 		}
 	}
 	custom, _ := Lookup("custom")
-	if len(custom.DiscoveryArgs) != 0 || len(custom.DiscoveryEnv) != 0 || len(custom.DiscoveryFiles) != 0 {
-		t.Fatalf("custom profile must not carry discovery wiring: %+v", custom)
+	if custom.CarriesInstructions() {
+		t.Fatalf("custom profile must not carry instruction wiring: %+v", custom)
+	}
+}
+
+// A managed Claude launch's settings register the inbox hooks, SessionStart
+// among them with no matcher, so it fires on startup, resume, compact and
+// clear. Stop runs the status reporter and the idle-wake waiter only: Claude
+// Code runs Stop hooks in parallel, so an inbox block for unread mail would
+// continue a turn the reporter had already ended.
+func TestClaudeSettingsRegisterInboxHooks(t *testing.T) {
+	p, _ := Lookup("claude")
+	native, err := p.PrepareNativeLaunch("/run/aether", []string{"claude", "a task"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(native.Files[agentstatus.ClaudeSettingsName], &settings); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PostToolBatch", "SubagentStart"} {
+		found := false
+		for _, entry := range settings.Hooks[event] {
+			for _, h := range entry.Hooks {
+				if h.Command == "/usr/local/bin/aether-internal hook claude "+event {
+					found = true
+					if entry.Matcher != "" {
+						t.Errorf("%s matcher = %q; SessionStart must fire on startup, resume, compact and clear", event, entry.Matcher)
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("claude settings lack the %s inbox hook", event)
+		}
+	}
+	var stop []string
+	for _, entry := range settings.Hooks["Stop"] {
+		for _, h := range entry.Hooks {
+			stop = append(stop, h.Command)
+		}
+	}
+	if want := []string{"/opt/aether/aether-server report claude", "/usr/local/bin/aether-internal hook claude wake"}; !slices.Equal(stop, want) {
+		t.Errorf("Stop hooks = %v, want %v", stop, want)
 	}
 }
 

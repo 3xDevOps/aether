@@ -38,6 +38,8 @@ type hookInstallPlan struct {
 	note         string
 	activate     string
 	unknownPaths bool
+	// managed is set when this run's launch loads the hooks itself.
+	managed bool
 }
 
 type hookInstallControls struct {
@@ -193,7 +195,7 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 		cursorNote += " Custom CLI config environment is set; its effect on hooks.json is undocumented."
 	}
 	return []hookInstallPlan{
-		{id: "claude", assets: []string{"claude.json"}, paths: []string{filepath.Join(claude, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json")}, controls: []string{"/etc/claude-code/managed-settings.json"}, note: "Managed Standard launches load these hooks through --settings /run/aether/claude-settings.json; this check covers manual copies only. Managed policy/trust remain unverified.", activate: "Restart Claude Code; review hooks in /hooks and accept workspace trust only through the normal UI. Managed-only policy may prohibit these hooks."},
+		{id: "claude", managed: managedHooksLine("claude", in) != "", assets: []string{"claude.json"}, paths: []string{filepath.Join(claude, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json")}, controls: []string{"/etc/claude-code/managed-settings.json"}, note: "Managed Standard launches load these hooks through --settings /run/aether/claude-settings.json; this check covers manual copies only. Managed policy/trust remain unverified.", activate: "Restart Claude Code; review hooks in /hooks and accept workspace trust only through the normal UI. Managed-only policy may prohibit these hooks."},
 		{id: "codex", assets: []string{"codex.json"}, paths: []string{filepath.Join(codex, "hooks.json"), project(".codex", "hooks.json")}, controls: []string{filepath.Join(codex, "config.toml"), project(".codex", "config.toml"), "/etc/codex/config.toml"}, note: "Inline TOML hooks, ancestor project layers, plugins, CLI overrides and exact hook trust hashes are not inspected.", activate: "Restart Codex; use /hooks to review and trust these exact definitions (repeat after changes); honor project trust and managed policy. Never bypass hook trust."},
 		{id: "copilot", assets: []string{"copilot.json"}, paths: []string{filepath.Join(copilot, "hooks", "aether.json"), project(".github", "hooks", "aether.json")}, controls: []string{filepath.Join(copilot, "settings.json"), project(".claude", "settings.json"), project(".claude", "settings.local.json"), project(".github", "copilot", "settings.json"), project(".github", "copilot", "settings.local.json")}, note: "Managed Standard launches load these hooks through --plugin-dir /run/aether; this check covers manual copies only. Other hook filenames, --config-dir, session trust and enterprise policy are unverified.", activate: "Quit and restart Copilot CLI in the intended trusted repository; resolve trust in its normal UI. Honor disableAllHooks and allowManagedHooksOnly."},
 		{id: "gemini", assets: []string{"gemini.json"}, paths: []string{filepath.Join(gemini, "settings.json"), project(".gemini", "settings.json")}, controls: []string{root("GEMINI_CLI_SYSTEM_DEFAULTS_PATH", "/etc/gemini-cli/system-defaults.json"), root("GEMINI_CLI_SYSTEM_SETTINGS_PATH", "/etc/gemini-cli/settings.json")}, note: "GEMINI_CLI_HOME is the parent of .gemini. Folder trust and extension settings remain unverified.", activate: "Fully exit and restart Gemini CLI; inspect /hooks list. Honor folder trust and hooksConfig controls; if intentionally disabled, discuss /hooks enable aether-inbox with the user rather than enabling everything."},
@@ -344,6 +346,9 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 		for event, entries := range expected.Hooks {
 			if hookEventInstalled(doc.Hooks[event], entries) {
 				found[event] = true
+				if plan.managed && event == "Stop" {
+					result.details = append(result.details, "remove the Stop hook from "+shellquote.Quote(path)+": Claude Code runs Stop hooks in parallel, so it races the status reporter this run's launch loads")
+				}
 			}
 		}
 	}

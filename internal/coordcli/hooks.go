@@ -58,6 +58,8 @@ type hookEvent struct {
 	StopHookActive bool   `json:"stop_hook_active"`
 	Status         string `json:"status"`
 	LoopCount      int    `json:"loop_count"`
+	// Source is why a session started: startup, resume, compact or clear.
+	Source string `json:"source"`
 }
 
 func hook(ctx context.Context, cfg Config, args []string) (int, error) {
@@ -97,7 +99,8 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	if input.Name != "" && input.Name != event {
 		return ExitFailure, fmt.Errorf("hook: event %q does not match configured event %q", input.Name, event)
 	}
-	if (harness == "claude" || harness == "codex") && input.AgentID != "" {
+	subagent := event == "SubagentStart"
+	if !subagent && (harness == "claude" || harness == "codex") && input.AgentID != "" {
 		return ExitOK, nil
 	}
 	stopping := event == "Stop" || event == "agentStop" || event == "AfterAgent" || event == "stop"
@@ -110,16 +113,37 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	if err := coordtransport.Call(ctx, cfg.Socket, protocol.MethodCoordHookStatus, nil, &status); err != nil {
 		return ExitFailure, fmt.Errorf("hook: %w", err)
 	}
+	if subagent {
+		var rules []string
+		if slices.Contains(status.Capabilities, protocol.MethodCoordReport) {
+			rules = append(rules, coordhooks.SubagentRule)
+		}
+		if slices.Contains(status.Capabilities, protocol.MethodCoordSend) {
+			rules = append(rules, coordhooks.SubagentPeerRule)
+		}
+		if len(rules) == 0 {
+			return ExitOK, nil
+		}
+		if err := writeHookContext(cfg.Out, harness, event, false, strings.Join(rules, " ")); err != nil {
+			return ExitFailure, fmt.Errorf("hook: write context: %w", err)
+		}
+		return ExitOK, nil
+	}
 	if harness == "claude" && (event == "UserPromptSubmit" || event == "PostToolBatch") {
 		// A busy session has no waiter; the turn's Stop starts the next one.
 		_ = os.Remove(claudeWakePath(status.RunID))
 	}
 	notices := currentHookNotices(status)
+	starting := event == "SessionStart" || event == "sessionStart"
 	if commandHarness(harness) {
 		// Command-hook context stays in the transcript, so repeat a notice
 		// only when its state changed. A Stop still blocks for unread mail.
+		// Compaction and clear drop the transcript, and with it every notice.
 		path := hookNoticePath(status.RunID, harness)
-		seen := readHookNotices(path)
+		seen := hookNotices{}
+		if !starting || (input.Source != "compact" && input.Source != "clear") {
+			seen = readHookNotices(path)
+		}
 		announced := notices
 		if !stopping && !hasNewMail(notices, seen.Mail) {
 			notices.Unread = 0
@@ -136,6 +160,9 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 		defer writeHookNotices(path, announced)
 	}
 	text := hookContext(status, notices, stopping)
+	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
+		text = strings.TrimSuffix(coordhooks.RoleCard(coordhooks.StatusGuide(status))+"\n"+text, "\n")
+	}
 	if text == "" {
 		return ExitOK, nil
 	}
@@ -219,7 +246,7 @@ func writeHookNotices(path string, n hookNotices) {
 func validHookEvent(harness, event string) bool {
 	switch harness {
 	case "claude":
-		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolBatch" || event == "Stop" || event == "wake"
+		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolBatch" || event == "SubagentStart" || event == "Stop" || event == "wake"
 	case "codex":
 		return event == "SessionStart" || event == "UserPromptSubmit" || event == "PostToolUse" || event == "Stop"
 	case "copilot":

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path"
@@ -10,10 +11,12 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 )
 
 // coAuthorsPath is where the run's co-author list appears inside its
@@ -30,44 +33,82 @@ var coAuthorInstruction = "Before each commit, read " + coAuthorsPath +
 	" After those lines, end every pull request description with \"Opened from Aether run <run id>\", using the run_id" +
 	" aether-internal status reports."
 
-// coordinationInstruction is deliberately one short, assignment-agnostic
-// launch hint. The CLI fetches the actual assignment and role from live
-// server state, so this prompt never embeds authority or stale task text.
-const coordinationInstruction = harness.DiscoveryInstruction
-
-// runInstructions are the rules a run's agent follows: the coordination
-// discovery hint, the report rule while lifecycle reporting is enabled, and
-// the co-author rule. assigned marks a mission worker or integrator and
-// background a headless run; they pick the report rule. A run without a run
-// transport has no mounted directory to read the files from and gets none.
-func (s *Scheduler) runInstructions(assigned, background bool) string {
+// runInstructions are the rules a run's agent follows: its role card, with
+// the report rules only while lifecycle reporting is enabled, and the
+// co-author rule. A run without a run transport has no mounted directory to
+// read the files from and gets none.
+func (s *Scheduler) runInstructions(g coordhooks.Guide) string {
 	c := s.coordinationSeam()
 	if c == nil || c.svc == nil {
 		return ""
 	}
-	rules := coordinationInstruction
-	if c.enabled {
-		report := harness.InteractiveReportInstruction
-		switch {
-		case assigned:
-			report = harness.AssignedReportInstruction
-		case background:
-			report = harness.BackgroundReportInstruction
-		}
-		rules += "\n\n" + report
+	if !c.enabled {
+		g.Role = ""
 	}
-	return rules + "\n\n" + coAuthorInstruction
+	return coordhooks.RoleCard(g) + "\n\n" + coAuthorInstruction
 }
 
-// withCoAuthorInstruction appends the run instructions to a task prompt. A
-// taskless launch remains taskless: its profile receives the discovery hint
-// through the coordination directory's ephemeral launch mechanism instead of
-// gaining a seeded user prompt.
-func (s *Scheduler) withCoAuthorInstruction(task string, assigned, background bool) string {
-	if rules := s.runInstructions(assigned, background); task != "" && rules != "" {
-		return task + "\n\n" + rules
+// runGuide is what a run's role card depends on: its mission role when the
+// store records one, else what the launch knows. assigned marks a mission
+// worker or integrator, background a headless run and wake a launch that
+// Aether resumes when mail arrives while it is idle.
+func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, assigned, background, wake bool) coordhooks.Guide {
+	g := coordhooks.Guide{RunID: string(run), Background: background, Wake: wake && !background}
+	switch {
+	case !assigned && background:
+		g.Role = coordhooks.RoleBackground
+	case !assigned:
+		g.Role = coordhooks.RoleInteractive
+	default:
+		g.Role = coordhooks.RoleMission
+		if run != "" {
+			if r, err := s.cfg.Store.GetRun(ctx, run); err == nil && r.MissionRole != "" {
+				g.Role = r.MissionRole
+			}
+		}
 	}
-	return task
+	return g
+}
+
+// launchInstructions are the instructions a non-ACP launch of run carries in
+// its system prompt, or none for a profile that has no place for them. A
+// member's own developer_instructions, which the launch's setting would
+// replace, come first.
+func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, profile harness.Profile, assigned bool, native harness.NativeLaunch) (string, error) {
+	if !profile.CarriesInstructions() {
+		return "", nil
+	}
+	text := s.runInstructions(s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, len(native.Files) > 0))
+	if text == "" || profile.InstructionsConfig == "" || s.cfg.Homes == nil {
+		return text, nil
+	}
+	config, err := s.cfg.Homes.HomeRead(ctx, run.HomeMember(), profile.InstructionsConfig)
+	// Aether refuses to follow a linked config; Codex still reads it, and
+	// the launch's setting replaces its value.
+	if errors.Is(err, memberhome.ErrConfigNotFound) || errors.Is(err, memberhome.ErrConfigDenied) {
+		return text, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", profile.InstructionsConfig, err)
+	}
+	kept, err := harness.ConfiguredInstructions(config.Content)
+	if err != nil {
+		return "", fmt.Errorf("read developer_instructions from %s: %w", profile.InstructionsConfig, err)
+	}
+	if kept == "" {
+		return text, nil
+	}
+	return kept + "\n\n" + text, nil
+}
+
+// withInstructions appends the run instructions to a task prompt, for a
+// launch that carries them in no system prompt. A taskless launch remains
+// taskless.
+func withInstructions(task, instructions string) string {
+	if task == "" || instructions == "" {
+		return task
+	}
+	return task + "\n\n" + instructions
 }
 
 // coAuthorTrailers renders one Co-authored-by line per member in members

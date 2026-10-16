@@ -135,7 +135,7 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 		Task: task, TaskBytes: taskBytes, TaskTruncated: taskTruncated,
 		Assignment: assignment, Peers: peers, PeerTotal: total,
 		PeersTruncated: total > len(peers), Unread: unread,
-		Capabilities: capabilities,
+		Capabilities: capabilities, Protected: self.Protected,
 	}, nil
 }
 

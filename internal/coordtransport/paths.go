@@ -27,4 +27,13 @@ const (
 	// ManagedHooksEnv is "1" when the run's launch loads Aether's inbox
 	// integration itself, so the agent must not install a manual copy.
 	ManagedHooksEnv = "AETHER_MANAGED_HOOKS"
+	// BackgroundEnv is "1" in a Background run's container, whose agent
+	// has no human to ask.
+	BackgroundEnv = "AETHER_BACKGROUND"
+	// WakeEnv is "1" in a Standard run whose loaded native integration
+	// resumes the idle agent when mail arrives.
+	WakeEnv = "AETHER_IDLE_WAKE"
+	// RoleCardEnv is "1" where the agent's system prompt carries its role
+	// card, so hooks and the MCP bridge do not repeat it.
+	RoleCardEnv = "AETHER_ROLE_CARD"
 )
