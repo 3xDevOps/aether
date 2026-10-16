@@ -61,6 +61,15 @@ jobs:
           ref: refs/heads/main
           persist-credentials: false
           fetch-depth: 0
+      # Fails before anything is built; only the release job reads the key.
+      - name: Require the release signing key
+        env:
+          KEY_SET: ${{ secrets.AETHER_RELEASE_SIGNING_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the release manifest cannot be signed; the AETHER_RELEASE_SIGNING_KEY repository secret is not set. Set it (see Release signing in docs/security.md), then rerun this release."
+            exit 1
+          fi
       - name: Validate the release tag and exact main CI commit
         id: authorize
         env:
@@ -627,17 +636,24 @@ jobs:
 
   # No producer may be skipped/failed: the complete run-specific asset set and
   # every tested image must be ready before updating the published release.
+  # The manifest goes up last, after every other asset is downloaded back
+  # anonymously and matches it: updaters ignore a release until then, even
+  # though GitHub already lists it as Latest.
   release:
     needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.sha }}
           persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
       # No run-id or token: download-artifact can read only this workflow run.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -648,8 +664,16 @@ jobs:
         with:
           name: binaries-android
           path: dist
-      - name: Require all twelve release assets and write checksums
+      # Runs without the signing key, so the signer never links the store.
+      - name: Read the store schema the release migrates to
+        id: store
+        run: echo "schema=$(go run ./internal/store/cmd/schema-version)" >> "$GITHUB_OUTPUT"
+      - name: Require all twelve release assets, write checksums and sign the manifest
         working-directory: dist
+        env:
+          AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
+          COMMIT: ${{ needs.release-policy.outputs.sha }}
+          STORE_SCHEMA: ${{ steps.store.outputs.schema }}
         run: |
           assets=(
             aether-server-linux-amd64 aether-server-linux-arm64
@@ -668,6 +692,10 @@ jobs:
           done
           sha256sum "${assets[@]}" > checksums.txt
           sha256sum --check --strict checksums.txt
+          go run ../internal/selfupdate/cmd/release-manifest \
+            -version "$GITHUB_REF_NAME" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" -out . "${assets[@]}"
+          diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
+            <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

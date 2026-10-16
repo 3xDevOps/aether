@@ -1,14 +1,13 @@
 package serverupdate
 
 import (
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -65,7 +65,7 @@ func (e *env) poisonCompanion() {
 	e.poisoned = map[string]bool{companionAsset(): true}
 }
 
-// isPoisoned reports whether asset's published checksum should be wrong.
+// isPoisoned reports whether asset's download should not match the manifest.
 func (e *env) isPoisoned(asset string) bool {
 	e.poisonMu.Lock()
 	defer e.poisonMu.Unlock()
@@ -85,38 +85,24 @@ const (
 	releaseTagUnderTest = "v0.2.0"
 )
 
-// releaseServer serves the release assets for tag the way GitHub does:
-// /releases/latest redirects to the tag page, and the download directory
-// carries checksums.txt plus one asset per binary. Which checksums are
-// wrong is read per request from e, so a test can break one asset alone.
+// releaseServer serves the signed release for tag the way GitHub does.
+// Which assets are corrupted in transit is read per request from e, so a
+// test can break one asset alone.
 func (e *env) releaseServer(t *testing.T, tag string) *httptest.Server {
 	t.Helper()
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
-	assets := map[string]string{
-		"aether-server" + suffix: newServerBinary,
-		"aether" + suffix:        newCLIBinary,
+	assets := map[string][]byte{
+		"aether-server" + suffix: []byte(newServerBinary),
+		"aether" + suffix:        []byte(newCLIBinary),
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
-	})
-	base := "/releases/download/" + tag
-	mux.HandleFunc(base+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		for name, body := range assets {
-			sum := sha256.Sum256([]byte(body))
-			digest := hex.EncodeToString(sum[:])
-			if e.isPoisoned(name) {
-				digest = strings.Repeat("0", 64)
-			}
-			_, _ = fmt.Fprintf(w, "%s  %s\n", digest, name)
+	rel := releasetest.Serve(t, tag, assets)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if name := path.Base(r.URL.Path); e.isPoisoned(name) {
+			_, _ = w.Write(bytes.ToUpper(assets[name]))
+			return
 		}
-	})
-	for name, body := range assets {
-		mux.HandleFunc(base+"/"+name, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(body))
-		})
-	}
-	srv := httptest.NewServer(mux)
+		rel.Config.Handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }

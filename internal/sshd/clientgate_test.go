@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/localgw"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/testhome"
 	"github.com/3xDevOps/Aether/internal/version"
 	"github.com/3xDevOps/Aether/internal/webgate"
@@ -305,10 +306,7 @@ func TestClientVersionGateGateway(t *testing.T) {
 	t.Cleanup(func() { version.Version = old })
 	version.Version = "v0.8.0-alpha.2"
 
-	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/releases/tag/"+gateFloor, http.StatusFound)
-	}))
-	t.Cleanup(releases.Close)
+	releases := releasetest.Serve(t, gateFloor, map[string][]byte{"aether-linux-amd64": []byte("binary")})
 	cliCfg := cli.Config{Addr: e.addr, Key: keyPath, KnownHosts: filepath.Join(home, "known_hosts")}
 	conn, err := cli.Dial(cliCfg)
 	if err != nil {

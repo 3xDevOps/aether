@@ -4,12 +4,8 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -32,35 +29,16 @@ const (
 	updatedCLIBinary    = "aether from the release"
 )
 
-// stubRelease serves the release assets for tag the way GitHub does, so
-// the whole update path - resolve, download, verify, swap - runs for real
+// stubRelease serves the signed release for tag the way GitHub does, so
+// the whole update path - resolve, verify, download, swap - runs for real
 // against something the test controls.
-func stubRelease(t *testing.T, tag string) *httptest.Server {
+func stubRelease(t *testing.T, tag string) *releasetest.Release {
 	t.Helper()
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
-	assets := map[string]string{
-		"aether-server" + suffix: updatedServerBinary,
-		"aether" + suffix:        updatedCLIBinary,
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
+	return releasetest.Serve(t, tag, map[string][]byte{
+		"aether-server" + suffix: []byte(updatedServerBinary),
+		"aether" + suffix:        []byte(updatedCLIBinary),
 	})
-	base := "/releases/download/" + tag
-	mux.HandleFunc(base+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
-		for name, body := range assets {
-			sum := sha256.Sum256([]byte(body))
-			_, _ = fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), name)
-		}
-	})
-	for name, body := range assets {
-		mux.HandleFunc(base+"/"+name, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(body))
-		})
-	}
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
 }
 
 // TestIntegrationServerUpdateAppliesWhenIdle drives the scheduled path end
