@@ -1,0 +1,67 @@
+package io.aether.android
+
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Android's java.util.regex is ICU, which refuses a "{" or "}" that is not
+ * part of a quantifier. The JVM these tests run on accepts both, so such a
+ * pattern passes every other test here and then throws from its class
+ * initializer on the phone.
+ *
+ * This scans source text for brace rules only; it is not ICU. It sees
+ * `Regex("...")` and `Regex("""...""")` literals, not patterns built by
+ * concatenation, `toRegex()` or `Pattern.compile`.
+ */
+class RegexDialectTest {
+    private val literal = Regex("""Regex\("((?:[^"\\]|\\.)*)"\)""")
+    private val rawLiteral = Regex("Regex\\(\"\"\"(.*?)\"\"\"\\)")
+    private val quantifier = Regex("""\{\d+(,\d*)?}""")
+
+    @Test
+    fun everyPatternKeepsItsBracesToQuantifiers() {
+        val sources = File("src/main/kotlin").walk().filter { it.extension == "kt" }.toList()
+        assertTrue(sources.isNotEmpty())
+        val refused =
+            sources.flatMap { file ->
+                val text = file.readText()
+                // Undoes the Kotlin string's escapes; a raw string has none.
+                val escaped = literal.findAll(text).map { it.groupValues[1].replace(Regex("""\\(.)"""), "$1") }
+                val raw = rawLiteral.findAll(text).map { it.groupValues[1] }
+                (escaped + raw).mapNotNull { pattern ->
+                    strayBrace(pattern)?.let { "${file.name}: index $it of $pattern" }
+                }.toList()
+            }
+        assertEquals(emptyList<String>(), refused)
+    }
+
+    @Test
+    fun aStrayBraceIsFound() {
+        assertEquals(6, strayBrace("""^\{"a"}$"""))
+        assertEquals(1, strayBrace("""a{b"""))
+        assertEquals(null, strayBrace("""^\{"a"\}[{}]\d{1,5}x{2,}$"""))
+    }
+
+    /** The index of the first brace outside a class, an escape and a quantifier. */
+    private fun strayBrace(pattern: String): Int? {
+        var inClass = false
+        var i = 0
+        while (i < pattern.length) {
+            val c = pattern[i]
+            when {
+                c == '\\' -> i++
+                inClass -> if (c == ']') inClass = false
+                c == '[' -> inClass = true
+                c == '{' -> {
+                    val match = quantifier.matchAt(pattern, i) ?: return i
+                    i = match.range.last
+                }
+                c == '}' -> return i
+            }
+            i++
+        }
+        return null
+    }
+}

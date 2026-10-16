@@ -30,5 +30,8 @@
 
     <string name="gateway_stopped">The local gateway stopped</string>
     <string name="gateway_retry">Retry</string>
+    <string name="renderer_killed">Android stopped the dashboard\'s renderer</string>
+    <string name="renderer_crashed">The dashboard\'s renderer crashed</string>
+    <string name="renderer_unresponsive">The dashboard\'s renderer stopped responding and was ended</string>
     <string name="no_app_for_link">No app on this phone opens %1$s</string>
 </resources>
