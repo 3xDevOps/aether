@@ -172,7 +172,12 @@ fun openUpdate(activity: Activity, targets: List<UpdateTarget>, error: TextView)
  * error is what the CLI printed, or why it could not run or finish.
  * Blocks; never call it on the main thread.
  */
-fun runCheck(context: Context): CheckRun {
+fun runCheck(context: Context): CheckRun = synchronized(checkLock) { runCheckLocked(context) }
+
+// The banner and Check for updates can run at once, and both write update-resolv.conf.
+private val checkLock = Any()
+
+private fun runCheckLocked(context: Context): CheckRun {
     val bin = File(context.applicationInfo.nativeLibraryDir, "libaether.so")
     // Its own file: the gateway rewrites resolv.conf while it runs.
     val resolv = File(context.filesDir, "update-resolv.conf")

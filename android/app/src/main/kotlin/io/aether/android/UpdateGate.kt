@@ -66,10 +66,17 @@ class UpdateGate(
 
     /**
      * Asks the gateway at [handshakeUrl] whether the server still needs a
-     * newer app. A check already running answers for this one too: a
-     * refused page can answer 426 for every call it makes at once.
+     * newer app. A check already running on the same gateway answers for
+     * this one too: a refused page can answer 426 for every call it makes
+     * at once.
      */
     fun check(handshakeUrl: String, refresh: Boolean = false) {
+        if (destroyed) return
+        // A check against an earlier gateway's port answers for nothing now.
+        if (handshakeUrl != gatewayUrl) {
+            generation++
+            checking = false
+        }
         gatewayUrl = handshakeUrl
         val call = gatewayCall(handshakeUrl, "update.check") ?: return
         if (checking) return
