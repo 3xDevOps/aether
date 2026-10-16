@@ -25,6 +25,7 @@ import { requestTitle } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
+import { syncViewContext, trackViewContext } from '@/store/view-context'
 
 const stateWord: Record<AssistantState, string> = {
   setup: 'Needs setup',
@@ -273,6 +274,7 @@ export function AssistantPanel() {
   const identity = useStore((s) => s.identityKey)
   const state = useStore((s) => s.assistantStatus?.state)
   const waiting = useStore(assistantWaiting) > 0
+  const share = useStore((s) => s.assistantShareView)
   const supported = useAssistantAvailable()
   const textarea = useRef<HTMLTextAreaElement>(null)
   const shown = supported && open
@@ -292,6 +294,8 @@ export function AssistantPanel() {
     if (supported && (open || useStore.getState().assistantStatus === null)) void refreshAssistant(useStore, api)
   }, [supported, open, identity])
   useEffect(() => (streamable ? connectAssistant(useStore, api) : undefined), [streamable, generation, identity])
+  useEffect(() => (supported ? trackViewContext(useStore) : undefined), [supported, identity])
+  useEffect(() => (shown && hasSession && share ? syncViewContext(useStore, api) : undefined), [shown, hasSession, share, identity])
 
   // Opening by hand moves the keyboard in; a panel restored from a reload does not take it.
   const opened = useRef(shown)

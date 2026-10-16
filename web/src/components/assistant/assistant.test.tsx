@@ -288,12 +288,17 @@ describe('the conversation', () => {
     const aside = await openPanel()
     acpOpen([
       item('turn_start', 1),
-      say(1, 'user', 'What is running?'),
+      item('message', 1, { message: {
+        role: 'user', message_id: 'u1', complete: true,
+        text: 'What is running?\n\n<aether-view-context>\n{"version":1,"route":{"name":"board"}}\n</aether-view-context>',
+        attachments: [{ type: 'resource', uri: 'aether://view-context', mime_type: 'application/json' }],
+      } }),
       say(1, 'assistant', 'Two runs are **working**.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
     expect(await within(log).findByText('What is running?')).toBeDefined()
+    expect(log.textContent).not.toMatch(/view-context|"version"/)
     expect(within(log).getByText('working').tagName).toBe('STRONG')
     expect(assistantSocket().header()).toEqual({ after_seq: 0, epoch: 0 })
   })
@@ -477,6 +482,8 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).toBe(first![1])
+    expect(first![2]).toMatchObject({ version: 1, route: { name: 'board' } })
+    expect(second![2]).toBe(first![2])
     expect(useStore.getState().assistantAttempt).toBeNull()
   })
 
@@ -493,6 +500,28 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).not.toBe(first![1])
+  })
+})
+
+describe('the view context', () => {
+  it('shows what is sent, and once turned off sends nothing and clears the server copy', async () => {
+    vi.mocked(api.assistantPrompt).mockResolvedValue({})
+    useStore.getState().navigate('run', { runId: 'run-8x2', view: 'changes' })
+    const aside = await openPanel()
+    acpOpen()
+    const chip = await within(aside).findByRole('button', { name: 'Sharing: run run-8x2 · Changes' })
+    expect(chip.getAttribute('aria-describedby')).toBeTruthy()
+    await userEvent.click(chip)
+    expect(within(aside).getByLabelText('Sent with each message').textContent).toContain('"run_id": "run-8x2"')
+
+    await userEvent.click(within(aside).getByRole('checkbox', { name: 'Share the page I am on with the assistant' }))
+    await waitFor(() => expect(api.assistantView).toHaveBeenCalledWith(null))
+    expect(within(aside).getByRole('button', { name: 'Not sharing this page' })).toBeDefined()
+    await userEvent.type(within(aside).getByRole('textbox', { name: 'Message the assistant' }), 'what is this?{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.assistantPrompt).mock.calls[0]![2]).toBeUndefined()
+    expect(vi.mocked(api.assistantView).mock.calls.every(([context]) => context === null)).toBe(true)
+    expect(JSON.parse(localStorage.getItem('aether.ui')!).state.assistantShareView).toBe(false)
   })
 })
 

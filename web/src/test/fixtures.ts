@@ -541,6 +541,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     assistantStatus: vi.fn(async () => needsOverride('assistantStatus')),
     assistantStart: vi.fn(async () => needsOverride('assistantStart')),
     assistantPrompt: vi.fn(async () => needsOverride('assistantPrompt')),
+    assistantView: vi.fn(async () => ({})),
     assistantCancel: vi.fn(async () => needsOverride('assistantCancel')),
     assistantAnswer: vi.fn(async () => needsOverride('assistantAnswer')),
     assistantConfirm: vi.fn(async () => needsOverride('assistantConfirm')),

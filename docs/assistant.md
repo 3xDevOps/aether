@@ -89,6 +89,7 @@ documentation of the server you run.
 | Read | `aether_usage` | `account.usage` | Remaining agent quota |
 | Read | `aether_environment_status` | `terminal.status` | Your environment's state and saved image |
 | Read | `aether_docs` | `assistant.docs` | Aether's own guides |
+| Read | `aether_view_context` | `assistant.view_context` | What your dashboard shows now; see [What it sees](#what-it-sees) |
 | Reversible | `aether_pause_run` | `run.pause` | Pauses a run |
 | Reversible | `aether_resume_run` | `run.resume` | Resumes a run |
 | Confirmed | `aether_launch_run` | `run.launch` | Starts a run, naming the agent, workspace and task |
@@ -103,6 +104,36 @@ messaging one, unless auto-approval is on.
 Environment changes, such as installing a toolchain, are not an Aether tool.
 The assistant runs them in its own shell in your environment container, then
 offers `aether_save_environment`.
+
+## What it sees
+
+Each message you send carries a **view context**: what your dashboard shows,
+so "why is this stuck?" or "go back to that run I was looking at" needs no
+ids. It holds:
+
+- the page you are on, with its workspace, run, mission and subagent ids and
+  the run view (Session, Terminal, Changes, Files, Browser)
+- the open file's kind and path, never its contents
+- whether the sidebar, run details, Browser beside and the Changes bar are
+  open
+- the last 8 pages you visited this session, newest first, one per run or
+  page
+- how many approvals and assistant notices wait, and up to 5 of your runs
+  that need you, with the reason's id
+
+It never holds titles, file contents, drafts, terminal text or secrets, is
+at most 4 KiB, and the page history is gone on reload. The agent gets it as
+an `aether://view-context` attachment, which the transcript does not show.
+While the panel is open, navigating also sends it, at most once a second, so
+the assistant reads the current page mid-turn with `aether_view_context`.
+The server keeps only the latest one per member, in memory; with several
+tabs open the latest navigation wins. The ids are hints: the assistant looks
+everything up with the tools above, as you.
+
+The line above the message box, **Sharing: run run-8x2 · Changes**, expands
+to the exact JSON that is sent. Clear **Share the page I am on with the
+assistant** to stop: nothing is sent and the server forgets its copy. The
+choice is saved in this browser.
 
 ## Confirmations
 

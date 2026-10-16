@@ -49,3 +49,30 @@ export interface AssistantStartParams {
 export interface AssistantFrame extends SessionFrame {
   status?: AssistantStatus
 }
+
+/** One page of the dashboard: ids and view names only, never titles or content. */
+export interface ViewEntry {
+  name: string
+  workspace_id?: string
+  run_id?: string
+  mission_id?: string
+  subagent?: string
+  view?: string
+  path?: string
+  at?: string
+}
+
+/** What `assistant.prompt` and `assistant.view` carry as `view_context`. */
+export interface ViewContext {
+  version: 1
+  captured_at: string
+  route: ViewEntry
+  open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
+  layout?: Record<string, boolean>
+  recent?: ViewEntry[]
+  pending?: {
+    approvals: number
+    assistant_notices: number
+    needs_you?: { run_id: string; reason?: string }[]
+  }
+}

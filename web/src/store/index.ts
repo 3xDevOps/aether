@@ -86,6 +86,7 @@ const persistedUi = (s: RootState) => ({
   // A phone never reopens the sheet on load.
   assistantOpen: s.assistantOpen && !onPhone(),
   assistantWidth: s.assistantWidth,
+  assistantShareView: s.assistantShareView,
   terminalDockHeight: s.terminalDockHeight,
   detailsOpen: s.detailsOpen,
   browserBeside: s.browserBeside,
@@ -199,6 +200,7 @@ export function createRootStore() {
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             assistantOpen: stored.assistantOpen === true && !onPhone(),
             assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),
+            assistantShareView: stored.assistantShareView !== false,
             terminalFontSize: clampTerminalFontSize(
               Number(stored.terminalFontSize ?? current.terminalFontSize),
             ),
