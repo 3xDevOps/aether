@@ -23,8 +23,7 @@ const connectionDot: Record<ConnectionState, string> = {
 
 /** Which of the four connectivity layers a failure belongs to. The gateway
  * hop is the desktop's own process, in front of all four. */
-const unreachableLayer: Record<UnreachableKind, string> = {
-  network: 'Client to edge',
+const unreachableLayer: Record<Exclude<UnreachableKind, 'network'>, string> = {
   gateway: 'Dashboard gateway',
   tailnet: 'Client to server',
   server: 'End-to-end',
@@ -47,6 +46,13 @@ const pathLayer: Record<EdgePath['layer'], string> = {
   authorization: 'Authorization',
   'server-registration': 'Server registration',
   'end-to-end': 'End-to-end',
+}
+
+/** An offline computer fails the first hop of its link: to the edge, or
+ * straight to the server over SSH. */
+function layerOf(kind: UnreachableKind, link: Pick<LinkStatus, 'edge_url'> | null): string {
+  if (kind === 'network') return link?.edge_url ? 'Client to edge' : 'Client to server'
+  return unreachableLayer[kind]
 }
 
 /** What failed, on which server, and the command that comes next. */
@@ -122,7 +128,7 @@ export function useConnectionProblem(): string | null {
   const link = useStore((s) => s.linkStatus)
   if (link?.server_configured === false) return null
   if (unreachable) {
-    const layer = at?.layer ? pathLayer[at.layer] : unreachableLayer[unreachable]
+    const layer = at?.layer ? pathLayer[at.layer] : layerOf(unreachable, link)
     return `${layer} failed · ${unreachableSentence(unreachable, link, approvalCode, at)}`
   }
   if (connection === 'live' || connection === 'connecting') return null

@@ -39,6 +39,13 @@ describe('a failed request on a link through an edge', () => {
     )
   })
 
+  it('names the first hop of the link for an offline computer', () => {
+    useStore.setState({ connection: 'reconnecting', linkStatus: edgeLink, unreachable: 'network' })
+    expect(renderHook(useConnectionProblem).result.current).toMatch(/^Client to edge failed · /)
+    useStore.setState({ linkStatus: { ...linkStatus, addr: 'host:2222' } })
+    expect(renderHook(useConnectionProblem).result.current).toMatch(/^Client to server failed · /)
+  })
+
   it('reads as Live once the failure is cleared', () => {
     useStore.setState({ connection: 'live', linkStatus: edgeLink, unreachable: null })
     expect(renderHook(useConnectionProblem).result.current).toBeNull()

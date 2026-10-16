@@ -934,7 +934,8 @@ Removal also repairs the selection and open route before any refresh awaits.
   the linked one means the gateway followed a re-link (`aether link
   --from-edge`): the dashboard re-reads the link status, resets the
   connection as for any server switch, and shows the failure under the new
-  server's id.
+  server's id. An offline computer is the client-to-edge layer on a link
+  through an edge and client-to-server on a direct SSH link.
 - **A total failure replaces the shell with one error page.** When nothing has
   hydrated and an error is recorded, `ConnectionError` takes the window
   instead of an empty sidebar and an empty board behind a toast. Which hop
